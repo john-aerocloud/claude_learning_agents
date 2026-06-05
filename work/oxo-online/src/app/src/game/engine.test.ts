@@ -93,3 +93,16 @@ describe('engine — board locked after a win (A6)', () => {
     expect(after.status).toBe('won');
   });
 });
+
+describe('engine — draw detection (A7)', () => {
+  it('reports a draw when the board fills with no winning line', () => {
+    // X O X
+    // X O O
+    // O X X
+    // Move order (X first): 0,1,2,4,3,5,7,6,8 → full, no line.
+    const s = play([0, 1, 2, 4, 3, 5, 7, 6, 8]);
+    expect(s.board.every((c) => c !== null)).toBe(true);
+    expect(s.status).toBe('draw');
+    expect(s.winner).toBeNull();
+  });
+});

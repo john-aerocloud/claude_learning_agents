@@ -48,6 +48,9 @@ export function applyMove(state: GameState, index: number): GameState {
   if (winner !== null) {
     return { ...state, board, winner, status: 'won' };
   }
+  if (board.every((c) => c !== null)) {
+    return { ...state, board, status: 'draw' };
+  }
   const currentPlayer: Player = state.currentPlayer === 'X' ? 'O' : 'X';
   return { ...state, board, currentPlayer };
 }

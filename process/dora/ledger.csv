@@ -153,3 +153,11 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-05T19:49:01Z,oxo-online,1,004-create-game,engineer,task_start,,na,S004-STEP9,Step 9-11: Play Online UI flow + OIDC lambda deploy perms
 2026-06-05T20:08:45Z,oxo-online,1,004-create-game,engineer,task_end,,success,S004-STEP9-11,Steps 9-11 landed: Play Online UI (F1/F2/F3/F4/F5) + OIDC lambda deploy scope (T4/S2). 67 app + 19 infra green.
 2026-06-05T20:11:34Z,oxo-online,4,004-create-game,cicd,task_start,,na,GATE-4-S004,"Steps 12-13: pipeline wiring review, deploy-oidc, infra workflow push, Lambda fn name capture"
+2026-06-05T20:33:39Z,oxo-online,4,004-create-game,cicd,deploy,,success,b2fa3bb,Step 12: OxoGameProd deployed (Lambda oxo-game-fn + Games table + HTTP API); infra run 27038118383 green
+2026-06-05T20:33:43Z,oxo-online,4,004-create-game,cicd,deploy,,success,b2fa3bb,Step 12: OxoOnlineProd deployed (CF /api/* -> HTTP API CachingDisabled); infra run 27038118383 green
+2026-06-05T20:33:49Z,oxo-online,4,004-create-game,cicd,deploy,,success,27037721898,Step 13: App pipeline green — SPA sync + CF invalidation + Lambda update gated correctly; app run 27037721898 re-run green
+2026-06-05T20:33:59Z,oxo-online,4,004-create-game,cicd,failure,,fail,53608e4,Infra workflow failed: npm ci cross-platform lock mismatch (emnapi missing); fix: npm install
+2026-06-05T20:33:59Z,oxo-online,4,004-create-game,cicd,failure,,fail,1e41798,Infra workflow failed: CannotFindAsset lambda dist/ not built; fix: add Lambda install+build steps
+2026-06-05T20:33:59Z,oxo-online,4,004-create-game,cicd,failure,,fail,1e41798,Infra workflow failed: OxoOnlineProd deployed before export existed (CDK batch parallel); fix: split into two sequential deploy steps
+2026-06-05T20:33:59Z,oxo-online,4,004-create-game,cicd,recovery,,rolled_forward,b2fa3bb,All three CI failures resolved by roll-forward fixes in sequential commits; infra run 27038118383 green
+2026-06-05T20:34:07Z,oxo-online,4,004-create-game,cicd,task_end,1260,success,b2fa3bb,"Steps 12-13 complete: pipeline wired, OIDC updated, infra deployed, app pipeline confirmed green, GH var set"

@@ -99,3 +99,14 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-05T17:27:33Z,oxo-online,2,002-local-game,engineer,task_end,,success,dcdf007,"Slice 002 local game delivered: engine + React UI + policy guards; 48 tests green, lint clean, build ok; no new runtime deps"
 2026-06-05T17:28:43Z,oxo-online,2,002-local-game,engineer,task_end,811,success,79bf59c,48/48 tests pass; lint clean; build clean; no new runtime deps
 2026-06-05T17:28:43Z,oxo-online,2,002-local-game,orchestrator,gate,,success,GATE-4-S002,"Gate 4 auto-approved: all tests pass, lint clean, build clean, application-only diff"
+2026-06-05T17:32:00Z,oxo-online,2,002-local-game,orchestrator,failure,,na,21b5d09,Pipeline failed — investigating
+2026-06-05T17:32:30Z,oxo-online,2,002-local-game,engineer,task_start,,na,,Defect: smoke tests still check TitleScreen elements after Phase C wired GameRoot to root route
+2026-06-05T17:35:42Z,oxo-online,2,002-local-game,engineer,task_end,120,success,0d1bbe3,Smoke tests updated to match GameRoot at root route
+2026-06-05T17:35:42Z,oxo-online,2,002-local-game,orchestrator,recovery,,na,0d1bbe3,Pipeline green after smoke test defect fix
+2026-06-05T17:35:42Z,oxo-online,2,002-local-game,orchestrator,deploy,,success,0d1bbe3,Slice 002 live in production — game board at root route
+2026-06-05T17:35:48Z,oxo-online,2,002-local-game,tester,task_start,,na,,In-prod validation of slice 002 — local two-player game
+2026-06-05T17:45:00Z,oxo-online,2,002-local-game,tester,task_end,575,success,slice002-validation.spec.ts,"10/10 Playwright tests pass against https://d3pf3kcvzpau1x.cloudfront.net; all 6 SMs + T1+T3+S1+S2 green; no defects"
+2026-06-05T17:39:41Z,oxo-online,2,002-local-game,tester,task_end,213,success,0d1bbe3,10/10 ACs pass in prod; T1/S2 zero network; S1 closed value set confirmed
+2026-06-05T17:39:45Z,oxo-online,2,002-local-game,documenter,task_start,,na,,Update docs/usage.md for slice 002
+2026-06-05T17:42:00Z,oxo-online,2,002-local-game,documenter,task_end,135,success,work/oxo-online/docs/usage.md,Created docs/usage.md; local two-player game documented; all claims traceable to result.md and acceptance.md
+2026-06-05T17:40:46Z,oxo-online,2,002-local-game,documenter,task_end,50,success,,docs/usage.md created for slice 002

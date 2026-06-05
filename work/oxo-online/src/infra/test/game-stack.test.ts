@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import * as cdk from 'aws-cdk-lib';
-import { Template } from 'aws-cdk-lib/assertions';
+import { Template, Match } from 'aws-cdk-lib/assertions';
 import { OxoGameStack } from '../lib/game-stack';
 
 function synth(): Template {
@@ -56,6 +56,66 @@ describe('OxoGameStack — Games table shape (T1, S3)', () => {
       const policy = (table.Properties as Record<string, unknown>)
         ?.ResourcePolicy;
       expect(policy).toBeUndefined();
+    }
+  });
+});
+
+describe('OxoGameStack — Lambda oxo-game-fn (T3, T5, S3)', () => {
+  it('runs on nodejs20.x with a fixed function name', () => {
+    const template = synth();
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      FunctionName: 'oxo-game-fn',
+      Runtime: 'nodejs20.x',
+      Handler: 'handler.handler',
+    });
+  });
+
+  it('passes the table name via the TABLE_NAME environment variable', () => {
+    const template = synth();
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Environment: { Variables: { TABLE_NAME: Match.anyValue() } },
+    });
+  });
+
+  it('caps reserved concurrency above zero (T5)', () => {
+    const template = synth();
+    const fns = template.findResources('AWS::Lambda::Function', {
+      Properties: { FunctionName: 'oxo-game-fn' },
+    });
+    const fn = Object.values(fns)[0];
+    expect(fn.Properties.ReservedConcurrentExecutions).toBeGreaterThan(0);
+  });
+
+  it('grants only dynamodb:PutItem on the Games table ARN — no wildcard, no read/scan (T3)', () => {
+    const template = synth();
+    const policies = template.findResources('AWS::IAM::Policy');
+    // Find the policy statement(s) referencing DynamoDB.
+    const ddbStatements: Array<Record<string, unknown>> = [];
+    for (const policy of Object.values(policies)) {
+      const stmts = (policy.Properties.PolicyDocument.Statement ??
+        []) as Array<Record<string, unknown>>;
+      for (const stmt of stmts) {
+        const action = stmt.Action;
+        const actions = Array.isArray(action) ? action : [action];
+        if (actions.some((a) => typeof a === 'string' && a.startsWith('dynamodb:'))) {
+          ddbStatements.push(stmt);
+        }
+      }
+    }
+    expect(ddbStatements.length).toBeGreaterThan(0);
+    for (const stmt of ddbStatements) {
+      const action = stmt.Action;
+      const actions = Array.isArray(action) ? action : [action];
+      // Only PutItem — no read/query/scan/getitem.
+      expect(actions).toEqual(['dynamodb:PutItem']);
+      // Resource must reference the table ARN, never a bare '*'.
+      expect(stmt.Resource).not.toBe('*');
+      const resources = Array.isArray(stmt.Resource)
+        ? stmt.Resource
+        : [stmt.Resource];
+      for (const r of resources) {
+        expect(r).not.toBe('*');
+      }
     }
   });
 });

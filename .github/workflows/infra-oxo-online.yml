@@ -29,12 +29,14 @@ on:
       - main
     paths:
       - 'work/oxo-online/src/infra/**'
+      - 'work/oxo-online/src/lambda/**'
       - '.github/workflows/infra-oxo-online.yml'
   pull_request:
     branches:
       - main
     paths:
       - 'work/oxo-online/src/infra/**'
+      - 'work/oxo-online/src/lambda/**'
       - '.github/workflows/infra-oxo-online.yml'
 
 concurrency:
@@ -63,7 +65,9 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-          cache-dependency-path: work/oxo-online/src/infra/package-lock.json
+          cache-dependency-path: |
+            work/oxo-online/src/infra/package-lock.json
+            work/oxo-online/src/lambda/package-lock.json
 
       - name: Install CDK dependencies
         working-directory: work/oxo-online/src/infra
@@ -75,6 +79,16 @@ jobs:
 
       - name: Build CDK TypeScript
         working-directory: work/oxo-online/src/infra
+        run: npm run build
+
+      - name: Install Lambda dependencies
+        working-directory: work/oxo-online/src/lambda
+        run: npm ci
+
+      - name: Build Lambda TypeScript
+        # CDK fromAsset() requires the compiled dist/ directory to exist at synth time.
+        # The Lambda source (src/lambda/**) is gitignored from dist/ so we must build here.
+        working-directory: work/oxo-online/src/lambda
         run: npm run build
 
       - name: Validate required context flags

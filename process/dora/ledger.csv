@@ -134,3 +134,14 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-05T19:10:00Z,oxo-online,3,003-ai-opponent,documenter,task_end,498,success,work/oxo-online/docs/usage.md,usage.md updated: mode selector documented; vs Computer section added; two-player section preserved; AI unbeatable + 47ms noted; no forward references
 2026-06-05T18:52:57Z,oxo-online,3,003-ai-opponent,documenter,task_end,50,success,,docs/usage.md updated for slice 003; vs Computer mode documented
 2026-06-05T19:03:55Z,oxo-online,4,focus-retro,orchestrator,gate,,success,RETRO-PROMPTS,"Focus retro: permission prompts from compound commands. v12→v13. §25 working-dir convention, §26 committed settings.json. CLAUDE.md updated."
+2026-06-05T19:12:05Z,oxo-online,5,004-planning,orchestrator,task_start,,na,,slice-next for chunk 4 online two-player
+2026-06-05T19:12:08Z,oxo-online,5,004-planning,product,task_start,,na,,propose next smallest slice from chunk 4 online two-player
+2026-06-05T19:12:52Z,oxo-online,5,004-create-game,product,task_start,,na,SLICE-NEXT-004,Product proposing slice 004 — thinnest first slice of Chunk 4 (create game + shareable code)
+2026-06-05T19:13:29Z,oxo-online,5,004-create-game,product,task_end,,success,work/oxo-online/slices/004-create-game/slice.md,slice.md written for 004-create-game; 5 success measures; HTTP-only create path; WS deferred to s005
+2026-06-05T19:13:46Z,oxo-online,5,004-planning,product,task_end,70,success,,slice 004-create-game proposed; slice.md written
+2026-06-05T19:17:07Z,oxo-online,5,004-create-game,orchestrator,gate,,success,GATE-2-S004,Gate 2 approved by human: slice 004-create-game
+2026-06-05T19:17:08Z,oxo-online,5,004-create-game,solution-architect,task_start,,na,,architecture delta + security review for 004-create-game
+2026-06-05T19:20:16Z,oxo-online,5,004-create-game,solution-architect,task_end,156,success,work/oxo-online/architecture/deltas/004-create-game.md,Delta 004: HTTP API + oxo-game-fn (PutItem Games only) + Games table + CF /api/* (CachingDisabled). New OxoGameStack. New surface/flow/boundary; WAF deferred. current.md C4 in progress.
+2026-06-05T19:20:38Z,oxo-online,5,004-create-game,solution-architect,task_end,156,success,,arch delta + security review written; new surface/flow/boundary — Gate 3 requires human sign-off
+2026-06-05T19:21:28Z,oxo-online,5,004-create-game,orchestrator,gate,,success,GATE-3-S004,Gate 3 approved: arch delta + security; first backend slice; WAF deferred; deploy order noted
+2026-06-05T19:23:10Z,oxo-online,5,004-create-game,orchestrator,task_end,900,success,,slice-next complete: slice.md + arch delta + security + acceptance.md all written; ready for /iteration-run

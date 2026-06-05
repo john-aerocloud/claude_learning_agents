@@ -16,7 +16,7 @@ is recorded; later chunks revise this when value is re-sliced.
 |-----|---------|--------|
 | **[C1]** | Needed for Chunk 1 (deployable shell) | delivered (slice 001) |
 | **[C2-3]** | Local game + AI — client-only, no new infra | **current** (C2 = slice 002, local game, delivered; C3 = AI, in progress) |
-| **[C4]** | Online match — first stateful backend + realtime | not started |
+| **[C4]** | Online match — first stateful backend + realtime | in progress (s004) |
 | **[C5]** | Leaderboard — first durable persistence | not started |
 | **[C6]** | Player identity — session/display name | not started |
 | **[C7]** | In-game chat — reuses C4 realtime transport | not started |

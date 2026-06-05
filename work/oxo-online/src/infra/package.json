@@ -5,16 +5,20 @@
   "scripts": {
     "build": "tsc",
     "watch": "tsc -w",
+    "test": "vitest run",
     "cdk": "cdk",
-    "diff": "cdk diff",
+    "diff": "cdk diff OxoGameProd OxoOnlineProd",
     "deploy:oidc": "cdk deploy OxoOnlineOidcStack --require-approval never",
-    "deploy:app": "cdk deploy OxoOnlineProd --require-approval never"
+    "deploy:app": "cdk deploy OxoOnlineProd --require-approval never",
+    "deploy:game": "cdk deploy OxoGameProd --require-approval never",
+    "deploy:all": "cdk deploy OxoGameProd OxoOnlineProd --require-approval never"
   },
   "devDependencies": {
     "@types/node": "22.x",
     "aws-cdk": "2.x",
     "ts-node": "^10.9.2",
-    "typescript": "~5.4.5"
+    "typescript": "~5.4.5",
+    "vitest": "^4.1.8"
   },
   "dependencies": {
     "aws-cdk-lib": "2.x",

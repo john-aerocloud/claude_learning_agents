@@ -10,3 +10,14 @@ describe('GameRoot — placing a symbol (B4)', () => {
     expect(screen.getByLabelText('cell 0')).toHaveTextContent('X');
   });
 });
+
+describe('GameRoot — turn alternation in the UI (B5)', () => {
+  it("reads X's turn, then O's turn, then X's turn as play proceeds", async () => {
+    render(<GameRoot />);
+    expect(screen.getByRole('status')).toHaveTextContent("X's turn");
+    await userEvent.click(screen.getByLabelText('cell 0'));
+    expect(screen.getByRole('status')).toHaveTextContent("O's turn");
+    await userEvent.click(screen.getByLabelText('cell 1'));
+    expect(screen.getByRole('status')).toHaveTextContent("X's turn");
+  });
+});

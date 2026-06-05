@@ -30,7 +30,15 @@
       "Bash(xargs cat)",
       "Skill(aws-profile)",
       "Bash(aws sts get-caller-identity *)",
-      "Bash(aws configure list-profiles *)"
+      "Bash(aws configure list-profiles *)",
+      "Bash(xargs git rm --cached)",
+      "Skill(project-list)",
+      "Bash(git remote *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(gh run *)",
+      "Skill(iteration-run)"
     ]
   }
 }

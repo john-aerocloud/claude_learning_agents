@@ -135,7 +135,50 @@ After first manual deploy of OxoOnlineOidcStack:
 
 ---
 
-## Forward note — not built in slice 001
+## Slice 002 — local two-player game (current)
+
+### What this slice adds
+
+New React components and a pure game-logic module replace the placeholder screen:
+
+- `src/game/logic.ts` (or equivalent) — pure functions for board state, move
+  validation, win/draw detection. No side effects; no AWS touch.
+- React components: game board, square, status display, player-turn indicator.
+- No new AWS resources. No CDK changes. No new IAM permissions.
+
+### Deploy path
+
+Unchanged from slice 001. The existing pipeline handles this without modification:
+
+```
+push to main (work/oxo-online/**)
+  → build job: npm ci → lint → unit tests (game logic + React) → npm run build
+  → deploy job: OIDC assume role → S3 sync (3-pass cache strategy) → CF invalidation
+  → smoke test: Playwright against live HTTPS URL
+  → DORA deploy event recorded
+```
+
+### Test approach
+
+| Layer | Tool | When | What is new in slice 002 |
+|-------|------|------|--------------------------|
+| Unit | Vitest | Every push, every PR | Game logic module (win/draw detection, move validation) — pure functions, straightforward to test exhaustively |
+| Component | Vitest + React Testing Library | Every push, every PR | Board and square rendering; status display |
+| Lint | ESLint | Every push, every PR | No change |
+| Build gate | `npm run build` | Every push, every PR | No change |
+| In-prod smoke | Playwright | After every deploy | Existing smoke tests still apply (page loads, TLS valid, no 4xx/5xx on root) |
+
+No backend exists in slice 002; no backend tests needed.
+
+### Rollback assets
+
+No change from slice 001. S3 bucket versioning covers the new SPA bundle.
+The existing rollback procedure (S3 version restore + CloudFront invalidation)
+applies without modification. No DB migrations; nothing irreversible.
+
+---
+
+## Forward note — not built in slices 001–002
 
 From Chunk 4 the pipeline gains:
 - Lambda packaging + `lambda:UpdateFunctionCode` deploy step

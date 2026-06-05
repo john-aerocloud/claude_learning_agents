@@ -17,3 +17,9 @@ export function initialState(): GameState {
     status: 'playing',
   };
 }
+
+export function applyMove(state: GameState, index: number): GameState {
+  const board = state.board.slice();
+  board[index] = state.currentPlayer;
+  return { ...state, board };
+}

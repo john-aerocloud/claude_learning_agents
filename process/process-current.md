@@ -1,11 +1,11 @@
 ---
-process_version: 9
+process_version: 10
 effective_from: 2026-06-05
-supersedes: v8
+supersedes: v9
 status: active
 ---
 
-# Current Process — v9
+# Current Process — v10
 
 The process all agents follow right now. Updated only by the Orchestrator at a
 retro, which snapshots the prior version into `process-history/` first.
@@ -99,6 +99,12 @@ Target: < 15 min in-session. Record in `dora/per-project.md`.
   AND all tests pass AND engineer reports no deviations.
 - Arch + security for local-only projects with no new infra: architect
   self-certifies; orchestrator confirms; no human wait.
+- **Security review auto-accepted (all project types):** when the
+  solution-architect's delta file contains an explicit conclusion stating
+  "no new attack surface, no new data flow, no new trust boundary", the
+  orchestrator confirms the conclusion is present and auto-accepts — no human
+  gate. Gate 3 still requires human approval if the review surfaces any new
+  control, open risk, or deferred recommendation.
 
 **b. Parallel N+1 planning.**
 
@@ -253,3 +259,5 @@ first deploy. Gross lead time for cloud/hosted first deploy should improve from
   confirm CICD agent uses this pattern from the start on the next project
 - Fail-fast validation (§20) — add to oxo-online pipelines retroactively;
   measure whether missing-config errors surface faster
+- Security review auto-accept (§8a, v10) — implemented; confirm gate 3 human
+  wait drops to zero on slices with no infra change

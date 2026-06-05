@@ -12,14 +12,14 @@ is recorded; later chunks revise this when value is re-sliced.
 
 ## Chunk-readiness legend
 
-| Tag | Meaning |
-|-----|---------|
-| **[C1]** | Needed for Chunk 1 (deployable shell) |
-| **[C2-3]** | Local game + AI — client-only, no new infra |
-| **[C4]** | Online match — first stateful backend + realtime |
-| **[C5]** | Leaderboard — first durable persistence |
-| **[C6]** | Player identity — session/display name |
-| **[C7]** | In-game chat — reuses C4 realtime transport |
+| Tag | Meaning | Status |
+|-----|---------|--------|
+| **[C1]** | Needed for Chunk 1 (deployable shell) | delivered (slice 001) |
+| **[C2-3]** | Local game + AI — client-only, no new infra | **current** (C2 = slice 002, local game; C3 = AI, pending) |
+| **[C4]** | Online match — first stateful backend + realtime | not started |
+| **[C5]** | Leaderboard — first durable persistence | not started |
+| **[C6]** | Player identity — session/display name | not started |
+| **[C7]** | In-game chat — reuses C4 realtime transport | not started |
 
 Minimum-to-deliver-value rule: nothing tagged later than the active chunk is
 built. Chunks 1–3 ship with **no application backend at all**.
@@ -125,6 +125,10 @@ C4Container
 - Static artifact; CDN gives global low latency, TLS, and a real URL on day one.
 - CloudFront is the single public origin and also routes `/api/*` and `/ws` so
   the SPA is same-origin (simplifies CORS and cookie/session scoping).
+- **[C2] Local game lives entirely in the SPA** — a pure, framework-free game
+  logic module (board, turn alternation, win/draw detection, reset) plus React
+  Board/Cell/Status components. No network, no persistence, no backend; ships
+  through the existing pipeline. See `architecture/deltas/002-local-game.md`.
 
 ### Game integrity: server-authoritative
 - From C4 the **server owns the board**. Clients send a proposed move

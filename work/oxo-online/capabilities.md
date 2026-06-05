@@ -178,7 +178,57 @@ applies without modification. No DB migrations; nothing irreversible.
 
 ---
 
-## Forward note — not built in slices 001–002
+## Slice 003 — single-player vs AI (current)
+
+### What this slice adds
+
+A pure client-side minimax AI module and a mode selector. No AWS changes.
+
+- `src/app/src/game/ai.ts` (or equivalent) — minimax engine; pure functions, no
+  side effects, no network calls.
+- React mode-selector component wiring the AI into the existing game loop.
+- No new CDK stacks, IAM permissions, environment variables, secrets, or
+  pipeline steps.
+
+### Deploy path
+
+Unchanged from slices 001–002.
+
+```
+push to main (work/oxo-online/**)
+  → build job: npm ci → lint → unit tests (AI module + game logic + React) → npm run build
+  → deploy job: OIDC assume role → S3 sync → CF invalidation
+  → smoke test: Playwright against live HTTPS URL
+  → DORA deploy event recorded
+```
+
+### Test approach
+
+| Layer | Tool | When | What is new in slice 003 |
+|-------|------|------|--------------------------|
+| Unit | Vitest | Every push, every PR | AI module — minimax correctness (optimal move assertions), game-tree exhaustion (AI never loses), draw detection |
+| Component | Vitest + React Testing Library | Every push, every PR | Mode-selector rendering; AI mode wires correctly |
+| Lint | ESLint | Every push, every PR | No change |
+| Build gate | `npm run build` | Every push, every PR | No change |
+| In-prod smoke | Playwright | After every deploy | Existing smoke tests unchanged — page loads, TLS, no 4xx/5xx |
+
+No backend tests needed; no backend exists in slices 001–003.
+No new infra tests needed; no infrastructure changed.
+
+### Rollback assets
+
+Unchanged from slices 001–002. S3 versioned bucket covers the new SPA bundle.
+Rollback: S3 version restore + CloudFront invalidation (see slice 001 procedure).
+Nothing irreversible; no DB migrations.
+
+### Pipeline changes
+
+None. No new secrets, variables, IAM permissions, CDK stacks, or workflow steps
+are required for this slice.
+
+---
+
+## Forward note — not built in slices 001–003
 
 From Chunk 4 the pipeline gains:
 - Lambda packaging + `lambda:UpdateFunctionCode` deploy step

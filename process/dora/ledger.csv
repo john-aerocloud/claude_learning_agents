@@ -110,3 +110,17 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-05T17:39:45Z,oxo-online,2,002-local-game,documenter,task_start,,na,,Update docs/usage.md for slice 002
 2026-06-05T17:42:00Z,oxo-online,2,002-local-game,documenter,task_end,135,success,work/oxo-online/docs/usage.md,Created docs/usage.md; local two-player game documented; all claims traceable to result.md and acceptance.md
 2026-06-05T17:40:46Z,oxo-online,2,002-local-game,documenter,task_end,50,success,,docs/usage.md created for slice 002
+2026-06-05T17:47:03Z,oxo-online,3,003-ai-opponent,product,task_start,,na,,Proposing slice 003 — single-player vs AI (Chunk 3)
+2026-06-05T17:52:00Z,oxo-online,3,003-ai-opponent,product,task_end,300,success,slices/003-ai-opponent/slice.md,slice.md written for 003-ai-opponent; 6 success measures; minimax AI; unbeatable property; scope and exclusions defined
+2026-06-05T17:48:22Z,oxo-online,3,003-ai-opponent,product,task_end,58,success,,slice.md written for 003-ai-opponent; 6 success measures
+2026-06-05T17:50:12Z,oxo-online,3,003-ai-opponent,solution-architect,task_start,,na,,"Architecture-lite path (§21) — C2-3 pre-tagged client-only; confirm no backend, write brief delta + security conclusion"
+2026-06-05T17:58:00Z,oxo-online,3,003-ai-opponent,solution-architect,task_end,180,success,architecture/deltas/003-ai-opponent.md,Lite path — C2-3 no-backend tag confirmed; delta + acceptance.md written; security conclusion: no new attack surface/data flow/trust boundary; current.md C3 marked in progress
+2026-06-05T17:51:38Z,oxo-online,3,003-ai-opponent,solution-architect,task_end,64,success,,Arch-lite delta written; C2-3 tag confirmed; security conclusion = no new attack surface/data flow/trust boundary; acceptance.md co-authored
+2026-06-05T18:10:25Z,oxo-online,3,003-ai-opponent,cicd,task_start,,na,,"Capabilities check — pure frontend slice, no pipeline change expected"
+2026-06-05T18:11:30Z,oxo-online,3,003-ai-opponent,cicd,task_end,65,success,,"Pipeline confirmed unchanged; capabilities.md updated with slice 003 section; no new infra, secrets, or pipeline steps"
+2026-06-05T18:10:25Z,oxo-online,3,003-ai-opponent,engineer,task_start,,na,,Thin route through acceptance cases for AI opponent
+2026-06-05T18:12:51Z,oxo-online,3,003-ai-opponent,cicd,task_end,43,success,,Pipeline unchanged; capabilities.md slice 003 section added
+2026-06-05T18:12:51Z,oxo-online,3,003-ai-opponent,engineer,task_end,113,success,,"Route written — 4 phases: A (pure minimax), B (mode selector), C (GameRoot wired), D (policy tests)"
+2026-06-05T18:12:51Z,oxo-online,3,003-ai-opponent,engineer,task_start,,na,,TDD build — phases A-D
+2026-06-05T18:37:38Z,oxo-online,3,003-ai-opponent,engineer,task_end,1434,success,9d3f287,62/62 tests pass; lint clean; build clean; game-tree exhaustion no X-wins; AI <200ms
+2026-06-05T18:37:39Z,oxo-online,3,003-ai-opponent,orchestrator,gate,,success,GATE-4-S003,"Gate 4 auto-approved: 62/62 tests, lint clean, build clean, application-only diff"

@@ -43,3 +43,19 @@ describe('ai.bestMove — takes the win (A2)', () => {
     expect(next.winner).toBe('O');
   });
 });
+
+// A3 — blocks an immediate X threat when O has no win of its own.
+describe('ai.bestMove — blocks the opponent (A3)', () => {
+  it('plays the cell that denies X’s completing line', () => {
+    // X on 0,4 → cell 8 completes the diagonal (X threat). O on 1,2 has no
+    // immediate win of its own. Counts X=2, O=2 → but O to move: make X=2,O=1
+    // by removing one O so X moved first. X=2 (0,4), O=1 (1): O to move.
+    const state = oToMove([
+      'X', 'O', null,
+      null, 'X', null,
+      null, null, null,
+    ]);
+    const move = bestMove(state);
+    expect(move).toBe(8);
+  });
+});

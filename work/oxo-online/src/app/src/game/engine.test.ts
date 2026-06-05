@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { initialState, applyMove, reset } from './engine';
+import { initialState, applyMove, reset, type GameState } from './engine';
 
 describe('engine — initialState (A1)', () => {
   it('returns nine empty cells, X to move, playing, no winner', () => {

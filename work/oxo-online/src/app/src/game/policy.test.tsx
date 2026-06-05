@@ -1,23 +1,26 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { readFileSync, readdirSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
 import { initialState, applyMove, type GameState } from './engine';
 
-const gameDir = dirname(fileURLToPath(import.meta.url));
-
-function gameSourceFiles(): string[] {
-  return readdirSync(gameDir)
-    .filter((f) => /\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f))
-    .map((f) => join(gameDir, f));
-}
+// Vite-native raw import of every source file under src/game/. Avoids node:*
+// imports (and a new @types/node dependency) entirely.
+const gameSources = import.meta.glob('./*.{ts,tsx}', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>;
 
 // D1 — no dangerous HTML sink anywhere in the game UI (S1).
 describe('policy: no dangerouslySetInnerHTML in src/game (D1, S1)', () => {
-  it('never appears in any game source file', () => {
-    for (const file of gameSourceFiles()) {
-      const src = readFileSync(file, 'utf8');
-      expect(src).not.toContain('dangerouslySetInnerHTML');
+  it('never appears in any non-test game source file', () => {
+    const sourceFiles = Object.entries(gameSources).filter(
+      ([path]) => !/\.test\.tsx?$/.test(path),
+    );
+    expect(sourceFiles.length).toBeGreaterThan(0);
+    for (const [path, src] of sourceFiles) {
+      expect(
+        src,
+        `${path} must not use dangerouslySetInnerHTML`,
+      ).not.toContain('dangerouslySetInnerHTML');
     }
   });
 });

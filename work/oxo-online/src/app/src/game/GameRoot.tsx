@@ -11,6 +11,8 @@ export function GameRoot() {
     setState((current) => applyMove(current, index));
   };
 
+  const locked = state.status !== 'playing';
+
   return (
     <main className="game" aria-label="oxo game">
       <Status
@@ -18,7 +20,7 @@ export function GameRoot() {
         currentPlayer={state.currentPlayer}
         winner={state.winner}
       />
-      <Board board={state.board} onSelect={onSelect} locked={false} />
+      <Board board={state.board} onSelect={onSelect} locked={locked} />
     </main>
   );
 }

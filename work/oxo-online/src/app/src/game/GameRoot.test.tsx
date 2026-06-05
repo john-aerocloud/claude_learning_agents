@@ -32,3 +32,23 @@ describe('GameRoot — clicking a taken cell is a no-op (B6)', () => {
     expect(screen.getByRole('status')).toHaveTextContent("O's turn");
   });
 });
+
+async function clickCells(indices: number[]) {
+  for (const i of indices) {
+    // eslint-disable-next-line no-await-in-loop
+    await userEvent.click(screen.getByLabelText(`cell ${i}`));
+  }
+}
+
+describe('GameRoot — win locks the board and shows result (B7)', () => {
+  it('announces the winner and disables remaining empty cells', async () => {
+    render(<GameRoot />);
+    // X: 0,1,2 (row 0 win) ; O: 3,4
+    await clickCells([0, 3, 1, 4, 2]);
+    expect(screen.getByRole('status')).toHaveTextContent('X wins');
+    // cell 5 is still empty but the board is locked
+    expect(screen.getByLabelText('cell 5')).toBeDisabled();
+    await userEvent.click(screen.getByLabelText('cell 5'));
+    expect(screen.getByLabelText('cell 5')).toHaveTextContent('');
+  });
+});

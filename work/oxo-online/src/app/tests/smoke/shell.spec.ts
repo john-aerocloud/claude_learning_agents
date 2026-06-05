@@ -28,8 +28,9 @@ test.describe('oxo-online deployable shell', () => {
   test('page title is set and game board renders', async ({ page }) => {
     await page.goto('/');
     await expect(page).toHaveTitle(/oxo-online/i);
-    // Slice 002: root renders the game — 9 cell buttons must be present.
-    const cells = page.getByRole('button').filter({ hasNotText: /play again/i });
+    // 9 cell buttons must be present. Cells carry aria-label="cell N" so this
+    // selector is stable against mode-selector or other button additions.
+    const cells = page.locator('[aria-label^="cell "]');
     await expect(cells).toHaveCount(9);
   });
 
@@ -46,7 +47,7 @@ test.describe('oxo-online deployable shell', () => {
     expect(response!.status()).toBe(200);
     await expect(page.locator('#root')).toBeAttached();
     // Unknown routes fall back to the game at / — board must be present.
-    const cells = page.getByRole('button').filter({ hasNotText: /play again/i });
+    const cells = page.locator('[aria-label^="cell "]');
     await expect(cells).toHaveCount(9);
   });
 });

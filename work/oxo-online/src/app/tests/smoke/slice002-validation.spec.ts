@@ -21,10 +21,11 @@ const PROD_URL = process.env.PROD_URL;
 
 /**
  * Helper: get all 9 cell buttons on the board.
- * Cells are buttons that are NOT the "Play again" button.
+ * Cells carry aria-label="cell N" — this is stable against mode-selector
+ * or other button additions to the game screen.
  */
 function getCells(page: Page) {
-  return page.getByRole('button').filter({ hasNotText: /play again/i });
+  return page.locator('[aria-label^="cell "]');
 }
 
 /**

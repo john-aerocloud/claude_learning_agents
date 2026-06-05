@@ -18,6 +18,10 @@ export function initialState(): GameState {
   };
 }
 
+export function reset(): GameState {
+  return initialState();
+}
+
 const LINES: ReadonlyArray<readonly [number, number, number]> = [
   [0, 1, 2],
   [3, 4, 5],

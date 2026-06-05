@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { initialState, applyMove } from './engine';
+import { initialState, applyMove, reset } from './engine';
 
 describe('engine — initialState (A1)', () => {
   it('returns nine empty cells, X to move, playing, no winner', () => {
@@ -82,6 +82,13 @@ describe('engine — win detection on each line (A5)', () => {
     const s = play([0, 1, 2]);
     expect(s.status).toBe('playing');
     expect(s.winner).toBeNull();
+  });
+});
+
+describe('engine — reset (A8)', () => {
+  it('returns the start state regardless of prior play', () => {
+    play([0, 3, 1, 4, 2]); // a won game
+    expect(reset()).toEqual(initialState());
   });
 });
 

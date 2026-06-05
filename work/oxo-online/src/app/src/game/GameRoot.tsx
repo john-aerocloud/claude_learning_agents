@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { initialState, applyMove } from './engine';
+import { initialState, applyMove, reset } from './engine';
 import { Board } from './Board';
 import { Status } from './Status';
 
@@ -21,6 +21,11 @@ export function GameRoot() {
         winner={state.winner}
       />
       <Board board={state.board} onSelect={onSelect} locked={locked} />
+      {locked && (
+        <button type="button" className="play-again" onClick={() => setState(reset())}>
+          Play again
+        </button>
+      )}
     </main>
   );
 }

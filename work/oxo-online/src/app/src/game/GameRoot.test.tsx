@@ -60,3 +60,27 @@ describe('GameRoot — draw shows Draw (B8)', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Draw');
   });
 });
+
+describe('GameRoot — Play again resets (B9)', () => {
+  it('is hidden while playing', () => {
+    render(<GameRoot />);
+    expect(
+      screen.queryByRole('button', { name: /play again/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('clears the board and returns to X’s turn after a finished game', async () => {
+    render(<GameRoot />);
+    await clickCells([0, 3, 1, 4, 2]); // X wins
+    await userEvent.click(
+      screen.getByRole('button', { name: /play again/i }),
+    );
+    expect(screen.getByRole('status')).toHaveTextContent("X's turn");
+    for (let i = 0; i < 9; i += 1) {
+      expect(screen.getByLabelText(`cell ${i}`)).toHaveTextContent('');
+    }
+    // A fresh move can be played.
+    await userEvent.click(screen.getByLabelText('cell 8'));
+    expect(screen.getByLabelText('cell 8')).toHaveTextContent('X');
+  });
+});

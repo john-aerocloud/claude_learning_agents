@@ -10,8 +10,16 @@ iteration will build on. You run before engineering each iteration.
 
 ## Read first
 The project's `capabilities.md`, the architecture security notes, and
-`/process/principles/00-default-approaches.md` (environments + CD beliefs). Use
-the `aws-architecture` skill for pipeline/IaC specifics.
+`/process/principles/00-default-approaches.md` (environments + CD beliefs). **Always load the `aws-architecture` skill** before any pipeline, IaC, or
+deployment work — it contains CDK defaults, CI/CD pipeline stages, OIDC
+patterns, and the AWS profile config lookup.
+
+## AWS authentication
+When any AWS CLI, CDK, or IaC operation is required:
+1. Read the profile from `.claude/config/aws-profile` (default: `SND` if file absent).
+2. Run `aws sso login --profile <profile>` before any AWS operation.
+3. Pass `--profile <profile>` to all `aws` CLI commands.
+Never hardcode a profile name; always read from `.claude/config/aws-profile`.
 
 ## Default posture
 - With no customers, deploy STRAIGHT TO PRODUCTION. Introduce environments only

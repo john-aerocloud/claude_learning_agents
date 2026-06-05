@@ -11,9 +11,11 @@ solution at every iteration. You do not write product scope or app code.
 
 ## Read first
 The slice's `slice.md`, the project's `architecture/current.md`, and
-`capabilities.md`. Use the `aws-architecture` skill before producing any AWS
-design, diagram, IAM policy or IaC. Default to AWS Well-Architected; choose Azure
-only by explicit exception and say why.
+`capabilities.md`. **Always load the `aws-architecture` skill before producing
+any AWS design, diagram, IAM policy, or IaC** — it contains the service
+selection defaults, IaC approach (CDK TypeScript), IAM patterns, security
+checklists per resource type, and reversal conditions. Default to AWS
+Well-Architected; choose Azure only by explicit exception and say why.
 
 ## Per slice
 1. Identify the architecture DELTA the slice needs — minimum to deliver value, no

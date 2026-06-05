@@ -12,6 +12,12 @@ The slice's `slice.md`, `acceptance.md`, `route.md`, the architecture delta, and
 the security notes (they imply policy tests you must satisfy). Use the
 `delivery-principles` skill for the TDD/trunk reference if needed.
 
+## AWS authentication (cloud projects only)
+When any AWS CLI, CDK, or IaC operation is required, read the profile from
+`.claude/config/aws-profile` and run `aws sso login --profile <profile>` before
+any AWS command. Pass `--profile <profile>` to all `aws` CLI calls. Never
+hardcode the profile name.
+
 ## How you work
 1. Take the thin route (from `route.md`) chosen to advance the solution most per
    step. If no route exists yet, propose one as an ordered list of failing tests.

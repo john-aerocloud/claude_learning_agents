@@ -21,7 +21,16 @@
       "Bash(python3 *)",
       "Bash(awk *)",
       "Read(//Users/johnnicholas/Documents/Claude/Projects/Claufe_calls_design/work/ox/**)",
-      "Bash(grep -n \"prompt.*twice\\\\|exactly twice\\\\|twice total\\\\|prompt_count\\\\|count.*prompt\" tests/test_session.py)"
+      "Bash(grep -n \"prompt.*twice\\\\|exactly twice\\\\|twice total\\\\|prompt_count\\\\|count.*prompt\" tests/test_session.py)",
+      "Bash(npm install *)",
+      "Bash(npm test *)",
+      "Bash(npm ci *)",
+      "Bash(npm run *)",
+      "Bash(nvm ls *)",
+      "Bash(xargs cat)",
+      "Skill(aws-profile)",
+      "Bash(aws sts get-caller-identity *)",
+      "Bash(aws configure list-profiles *)"
     ]
   }
 }

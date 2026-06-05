@@ -35,3 +35,13 @@ describe('engine — turn alternation (A3)', () => {
     expect(afterO.board[1]).toBe('O');
   });
 });
+
+describe('engine — illegal move on a taken cell (A4)', () => {
+  it('returns the state unchanged when the cell is occupied', () => {
+    const afterX = applyMove(initialState(), 0);
+    const again = applyMove(afterX, 0);
+    expect(again.board[0]).toBe('X');
+    expect(again.currentPlayer).toBe('O');
+    expect(again).toEqual(afterX);
+  });
+});

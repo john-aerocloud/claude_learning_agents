@@ -59,3 +59,27 @@ describe('ai.bestMove — blocks the opponent (A3)', () => {
     expect(move).toBe(8);
   });
 });
+
+// A4 — game-tree exhaustion: optimal O never loses (T3 / F4).
+describe('ai.bestMove — never loses against any X play (A4, T3, F4)', () => {
+  it('yields no terminal state where X wins, over every X line of play', () => {
+    let xWins = 0;
+    // Recurse: at X turns branch over every legal move; at O turns play bestMove.
+    const walk = (state: GameState) => {
+      if (state.status === 'won') {
+        if (state.winner === 'X') xWins += 1;
+        return;
+      }
+      if (state.status === 'draw') return;
+      if (state.currentPlayer === 'X') {
+        for (let i = 0; i < 9; i += 1) {
+          if (state.board[i] === null) walk(applyMove(state, i));
+        }
+      } else {
+        walk(applyMove(state, bestMove(state)));
+      }
+    };
+    walk(initialState()); // X moves first (human is X)
+    expect(xWins).toBe(0);
+  });
+});

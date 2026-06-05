@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(npm ci *)",
+      "Bash(npm install *)",
+      "Bash(npm test *)",
+      "Bash(npm --prefix * run *)",
+      "Bash(npm --prefix * ci *)",
+      "Bash(npm --prefix * install *)",
+      "Bash(npm --prefix * test *)",
+      "Bash(npx playwright test *)",
+      "Bash(PROD_URL=* npx playwright test *)",
+      "Bash(python3 *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(git remote *)",
+      "Bash(gh run *)",
+      "Bash(gh pr *)",
+      "Bash(gh workflow *)",
+      "Bash(until *)",
+      "Skill(retro)",
+      "Skill(slice-next)",
+      "Skill(iteration-run)",
+      "Skill(project-list)",
+      "Skill(aws-profile)"
+    ]
+  }
+}

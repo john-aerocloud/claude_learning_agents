@@ -19,6 +19,7 @@ but the cloud/hosted pipeline introduced a new wait class not present in ox.
 | 003 | v11 §21 arch-lite | Solution-architect ≤ 5 min for frontend-only slices | 64s — confirmed (down from 780s in s002). Planning phase: 2 min total | No ✓ | Hit strongly. §21 working as designed. |
 | 003 | v11 §22 surface-change done condition | CFR restored to 0% | CFR 33% — another smoke failure. Mode-selector buttons broke getCells count. §22 trigger too narrow (route rewiring only, missed new-button-added case) | Yes ✗ | Rule class correct; trigger too narrow. Broadened in v12 to cover new interactive controls added to smoke-tested screens. |
 | 003 | n/a (pattern confirmed) | n/a | 2nd consecutive fragile-selector failure | Yes ✗ | getCells used all-buttons-minus-play-again; mode-selector buttons broke it. Now a pattern (2 data points). §23 stable selector mandate added in v12. MTTR 257s — fast recovery. |
+| cross-session | v13 §25 working-dir convention | `cd &&` compound prompts eliminated | Anticipated: zero approval prompts for npm/dora/gh run variants | — pending | npm --prefix replaces cd&&npm; dora.py root-relative by convention; committed settings.json covers gh run variants. Measure at s004. |
 
 ## Pipeline iteration breakdown (slice 001)
 

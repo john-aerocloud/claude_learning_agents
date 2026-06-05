@@ -1,11 +1,11 @@
 ---
-process_version: 12
+process_version: 13
 effective_from: 2026-06-05
-supersedes: v11
+supersedes: v12
 status: active
 ---
 
-# Current Process — v12
+# Current Process — v13
 
 The process all agents follow right now. Updated only by the Orchestrator at a
 retro, which snapshots the prior version into `process-history/` first.
@@ -32,12 +32,13 @@ and pipeline iteration loops.
 | 002 | oxo-online | ~42 min | ~36 min | ~5 min | Smoke test regression |
 | 003 | oxo-online | ~66 min | ~32 min | ~28 min | Human gate waits + smoke regression |
 
-Script output (v12): `lead=2340s freq=3/day cfr=33% mttr=257s`.
+Script output (v13): `lead=2340s freq=3/day cfr=33% mttr=257s`.
 
 **Three distinct constraint classes observed:**
 - **Session boundary** (ox): pipeline idles overnight; fix = session continuity.
 - **Pipeline iteration loop** (oxo-online s001): multiple fix-commit-push-wait cycles on new pipeline; fix = CICD pre-flight + fail-fast.
 - **Fragile smoke selectors** (oxo-online s002+s003): smoke tests coupled to button inventory rather than semantic ids; fix = §23 stable selector mandate.
+- **Permission prompts from compounded commands** (recurring): `cd && npm`, wrong-directory dora.py, novel `gh run` variants each generate fresh approval requests; fix = §25 working-directory convention + §26 committed allowlist.
 
 ## 3. Wait time taxonomy
 
@@ -50,6 +51,8 @@ Script output (v12): `lead=2340s freq=3/day cfr=33% mttr=257s`.
 | **Human gate wait** | oxo s001: gate 2 → gate 2B | 1h 55min | Auto-approve + batch gates (§8) |
 | **Smoke test regression** | oxo s002: root route changed, smoke assertions stale | ~5 min | Surface-change done condition (§22) |
 | **Fragile smoke selector** | oxo s003: new buttons added, getCells count broke | ~5 min | Stable selector mandate (§23) |
+| **Permission prompt (compound cmd)** | `cd /path && npm run test:run` — novel compound needs approval each session | 15–60s per occurrence | Working-directory convention (§25) |
+| **Permission prompt (dora.py dir)** | dora.py called from wrong directory — fails + prompts | ~30s + failure | Always run from project root (§25) |
 
 ## 4. Session continuity (v7 — primary wait-reduction lever for local-only)
 
@@ -156,9 +159,9 @@ Orchestrator updates `work/<project>/dora/per-project.md` at the end of each
 slice retro. Include: slice, change, expected DORA effect, actual, regression
 flag, reflection, time-to-first-deploy (s001 only), delivery gap.
 
-## 16. DORA baseline (v12 — oxo-online s003 added)
+## 16. DORA baseline (v13 — unchanged from v12)
 
-| Metric | ox final | oxo-online s001 | oxo-online s002 | oxo-online s003 | v12 target |
+| Metric | ox final | oxo-online s001 | oxo-online s002 | oxo-online s003 | v13 target |
 |--------|---------|----------------|-----------------|-----------------|------------|
 | Gross lead time (median) | 2340s (39 min) | 26,700s (7h 25min) | ~2,520s (42 min) | ~3,960s (66 min) | < 2400s in-session |
 | Deployment frequency | 2/active-day | — | 2/active-day | 3/active-day | ≥ 3/active-day |
@@ -168,8 +171,9 @@ flag, reflection, time-to-first-deploy (s001 only), delivery gap.
 **Computed baseline (2026-06-05):** `lead=2340s freq=3/day cfr=33% mttr=257s`
 
 **Named constraint:** `tester` (median 1059s, partly historical). In-session tester
-runs are 213–253s. The actionable constraint is **CFR = 33%** — two consecutive
-smoke failures from fragile selectors. Attack via §23 (stable selector mandate).
+runs are 213–253s. The actionable constraints are:
+1. **CFR = 33%** — two consecutive smoke failures from fragile selectors. Attack via §23.
+2. **Permission prompts** — recurring pauses from compound commands. Attack via §25–26.
 
 ## 17. Commit discipline
 
@@ -314,10 +318,64 @@ set in `Cell.tsx`; stable for all future UI additions.
 controls. Two pipeline failures (s002, s003) both trace to this class of fragile
 selector; fixing at source eliminates the recurring pattern.
 
-## 24. Change-set queued for next iteration
+## 25. Working-directory convention (v13 — new)
 
-- Stable smoke selectors (§23) — now in place for oxo-online; confirm CFR = 0%
-  on next slice that touches the game screen
-- §22 broadened trigger — measure whether surface-change check fires on first
-  slice that adds new controls; target zero pipeline failures from smoke
+**All orchestrator and agent commands run from the project root
+(`/Users/johnnicholas/Documents/Claude/Projects/Claufe_Code_agent_design/`).**
+
+Three recurring prompt-generating patterns and their fixes:
+
+| Anti-pattern | Problem | Fix |
+|---|---|---|
+| `cd /path/to/app && npm run test:run` | Novel compound; approval prompt each session | `npm --prefix work/<project>/src/app run test:run` from project root |
+| `cd /path && python3 .claude/skills/.../dora.py` | Wrong relative path; hard failure or novel prompt | `python3 .claude/skills/dora-ledger/scripts/dora.py` — always project-root-relative |
+| `gh run view <id> --log-failed` | Variant not in allowlist; prompts every time | Add `Bash(gh run view *)` to project settings.json (§26) |
+
+**npm --prefix convention (standard form):**
+```bash
+# Instead of: cd work/oxo-online/src/app && npm run test:run
+npm --prefix work/oxo-online/src/app run test:run
+
+# Instead of: cd work/oxo-online/src/app && npm ci
+npm --prefix work/oxo-online/src/app ci
+
+# Instead of: cd work/oxo-online/src/app && npm run build
+npm --prefix work/oxo-online/src/app run build
+```
+
+**dora.py convention (always from project root):**
+```bash
+# Correct (project root):
+python3 .claude/skills/dora-ledger/scripts/dora.py compute
+
+# Wrong (any subdirectory):
+# cd work/oxo-online/src/app && python3 .claude/skills/...
+```
+
+**Anticipated DORA effect:** Eliminates recurring 15–60s human-approval pauses for
+directory-sensitive compound commands. Reduces novel command combinations that
+fall outside the committed allowlist.
+
+## 26. Committed project allowlist (v13 — new)
+
+A project-level `.claude/settings.json` (committed, not `.local`) captures stable
+allowlist patterns so all agents work without prompts across sessions.
+
+**Do not confuse:**
+- `.claude/settings.json` — committed; tracks with the repo; correct place for project allowlist
+- `.claude/settings.local.json` — user-specific, git-ignored; for personal overrides only
+
+The committed allowlist lives at `.claude/settings.json` and is initialised with
+the patterns known to be safe (see the file). Run `/fewer-permission-prompts`
+after any session that introduces new recurring command patterns to refresh it.
+
+**Anticipated DORA effect:** Permission-prompt delays (15–60s each) eliminated for
+covered patterns. Reduces human interruption frequency during agent execution.
+
+## 27. Change-set queued for next iteration
+
+- **§25 working-directory convention** — measure whether compounded-command prompts disappear from s004; target zero `cd &&` compounds in agent commands
+- **§26 committed allowlist** — measure whether novel-command approval prompts disappear; target zero approval prompts for npm/dora/gh run variants
+- **Stable smoke selectors (§23)** — confirm CFR = 0% on next slice that touches the game screen
+- **§22 broadened trigger** — measure whether surface-change check fires on first slice that adds new controls; target zero pipeline failures from smoke
 - Deployment frequency hit 3/day in s003 — maintain ≥ 3 as slices continue

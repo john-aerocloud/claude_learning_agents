@@ -133,3 +133,4 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-05T18:51:56Z,oxo-online,3,003-ai-opponent,documenter,task_start,,na,,Update docs/usage.md for slice 003 — adding vs Computer mode
 2026-06-05T19:10:00Z,oxo-online,3,003-ai-opponent,documenter,task_end,498,success,work/oxo-online/docs/usage.md,usage.md updated: mode selector documented; vs Computer section added; two-player section preserved; AI unbeatable + 47ms noted; no forward references
 2026-06-05T18:52:57Z,oxo-online,3,003-ai-opponent,documenter,task_end,50,success,,docs/usage.md updated for slice 003; vs Computer mode documented
+2026-06-05T19:03:55Z,oxo-online,4,focus-retro,orchestrator,gate,,success,RETRO-PROMPTS,"Focus retro: permission prompts from compound commands. v12→v13. §25 working-dir convention, §26 committed settings.json. CLAUDE.md updated."

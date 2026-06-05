@@ -19,3 +19,11 @@ See `README.md` for the full system. In short:
 - Before crawling files, read the `process-framework` skill — it says what to
   load for each task and keeps context small. Record/compute metrics with the
   `dora-ledger` skill.
+
+# Working-directory conventions
+
+**All commands run from the project root** (the directory containing this file).
+
+- Use `npm --prefix work/<project>/src/app run <cmd>` instead of `cd ... && npm run <cmd>`
+- Run `python3 .claude/skills/dora-ledger/scripts/dora.py` from project root only — the path is root-relative
+- The committed allowlist is in `.claude/settings.json`; add novel patterns there, not in `.local.json`

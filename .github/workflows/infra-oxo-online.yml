@@ -123,11 +123,23 @@ jobs:
           CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
           CDK_DEFAULT_REGION: ${{ env.AWS_REGION }}
 
-      - name: CDK deploy — OxoGameProd then OxoOnlineProd
+      - name: CDK deploy — OxoGameProd (must complete before OxoOnlineProd)
+        # OxoOnlineProd imports OxoGameProd-HttpApiEndpoint via Fn::ImportValue.
+        # On first deploy the export does not exist yet, so CDK must deploy
+        # OxoGameProd to completion BEFORE starting OxoOnlineProd.
+        # Deploy stacks separately (not as a batch) to guarantee sequential order.
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         working-directory: work/oxo-online/src/infra
         run: |
-          npx cdk deploy OxoGameProd OxoOnlineProd --require-approval never \
+          npx cdk deploy OxoGameProd --require-approval never \
+            -c githubOrg=${{ github.repository_owner }} \
+            -c githubRepo=${{ github.event.repository.name }}
+
+      - name: CDK deploy — OxoOnlineProd (after OxoGameProd export exists)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        working-directory: work/oxo-online/src/infra
+        run: |
+          npx cdk deploy OxoOnlineProd --require-approval never \
             -c githubOrg=${{ github.repository_owner }} \
             -c githubRepo=${{ github.event.repository.name }}
         env:

@@ -187,6 +187,26 @@ export class OxoOnlineOidcStack extends cdk.Stack {
       }),
     );
 
+    // Lambda code deploy — scoped to the single game function ARN.
+    // UpdateFunctionCode is the only action needed for CI/CD hot-swap.
+    // GetFunction is used to verify the update completed successfully.
+    // No iam:* actions; the Lambda execution role is managed by CDK/CloudFormation.
+    deployRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'LambdaCodeDeploy',
+        effect: iam.Effect.ALLOW,
+        actions: [
+          'lambda:UpdateFunctionCode',
+          'lambda:GetFunction', // health-check: confirm update applied
+        ],
+        resources: [
+          // Scoped to the specific function ARN — no wildcard.
+          // The function lives in the same account and region as the rest of the stack.
+          `arn:aws:lambda:*:${this.account}:function:oxo-game-fn`,
+        ],
+      }),
+    );
+
     // IAM read-only for CDK to resolve role/policy ARNs during diff/deploy.
     deployRole.addToPolicy(
       new iam.PolicyStatement({

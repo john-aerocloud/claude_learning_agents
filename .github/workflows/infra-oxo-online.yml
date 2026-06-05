@@ -73,6 +73,21 @@ jobs:
         working-directory: work/oxo-online/src/infra
         run: npm run build
 
+      - name: Validate required context flags
+        # §20 pre-flight: fail fast if the context values the CDK app requires are
+        # absent before we spend time on an AWS round-trip.
+        run: |
+          MISSING=()
+          if [ -z "${{ github.repository_owner }}" ]; then MISSING+=(githubOrg); fi
+          if [ -z "${{ github.event.repository.name }}" ]; then MISSING+=(githubRepo); fi
+          if [ -z "${{ secrets.AWS_ACCOUNT_ID }}" ]; then MISSING+=(AWS_ACCOUNT_ID); fi
+          if [ -z "${{ secrets.OXO_ONLINE_INFRA_DEPLOY_ROLE_ARN }}" ]; then MISSING+=(OXO_ONLINE_INFRA_DEPLOY_ROLE_ARN); fi
+          if [ ${#MISSING[@]} -ne 0 ]; then
+            echo "ERROR: missing required secrets/vars: ${MISSING[*]}"
+            exit 1
+          fi
+          echo "All required context flags present."
+
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -80,21 +95,21 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: oxo-online-infra-${{ github.run_id }}
 
-      - name: CDK diff
+      - name: CDK diff — OxoGameProd + OxoOnlineProd
         working-directory: work/oxo-online/src/infra
         run: |
-          npx cdk diff OxoOnlineProd \
+          npx cdk diff OxoGameProd OxoOnlineProd \
             -c githubOrg=${{ github.repository_owner }} \
             -c githubRepo=${{ github.event.repository.name }}
         env:
           CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
           CDK_DEFAULT_REGION: ${{ env.AWS_REGION }}
 
-      - name: CDK deploy — OxoOnlineProd
+      - name: CDK deploy — OxoGameProd then OxoOnlineProd
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         working-directory: work/oxo-online/src/infra
         run: |
-          npx cdk deploy OxoOnlineProd --require-approval never \
+          npx cdk deploy OxoGameProd OxoOnlineProd --require-approval never \
             -c githubOrg=${{ github.repository_owner }} \
             -c githubRepo=${{ github.event.repository.name }}
         env:

@@ -3,6 +3,7 @@ import 'source-map-support/register';
 import * as cdk from 'aws-cdk-lib';
 import { OxoOnlineShellStack } from '../lib/oxo-online-shell-stack';
 import { OxoOnlineOidcStack } from '../lib/oxo-online-oidc-stack';
+import { OxoGameStack } from '../lib/game-stack';
 
 /**
  * oxo-online CDK app entry point.
@@ -20,10 +21,16 @@ import { OxoOnlineOidcStack } from '../lib/oxo-online-oidc-stack';
  *   Provide all three or none — partial config throws.
  *   Dev deploy omits all three and uses the auto-generated *.cloudfront.net URL.
  *
- * Stack deploy order (first time only):
- *   1. cdk deploy OxoOnlineOidcStack  (creates the OIDC provider + deploy role)
- *      Then copy the DeployRoleArn output into the GitHub secret AWS_DEPLOY_ROLE_ARN.
- *   2. cdk deploy OxoOnlineProd       (every subsequent deploy via GitHub Actions)
+ * Stack deploy order:
+ *   1. cdk deploy OxoOnlineOidcStack  (one-time: creates OIDC provider + deploy roles)
+ *      Copy DeployRoleArn → GitHub secret OXO_ONLINE_DEPLOY_ROLE_ARN.
+ *      Copy InfraDeployRoleArn → GitHub secret OXO_ONLINE_INFRA_DEPLOY_ROLE_ARN.
+ *   2. cdk deploy OxoGameProd         (every subsequent infra deploy — must be first)
+ *   3. cdk deploy OxoOnlineProd       (consumes OxoGameProd CfnOutput for /api/* origin)
+ *
+ * OxoGameProd must deploy before OxoOnlineProd because OxoOnlineProd will consume
+ * the HTTP API endpoint export from OxoGameProd as its /api/* CloudFront origin.
+ * See work/oxo-online/src/infra/STACK_ORDER.md for the cross-stack reference pattern.
  */
 
 const app = new cdk.App();
@@ -75,7 +82,20 @@ new OxoOnlineOidcStack(app, 'OxoOnlineOidcStack', {
   },
 });
 
-// Application stack — deployed by GitHub Actions on every push to main.
+// Game backend stack — deployed by GitHub Actions on every infra push.
+// Must deploy BEFORE OxoOnlineProd so its HTTP API endpoint CfnOutput is
+// available for the /api/* CloudFront origin in OxoOnlineProd.
+new OxoGameStack(app, 'OxoGameProd', {
+  env,
+  tags: {
+    Project: 'oxo-online',
+    Env: 'prod',
+    ManagedBy: 'cdk',
+  },
+});
+
+// Application (SPA hosting) stack — deployed by GitHub Actions on every push to main.
+// Consumes the HTTP API endpoint from OxoGameProd to wire the /api/* origin.
 new OxoOnlineShellStack(app, 'OxoOnlineProd', {
   env,
   certArn,

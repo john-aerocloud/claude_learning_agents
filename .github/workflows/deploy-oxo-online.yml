@@ -20,14 +20,18 @@
 #   OXO_ONLINE_CLOUDFRONT_DISTRIBUTION  CloudFront distribution ID
 #   OXO_ONLINE_S3_BUCKET                S3 bucket name
 #   OXO_ONLINE_PROD_URL                 e.g. https://d3pf3kcvzpau1x.cloudfront.net
+#   OXO_ONLINE_LAMBDA_FUNCTION_NAME     Lambda function name for UpdateFunctionCode
+#                                       (set to the value of the LambdaFunctionName
+#                                       CfnOutput from OxoGameProd stack — e.g. oxo-game-fn)
 #
 # GitHub Actions secrets:
 #   OXO_ONLINE_DEPLOY_ROLE_ARN          IAM role ARN (from OxoOnlineOidcStack output)
 #   ACM_CERT_ARN                        (optional) ACM cert ARN for custom domain — used by manual CDK deploy only
 #   HOSTED_ZONE_ID                      (optional) Route 53 zone ID — used by manual CDK deploy only
 #
-# Note: CDK infra changes are NOT deployed by this pipeline. Run `make deploy`
-# locally from work/oxo-online/src/infra when infra changes are needed.
+# Note: CDK infra changes are NOT deployed by this pipeline. CDK is in the
+# infra-oxo-online.yml pipeline. This pipeline handles: SPA (S3 sync +
+# CloudFront invalidation) + Lambda code update when src/lambda/** changes.
 #
 # GitHub Actions variables (optional — custom domain):
 #   OXO_ONLINE_DOMAIN_NAME              e.g. oxo.example.com
@@ -45,13 +49,15 @@ on:
     branches:
       - main
     paths:
-      - 'work/oxo-online/**'
+      - 'work/oxo-online/src/app/**'
+      - 'work/oxo-online/src/lambda/**'
       - '.github/workflows/deploy-oxo-online.yml'
   pull_request:
     branches:
       - main
     paths:
-      - 'work/oxo-online/**'
+      - 'work/oxo-online/src/app/**'
+      - 'work/oxo-online/src/lambda/**'
       - '.github/workflows/deploy-oxo-online.yml'
 
 concurrency:
@@ -165,10 +171,45 @@ jobs:
             --distribution-id ${{ vars.OXO_ONLINE_CLOUDFRONT_DISTRIBUTION }} \
             --paths "/*"
 
+      # -------------------------------------------------------------------------
+      # Lambda code update — only runs when work/oxo-online/src/lambda/** changed.
+      #
+      # The oxo-deploy role must have lambda:UpdateFunctionCode on the function ARN.
+      # See work/oxo-online/src/infra/DEPLOY_ROLE_EXTENSIONS.md for the permissions
+      # that must be added to the role before this step will work.
+      #
+      # OXO_ONLINE_LAMBDA_FUNCTION_NAME is a GitHub Actions variable (not a secret):
+      # set it to the LambdaFunctionName CfnOutput value from the OxoGameProd stack
+      # (e.g. "oxo-game-fn" or the CDK-generated logical name).
+      # -------------------------------------------------------------------------
+      - name: Detect Lambda source changes
+        id: lambda-changed
+        run: |
+          CHANGED=$(git diff --name-only HEAD~1 HEAD -- work/oxo-online/src/lambda/ 2>/dev/null | wc -l)
+          if [ "$CHANGED" -gt "0" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Package Lambda source
+        if: steps.lambda-changed.outputs.changed == 'true' && vars.OXO_ONLINE_LAMBDA_FUNCTION_NAME != ''
+        run: |
+          cd work/oxo-online/src/lambda
+          zip -r /tmp/lambda-package.zip . -x "*.test.*" -x "node_modules/.cache/*"
+
+      - name: Deploy Lambda code
+        if: steps.lambda-changed.outputs.changed == 'true' && vars.OXO_ONLINE_LAMBDA_FUNCTION_NAME != ''
+        run: |
+          aws lambda update-function-code \
+            --function-name ${{ vars.OXO_ONLINE_LAMBDA_FUNCTION_NAME }} \
+            --zip-file fileb:///tmp/lambda-package.zip \
+            --region ${{ env.AWS_REGION }}
+
       - name: Record DORA deploy event
         run: |
           python .claude/skills/dora-ledger/scripts/dora.py record \
-            --project oxo-online --iteration 1 --slice 001 \
+            --project oxo-online --iteration 4 --slice 004-create-game \
             --agent cicd --event deploy --outcome success \
             --ref "${{ github.sha }}" \
             --note "Automated deploy via GitHub Actions run ${{ github.run_id }}"
@@ -192,7 +233,7 @@ jobs:
         if: failure()
         run: |
           python .claude/skills/dora-ledger/scripts/dora.py record \
-            --project oxo-online --iteration 1 --slice 001 \
+            --project oxo-online --iteration 4 --slice 004-create-game \
             --agent cicd --event failure --outcome fail \
             --ref "${{ github.sha }}" \
             --note "Deploy or smoke test failed — run ${{ github.run_id }}"

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { initialState, applyMove, type GameState } from './engine';
+import { bestMove } from './ai';
 
 // Vite-native raw import of every source file under src/game/. Avoids node:*
 // imports (and a new @types/node dependency) entirely.
@@ -88,5 +89,91 @@ describe('policy: gameplay performs no network I/O (D3, T1, S2)', () => {
     expect(xhrOpen).not.toHaveBeenCalled();
     expect(wsCtor).not.toHaveBeenCalled();
     cleanup();
+  });
+});
+
+// D4 — no network during a full vs-Computer game (T5, S3).
+describe('policy: vs-Computer play performs no network I/O (D4, T5, S3)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('never invokes fetch, XHR, or WebSocket across AI moves and reset', async () => {
+    const { render, screen, waitFor, cleanup } = await import(
+      '@testing-library/react'
+    );
+    const userEvent = (await import('@testing-library/user-event')).default;
+    const { GameRoot } = await import('./GameRoot');
+
+    const fetchSpy = vi.fn();
+    const xhrOpen = vi.fn();
+    const wsCtor = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    class FakeXHR {
+      open = xhrOpen;
+      send = vi.fn();
+      setRequestHeader = vi.fn();
+    }
+    vi.stubGlobal('XMLHttpRequest', FakeXHR as unknown as typeof XMLHttpRequest);
+    vi.stubGlobal(
+      'WebSocket',
+      function WS(this: unknown, url: string) {
+        wsCtor(url);
+      } as unknown as typeof WebSocket,
+    );
+
+    render(<GameRoot />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /vs computer/i }),
+    );
+    // Play to a terminal state: human takes the first empty playable cell, AI
+    // (optimal O) replies each turn. Loop until Play again appears.
+    while (!screen.queryByRole('button', { name: /play again/i })) {
+      let clicked = false;
+      for (let i = 0; i < 9 && !clicked; i += 1) {
+        const cell = screen.getByLabelText(`cell ${i}`);
+        if (cell.textContent === '' && !(cell as HTMLButtonElement).disabled) {
+          await userEvent.click(cell);
+          clicked = true;
+        }
+      }
+      await waitFor(() => {});
+      if (!clicked) break;
+    }
+    await userEvent.click(
+      screen.getByRole('button', { name: /play again/i }),
+    );
+    // One more human move after reset (AI replies).
+    await userEvent.click(screen.getByLabelText('cell 0'));
+    await waitFor(() => {});
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(xhrOpen).not.toHaveBeenCalled();
+    expect(wsCtor).not.toHaveBeenCalled();
+    cleanup();
+  });
+});
+
+// D5 — closed value set holds with AI-produced O moves (S1).
+describe('policy: cell values stay closed to {X,O,null} with AI play (D5, S1)', () => {
+  it('admits no other value as optimal O answers every X line of play', () => {
+    const allowed = new Set<unknown>(['X', 'O', null]);
+    const assertClosed = (s: GameState) => {
+      for (const cell of s.board) expect(allowed.has(cell)).toBe(true);
+    };
+    // Same game tree as ai A4: X branches over every legal move, O = bestMove.
+    const walk = (s: GameState) => {
+      assertClosed(s);
+      if (s.status !== 'playing') return;
+      if (s.currentPlayer === 'X') {
+        for (let i = 0; i < 9; i += 1) {
+          if (s.board[i] === null) walk(applyMove(s, i));
+        }
+      } else {
+        walk(applyMove(s, bestMove(s)));
+      }
+    };
+    walk(initialState());
   });
 });

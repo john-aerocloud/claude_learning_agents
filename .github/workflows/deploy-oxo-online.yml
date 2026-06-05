@@ -23,9 +23,11 @@
 #
 # GitHub Actions secrets:
 #   OXO_ONLINE_DEPLOY_ROLE_ARN          IAM role ARN (from OxoOnlineOidcStack output)
-#   AWS_ACCOUNT_ID                      AWS account number
-#   ACM_CERT_ARN                        (optional) ACM cert ARN for custom domain
-#   HOSTED_ZONE_ID                      (optional) Route 53 zone ID
+#   ACM_CERT_ARN                        (optional) ACM cert ARN for custom domain — used by manual CDK deploy only
+#   HOSTED_ZONE_ID                      (optional) Route 53 zone ID — used by manual CDK deploy only
+#
+# Note: CDK infra changes are NOT deployed by this pipeline. Run `make deploy`
+# locally from work/oxo-online/src/infra when infra changes are needed.
 #
 # GitHub Actions variables (optional — custom domain):
 #   OXO_ONLINE_DOMAIN_NAME              e.g. oxo.example.com
@@ -125,41 +127,9 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: oxo-online-deploy-${{ github.run_id }}
 
-      - name: Set up Node 22 (for CDK)
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: work/oxo-online/src/infra/package-lock.json
-
-      - name: Install CDK dependencies
-        working-directory: work/oxo-online/src/infra
-        run: npm ci
-
-      - name: Build CDK TypeScript
-        working-directory: work/oxo-online/src/infra
-        run: npm run build
-
-      - name: CDK diff (informational)
-        working-directory: work/oxo-online/src/infra
-        run: |
-          npx cdk diff OxoOnlineProd \
-            -c githubOrg=${{ github.repository_owner }} \
-            -c githubRepo=${{ github.event.repository.name }}
-        continue-on-error: true
-
-      - name: CDK deploy — OxoOnlineProd
-        working-directory: work/oxo-online/src/infra
-        run: |
-          npx cdk deploy OxoOnlineProd --require-approval never --outputs-file cdk-outputs.json \
-            -c githubOrg=${{ github.repository_owner }} \
-            -c githubRepo=${{ github.event.repository.name }}
-        env:
-          CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
-          CDK_DEFAULT_REGION: ${{ env.AWS_REGION }}
-          ACM_CERT_ARN: ${{ secrets.ACM_CERT_ARN }}
-          HOSTED_ZONE_ID: ${{ secrets.HOSTED_ZONE_ID }}
-          DOMAIN_NAME: ${{ vars.OXO_ONLINE_DOMAIN_NAME }}
+      # CDK infra changes are deployed manually via `make deploy` in work/oxo-online/src/infra.
+      # The pipeline only handles app deployment: S3 sync + CloudFront invalidation.
+      # This keeps the OIDC role permissions minimal (S3 + CloudFront only, no IAM/CFN).
 
       - name: Download build artifact
         uses: actions/download-artifact@v4

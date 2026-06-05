@@ -1,0 +1,104 @@
+###############################################################################
+# oxo-online — infrastructure pipeline
+#
+# Triggers on changes to the CDK infra source only. Separate from the app
+# deploy pipeline so infra and app changes are independently deployable.
+#
+# Auth:
+#   GitHub OIDC → oxo-infra-deploy role, which can assume the CDK bootstrap
+#   roles (cdk-*-deploy-role, cdk-*-file-publishing-role) in the account.
+#   Bootstrap was run with --trust 817047731316 to permit this.
+#
+# GitHub Actions secrets:
+#   OXO_ONLINE_INFRA_DEPLOY_ROLE_ARN    arn:aws:iam::817047731316:role/oxo-infra-deploy
+#   AWS_ACCOUNT_ID                      817047731316
+#
+# GitHub Actions variables (optional — custom domain):
+#   OXO_ONLINE_DOMAIN_NAME              e.g. oxo.example.com
+#
+# GitHub Actions secrets (optional — custom domain):
+#   ACM_CERT_ARN                        ACM cert ARN in us-east-1
+#   HOSTED_ZONE_ID                      Route 53 hosted zone ID
+###############################################################################
+
+name: oxo-online — infra
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'work/oxo-online/src/infra/**'
+      - '.github/workflows/infra-oxo-online.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'work/oxo-online/src/infra/**'
+      - '.github/workflows/infra-oxo-online.yml'
+
+concurrency:
+  group: infra-oxo-online-prod
+  cancel-in-progress: false  # never cancel an in-flight infra deploy
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.OXO_ONLINE_AWS_REGION || 'eu-west-2' }}
+
+jobs:
+  infra:
+    name: CDK diff / deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: work/oxo-online/src/infra/package-lock.json
+
+      - name: Install CDK dependencies
+        working-directory: work/oxo-online/src/infra
+        run: npm ci
+
+      - name: Build CDK TypeScript
+        working-directory: work/oxo-online/src/infra
+        run: npm run build
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.OXO_ONLINE_INFRA_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: oxo-online-infra-${{ github.run_id }}
+
+      - name: CDK diff
+        working-directory: work/oxo-online/src/infra
+        run: |
+          npx cdk diff OxoOnlineProd \
+            -c githubOrg=${{ github.repository_owner }} \
+            -c githubRepo=${{ github.event.repository.name }}
+        env:
+          CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+          CDK_DEFAULT_REGION: ${{ env.AWS_REGION }}
+
+      - name: CDK deploy — OxoOnlineProd
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        working-directory: work/oxo-online/src/infra
+        run: |
+          npx cdk deploy OxoOnlineProd --require-approval never \
+            -c githubOrg=${{ github.repository_owner }} \
+            -c githubRepo=${{ github.event.repository.name }}
+        env:
+          CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+          CDK_DEFAULT_REGION: ${{ env.AWS_REGION }}
+          ACM_CERT_ARN: ${{ secrets.ACM_CERT_ARN }}
+          HOSTED_ZONE_ID: ${{ secrets.HOSTED_ZONE_ID }}
+          DOMAIN_NAME: ${{ vars.OXO_ONLINE_DOMAIN_NAME }}

@@ -202,12 +202,64 @@ export class OxoOnlineOidcStack extends cdk.Stack {
       }),
     );
 
-    // Stack output — copy this value into the GitHub secret AWS_DEPLOY_ROLE_ARN.
+    // -------------------------------------------------------------------------
+    // oxo-infra-deploy IAM role — used by the infra GitHub Actions workflow.
+    // Has permission to assume CDK bootstrap roles so it can run cdk deploy.
+    // Broader than oxo-deploy by design; kept separate to scope each workflow.
+    // -------------------------------------------------------------------------
+    const infraDeployRole = new iam.Role(this, 'InfraDeployRole', {
+      roleName: 'oxo-infra-deploy',
+      assumedBy: new iam.WebIdentityPrincipal(
+        ghProvider.openIdConnectProviderArn,
+        {
+          StringEquals: {
+            'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
+          },
+          StringLike: {
+            'token.actions.githubusercontent.com:sub': `repo:${props.githubOrg}/${props.githubRepo}:*`,
+          },
+        },
+      ),
+      maxSessionDuration: cdk.Duration.hours(1),
+      description: 'GitHub Actions OIDC infra deploy role for oxo-online. Assumes CDK bootstrap roles.',
+    });
+
+    // Allow assuming all CDK bootstrap roles in this account/region.
+    infraDeployRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'CdkBootstrapRoleAssume',
+        effect: iam.Effect.ALLOW,
+        actions: ['sts:AssumeRole'],
+        resources: [
+          `arn:aws:iam::${this.account}:role/cdk-*-deploy-role-${this.account}-*`,
+          `arn:aws:iam::${this.account}:role/cdk-*-file-publishing-role-${this.account}-*`,
+          `arn:aws:iam::${this.account}:role/cdk-*-image-publishing-role-${this.account}-*`,
+          `arn:aws:iam::${this.account}:role/cdk-*-lookup-role-${this.account}-*`,
+        ],
+      }),
+    );
+
+    // Allow reading CDK bootstrap version from SSM.
+    infraDeployRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'CdkBootstrapSsm',
+        effect: iam.Effect.ALLOW,
+        actions: ['ssm:GetParameter'],
+        resources: [`arn:aws:ssm:*:${this.account}:parameter/cdk-bootstrap/*/version`],
+      }),
+    );
+
+    // Stack outputs.
     this.deployRoleArn = new cdk.CfnOutput(this, 'DeployRoleArn', {
       value: deployRole.roleArn,
-      description:
-        'Copy this ARN into the GitHub repository secret AWS_DEPLOY_ROLE_ARN',
+      description: 'App deploy role ARN — GitHub secret OXO_ONLINE_DEPLOY_ROLE_ARN',
       exportName: 'OxoOnlineOidc-DeployRoleArn',
+    });
+
+    new cdk.CfnOutput(this, 'InfraDeployRoleArn', {
+      value: infraDeployRole.roleArn,
+      description: 'Infra deploy role ARN — GitHub secret OXO_ONLINE_INFRA_DEPLOY_ROLE_ARN',
+      exportName: 'OxoOnlineOidc-InfraDeployRoleArn',
     });
 
     new cdk.CfnOutput(this, 'OidcProviderArn', {

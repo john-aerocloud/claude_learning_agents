@@ -1,0 +1,19 @@
+export type Cell = 'X' | 'O' | null;
+export type Player = 'X' | 'O';
+export type Status = 'playing' | 'won' | 'draw';
+
+export interface GameState {
+  board: Cell[];
+  currentPlayer: Player;
+  winner: Player | null;
+  status: Status;
+}
+
+export function initialState(): GameState {
+  return {
+    board: [null, null, null, null, null, null, null, null, null],
+    currentPlayer: 'X',
+    winner: null,
+    status: 'playing',
+  };
+}

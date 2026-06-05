@@ -255,3 +255,49 @@ describe('GameRoot — Play Online success flow (F1, F2, F3)', () => {
     expect(screen.getByText('MNP234')).toBeVisible();
   });
 });
+
+describe('GameRoot — Play Online failure degrades gracefully (F4, F5)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('shows a readable error and keeps the mode selector usable on rejection', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network down'));
+    render(<GameRoot />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /play online/i }),
+    );
+    await waitFor(() =>
+      expect(screen.getByText(/could not start online game/i)).toBeInTheDocument(),
+    );
+    // Mode selector still present and usable — no white-screen.
+    expect(
+      screen.getByRole('button', { name: /two player/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /vs computer/i }),
+    ).toBeInTheDocument();
+    // Existing mode still works after the error.
+    await userEvent.click(screen.getByRole('button', { name: /vs computer/i }));
+    expect(screen.getByRole('status')).toHaveTextContent("X's turn");
+  });
+
+  it('shows a readable error on a 5xx response', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ error: 'Could not create game' }), {
+        status: 500,
+      }),
+    );
+    render(<GameRoot />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /play online/i }),
+    );
+    await waitFor(() =>
+      expect(screen.getByText(/could not start online game/i)).toBeInTheDocument(),
+    );
+    // The board is still present (mode selector accessible).
+    expect(
+      screen.getByRole('button', { name: /two player/i }),
+    ).toBeInTheDocument();
+  });
+});

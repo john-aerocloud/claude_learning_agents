@@ -142,20 +142,24 @@ jobs:
 
       - name: CDK diff (informational)
         working-directory: work/oxo-online/src/infra
-        run: npx cdk diff OxoOnlineProd
+        run: |
+          npx cdk diff OxoOnlineProd \
+            -c githubOrg=${{ github.repository_owner }} \
+            -c githubRepo=${{ github.event.repository.name }}
         continue-on-error: true
 
       - name: CDK deploy — OxoOnlineProd
         working-directory: work/oxo-online/src/infra
-        run: npx cdk deploy OxoOnlineProd --require-approval never --outputs-file cdk-outputs.json
+        run: |
+          npx cdk deploy OxoOnlineProd --require-approval never --outputs-file cdk-outputs.json \
+            -c githubOrg=${{ github.repository_owner }} \
+            -c githubRepo=${{ github.event.repository.name }}
         env:
           CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
           CDK_DEFAULT_REGION: ${{ env.AWS_REGION }}
           ACM_CERT_ARN: ${{ secrets.ACM_CERT_ARN }}
           HOSTED_ZONE_ID: ${{ secrets.HOSTED_ZONE_ID }}
           DOMAIN_NAME: ${{ vars.OXO_ONLINE_DOMAIN_NAME }}
-          GITHUB_ORG: ${{ github.repository_owner }}
-          GITHUB_REPO: ${{ github.event.repository.name }}
 
       - name: Download build artifact
         uses: actions/download-artifact@v4

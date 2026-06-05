@@ -1,11 +1,11 @@
 ---
-process_version: 11
+process_version: 12
 effective_from: 2026-06-05
-supersedes: v10
+supersedes: v11
 status: active
 ---
 
-# Current Process — v11
+# Current Process — v12
 
 The process all agents follow right now. Updated only by the Orchestrator at a
 retro, which snapshots the prior version into `process-history/` first.
@@ -30,13 +30,14 @@ and pipeline iteration loops.
 | 003 | ox | 39 min | ~37 min | ~2 min | None |
 | 001 | oxo-online | 7h 25min | ~50 min | ~3h 22min | Pipeline iteration loop |
 | 002 | oxo-online | ~42 min | ~36 min | ~5 min | Smoke test regression |
+| 003 | oxo-online | ~66 min | ~32 min | ~28 min | Human gate waits + smoke regression |
 
-Script output (v11): `lead=2211s freq=2/day cfr=20% mttr=222s`.
+Script output (v12): `lead=2340s freq=3/day cfr=33% mttr=257s`.
 
 **Three distinct constraint classes observed:**
 - **Session boundary** (ox): pipeline idles overnight; fix = session continuity.
 - **Pipeline iteration loop** (oxo-online s001): multiple fix-commit-push-wait cycles on new pipeline; fix = CICD pre-flight + fail-fast.
-- **Smoke test regression** (oxo-online s002): surface changed but smoke tests not updated; fix = §22 done condition for surface changes.
+- **Fragile smoke selectors** (oxo-online s002+s003): smoke tests coupled to button inventory rather than semantic ids; fix = §23 stable selector mandate.
 
 ## 3. Wait time taxonomy
 
@@ -48,6 +49,7 @@ Script output (v11): `lead=2211s freq=2/day cfr=20% mttr=222s`.
 | **Pipeline iteration loop** | oxo s001: 8 pipeline fixes after engineer done | 3h 22min | CICD pre-flight + fail-fast (§19–20) |
 | **Human gate wait** | oxo s001: gate 2 → gate 2B | 1h 55min | Auto-approve + batch gates (§8) |
 | **Smoke test regression** | oxo s002: root route changed, smoke assertions stale | ~5 min | Surface-change done condition (§22) |
+| **Fragile smoke selector** | oxo s003: new buttons added, getCells count broke | ~5 min | Stable selector mandate (§23) |
 
 ## 4. Session continuity (v7 — primary wait-reduction lever for local-only)
 
@@ -154,20 +156,20 @@ Orchestrator updates `work/<project>/dora/per-project.md` at the end of each
 slice retro. Include: slice, change, expected DORA effect, actual, regression
 flag, reflection, time-to-first-deploy (s001 only), delivery gap.
 
-## 16. DORA baseline (v11 — oxo-online s002 added)
+## 16. DORA baseline (v12 — oxo-online s003 added)
 
-| Metric | ox final | oxo-online s001 | oxo-online s002 | v11 target |
-|--------|---------|----------------|-----------------|------------|
-| Gross lead time (median) | 2340s (39 min) | 26,700s (7h 25min) | ~2,520s (42 min) | < 2400s in-session |
-| Deployment frequency | 2/active-day | — | 2/active-day | ≥ 3/active-day |
-| Change failure rate | 0% | 0% | 20% | restore to 0% |
-| MTTR | n/a | n/a | 222s (3.7 min) | < 300s |
+| Metric | ox final | oxo-online s001 | oxo-online s002 | oxo-online s003 | v12 target |
+|--------|---------|----------------|-----------------|-----------------|------------|
+| Gross lead time (median) | 2340s (39 min) | 26,700s (7h 25min) | ~2,520s (42 min) | ~3,960s (66 min) | < 2400s in-session |
+| Deployment frequency | 2/active-day | — | 2/active-day | 3/active-day | ≥ 3/active-day |
+| Change failure rate | 0% | 0% | 20% | 33% | restore to 0% |
+| MTTR | n/a | n/a | 222s | 257s | < 300s |
 
-**Computed baseline (2026-06-05):** `lead=2211s freq=2/day cfr=20% mttr=222s`
+**Computed baseline (2026-06-05):** `lead=2340s freq=3/day cfr=33% mttr=257s`
 
-**Current constraint:** `tester` (median 1200s, driven by historical ox overnight
-data). In-session tester runs are fast (~213s). The constraint to attack via
-process change is the **CFR regression** — restore to 0% via §22.
+**Named constraint:** `tester` (median 1059s, partly historical). In-session tester
+runs are 213–253s. The actionable constraint is **CFR = 33%** — two consecutive
+smoke failures from fragile selectors. Attack via §23 (stable selector mandate).
 
 ## 17. Commit discipline
 
@@ -259,39 +261,63 @@ pure-frontend slice should drop from ~42 min toward ~25–30 min.
 **When this path does NOT apply:** any time the slice introduces a new service,
 API call, data persistence, or trust relationship — revert to full delta.
 
-## 22. Engineer done condition — surface changes (v11 — new)
+## 22. Engineer done condition — surface changes (v11, broadened v12)
 
-When a slice changes the **principal visible element at a well-known URL**
-(root `/`, a key deep-link, or a landmark UI element referenced in smoke tests),
-the engineer's done condition includes one additional check:
+When a slice **changes or adds interactive controls to a screen that has
+existing smoke tests**, the engineer's done condition includes:
 
-> **Verify `tests/smoke/` assertions still match what the deployed surface now
-> renders.** If smoke tests reference UI content that no longer appears at that
-> URL, update them in the same commit sequence, before merge.
+> **Verify `tests/smoke/` selectors still isolate the correct elements.**
+> If the slice adds, removes, or renames buttons/inputs/links on a screen
+> the smoke suite navigates to, confirm smoke helpers find the right elements
+> after the change — not just that count assertions pass.
 
-Trigger examples:
-- Root route (`/`) is rewired to a different component (Phase C style)
-- A prominent element (heading, CTA button) is removed or renamed at a URL the
-  smoke suite navigates to
+Trigger examples (broadened from v11):
+- Root route rewired to a different component
+- A prominent element removed or renamed at a smoke-tested URL
+- **New interactive controls added to a smoke-tested screen** ← added v12
+- Mode selectors, toolbars, or navigation added alongside existing game controls
 
-This is separate from unit tests. Smoke tests are infrastructure + surface
-validators; they travel with the content changes that invalidate them.
+**Why broadened:** v11 rule covered route rewiring only. s003 added mode-selector
+buttons alongside game cells; `getCells` counted all non-play-again buttons (11
+instead of 9). The rule was the right class but too narrow a trigger.
+(See `principle-failures/2026-06-05-fragile-smoke-selectors.md`)
 
-**Why:** oxo-online s002 routed `/` from `TitleScreen` to `GameRoot`. Unit
-tests were updated; smoke tests were not. Pipeline failure + MTTR 222s. CFR
-rose from 0% to 20%. (See `principle-failures/2026-06-05-smoke-tests-not-updated-with-root-route.md`)
+**Anticipated DORA effect (v12):** CFR restored to 0%. Two consecutive failures
+have been caught by this rule class; the selector fix (§23) makes future
+additions safe by construction.
 
-**Anticipated DORA effect:** restore CFR to 0% on the next slice that changes
-a well-known surface. One missed smoke update cost one pipeline cycle (~5 min);
-catching it pre-push costs ~1 min.
+## 23. Stable smoke selector mandate (v12 — new)
 
-## 23. Change-set queued for next iteration
+All smoke test helpers that select a **specific category of interactive element**
+(board cells, specific buttons, form fields) **must use a stable semantic
+identifier**, not a derived count or text-exclusion filter.
 
-- Architecture-lite path (§21) — apply to next frontend-only slice; target
-  solution-architect time ≤ 5 min; measure against s002 baseline of ~15 min
-- Surface-change done condition (§22) — apply immediately; target CFR restored
-  to 0% on next slice
-- Lint-in-done-condition (§17 update) — engineer caught lint error post-commit
-  in s002; enforce lint inside done gate, not discovered after commit
-- Deployment frequency — currently 2/active-day; target ≥ 3; next slice is
-  the first in-session opportunity to hit this
+| ✓ Use | ✗ Do not use |
+|-------|-------------|
+| `page.locator('[aria-label^="cell "]')` | `getByRole('button').filter({ hasNotText: /play again/i })` |
+| `page.locator('[data-testid="board-cell"]')` | `getByRole('button').nth(N)` |
+| `page.getByRole('button', { name: /play again/i })` | `getByRole('button')` with count assertion |
+
+**Rule:** if you are selecting a subset of buttons on a screen that will grow
+(game cells vs mode-selector buttons vs play-again), use an attribute that
+uniquely identifies that subset (`aria-label`, `data-testid`, `className` as
+last resort) — not exclusion from the full button inventory.
+
+**Applies at authoring time.** The engineer writing the smoke test is responsible
+for using a stable selector. The tester writing the validation spec must also
+follow this rule.
+
+**Current stable selector for oxo-online cells:** `[aria-label^="cell "]` —
+set in `Cell.tsx`; stable for all future UI additions.
+
+**Anticipated DORA effect:** CFR → 0% on slices that add new interactive
+controls. Two pipeline failures (s002, s003) both trace to this class of fragile
+selector; fixing at source eliminates the recurring pattern.
+
+## 24. Change-set queued for next iteration
+
+- Stable smoke selectors (§23) — now in place for oxo-online; confirm CFR = 0%
+  on next slice that touches the game screen
+- §22 broadened trigger — measure whether surface-change check fires on first
+  slice that adds new controls; target zero pipeline failures from smoke
+- Deployment frequency hit 3/day in s003 — maintain ≥ 3 as slices continue

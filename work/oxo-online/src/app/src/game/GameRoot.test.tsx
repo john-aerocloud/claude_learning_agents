@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { GameRoot } from './GameRoot';
@@ -189,5 +189,69 @@ describe('GameRoot — two-player mode produces no auto-O (C4, F5, T7)', () => {
     expect(countSymbol('X')).toBe(1);
     expect(countSymbol('O')).toBe(0);
     expect(screen.getByRole('status')).toHaveTextContent("O's turn");
+  });
+});
+
+describe('GameRoot — Play Online success flow (F1, F2, F3)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('issues POST /api/games when Play Online is clicked', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response(JSON.stringify({ gameId: 'g-1', code: 'ABC234' }), {
+          status: 201,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+    render(<GameRoot />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /play online/i }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/games',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('shows a loading indicator while the request is pending', async () => {
+    let resolveFetch: (r: Response) => void = () => {};
+    vi.spyOn(globalThis, 'fetch').mockReturnValue(
+      new Promise<Response>((resolve) => {
+        resolveFetch = resolve;
+      }),
+    );
+    render(<GameRoot />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /play online/i }),
+    );
+    expect(screen.getByRole('status')).toHaveTextContent(/starting|loading|waiting/i);
+    // resolve so the component settles before the test ends
+    resolveFetch(
+      new Response(JSON.stringify({ gameId: 'g-1', code: 'ABC234' }), {
+        status: 201,
+      }),
+    );
+    await waitFor(() => expect(screen.getByText('ABC234')).toBeInTheDocument());
+  });
+
+  it('shows the returned code prominently and keeps it visible', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ gameId: 'g-1', code: 'MNP234' }), {
+        status: 201,
+      }),
+    );
+    render(<GameRoot />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /play online/i }),
+    );
+    await waitFor(() =>
+      expect(screen.getByText(/waiting for opponent/i)).toBeInTheDocument(),
+    );
+    expect(screen.getByText('MNP234')).toBeInTheDocument();
+    // Remains visible without further interaction.
+    expect(screen.getByText('MNP234')).toBeVisible();
   });
 });

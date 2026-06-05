@@ -1,0 +1,70 @@
+timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
+2026-06-04T00:00:00Z,ox,0,requirement,orchestrator,task_start,,na,KICKOFF-001,Project ox created; dispatching product agent for JTBD vision
+2026-06-04T00:01:00Z,ox,0,requirement,product,task_start,,na,KICKOFF-001,Product agent producing JTBD vision
+2026-06-04T00:02:00Z,ox,0,requirement,product,task_end,,success,KICKOFF-001,JTBD vision + chunks written to work/ox/
+2026-06-04T00:02:00Z,ox,0,requirement,orchestrator,gate,,success,GATE-1,Gate 1 product vision approved by human
+2026-06-04T00:03:00Z,ox,0,requirement,solution-architect,task_start,,na,GATE-1,Dispatching solution architect for target architecture + security review
+# event ∈ {task_start,task_end,deploy,failure,recovery,gate}
+# outcome ∈ {success,fail,rolled_forward,rolled_back,na}
+# duration_s: wall-clock seconds for the unit of work; blank for instantaneous events
+# ref: git sha / PR / test id / decision-log anchor
+# All times UTC ISO-8601. Append-only — never edit prior rows.
+2026-06-04T11:49:58Z,ox,0,architecture,solution-architect,task_start,,na,GATE-1,"Producing target architecture, deltas/001, security review for ox CLI"
+2026-06-04T12:35:14Z,ox,0,architecture,solution-architect,task_end,1200,success,GATE-1,"Target arch (Python3 stdlib CLI), delta 001, security review (stdin-only surface) complete; cloud principle deviation logged"
+2026-06-04T12:36:00Z,ox,0,architecture,orchestrator,gate,,success,GATE-2,Architecture + security review approved by human
+2026-06-04T12:36:00Z,ox,1,slice-001,product,task_start,,na,GATE-2,Dispatching product agent to define slice 001 (Chunk 1: playable board)
+2026-06-04T12:37:00Z,ox,1,slice-001,product,task_end,,success,GATE-2,slice.md + acceptance.md (13 ACs) written for slice 001
+2026-06-04T12:37:00Z,ox,1,slice-001,orchestrator,gate,,success,GATE-2B,Slice 001 approved by human; dispatching engineer
+2026-06-04T12:38:00Z,ox,1,slice-001,engineer,task_start,,na,GATE-2B,Engineer building slice 001 TDD on trunk
+2026-06-04T12:45:00Z,ox,1,slice-001,engineer,task_end,,success,GATE-2B,39 tests pass; all 13 ACs green; no principle deviations
+2026-06-04T12:45:00Z,ox,1,slice-001,orchestrator,gate,,success,GATE-3,Go/no-go to deploy approved by human; dispatching tester
+2026-06-04T12:45:00Z,ox,1,slice-001,tester,task_start,,na,GATE-3,Tester validating slice 001 through public surface
+2026-06-04T13:05:00Z,ox,1,slice-001,tester,task_end,1200,success,GATE-3,"All 6 success measures pass; all 13 ACs green; no defects; slice 001 done"
+2026-06-04T13:06:00Z,ox,1,slice-001,documenter,task_start,,na,GATE-3,Documenter writing usage.md for slice 001 playable-board
+2026-06-04T13:07:00Z,ox,1,slice-001,documenter,task_end,60,success,GATE-3,Created work/ox/docs/usage.md; all claims traceable to result.md and acceptance.md
+2026-06-04T13:07:00Z,ox,1,slice-001,orchestrator,deploy,,success,GATE-3,Slice 001 delivered; tester validation = deploy for local CLI (no separate infra deploy)
+2026-06-04T16:07:00Z,ox,1,slice-001,orchestrator,task_start,,na,RETRO-1,Retro for ox slice-001
+2026-06-04T16:10:00Z,ox,1,slice-001,orchestrator,task_end,,success,RETRO-1,Process v2 written; constraint=solution-architect; project classification guidance added
+2026-06-04T16:11:00Z,ox,2,slice-002,product,task_start,,na,SLICE-NEXT-2,Product proposing slice 002
+2026-06-04T16:12:00Z,ox,2,slice-002,product,task_end,,success,SLICE-NEXT-2,slice.md written for slice 002; awaiting gate-2 sign-off
+2026-06-04T16:13:00Z,ox,2,slice-002,orchestrator,gate,,success,GATE-2-S002,Slice 002 approved by human
+2026-06-04T16:13:00Z,ox,2,slice-002,solution-architect,task_start,,na,GATE-2-S002,Architect producing delta 002 + security review
+2026-06-04T16:14:00Z,ox,2,slice-002,solution-architect,task_start,,na,GATE-2-S002,"Producing delta 002 (AI Engine/minimax), current.md update, acceptance.md, security verdict"
+2026-06-04T16:34:00Z,ox,2,slice-002,solution-architect,task_end,1200,success,GATE-2-S002,"Delta 002 (AI Engine/negamax, one new pure module), current.md AI promoted to active, acceptance.md (9 ACs), security verdict: no new controls. No principle deviation."
+2026-06-04T16:35:00Z,ox,2,slice-002,orchestrator,gate,,success,GATE-3-S002,Architecture + security approved by human; dispatching engineer
+2026-06-04T16:35:00Z,ox,2,slice-002,engineer,task_start,,na,GATE-3-S002,Engineer building slice 002 TDD on trunk
+2026-06-04T16:55:00Z,ox,2,slice-002,engineer,task_end,,success,GATE-3-S002,58 tests pass (19 new); all 9 ACs green; ai.py added; no principle deviations
+2026-06-04T16:55:00Z,ox,2,slice-002,orchestrator,gate,,success,GATE-4-S002,Go/no-go to deploy; build green; dispatching tester
+2026-06-04T16:55:00Z,ox,2,slice-002,tester,task_start,,na,GATE-4-S002,Tester validating slice 002 through public surface
+2026-06-05T00:30:00Z,ox,2,slice-002,tester,task_end,2100,success,GATE-4-S002,"All 6 SMs pass; 9/9 ACs green; 58 tests pass; full game-tree no X win; draw confirmed; no defects"
+2026-06-05T00:31:00Z,ox,2,slice-002,documenter,task_start,,na,GATE-4-S002,Documenter updating usage.md for slice 002
+2026-06-05T00:32:00Z,ox,2,slice-002,documenter,task_end,60,success,GATE-4-S002,usage.md updated; single-player vs unbeatable computer; example session revised
+2026-06-05T00:32:00Z,ox,2,slice-002,orchestrator,deploy,,success,GATE-4-S002,Slice 002 delivered; tester validation = deploy for local CLI (no separate infra deploy)
+2026-06-05T00:32:00Z,ox,2,slice-002,orchestrator,task_start,,na,RETRO-2,Retro for ox slice-002
+2026-06-05T00:40:00Z,ox,2,slice-002,orchestrator,task_end,,success,RETRO-2,Process v3 written; constraint=tester; tester scope clarified; deploy event fix; per-project.md updated
+2026-06-05T07:10:00Z,ox,0,all,orchestrator,task_start,,na,RETRO-3,Manual retro for ox; focus question on gross lead time contributors
+2026-06-05T07:15:00Z,ox,0,all,orchestrator,task_end,,success,RETRO-3,Process v4 written; parallel planning + auto go/no-go + gross lead time analysis added
+2026-06-05T07:20:00Z,ox,0,all,orchestrator,task_start,,na,RETRO-4,Manual retro correction: gross lead time redefined as wall-clock (all waits); constraint corrected to human gate latency
+2026-06-05T07:25:00Z,ox,0,all,orchestrator,task_end,,success,RETRO-4,Process v5 written; gross lead time = wall-clock (91% wait); constraint = human gate latency; gate reduction strategies added
+2026-06-05T07:26:00Z,ox,3,slice-003,product,task_start,,na,SLICE-NEXT-3,Product proposing slice 003
+2026-06-05T07:27:00Z,ox,3,slice-003,product,task_end,,success,SLICE-NEXT-3,slice.md written for slice 003 play-again loop; awaiting gate sign-off
+2026-06-05T07:28:00Z,ox,3,slice-003,orchestrator,gate,,success,GATE-2-S003,Slice 003 approved (scope updated: session score added); dispatching architect
+2026-06-05T07:28:00Z,ox,3,slice-003,solution-architect,task_start,,na,GATE-2-S003,Architect producing delta 003 + security review + acceptance tests
+2026-06-05T07:26:36Z,ox,3,slice-003,solution-architect,task_end,900,success,GATE-2-S003,"Delta 003 (session loop in game.py wraps play_game; score dict; injectable again seam), current.md Session Loop active, acceptance.md (9 ACs, all 8 SMs), security verdict: no new surface (play-again clause added). No principle deviation."
+2026-06-05T07:30:00Z,ox,3,slice-003,orchestrator,gate,,success,GATE-3-S003,Architecture + security approved by human; dispatching engineer
+2026-06-05T07:30:00Z,ox,3,slice-003,engineer,task_start,,na,GATE-3-S003,Engineer building slice 003 TDD on trunk
+2026-06-05T07:45:00Z,ox,3,slice-003,engineer,task_end,,success,GATE-3-S003,85 tests pass (27 new); all 9 ACs green; no principle deviations
+2026-06-05T07:45:00Z,ox,3,slice-003,orchestrator,gate,,success,GATE-4-S003,Go/no-go AUTO-APPROVED: local-only + green build + no deviations (v5 §3); dispatching tester
+2026-06-05T07:45:00Z,ox,3,slice-003,tester,task_start,,na,GATE-4-S003,Tester validating slice 003 through public surface
+2026-06-05T08:05:00Z,ox,3,slice-003,tester,task_end,1200,success,GATE-4-S003,"All 8 SMs pass; 85/85 tests pass; play-again prompt, score, y/n/invalid/EOF all validated via CLI; no defects; slice 003 done"
+2026-06-05T08:05:00Z,ox,3,slice-003,orchestrator,deploy,,success,GATE-4-S003,Slice 003 delivered; tester validation = deploy for local CLI (no separate infra deploy)
+2026-06-05T08:05:00Z,ox,3,slice-003,documenter,task_start,,na,GATE-4-S003,Documenter updating usage.md for slice 003
+2026-06-05T08:06:00Z,ox,3,slice-003,documenter,task_end,60,success,GATE-4-S003,usage.md updated; feature-complete; play-again + score documented; caveats removed
+2026-06-05T08:06:00Z,ox,3,slice-003,orchestrator,task_start,,na,RETRO-5,Mandatory retro for ox slice-003
+2026-06-05T08:18:00Z,ox,3,slice-003,orchestrator,task_end,,success,RETRO-5,Process v6 written; tester scope confirmed; engineer duration_s + deploy event format gaps queued; ox marked complete
+2026-06-05T09:00:00Z,ox,0,all,orchestrator,task_start,,na,RETRO-6,Final ox retro; gross lead time analysis; session continuity identified as primary constraint
+2026-06-05T09:15:00Z,ox,0,all,orchestrator,task_end,,success,RETRO-6,Process v7 written; session continuity discipline + time-to-first-deploy + delivery gap metrics added; constraint reidentified as session boundaries not gate count
+2026-06-05T09:30:00Z,oxo-online,0,requirement,orchestrator,task_start,,na,KICKOFF-OXO,Project oxo-online created; dispatching product agent for JTBD vision
+2026-06-05T09:30:00Z,oxo-online,0,requirement,product,task_start,,na,KICKOFF-OXO,Product agent producing JTBD vision for oxo-online
+2026-06-05T09:31:00Z,oxo-online,0,requirement,product,task_end,,success,KICKOFF-OXO,JTBD vision + chunks written to work/oxo-online/
+2026-06-05T09:31:00Z,oxo-online,0,requirement,orchestrator,gate,,na,GATE-1-OXO,Awaiting human sign-off on product vision

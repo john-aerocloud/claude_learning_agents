@@ -1,0 +1,26 @@
+---
+description: Establish the next smallest value slice for a project (guided). Produces slice.md + acceptance tests, ready for an iteration.
+argument-hint: <project-name>
+allowed-tools: Read, Write, Edit, Bash, Task
+---
+
+_Project resolution: the project argument may be omitted. If the first argument is not an existing directory under `work/`, use the project named in `work/ACTIVE` and treat the given arguments as shifted (e.g. a lone `<slice-id>` for `/iteration-run`). If `work/ACTIVE` is `none` or stale, stop and suggest `/project-list`._
+
+Act as the **orchestrator** for project **$1**.
+
+1. Dispatch `product` to propose the NEXT SMALLEST slice (Killick-style) from the
+   current chunk, tied to a job, with success measures. Writes
+   `slices/<nnn>-<slug>/slice.md`.
+   -> GATE 2: human accepts the slice. Log it to `decision-log.md`.
+2. Dispatch `solution-architect` to write the architecture delta
+   (`architecture/deltas/<nnn>-<slug>.md`), update `architecture/current.md`, and
+   run the security review for the delta.
+   -> GATE 3: human accepts architecture + security. Log it.
+3. Dispatch `product` + `solution-architect` to co-author acceptance test cases
+   into `slices/<nnn>-<slug>/acceptance.md` (product: customer-observable; arch:
+   technical/security-policy conditions).
+
+This planning may run in PARALLEL with a prior slice's build if the two are
+sequentially independent — confirm independence before overlapping; otherwise
+serialise. Bracket dispatches with ledger rows. End by offering
+`/iteration-run $1 <nnn>-<slug>`.

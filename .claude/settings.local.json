@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python .claude/skills/dora-ledger/scripts/dora.py record *)",
+      "Bash(python3 -m pytest --version)",
+      "Bash(export PYENV_VERSION=3.13.12)",
+      "Bash(python3 -m pip install *)",
+      "Bash(python3 -m pytest *)",
+      "Bash(python3 -m ox)",
+      "Bash(echo *)",
+      "Bash(awk '{ print length, $0 }')",
+      "Bash(awk '{ if\\(length > max\\) max=length } END { print \"Max width:\", max }')",
+      "Skill(retro)",
+      "Skill(slice-next)",
+      "Bash(python3 -c \"import sys; print\\(sys.executable\\)\")",
+      "Read(//opt/homebrew/bin/**)",
+      "Bash(pip3 list *)",
+      "Bash(~/.pyenv/versions/3.13.12/bin/python *)",
+      "Bash(~/.pyenv/versions/3.13.12/bin/python -m pytest tests/test_ai.py tests/test_security.py -q)",
+      "Bash(pip3 install *)",
+      "Bash(python3 *)",
+      "Bash(awk *)",
+      "Read(//Users/johnnicholas/Documents/Claude/Projects/Claufe_calls_design/work/ox/**)",
+      "Bash(grep -n \"prompt.*twice\\\\|exactly twice\\\\|twice total\\\\|prompt_count\\\\|count.*prompt\" tests/test_session.py)"
+    ]
+  }
+}

@@ -39,7 +39,9 @@
       "Bash(git push *)",
       "Bash(gh run *)",
       "Skill(iteration-run)",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "Bash(PROD_URL=https://d3pf3kcvzpau1x.cloudfront.net npx playwright test tests/smoke/slice003-validation.spec.ts --reporter=list)",
+      "Bash(PROD_URL=https://d3pf3kcvzpau1x.cloudfront.net npx playwright test tests/smoke/slice002-validation.spec.ts --reporter=list)"
     ]
   }
 }

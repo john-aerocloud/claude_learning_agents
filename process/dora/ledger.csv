@@ -124,3 +124,12 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-05T18:12:51Z,oxo-online,3,003-ai-opponent,engineer,task_start,,na,,TDD build — phases A-D
 2026-06-05T18:37:38Z,oxo-online,3,003-ai-opponent,engineer,task_end,1434,success,9d3f287,62/62 tests pass; lint clean; build clean; game-tree exhaustion no X-wins; AI <200ms
 2026-06-05T18:37:39Z,oxo-online,3,003-ai-opponent,orchestrator,gate,,success,GATE-4-S003,"Gate 4 auto-approved: 62/62 tests, lint clean, build clean, application-only diff"
+2026-06-05T18:42:28Z,oxo-online,3,003-ai-opponent,orchestrator,failure,,na,fb7be28,Pipeline failed — investigating
+2026-06-05T18:47:20Z,oxo-online,3,003-ai-opponent,orchestrator,recovery,,na,0aaa5a8,Pipeline green after smoke selector fix
+2026-06-05T18:47:21Z,oxo-online,3,003-ai-opponent,orchestrator,deploy,,success,0aaa5a8,Slice 003 live — AI opponent at production URL
+2026-06-05T18:47:21Z,oxo-online,3,003-ai-opponent,tester,task_start,,na,,In-prod validation of slice 003 — single-player vs AI
+2026-06-05T19:05:00Z,oxo-online,3,003-ai-opponent,tester,task_end,1059,success,slice003-validation.spec.ts,"11/11 slice-003 ACs pass; 10/10 slice-002 regression pass; F1-F6+T5+T7+S1 all green; AI <200ms; no network; X never wins; slice 003 done"
+2026-06-05T18:51:55Z,oxo-online,3,003-ai-opponent,tester,task_end,253,success,0aaa5a8,21/21 pass; AI 47ms; X-wins = 0; T7 two-player regression clean
+2026-06-05T18:51:56Z,oxo-online,3,003-ai-opponent,documenter,task_start,,na,,Update docs/usage.md for slice 003 — adding vs Computer mode
+2026-06-05T19:10:00Z,oxo-online,3,003-ai-opponent,documenter,task_end,498,success,work/oxo-online/docs/usage.md,usage.md updated: mode selector documented; vs Computer section added; two-player section preserved; AI unbeatable + 47ms noted; no forward references
+2026-06-05T18:52:57Z,oxo-online,3,003-ai-opponent,documenter,task_end,50,success,,docs/usage.md updated for slice 003; vs Computer mode documented

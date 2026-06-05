@@ -20,3 +20,4 @@ the DORA ledger `ref` column.
 | 2026-06-05T19:10:00Z | gate-2 | Slice 003 (ai-opponent) approved | human | Client-side minimax AI as O player; mode selector; 200ms response; game-tree exhaustion test; no backend; proceed to arch-lite delta | GATE-2-S003 |
 | 2026-06-05T19:11:00Z | gate-3 | Slice 003 arch-lite delta + security auto-accepted | orchestrator | C2-3 tag confirmed; no new infra/data flow/trust boundary; security conclusion explicit — auto-accept per v11 §8a + §21 | GATE-3-S003 |
 | 2026-06-05T20:00:00Z | gate-4 | Go/no-go to deploy auto-approved | orchestrator | 62/62 tests pass; lint clean; build clean; application-only diff (sha 9d3f287); game-tree exhaustion confirms no X-wins | GATE-4-S003 |
+| 2026-06-05T20:30:00Z | delivered | Slice 003 deployed and validated | orchestrator | 21/21 in-prod tests pass; AI 47ms; X-wins = 0; two-player regression clean; sha 0aaa5a8 | SLICE-003-DELIVERED |

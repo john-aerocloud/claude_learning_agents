@@ -67,4 +67,19 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-05T09:30:00Z,oxo-online,0,requirement,orchestrator,task_start,,na,KICKOFF-OXO,Project oxo-online created; dispatching product agent for JTBD vision
 2026-06-05T09:30:00Z,oxo-online,0,requirement,product,task_start,,na,KICKOFF-OXO,Product agent producing JTBD vision for oxo-online
 2026-06-05T09:31:00Z,oxo-online,0,requirement,product,task_end,,success,KICKOFF-OXO,JTBD vision + chunks written to work/oxo-online/
-2026-06-05T09:31:00Z,oxo-online,0,requirement,orchestrator,gate,,na,GATE-1-OXO,Awaiting human sign-off on product vision
+2026-06-05T09:32:00Z,oxo-online,0,requirement,orchestrator,gate,,success,GATE-1-OXO,Gate 1 product vision approved by human
+2026-06-05T09:32:00Z,oxo-online,0,architecture,solution-architect,task_start,,na,GATE-1-OXO,Architect producing target architecture + security review for oxo-online (cloud/hosted)
+2026-06-05T09:34:00Z,oxo-online,0,architecture,solution-architect,task_end,900,success,GATE-1-OXO,"Target arch complete: Lambda+API Gateway WS+DynamoDB+CloudFront+S3; 9 security notes; delta 001 (static SPA shell only); no VPC for C1-C7; server-authoritative game; aws-architecture skill missing (deviation logged)"
+2026-06-05T09:45:00Z,oxo-online,0,architecture,orchestrator,gate,,success,GATE-2-OXO,Architecture + security approved by human; dispatching product + architect for slice 001
+2026-06-05T09:45:00Z,oxo-online,1,slice-001,product,task_start,,na,GATE-2-OXO,Product defining slice 001 (Chunk 1: deployable shell)
+2026-06-05T09:23:17Z,oxo-online,0,architecture,solution-architect,task_end,1500,success,GATE-1-OXO,"Target arch (serverless: CloudFront+S3, API GW WS+HTTP, Lambda, 2x DynamoDB); delta 001 (static-shell no backend); 10 security notes; capabilities prod-only OIDC; security review done; aws-architecture skill missing -> deviation logged"
+2026-06-05T11:33:13Z,oxo-online,1,001-deployable-shell,solution-architect,task_start,,na,,Author acceptance criteria for slice 001 deployable shell
+2026-06-05T11:33:54Z,oxo-online,1,001-deployable-shell,solution-architect,task_end,300,success,slices/001-deployable-shell/acceptance.md,7 automatable ACs co-authored for deployable shell
+2026-06-05T09:46:00Z,oxo-online,1,slice-001,product,task_end,,success,GATE-2-OXO,slice.md written for slice 001 deployable-shell
+2026-06-05T09:47:00Z,oxo-online,1,slice-001,orchestrator,gate,,na,GATE-2B-OXO,Awaiting human sign-off on slice 001 deployable-shell
+2026-06-05T11:40:00Z,oxo-online,1,slice-001,orchestrator,gate,,success,GATE-2B-OXO,Slice 001 approved by human; dispatching cicd then engineer
+2026-06-05T11:40:00Z,oxo-online,1,slice-001,cicd,task_start,,na,GATE-2B-OXO,CICD producing CDK stack + GitHub Actions pipeline for slice 001
+2026-06-05T11:58:00Z,oxo-online,1,slice-001,cicd,task_end,1080,success,GATE-2B-OXO,CDK stacks (shell+OIDC) + GitHub Actions pipeline written; capabilities.md updated; pre-requisites documented
+2026-06-05T11:45:00Z,oxo-online,1,slice-001,cicd,task_end,300,success,GATE-2B-OXO,CDK stack + GitHub Actions pipeline + capabilities produced; pre-requisites documented
+2026-06-05T11:45:00Z,oxo-online,1,slice-001,engineer,task_start,,na,GATE-2B-OXO,Engineer building React shell + Playwright smoke tests
+2026-06-05T13:33:00Z,oxo-online,1,slice-001,engineer,task_end,360,success,GATE-2B-OXO,4 unit tests pass; React shell built; Playwright smoke tests written; build path mismatch fixed

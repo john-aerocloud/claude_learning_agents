@@ -1,7 +1,7 @@
 ---
 slice: 001-deployable-shell
 chunk: 1
-status: pending
+status: delivered
 created: 2026-06-05
 ---
 

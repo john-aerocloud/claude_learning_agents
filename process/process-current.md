@@ -1,11 +1,11 @@
 ---
-process_version: 7
+process_version: 8
 effective_from: 2026-06-05
-supersedes: v6
+supersedes: v7
 status: active
 ---
 
-# Current Process — v7
+# Current Process — v8
 
 The process all agents follow right now. Updated only by the Orchestrator at a
 retro, which snapshots the prior version into `process-history/` first.
@@ -215,7 +215,30 @@ regression flag, reflection, time-to-first-deploy (s001 only), delivery gap.
 All fast slices (001, 003) completed within a single session. The slow slice
 (002) had the tester session cross overnight.
 
-## 17. Change-set queued for next iteration
+## 17. Commit discipline
+
+The engineer commits to trunk every time the full test suite transitions from
+red to green. Rules:
+
+- **Commit when green, never when red.** A commit represents a safe, tested
+  state — not a work-in-progress checkpoint.
+- **Message states intent, not mechanics.** The message answers "what does this
+  advance?" — the slice, acceptance criterion, defect, or job being served.
+  Code diffs already show what changed; the message must explain why.
+- **One logical change per commit.** Each commit must be independently
+  deployable. If two changes are entangled, extract the dependency first.
+
+Example good messages:
+- `Serve React shell from S3 via CloudFront — AC1 (HTTPS with valid cert)`
+- `Block direct S3 access; only CloudFront OAC permitted — AC3`
+- `Fix: AI plays to corner on first move (defect: was always centre)`
+
+Example bad messages:
+- `update files`
+- `fix bug`
+- `wip`
+
+## 18. Change-set queued for next iteration
 
 - Engineer duration_s (§14) — confirm engineer fills field on next project
 - Session continuity (§4) — measure whether mean gross lead time improves

@@ -14,6 +14,26 @@ The project's `capabilities.md`, the architecture security notes, and
 deployment work — it contains CDK defaults, CI/CD pipeline stages, OIDC
 patterns, and the AWS profile config lookup.
 
+## Monorepo pipeline pattern
+All projects live under `work/<project>/`. Each project gets its own workflow:
+
+- **Location:** `.github/workflows/deploy-<project>.yml` at the **repo root**
+  (GitHub only reads workflows from the root `.github/workflows/` directory).
+- **Path filter:** trigger only on `work/<project>/**` and the workflow file
+  itself, so unrelated project changes don't trigger this pipeline.
+- **Working directories:** always absolute from the repo root
+  (e.g. `work/<project>/src/app`, `work/<project>/src/infra`).
+- **Secrets and variables:** prefix with the project name
+  (e.g. `OXO_ONLINE_DEPLOY_ROLE_ARN`, `OXO_ONLINE_S3_BUCKET`) to avoid
+  collisions between projects.
+- **Concurrency group:** `deploy-<project>-prod` — scoped per project so
+  parallel deploys of different projects don't block each other.
+- **Artifact names:** prefix with the project name (e.g. `oxo-online-spa-build`).
+
+When creating a workflow for a new project, copy
+`.github/workflows/deploy-oxo-online.yml` as the template and substitute the
+project name and its specific deploy steps (S3+CloudFront, Lambda, etc.).
+
 ## AWS authentication
 When any AWS CLI, CDK, or IaC operation is required:
 1. Read the profile from `.claude/config/aws-profile` (default: `SND` if file absent).

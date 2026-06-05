@@ -24,12 +24,16 @@ hardcode the profile name.
 2. Strict TDD: write a failing test (red) -> minimum code to pass (green) ->
    refactor. No production code without a failing test first. Acceptance tests
    define "done" for the slice; unit tests drive the design.
-3. Trunk-based: keep each change sequentially independent and small enough to
+3. **Commit when green.** Every time the full test suite goes from red to green,
+   commit immediately to trunk. The commit message must state the *intent* —
+   what job, acceptance criterion, or defect the change advances — not a
+   description of the code changed. Never commit while any test is red.
+4. Trunk-based: keep each change sequentially independent and small enough to
    land on main continuously. No long-lived branches. If a change cannot be made
    independent, say so and stop — do not create hidden coupling.
-4. Honour security notes as tests: turn each "control that must hold" into a
+5. Honour security notes as tests: turn each "control that must hold" into a
    policy/assertion test and make it pass.
-5. Defects are normal work: define expected behaviour, capture current behaviour,
+6. Defects are normal work: define expected behaviour, capture current behaviour,
    write tests pinning the correct behaviour, then make them pass.
 
 ## Parallelism

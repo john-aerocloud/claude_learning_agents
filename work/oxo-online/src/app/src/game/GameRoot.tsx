@@ -3,18 +3,44 @@ import { initialState, applyMove, reset } from './engine';
 import { Board } from './Board';
 import { Status } from './Status';
 
-/** Root of the local two-player game: owns state, wires Status + Board. */
+type Mode = 'two-player' | 'vs-computer';
+
+/** Root of the game: owns state + mode, wires the mode selector, Status, Board. */
 export function GameRoot() {
   const [state, setState] = useState(initialState);
+  const [mode, setMode] = useState<Mode>('two-player');
 
   const onSelect = (index: number) => {
     setState((current) => applyMove(current, index));
+  };
+
+  const selectMode = (next: Mode) => {
+    setMode(next);
+    setState(reset());
   };
 
   const locked = state.status !== 'playing';
 
   return (
     <main className="game" aria-label="oxo game">
+      <div className="mode-selector" role="group" aria-label="game mode">
+        <button
+          type="button"
+          className="mode"
+          aria-pressed={mode === 'two-player'}
+          onClick={() => selectMode('two-player')}
+        >
+          Two player
+        </button>
+        <button
+          type="button"
+          className="mode"
+          aria-pressed={mode === 'vs-computer'}
+          onClick={() => selectMode('vs-computer')}
+        >
+          vs Computer
+        </button>
+      </div>
       <Status
         status={state.status}
         currentPlayer={state.currentPlayer}

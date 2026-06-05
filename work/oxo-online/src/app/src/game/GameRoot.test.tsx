@@ -84,3 +84,39 @@ describe('GameRoot — Play again resets (B9)', () => {
     expect(screen.getByLabelText('cell 8')).toHaveTextContent('X');
   });
 });
+
+describe('GameRoot — mode selector (B1, S1, F1)', () => {
+  it('offers a vs Computer control and defaults to two-player', () => {
+    render(<GameRoot />);
+    expect(
+      screen.getByRole('button', { name: /vs computer/i }),
+    ).toBeInTheDocument();
+    // Default unchanged: empty board, X to move.
+    expect(screen.getByRole('status')).toHaveTextContent("X's turn");
+    for (let i = 0; i < 9; i += 1) {
+      expect(screen.getByLabelText(`cell ${i}`)).toHaveTextContent('');
+    }
+  });
+});
+
+describe('GameRoot — selecting vs Computer (B2, F1)', () => {
+  it('starts a fresh game with the human as X', async () => {
+    render(<GameRoot />);
+    await userEvent.click(screen.getByRole('button', { name: /vs computer/i }));
+    expect(screen.getByRole('status')).toHaveTextContent("X's turn");
+    for (let i = 0; i < 9; i += 1) {
+      expect(screen.getByLabelText(`cell ${i}`)).toHaveTextContent('');
+    }
+  });
+});
+
+describe('GameRoot — switching mode resets the board (B3)', () => {
+  it('clears an in-progress two-player game when vs Computer is chosen', async () => {
+    render(<GameRoot />);
+    await userEvent.click(screen.getByLabelText('cell 0')); // X plays
+    expect(screen.getByLabelText('cell 0')).toHaveTextContent('X');
+    await userEvent.click(screen.getByRole('button', { name: /vs computer/i }));
+    expect(screen.getByLabelText('cell 0')).toHaveTextContent('');
+    expect(screen.getByRole('status')).toHaveTextContent("X's turn");
+  });
+});

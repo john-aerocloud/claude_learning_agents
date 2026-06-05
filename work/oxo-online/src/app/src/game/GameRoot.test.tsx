@@ -21,3 +21,14 @@ describe('GameRoot — turn alternation in the UI (B5)', () => {
     expect(screen.getByRole('status')).toHaveTextContent("X's turn");
   });
 });
+
+describe('GameRoot — clicking a taken cell is a no-op (B6)', () => {
+  it('leaves the symbol and the turn unchanged', async () => {
+    render(<GameRoot />);
+    await userEvent.click(screen.getByLabelText('cell 0')); // X, now O's turn
+    expect(screen.getByLabelText('cell 0')).toBeDisabled();
+    await userEvent.click(screen.getByLabelText('cell 0')); // ignored
+    expect(screen.getByLabelText('cell 0')).toHaveTextContent('X');
+    expect(screen.getByRole('status')).toHaveTextContent("O's turn");
+  });
+});

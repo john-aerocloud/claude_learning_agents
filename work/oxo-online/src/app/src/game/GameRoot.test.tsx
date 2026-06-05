@@ -1,7 +1,16 @@
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { GameRoot } from './GameRoot';
+
+/** Count rendered cells currently holding a given symbol. */
+function countSymbol(symbol: 'X' | 'O'): number {
+  let n = 0;
+  for (let i = 0; i < 9; i += 1) {
+    if (screen.getByLabelText(`cell ${i}`).textContent === symbol) n += 1;
+  }
+  return n;
+}
 
 describe('GameRoot — placing a symbol (B4)', () => {
   it('shows X in the cell that the first move clicks', async () => {
@@ -118,5 +127,67 @@ describe('GameRoot — switching mode resets the board (B3)', () => {
     await userEvent.click(screen.getByRole('button', { name: /vs computer/i }));
     expect(screen.getByLabelText('cell 0')).toHaveTextContent('');
     expect(screen.getByRole('status')).toHaveTextContent("X's turn");
+  });
+});
+
+describe('GameRoot — AI plays O automatically (C1, F2)', () => {
+  it('places exactly one O after the human X move with no further input', async () => {
+    render(<GameRoot />);
+    await userEvent.click(screen.getByRole('button', { name: /vs computer/i }));
+    await userEvent.click(screen.getByLabelText('cell 0')); // human X
+    await waitFor(() => expect(countSymbol('O')).toBe(1));
+    expect(countSymbol('X')).toBe(1);
+  });
+});
+
+describe('GameRoot — AI move renders within 200ms (C2, F3, T4)', () => {
+  it('shows O quickly after the human move', async () => {
+    render(<GameRoot />);
+    await userEvent.click(screen.getByRole('button', { name: /vs computer/i }));
+    const start = performance.now();
+    await userEvent.click(screen.getByLabelText('cell 4')); // human X centre
+    await waitFor(() => expect(countSymbol('O')).toBe(1));
+    expect(performance.now() - start).toBeLessThan(200);
+  });
+});
+
+describe('GameRoot — Play again stays in vs-Computer mode (C3, F6)', () => {
+  it('resets the board but keeps AI responding to the next human move', async () => {
+    render(<GameRoot />);
+    await userEvent.click(screen.getByRole('button', { name: /vs computer/i }));
+    // Drive a full game to a terminal state against optimal O (ends in a draw
+    // or O win — never an X win). Keep clicking the first empty cell as X.
+    while (
+      !screen.queryByRole('button', { name: /play again/i })
+    ) {
+      let clicked = false;
+      for (let i = 0; i < 9 && !clicked; i += 1) {
+        const cell = screen.getByLabelText(`cell ${i}`);
+        if (cell.textContent === '' && !(cell as HTMLButtonElement).disabled) {
+          await userEvent.click(cell);
+          clicked = true;
+        }
+      }
+      await waitFor(() => {});
+      if (!clicked) break;
+    }
+    await userEvent.click(screen.getByRole('button', { name: /play again/i }));
+    expect(screen.getByRole('status')).toHaveTextContent("X's turn");
+    for (let i = 0; i < 9; i += 1) {
+      expect(screen.getByLabelText(`cell ${i}`)).toHaveTextContent('');
+    }
+    // Mode persisted: a fresh human X still triggers an automatic O reply.
+    await userEvent.click(screen.getByLabelText('cell 0'));
+    await waitFor(() => expect(countSymbol('O')).toBe(1));
+  });
+});
+
+describe('GameRoot — two-player mode produces no auto-O (C4, F5, T7)', () => {
+  it('leaves the board with only the human symbol in default mode', async () => {
+    render(<GameRoot />);
+    await userEvent.click(screen.getByLabelText('cell 0')); // X
+    expect(countSymbol('X')).toBe(1);
+    expect(countSymbol('O')).toBe(0);
+    expect(screen.getByRole('status')).toHaveTextContent("O's turn");
   });
 });

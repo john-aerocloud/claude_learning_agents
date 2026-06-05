@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { initialState, applyMove, reset } from './engine';
+import { bestMove } from './ai';
 import { Board } from './Board';
 import { Status } from './Status';
 
@@ -13,6 +14,18 @@ export function GameRoot() {
   const onSelect = (index: number) => {
     setState((current) => applyMove(current, index));
   };
+
+  // In vs-Computer mode the AI plays O. Run it in an effect (not the click
+  // handler) so the human's X paints first, then O follows synchronously.
+  useEffect(() => {
+    if (
+      mode === 'vs-computer' &&
+      state.status === 'playing' &&
+      state.currentPlayer === 'O'
+    ) {
+      setState((current) => applyMove(current, bestMove(current)));
+    }
+  }, [mode, state]);
 
   const selectMode = (next: Mode) => {
     setMode(next);

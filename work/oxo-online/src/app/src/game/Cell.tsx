@@ -8,9 +8,9 @@ interface CellProps {
 }
 
 /**
- * A single board square. Renders its value as plain JSX text (never as HTML —
- * no dangerouslySetInnerHTML), and reports clicks by index. Disabled once it
- * holds a symbol or when the board is locked.
+ * A single board square. Renders its value as plain JSX text content (never as
+ * raw HTML), and reports clicks by index. Disabled once it holds a symbol or
+ * when the board is locked.
  */
 export function Cell({ value, index, onSelect, disabled = false }: CellProps) {
   return (

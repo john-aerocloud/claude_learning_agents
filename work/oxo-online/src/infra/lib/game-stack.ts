@@ -2,6 +2,8 @@ import * as path from 'path';
 import * as cdk from 'aws-cdk-lib';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as apigatewayv2 from 'aws-cdk-lib/aws-apigatewayv2';
+import * as apigatewayv2integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import { Construct } from 'constructs';
 
 // slice 004: OxoGameStack
@@ -66,5 +68,45 @@ export class OxoGameStack extends cdk.Stack {
     // no wildcard resource, no second table (T3, S3). `grant` scopes Resource to
     // the table ARN via a CloudFormation reference.
     gamesTable.grant(gameFunction, 'dynamodb:PutItem');
+
+    // -------------------------------------------------------------------------
+    // HTTP API — single route POST /games -> Lambda proxy ($default stage).
+    // The SPA calls /api/games; CloudFront strips the /api prefix so the API
+    // sees /games (see OxoOnlineProd /api/* behaviour). TLS 1.2+ is enforced by
+    // the service. CORS is not configured because CloudFront makes the SPA path
+    // same-origin (delta 004).
+    // -------------------------------------------------------------------------
+    const httpApi = new apigatewayv2.HttpApi(this, 'GameApi', {
+      apiName: 'oxo-game-api',
+    });
+
+    const integration = new apigatewayv2integrations.HttpLambdaIntegration(
+      'GameIntegration',
+      gameFunction,
+    );
+
+    httpApi.addRoutes({
+      path: '/games',
+      methods: [apigatewayv2.HttpMethod.POST],
+      integration,
+    });
+
+    // -------------------------------------------------------------------------
+    // Cross-stack outputs (STACK_ORDER.md):
+    //   - HttpApiEndpoint: consumed by OxoOnlineProd as the /api/* origin.
+    //   - LambdaFunctionName: copied to GitHub Actions var for UpdateFunctionCode.
+    // -------------------------------------------------------------------------
+    new cdk.CfnOutput(this, 'HttpApiEndpoint', {
+      value: httpApi.apiEndpoint,
+      description: 'HTTP API invoke URL — consumed by OxoOnlineProd /api/* origin',
+      exportName: 'OxoGameProd-HttpApiEndpoint',
+    });
+
+    new cdk.CfnOutput(this, 'LambdaFunctionName', {
+      value: gameFunction.functionName,
+      description:
+        'Lambda function name — GitHub Actions var OXO_ONLINE_LAMBDA_FUNCTION_NAME',
+      exportName: 'OxoGameProd-LambdaFunctionName',
+    });
   }
 }

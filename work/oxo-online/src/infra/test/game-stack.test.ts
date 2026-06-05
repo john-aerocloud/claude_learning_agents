@@ -3,12 +3,15 @@ import * as cdk from 'aws-cdk-lib';
 import { Template, Match } from 'aws-cdk-lib/assertions';
 import { OxoGameStack } from '../lib/game-stack';
 
-function synth(): Template {
+function synthStack(): OxoGameStack {
   const app = new cdk.App();
-  const stack = new OxoGameStack(app, 'OxoGameProd', {
+  return new OxoGameStack(app, 'OxoGameProd', {
     env: { account: '123456789012', region: 'eu-west-2' },
   });
-  return Template.fromStack(stack);
+}
+
+function synth(): Template {
+  return Template.fromStack(synthStack());
 }
 
 describe('OxoGameStack — Games table exists (Step 4 harness)', () => {
@@ -117,5 +120,35 @@ describe('OxoGameStack — Lambda oxo-game-fn (T3, T5, S3)', () => {
         expect(r).not.toBe('*');
       }
     }
+  });
+});
+
+describe('OxoGameStack — HTTP API POST /games + cross-stack outputs (Step 7)', () => {
+  it('exposes a POST /games route', () => {
+    const template = synth();
+    template.hasResourceProperties('AWS::ApiGatewayV2::Route', {
+      RouteKey: 'POST /games',
+    });
+  });
+
+  it('integrates the route with a Lambda proxy (AWS_PROXY)', () => {
+    const template = synth();
+    template.hasResourceProperties('AWS::ApiGatewayV2::Integration', {
+      IntegrationType: 'AWS_PROXY',
+    });
+  });
+
+  it('exports HttpApiEndpoint with the stable exportName', () => {
+    const template = synth();
+    template.hasOutput('HttpApiEndpoint', {
+      Export: { Name: 'OxoGameProd-HttpApiEndpoint' },
+    });
+  });
+
+  it('exports LambdaFunctionName with the stable exportName', () => {
+    const template = synth();
+    template.hasOutput('LambdaFunctionName', {
+      Export: { Name: 'OxoGameProd-LambdaFunctionName' },
+    });
   });
 });

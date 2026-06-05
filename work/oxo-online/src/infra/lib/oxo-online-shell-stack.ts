@@ -173,6 +173,40 @@ export class OxoOnlineShellStack extends cdk.Stack {
     });
 
     // -------------------------------------------------------------------------
+    // /api/* behaviour — routes API calls to the OxoGameProd HTTP API.
+    //
+    // The HTTP API invoke URL is exported by OxoGameProd as a CfnOutput; we
+    // import it here (CloudFormation enforces OxoGameProd deploys first).
+    // Security controls satisfied (delta 004, T2):
+    //   - CachingDisabled: per-request responses are never cached.
+    //   - HTTPS-only to the origin (TLS 1.2+ at the API).
+    //   - viewerProtocolPolicy redirect-to-HTTPS (no plaintext from viewers).
+    //   - ALLOW_ALL methods so POST /api/games reaches the Lambda.
+    //   - AllViewerExceptHostHeader forwards body/method/headers the API needs.
+    // The SPA path stays same-origin, so the CSP connect-src 'self' already
+    // permits the /api/games fetch — no CSP change required.
+    // -------------------------------------------------------------------------
+    const httpApiEndpoint = cdk.Fn.importValue('OxoGameProd-HttpApiEndpoint');
+    const apiOrigin = new origins.HttpOrigin(
+      // apiEndpoint is "https://<id>.execute-api.<region>.amazonaws.com";
+      // CloudFront origins take the domain only — select the host portion.
+      cdk.Fn.select(2, cdk.Fn.split('/', httpApiEndpoint)),
+      {
+        protocolPolicy: cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
+        originPath: '',
+      },
+    );
+
+    distribution.addBehavior('/api/*', apiOrigin, {
+      cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
+      allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
+      viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+      originRequestPolicy:
+        cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+      responseHeadersPolicy,
+    });
+
+    // -------------------------------------------------------------------------
     // Deny direct access to the S3 bucket from any principal other than the OAC.
     // CDK's OAC origin adds the Allow statement; this explicit Deny makes the
     // policy defence-in-depth even if the Allow were removed.

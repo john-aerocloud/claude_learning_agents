@@ -10,7 +10,7 @@ import { Construct } from 'constructs';
 // Resources:
 //   - DynamoDB `Games` table (PK: gameId; TTL: ttl; on-demand; SSE)
 //   - Lambda `oxo-game-fn` (Node.js 20.x; POST /api/games handler; env: TABLE_NAME)
-//   - HTTP API Gateway (POST /games -> lambda proxy; $default stage)
+//   - HTTP API Gateway (POST /api/games -> lambda proxy; $default stage)
 //   - IAM execution role scoped to PutItem on Games ARN + its own log group
 //   - CfnOutput: HttpApiEndpoint (consumed by OxoOnlineProd as /api/* origin)
 //   - CfnOutput: LambdaFunctionName (consumed by deploy-oxo-online.yml)
@@ -70,11 +70,12 @@ export class OxoGameStack extends cdk.Stack {
     gamesTable.grant(gameFunction, 'dynamodb:PutItem');
 
     // -------------------------------------------------------------------------
-    // HTTP API — single route POST /games -> Lambda proxy ($default stage).
-    // The SPA calls /api/games; CloudFront strips the /api prefix so the API
-    // sees /games (see OxoOnlineProd /api/* behaviour). TLS 1.2+ is enforced by
-    // the service. CORS is not configured because CloudFront makes the SPA path
-    // same-origin (delta 004).
+    // HTTP API — single route POST /api/games -> Lambda proxy ($default stage).
+    // The SPA calls /api/games; CloudFront's /api/* behaviour forwards the full
+    // path unchanged to this origin (no prefix stripping), so the route key
+    // MUST include the /api prefix to match (DEFECT-004-001). TLS 1.2+ is
+    // enforced by the service. CORS is not configured because CloudFront makes
+    // the SPA path same-origin (delta 004).
     // -------------------------------------------------------------------------
     const httpApi = new apigatewayv2.HttpApi(this, 'GameApi', {
       apiName: 'oxo-game-api',
@@ -86,7 +87,7 @@ export class OxoGameStack extends cdk.Stack {
     );
 
     httpApi.addRoutes({
-      path: '/games',
+      path: '/api/games',
       methods: [apigatewayv2.HttpMethod.POST],
       integration,
     });

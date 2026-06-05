@@ -124,10 +124,10 @@ describe('OxoGameStack — Lambda oxo-game-fn (T3, T5, S3)', () => {
 });
 
 describe('OxoGameStack — HTTP API POST /games + cross-stack outputs (Step 7)', () => {
-  it('exposes a POST /games route', () => {
+  it('exposes a POST /api/games route (DEFECT-004-001: matches the CloudFront /api/* path forwarded to the origin)', () => {
     const template = synth();
     template.hasResourceProperties('AWS::ApiGatewayV2::Route', {
-      RouteKey: 'POST /games',
+      RouteKey: 'POST /api/games',
     });
   });
 

@@ -25,3 +25,13 @@ describe('engine — applyMove placement (A2)', () => {
     expect(start.board[4]).toBeNull();
   });
 });
+
+describe('engine — turn alternation (A3)', () => {
+  it('switches to O after X moves, and back to X after O moves', () => {
+    const afterX = applyMove(initialState(), 0);
+    expect(afterX.currentPlayer).toBe('O');
+    const afterO = applyMove(afterX, 1);
+    expect(afterO.currentPlayer).toBe('X');
+    expect(afterO.board[1]).toBe('O');
+  });
+});

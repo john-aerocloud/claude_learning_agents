@@ -21,5 +21,6 @@ export function initialState(): GameState {
 export function applyMove(state: GameState, index: number): GameState {
   const board = state.board.slice();
   board[index] = state.currentPlayer;
-  return { ...state, board };
+  const currentPlayer: Player = state.currentPlayer === 'X' ? 'O' : 'X';
+  return { ...state, board, currentPlayer };
 }

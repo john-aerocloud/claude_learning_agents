@@ -13,6 +13,9 @@ but the cloud/hosted pipeline introduced a new wait class not present in ox.
 |-------|--------|----------------------|--------|-------------|------------|
 | 001 | v7 session continuity | lead time < 60 min in-session | 7h 25min — missed | Yes (cloud pattern) | Session continuity eliminated overnight waits but not pipeline iteration loops. Cloud/hosted needs CICD pre-flight checklist (v9 §19) as additional lever. |
 | 001 | v8 commit discipline | cleaner audit trail, no red commits | Applied throughout — all commits intent-focused | No | Working as intended. Does not directly affect lead time. |
+| 002 | v9 CICD pre-flight (§19) | ≤ 3 pipeline fix cycles | 0 pipeline config fix cycles — no OIDC/CDK/node issues | No ✓ | Pre-flight checklist worked. 1 failure occurred (smoke tests), but it was content regression, not CICD config. |
+| 002 | v10 security auto-accept (§8a) | Gate 3 human wait = 0 on no-infra slices | Auto-accepted, zero human wait | No ✓ | Working exactly as intended. Pure frontend delta confirmed in ~0s. |
+| 002 | n/a (new failure mode) | n/a | CFR 20% — smoke tests stale after root route change | Yes ✗ | Unit tests updated; smoke tests missed. §22 (surface-change done condition) added in v11 to prevent recurrence. MTTR 222s — recovery was fast. |
 
 ## Pipeline iteration breakdown (slice 001)
 

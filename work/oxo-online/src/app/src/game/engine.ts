@@ -39,7 +39,7 @@ function findWinner(board: Cell[]): Player | null {
 }
 
 export function applyMove(state: GameState, index: number): GameState {
-  if (state.board[index] !== null) {
+  if (state.status !== 'playing' || state.board[index] !== null) {
     return state;
   }
   const board = state.board.slice();

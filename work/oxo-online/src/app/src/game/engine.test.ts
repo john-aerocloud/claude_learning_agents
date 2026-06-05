@@ -84,3 +84,12 @@ describe('engine — win detection on each line (A5)', () => {
     expect(s.winner).toBeNull();
   });
 });
+
+describe('engine — board locked after a win (A6)', () => {
+  it('ignores further moves once the game is won', () => {
+    const won = play([0, 3, 1, 4, 2]); // X wins row 0
+    const after = applyMove(won, 5); // cell 5 is empty but game is over
+    expect(after).toEqual(won);
+    expect(after.status).toBe('won');
+  });
+});

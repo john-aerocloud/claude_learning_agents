@@ -51,3 +51,12 @@ describe('GameRoot — win locks the board and shows result (B7)', () => {
     expect(screen.getByLabelText('cell 5')).toHaveTextContent('');
   });
 });
+
+describe('GameRoot — draw shows Draw (B8)', () => {
+  it('announces a draw when the board fills with no line', async () => {
+    render(<GameRoot />);
+    // Fills board with no winning line (see engine A7).
+    await clickCells([0, 1, 2, 4, 3, 5, 7, 6, 8]);
+    expect(screen.getByRole('status')).toHaveTextContent('Draw');
+  });
+});

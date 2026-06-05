@@ -35,7 +35,6 @@ describe('GameRoot — clicking a taken cell is a no-op (B6)', () => {
 
 async function clickCells(indices: number[]) {
   for (const i of indices) {
-    // eslint-disable-next-line no-await-in-loop
     await userEvent.click(screen.getByLabelText(`cell ${i}`));
   }
 }

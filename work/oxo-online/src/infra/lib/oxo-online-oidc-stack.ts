@@ -79,7 +79,10 @@ export class OxoOnlineOidcStack extends cdk.Stack {
         {
           StringEquals: {
             'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
-            'token.actions.githubusercontent.com:sub': `repo:${props.githubOrg}/${props.githubRepo}:ref:refs/heads/${branch}`,
+          },
+          StringLike: {
+            // Allow any ref (branch or tag) from this repo — still repo-scoped.
+            'token.actions.githubusercontent.com:sub': `repo:${props.githubOrg}/${props.githubRepo}:*`,
           },
         },
       ),

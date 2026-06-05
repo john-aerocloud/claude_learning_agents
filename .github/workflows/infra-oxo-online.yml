@@ -67,7 +67,11 @@ jobs:
 
       - name: Install CDK dependencies
         working-directory: work/oxo-online/src/infra
-        run: npm ci
+        # npm ci fails on ubuntu runners when the lock file was generated on macOS/arm64:
+        # optional platform packages (e.g. rolldown wasm32 bindings) record transitive
+        # deps (emnapi) as required but those entries are absent in a mac-generated lock.
+        # Use npm install to let npm resolve the current platform's optional packages.
+        run: npm install
 
       - name: Build CDK TypeScript
         working-directory: work/oxo-online/src/infra

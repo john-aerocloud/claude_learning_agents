@@ -45,3 +45,42 @@ describe('engine — illegal move on a taken cell (A4)', () => {
     expect(again).toEqual(afterX);
   });
 });
+
+// Helper: play a sequence of moves from a fresh game.
+function play(indices: number[]): GameState {
+  return indices.reduce((s, i) => applyMove(s, i), initialState());
+}
+
+describe('engine — win detection on each line (A5)', () => {
+  // For each line, X takes the three line cells while O takes harmless cells.
+  // Sequence interleaves X and O so turns stay valid.
+  const xWinSequences: Array<[string, number[]]> = [
+    ['row 0 (0,1,2)', [0, 3, 1, 4, 2]],
+    ['row 1 (3,4,5)', [3, 0, 4, 1, 5]],
+    ['row 2 (6,7,8)', [6, 0, 7, 1, 8]],
+    ['col 0 (0,3,6)', [0, 1, 3, 2, 6]],
+    ['col 1 (1,4,7)', [1, 0, 4, 2, 7]],
+    ['col 2 (2,5,8)', [2, 0, 5, 1, 8]],
+    ['diag (0,4,8)', [0, 1, 4, 2, 8]],
+    ['diag (2,4,6)', [2, 1, 4, 3, 6]],
+  ];
+
+  it.each(xWinSequences)('detects X win on %s', (_label, seq) => {
+    const s = play(seq);
+    expect(s.status).toBe('won');
+    expect(s.winner).toBe('X');
+  });
+
+  it('detects an O win', () => {
+    // X: 0,1,8 ; O: 3,4,5 (O wins row 1)
+    const s = play([0, 3, 1, 4, 8, 5]);
+    expect(s.status).toBe('won');
+    expect(s.winner).toBe('O');
+  });
+
+  it('stays playing when no line is complete', () => {
+    const s = play([0, 1, 2]);
+    expect(s.status).toBe('playing');
+    expect(s.winner).toBeNull();
+  });
+});

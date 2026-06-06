@@ -8,6 +8,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@aws-sdk/client-apigatewaymanagementapi": "^3.1063.0",
     "@aws-sdk/client-dynamodb": "^3.654.0",
     "@aws-sdk/lib-dynamodb": "^3.654.0",
     "uuid": "^10.0.0"

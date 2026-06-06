@@ -1,7 +1,31 @@
-import { QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { QueryCommand, UpdateCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
+import {
+  ApiGatewayManagementApiClient,
+  PostToConnectionCommand,
+} from '@aws-sdk/client-apigatewaymanagementapi';
 import type { APIGatewayProxyWebsocketEventV2 } from 'aws-lambda';
-import { ddb } from './ddb';
+import { ddb, CONNECTION_TTL_SECONDS } from './ddb';
 import { close, type WsResult } from './ws-result';
+
+/**
+ * Post a server frame to a single WebSocket connection via the @connections
+ * Management API (execute-api:ManageConnections — scoped to this WS API only, S2).
+ * The endpoint is the prod-stage management URL injected via WS_API_ENDPOINT.
+ */
+async function postToConnection(
+  connectionId: string,
+  payload: { type: 'game-ready'; role: 'host' | 'guest' },
+): Promise<void> {
+  const client = new ApiGatewayManagementApiClient({
+    endpoint: process.env.WS_API_ENDPOINT,
+  });
+  await client.send(
+    new PostToConnectionCommand({
+      ConnectionId: connectionId,
+      Data: Buffer.from(JSON.stringify(payload)),
+    }),
+  );
+}
 
 /**
  * join — guest joins a game by code.
@@ -39,7 +63,9 @@ export async function handleJoin(
       }),
     );
 
-    const game = result.Items?.[0] as { gameId?: string } | undefined;
+    const game = result.Items?.[0] as
+      | { gameId?: string; hostConnectionId?: string }
+      | undefined;
 
     // A2.1 — unknown code: no game for this code. Close 4040, write nothing.
     if (!game) {
@@ -80,9 +106,30 @@ export async function handleJoin(
       throw err;
     }
 
-    // Set C (C1) inserts the happy-path tail here: write the guest Connections
-    // item and post game-ready to both connections via @connections. Until C1
-    // lands, a successful activation is acknowledged without a close.
+    // C1 — happy-path tail. The atomic activate above succeeded, so this caller
+    // is the one and only guest. Record the guest's Connections item (role,
+    // gameId, 2h TTL — T3), then fan out `game-ready` to both sides (T1).
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    await ddb.send(
+      new PutCommand({
+        TableName: process.env.CONNECTIONS_TABLE,
+        Item: {
+          connectionId,
+          gameId: game.gameId,
+          role: 'guest',
+          ttl: nowSeconds + CONNECTION_TTL_SECONDS,
+        },
+      }),
+    );
+
+    // game-ready fan-out. Each payload carries ONLY { type, role } — never the
+    // other player's connectionId or any other game field (T1, data-classification).
+    await postToConnection(game.hostConnectionId as string, {
+      type: 'game-ready',
+      role: 'host',
+    });
+    await postToConnection(connectionId, { type: 'game-ready', role: 'guest' });
+
     return { statusCode: 200 };
   } catch {
     // A2.2 — any unexpected internal error maps to a generic 4500 close.

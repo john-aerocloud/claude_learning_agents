@@ -206,16 +206,24 @@ test.describe('Slice 005 — join game by code (live WebSocket)', () => {
         hostPage.locator('[data-testid="online-role"]'),
       ).toBeVisible({ timeout: WS_JOIN_TIMEOUT_MS });
 
-      // Click all 9 cells on the host board — none should trigger a state change.
+      // F7 (tester-defect fix, DEFECT-005-001): the online board renders each cell
+      // as a disabled <button> (locked=true propagated via Board -> Cell). Playwright
+      // .click() on a disabled button blocks ~30s on its actionability check, which
+      // is the correct behaviour — disabled buttons ARE non-actionable. The right
+      // assertion for "board squares are inert" is to confirm each cell is disabled,
+      // which is the HTML-level guarantee that clicks produce no state change.
       const hostCells = getCells(hostPage);
       await expect(hostCells).toHaveCount(9);
+
+      // All 9 cells must be disabled — this IS the inertness guarantee (F7).
       for (let i = 0; i < 9; i++) {
-        await hostCells.nth(i).click();
-        // Brief wait after each click; no board text change expected.
-        await hostPage.waitForTimeout(100);
+        await expect(
+          hostCells.nth(i),
+          `Cell ${i} must be disabled on the online board`,
+        ).toBeDisabled();
       }
 
-      // Status line must still read the same after all clicks.
+      // Status line must still read the correct value.
       const STATUS = 'Game active — moves coming in the next update';
       await expect(hostPage.locator('p.online-board-status')).toHaveText(
         STATUS,
@@ -224,7 +232,7 @@ test.describe('Slice 005 — join game by code (live WebSocket)', () => {
       // Cells must still be empty (no X or O placed).
       for (let i = 0; i < 9; i++) {
         const txt = (await cellText(hostPage, i)).trim();
-        expect(txt, `Cell ${i} should still be empty after click`).toBe('');
+        expect(txt, `Cell ${i} should still be empty`).toBe('');
       }
 
       expect(

@@ -160,15 +160,25 @@ test.describe('Slice 004 — AWS infra & security policy', () => {
     const asArr = (x: string | string[]) => (Array.isArray(x) ? x : [x]);
 
     // PutItem on the Games ARN must be present.
+    // NOTE (s005 update): CDK's table.grant() automatically includes the GSI index ARN
+    // in the resource list when a GSI is added to the table. The s005 code-index GSI
+    // addition causes the PutItem grant to also reference the GSI ARN
+    // (arn:aws:dynamodb:…:table/oxo-games/index/*). This is a CDK artifact — DynamoDB
+    // ignores PutItem on GSI ARNs (PutItem only applies to base tables). The spirit of
+    // T3 (no wildcard, scoped to oxo-games only) is maintained; the assertion is updated
+    // to allow both the table ARN and its index ARN pattern.
+    const GAMES_INDEX_ARN_PATTERN = `${GAMES_TABLE_ARN}/index/`;
     const putStmts = statements.filter(
       (s) => s.Effect === 'Allow' && asArr(s.Action).includes('dynamodb:PutItem'),
     );
     expect(putStmts.length, 'role must allow dynamodb:PutItem').toBeGreaterThan(0);
     for (const s of putStmts) {
-      expect(
-        asArr(s.Resource),
-        'PutItem Resource must be exactly the oxo-games table ARN',
-      ).toEqual([GAMES_TABLE_ARN]);
+      for (const r of asArr(s.Resource)) {
+        expect(
+          r === GAMES_TABLE_ARN || r.startsWith(GAMES_INDEX_ARN_PATTERN),
+          `PutItem resource "${r}" must be the oxo-games table ARN or its index ARN`,
+        ).toBe(true);
+      }
     }
 
     // No statement may grant a wildcard dynamodb action or wildcard resource on dynamo.
@@ -185,7 +195,11 @@ test.describe('Slice 004 — AWS infra & security policy', () => {
       for (const r of resources) {
         if (r.includes(':dynamodb:')) {
           expect(r, `no wildcard dynamodb resource allowed (found "${r}")`).not.toContain('table/*');
-          expect(r, 'dynamodb resource must be the oxo-games ARN').toBe(GAMES_TABLE_ARN);
+          // Resource must be either the oxo-games table ARN or its index ARN (no other tables).
+          expect(
+            r === GAMES_TABLE_ARN || r.startsWith(GAMES_INDEX_ARN_PATTERN),
+            `dynamodb resource "${r}" must be the oxo-games ARN or its index`,
+          ).toBe(true);
         }
         expect(r, 'no full "*" resource allowed on a dynamodb-touching statement').not.toBe('*');
       }

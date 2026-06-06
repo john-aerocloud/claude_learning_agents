@@ -221,3 +221,10 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-06T13:09:16Z,oxo-online,7,s005-h1,product,task_start,,na,,
 2026-06-06T13:11:19Z,oxo-online,7,s005-h1,product,task_end,,success,,
 2026-06-06T13:14:06Z,oxo-online,6,005-join-game,orchestrator,gate,,success,RETRO-TOOLING-V23,v23: tooling self-service for all agents; cicd owns allowlist; Makefile roles disambiguated
+2026-06-06T13:19:07Z,oxo-online,6,005-join-game,tester,validation_run,,fail,02e85e7:validation,tests/validation FAILED via make validate
+2026-06-06T13:19:17Z,oxo-online,6,005-join-game,tester,validation_run,,success,02e85e7:smoke,tests/smoke green via make smoke
+2026-06-06T13:19:32Z,oxo-online,6,005-join-game,tester,validation_run,,fail,02e85e7:smoke,tests/smoke FAILED via make smoke
+2026-06-06T13:19:56Z,oxo-online,6,005-join-game,tester,task_start,,na,8449f07,Tester starting validation of slice 005-join-game in production
+2026-06-06T13:20:01Z,oxo-online,6,005-join-game,tester,failure,,fail,8449f07,DEFECT-005-001: WS close mechanism broken - Lambda non-2xx does not send custom close codes; register handler ConditionalCheckFailedException on null hostConnectionId; F1/F3/F4/T1/T4/T5 FAIL
+2026-06-06T13:21:29Z,oxo-online,6,005-join-game,tester,validation_run,,fail,02e85e7:validation,tests/validation FAILED via make validate
+2026-06-06T13:22:10Z,oxo-online,6,005-join-game,tester,validation_run,,fail,02e85e7:validation,tests/validation FAILED via make validate

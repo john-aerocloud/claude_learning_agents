@@ -483,3 +483,96 @@ this slice (consistent with oxo-game-fn default).
 **Wss URL config.js rollback:** If the wss URL in config.js is stale (e.g., after
 a CDK stack re-deploy that regenerated the API Gateway ID), re-running the
 deploy pipeline re-fetches and overwrites config.js automatically.
+
+---
+
+## Slice s005-h1 — WAF rate-limiting (hardening; control-plane only)
+
+### What this slice adds
+
+Two WAFv2 WebACLs on the two public endpoints:
+- Global `CLOUDFRONT`-scope ACL in `us-east-1` (new `OxoOnlineWafUsEast1`
+  stack) — associated with the CloudFront distribution; covers all `/api/*`
+  traffic.
+- Regional `REGIONAL`-scope ACL in `eu-west-2` (inside `OxoGameProd`) —
+  associated with the WS API `prod` stage.
+
+Both ACLs: default-allow, IP-reputation list (priority 0), rate-based rule
+(priority 1). Rate limits: 100/5-min/IP (CF global), 20/5-min/IP (WS regional).
+No application code changes.
+
+### Environments in play
+
+**Production only.** Unchanged. WAF is a managed cloud service — no local
+emulation exists. All WAF validation is cloud-only (walking-skeleton probe +
+tester prod validation). See delta s005-h1-waf.md §5 for the local/prod gap
+table.
+
+### Deploy path
+
+```
+push to main (work/oxo-online/src/infra/**)
+  → infra-oxo-online.yml:
+      validate context flags
+      npm install (infra) + npm ci (lambda) + build both
+      OIDC assume oxo-infra-deploy
+      cdk deploy OxoOnlineWafUsEast1  ← NEW; us-east-1; exports global WebACL ARN
+      cdk deploy OxoGameProd           ← regional WAFv2 WebACL + WS association
+      cdk deploy OxoOnlineProd         ← sets distribution webAclId (cross-region import)
+```
+
+App pipeline (deploy-oxo-online.yml) is unchanged by this slice.
+
+### Pre-requisites before first WAF deploy (human must action)
+
+| Step | What | Command |
+|------|------|---------|
+| 1 | Engineer adds `Wafv2Manage` + `CloudFrontSetWebAcl` statements to `oxo-online-oidc-stack.ts` | (engineer task) |
+| 2 | Apply OIDC role change (§39 — config before resource) | `make -C work/oxo-online/src/infra deploy-oidc` |
+| 3 | Bootstrap CDK in us-east-1 (ABSENT as of 2026-06-06 — one-time manual step) | `npx cdk bootstrap aws://817047731316/us-east-1 --trust 817047731316 --cloudformation-execution-policies arn:aws:iam::aws:policy/AdministratorAccess --profile dev-int` |
+| 4 | Push infra change; pipeline deploys all three stacks in order | git push to main |
+
+### New GitHub Actions variables/secrets required (s005-h1)
+
+None. The new stacks deploy under the existing `OXO_ONLINE_INFRA_DEPLOY_ROLE_ARN`
+with the extended WAFv2 + CloudFront grants. No new GH secrets or variables.
+
+### Stack ordering
+
+```
+1. OxoOnlineWafUsEast1   (us-east-1)  — global WebACL ARN exported
+2. OxoGameProd           (eu-west-2)  — regional WebACL + WS association
+3. OxoOnlineProd         (eu-west-2)  — distribution webAclId set (imports #1)
+```
+
+Cross-region reference: CDK `crossRegionReferences: true` on both
+`OxoOnlineWafUsEast1` and `OxoOnlineProd`. CDK writes the ARN to an SSM
+parameter in us-east-1; a custom resource in `OxoOnlineProd` reads it at deploy
+time. CloudFormation has no native cross-region `Fn::ImportValue`.
+
+### Rollback assets
+
+**Global CF ACL rollback:** Set distribution `webAclId` back to empty in
+`OxoOnlineProd` (CDK update), then destroy `OxoOnlineWafUsEast1`.
+CloudFront stops consulting the ACL; all routes continue to serve.
+
+**Regional WS ACL rollback:** Remove `CfnWebACLAssociation` then `CfnWebACL`
+from `OxoGameProd` via CDK update. WS `prod` stage returns to prior state
+(reserved concurrency + stage throttle remain as defence-in-depth floor).
+
+Both reversals are data-free: no app data, no client contract affected.
+Default behaviour on block: raise threshold (`UpdateWebACL`) before full
+disassociation.
+
+### §19 pre-flight checklist — s005-h1
+
+| Check | Result |
+|-------|--------|
+| No `GITHUB_` prefix env vars | PASS — pipeline uses `github.repository_owner` / `github.event.repository.name` expressions; `CDK_DEFAULT_REGION` set to literal `us-east-1` for WAF step (not a GITHUB_ prefix) |
+| OIDC trust policy uses `StringLike` for sub | PASS — inherited from existing OIDC stack (unchanged) |
+| us-east-1 CDK bootstrap exists | BLOCKED — CDKToolkit not found in us-east-1 (2026-06-06 check); manual bootstrap required (see pre-requisites table above) |
+| `crossRegionReferences: true` on both WAF + OxoOnlineProd stacks | NOTE FOR ENGINEER — both stacks must set this flag; engineer wires in stack constructors |
+| deploy-role WAFv2 + CloudFront grants applied before WAF deploy (§39) | BLOCKED until engineer extends OIDC stack + `make deploy-oidc` runs |
+| Stacks deploy sequentially (not batch) | PASS — three separate pipeline steps |
+| Diff step includes OxoOnlineWafUsEast1 | PASS — updated in infra workflow |
+| No new GH secrets or variables | PASS |

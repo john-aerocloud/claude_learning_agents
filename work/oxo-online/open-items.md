@@ -46,6 +46,9 @@ job served — core jobs beat secondary (see project.md classification);
 
 | OI-28 | engineering (principles/02, v28) | No local stand-up exists: SPA dev server runs, but lambdas/DynamoDB/WS have no local substitutes; engineer browser tests currently impossible pre-deploy | quality into the tester (constraint); lead time | principles/02 | build at s006 with the hexagonal refactor (OI-17) — ports/adapters and local substitutes are the same work |
 
+| OI-29 | cicd (s005-h1-waf pre-flight) | us-east-1 CDK bootstrap ABSENT — CDKToolkit stack not found in us-east-1 (checked 2026-06-06 vs profile dev-int). OxoOnlineWafUsEast1 (CLOUDFRONT-scope WebACL) cannot deploy until bootstrap is run. Manual one-time step required before first WAF infra pipeline run: `npx cdk bootstrap aws://817047731316/us-east-1 --trust 817047731316 --cloudformation-execution-policies arn:aws:iam::aws:policy/AdministratorAccess --profile dev-int`. See STACK_ORDER.md. | BLOCKER for s005-h1 deploy | STACK_ORDER.md + capabilities.md | must be resolved before s005-h1 infra pipeline push |
+| OI-30 | cicd (s005-h1-waf §39) | deploy-role WAFv2 + CloudFront grants (Wafv2Manage + CloudFrontSetWebAcl statements) must be wired into oxo-online-oidc-stack.ts by engineer and applied via `make -C work/oxo-online/src/infra deploy-oidc` BEFORE the WAF infra pipeline runs — §39 config-before-resource ordering. Staged in DEPLOY_ROLE_EXTENSIONS.md. | BLOCKER for s005-h1 deploy | DEPLOY_ROLE_EXTENSIONS.md | must precede OI-29 bootstrap + pipeline run |
+
 Process-side items (project-agnostic) live in `/process/improvement-slices/`
 and the §27 retro queue — currently: pipeline-N+1-planning-over-build
 (operationalise §8b), §37 parallel-build scoring on s005, IMP-001/002/003

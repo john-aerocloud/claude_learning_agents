@@ -113,21 +113,46 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: oxo-online-infra-${{ github.run_id }}
 
-      - name: CDK diff — OxoGameProd + OxoOnlineProd
+      - name: CDK diff — OxoOnlineWafUsEast1 + OxoGameProd + OxoOnlineProd
+        # s005-h1: OxoOnlineWafUsEast1 (us-east-1) is diffed alongside the
+        # eu-west-2 stacks. CDK needs us-east-1 bootstrap to have been run
+        # (see STACK_ORDER.md). crossRegionReferences: true on both WAF and
+        # OxoOnlineProd stacks allows CDK to write the WebACL ARN via SSM.
         working-directory: work/oxo-online/src/infra
         run: |
-          npx cdk diff OxoGameProd OxoOnlineProd \
+          npx cdk diff OxoOnlineWafUsEast1 OxoGameProd OxoOnlineProd \
             -c githubOrg=${{ github.repository_owner }} \
             -c githubRepo=${{ github.event.repository.name }}
         env:
           CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
           CDK_DEFAULT_REGION: ${{ env.AWS_REGION }}
 
+      - name: CDK deploy — OxoOnlineWafUsEast1 (us-east-1; must complete before OxoOnlineProd)
+        # s005-h1: OxoOnlineWafUsEast1 deploys FIRST in the sequence.
+        # OxoOnlineProd imports its global WebACL ARN via CDK crossRegionReferences
+        # (SSM parameter in us-east-1, read by a custom resource in eu-west-2).
+        # §39: deploy-role WAFv2 grants MUST be applied via make deploy-oidc
+        # BEFORE this step runs (see STACK_ORDER.md + DEPLOY_ROLE_EXTENSIONS.md).
+        # PRE-REQUISITE: CDK bootstrap must exist in us-east-1:
+        #   cdk bootstrap aws://817047731316/us-east-1 --trust 817047731316 \
+        #     --cloudformation-execution-policies arn:aws:iam::aws:policy/AdministratorAccess \
+        #     --profile dev-int
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        working-directory: work/oxo-online/src/infra
+        run: |
+          npx cdk deploy OxoOnlineWafUsEast1 --require-approval never \
+            -c githubOrg=${{ github.repository_owner }} \
+            -c githubRepo=${{ github.event.repository.name }}
+        env:
+          CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+          CDK_DEFAULT_REGION: us-east-1
+
       - name: CDK deploy — OxoGameProd (must complete before OxoOnlineProd)
         # OxoOnlineProd imports OxoGameProd-HttpApiEndpoint via Fn::ImportValue.
         # On first deploy the export does not exist yet, so CDK must deploy
         # OxoGameProd to completion BEFORE starting OxoOnlineProd.
         # Deploy stacks separately (not as a batch) to guarantee sequential order.
+        # s005-h1: also deploys the regional WAFv2 WebACL + WS-stage association.
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         working-directory: work/oxo-online/src/infra
         run: |
@@ -135,7 +160,11 @@ jobs:
             -c githubOrg=${{ github.repository_owner }} \
             -c githubRepo=${{ github.event.repository.name }}
 
-      - name: CDK deploy — OxoOnlineProd (after OxoGameProd export exists)
+      - name: CDK deploy — OxoOnlineProd (after WAF ARN + OxoGameProd exports exist)
+        # s005-h1: OxoOnlineProd now imports the global WebACL ARN from
+        # OxoOnlineWafUsEast1 via crossRegionReferences SSM reader, and
+        # sets the CloudFront distribution webAclId. Both WAF+OxoGameProd
+        # must have completed before this step.
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         working-directory: work/oxo-online/src/infra
         run: |

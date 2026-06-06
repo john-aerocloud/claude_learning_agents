@@ -28,6 +28,41 @@ BEFORE this sequence runs (§39 — see DEPLOY_ROLE_EXTENSIONS.md).
 §30 cross-stack contract for the ARN handoff: SYNTH-CONTRACT-WAF-1
 (see `slices/s005-h1-waf/acceptance.md`).
 
+## §39 config-follows-resource: WAFv2 grant ordering
+
+The deploy-role WAFv2 and CloudFront grants (staged in DEPLOY_ROLE_EXTENSIONS.md)
+MUST be applied BEFORE the WAF stacks deploy. Correct order:
+
+```
+1. Engineer adds Wafv2Manage + CloudFrontSetWebAcl statements to
+   oxo-online-oidc-stack.ts in the deployRole definition.
+2. make -C work/oxo-online/src/infra deploy-oidc   ← apply OIDC change FIRST
+3. CDK bootstrap us-east-1 (if not already done — see below)
+4. Infra pipeline runs: OxoOnlineWafUsEast1 → OxoGameProd → OxoOnlineProd
+```
+
+If step 4 runs before step 2, CloudFormation fails with AccessDenied on
+`wafv2:CreateWebACL` / `cloudfront:UpdateDistribution` — the §39 reversal
+failure mode. Fix the schedule, not the pipeline.
+
+## us-east-1 CDK bootstrap requirement (s005-h1)
+
+`OxoOnlineWafUsEast1` deploys to `us-east-1`. CDK bootstrap must exist in
+us-east-1 before the infra pipeline can deploy that stack. As of 2026-06-06
+**us-east-1 bootstrap is ABSENT** (CDKToolkit stack not found). Run this
+one-time manual step before the first infra pipeline run for s005-h1:
+
+```bash
+npx cdk bootstrap aws://817047731316/us-east-1 \
+  --trust 817047731316 \
+  --cloudformation-execution-policies arn:aws:iam::aws:policy/AdministratorAccess \
+  --profile dev-int
+```
+
+This is the same trust pattern used for eu-west-2 bootstrap (oxo-infra-deploy
+role assumes the CDK bootstrap roles). No new IAM role is created; the existing
+CDK bootstrap pattern is extended to the second region.
+
 ## Why OxoGameProd must deploy before OxoOnlineProd
 
 `OxoOnlineProd` adds a `/api/*` CloudFront cache behaviour whose origin is the

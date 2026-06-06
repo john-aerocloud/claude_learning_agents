@@ -127,3 +127,13 @@ Implement build identity on every surface you build: bundles carry the commit
 sha (build-time define -> meta/config + response header where the serving
 layer allows), functions log it as a structured field and read it from env.
 The sha is injected by the pipeline — never hardcoded.
+
+## Walking-skeleton probe + code-policy pin (process v25 §30)
+When your slice introduces a NEW platform integration mechanism (first
+WebSocket, first CDN behaviour class, first auth flow, first queue — the
+architect's delta names it), your route MUST include an early step driving
+ONE real request through the full deployed path with the REAL client
+technology (a browser for web — node probes bypass CSP, config wiring, and
+event ordering) BEFORE building use cases on top. Schedule the thin early
+deploy it implies. And wherever IAM grants a narrow action set, the writing
+code carries a test pinning it to granted actions (assert command types).

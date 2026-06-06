@@ -66,3 +66,10 @@ Every delta that adds or changes a deployable surface MUST state the build-
 identity carrier for that surface (page/API header, meta/config field, log
 field) per process/principles/01-version-identifiable-deployments.md. A
 surface with no readable build identity is an incomplete design.
+
+## New-mechanism flag (process v25 §30)
+Every delta explicitly states whether the slice introduces a NEW platform
+integration mechanism (first use of a service/protocol/behaviour class in
+this system). When yes, name the walking-skeleton probe the route must
+include (what one real-client request through the deployed path proves) —
+the engineer schedules it before use-case build-out.

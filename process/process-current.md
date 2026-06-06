@@ -1,11 +1,11 @@
 ---
-process_version: 24
+process_version: 25
 effective_from: 2026-06-06
-supersedes: v23
+supersedes: v24
 status: active
 ---
 
-# Current Process — v24
+# Current Process — v25
 
 The process all agents follow right now. Updated only by the Orchestrator at a
 retro, which snapshots the prior version into `process-history/` first.
@@ -32,15 +32,17 @@ and pipeline iteration loops.
 | 002 | oxo-online | ~42 min | ~36 min | ~5 min | Smoke test regression |
 | 003 | oxo-online | ~66 min | ~32 min | ~28 min | Human gate waits + smoke regression |
 | 004 | oxo-online | ~11h 52min | ~75 min | ~9h 20min | Defect-fix-revalidate cycle crossing overnight boundary |
+| 005 | oxo-online | ~4h | ~2h 10min agent (build 30% parallel-saved) | ~2h 40min | DEFECT-005-001: 6 stacked causes, 2 fix rounds, all in-session |
 
-Script output (v14): `lead=2979s freq=3/day cfr=33% mttr=292s`.
+Script output (v25): `lead=3618s freq=5/day cfr=27% mttr=3054s`.
 
 **Constraint classes observed:**
 - **Session boundary** (ox; oxo s004 revalidation): pipeline idles overnight; fix = session continuity, and don't leave a recovery validation pending at end of session.
 - **Pipeline iteration loop** (oxo s001, s004 first-backend): fix-commit-push-wait cycles on pipeline novelty; fix = CICD pre-flight (§19, extended v14).
 - **Fragile smoke selectors** (oxo s002+s003): fixed at source by §23; zero recurrence in s004 ✓.
-- **Cross-stack contract gap** (oxo s004): each stack synth-green individually, but the path contract between them (CF `/api/*` ↔ API route key) was never asserted; fix = §30.
-- **Permission prompts** (recurring through s003): fixed by §25–26; zero occurrences in s004 ✓.
+- **Cross-stack contract gap** (oxo s004): each stack synth-green individually, but the path contract between them (CF `/api/*` ↔ API route key) was never asserted; fix = §30 — no recurrence in s005 ✓.
+- **Platform-runtime semantics gap** (oxo s005): synth/unit/node-level checks cannot see browser-only platform behaviour (close-code delivery, CSP, config wiring, event ordering); fix = §30 walking-skeleton probe (v25).
+- **Permission prompts** (recurring through s003): fixed by §25–26 + v23 self-service; near-zero in s004–s005 ✓.
 
 ## 3. Wait time taxonomy
 
@@ -339,352 +341,29 @@ command patterns.
 
 ## 27. Change-set queued for next iteration
 
-- **§30 cross-stack contract test** — slice 005 (WebSocket join) adds a new
-  cross-stack route (`/ws` or similar via CF/API); the contract test must exist
-  before deploy. Target: CFR 0% on s005.
-- **(human-directed, consider at next retro) Pipeline planning over build** —
-  operationalise §8b: while slice N is in build/deploy/validate, product +
-  solution-architect queue slice N+1 (slice-next runs concurrently when
-  sequentially independent). Today §8b is a one-liner nobody acts on; make it
-  a standing iteration-run step. Target: delivery gap (§6) → ~0; gross lead
-  time per slice approaches build wall-clock.
-- **(human-directed, exercise on s005) §37 parallel use-case engineering** —
-  s005 has 3 independent buildable sets (A: UC1/UC2/UC4 backend, B: UC5 UI,
-  C: UC3 integration). Dispatch parallel engineers for A and B; measure build
-  wall-clock vs the serial sum and score §37 with real data.
-- **§28 auto-retro + §29 parallel documenter** — measure end-of-iteration wait:
-  target zero human-prompt wait between `delivered` and retro start; documenter
-  wall-clock fully overlapped with retro.
-- **§4e same-session recovery validation** — if s005 has any defect, MTTR pair
-  must close in-session. Target: MTTR < 600s.
-- **§19 v14 items** — target zero pipeline iteration failures on s005 (s004 had 3).
-- **§33 zero-prompt run** — IMP-001 actioned; target zero permission prompts
-  across the whole of s005 (s004 surfaced an unallowlisted AWS CLI class plus
-  `cd &&` / `source &&` compounds from subagents).
-- **§34 chunk plan** — `chunk-plan.md` exists and is updated at s005 slice-next
-  and delivery.
+(Scored items from v14–v24 live in `process-history/v24-2026-06-06.md`.)
 
-## 32. Improvement slices (v15 — human-directed)
-
-**Process, tooling, and automation improvements are specified and delivered as
-slices, exactly like product work.** Each improvement slice lives in
-`/process/improvement-slices/IMP-NNN-<name>.md` (project-agnostic — never
-references a specific project) and must state:
-
-- **Job**: which delivery friction it removes, evidenced from the ledger,
-  principle-failures, or observed waits.
-- **DORA target**: the named metric it improves or protects (lead time,
-  deployment frequency, CFR, MTTR — or an enabling sub-metric like
-  prompt-pauses/slice), with an anticipated, measurable effect.
-- **Done condition**: an observable, testable outcome — not "agents try harder".
-- **Protection**: which test, gate, or committed artifact protects the change
-  once human approval is removed from the path.
-
-The orchestrator queues improvement slices alongside product slices and applies
-the same economics: the next slice picked is the one with the best expected
-DORA return, whether product or improvement. Retro change-sets (§27) either
-land as immediate process-text changes (when they are pure rules) or graduate
-into improvement slices (when they need tooling/tests built).
-
-**Targets:** all four metrics, via systematic removal of recurring waits.
-**Anticipated effect:** improvement work stops being ad-hoc retro edits and
-becomes scheduled, measured, and scoreable like everything else.
-
-## 33. Tools-over-permissions (v15 — human-directed)
-
-**Human permission prompts are a wait class to be engineered away, not a safety
-mechanism to rely on. Safety comes from the process: tests, gates, scoped IAM,
-and committed, reviewable tooling.** When an agent's command would prompt:
-
-1. **Recurring command class → committed tool + narrow allowlist.** Build it as
-   a committed script/skill/Make target (reviewable, testable), then allowlist
-   the *exact path or target* (`Bash(python3 .claude/skills/dora-ledger/scripts/dora.py *)`,
-   `Bash(make -C work/<p>/src/infra deploy-oidc)`) — never an interpreter or
-   task-runner wildcard that grants arbitrary execution.
-2. **Mutating actions are protected by the process, not the prompt.** `git push`
-   to trunk is allowlisted because tests+lint must be green before commit (§17)
-   and gates precede deploys (§8). A prompt adds wait, not safety, once those
-   hold.
-3. **Commands are written to match the allowlist (hard rule).** The allowlist
-   is the contract; agents emit commands in the forms it covers. No `cd … && …`
-   or `source … && …` prefixes — they match no allowlist pattern and always
-   prompt (observed: 18 `cd &&`, 13 `source &&` in the s004 window despite
-   §25). Use `npm --prefix`, `make -C`, `git -C`, root-relative paths. The
-   contract is written into every agent definition ("Command form" section);
-   a prompt caused by an avoidable command form is a principle-failure. The
-   allowlist itself is never bypassed or intercepted — it is used well.
-4. **New surface → allowlist in the same slice.** When a slice introduces a new
-   tool class (s004: the AWS CLI), extending `.claude/settings.json` with the
-   read-only/scoped patterns that surface needs is part of the cicd agent's
-   capability step — before the build, not after the prompts. cicd OWNS the
-   allowlist file: it applies additions itself, never leaves proposals.
-5. **Tooling self-service (v23).** Every agent CREATES the committed tooling
-   its role depends on — make targets, scripts, spec helpers — in the same
-   slice, tested and documented. Flag-don't-fix applies only to what an agent
-   cannot own (permissions → cicd). A committed parameterised tool is the
-   opposite of an improvised workaround; conflating the two made the
-   orchestrator a serial tooling bottleneck (3 occurrences in one slice).
-
-**Targets:** lead time (prompt-pauses → 0) and deployment frequency (no human
-in the loop for protected operations). **Anticipated effect:** zero permission
-prompts in a normal slice; prompts remain only for genuinely novel,
-unprotected, or destructive operations.
-
-## 34. Chunk plan — slices must add up to chunks (v15 — human-directed)
-
-Every project maintains `work/<project>/chunk-plan.md`, owned by the **product**
-agent: per chunk, its job, its **done condition**, the slices delivered toward
-it (with outcomes), and the forecast remaining slices (thinnest-first; forecasts
-are revisable at every slice-next, not commitments). A summary table shows
-chunk | status | delivered/remaining | next slice.
-
-Updated at two moments, both mandatory:
-- **slice-next**: the new slice is placed in its chunk; the remaining-slice
-  forecast for that chunk is re-cut.
-- **delivery**: the slice moves to delivered with its outcome; chunk status
-  re-assessed against the done condition.
-
-The orchestrator reads the chunk plan when sequencing; "chunk delivered" is a
-decision-log event.
-
-**Targets:** lead time at the chunk level — makes visible when slices stop
-adding up to customer-meaningful capability (slices delivered but chunk not
-advancing = slicing failure to raise at retro). **Anticipated effect:** every
-slice traceable to a chunk done-condition; no orphan slices.
-
-## 35. Validation-as-code with run provenance (v16 — human-directed; slimmed v17)
-
-**Validation is committed code with recorded runs, never improvised ad-hoc
-bash.** Every check lives in the project's validation framework
-(`tests/validation/`), specs are lifecycle-managed by relevancy (added and
-**deleted** as slices change what matters), and every run emits a
-`validation_run` ledger row carrying the iteration and the sha under test —
-"was S1 verified, against which build?" is answerable from the ledger alone.
-
-The operational detail (spec headers, relevancy review, run-record mechanics)
-is **tester behaviour and lives in the tester's agent definition**
-(`.claude/agents/tester.md`), per §36 routing. Entry points: `make validate`,
-`make smoke` (run + record in one step).
-
-**Targets:** lead time (tester prompt-pauses → 0), MTTR (recovery evidence is
-a recorded re-run, one command), CFR (pinned specs are standing regression).
-
-## 36. Improvement routing — narrowest owner (v17 — human-directed)
-
-**Retro and orchestrator route every improvement to the narrowest artifact
-that owns the behaviour.** The goal for the process file is to be **optimal,
-concise, and necessary** — it is allowed to grow whenever a genuinely
-cross-agent rule needs stating; size is not the metric, necessity and correct
-placement are. Content earns its place by being general and load-bearing;
-it gets removed for being misplaced or redundant, never for being long.
-Agents improve where the behaviour lives:
-
-| Learning concerns | Lands in |
-|---|---|
-| One agent's behaviour (how tester validates, how engineer commits) | that agent's definition in `.claude/agents/<agent>.md` |
-| Cross-agent rules of the game (gates, commit discipline, command form) | `process-current.md` |
-| A repeated manual action | a committed tool: Makefile target, script, or skill — parameterised, never hand-assembled inline |
-| A heavy reference document | a skill (abstract it; don't make agents hold it) |
-| Project-specific facts | the project's `/work` artifacts — never `/process` |
-
-The retro's job is explicitly to **identify these frictions, ask when the
-solution is genuinely the human's call, and solve them in solution-appropriate
-ways** — an agent-definition edit, a tool, a process rule, or an improvement
-slice (§32) when it needs building. Within this project's confines permission
-is granted: prefer committed automation over interactive approval; security
-controls remain in the IAM scoping, gates, and tests — not in prompts.
-
-**The DORA baseline is the control loop that keeps this in check.** Every
-routed change names its target metric; the next retro scores
-anticipated-vs-observed. A change-set is only a net win if throughput (lead
-time), quality (CFR), frequency, and recovery (MTTR) improve or hold in
-aggregate — an improvement that buys one metric by degrading another gets
-reverted or reworked at the retro that catches it.
-
-**Inline env-var rule (v17):** commands must not hand-assemble env-var
-prefixes or long argument strings inline — that makes the operation manual
-and unrepeatable. Defaults live in config (spec files, package.json,
-playwright config); parameterised invocation lives in the root `Makefile`
-(`make dora-record EVENT=… AGENT=…`, `make validate ITER=… SLICE=…`).
-
-**Targets:** all four metrics via the scoring loop; lead time directly (fewer
-manual assemblies, smaller orchestration context). **Anticipated effect:**
-process-current.md stops accumulating agent-local detail; agent definitions
-become the unit of agent improvement; repeated actions become single
-parameterised commands.
-
-## 37. Use cases — the construct beneath a slice (v18 — human-directed)
-
-A slice often contains a sequence of implementation steps that each layer
-value — treated as one indivisible lump, that sequence serialises the build.
-**Beneath every slice, planning decomposes the scope into USE CASES:
-separately buildable, separately testable interaction units.** The hierarchy:
-
-> chunk (capability, §34) → slice (customer value, gated) → use case
-> (buildable/testable unit) → route steps (red→green commits)
-
-Each use case in `slices/<nnn>-<slug>/use-cases.md` states: id (UCn), actor,
-trigger → observable outcome, its own done condition, the acceptance cases it
-pins, and its **dependency edges** on other use cases (only where genuinely
-required — an edge that isn't real costs parallelism).
-
-Rules:
-- **Product** decomposes at slice-next (with the architect for infra enablers);
-  acceptance cases are tagged with their use case.
-- **Engineer** routes per use case: a use case is done when its own acceptance
-  cases pass, independently of the others. Route steps land on trunk per §17
-  as always.
-- **Orchestrator** reads the dependency edges as the parallelism plan: use
-  cases with no mutual dependency MAY be built by parallel engineers on trunk,
-  isolated by **use-case flags (§40)**, not by source-control features.
-  Genuinely sequential mutations of one logical seam stay sequential.
-- Use cases are not gates and not customer-facing units — the slice still
-  ships and is validated as one value increment.
-
-**Targets:** gross lead time (build wall-clock = slowest dependency chain,
-not the sum of steps); protects CFR (each use case independently testable —
-no big-bang merge). **Anticipated effect:** multi-engineer builds become the
-default option for any slice with ≥2 independent use cases; measured first on
-s005 (decomposed at planning into parallel-buildable sets).
-
-## 38. Next-work selection — the open-items register (v19 — human-directed)
-
-**"What runs next" is decided against the full set of unaddressed items, not
-just the chunk plan.** Every role leaves residue: product (forecast slices),
-architecture (revisit-decisions, deferred patterns), security (accepted risks
-→ hardening slices), engineering (debt, flags raised in returns), documentation
-(user-facing gaps found while documenting), process (improvement slices,
-retro queue §27). That residue is consolidated, not scattered:
-
-- **System-learning items** (help DORA): `/process/improvement-slices/` +
-  the §27 queue. Project-agnostic.
-- **Project items** (value, risk, debt): `work/<project>/open-items.md`,
-  owned by the orchestrator, appended by every agent whose return flags
-  something unaddressed. Each item: source role, what's unaddressed, the job
-  or risk it relates to, and where it's tracked (h-slice, forecast slice,
-  note).
-
-**Selection rule, applied at every "what next" decision:**
-
-1. **Process improvements that help DORA come first** — system learning is
-   the goal of this repo; a pipeline that improves itself outruns any single
-   slice of product value. (Bounded by judgement: don't starve a paying
-   customer need to polish the machine.)
-2. **User-value items are ranked by job served**: each is weighed against the
-   project goal (`project.md` vision) and the JTBD it benefits. **Core jobs
-   beat secondary jobs** — product classifies every job as core or secondary
-   in the project's job list, and the chunk plan inherits that classification.
-3. **Risk items** (security hardening, debt) are scheduled by exposure: before
-   the slice that widens the surface they guard (e.g. WS hardening before the
-   write surface grows), not "eventually".
-
-The orchestrator reads the register + improvement slices at slice-next and at
-every sequencing decision, and states in the decision log which items were
-considered and why the chosen one won.
-
-**Targets:** all four metrics (DORA-first ordering is the control loop's own
-priority); lead time for core jobs specifically — secondary-job work stops
-queue-jumping. **Anticipated effect:** nothing flagged by an agent silently
-evaporates; every "what next" is an explicit, logged choice over the full
-register.
-
-## 39. Scheduling over compensation (v20 — human-directed)
-
-**A hard sequential dependency is a scheduling constraint, not an error
-condition to tolerate.** Parallelism (§37) never licenses running steps out of
-dependency order; when an action references something that does not yet exist,
-the action moves to after the thing exists — the dependency edge IS the
-schedule.
-
-Rules:
-- **Configuration follows its resource.** A pipeline variable, export
-  consumer, endpoint URL, or credential that references a resource is set in
-  the step AFTER the resource is created (capture-output-then-set, the
-  established deploy pattern) — never staged in advance "so it's ready".
-- **No compensating logic for out-of-order execution.** Sentinel values,
-  exists-checks-that-skip, retry-until-created, and tolerant guards that
-  absorb an order which should never occur are prohibited fixes — they hide
-  the mis-schedule and convert a one-time ordering fact into permanent runtime
-  complexity. (Graceful degradation for genuine runtime conditions — a
-  service being down — remains correct; the test is whether the order is
-  *designed* never to occur.)
-- **The capability step is also scheduled work.** "Wire everything the slice
-  needs" means wiring each thing at its dependency-correct point in the
-  iteration, not all of it up front.
-- Discovering a hidden hard edge during parallel work is a scheduling finding:
-  re-serialise those steps and record the edge (use-cases/route), don't patch
-  around it.
-
-**Targets:** CFR (no red pipelines from designed-impossible orders; no
-permanent tolerance code masking real failures later); protects lead time
-(parallelism stays safe so it stays usable). **Anticipated effect:** zero
-compensating-logic fixes; ordering mistakes surface as schedule corrections at
-planning, not pipeline behaviour at runtime.
-
-## 40. Use-case flags — parallel engineering on trunk (v21 — human-directed)
-
-**Parallel engineers isolate work-in-progress with flags and branches IN CODE,
-never with source-control features** (no long-lived branches, no worktree
-checkouts, no stash choreography). Integration must be seamless and
-continuous: everyone commits to trunk, every commit is green, and the flag —
-not the VCS — controls when one engineer's change becomes live for another.
-
-The construct is the **use-case flag**: a flag named for the use case it
-guards (e.g. `UC3_PAIRING`), engineering-level (not a customer feature flag),
-with this lifecycle:
-
-1. **Introduce** — the engineer building UCn lands code behind `UCn` flag,
-   default OFF. Their own tests run with the flag ON; everyone else's code and
-   tests are untouched by the WIP.
-2. **Consume when ready** — another engineer integrating against UCn flips the
-   flag ON in their context only when THEY are ready: flip → integrate →
-   verify green. Until then they work against the seam/stub, unaffected by
-   UCn's in-flight commits.
-3. **Factor out** — once the consuming integration is verified, the flag is
-   removed from the CODE first, then from the CONFIGURATION. Flag removal is
-   part of the use case's done condition — flags are slice-scoped and
-   short-lived; an orphan flag at retro is a principle-failure.
-
-Mechanics are solution-appropriate (a config/flags module, env var, runtime
-config entry) and are part of the **cicd agent's feature-flag infrastructure
-charter** — established once per project, then reused. File-ownership
-boundaries (§37 route claims) remain the first line; flags are the answer for
-the shared seams where ownership alone can't keep engineers independent.
-
-**Targets:** lead time (parallel engineers never block on or stash around
-each other; integration cost paid continuously in small pieces); protects CFR
-(consuming a colleague's change is an explicit, verified act — not an
-accidental rebase surprise). **Anticipated effect:** zero stash-dances /
-worktree overhead; shared-seam use cases (the s005 Set C class) become
-parallel-buildable instead of strictly sequential.
-
-## 41. Engineering standard — hexagonal + supportability (v22 — human-directed)
-
-Cross-agent summary; the operational detail lives in the agent definitions
-per §36 routing (engineer: ports/adapters + failure taxonomy + tested
-logging; cicd: metrics over failure logs; documenter: support runbook).
-
-- **Hexagonal architecture (Cockburn).** Domain logic at the centre defines
-  the language and the port interfaces; adapters (in `adapters/` or a folder
-  named for the application tech, e.g. `lambdas/`) implement them. No concept
-  from a concrete external service leaks into domain logic. Dependency
-  direction: adapters → domain, never the reverse.
-- **Failure taxonomy.** Failures are mechanically categorised: external call
-  exhausts retries → 5xx/timeout = external dependency (availability), 4xx
-  from the dependency = internal (we built a bad request); invalid input into
-  our code = 4xx-class, logged. Structured log fields carry the category.
-- **Metrics over logs** split internal-vs-external and, within external,
-  data(4xx)-vs-availability(5xx) — so support can tell whose problem it is
-  without reading code.
-- **Logging is tested and documented.** Failure-path tests assert the emitted
-  category/fields; the documenter maintains `docs/runbook.md` for the support
-  team, grounded in what actually ships.
-
-**Targets:** MTTR (support can categorise and act without engineering);
-protects CFR (validation failures surface as 4xx data problems, not
-mystery 5xxs); quality of recovery evidence. **Anticipated effect:** every
-production failure is attributable (our code / their service / caller data)
-from logs+metrics alone; first measured on the slices that ship under it.
+- **Walking-skeleton probe (§30 v25)** — applies to the next slice introducing
+  a new platform mechanism (h1's WAF attach counts: probe = burst test against
+  the deployed ACL before building on it). Target: CFR 0% on new-mechanism
+  slices; MTTR < 900s on any defect (4 of 6 s005 causes were skeleton-
+  detectable).
+- **Code↔policy contract (§30 v25) + IMP-004 synth scan** — engineer pins per
+  handler now; automated SDK-commands-vs-grants scan when IMP-004 is built.
+  Target: CFR.
+- **§40 UC flags — still unscored** — not exercised in s005 (file ownership
+  sufficed; Set C single-engineer); two stash incidents prove the underlying
+  need. Exercise on the next shared-seam parallel set or score moot. Related:
+  IMP-005 per-agent ledger shards (the ledger is the one shared append-file
+  causing rebase friction).
+- **§8b pipelining — operationalised this slice** (h1 planned during s005
+  validation, gate-2-ready before delivery). Keep measuring delivery gap;
+  target < 15 min.
+- **§41 + OI-17/18 hexagonal/supportability refactor** — scheduled into s006
+  (same handlers). Early signal positive: R2's categorised logging was used in
+  diagnosis the same day it shipped.
+- **principles/01 version identity (OI-25)** — implement in the next slice that
+  touches each surface; tester then gains identity-before-behaviour.
 
 ## 28. Auto-retro at delivery (v14 — human-directed)
 
@@ -734,12 +413,33 @@ Rule for the engineer (route step in Phase B equivalent):
 
 oxo-online now has a pinned regression: `game-stack.test.ts` asserts
 `RouteKey: 'POST /api/games'` matching the CF `/api/*` behaviour. Slice 005
-must add the composed-template contract test for its new surface.
+added the composed-template WS contract test (D1/T7) — that class did not
+recur.
 
-**Targets:** CFR → 0% (named constraint). **Anticipated effect:** the s004
-defect class (one prod failure per slice, three slices running) is eliminated
-at synth time; also removes the defect-fix-revalidate cycle (~1h agent + gap
-risk) from lead time.
+**Walking-skeleton probe (v25, from DEFECT-005-001).** Synth contracts cannot
+see PLATFORM RUNTIME semantics. When a slice introduces a **new platform
+integration mechanism** (first WebSocket, first CDN behaviour class, first
+auth flow, first queue), the route MUST include an early step that drives ONE
+real request through the full new path **with the real client technology**
+(a browser for web — node-level probes bypass CSP, config wiring, and
+event-ordering) against the deployed surface, BEFORE use cases are built on
+top. Evidence: 4 of 6 stacked root causes in s005's defect (undeliverable
+close codes, frame/close race, unreferenced config.js, CSP-blocked WSS) were
+visible ONLY to a real browser in prod — each individually cheap at skeleton
+time, jointly a 1h37m MTTR at slice end. The architect's delta names when the
+mechanism is new; the engineer's route places the probe; the deploy schedule
+allows the early thin deploy it implies.
+
+**Code↔policy contract (v25, from DEFECT-005-001 R2).** Where IAM grants a
+narrow action set, the writing code carries a test pinning it to granted
+actions (least-privilege correctly broke drifted code in prod — S1 asserted
+grants, nothing asserted needs). Engineer-owned per handler; a synth-time
+automated scan is queued as IMP-004.
+
+**Targets:** CFR → 0% (named constraint), lead time (the defect-discovery
+cycle moves from slice-end to skeleton-time). **Anticipated effect:** new-
+mechanism slices surface platform/browser/policy mismatches in the first probe
+step, not in production validation.
 
 ## 31. CFR ledger convention (v14 — definitional)
 

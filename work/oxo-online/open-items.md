@@ -40,6 +40,8 @@ job served — core jobs beat secondary (see project.md classification);
 | OI-24 | cicd (DEFECT-005-001) | Hot-swap packaging landmine: `Package Lambda source` zipped raw TypeScript; CDK `fromAsset` compiles to JS. Dual-trigger race: both pipelines on `src/lambda/**` could overwrite CDK-deployed code with un-runnable source | risk: deploy correctness / CFR | deploy-oxo-online.yml + STACK_ORDER.md | **RESOLVED slice 005** — hot-swap removed; `src/lambda/**` removed from deploy pipeline path filter; infra pipeline (CDK fromAsset) is sole Lambda code deployer; GH vars OXO_ONLINE_LAMBDA_FUNCTION_NAME / OXO_ONLINE_WS_LAMBDA_FUNCTION_NAME now unused |
 | OI-25 | architecture principle 01 (human-directed) | Implement version-identifiable deployments in oxo-online: sha into SPA (meta/config + header), HTTP+WS API response headers, Lambda structured log field; pipeline injects; tester/smoke gate identity-before-behaviour | risk: false-negative validation, MTTR misattribution (evidenced by DEFECT-005-001 re-validation smoke race) | principles/01 | next slice that touches each surface — candidate to fold into s005-h1 build or s006 |
 
+| OI-26 | retro input (DEFECT-005-001 R2) | Code-vs-IAM-policy contract untested: S1 asserts what the role GRANTS, nothing asserts what the code NEEDS — register.ts drifted to UpdateItem and least-privilege correctly broke it in prod. Candidate: §30-class contract test (static scan of SDK commands per handler vs granted actions at synth) | CFR | s005 retro | s005 retro |
+
 Process-side items (project-agnostic) live in `/process/improvement-slices/`
 and the §27 retro queue — currently: pipeline-N+1-planning-over-build
 (operationalise §8b), §37 parallel-build scoring on s005, IMP-001/002/003

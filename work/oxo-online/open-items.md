@@ -31,6 +31,8 @@ job served — core jobs beat secondary (see project.md classification);
 | OI-15 | cicd (s005) | `aws dynamodb query` not in allowlist — tester will need to query the Connections table by connectionId and Games table by code GSI to verify items. Proposed: `Bash(aws dynamodb query *)`. Add to allowlist. | risk: tester blocked | allowlist | before s005 tester |
 | OI-16 | cicd (s005) | `/config.js` is a new file on S3/CloudFront with `no-cache` headers — the smoke test should assert it is reachable (HTTP 200) and contains `OXO_CONFIG`. No action for CICD (engineer wires the script tag in index.html; tester validates via curl). `Bash(curl https://d3pf3kcvzpau1x.cloudfront.net/config.js*)` may need to be added to the allowlist. | risk: tester blocked | allowlist | before s005 tester |
 
+| OI-20 | cicd (s005 deploy) | App-pipeline lambda hot-swap gates on `git diff HEAD~1` which fails on shallow re-runs (depth=1) — re-run after lambda-only change unreliable; push is the reliable path | risk: deploy reliability | cicd s005 return | document + fix in next pipeline-touching slice |
+
 Process-side items (project-agnostic) live in `/process/improvement-slices/`
 and the §27 retro queue — currently: pipeline-N+1-planning-over-build
 (operationalise §8b), §37 parallel-build scoring on s005, IMP-001/002/003

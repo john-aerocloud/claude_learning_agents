@@ -35,7 +35,26 @@ function client(): ApiGatewayManagementApiClient {
 }
 
 /**
- * Deliver a requested close to a single connection: POST the error frame, then
+ * Drain interval (ms) held between POSTing the error frame and DELETEing the
+ * connection. DEFECT-005-001-R2 (Issue 2): the DELETE closes the socket; at the
+ * browser the close event can otherwise beat the in-flight message event, so
+ * the generic "Something went wrong" renders instead of the specific 4040/4041
+ * text. This is a genuine ASYNC-DELIVERY ordering concern (the message and the
+ * close travel as separate events to the client and the platform does not
+ * guarantee the message is flushed before the DELETE-driven close) — NOT a §39
+ * designed-impossible order. We let the frame drain before tearing the socket
+ * down. The client also holds its own short grace window, so each half is
+ * defensible on its own.
+ */
+const DRAIN_MS = 200;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Deliver a requested close to a single connection: POST the error frame, wait
+ * a brief drain interval so the frame lands client-side before the close, then
  * DELETE the connection. The DELETE is always attempted, even if the POST fails
  * (e.g. the client already vanished — GoneException), so a dead connection is
  * still reaped. No exception propagates to the caller.
@@ -69,6 +88,10 @@ export async function deliverClose(
       }),
     );
   }
+
+  // Drain: let the error frame land client-side before the DELETE closes the
+  // socket (Issue 2 — async-delivery ordering, see DRAIN_MS above).
+  await delay(DRAIN_MS);
 
   try {
     await c.send(new DeleteConnectionCommand({ ConnectionId: connectionId }));

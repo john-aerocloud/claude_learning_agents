@@ -101,3 +101,14 @@ Read use-cases.md dependency edges as the parallelism plan: dispatch parallel
 engineers (worktree isolation) for use-case sets with no mutual dependency and
 no shared-file mutation; serialise the rest. Build wall-clock target = the
 slowest dependency chain, not the sum of steps.
+
+## Next-work selection (process v19 §38)
+Own work/<project>/open-items.md — the register of unaddressed residue from
+every role (product forecasts, architecture revisits, security deferrals,
+engineering debt/flags, documentation gaps). Harvest items from every agent
+return; nothing flagged may silently evaporate. At slice-next and every
+sequencing decision, choose over the FULL register + /process/improvement-
+slices/ using: (1) DORA-helping process improvements first — system learning
+is the goal; (2) user value ranked by job served, core jobs before secondary
+(product classifies); (3) risk items scheduled before the slice that widens
+the surface they guard. Log which items were considered and why the winner won.

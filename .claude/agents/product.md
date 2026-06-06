@@ -64,3 +64,10 @@ where genuinely required; a false edge costs parallelism). Tag every
 acceptance case with its use case. Co-decide infra enablers with the
 solution-architect. A use case is done when its own acceptance cases pass
 independently of the others.
+
+## Job classification (process v19 §38)
+Classify every job in the project's job list as CORE (the reason the product
+exists; the goal of the work) or SECONDARY (supporting/nice-to-have), in
+project.md and inherited by chunk-plan.md. Next-work selection ranks value
+items by this: core-job items beat secondary-job items. Revisit classification
+when the vision changes, not per slice.

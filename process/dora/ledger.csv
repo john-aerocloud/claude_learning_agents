@@ -191,3 +191,5 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-06T11:53:54Z,oxo-online,6,005-join-game,solution-architect,task_start,,na,,Append technical/security-policy acceptance cases for slice 005-join-game
 2026-06-06T11:55:34Z,oxo-online,6,005-join-game,solution-architect,task_end,,success,,"Appended T1-T10/S1-S5 acceptance cases (15 cases) for s005, committed e0a4e3e"
 2026-06-06T11:56:22Z,oxo-online,6,005-planning,orchestrator,task_end,,success,,slice-next complete: slice.md + use-cases.md + arch delta + security + 25 acceptance cases; hardening slices h1-h3 queued; ready for iteration-run
+2026-06-06T11:58:53Z,oxo-online,6,005-join-game,product,task_start,,na,,
+2026-06-06T11:59:02Z,oxo-online,6,005-join-game,orchestrator,gate,,success,PROCESS-V19,v19: open-items register + DORA-first/core-job-first selection rule

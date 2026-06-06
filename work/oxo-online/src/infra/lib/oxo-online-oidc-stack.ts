@@ -200,9 +200,13 @@ export class OxoOnlineOidcStack extends cdk.Stack {
           'lambda:GetFunction', // health-check: confirm update applied
         ],
         resources: [
-          // Scoped to the specific function ARN — no wildcard.
-          // The function lives in the same account and region as the rest of the stack.
+          // Scoped to the specific function ARNs — no wildcard.
+          // The functions live in the same account and region as the rest of
+          // the stack. s005 adds oxo-ws-fn (WebSocket join handler) so the app
+          // pipeline can hot-swap its code by stable name (S4 — ARN-scoped, no
+          // iam:* mutation).
           `arn:aws:lambda:*:${this.account}:function:oxo-game-fn`,
+          `arn:aws:lambda:*:${this.account}:function:oxo-ws-fn`,
         ],
       }),
     );

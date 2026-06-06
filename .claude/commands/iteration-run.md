@@ -1,5 +1,5 @@
 ---
-description: Run one XP implementation iteration for a slice (capabilities -> thin route -> TDD build -> deploy -> validate-in-prod), then prompt for retro.
+description: Run one XP implementation iteration for a slice (capabilities -> thin route -> TDD build -> deploy -> validate-in-prod), then the retro runs automatically (documenter in parallel).
 argument-hint: <project-name> <slice-id>
 allowed-tools: Read, Write, Edit, Bash, Task
 ---
@@ -21,12 +21,16 @@ Bracket every dispatch with ledger rows; emit deploy/failure/recovery events.
 5. **Validate in prod.** Dispatch `tester` to exercise the public surface
    (browser/API). Pass -> write `result.md`. Fail -> hand defect back to
    `engineer` (MTTR clock runs) and loop step 3.
-6. **Document.** Dispatch `documenter` to update `docs/usage.md` — what the
-   project does now, how to run it, how to use it. Grounded in `result.md` and
-   `acceptance.md`; no forward-planning or internals.
-7. **Retro.** When the slice is delivered, automatically run `/retro $1 $2`
-   without waiting for human instruction. The retro is a mandatory part of
-   every slice delivery, not an optional follow-up.
+6. **Document (parallel, non-blocking).** Dispatch `documenter` **in the
+   background** to update `docs/usage.md` — what the project does now, how to
+   run it, how to use it. Grounded in `result.md` and `acceptance.md`; no
+   forward-planning or internals. Nothing in the process depends on its output
+   (process v14 §29) — do NOT wait for it before step 7.
+7. **Retro (automatic, same session).** The moment the slice is marked
+   `delivered`, run `/retro $1 $2` without waiting for human instruction
+   (process v14 §28). The retro is a mandatory part of every slice delivery,
+   not an optional follow-up; the human can interrupt it, but their absence
+   must not delay it.
 
 Report: what shipped, deploy result, in-prod validation, and the current
 constraint from the refreshed baseline.

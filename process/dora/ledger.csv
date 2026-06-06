@@ -156,10 +156,10 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-05T20:33:39Z,oxo-online,4,004-create-game,cicd,deploy,,success,b2fa3bb,Step 12: OxoGameProd deployed (Lambda oxo-game-fn + Games table + HTTP API); infra run 27038118383 green
 2026-06-05T20:33:43Z,oxo-online,4,004-create-game,cicd,deploy,,success,b2fa3bb,Step 12: OxoOnlineProd deployed (CF /api/* -> HTTP API CachingDisabled); infra run 27038118383 green
 2026-06-05T20:33:49Z,oxo-online,4,004-create-game,cicd,deploy,,success,27037721898,Step 13: App pipeline green — SPA sync + CF invalidation + Lambda update gated correctly; app run 27037721898 re-run green
-2026-06-05T20:33:59Z,oxo-online,4,004-create-game,cicd,failure,,fail,53608e4,Infra workflow failed: npm ci cross-platform lock mismatch (emnapi missing); fix: npm install
-2026-06-05T20:33:59Z,oxo-online,4,004-create-game,cicd,failure,,fail,1e41798,Infra workflow failed: CannotFindAsset lambda dist/ not built; fix: add Lambda install+build steps
-2026-06-05T20:33:59Z,oxo-online,4,004-create-game,cicd,failure,,fail,1e41798,Infra workflow failed: OxoOnlineProd deployed before export existed (CDK batch parallel); fix: split into two sequential deploy steps
-2026-06-05T20:33:59Z,oxo-online,4,004-create-game,cicd,recovery,,rolled_forward,b2fa3bb,All three CI failures resolved by roll-forward fixes in sequential commits; infra run 27038118383 green
+2026-06-05T20:33:59Z,oxo-online,4,004-create-game,cicd,pipeline_failure,,fail,53608e4,Infra workflow failed: npm ci cross-platform lock mismatch (emnapi missing); fix: npm install
+2026-06-05T20:33:59Z,oxo-online,4,004-create-game,cicd,pipeline_failure,,fail,1e41798,Infra workflow failed: CannotFindAsset lambda dist/ not built; fix: add Lambda install+build steps
+2026-06-05T20:33:59Z,oxo-online,4,004-create-game,cicd,pipeline_failure,,fail,1e41798,Infra workflow failed: OxoOnlineProd deployed before export existed (CDK batch parallel); fix: split into two sequential deploy steps
+2026-06-05T20:33:59Z,oxo-online,4,004-create-game,cicd,pipeline_recovery,,rolled_forward,b2fa3bb,All three CI failures resolved by roll-forward fixes in sequential commits; infra run 27038118383 green
 2026-06-05T20:34:07Z,oxo-online,4,004-create-game,cicd,task_end,1260,success,b2fa3bb,"Steps 12-13 complete: pipeline wired, OIDC updated, infra deployed, app pipeline confirmed green, GH var set"
 2026-06-05T21:00:00Z,oxo-online,5,004-create-game,tester,task_start,,na,SLICE-004-VALIDATION,Tester starting steps 14-16 production validation for slice 004-create-game
 2026-06-05T21:45:00Z,oxo-online,5,004-create-game,tester,failure,,fail,SLICE-004-VALIDATION,"F1/F2/F3 FAIL: CloudFront /api/* forwards full path /api/games to HTTP API which only has route POST /games — 404 from origin; CF error page returns index.html. Direct HTTP API works (201+code). T1/S1 pass via direct endpoint. T2/T3/T5/S2/S3 pass. F4/F5 pass. Defect handed to engineering."
@@ -171,3 +171,4 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-06T07:04:25Z,oxo-online,5,004-create-game,tester,task_end,600,success,d4cc195,DEFECT-004-001 re-validation PASS: 30/30 smoke tests green; F1 code=GZU3U2 in 1305ms; F2 code matches /^[A-HJ-NP-Z2-9]{6}$/; F3 elapsed<3s; T1 DynamoDB status=waiting ttl=24.00h; slice 004 done
 2026-06-06T07:10:00Z,oxo-online,5,004-create-game,documenter,task_start,,na,d4cc195,Updating usage.md for slice 004-create-game (Play Online + backend)
 2026-06-06T07:15:00Z,oxo-online,5,004-create-game,documenter,task_end,300,success,work/oxo-online/docs/usage.md,usage.md updated: Play Online mode + 6-char code + error handling + backend deploy instructions; all claims traceable to result.md and acceptance.md
+2026-06-06T07:12:42Z,oxo-online,5,004-create-game,orchestrator,gate,,success,RETRO-S004,Retro complete; process v13->v14: auto-retro + parallel documenter + cross-stack contract tests + CFR convention

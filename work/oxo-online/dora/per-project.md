@@ -33,3 +33,7 @@ but the cloud/hosted pipeline introduced a new wait class not present in ox.
 | 6 | CDK `iam:PassRole` denied | Split infra/app pipelines; new `oxo-infra-deploy` role |
 | 7 | Playwright `@playwright/test` not found | Added `npm ci` in deploy job |
 | 8 | `OXO_ONLINE_S3_BUCKET` empty | Set missing GitHub variables |
+| 004 | v13 §25–26 prompts | zero approval prompts for known patterns | Zero compound-command prompts across 7 dispatches | No ✓ | Confirmed; scored MET in v13 history snapshot. |
+| 004 | v12 §22–23 selectors | CFR from fragile selectors = 0 | Play Online added to smoke-tested screen; zero smoke regressions | No ✓ | Both rules confirmed; selector class closed after 2 prior failures. |
+| 004 | n/a (new failure mode) | n/a | DEFECT-004-001: CF /api/* vs API route key POST /games — both stacks synth-green individually, 404 in prod masked as SPA 200. 1 prod failure / 3 deploys (33%) | Yes ✗ | Cross-stack contract gap — synth-detectable. §30 added in v14 (composed-template contract tests). Also 3 CI pipeline failures (lock cross-platform, gitignored dist at synth, CDK batch-deploy export race) → §19 extended; reclassified per §31. |
+| 004 | n/a (session boundary) | n/a | MTTR pair ~9h: fix deployed in-session (~18 min fix-to-redeploy) but re-validation crossed overnight gap | Yes ✗ | §4e added: never leave recovery validation pending at session boundary. |

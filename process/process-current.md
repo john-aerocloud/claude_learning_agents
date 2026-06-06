@@ -1,11 +1,11 @@
 ---
-process_version: 13
-effective_from: 2026-06-05
-supersedes: v12
+process_version: 14
+effective_from: 2026-06-06
+supersedes: v13
 status: active
 ---
 
-# Current Process — v13
+# Current Process — v14
 
 The process all agents follow right now. Updated only by the Orchestrator at a
 retro, which snapshots the prior version into `process-history/` first.
@@ -31,38 +31,33 @@ and pipeline iteration loops.
 | 001 | oxo-online | 7h 25min | ~50 min | ~3h 22min | Pipeline iteration loop |
 | 002 | oxo-online | ~42 min | ~36 min | ~5 min | Smoke test regression |
 | 003 | oxo-online | ~66 min | ~32 min | ~28 min | Human gate waits + smoke regression |
+| 004 | oxo-online | ~11h 52min | ~75 min | ~9h 20min | Defect-fix-revalidate cycle crossing overnight boundary |
 
-Script output (v13): `lead=2340s freq=3/day cfr=33% mttr=257s`.
+Script output (v14): `lead=2979s freq=3/day cfr=33% mttr=292s`.
 
-**Three distinct constraint classes observed:**
-- **Session boundary** (ox): pipeline idles overnight; fix = session continuity.
-- **Pipeline iteration loop** (oxo-online s001): multiple fix-commit-push-wait cycles on new pipeline; fix = CICD pre-flight + fail-fast.
-- **Fragile smoke selectors** (oxo-online s002+s003): smoke tests coupled to button inventory rather than semantic ids; fix = §23 stable selector mandate.
-- **Permission prompts from compounded commands** (recurring): `cd && npm`, wrong-directory dora.py, novel `gh run` variants each generate fresh approval requests; fix = §25 working-directory convention + §26 committed allowlist.
+**Constraint classes observed:**
+- **Session boundary** (ox; oxo s004 revalidation): pipeline idles overnight; fix = session continuity, and don't leave a recovery validation pending at end of session.
+- **Pipeline iteration loop** (oxo s001, s004 first-backend): fix-commit-push-wait cycles on pipeline novelty; fix = CICD pre-flight (§19, extended v14).
+- **Fragile smoke selectors** (oxo s002+s003): fixed at source by §23; zero recurrence in s004 ✓.
+- **Cross-stack contract gap** (oxo s004): each stack synth-green individually, but the path contract between them (CF `/api/*` ↔ API route key) was never asserted; fix = §30.
+- **Permission prompts** (recurring through s003): fixed by §25–26; zero occurrences in s004 ✓.
 
 ## 3. Wait time taxonomy
 
 | Pattern | Example | Duration | Fix |
 |---------|---------|---------|-----|
 | **Requirement-phase dormancy** | ox arch dispatched 00:03, ran 11:49 | 11h 46min | Session continuity (§4) |
-| **Agent session overnight** | ox tester dispatched 16:55, result 00:30 | 7h 35min | Session continuity (§4) |
-| **Inter-session gap** | ox s002 retro → s003 start | 6h 46min | Session continuity (§4) |
-| **Pipeline iteration loop** | oxo s001: 8 pipeline fixes after engineer done | 3h 22min | CICD pre-flight + fail-fast (§19–20) |
+| **Agent session overnight** | ox tester; oxo s004 re-validation | 7–10h | Session continuity (§4); §28 same-session closure |
+| **Pipeline iteration loop** | oxo s001: 8 fixes; s004: 3 fixes | 22min–3h 22min | CICD pre-flight + fail-fast (§19–20) |
 | **Human gate wait** | oxo s001: gate 2 → gate 2B | 1h 55min | Auto-approve + batch gates (§8) |
-| **Smoke test regression** | oxo s002: root route changed, smoke assertions stale | ~5 min | Surface-change done condition (§22) |
-| **Fragile smoke selector** | oxo s003: new buttons added, getCells count broke | ~5 min | Stable selector mandate (§23) |
-| **Permission prompt (compound cmd)** | `cd /path && npm run test:run` — novel compound needs approval each session | 15–60s per occurrence | Working-directory convention (§25) |
-| **Permission prompt (dora.py dir)** | dora.py called from wrong directory — fails + prompts | ~30s + failure | Always run from project root (§25) |
+| **Prod-found defect cycle** | s004: DEFECT-004-001 found in step 16, fixed, redeployed, revalidated | ~1h agent + overnight gap | Cross-stack contract test (§30) — find it at synth, not in prod |
+| **End-of-iteration human prompt** | "run /retro?" wait after delivery | minutes–hours | Auto-retro (§28) |
+| **Smoke regression / fragile selector** | oxo s002/s003 | ~5 min | §22 + §23 (confirmed working s004) |
+| **Permission prompts** | compound cmds, novel variants | 15–60s each | §25–26 (confirmed working s004) |
 
 ## 4. Session continuity (v7 — primary wait-reduction lever for local-only)
 
-**Anticipated DORA effect (v7):** gross lead time < 60 min in-session.
-**Observed (oxo-online s002):** ~42 min — target met for a pure-frontend slice
-in-session with no pipeline loops.
-**Diagnosis:** session continuity + CICD pre-flight + auto-gates = fast delivery
-when the slice is frontend-only. The combination is working.
-
-Guidelines remain in force for session boundary waits:
+Guidelines in force for session boundary waits:
 
 **a. Start a session, finish a deliverable.**
 
@@ -70,7 +65,12 @@ Guidelines remain in force for session boundary waits:
 
 **c. Don't dispatch the tester near end of session.**
 
-**d. Retro runs in the same session as delivery.**
+**d. Retro runs in the same session as delivery — now automatic, see §28.**
+
+**e. (new v14) Never leave a defect recovery pending validation at a session
+boundary.** s004's MTTR pair inflated to ~9h because the fix deployed in-session
+but re-validation ran after an overnight gap. If a roll-forward fix deploys,
+re-validate immediately in the same session.
 
 ## 5. Time-to-first-deploy
 
@@ -93,13 +93,15 @@ Target: < 15 min in-session. Record in `dora/per-project.md`.
 
 - **New requirement** → `/requirement-new`
 - **Per iteration** → `/iteration-run`
-- **Retro** → `/retro`
+- **Retro** → `/retro` — fires automatically at delivery (§28)
 
 ## 8. Gate design
 
 **a. Auto-approve where the outcome is clear:**
 - Go/no-go to deploy: orchestrator auto-approves when all tests pass AND lint
-  clean AND build succeeds AND no deviations blocking deploy.
+  clean AND build succeeds AND no deviations blocking deploy — **application-only
+  diffs only**. Infra-bearing diffs (new stacks, IAM changes, new attack surface)
+  remain a human gate (as exercised at GATE-4-S004).
 - Arch + security for local-only projects with no new infra: architect
   self-certifies; orchestrator confirms; no human wait.
 - **Security review auto-accepted (all project types):** when the
@@ -127,15 +129,17 @@ Target: < 15 min in-session. Record in `dora/per-project.md`.
 | cicd | capabilities (environments, pipeline, rollback) |
 | engineer | TDD build on trunk |
 | tester | in-prod / public-surface validation |
-| documenter | `docs/usage.md` after every validated slice |
+| documenter | dispatched **in parallel, in the background**, at delivery (§29) |
 
 ## 11. Tester scope
 
 The tester validates **customer-observable outcomes** through the public
 surface. It does NOT re-implement exhaustive correctness checks in the suite.
 
-Tester median s002: 213s. Historical ox: 1200s (session-boundary driven).
-With session continuity in place, tester median target: < 300s.
+Tester median 1059s (partly historical). In-session validation runs are
+213–2760s; s004's full backend validation (steps 14–16 incl. CLI policy
+checks) took 2760s — acceptable for a first-backend slice. Target for
+frontend-only slices remains < 300s.
 
 ## 12. Deploy event — definition by project type
 
@@ -159,21 +163,22 @@ Orchestrator updates `work/<project>/dora/per-project.md` at the end of each
 slice retro. Include: slice, change, expected DORA effect, actual, regression
 flag, reflection, time-to-first-deploy (s001 only), delivery gap.
 
-## 16. DORA baseline (v13 — unchanged from v12)
+## 16. DORA baseline (v14)
 
-| Metric | ox final | oxo-online s001 | oxo-online s002 | oxo-online s003 | v13 target |
-|--------|---------|----------------|-----------------|-----------------|------------|
-| Gross lead time (median) | 2340s (39 min) | 26,700s (7h 25min) | ~2,520s (42 min) | ~3,960s (66 min) | < 2400s in-session |
-| Deployment frequency | 2/active-day | — | 2/active-day | 3/active-day | ≥ 3/active-day |
-| Change failure rate | 0% | 0% | 20% | 33% | restore to 0% |
-| MTTR | n/a | n/a | 222s | 257s | < 300s |
+| Metric | s002 | s003 | s004 | v14 target |
+|--------|------|------|------|------------|
+| Gross lead time (median, all slices) | ~2,520s | ~3,960s | ~42,700s wall (75 min agent) | < 3600s wall in-session |
+| Deployment frequency | 2/active-day | 3/active-day | 3/active-day | ≥ 3/active-day |
+| Change failure rate | 20% | 33% | 33% (1 prod failure / 3 deploys; CI failures reclassified §31) | 0% |
+| MTTR | 222s | 257s | ~9h (inflated by overnight re-validation gap; fix-to-redeploy was ~18 min) | < 600s, validated same-session |
 
-**Computed baseline (2026-06-05):** `lead=2340s freq=3/day cfr=33% mttr=257s`
+**Computed baseline (2026-06-06):** `lead=2979s freq=3/day cfr=33% mttr=292s`
 
-**Named constraint:** `tester` (median 1059s, partly historical). In-session tester
-runs are 213–253s. The actionable constraints are:
-1. **CFR = 33%** — two consecutive smoke failures from fragile selectors. Attack via §23.
-2. **Permission prompts** — recurring pauses from compound commands. Attack via §25–26.
+**Named constraint:** CFR. Three consecutive slices each shipped exactly one
+production-reaching failure (s002 stale smoke, s003 fragile selector, s004
+cross-stack contract). The first two classes are fixed at source (§22–23,
+zero recurrence in s004). s004's class is new: **contracts that span stack
+boundaries are not pinned by per-stack tests**. Attack via §30.
 
 ## 17. Commit discipline
 
@@ -198,7 +203,7 @@ pipelines** from the start:
 - App role: S3 + CloudFront only (no IAM, no CloudFormation)
 - Infra role: can assume CDK bootstrap roles; requires `cdk bootstrap --trust <account>`
 
-## 19. CICD pipeline pre-flight checklist (v9 — new)
+## 19. CICD pipeline pre-flight checklist (v9, extended v14)
 
 Before writing or pushing a cloud/hosted pipeline for the first time, the CICD
 agent works through this checklist. Each item represents a failure mode observed
@@ -221,13 +226,23 @@ in practice:
 - [ ] `githubOrg` and `githubRepo` are passed as `-c` context flags on the
       command line, not as env vars (reserved prefix issue above)
 - [ ] CDK infra deploy uses the infra role, not the app role
+- [ ] **(v14, s004)** Any build artifact CDK `fromAsset()` needs at synth time
+      (e.g. Lambda `dist/`) is gitignored — the workflow must build it before
+      synth, and the source path must be in the workflow's path trigger
+- [ ] **(v14, s004)** Stacks linked by `CfnOutput` exports deploy **sequentially**
+      (separate workflow steps), never as one `cdk deploy A B` batch — CDK batch
+      deploys concurrently and the export does not exist on first deploy
 
 **Runner environment:**
-- [ ] Each job that runs tests/tools installs its own dependencies (`npm ci`)
-      — node_modules are not shared between jobs
+- [ ] Each job that runs tests/tools installs its own dependencies — but
+      **(v14, s004)** beware `npm ci` with a lock file generated on a different
+      platform (macOS/arm64 lock may exclude linux-x64 optional native deps);
+      use `npm install` for that job or regenerate the lock on linux
 - [ ] Node.js action versions are pinned to a version supporting the current
       runner Node.js (set `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true` until
       action maintainers catch up)
+- [ ] **(v14, s004)** CI test steps invoke `vitest run` (or `--run`) explicitly
+      — a bare `npm test` mapped to watch mode hangs the job
 
 ## 20. Pipeline fail-fast validation (v9 — new)
 
@@ -246,7 +261,7 @@ every job that uses secrets or variables**:
     fi
 ```
 
-## 21. Architecture-lite path for pre-tagged no-backend slices (v11 — new)
+## 21. Architecture-lite path for pre-tagged no-backend slices (v11)
 
 When the active chunk is **explicitly tagged in `architecture/current.md`** as
 "no backend" or "client-only" (e.g., the C2-3 tag), the solution-architect
@@ -257,10 +272,6 @@ follows a lightweight review path instead of a full delta:
 2. Write a brief delta (target < 5 min): what React/UI changes, what does NOT
    change, one-line security conclusion.
 3. Auto-accept applies immediately (§8a) — no new attack surface by definition.
-
-**Anticipated DORA effect:** reduces solution-architect time for frontend-only
-slices from ~15 min (s002 observed) toward ~3–5 min. Gross lead time for a
-pure-frontend slice should drop from ~42 min toward ~25–30 min.
 
 **When this path does NOT apply:** any time the slice introduces a new service,
 API call, data persistence, or trust relationship — revert to full delta.
@@ -275,22 +286,16 @@ existing smoke tests**, the engineer's done condition includes:
 > the smoke suite navigates to, confirm smoke helpers find the right elements
 > after the change — not just that count assertions pass.
 
-Trigger examples (broadened from v11):
+Trigger examples:
 - Root route rewired to a different component
 - A prominent element removed or renamed at a smoke-tested URL
-- **New interactive controls added to a smoke-tested screen** ← added v12
+- New interactive controls added to a smoke-tested screen
 - Mode selectors, toolbars, or navigation added alongside existing game controls
 
-**Why broadened:** v11 rule covered route rewiring only. s003 added mode-selector
-buttons alongside game cells; `getCells` counted all non-play-again buttons (11
-instead of 9). The rule was the right class but too narrow a trigger.
-(See `principle-failures/2026-06-05-fragile-smoke-selectors.md`)
+**Scored (s004):** Play Online button added to a smoke-tested screen; zero
+smoke regressions. Rule confirmed working.
 
-**Anticipated DORA effect (v12):** CFR restored to 0%. Two consecutive failures
-have been caught by this rule class; the selector fix (§23) makes future
-additions safe by construction.
-
-## 23. Stable smoke selector mandate (v12 — new)
+## 23. Stable smoke selector mandate (v12)
 
 All smoke test helpers that select a **specific category of interactive element**
 (board cells, specific buttons, form fields) **must use a stable semantic
@@ -302,80 +307,118 @@ identifier**, not a derived count or text-exclusion filter.
 | `page.locator('[data-testid="board-cell"]')` | `getByRole('button').nth(N)` |
 | `page.getByRole('button', { name: /play again/i })` | `getByRole('button')` with count assertion |
 
-**Rule:** if you are selecting a subset of buttons on a screen that will grow
-(game cells vs mode-selector buttons vs play-again), use an attribute that
-uniquely identifies that subset (`aria-label`, `data-testid`, `className` as
-last resort) — not exclusion from the full button inventory.
+**Applies at authoring time** — to the engineer writing smoke tests AND the
+tester writing validation specs.
 
-**Applies at authoring time.** The engineer writing the smoke test is responsible
-for using a stable selector. The tester writing the validation spec must also
-follow this rule.
+**Current stable selectors for oxo-online:** `[aria-label^="cell "]` (cells),
+`[aria-label="play online"]`, `[data-testid="game-code"]`, `[data-testid="spinner"]`.
 
-**Current stable selector for oxo-online cells:** `[aria-label^="cell "]` —
-set in `Cell.tsx`; stable for all future UI additions.
+**Scored (s004):** CFR from fragile selectors = 0. Rule confirmed working.
 
-**Anticipated DORA effect:** CFR → 0% on slices that add new interactive
-controls. Two pipeline failures (s002, s003) both trace to this class of fragile
-selector; fixing at source eliminates the recurring pattern.
-
-## 25. Working-directory convention (v13 — new)
+## 25. Working-directory convention (v13 — confirmed working s004)
 
 **All orchestrator and agent commands run from the project root
 (`/Users/johnnicholas/Documents/Claude/Projects/Claufe_Code_agent_design/`).**
 
-Three recurring prompt-generating patterns and their fixes:
+| Anti-pattern | Fix |
+|---|---|
+| `cd /path/to/app && npm run test:run` | `npm --prefix work/<project>/src/app run test:run` from project root |
+| `cd /path && python3 .claude/skills/.../dora.py` | `python3 .claude/skills/dora-ledger/scripts/dora.py` — always project-root-relative |
+| Novel `gh` variants prompting each time | Add to committed allowlist (§26) |
 
-| Anti-pattern | Problem | Fix |
-|---|---|---|
-| `cd /path/to/app && npm run test:run` | Novel compound; approval prompt each session | `npm --prefix work/<project>/src/app run test:run` from project root |
-| `cd /path && python3 .claude/skills/.../dora.py` | Wrong relative path; hard failure or novel prompt | `python3 .claude/skills/dora-ledger/scripts/dora.py` — always project-root-relative |
-| `gh run view <id> --log-failed` | Variant not in allowlist; prompts every time | Add `Bash(gh run view *)` to project settings.json (§26) |
+Use `make -C work/<project>/src/infra <target>` instead of `cd`-ing into infra.
 
-**npm --prefix convention (standard form):**
-```bash
-# Instead of: cd work/oxo-online/src/app && npm run test:run
-npm --prefix work/oxo-online/src/app run test:run
+**Scored (s004):** zero compound-command permission prompts. Confirmed working.
 
-# Instead of: cd work/oxo-online/src/app && npm ci
-npm --prefix work/oxo-online/src/app ci
-
-# Instead of: cd work/oxo-online/src/app && npm run build
-npm --prefix work/oxo-online/src/app run build
-```
-
-**dora.py convention (always from project root):**
-```bash
-# Correct (project root):
-python3 .claude/skills/dora-ledger/scripts/dora.py compute
-
-# Wrong (any subdirectory):
-# cd work/oxo-online/src/app && python3 .claude/skills/...
-```
-
-**Anticipated DORA effect:** Eliminates recurring 15–60s human-approval pauses for
-directory-sensitive compound commands. Reduces novel command combinations that
-fall outside the committed allowlist.
-
-## 26. Committed project allowlist (v13 — new)
+## 26. Committed project allowlist (v13 — confirmed working s004)
 
 A project-level `.claude/settings.json` (committed, not `.local`) captures stable
-allowlist patterns so all agents work without prompts across sessions.
-
-**Do not confuse:**
-- `.claude/settings.json` — committed; tracks with the repo; correct place for project allowlist
-- `.claude/settings.local.json` — user-specific, git-ignored; for personal overrides only
-
-The committed allowlist lives at `.claude/settings.json` and is initialised with
-the patterns known to be safe (see the file). Run `/fewer-permission-prompts`
-after any session that introduces new recurring command patterns to refresh it.
-
-**Anticipated DORA effect:** Permission-prompt delays (15–60s each) eliminated for
-covered patterns. Reduces human interruption frequency during agent execution.
+allowlist patterns so all agents work without prompts across sessions. Run
+`/fewer-permission-prompts` after any session that introduces new recurring
+command patterns.
 
 ## 27. Change-set queued for next iteration
 
-- **§25 working-directory convention** — measure whether compounded-command prompts disappear from s004; target zero `cd &&` compounds in agent commands
-- **§26 committed allowlist** — measure whether novel-command approval prompts disappear; target zero approval prompts for npm/dora/gh run variants
-- **Stable smoke selectors (§23)** — confirm CFR = 0% on next slice that touches the game screen
-- **§22 broadened trigger** — measure whether surface-change check fires on first slice that adds new controls; target zero pipeline failures from smoke
-- Deployment frequency hit 3/day in s003 — maintain ≥ 3 as slices continue
+- **§30 cross-stack contract test** — slice 005 (WebSocket join) adds a new
+  cross-stack route (`/ws` or similar via CF/API); the contract test must exist
+  before deploy. Target: CFR 0% on s005.
+- **§28 auto-retro + §29 parallel documenter** — measure end-of-iteration wait:
+  target zero human-prompt wait between `delivered` and retro start; documenter
+  wall-clock fully overlapped with retro.
+- **§4e same-session recovery validation** — if s005 has any defect, MTTR pair
+  must close in-session. Target: MTTR < 600s.
+- **§19 v14 items** — target zero pipeline iteration failures on s005 (s004 had 3).
+
+## 28. Auto-retro at delivery (v14 — human-directed)
+
+**When a slice is marked `delivered` (validation passed, decision-log row
+written), the orchestrator runs the retro immediately and automatically in the
+same session — no human prompt, no wait.** The human can interrupt or redirect
+the retro, but their absence must not delay it.
+
+`/iteration-run` therefore ends at retro-complete, not at "prompt for retro".
+
+**Targets:** gross lead time + delivery gap. **Anticipated effect:** removes the
+end-of-iteration human-prompt wait (minutes to hours, and the class of overnight
+gaps seen in ox/s004) from every slice; retro learnings land before the next
+slice starts instead of after an idle gap.
+
+## 29. Documenter runs in parallel (v14 — human-directed)
+
+**Nothing in the process depends on documentation output.** At delivery, the
+orchestrator dispatches the documenter **in the background, in parallel with the
+retro** (and with N+1 planning where applicable). No gate, agent, or loop step
+waits on it. The documenter commits its own changes; honesty rule unchanged —
+document what shipped, not what was planned.
+
+**Targets:** gross lead time. **Anticipated effect:** documenter wall-clock
+(~2–5 min) drops out of the critical path entirely; first exercised at the
+s004 retro (documenter ran concurrently, committed `968a28b`).
+
+## 30. Cross-stack contract tests at synth time (v14 — new)
+
+**When a request path crosses an infrastructure boundary owned by more than one
+stack (CDN behaviour → API route → handler), a synth-time test must assert the
+contract between the synthesised templates — not just each side in isolation.**
+
+s004 evidence: `OxoOnlineProd` synthesised a CF behaviour for `/api/*` and
+`OxoGameProd` synthesised route key `POST /games`; both suites were green, yet
+the composed system 404'd in production (DEFECT-004-001). The defect was fully
+detectable at synth time.
+
+Rule for the engineer (route step in Phase B equivalent):
+- Synthesise **both** templates in one test file.
+- Assert path consistency end-to-end: the path pattern the CDN forwards
+  (including any `OriginPath` stripping) must literally match a route key on the
+  receiving API (e.g. CF forwards `/api/games` ⇒ a route `POST /api/games`
+  exists; or CF strips `/api` ⇒ `POST /games` exists).
+- Apply the same idea to any future boundary: WebSocket stage paths, custom
+  origins, queue/topic names passed across stacks by string.
+
+oxo-online now has a pinned regression: `game-stack.test.ts` asserts
+`RouteKey: 'POST /api/games'` matching the CF `/api/*` behaviour. Slice 005
+must add the composed-template contract test for its new surface.
+
+**Targets:** CFR → 0% (named constraint). **Anticipated effect:** the s004
+defect class (one prod failure per slice, three slices running) is eliminated
+at synth time; also removes the defect-fix-revalidate cycle (~1h agent + gap
+risk) from lead time.
+
+## 31. CFR ledger convention (v14 — definitional)
+
+DORA change failure rate counts **changes that fail in production / for users**.
+Therefore:
+
+- `failure` / `recovery` events: production-impacting only (failed smoke against
+  prod, defect found in live validation, user-visible regression). These count
+  toward CFR and MTTR.
+- `pipeline_failure` / `pipeline_recovery` events: CI/CD runs that go red
+  **before** the change reaches production. These do NOT count toward CFR/MTTR —
+  they are pipeline-iteration waits (§3) and are attacked via §19–20.
+
+Applied retroactively to s004's three CI failures (reclassified 2026-06-06).
+The orchestrator must not use this to hide real failures: anything a user could
+have observed is `failure`, full stop.
+
+**Targets:** metric integrity (CFR reflects its DORA definition). **Anticipated
+effect:** CFR reads 33% not 67% for the same history; trend remains honest.

@@ -275,3 +275,5 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-06T15:56:29Z,oxo-online,7,s005-h1-waf,cicd,pipeline_failure,,fail,27066828546,"infra runs raced prerequisites: WAF deploy before deploy-oidc grants/bootstrap; pre-prod, no impact"
 2026-06-06T15:56:29Z,oxo-online,7,s005-h1-waf,cicd,pipeline_recovery,,rolled_forward,OI-29-30,bootstrap + deploy-oidc now applied; rerun pending gate-4
 2026-06-06T15:59:12Z,oxo-online,7,s005-h1-waf,orchestrator,gate,,success,GATE-AMEND-H1-A,Option A: descope WS regional ACL (platform constraint); CF global ACL proceeds; gate-4 roll-forward approved
+2026-06-06T16:00:18Z,oxo-online,7,s005-h1-waf,engineer,task_start,,na,GATE-AMEND-H1-A,Option A rescope: drop UC2 WS WAFv2 (WAFv2 cannot associate API GW v2 WebSocket); roll deploy forward
+2026-06-06T16:00:23Z,oxo-online,7,s005-h1-waf,solution-architect,task_start,,success,,GATE-AMEND-H1-A Option A rescope: UC2 regional WAF removed (WAFv2 cannot associate v2 APIs); docs+skill amend

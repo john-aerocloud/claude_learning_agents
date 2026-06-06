@@ -69,6 +69,18 @@ waf-probe:
 	node work/$(PROJECT)/scripts/waf-burst-probe.js --base-url $(BASE_URL) \
 	  $(if $(BURST),--burst $(BURST),)
 
+# --- WAF sustained-rate probe (s005-h1-waf AC3.1) -----------------------------
+# Paces >100 POST /api/games at 1 req/1.5s across ~165s. Unlike the burst probe,
+# this paced pattern gives WAF's periodic evaluation cycle (every ~30s) enough
+# requests in the 300s sliding window to fire the Block action.
+# Called by tests/validation/slice005-h1-waf-ac3.1.spec.ts (make validate).
+# Standalone invocation for operator use (NOT the primary entry point for UC3):
+# make waf-sustained BASE_URL=https://d3pf3kcvzpau1x.cloudfront.net [COUNT=110] [PACE_MS=1500]
+waf-sustained:
+	node work/$(PROJECT)/scripts/waf-sustained-probe.js --base-url $(BASE_URL) \
+	  $(if $(COUNT),--count $(COUNT),) \
+	  $(if $(PACE_MS),--pace-ms $(PACE_MS),)
+
 # --- App / infra test entry points --------------------------------------------
 test-app:
 	npm --prefix $(APP) run test:run
@@ -94,4 +106,4 @@ synth-infra:
 	npm --prefix $(INFRA) run cdk -- synth $(STACKS) --quiet \
 	  -c githubOrg=$(GH_ORG) -c githubRepo=$(GH_REPO)
 
-.PHONY: dora-record dora-compute validate smoke waf-probe test-app lint-app build-app test-infra synth-infra
+.PHONY: dora-record dora-compute validate smoke waf-probe waf-sustained test-app lint-app build-app test-infra synth-infra

@@ -70,10 +70,12 @@ run time. Removal is a normal, logged act — a retired spec stays in git histor
 Each review emits a log line stating specs added/retired, or explicitly
 "no change".
 
-Current specs (both `pinned`):
+Current specs (all `pinned`):
 
 - `slice004-api-contract.spec.ts` — F2, T1 (response), S1, T2 (observable).
 - `slice004-aws-policy.spec.ts` — T1 (persisted), S1 (stored), T2, T3, T5.
+- `slice005-aws-policy.spec.ts` — T2+T3 (live WS pairing+DynamoDB), T5 (no-hijack), T8 (reserved concurrency+stage throttle), T9 (Connections table), S1 (ws-fn grants), S2 (ManageConnections scope), S4 (deploy role no iam:*).
+- `slice005-h1-waf-ac3.1.spec.ts` — AC1.4 (WebACL listed us-east-1), AC1.5 (CF dist webAclId), DEPLOY-IDENTITY-WAF (rate rule config), AC3.1 (sustained-rate WAF block: 110 req @ 1.5s pace → >= 1 HTTP 403 + CloudWatch BlockedRequests > 0). Long-running: ~3 min. Requires PROD_URL + AWS creds (dev-int, us-east-1).
 
 ## Run-record command (provenance)
 

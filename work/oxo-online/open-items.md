@@ -33,6 +33,9 @@ job served — core jobs beat secondary (see project.md classification);
 
 | OI-20 | cicd (s005 deploy) | App-pipeline lambda hot-swap gates on `git diff HEAD~1` which fails on shallow re-runs (depth=1) — re-run after lambda-only change unreliable; push is the reliable path | risk: deploy reliability | cicd s005 return | document + fix in next pipeline-touching slice |
 
+| OI-21 | tester/engineer (DEFECT-005-001) | Architect must amend delta 005: WS error transport is error MESSAGE frame + DELETE close (APIGW cannot send custom close frames) — security intent (no leak, specific codes) unchanged | architecture honesty | acceptance.md amended; delta pending | with s005 closure |
+| OI-22 | retro input (DEFECT-005-001) | New defect class: platform-semantic assumption (close-code delivery) — synth-level §30 contract tests cannot catch platform behaviour; consider a thin live walking-skeleton probe step when a slice introduces a NEW platform integration mechanism | CFR | s005 retro | s005 retro |
+
 Process-side items (project-agnostic) live in `/process/improvement-slices/`
 and the §27 retro queue — currently: pipeline-N+1-planning-over-build
 (operationalise §8b), §37 parallel-build scoring on s005, IMP-001/002/003

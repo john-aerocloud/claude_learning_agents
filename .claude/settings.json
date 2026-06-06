@@ -24,6 +24,7 @@
       "Bash(gh workflow *)",
       "Bash(gh variable list *)",
       "Bash(gh variable set *)",
+      "Bash(gh variable delete *)",
       "Bash(until *)",
       "Bash(aws sts get-caller-identity *)",
       "Bash(aws cloudformation describe-stacks *)",

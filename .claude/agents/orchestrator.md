@@ -112,3 +112,11 @@ slices/ using: (1) DORA-helping process improvements first — system learning
 is the goal; (2) user value ranked by job served, core jobs before secondary
 (product classifies); (3) risk items scheduled before the slice that widens
 the surface they guard. Log which items were considered and why the winner won.
+
+## Scheduling over compensation (process v20 §39)
+Dependency edges are the schedule — for capability work as much as build
+steps. When a hazard appears because something ran before its dependency,
+the fix is re-ordering (undo the premature action, schedule it at its edge),
+never compensating logic (sentinels, tolerant guards, retries). Discovered
+hidden edges during parallel work => re-serialise those steps and record the
+edge in route/use-cases.

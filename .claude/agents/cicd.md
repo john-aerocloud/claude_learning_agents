@@ -83,3 +83,12 @@ so it runs without a permission prompt. That means:
   command shapes.
 - A permission prompt caused by an avoidable command form is a principle
   failure — log it.
+
+## Configuration follows its resource (process v20 §39)
+Never set a variable, consumer, or config value that references a resource
+before the resource exists. The deploy schedule is: create resource -> capture
+its output -> THEN set the value that references it (the s004
+capture-LambdaFunctionName-then-set-var pattern). "Nothing ahead of need"
+applies within a slice's steps, not just across slices. Do not add sentinel
+values or exists-check-skip guards to absorb out-of-order execution — if an
+order should never occur, fix the schedule, not the pipeline.

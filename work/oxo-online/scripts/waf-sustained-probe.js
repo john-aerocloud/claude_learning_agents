@@ -39,14 +39,23 @@
  *   --timeout <ms>           per-request timeout (default 10000)
  *   --cooldown <ms>          pause after the burst before clean request (default 5000)
  *
+ * WAF BLOCK STATUS (DEFECT-WAF-001):
+ *   The WAF rate rule's Block action carries a CUSTOM response with HTTP 429
+ *   (Too Many Requests). It is deliberately NOT the WAFv2 default 403: the
+ *   CloudFront distribution maps 403/404 -> 200 + SPA index.html, which would
+ *   MASK a 403 block as a 200 + HTML page (invisible to clients/probes/HTTP
+ *   metrics). 429 is not in CloudFront's CustomErrorResponses list, so it
+ *   passes through to the client untouched — the honest observable contract.
+ *   This probe therefore counts 429s (not 403s) as WAF blocks.
+ *
  * Output (JSON):
  *   {
  *     sent: number,
  *     status2xx: number,
- *     status403: number,       // WAF blocks (create handler never returns 403)
+ *     status429: number,       // WAF blocks (custom response; handler never returns 429)
  *     status5xx: number,       // Lambda concurrency exhaustion / errors
  *     statusOther: number,
- *     wafBlocked: number,      // alias for status403
+ *     wafBlocked: number,      // alias for status429
  *     durationMs: number,      // total burst duration
  *     normalFlow: { ok, status, hasGamePayload, note? },
  *     pass: boolean            // wafBlocked >= 1 (normal flow ok is secondary)
@@ -128,18 +137,19 @@ async function main() {
 
   // Classify results.
   let status2xx = 0;
-  let status403 = 0;
+  let status429 = 0;
   let status5xx = 0;
   let statusOther = 0;
   for (const r of results) {
     if (r.status >= 200 && r.status < 300) status2xx += 1;
-    else if (r.status === 403) status403 += 1;
+    else if (r.status === 429) status429 += 1;
     else if (r.status >= 500) status5xx += 1;
     else statusOther += 1;
   }
 
-  // The create handler never returns 403 — any 403 is a WAF edge block.
-  const wafBlocked = status403;
+  // The create handler never returns 429 — any 429 is a WAF rate-limit block
+  // (custom block response; see DEFECT-WAF-001 note in the header).
+  const wafBlocked = status429;
 
   // Cool-down then one clean request.
   process.stderr.write(`[waf-sustained-probe] Burst complete. Cooling down ${cooldownMs}ms...\n`);
@@ -160,9 +170,9 @@ async function main() {
     status: clean.status,
     hasGamePayload,
   };
-  if (clean.status === 403) {
+  if (clean.status === 429) {
     normalFlow.note =
-      'clean request still WAF-blocked — source IP is inside the 300s rate window; ' +
+      'clean request still WAF-blocked (429) — source IP is inside the 300s rate window; ' +
       'wait for the window to expire and re-run to confirm default-allow transparency';
   }
 
@@ -172,7 +182,7 @@ async function main() {
     endpoint,
     sent: results.length,
     status2xx,
-    status403,
+    status429,
     status5xx,
     statusOther,
     wafBlocked,

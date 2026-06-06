@@ -114,6 +114,35 @@ describe('OxoOnlineWafUsEast1Stack — global ACL rules (Step 2)', () => {
     expect(rateRule.Action).toHaveProperty('Block');
   });
 
+  // ---------------------------------------------------------------------------
+  // DEFECT-WAF-001 — the rate rule's Block action MUST carry a CustomResponse
+  // with ResponseCode 429. The shell stack's CloudFront CustomErrorResponses
+  // map ONLY 403 and 404 -> /index.html + HTTP 200 (the SPA needs that for
+  // S3-origin 403s). A default WAF block returns 403, which CF then rewrites
+  // to 200 + SPA HTML — making blocks INVISIBLE to clients/probes/HTTP metrics.
+  // 429 is NOT in CF's CustomErrorResponses list, so it passes through to the
+  // client untouched, AND is semantically honest for rate limiting.
+  it('the rate rule Block action returns a CustomResponse with ResponseCode 429 (DEFECT-WAF-001 — not CF-error-intercepted)', () => {
+    const { template } = synth();
+    const acls = template.findResources('AWS::WAFv2::WebACL');
+    const acl = Object.values(acls)[0] as Record<string, any>;
+    const rules: any[] = acl.Properties.Rules ?? [];
+    const rateRule = rules.find((r) => r.Statement?.RateBasedStatement);
+    expect(rateRule, 'expected a rate-based rule').toBeDefined();
+    const block = rateRule.Action.Block;
+    expect(
+      block,
+      'rate rule Block action must be an object carrying CustomResponse',
+    ).toBeDefined();
+    expect(
+      block.CustomResponse,
+      'rate rule Block must carry a CustomResponse so the block is not CF-error-mapped to 200+SPA',
+    ).toBeDefined();
+    // 429 must NOT collide with the shell stack CustomErrorResponses (403/404).
+    expect(block.CustomResponse.ResponseCode).toBe(429);
+    expect([403, 404]).not.toContain(block.CustomResponse.ResponseCode);
+  });
+
   it('enables CloudWatch metrics + sampled requests on each rule and the ACL default (observability)', () => {
     const { template } = synth();
     const acls = template.findResources('AWS::WAFv2::WebACL');

@@ -126,3 +126,66 @@ describe('OxoOnlineShellStack — distribution webAclId cross-region handoff (St
     expect(dist.Properties.DistributionConfig.WebACLId).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// DEFECT-WAF-001 — CROSS-STACK CONTRACT (process v14 §30): the WAF rate rule's
+// custom block ResponseCode must NOT collide with any CloudFront
+// CustomErrorResponse the shell stack maps to 200 + SPA HTML. If it did, every
+// WAF block would be rewritten to 200 + index.html and become invisible to
+// clients/probes/HTTP metrics (the third masking strike, OI-31). This test
+// synthesises BOTH templates in one file and asserts the codes are disjoint —
+// the masking is fully detectable at synth time.
+// ---------------------------------------------------------------------------
+describe('WAF block code vs CloudFront CustomErrorResponses — cross-stack contract (DEFECT-WAF-001)', () => {
+  function synthBoth(): { waf: Template; shell: Template } {
+    const app = new cdk.App();
+    const wafStack = new OxoOnlineWafUsEast1Stack(app, 'OxoOnlineWafUsEast1', {
+      env: { account: '123456789012', region: 'us-east-1' },
+      crossRegionReferences: true,
+    });
+    const shellStack = new OxoOnlineShellStack(app, 'OxoOnlineProd', {
+      env: { account: '123456789012', region: 'eu-west-2' },
+      crossRegionReferences: true,
+      globalWebAclArn: wafStack.webAclArn,
+    });
+    return {
+      waf: Template.fromStack(wafStack),
+      shell: Template.fromStack(shellStack),
+    };
+  }
+
+  it('the WAF rate-rule block ResponseCode is NOT in CloudFront CustomErrorResponses (block stays observable)', () => {
+    const { waf, shell } = synthBoth();
+
+    // WAF side: extract the rate rule's custom-block ResponseCode.
+    const acl = Object.values(
+      waf.findResources('AWS::WAFv2::WebACL'),
+    )[0] as Record<string, any>;
+    const rateRule = (acl.Properties.Rules as any[]).find(
+      (r) => r.Statement?.RateBasedStatement,
+    );
+    const wafBlockCode = rateRule.Action.Block.CustomResponse.ResponseCode;
+    expect(wafBlockCode, 'WAF rate-rule block must declare a custom ResponseCode').toBeDefined();
+
+    // CloudFront side: the source HTTP statuses CF rewrites to SPA HTML.
+    const dist = Object.values(
+      shell.findResources('AWS::CloudFront::Distribution'),
+    )[0] as Record<string, any>;
+    const customErrors: Array<{ ErrorCode: number; ResponseCode?: number }> =
+      dist.Properties.DistributionConfig.CustomErrorResponses ?? [];
+    const interceptedCodes = customErrors.map((e) => e.ErrorCode);
+
+    // The contract: the code CF returns to the client when WAF blocks must NOT
+    // be one CF intercepts and masks as 200 + SPA HTML.
+    expect(
+      interceptedCodes,
+      `WAF block code ${wafBlockCode} collides with a CloudFront CustomErrorResponse ` +
+        `ErrorCode (${interceptedCodes.join(', ')}); the block would be masked as 200+SPA HTML`,
+    ).not.toContain(wafBlockCode);
+
+    // Belt-and-suspenders: confirm CF still maps 403/404 (SPA needs it) so we
+    // are NOT regressing the S3-origin 403 behaviour while fixing the WAF code.
+    expect(interceptedCodes).toContain(403);
+    expect(interceptedCodes).toContain(404);
+  });
+});

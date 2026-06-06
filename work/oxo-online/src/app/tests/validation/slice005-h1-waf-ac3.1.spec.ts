@@ -8,8 +8,23 @@ import { fileURLToPath } from 'node:url';
  * Slice: s005-h1-waf (WAF rate-limiting on CloudFront public endpoint)
  * Acceptance pinned:
  *   AC3.1 (CF burst block — sustained-rate: >100 POST /api/games over 300s window
- *          from single IP yields >= 1 HTTP 403 WAF block AND CloudWatch
- *          wafv2 BlockedRequests > 0 for rule oxo-cf-rate-limit in us-east-1).
+ *          from single IP yields >= 1 HTTP 429 WAF block (custom block response,
+ *          NOT SPA HTML) AND CloudWatch wafv2 BlockedRequests > 0 for rule
+ *          oxo-cf-rate-limit in us-east-1).
+ *
+ * DEFECT-WAF-001 CONTRACT CHANGE (engineer, s005-h1-waf iter 7, 2026-06-06):
+ *   The tester correctly evidenced that the spec/probe asserting HTTP 403 was
+ *   right about the WAF FIRING but the 403 was being MASKED: CloudFront's
+ *   CustomErrorResponses map 403 (and 404) -> 200 + /index.html (the SPA needs
+ *   that for S3-origin 403s), so a WAF 403 block reached the client as 200 +
+ *   SPA HTML — blocks were invisible at the HTTP level. FIX: the rate rule's
+ *   Block action now returns a CUSTOM HTTP 429 (Too Many Requests), which is
+ *   NOT in CloudFront's CustomErrorResponses list and therefore passes through
+ *   untouched. The honest observable contract is now 429 (+ WAF body, not SPA
+ *   HTML), so this spec asserts 429. The CF error mapping is unchanged.
+ *   RESIDUAL: IP-reputation managed-group blocks still return 403 and are still
+ *   CF-masked to SPA 200s; their observable channel is CloudWatch, not HTTP
+ *   status (see waf-us-east-1-stack.ts comment). AC3.1 exercises the rate rule.
  *   AC1.4 (WebACL listed in us-east-1 with CLOUDFRONT scope; non-empty).
  *   AC1.5 (CF distribution webAclId non-empty and matches the listed WebACL ARN).
  *   DEPLOY-IDENTITY-WAF (WebACL tags: Project=oxo-online, Env=prod, ManagedBy=cdk).
@@ -181,7 +196,9 @@ test.describe('s005-h1-waf AC1.x — WAF WebACL existence, association, identity
               AggregateKeyType: string;
             };
           };
-          Action?: Record<string, unknown>;
+          Action?: {
+            Block?: { CustomResponse?: { ResponseCode?: number } };
+          };
           VisibilityConfig: { MetricName: string };
         }>;
       };
@@ -214,6 +231,15 @@ test.describe('s005-h1-waf AC1.x — WAF WebACL existence, association, identity
     // Action must be Block.
     expect(rateRule!.Action, 'Rate rule action must be Block').toHaveProperty('Block');
 
+    // DEFECT-WAF-001: the Block action must carry a CUSTOM response with HTTP
+    // 429, so the block is NOT CF-error-mapped to 200 + SPA HTML. 429 is not in
+    // the CloudFront CustomErrorResponses list (403/404) and is the honest
+    // rate-limit status — this is the observable contract clients/probes see.
+    expect(
+      rateRule!.Action?.Block?.CustomResponse?.ResponseCode,
+      'Rate rule Block must return a custom ResponseCode 429 (not the default 403, which CF masks to 200+SPA)',
+    ).toBe(429);
+
     // Metric name must match the expected value (for CloudWatch correlation).
     expect(
       rateRule!.VisibilityConfig.MetricName,
@@ -238,7 +264,7 @@ test.describe('s005-h1-waf AC1.x — WAF WebACL existence, association, identity
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AC3.1 — Sustained-rate probe: >100 POST /api/games paced across the 300s
-// window. Asserts >= 1 HTTP 403 WAF block returned to the client AND
+// window. Asserts >= 1 HTTP 429 WAF block returned to the client AND
 // CloudWatch BlockedRequests > 0 for rule oxo-cf-rate-limit in us-east-1.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -251,7 +277,7 @@ test.describe('s005-h1-waf AC3.1 — sustained-rate WAF block', () => {
   );
 
   test(
-    'AC3.1 — paced burst (110 req @ 1.5s) triggers >= 1 WAF 403 block; CloudWatch BlockedRequests > 0',
+    'AC3.1 — paced burst (110 req @ 1.5s) triggers >= 1 WAF 429 block; CloudWatch BlockedRequests > 0',
     async () => {
       // Set an extended timeout for this one long-running test.
       test.setTimeout(TEST_TIMEOUT_MS);
@@ -292,7 +318,7 @@ test.describe('s005-h1-waf AC3.1 — sustained-rate WAF block', () => {
       let probe: {
         sent: number;
         status2xx: number;
-        status403: number;
+        status429: number;
         status5xx: number;
         statusOther: number;
         wafBlocked: number;
@@ -314,7 +340,7 @@ test.describe('s005-h1-waf AC3.1 — sustained-rate WAF block', () => {
 
       console.log(
         `[AC3.1] Probe result: sent=${probe.sent} 2xx=${probe.status2xx} ` +
-        `403=${probe.status403} 5xx=${probe.status5xx} other=${probe.statusOther} ` +
+        `429=${probe.status429} 5xx=${probe.status5xx} other=${probe.statusOther} ` +
         `wafBlocked=${probe.wafBlocked} durationMs=${probe.durationMs}`,
       );
       console.log(
@@ -322,12 +348,14 @@ test.describe('s005-h1-waf AC3.1 — sustained-rate WAF block', () => {
         (probe.normalFlow.note ? ` note="${probe.normalFlow.note}"` : ''),
       );
 
-      // ── Step 2: assert >= 1 HTTP 403 WAF block from the probe ─────────────
-      // The create handler (oxo-game-fn) NEVER returns 403; any 403 in the burst
-      // is a WAF edge block. Distinguish from Lambda 5xx (concurrency exhaustion).
+      // ── Step 2: assert >= 1 HTTP 429 WAF block from the probe ─────────────
+      // The create handler (oxo-game-fn) NEVER returns 429; any 429 in the burst
+      // is a WAF rate-limit block (custom block response, DEFECT-WAF-001). 429 is
+      // NOT CF-error-mapped (CF only intercepts 403/404), so the block reaches the
+      // client honestly. Distinguish from Lambda 5xx (concurrency exhaustion).
       expect(
         probe.wafBlocked,
-        `AC3.1 FAIL: Expected >= 1 WAF 403 block from ${probe.sent} sustained requests ` +
+        `AC3.1 FAIL: Expected >= 1 WAF 429 block from ${probe.sent} sustained requests ` +
         `(2xx=${probe.status2xx}, 5xx=${probe.status5xx}). ` +
         `0 WAF blocks = rate rule did not fire within the probe window. ` +
         `Engineering action: verify WAF evaluation frequency, rate rule configuration, ` +
@@ -390,7 +418,7 @@ test.describe('s005-h1-waf AC3.1 — sustained-rate WAF block', () => {
             }
           } catch (err) {
             // CloudWatch call failed — log but don't fail the test on it;
-            // the HTTP-level 403 assertion above is the primary evidence.
+            // the HTTP-level 429 assertion above is the primary evidence.
             console.log(`[AC3.1] CloudWatch poll error (non-fatal): ${String(err)}`);
             break;
           }
@@ -406,7 +434,7 @@ test.describe('s005-h1-waf AC3.1 — sustained-rate WAF block', () => {
         ).toBeGreaterThan(0);
 
         console.log(
-          `[AC3.1] PASS: wafBlocked=${probe.wafBlocked} HTTP 403s received; ` +
+          `[AC3.1] PASS: wafBlocked=${probe.wafBlocked} HTTP 429s received; ` +
           `CloudWatch BlockedRequests=${cwBlockedRequests} (rule=${RATE_RULE_METRIC})`,
         );
       } else {
@@ -419,7 +447,7 @@ test.describe('s005-h1-waf AC3.1 — sustained-rate WAF block', () => {
 
       // ── Step 4: normal-flow note (not a hard assertion — may still be in window) ─
       // The walking-skeleton step 3 requirement: one clean POST must succeed after
-      // the rate window expires. If the clean request is still 403, log the note;
+      // the rate window expires. If the clean request is still 429, log the note;
       // the operator should verify normal-flow transparency after the 300s window.
       if (!probe.normalFlow.ok) {
         console.log(

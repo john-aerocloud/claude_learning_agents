@@ -55,6 +55,18 @@ export class OxoOnlineWafUsEast1Stack extends cdk.Stack {
       },
       rules: [
         // Priority 0 — AWS-managed IP reputation list (action from the group).
+        // RESIDUAL (DEFECT-WAF-001): this managed group uses its OWN block
+        // action (overrideAction = none = "use the group's actions"), which
+        // returns 403. CloudFront's CustomErrorResponses (403 -> 200 + SPA HTML)
+        // therefore STILL mask IP-reputation blocks as SPA 200s. Overriding a
+        // managed-group block to a 429 custom response requires a per-rule
+        // RuleActionOverride on every sub-rule in the group (the group does not
+        // expose a single block action), which is materially more complex and
+        // lower-value than the rate rule (reputation blocks are rare, and the
+        // CloudWatch BlockedRequests metric still records them honestly). Left
+        // as 403 deliberately; the OBSERVABLE channel for reputation blocks is
+        // CloudWatch, not the HTTP status. Revisit if reputation blocks need
+        // client-visible status.
         {
           name: 'AwsIpReputation',
           priority: 0,
@@ -83,7 +95,22 @@ export class OxoOnlineWafUsEast1Stack extends cdk.Stack {
               aggregateKeyType: 'IP',
             },
           },
-          action: { block: {} },
+          // DEFECT-WAF-001: a default WAF block returns HTTP 403. The shell
+          // stack's CloudFront CustomErrorResponses map 403 (and 404) -> 200 +
+          // /index.html (the SPA needs that for S3-origin 403s). A 403 block
+          // would therefore be rewritten to 200 + SPA HTML and become INVISIBLE
+          // to clients/probes/HTTP-level metrics. We return a CUSTOM 429 instead:
+          // CloudFront only intercepts the codes it lists (403/404), so 429
+          // passes through untouched, AND 429 (Too Many Requests) is the honest
+          // status for a rate-limit block. This does NOT touch the CF error
+          // mapping — only the code WAF emits.
+          action: {
+            block: {
+              customResponse: {
+                responseCode: 429,
+              },
+            },
+          },
           visibilityConfig: {
             cloudWatchMetricsEnabled: true,
             sampledRequestsEnabled: true,

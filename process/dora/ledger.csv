@@ -204,3 +204,5 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-06T12:11:16Z,oxo-online,6,005-join-game,cicd,task_start,,na,pipeline-fix,Hardening WS+game Lambda deploy steps to skip gracefully when function not yet provisioned
 2026-06-06T12:15:44Z,oxo-online,6,005-join-game,engineer,task_end,,success,,"Set B B1-B4 green: join screen, error messages, online board, mocked game-ready transition; 85 app tests"
 2026-06-06T12:17:51Z,oxo-online,6,005-join-game,orchestrator,gate,,success,PROCESS-V20,v20: scheduling over compensation; premature WS var deleted; pipeline-hardening dispatch cancelled
+2026-06-06T12:27:39Z,oxo-online,6,005-join-game,engineer,task_end,,success,,"Set A + D1: A0.1-A0.6 infra, A1 connect/register, A2 4040/4500, A4 4041, D1 contract; 40 infra + 16 unit green; synth all stacks ok"
+2026-06-06T12:31:12Z,oxo-online,6,005-join-game,orchestrator,gate,,success,PROCESS-V21,v21: use-case flags over worktrees; synth-infra target added

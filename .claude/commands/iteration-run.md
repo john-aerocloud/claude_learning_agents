@@ -15,11 +15,13 @@ Bracket every dispatch with ledger rows; emit deploy/failure/recovery events.
    acceptance cases that advances the solution most per step -> `route.md`,
    grouped by use case (`use-cases.md`, process §37).
 3. **Build (TDD, parallel by use case).** Read the use-case dependency edges:
-   dispatch parallel `engineer`s (worktree isolation) for use-case sets with no
-   mutual dependency and no shared-file mutation; serialise the rest. Strict
-   red->green->refactor on trunk, WIP sequentially independent. A use case is
-   done when its own acceptance cases pass. Repeat until all cases pass.
-   Security notes become policy tests.
+   dispatch parallel `engineer`s on trunk for use-case sets with no mutual
+   dependency, isolated by use-case flags (process §40 — flags in code, never
+   worktrees/branches/stash choreography); serialise only genuinely sequential
+   mutations of one seam. Strict red->green->refactor on trunk, WIP
+   sequentially independent; flags factored out (code, then config) as part of
+   each UC's done condition. A use case is done when its own acceptance cases
+   pass. Repeat until all cases pass. Security notes become policy tests.
    -> GATE 4: go/no-go to deploy. Log it.
 4. **Continuous deploy.** Merge to main triggers the pipeline to production.
 5. **Validate in prod.** Dispatch `tester` to exercise the public surface

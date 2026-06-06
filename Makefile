@@ -64,4 +64,13 @@ build-app:
 test-infra:
 	npm --prefix $(INFRA) test
 
-.PHONY: dora-record dora-compute validate smoke test-app lint-app build-app test-infra
+# Synth all stacks with the project-pinned CDK (not a global npx install).
+# STACKS optional: make synth-infra STACKS="OxoGameProd"
+# githubOrg/githubRepo go as -c context flags per process §19 (GITHUB_ env prefix is reserved).
+GH_ORG  ?= john-aerocloud
+GH_REPO ?= claude_learning_agents
+synth-infra:
+	npm --prefix $(INFRA) run cdk -- synth $(STACKS) --quiet \
+	  -c githubOrg=$(GH_ORG) -c githubRepo=$(GH_REPO)
+
+.PHONY: dora-record dora-compute validate smoke test-app lint-app build-app test-infra synth-infra

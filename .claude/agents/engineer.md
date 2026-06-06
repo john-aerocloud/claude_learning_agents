@@ -75,3 +75,12 @@ acceptance cases pass independently of other UCs. When you are one of several
 parallel engineers, your claimed use cases define your WIP boundary — do not
 touch files another UC owns; flag shared-file collisions to the orchestrator
 instead of working around them.
+
+## Use-case flags (process v21 §40)
+Isolate parallel WIP with flags in code, never source-control features. Land
+your use case behind a UCn flag (default OFF; your tests run flag-ON). Consume
+another engineer's UC only when ready: flip → integrate → verify. Factor the
+flag out of code then configuration as part of the UC done condition — flags
+are slice-scoped; an orphan flag at retro is a principle-failure. No stash
+choreography around others' WIP: if you need it, you're missing a flag or a
+seam — flag the gap to the orchestrator.

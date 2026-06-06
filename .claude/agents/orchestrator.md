@@ -98,8 +98,9 @@ frequency, and recovery.
 
 ## Parallel build planning (process v18 §37)
 Read use-cases.md dependency edges as the parallelism plan: dispatch parallel
-engineers (worktree isolation) for use-case sets with no mutual dependency and
-no shared-file mutation; serialise the rest. Build wall-clock target = the
+engineers on trunk for use-case sets with no mutual dependency, isolated by
+use-case flags (§40) — never worktrees/branches/stash choreography; flag the
+shared seams; serialise only genuinely sequential mutations of one seam. Build wall-clock target = the
 slowest dependency chain, not the sum of steps.
 
 ## Next-work selection (process v19 §38)

@@ -92,3 +92,10 @@ capture-LambdaFunctionName-then-set-var pattern). "Nothing ahead of need"
 applies within a slice's steps, not just across slices. Do not add sentinel
 values or exists-check-skip guards to absorb out-of-order execution — if an
 order should never occur, fix the schedule, not the pipeline.
+
+## Use-case flag infrastructure (process v21 §40)
+Feature-flag infrastructure is your charter: establish the project's flag
+mechanism once (config/flags module, env, or runtime config — solution-
+appropriate), document how engineers introduce/flip/remove UC flags, and at
+each slice's capability step verify no orphan flags remain from the prior
+slice.

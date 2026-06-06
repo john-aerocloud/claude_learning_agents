@@ -55,6 +55,8 @@
       "Bash(make lint-app)",
       "Bash(make build-app)",
       "Bash(make test-infra)",
+      "Bash(make synth-infra *)",
+      "Bash(make synth-infra)",
       "Bash(curl https://d3pf3kcvzpau1x.cloudfront.net*)",
       "Bash(curl https://ikvpqv86ok.execute-api.eu-west-2.amazonaws.com*)",
       "Skill(retro)",

@@ -5,8 +5,28 @@
 | CDK construct ID  | CloudFormation stack name | Purpose                                           | Deploy cadence          |
 |-------------------|--------------------------|---------------------------------------------------|-------------------------|
 | `OxoOnlineOidcStack` | `OxoOnlineOidcStack`  | OIDC provider + `oxo-deploy` + `oxo-infra-deploy` IAM roles | One-time manual (`make -C work/oxo-online/src/infra deploy-oidc`) |
-| `OxoGameProd`     | `OxoGameProd`            | Lambda (`oxo-game-fn`, `oxo-ws-fn`) + DynamoDB `Games` + `Connections` + HTTP API + WS API | Every infra push (infra pipeline) |
-| `OxoOnlineProd`   | `OxoOnlineProd`          | S3 bucket + CloudFront distribution + Route 53    | Every infra push (infra pipeline) |
+| `OxoOnlineWafUsEast1` | `OxoOnlineWafUsEast1` | **[s005-h1]** Global CLOUDFRONT-scope WAFv2 WebACL (us-east-1). Exports ARN cross-region to OxoOnlineProd | Every infra push (infra pipeline) — **first**, in us-east-1 |
+| `OxoGameProd`     | `OxoGameProd`            | Lambda (`oxo-game-fn`, `oxo-ws-fn`) + DynamoDB `Games` + `Connections` + HTTP API + WS API + **[s005-h1]** regional WAFv2 WebACL + association on WS prod stage | Every infra push (infra pipeline) |
+| `OxoOnlineProd`   | `OxoOnlineProd`          | S3 bucket + CloudFront distribution + Route 53 + **[s005-h1]** distribution `webAclId` = OxoOnlineWafUsEast1 ARN (cross-region import) | Every infra push (infra pipeline) |
+
+## s005-h1 WAF deploy order (cross-region)
+
+```
+1. OxoOnlineWafUsEast1   (us-east-1)  — create global WebACL, export ARN
+2. OxoGameProd           (eu-west-2)  — incl. regional WebACL + WS-stage association
+3. OxoOnlineProd         (eu-west-2)  — set distribution webAclId (imports #1 cross-region)
+```
+
+`OxoOnlineWafUsEast1` deploys FIRST because `OxoOnlineProd` imports its WebACL
+ARN via CDK `crossRegionReferences: true` (SSM parameter in us-east-1, read by a
+custom resource in eu-west-2 — CloudFormation has no native cross-region
+import). The regional WebACL + association are self-contained inside
+`OxoGameProd`, so `OxoGameProd`'s "before OxoOnlineProd" position is unchanged.
+The deploy-role WAFv2/CloudFront grants must be applied via `make deploy-oidc`
+BEFORE this sequence runs (§39 — see DEPLOY_ROLE_EXTENSIONS.md).
+
+§30 cross-stack contract for the ARN handoff: SYNTH-CONTRACT-WAF-1
+(see `slices/s005-h1-waf/acceptance.md`).
 
 ## Why OxoGameProd must deploy before OxoOnlineProd
 

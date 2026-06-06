@@ -96,11 +96,18 @@ user identity, so binding is **capability-by-connection**:
       connect/message flooding.
 - [ ] `Connections` items carry a 2h TTL so orphaned/abandoned connections from a
       flood self-expire (storage cannot grow unboundedly).
-- [ ] **Accepted residual risk:** no WAF / no `$connect` authorizer in s005. An
-      unauthenticated attacker can still open connections up to the API Gateway
-      account limits and the throttle cap. Accepted for hobby volume; **deferred
-      controls (open risk for gate):** WAF rate rule and/or a `$connect`
-      capability-token authorizer before promoting beyond hobby volume.
+- [x] **WAF rate rule attached (s005-h1-waf — risk partially closing).** A
+      REGIONAL WAFv2 WebACL (rate-based rule 20/5-min/IP +
+      `AWSManagedRulesAmazonIpReputationList`) is associated with the WS API
+      `prod` stage, bounding connection volume per IP on top of the
+      reserved-concurrency + stage-throttle floor. See
+      `architecture/security/wafv2.md`.
+- [ ] **Residual (still open for gate):** no `$connect` capability-token
+      authorizer (s005-h2). WAF bounds connection *volume* per IP but does not
+      *authenticate* — an attacker within the rate budget can still open
+      connections. Per-game join-token authorizer remains the open control;
+      rate thresholds are pre-launch placeholders. See `deltas/s005-h1-waf.md`
+      §9 open risks.
 
 ### Data classification
 - [ ] Messages and stored fields contain **no PII**: `connectionId` (an

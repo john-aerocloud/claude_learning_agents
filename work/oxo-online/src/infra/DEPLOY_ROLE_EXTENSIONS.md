@@ -147,3 +147,93 @@ bootstrap execution role. The `oxo-deploy` role only needs to push code to an
 existing function — it never creates, modifies, or attaches IAM roles. This
 preserves the principle that the deploy pipeline cannot escalate its own IAM
 privileges.
+
+---
+
+# Deploy role extensions required for slice s005-h1-waf
+
+The infra deploy role must be able to manage the two new WAFv2 WebACLs and set
+the CloudFront distribution `webAclId`. Additive, scoped — no wildcards.
+
+## New permissions needed
+
+```typescript
+// WAFv2 WebACL management — both the global (us-east-1 CLOUDFRONT) and the
+// regional (eu-west-2 WS-stage) ACLs are managed by CDK/CloudFormation.
+// No wafv2:* wildcard; only the management + association actions CDK needs.
+deployRole.addToPolicy(
+  new iam.PolicyStatement({
+    sid: 'Wafv2Manage',
+    effect: iam.Effect.ALLOW,
+    actions: [
+      'wafv2:CreateWebACL',
+      'wafv2:GetWebACL',
+      'wafv2:UpdateWebACL',
+      'wafv2:DeleteWebACL',
+      'wafv2:ListWebACLs',
+      'wafv2:TagResource',
+      'wafv2:UntagResource',
+      'wafv2:ListTagsForResource',
+      'wafv2:AssociateWebACL',
+      'wafv2:DisassociateWebACL',
+      'wafv2:ListResourcesForWebACL',
+      'wafv2:GetWebACLForResource',
+    ],
+    // WAFv2 management actions do not all support resource-level ARN scoping
+    // at create time (the ACL ARN does not exist yet). Scope is bounded by the
+    // account/region the role can act in; the deploy role has NO iam:* and
+    // cannot use these to escalate. Re-scope to specific ACL ARNs once stable.
+    resources: ['*'],
+  }),
+);
+
+// CloudFront distribution update — to set the distribution webAclId.
+// Scoped to the existing distribution ARN; NOT cloudfront:* and NOT
+// Create/DeleteDistribution.
+deployRole.addToPolicy(
+  new iam.PolicyStatement({
+    sid: 'CloudFrontSetWebAcl',
+    effect: iam.Effect.ALLOW,
+    actions: [
+      'cloudfront:UpdateDistribution',
+      'cloudfront:GetDistribution',
+      'cloudfront:GetDistributionConfig',
+    ],
+    resources: [
+      `arn:aws:cloudfront::${deployRole.stack.account}:distribution/E519HYABC57ZX`,
+    ],
+  }),
+);
+```
+
+## Why these, not broader
+
+| Action | Reason |
+|--------|--------|
+| `wafv2:Create/Update/Delete/Get/ListWebACL` | CDK creates and manages both WebACLs |
+| `wafv2:Associate/Disassociate/ListResourcesForWebACL` | regional WS-stage association + clean rollback |
+| `wafv2:Tag/Untag/ListTags` | CDK tags every resource (`Project/Env/ManagedBy`) |
+| `cloudfront:UpdateDistribution` (+ Get/GetConfig) | set/read the distribution `webAclId` |
+| NOT `wafv2:*` | no need for `PutLoggingConfiguration`, `CreateIPSet`, etc. yet |
+| NOT `cloudfront:Create/DeleteDistribution` | distribution lifecycle owned by CDK, not a property toggle |
+| NOT `iam:*` | preserves no-self-escalation; execution-plane IAM is the CDK CFN exec role |
+
+## When to apply (§39 config-follows-resource — apply BEFORE the WAF deploy)
+
+1. Engineer adds `Wafv2Manage` + `CloudFrontSetWebAcl` statements to
+   `oxo-online-oidc-stack.ts` in the `deployRole` definition.
+2. Apply the OIDC stack manually FIRST (excluded from the automated pipeline):
+   ```
+   make -C work/oxo-online/src/infra deploy-oidc
+   ```
+3. THEN run the infra pipeline, which deploys `OxoOnlineWafUsEast1`,
+   `OxoGameProd` (regional WebACL + association), and `OxoOnlineProd`
+   (`webAclId` set). If step 3 runs before step 2, CloudFormation fails with
+   AccessDenied on `wafv2:CreateWebACL` / `cloudfront:UpdateDistribution` — that
+   is the resource-before-config reversal failure mode (§39); avoid it by
+   applying the role change in the same slice, ahead of the infra deploy.
+
+## Rollback
+
+WAFv2 grants are additive and removable. Disassociation (clear distribution
+`webAclId`, delete the WS `WebACLAssociation`) is a clean, data-free reversal.

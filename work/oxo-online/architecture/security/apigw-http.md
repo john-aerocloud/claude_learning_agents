@@ -21,6 +21,10 @@ Checkable controls:
       behaviour (origin HTTPS-only, `CachingDisabled`).
 - [ ] No client-supplied field is persisted; server generates `gameId`, `code`,
       `status`, `ttl`. Non-POST methods and unexpected/oversized bodies rejected.
-- [ ] **WAF deferred** for s004: cost/abuse floor is the Lambda reserved
-      concurrency cap + 24h DynamoDB TTL. WAF rate-based rule to be attached in
-      C4/C5 against observed traffic — tracked open risk.
+- [x] **WAF attached (s005-h1-waf — risk closing).** A CloudFront-scope WAFv2
+      WebACL (rate-based rule 100/5-min/IP + `AWSManagedRulesAmazonIpReputationList`)
+      now fronts all `/api/*` traffic, so `POST /api/games` is rate-bounded per
+      IP before reaching the HTTP API or Lambda. The Lambda reserved-concurrency
+      cap + 24h TTL remain as the defence-in-depth floor. No separate WebACL on
+      the HTTP API stage (Gate-2 decision — CloudFront ACL covers the path). See
+      `architecture/security/wafv2.md` and `deltas/s005-h1-waf.md`.

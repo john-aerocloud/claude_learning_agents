@@ -1,6 +1,6 @@
 # DORA Baseline (computed)
 
-_Generated 2026-06-06T14:59:44Z from ledger.csv. Do not hand-edit._
+_Generated 2026-06-06T15:13:48Z from ledger.csv. Do not hand-edit._
 
 ## Four key metrics (whole pipeline)
 
@@ -24,5 +24,14 @@ _Generated 2026-06-06T14:59:44Z from ledger.csv. Do not hand-edit._
 
 ## Theory-of-Constraints read
 
-- Constraint (slowest median step): **tester**
-- Recommended exploit/subordinate action: _(orchestrator fills in)_
+- Constraint (slowest median step): **tester** (median 1130s)
+- Recommended exploit/subordinate action (v27): the tester's cost is driven by
+  the QUALITY of work arriving at it — the costliest defect (DEFECT-005-001,
+  MTTR 5807s) had 4/6 root causes that were browser-only and gave a FALSE GREEN
+  to the node-level probe run before hand-off. EXPLOIT: move browser/transport/
+  policy detection upstream of the tester — engineer drives the §17 walking-
+  skeleton probe in a REAL browser (Playwright / Playwright MCP), not node;
+  lands wire-on-deploy + code↔policy contract tests; tester carries ≥1 browser-
+  transport spec + honest harness (no actionable click on disabled). Capability:
+  IMP-006. Next constraint to watch after this lands: solution-architect
+  (median 660s) or prod-defect MTTR depth itself.

@@ -95,6 +95,25 @@ interactive element by a stable semantic identifier (`[aria-label^="…"]`,
 Fragile selectors are a recurring change-failure source; the mandate binds the
 tester at authoring time exactly as it binds the engineer.
 
+## Browser-transport coverage & honest harness (process v27)
+For any browser-delivered slice your validation MUST include at least one spec
+that FAILS when the browser security/transport layer is wrong — CSP
+`connect-src` blocks the socket/endpoint, runtime config is missing/undefined,
+or mixed-content is rejected. These are "works in node, blocked in browser"
+failures invisible to any non-browser probe; the suite must assert them at the
+browser level.
+
+Do NOT mask real failures with the harness:
+- Never issue an actionable `.click()` on a `disabled`/inert element — Playwright
+  waits ~30s for actionability and reports a timeout that HIDES the real cause.
+  To assert inertness use `force`/`dispatchEvent` or assert the `disabled`
+  state directly.
+- A defect is not closed until the end-to-end USER symptom is reproduced and
+  pinned in a spec — confirm the user-visible outcome, not just that a
+  lower-layer fix landed. (Playwright MCP is available for live exploratory
+  reproduction when a committed spec does not yet capture the symptom; the
+  pinned spec is still the deliverable.)
+
 ## Identity before behaviour (principles/01)
 First assertion of ANY live validation: served build identity == sha under
 test (page header/meta, API header). On mismatch: bounded wait/retry, then

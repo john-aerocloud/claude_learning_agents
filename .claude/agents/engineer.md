@@ -156,12 +156,43 @@ idea to any string-coupled boundary: WebSocket stage paths, custom origins,
 queue/topic names passed across stacks. The defect class this prevents (each
 stack green alone, composed system 404s) is fully detectable at synth time.
 
-## Walking-skeleton probe + code-policy pin (process v25 §30)
+## Walking-skeleton probe + code-policy pin (process v25 §30, v27 sharpened)
 When your slice introduces a NEW platform integration mechanism (first
 WebSocket, first CDN behaviour class, first auth flow, first queue — the
 architect's delta names it), your route MUST include an early step driving
 ONE real request through the full deployed path with the REAL client
-technology (a browser for web — node probes bypass CSP, config wiring, and
-event ordering) BEFORE building use cases on top. Schedule the thin early
-deploy it implies. And wherever IAM grants a narrow action set, the writing
-code carries a test pinning it to granted actions (assert command types).
+technology BEFORE building use cases on top, and schedule the thin early
+deploy it implies.
+
+- **"Real client" for a web surface means a REAL BROWSER, never a node probe.**
+  A node `ws`/`fetch` probe runs below the browser's security/transport layer
+  and gives a FALSE GREEN: it bypasses CSP `connect-src`, runtime-config
+  injection ordering (`window.OXO_CONFIG`-style), mixed-content rules, and
+  browser event ordering. Drive the probe through the browser — via Playwright
+  (a committed `tests/skeleton/` spec) or, for exploratory discovery before the
+  spec exists, the Playwright MCP browser. A node-level probe does NOT satisfy
+  this rule for a browser-delivered mechanism.
+- **Discovery → regression.** Use the live browser drive (MCP or scripted
+  Playwright) to DISCOVER what actually breaks end-to-end (console errors,
+  blocked connections, undefined config), then convert each finding into a
+  committed failing spec so it becomes standing regression. The interactive
+  drive finds unknowns; the committed spec keeps them fixed — they are
+  complementary, not redundant.
+- **A defect is not closed until the end-to-end USER symptom is reproduced and
+  pinned** — not just the first true-but-secondary cause. Diagnosis that stops
+  at a real-but-partial bug (e.g. an IAM AccessDenied) without reproducing the
+  user-visible failure will keep re-opening the same defect.
+
+## Wire-on-deploy contract tests (process v27)
+When a deploy/capability step says "the app/engineer wires X" (e.g. pipeline
+writes `/config.js`; `index.html` must reference it before the bundle), land a
+contract test in the SAME slice that FAILS until X is wired — a unit assertion
+on the source (HTML load order), a synth assertion (CSP `connect-src` admits the
+WSS origin). An un-pinned "deploy wires this" hand-off is undetectable until a
+human watches a browser, which is exactly the leak that reaches the tester.
+
+## Code↔policy pin (process v25 §30)
+Wherever IAM grants a NARROW action set on a resource, the writing code carries
+a test pinning it to the granted actions (assert command types; assert no
+ungranted command against that table) — least-privilege and code cannot then
+silently diverge into a prod AccessDenied.

@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, act } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, act, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { JoinScreen } from './JoinScreen';
 import type { ConnectOptions, GameSocket, GameSocketFactory } from './socket';
@@ -101,16 +101,27 @@ describe('JoinScreen — error-frame messages (DEFECT-005-001 Bug B; B2, F3/F4/F
   });
 
   it('falls back to the generic message on a bare close with no prior error frame (real disconnect)', async () => {
-    const m = mockFactory();
-    render(<JoinScreen connect={m.factory} />);
-    await userEvent.type(screen.getByLabelText(/game code/i), 'ABC234');
-    await userEvent.click(screen.getByRole('button', { name: /join/i }));
-    // A real disconnect (e.g. network drop, or the server's DELETE close 1000)
-    // with no preceding error frame degrades to the generic message.
-    act(() => m.opts?.onClose(1006));
-    expect(screen.getByRole('alert')).toHaveTextContent(
-      'Something went wrong. Please try again.',
-    );
+    vi.useFakeTimers();
+    try {
+      const m = mockFactory();
+      render(<JoinScreen connect={m.factory} />);
+      // fireEvent is synchronous — no userEvent timer waits under fake timers.
+      fireEvent.change(screen.getByLabelText(/game code/i), {
+        target: { value: 'ABC234' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /join/i }));
+      // A real disconnect (e.g. network drop, or the server's DELETE close 1000)
+      // with no preceding error frame degrades to the generic message — but only
+      // AFTER the grace window elapses with no error frame arriving (Issue 2).
+      act(() => m.opts?.onClose(1006));
+      expect(screen.queryByRole('alert')).toBeNull();
+      act(() => vi.advanceTimersByTime(300));
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Something went wrong. Please try again.',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('a close AFTER an error frame does not overwrite the specific message', async () => {
@@ -130,6 +141,88 @@ describe('JoinScreen — error-frame messages (DEFECT-005-001 Bug B; B2, F3/F4/F
     act(() => m.opts?.onClose(1000));
     expect(screen.getByRole('alert')).toHaveTextContent(
       'Game not found. Check the code and try again.',
+    );
+  });
+});
+
+// DEFECT-005-001-R2 (Issue 2, CLIENT half — the robust one). The browser can
+// surface the DELETE-driven CLOSE event before the in-flight error MESSAGE
+// event. On a close with NO prior error frame the screen must HOLD a short
+// grace window for an in-flight error frame; if one arrives it wins (specific
+// message), otherwise the generic message renders after the window. An
+// authoritative error frame ALWAYS wins, regardless of ordering.
+describe('JoinScreen — error-frame vs close race grace window (DEFECT-005-001-R2 Issue 2)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function submit() {
+    const m = mockFactory();
+    render(<JoinScreen connect={m.factory} />);
+    // fireEvent is synchronous — no userEvent timer waits under fake timers.
+    fireEvent.change(screen.getByLabelText(/game code/i), {
+      target: { value: 'ABC234' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /join/i }));
+    return m;
+  }
+
+  it('close-then-message-within-grace: the specific error frame still wins', async () => {
+    const m = submit();
+    // Close arrives first (browser surfaced the DELETE before the message).
+    act(() => m.opts?.onClose(1000));
+    // No generic message yet — the grace window is open.
+    expect(screen.queryByRole('alert')).toBeNull();
+    // The in-flight error frame lands inside the grace window.
+    act(() =>
+      m.opts?.onMessage({
+        type: 'error',
+        code: 4041,
+        message: 'This game is no longer available.',
+      }),
+    );
+    // The authoritative error frame wins immediately.
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'This game is no longer available.',
+    );
+    // Even after the grace window elapses, the specific message is NOT replaced
+    // by the generic one.
+    act(() => vi.advanceTimersByTime(300));
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'This game is no longer available.',
+    );
+  });
+
+  it('message-then-close: the specific message is shown and the close never overwrites it', async () => {
+    const m = submit();
+    act(() =>
+      m.opts?.onMessage({
+        type: 'error',
+        code: 4040,
+        message: 'Game not found. Check the code and try again.',
+      }),
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Game not found. Check the code and try again.',
+    );
+    act(() => m.opts?.onClose(1000));
+    act(() => vi.advanceTimersByTime(300));
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Game not found. Check the code and try again.',
+    );
+  });
+
+  it('close-with-no-message: generic message renders only after the grace window', async () => {
+    const m = submit();
+    act(() => m.opts?.onClose(1006));
+    // Within the grace window, nothing is rendered yet.
+    expect(screen.queryByRole('alert')).toBeNull();
+    act(() => vi.advanceTimersByTime(300));
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Something went wrong. Please try again.',
     );
   });
 });

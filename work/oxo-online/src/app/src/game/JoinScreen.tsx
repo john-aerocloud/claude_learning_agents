@@ -1,7 +1,19 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { GameSocket, GameSocketFactory, ServerMessage } from './socket';
 
 const GENERIC_ERROR = 'Something went wrong. Please try again.';
+
+/**
+ * DEFECT-005-001-R2 (Issue 2, client half). The server posts the error MESSAGE
+ * frame then DELETEs the connection; at the browser the DELETE-driven CLOSE
+ * event can beat the in-flight message event. On a close with NO prior error
+ * frame we therefore HOLD a short grace window for an in-flight error frame
+ * before rendering the generic message. An authoritative error frame ALWAYS
+ * wins (it cancels the grace timer and shows the specific message), regardless
+ * of which event the browser surfaces first. The server also drains the frame
+ * before its DELETE — each half is defensible on its own.
+ */
+const CLOSE_GRACE_MS = 300;
 
 /**
  * Maps the defined error codes to readable messages (S3). DEFECT-005-001 Bug B:
@@ -39,12 +51,17 @@ export function JoinScreen({ connect, onGameReady }: JoinScreenProps) {
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const socketRef = useRef<GameSocket | null>(null);
+  const graceTimer = useRef<ReturnType<typeof setTimeout>>();
+
+  // Clear any pending grace timer when the screen unmounts.
+  useEffect(() => () => clearTimeout(graceTimer.current), []);
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     if (connecting) return;
     setConnecting(true);
     setError(null);
+    clearTimeout(graceTimer.current);
     // Track whether the server already reported a specific error (Bug B). The
     // subsequent DELETE-driven close must not overwrite that specific message.
     let errorShown = false;
@@ -53,8 +70,11 @@ export function JoinScreen({ connect, onGameReady }: JoinScreenProps) {
         if (message.type === 'game-ready') {
           onGameReady?.(message);
         } else if (message.type === 'error') {
-          // Bug B: failure arrives as an error MESSAGE frame.
+          // Bug B: failure arrives as an error MESSAGE frame. It is
+          // AUTHORITATIVE — it always wins, even if a close already opened the
+          // grace window (the browser surfaced the close event first).
           errorShown = true;
+          clearTimeout(graceTimer.current);
           setConnecting(false);
           setError(messageForCode(message.code));
           // Code is intentionally retained for retry (F3).
@@ -62,12 +82,16 @@ export function JoinScreen({ connect, onGameReady }: JoinScreenProps) {
       },
       onClose: () => {
         setConnecting(false);
-        // A close with no preceding error frame is a real disconnect — degrade
-        // to the generic message. If an error frame already set a specific
-        // message, keep it (the error frame is authoritative).
-        if (!errorShown) {
-          setError(GENERIC_ERROR);
-        }
+        // A close with no preceding error frame MIGHT be a real disconnect, or
+        // it might be the DELETE-driven close racing ahead of an in-flight error
+        // frame (Issue 2). Hold a short grace window: if an error frame arrives
+        // it wins (handled above); otherwise render the generic message once the
+        // window elapses. If a specific message is already shown, do nothing.
+        if (errorShown) return;
+        clearTimeout(graceTimer.current);
+        graceTimer.current = setTimeout(() => {
+          if (!errorShown) setError(GENERIC_ERROR);
+        }, CLOSE_GRACE_MS);
         // Code is intentionally retained for retry (F3).
       },
     });

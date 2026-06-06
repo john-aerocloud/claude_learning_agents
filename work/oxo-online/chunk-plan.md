@@ -30,7 +30,7 @@ and marks actuals when a slice is delivered.
 **Job served:**
 When my friend and I decide to play, I want the game to just work in a browser with
 no install, no sign-up friction, and consistent uptime, so that the barrier to
-starting a game is as close to zero as possible. (Ambient job — availability.)
+starting a game is as close to zero as possible. (Ambient job — availability.) **[SECONDARY]**
 
 **Done condition:** A real HTTPS URL returns the React SPA with a valid TLS
 certificate; the GitHub Actions pipeline deploys on push to main without manual
@@ -52,7 +52,7 @@ steps; no long-lived AWS credentials exist in CI.
 When I want to play noughts and crosses with someone next to me, I want to open
 the URL and take turns clicking squares on the same device, so that we can play a
 complete game and find out who won. (Core job — playing against a real human,
-functional core.)
+functional core.) **[CORE]**
 
 **Done condition:** Two people on one browser can play a complete game of noughts
 and crosses — moves alternate, win and draw are detected, result is shown, and
@@ -74,7 +74,7 @@ and crosses — moves alternate, win and draw are detected, result is shown, and
 When I want a quick game but no friend is available right now, I want to open the
 URL and play immediately against a computer opponent that provides a genuine
 challenge, so that I can get the satisfaction of a competitive game on my own
-schedule. (Supporting job — solo challenge without friction.)
+schedule. (Supporting job — solo challenge without friction.) **[SECONDARY]**
 
 **Done condition:** A "vs Computer" mode is available at the live URL; the AI is
 unbeatable (minimax, no X-win path exists in the full game tree); AI responds in
@@ -96,7 +96,7 @@ unbeatable (minimax, no X-win path exists in the full game tree); AI responds in
 When I want to challenge a specific friend to a game, I want to create a game
 session, share a code, have my friend join, and play moves in real time between
 two browsers, so that we get the genuine satisfaction of competing against each
-other remotely. (Core job — playing against a real human, full job.)
+other remotely. (Core job — playing against a real human, full job.) **[CORE]**
 
 **Done condition:** Two players in separate browsers can complete a full game: host
 creates a game and shares a code; joiner enters the code and joins; moves made in
@@ -253,7 +253,7 @@ coordination friction for the core job.
 **Job served:**
 When I have played one or more games, I want to see how I rank against other
 players, so that I feel a reason to come back and improve my record, and I can
-show others my standing. (Supporting job — motivation through standing.)
+show others my standing. (Supporting job — motivation through standing.) **[SECONDARY]**
 
 **Done condition:** The title screen shows a leaderboard of win/draw/loss
 standings; after a completed game the board updates within 10 seconds; it loads
@@ -284,7 +284,7 @@ reflects the result within 10 seconds. This is the done-condition proof for C5.
 **Job served:**
 When I have played games, I want my display name to appear on the leaderboard and
 in the game, so that the social dimension of standing feels personal rather than
-anonymous. (Supporting job — motivation through standing, social dimension.)
+anonymous. (Supporting job — motivation through standing, social dimension.) **[SECONDARY]**
 
 **Done condition:** A player can enter a display name before or at game creation;
 the name persists for the session; it appears on the leaderboard and is visible to
@@ -311,7 +311,7 @@ instead of anonymous identifiers.
 When I am playing a game with a friend or stranger, I want to exchange short
 messages during the game, so that the match feels like a shared social experience
 rather than two people silently clicking. (Supporting job — connection through
-banter.)
+banter.) **[SECONDARY]**
 
 **Done condition:** During an active game both players can send and receive short
 text messages; messages appear within 1 second (p95); chat is scoped to the game

@@ -10,7 +10,15 @@ stopped:
 
 ## Job(s) to Be Done (product vision)
 
-### Core job — playing against a real human
+<!-- Classification: CORE = the reason this product exists; SECONDARY = supporting / nice-to-have.
+     Next-work selection ranks core-job items above secondary-job items.
+     Revisit only when the product vision changes, not per slice. -->
+
+### [CORE] Playing against a real human
+**Classification: CORE** — This is the product's sole reason for existing. A
+real-time multiplayer noughts and crosses game between two people online is the
+stated goal; without this job the product does not exist.
+
 When I want a quick, low-friction competitive game with a friend (or any
 available opponent), I want to set up or join a noughts and crosses match
 and play it to completion in real time, so that I get the genuine satisfaction
@@ -20,7 +28,10 @@ Functional dimension: find an opponent, make moves in turn, see the result.
 Social dimension: I can share a game link or code with someone and we play
 together, which makes the game feel meaningful rather than solitary.
 
-### Supporting job — motivation through standing
+### [SECONDARY] Motivation through standing
+**Classification: SECONDARY** — The leaderboard adds retention and replayability
+but the game is fully functional without it. Players come to play, not to rank.
+
 When I have played one or more games, I want to see how I rank against other
 players, so that I feel a reason to come back and improve my record, and so
 I can show others my standing.
@@ -28,7 +39,11 @@ I can show others my standing.
 Emotional dimension: seeing my name on a leaderboard converts an ephemeral game
 into an ongoing identity within the product.
 
-### Supporting job — solo challenge without friction
+### [SECONDARY] Solo challenge without friction
+**Classification: SECONDARY** — The product is explicitly multiplayer; the AI
+opponent is a fallback convenience for when no human is available. It does not
+deliver the core social satisfaction the product is built around.
+
 When I want a quick game but no friend is available right now, I want to play
 against a computer opponent that provides a genuine challenge, so I can still
 get the satisfaction of a competitive game on my own schedule.
@@ -36,7 +51,11 @@ get the satisfaction of a competitive game on my own schedule.
 Functional dimension: play starts immediately with no coordination required.
 Emotional dimension: an unbeatable opponent means every draw feels earned.
 
-### Supporting job — connection through banter
+### [SECONDARY] Connection through banter
+**Classification: SECONDARY** — In-game chat enriches the social experience but
+the core job (playing a match to completion) is entirely achievable without it.
+It is a differentiation feature, not a foundation.
+
 When I am playing a game with a friend or stranger, I want to exchange short
 messages during the game, so that the match feels like a shared social
 experience rather than two people silently clicking.
@@ -44,7 +63,11 @@ experience rather than two people silently clicking.
 Social dimension: chat converts a mechanical game into a conversation — it is
 what separates playing *with* someone from playing *at* them.
 
-### Ambient job — reliable, always-on availability
+### [SECONDARY] Reliable, always-on availability
+**Classification: SECONDARY** — Availability is a non-functional quality that
+enables all other jobs; it is not itself a job users come for. It would be
+CORE-blocking if violated but is not the product's reason for existing.
+
 When my friend and I decide to play, I want the game to just work in a browser
 with no install, no sign-up friction that blocks play, and consistent uptime,
 so that the barrier to starting a game is as close to zero as possible.

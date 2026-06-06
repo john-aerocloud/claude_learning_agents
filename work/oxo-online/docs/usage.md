@@ -5,13 +5,14 @@
 oxo-online is a noughts and crosses (tic-tac-toe) game that runs in a web
 browser. You can play locally against another person on the same device, play
 solo against an unbeatable computer opponent, or start an online game and
-receive a shareable 6-character code to give to a friend. The game detects
+share a 6-character code so a friend can join from their own device. Both
+players see the board together and know their role (X or O). The game detects
 wins and draws, locks the board when the game ends, and lets you start a new
 game without refreshing the page.
 
-**Not yet available:** a second player joining by code (the join flow ships in
-slice 005), move relay between players in real time, player accounts, score
-tracking across sessions, and in-game chat.
+**Not yet available:** move relay between players (clicking squares has no
+effect in the online mode — that ships in slice 006), player accounts, score
+tracking across sessions, share-link URL pre-fill, and in-game chat.
 
 ---
 
@@ -35,7 +36,7 @@ Three options appear on the mode selector at the top of the screen:
   clicking squares.
 - **vs Computer** — you play as X; the computer plays as O automatically.
 - **Play Online** — creates a game on the server and shows you a code to share
-  with a friend. The friend cannot join yet (that is slice 005).
+  with a friend; the friend joins from their own browser using the code.
 
 Click the option you want. The board resets and "X's turn" is shown.
 
@@ -66,7 +67,7 @@ The same rules apply, with these differences:
 
 ---
 
-## Play Online — starting a game
+## Play Online — starting a game (host)
 
 1. Click **Play Online** on the mode selector.
 2. A loading spinner appears while the game is created on the server (shown
@@ -75,7 +76,8 @@ The same rules apply, with these differences:
    **6-character game code** (uppercase letters and digits, no ambiguous
    characters such as O, 0, 1, I, or L — example: `GZU3U2`).
 4. Share the code with your friend by any means (copy and paste it manually).
-5. The friend cannot join yet — joining by code ships in slice 005.
+5. Wait on the waiting screen. When your friend joins, both screens
+   automatically transition to the game board.
 
 **If the backend is unavailable:** the UI displays "Could not start online game
 — please try again". The mode selector remains usable and no page reload is
@@ -83,15 +85,59 @@ needed. The browser will not show a blank white screen.
 
 ---
 
+## Play Online — joining a game (second player)
+
+1. Ask the host for their 6-character game code.
+2. Click **Play Online** on the mode selector, then choose **Join a game**.
+3. Enter the 6-character code and click **Join**.
+4. Within 3 seconds both players see the game board. The host is **X**; the
+   joiner is **O**. Each player's screen shows "You are X" or "You are O".
+5. The board is visible but squares cannot be clicked yet — move relay ships
+   in slice 006. A status line reads "Game active — moves coming in the next
+   update".
+
+**Error messages you may see on the join screen:**
+
+| Message | Meaning |
+|---------|---------|
+| "Game not found. Check the code and try again." | The code does not match any active game. Check for typos; the host's code is 6 characters. |
+| "This game is no longer available." | The game already has two players, or has ended. Ask the host to create a new game. |
+| "Something went wrong. Please try again." | An unexpected server error occurred. Try again; if the problem persists the service may be briefly unavailable. |
+
+---
+
 ## Example session — Play Online
 
 ```
-User clicks "Play Online"
+Host clicks "Play Online"
   → spinner briefly (if server takes >500 ms)
   → "Waiting for opponent"
      Game code: GZU3U2
-     (share this code with your friend)
+
+Friend clicks "Play Online" → "Join a game"
+  → enters GZU3U2 → clicks Join
+  → "connecting..."
+
+Both screens → game board (within 3 seconds of join)
+  Host:  "You are X — Game active — moves coming in the next update"
+  Guest: "You are O — Game active — moves coming in the next update"
 ```
+
+---
+
+## Known limitations (online mode)
+
+- **Reload loses the session.** If either player reloads the page they lose
+  their WebSocket connection and cannot reconnect to the same game. Both
+  players must create/join a fresh game. Reconnection is not in scope for
+  this release.
+- **Moves do not relay.** Clicking squares has no effect in online mode.
+  Move relay ships in slice 006.
+- **Games expire silently.** DynamoDB TTL removes games after 24 hours and
+  WebSocket connections after 2 hours. There is no UI countdown or
+  notification.
+- **Code sharing is manual.** There is no share-link URL pre-fill; copy the
+  code yourself. Share-link UX is planned for slice 008.
 
 ---
 
@@ -154,18 +200,20 @@ live CloudFront URL. They require network access to production.
 Pushing to `main` with changes under `work/oxo-online/src/` triggers two
 GitHub Actions pipelines automatically:
 
-- **infra-oxo-online.yml** — triggered on changes to `src/infra/**`. Runs CDK
-  deploy for `OxoGameProd` (Lambda + DynamoDB + HTTP API) first, then
-  `OxoOnlineProd` (CloudFront + S3) second. The order is mandatory — see
-  `work/oxo-online/src/infra/STACK_ORDER.md`.
+- **infra-oxo-online.yml** — triggered on changes to `src/infra/**` or
+  `src/lambda/**`. Builds the CDK app and all Lambda code, then deploys
+  `OxoGameProd` (both Lambdas + DynamoDB + HTTP API + WebSocket API) first,
+  then `OxoOnlineProd` (CloudFront + S3) second. The order is mandatory — see
+  `work/oxo-online/src/infra/STACK_ORDER.md`. After deploying, writes the
+  WebSocket URL into `/config.js` on S3 so the SPA can connect to the right
+  endpoint.
 
-- **deploy-oxo-online.yml** — triggered on changes to `src/app/**` or
-  `src/lambda/**`. Builds and syncs the SPA to S3, issues a CloudFront
-  invalidation, and (when `src/lambda/**` changed) hot-swaps the Lambda code
-  via `aws lambda update-function-code`.
+- **deploy-oxo-online.yml** — triggered on changes to `src/app/**` only.
+  Builds and syncs the SPA to S3, issues a CloudFront invalidation (waits for
+  completion), and writes `/config.js`. Lambda code is deployed exclusively
+  by the infra pipeline (CDK `fromAsset`) — not by this pipeline.
 
-Both pipelines use GitHub OIDC (no static AWS keys). The GitHub Actions
-variable `OXO_ONLINE_LAMBDA_FUNCTION_NAME` must be set to `oxo-game-fn`.
+Both pipelines use GitHub OIDC (no static AWS keys).
 
 ### OIDC stack (one-time manual)
 
@@ -185,8 +233,11 @@ pipeline can update Lambda code.
 
 ## Known limitations
 
-- A friend cannot join an online game by code yet (slice 005).
+- **Online mode — moves do not relay** (slice 006). The board is visible but
+  clicking squares has no effect in online mode.
+- **Online mode — no reconnect.** Reloading the page loses the session; start
+  a new game.
+- **Online mode — silent expiry.** Games expire after 24 hours; WebSocket
+  connections expire after 2 hours. No UI notification is shown.
 - Mobile layout is functional but not optimised for small screens.
 - There is no undo, no move history, and no score tally across sessions.
-- Games expire after 24 hours (DynamoDB TTL). There is no UI notification when
-  a game has expired.

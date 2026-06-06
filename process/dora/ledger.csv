@@ -254,3 +254,4 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-06T15:00:36Z,oxo-online,6,005-join-game,documenter,task_start,,na,ff06b15,Documenter writing usage.md + first runbook for slice 005-join-game
 2026-06-06T15:03:14Z,oxo-online,6,005-join-game,documenter,task_end,420,success,ff06b15,"usage.md updated (join flow, stale claims removed); runbook.md created (first edition, 8 sections)"
 2026-06-06T15:03:22Z,oxo-online,6,005-join-game,orchestrator,gate,,success,RETRO-S005,retro v25: walking-skeleton probe + code-policy contract; IMP-004/005 queued; full scoring in v24 snapshot
+2026-06-06T15:10:05Z,oxo-online,6,005-join-game,orchestrator,gate,,success,PROCESS-REFACTOR-V26,Process v25->v26 refactor: stage-based restructure; agent-specific rules routed to agent defs; one current baseline; obligations preserved

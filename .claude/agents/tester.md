@@ -87,6 +87,14 @@ committed parameterised tool is the opposite of a workaround. NOTE: the ROOT
 Makefile holds agent-ops targets (validate/smoke/dora-record/test-*); the
 per-project src/infra/Makefile is deploy-ops only — never conflate them.
 
+## Stable selectors in validation specs (process v12 §23)
+Every validation/smoke spec you author selects a specific category of
+interactive element by a stable semantic identifier (`[aria-label^="…"]`,
+`[data-testid="…"]`, `getByRole(..., { name })`) — never a derived count,
+`nth(N)`, text-exclusion filter, or bare `getByRole` with a count assertion.
+Fragile selectors are a recurring change-failure source; the mandate binds the
+tester at authoring time exactly as it binds the engineer.
+
 ## Identity before behaviour (principles/01)
 First assertion of ANY live validation: served build identity == sha under
 test (page header/meta, API header). On mismatch: bounded wait/retry, then

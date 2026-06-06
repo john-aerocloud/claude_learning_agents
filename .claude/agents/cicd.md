@@ -30,9 +30,76 @@ All projects live under `work/<project>/`. Each project gets its own workflow:
   parallel deploys of different projects don't block each other.
 - **Artifact names:** prefix with the project name (e.g. `oxo-online-spa-build`).
 
-When creating a workflow for a new project, copy
-`.github/workflows/deploy-oxo-online.yml` as the template and substitute the
-project name and its specific deploy steps (S3+CloudFront, Lambda, etc.).
+When creating a workflow for a new project, copy an existing project's
+`deploy-<project>.yml` as the template and substitute the project name and its
+specific deploy steps (S3+CloudFront, Lambda, etc.).
+
+## Two-pipeline structure (cloud/hosted default)
+For every cloud/hosted project, produce TWO separate pipelines from the start:
+
+| Pipeline | File | Trigger | Role | Does |
+|----------|------|---------|------|------|
+| App deploy | `deploy-<project>.yml` | `src/app/**` | minimal OIDC role | Build → S3 sync → CDN invalidation |
+| Infra deploy | `infra-<project>.yml` | `src/infra/**` | CDK-capable OIDC role | CDK diff (PR) + CDK deploy (main) |
+
+Always create TWO OIDC roles:
+- App role: S3 + CloudFront only (no IAM, no CloudFormation).
+- Infra role: can assume CDK bootstrap roles; requires `cdk bootstrap --trust <account>`.
+
+## Pipeline pre-flight checklist (work it before first push)
+Before writing or pushing a cloud/hosted pipeline for the first time, work this
+checklist — each item is a failure mode observed in practice:
+
+**GitHub Actions + AWS OIDC:**
+- [ ] OIDC trust policy uses `StringLike` for `sub` (not `StringEquals`) to
+      tolerate ref-format variations across trigger types.
+- [ ] No env vars use the `GITHUB_` prefix — it is reserved; GitHub silently
+      drops them. Use `GH_` or a project prefix instead.
+- [ ] All required secrets/variables are documented; pipeline fails fast if any
+      are absent (see fail-fast step below).
+- [ ] `environment: production` gate is intentional — omit if no approval queue
+      is wanted (it pauses the job indefinitely awaiting a reviewer).
+
+**CDK:**
+- [ ] `cdk.json` exists with `"app": "npx ts-node --prefer-ts-exts bin/app.ts"`.
+- [ ] `ts-node` is in `devDependencies`.
+- [ ] CDK bootstrap has been run with `--trust <account-id>` for the infra role.
+- [ ] `githubOrg` / `githubRepo` are passed as `-c` context flags on the command
+      line, not as env vars (reserved-prefix issue above).
+- [ ] CDK infra deploy uses the infra role, not the app role.
+- [ ] Any build artifact CDK `fromAsset()` needs at synth time (e.g. Lambda
+      `dist/`) is gitignored — the workflow must build it before synth, and the
+      source path must be in the workflow's path trigger.
+- [ ] Stacks linked by `CfnOutput` exports deploy **sequentially** (separate
+      workflow steps), never as one `cdk deploy A B` batch — CDK batch deploys
+      concurrently and the export does not exist on first deploy.
+
+**Runner environment:**
+- [ ] Each job that runs tests/tools installs its own dependencies — but beware
+      `npm ci` with a lock file generated on a different platform (macOS/arm64
+      lock may exclude linux-x64 optional native deps); use `npm install` for
+      that job or regenerate the lock on linux.
+- [ ] Node.js action versions are pinned to a version supporting the current
+      runner Node.js (set `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true` until action
+      maintainers catch up).
+- [ ] CI test steps invoke `vitest run` (or `--run`) explicitly — a bare
+      `npm test` mapped to watch mode hangs the job.
+
+## Pipeline fail-fast config validation
+Every cloud/hosted pipeline includes a validation step as the FIRST step of
+every job that uses secrets or variables:
+
+```yaml
+- name: Validate required config
+  run: |
+    missing=""
+    [ -z "${{ secrets.MY_SECRET }}" ] && missing="$missing MY_SECRET"
+    [ -z "${{ vars.MY_VAR }}" ]   && missing="$missing MY_VAR"
+    if [ -n "$missing" ]; then
+      echo "Missing required config:$missing"
+      exit 1
+    fi
+```
 
 ## AWS authentication
 When any AWS CLI, CDK, or IaC operation is required:

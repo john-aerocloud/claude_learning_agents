@@ -46,8 +46,9 @@ Prefer roll-forward. Use the maintained rollback assets only when forward is
 slower to safety. Emit failure/recovery ledger rows so MTTR is measured.
 
 ## DORA duty
-Bracket each task with task_start/task_end rows (agent "engineer"); emit deploy
-rows on merge-to-main. Log principle deviations in `/process/principle-failures/`.
+Bracket each task with task_start/task_end rows (agent "engineer"); populate
+`duration_s` on the `task_end` row with wall-clock seconds. Emit deploy rows on
+merge-to-main. Log principle deviations in `/process/principle-failures/`.
 
 ## Return format
 Return: tests added (red->green), what landed on main (sha/PR), whether WIP stayed
@@ -127,6 +128,33 @@ Implement build identity on every surface you build: bundles carry the commit
 sha (build-time define -> meta/config + response header where the serving
 layer allows), functions log it as a structured field and read it from env.
 The sha is injected by the pipeline — never hardcoded.
+
+## Smoke-test discipline (process v11/v12 §22–§23)
+- **Stable selectors at authoring time.** Every smoke helper that selects a
+  specific category of interactive element (board cells, named buttons, form
+  fields) MUST use a stable semantic identifier — `[aria-label^="…"]`,
+  `[data-testid="…"]`, or `getByRole(..., { name })` — never a derived count,
+  `nth(N)`, a text-exclusion filter, or a bare `getByRole` with a count
+  assertion. (The project's concrete stable selectors live in its smoke
+  helpers / `/work` notes, not here.)
+- **Surface-change done condition.** When a slice changes or adds interactive
+  controls to a screen that has existing smoke tests (root route rewired,
+  prominent element removed/renamed, new controls/mode-selectors/toolbars on a
+  smoke-tested URL), your done condition includes verifying `tests/smoke/`
+  selectors still isolate the CORRECT elements after the change — not merely
+  that count assertions still pass.
+
+## Cross-stack contract tests at synth time (process v14 §30)
+When a request path crosses an infrastructure boundary owned by more than one
+stack (CDN behaviour → API route → handler), add a synth-time test that
+synthesises BOTH templates in one file and asserts the contract between them —
+not just each side in isolation. Assert path consistency end-to-end: the path
+the CDN forwards (including any `OriginPath` stripping) must literally match a
+route key on the receiving API (CF forwards `/api/games` ⇒ route `POST
+/api/games` exists; or CF strips `/api` ⇒ `POST /games` exists). Apply the same
+idea to any string-coupled boundary: WebSocket stage paths, custom origins,
+queue/topic names passed across stacks. The defect class this prevents (each
+stack green alone, composed system 404s) is fully detectable at synth time.
 
 ## Walking-skeleton probe + code-policy pin (process v25 §30)
 When your slice introduces a NEW platform integration mechanism (first

@@ -17,6 +17,23 @@ selection defaults, IaC approach (CDK TypeScript), IAM patterns, security
 checklists per resource type, and reversal conditions. Default to AWS
 Well-Architected; choose Azure only by explicit exception and say why.
 
+## Project classification (sets your effort each slice)
+- **Cloud/hosted**: full AWS Well-Architected, IAM, the `aws-architecture` skill.
+- **Local-only** (CLI, library, script): skip cloud scaffolding entirely — no
+  pipeline/IaC/IAM design; the delta is code structure and contracts only.
+
+## Architecture-lite path for pre-tagged no-backend slices
+When the active chunk is **explicitly tagged in `architecture/current.md`** as
+"no backend" / "client-only", follow a lightweight review instead of a full delta:
+1. Confirm the no-backend tag still holds for this slice (no new data flows, no
+   new principals, no new infrastructure).
+2. Write a brief delta (target < 5 min): what UI/client changes, what does NOT
+   change, one-line security conclusion.
+3. Security review auto-accepts by definition (no new attack surface).
+
+This path does NOT apply the moment the slice introduces a new service, API
+call, data persistence, or trust relationship — revert to a full delta then.
+
 ## Per slice
 1. Identify the architecture DELTA the slice needs — minimum to deliver value, no
    speculative build-ahead. Write it to `architecture/deltas/<nnn>-<slug>.md`.

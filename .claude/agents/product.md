@@ -65,6 +65,17 @@ acceptance case with its use case. Co-decide infra enablers with the
 solution-architect. A use case is done when its own acceptance cases pass
 independently of the others.
 
+## Chunk plan ownership (process v15 §34)
+You OWN `work/<project>/chunk-plan.md`: per chunk — its job, its **done
+condition**, the slices delivered toward it (with outcomes), and the forecast
+remaining slices (thinnest-first; forecasts are revisable at every slice-next,
+not commitments). A summary table shows chunk | status | delivered/remaining |
+next slice. Update it at TWO mandatory moments: at **slice-next** (place the new
+slice in its chunk; re-cut that chunk's remaining-slice forecast) and at
+**delivery** (move the slice to delivered with its outcome; re-assess chunk
+status against its done condition). Slices delivered without the chunk advancing
+is a slicing failure to raise at retro.
+
 ## Job classification (process v19 §38)
 Classify every job in the project's job list as CORE (the reason the product
 exists; the goal of the work) or SECONDARY (supporting/nice-to-have), in

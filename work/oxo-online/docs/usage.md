@@ -239,5 +239,10 @@ pipeline can update Lambda code.
   a new game.
 - **Online mode — silent expiry.** Games expire after 24 hours; WebSocket
   connections expire after 2 hours. No UI notification is shown.
+- **Rate limiting on game creation.** A WAF rate rule limits POST /api/games to
+  100 requests per 5 minutes per IP. If exceeded, the server returns HTTP 429
+  and the UI shows "Could not start online game — please try again". Wait a few
+  minutes and try again. This limit only applies to the game-creation step; the
+  WebSocket (join/play) connection is separate.
 - Mobile layout is functional but not optimised for small screens.
 - There is no undo, no move history, and no score tally across sessions.

@@ -1,7 +1,7 @@
 # oxo-online — Support Runbook
 
 Audience: on-call engineers and support team.
-Last updated: slice 005-join-game (iteration 6, sha ff06b15, validated 2026-06-06T14:57Z).
+Last updated: slice s005-h1-waf (iteration 7, sha e523948, validated 2026-06-06T17:43Z).
 
 ---
 
@@ -69,14 +69,19 @@ Outputs present at slice 005: `HttpApiEndpoint`, `LambdaFunctionName`,
 ```
 Browser
   |
-  +-- HTTPS --> CloudFront d3pf3kcvzpau1x
+  +-- HTTPS --> WAFv2 ACL oxo-online-cf-global (us-east-1, CLOUDFRONT scope)
+  |               | rate rule: 100 req/300s/IP -> HTTP 429
+  |               | IP-reputation group       -> 403 (CF masks to 200+SPA; see §8)
+  |               v
+  |             CloudFront d3pf3kcvzpau1x
   |               |-- /             --> S3 (SPA bundle, index.html)
   |               |-- /config.js    --> S3 (window.OXO_CONFIG, no-cache)
   |               `-- /api/*        --> HTTP API (CachingDisabled)
   |                                     POST /api/games -> oxo-game-fn
   |
-  `-- WSS direct (not via CloudFront)
+  `-- WSS direct (not via CloudFront, NO WAF)
         wss://ylbzjuo8lf.execute-api.eu-west-2.amazonaws.com/prod
+          Interim flood control: stage throttle rate=20/s burst=40 (account-level)
           $connect   -> oxo-ws-fn
           register   -> oxo-ws-fn
           join       -> oxo-ws-fn
@@ -94,7 +99,8 @@ Browser
 | Lambda — ws | oxo-ws-fn | connect/register/join/$disconnect; DynamoDB r/w Games+Connections; ManageConnections |
 | DynamoDB — games | oxo-games | PK: gameId; GSI: code-index (PK: code); 24h TTL; SSE enabled; on-demand |
 | DynamoDB — connections | oxo-connections | PK: connectionId; 2h TTL; SSE enabled; on-demand |
-| CloudFormation stacks | OxoOnlineOidcStack, OxoGameProd, OxoOnlineProd | Deploy order: OxoGameProd then OxoOnlineProd |
+| WAFv2 WebACL — global | oxo-online-cf-global (us-east-1) | CLOUDFRONT scope; associated to d3pf3kcvzpau1x; rate rule 100/300s/IP (Block=429); IP-rep managed group |
+| CloudFormation stacks | OxoOnlineOidcStack, OxoOnlineWafUsEast1, OxoGameProd, OxoOnlineProd | Deploy order: WafUsEast1 -> OxoGameProd -> OxoOnlineProd |
 | S3 bucket | see `WebBucketName` GH var | Versioning on; SPA + config.js |
 | Log group — game fn | /aws/lambda/oxo-game-fn | No structured categories yet (OI-18) |
 | Log group — ws fn | /aws/lambda/oxo-ws-fn | Structured JSON events (see §4) |
@@ -118,8 +124,22 @@ The deploy pipeline does not touch Lambda code (OI-24 resolved).
 # Smoke suite (38 tests; runs against live CloudFront URL)
 make -C work/oxo-online smoke
 
-# Validation suite (14 tests; requires AWS credentials + live stack)
+# Validation suite (18 tests; requires AWS credentials + live stack)
 make -C work/oxo-online validate
+
+# WAF ACL — confirm global ACL is present and has expected ARN
+aws wafv2 list-web-acls --scope CLOUDFRONT --region us-east-1 \
+  --query 'WebACLs[?Name==`oxo-online-cf-global`].{Name:Name,ARN:ARN}'
+
+# WAF ACL — confirm associated to CloudFront distribution
+aws cloudfront get-distribution-config --id E519HYABC57ZX \
+  --query 'DistributionConfig.WebACLId'
+
+# WAF build identity — tags must show Project=oxo-online, Env=prod, ManagedBy=cdk
+aws wafv2 list-tags-for-resource \
+  --resource-arn "$(aws wafv2 list-web-acls --scope CLOUDFRONT --region us-east-1 \
+    --query 'WebACLs[?Name==`oxo-online-cf-global`].ARN' --output text)" \
+  --region us-east-1
 
 # Lambda reserved concurrency (must be 15 for oxo-ws-fn)
 aws lambda get-function-concurrency --function-name oxo-ws-fn
@@ -258,11 +278,69 @@ the CF invalidation may still be propagating (the pipeline now waits for
 completion, but propagation can take a few minutes globally). Ask the user to
 hard-refresh (Ctrl+Shift+R / Cmd+Shift+R).
 
+### Client receives HTTP 429 from POST /api/games
+
+The CloudFront WAF rate rule (100 req/300s per source IP) is firing. This is
+intentional behaviour, not a defect.
+
+1. The 429 status is returned by WAFv2 — Lambda is NOT invoked. The response
+   body is the WAF custom block body, not a JSON API response.
+2. The rate window is 300 seconds (5 minutes). After the window expires, the
+   client's IP is automatically unblocked. No manual action is needed.
+3. If a legitimate client is being blocked (false positive), verify via WAF
+   sampled-requests:
+   ```bash
+   aws wafv2 get-sampled-requests \
+     --web-acl-arn "$(aws wafv2 list-web-acls --scope CLOUDFRONT --region us-east-1 \
+       --query 'WebACLs[?Name==`oxo-online-cf-global`].ARN' --output text)" \
+     --rule-metric-name oxo-cf-rate-limit \
+     --scope CLOUDFRONT \
+     --time-window StartTime=$(date -u -v-5M +%Y-%m-%dT%H:%M:%SZ),EndTime=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+     --max-items 100 \
+     --region us-east-1
+   ```
+4. To raise the threshold temporarily (first response before full rollback):
+   push a CDK change to increase the rate rule limit in `waf-us-east-1-stack.ts`
+   and redeploy the WAF stack. Full disassociation is the nuclear rollback (see §8).
+
+### SPA HTML returned instead of API JSON
+
+If a POST to `/api/games` (or any `/api/*` path) returns HTTP 200 with an HTML
+body instead of a JSON API response, the likely cause is the WAF
+IP-reputation managed-rule-group blocking the request. CloudFront's
+`CustomErrorResponses` maps 403 to 200+SPA index.html — this masks reputation
+blocks at the HTTP level.
+
+1. Check WAF sampled-requests for BLOCK actions from the `AWSManagedRulesAmazonIpReputationList` rule:
+   ```bash
+   aws wafv2 get-sampled-requests \
+     --web-acl-arn "$(aws wafv2 list-web-acls --scope CLOUDFRONT --region us-east-1 \
+       --query 'WebACLs[?Name==`oxo-online-cf-global`].ARN' --output text)" \
+     --rule-metric-name AWSManagedRulesAmazonIpReputationList \
+     --scope CLOUDFRONT \
+     --time-window StartTime=$(date -u -v-5M +%Y-%m-%dT%H:%M:%SZ),EndTime=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+     --max-items 100 \
+     --region us-east-1
+   ```
+2. Check CloudWatch metric `BlockedRequests` (WebACL=oxo-online-cf-global,
+   Rule=AWSManagedRulesAmazonIpReputationList) for recent block count.
+3. If the source IP appears legitimate (e.g. an office egress IP mis-classified
+   by the managed group), raise an AWS support case to reclassify the IP, or
+   add an IP-set override rule (priority 0, allow) to exempt the specific IP.
+
+Note: this is a documented residual. Reputation-group 403 blocks are
+CloudWatch-observable only; they are not visible as HTTP 4xx to the client.
+Rate-rule blocks are HTTP-observable as 429.
+
 ### WebSocket floods / unexpected cost spike
 
-oxo-ws-fn has `ReservedConcurrentExecutions: 15` and the API Gateway throttle
-is 20 requests/second burst 40. These are the only rate controls in place.
-**WAF is not enabled** (deferred hardening slice h1).
+The WS endpoint has NO WAF (WAFv2 cannot associate with API Gateway v2; this
+is a platform constraint — see s005-h1-waf architecture/deltas). Controls in
+place are:
+- API Gateway prod stage: default-route throttle rate=20/s, burst=40
+  (account/stage level; NOT per-IP)
+- oxo-ws-fn: `ReservedConcurrentExecutions: 15`
+- Per-IP WS rate-limiting is deferred to s005-h2 ($connect authorizer).
 
 If a cost spike is observed:
 1. Check oxo-ws-fn CloudWatch metrics (`ConcurrentExecutions`, `Invocations`)
@@ -270,7 +348,7 @@ If a cost spike is observed:
 2. If the concurrency ceiling is being hit, Lambda will throttle (return 429
    to API Gateway). This presents as connection failures in the client.
 3. Mitigation today: increase reserved concurrency temporarily via the console
-   (or push a CDK change). WAF rate-based rules are the permanent fix (h1).
+   (or push a CDK change). Per-IP WS blocking ships with s005-h2.
 
 ### POST /api/games returning 5xx
 
@@ -287,6 +365,13 @@ If a cost spike is observed:
 **Roll-forward is the default posture.** There is no Lambda versioning (OI-6
 open). Push a corrected commit to `main`; the pipeline overwrites the Lambda
 code.
+
+**WAF rollback (CloudFront ACL):** if the rate rule is causing false-positive
+blocks, the cheapest first response is to raise the threshold in CDK and push.
+If the entire WAF must be removed urgently:
+1. Remove the `webAclId` property from the CloudFront distribution in
+   `OxoOnlineProd` CDK code and push — the distribution stops consulting the ACL.
+2. Optionally destroy `OxoOnlineWafUsEast1` to remove the WebACL from us-east-1.
 
 **SPA rollback** (if needed before a fix is ready):
 ```bash
@@ -322,17 +407,148 @@ The `Games` table uses `RemovalPolicy.RETAIN`.
 
 ---
 
-## 8. Known gaps (honest)
+---
+
+## 8. WAF — AWS WAFv2 (s005-h1-waf)
+
+### What is in place
+
+**Global ACL: `oxo-online-cf-global`**
+- Scope: CLOUDFRONT; region: us-east-1
+- Associated to CloudFront distribution `E519HYABC57ZX`
+- Rules (in priority order):
+  1. `AWSManagedRulesAmazonIpReputationList` (priority 0) — blocks known
+     malicious IPs. Block action returns 403. CloudFront's CustomErrorResponses
+     maps 403 → 200+SPA index.html (see residual below).
+  2. Rate rule (priority 1, metric: `oxo-cf-rate-limit`) — 100 requests per
+     300-second window per source IP. Block action returns **HTTP 429** (Too
+     Many Requests). 429 is NOT in the CF CustomErrorResponses list and passes
+     through to the client honestly.
+- Default action: Allow (legitimate traffic is never default-denied).
+- Build identity: tags `Project=oxo-online, Env=prod, ManagedBy=cdk` on the
+  WebACL resource; CDK stack `OxoOnlineWafUsEast1` in us-east-1.
+
+**WS endpoint: NO WAF**
+
+WAFv2 REGIONAL WebACLs cannot associate with API Gateway v2 (HTTP or
+WebSocket) APIs. This is an AWS platform constraint (valid association targets
+are REST v1 stages, ALB, AppSync, Cognito user pools, App Runner, and Verified
+Access only). The planned regional WS WebACL was rejected at deploy
+(GATE-AMEND-H1-A, 2026-06-06). Per-IP WS rate-limiting is deferred to
+s005-h2 ($connect authorizer). Interim WS flood control: API Gateway prod
+stage default-route throttle (rate=20/s, burst=40, account-level, NOT per-IP).
+
+### Build identity — how to confirm WAF version
+
+The WAF ACL carries no `X-Build-Id` header (it is a control-plane resource, not
+a response surface). Confirm the deployed ACL configuration before diagnosing:
+
+```bash
+# 1. Confirm ACL exists and get its ARN
+aws wafv2 list-web-acls --scope CLOUDFRONT --region us-east-1 \
+  --query 'WebACLs[?Name==`oxo-online-cf-global`].{Name:Name,ARN:ARN,Id:Id}'
+
+# 2. Confirm rules, rate limit, and block response code
+aws wafv2 get-web-acl \
+  --name oxo-online-cf-global \
+  --scope CLOUDFRONT \
+  --id <id-from-step-1> \
+  --region us-east-1 \
+  --query 'WebACL.Rules[*].{Name:Name,Priority:Priority,Action:Action}'
+
+# 3. Confirm association to CloudFront distribution
+aws cloudfront get-distribution-config --id E519HYABC57ZX \
+  --query 'DistributionConfig.WebACLId'
+
+# The WebACLId must match the ARN from step 1.
+```
+
+If the WebACLId is empty or absent, the WAF ACL is not associated; rate-rule
+protection is absent. Re-deploy `OxoOnlineWafUsEast1` then `OxoOnlineProd`.
+
+### Symptom: client receives HTTP 429
+
+The rate rule fired. The client's source IP exceeded 100 requests in the
+current 300-second window. This is expected behaviour.
+
+- The 429 is returned by WAFv2; Lambda is NOT invoked.
+- The window drains automatically. No manual action needed unless the client
+  is legitimate and being false-positive blocked.
+- To observe which IPs are being blocked:
+  ```bash
+  aws wafv2 get-sampled-requests \
+    --web-acl-arn "<ARN from list-web-acls above>" \
+    --rule-metric-name oxo-cf-rate-limit \
+    --scope CLOUDFRONT \
+    --time-window StartTime=<ISO8601-5min-ago>,EndTime=<ISO8601-now> \
+    --max-items 100 \
+    --region us-east-1
+  ```
+- CloudWatch metric: `BlockedRequests` (dimensions: `WebACL=oxo-online-cf-global`,
+  `Rule=oxo-cf-rate-limit`). Log group for sampled requests is the WAF logging
+  configuration if enabled (not configured in this slice; use `get-sampled-requests`).
+
+### Symptom: SPA HTML returned instead of API JSON (for /api/* requests)
+
+CloudFront's CustomErrorResponses maps 403 → 200+SPA index.html. If a WAF
+IP-reputation block fires (403 from WAFv2), the client receives HTTP 200 with
+HTML — indistinguishable from a normal SPA load at the HTTP level.
+
+This is a **documented residual** (accepted at GATE-AMEND-H1-A / DEFECT-WAF-001
+fix). Rate-rule blocks were corrected to use 429 (not affected). Only
+reputation-group blocks exhibit this masking behaviour.
+
+To diagnose:
+1. Check WAF sampled-requests for BLOCK actions from `AWSManagedRulesAmazonIpReputationList`:
+   ```bash
+   aws wafv2 get-sampled-requests \
+     --web-acl-arn "<ARN from list-web-acls above>" \
+     --rule-metric-name AWSManagedRulesAmazonIpReputationList \
+     --scope CLOUDFRONT \
+     --time-window StartTime=<ISO8601-5min-ago>,EndTime=<ISO8601-now> \
+     --max-items 100 \
+     --region us-east-1
+   ```
+2. Check CloudWatch metric `BlockedRequests` (dimensions:
+   `WebACL=oxo-online-cf-global`,
+   `Rule=AWSManagedRulesAmazonIpReputationList`).
+3. Whose problem: if the source IP is a known-bad IP per the managed list, this
+   is working as designed. If the IP is a legitimate player IP that AWS has
+   mis-classified, raise an AWS support case for IP reclassification, or add
+   an IP-set override allow rule at priority 0 in the WebACL.
+
+### Cost
+
+One ACL (`oxo-online-cf-global` in us-east-1). Standing cost: WAFv2 CLOUDFRONT
+ACL monthly base charge + per-rule charge + per-request inspection cost. At
+hobby volume this is a small but non-zero standing cost on an otherwise
+scale-to-zero stack. No regional WebACL was deployed (UC2 retired). Prior to
+s005-h1, there were zero ACLs; this slice introduces one.
+
+### Rollback
+
+To remove the WAF ACL:
+1. Remove `webAclId` from the CloudFront distribution config in CDK
+   (`OxoOnlineProd`) and push — the infra pipeline disassociates the ACL.
+2. Optionally `cdk destroy OxoOnlineWafUsEast1` (us-east-1) to remove the
+   WebACL resource itself.
+3. CloudFront continues to serve all routes; the rate rule and IP-reputation
+   checks are simply absent.
+
+---
+
+## 9. Known gaps (honest)
 
 | ID | Gap | Impact |
 |----|-----|--------|
 | OI-18 | No CloudWatch metrics, no alarms, no categorised logging in `oxo-game-fn` | Cannot set alert thresholds on error rate; game-fn faults require manual log scanning |
 | OI-25 | No version header on any HTTP/WS response | Cannot determine deployed version from a request; must compare bundle hash by hand (see §1) |
 | OI-6 | No Lambda versioning or aliases | No instant Lambda rollback; roll-forward only |
-| h1 | No WAF on the WebSocket API | No IP-based rate limiting; concurrency cap is the only cost floor |
-| h2 | No WAF on CloudFront / HTTP API | Same gap for POST /api/games |
+| h1/OPEN | No WAF on the WebSocket API — WAFv2 cannot associate with API Gateway v2 (platform constraint) | WS connection-exhaustion control is account/stage-level throttle only; no per-IP bound until s005-h2 $connect authorizer ships |
+| h1/RESIDUAL | IP-reputation managed-rule-group 403 blocks are masked by CloudFront CustomErrorResponses to 200+SPA | Reputation blocks are CloudWatch-observable only (not HTTP-status observable). Rate-rule blocks return honest 429. |
+| h2-waf/CLOSED | WAF rate-limiting on CloudFront/HTTP API (POST /api/games) | SHIPPED s005-h1-waf: oxo-online-cf-global ACL, 100 req/300s/IP, Block=429 |
 | h3 | No server-authoritative move validation | Not yet relevant (moves do not relay until s006) |
 
-Gaps are tracked in the project open-items register. Do not treat h1/h2 as
-alerts requiring immediate action; they are planned hardening slices, not
-current defects.
+Gaps are tracked in the project open-items register. Do not treat open items as
+alerts requiring immediate action unless noted otherwise; they are planned
+hardening slices, not current defects.

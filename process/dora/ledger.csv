@@ -303,3 +303,5 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-06T17:32:31Z,oxo-online,7,s005-h1-waf,tester,task_end,,success,80bc2ef:s005-h1-waf-done,s005-h1-waf DONE: 18/18 validation + 38/38 smoke green. DEFECT-WAF-001 closed (MTTR=4851s). Probe 200@800ms committed. CW dim fix (no Region=CloudFront). workers=1 validation config. result.md written.
 2026-06-06T17:35:06Z,oxo-online,7,s005-h1-waf,orchestrator,task_end,,success,SLICE-H1-DELIVERED,iteration 7 delivered; auto-retro starting
 2026-06-06T17:35:53Z,oxo-online,7,s005-h1-waf,orchestrator,gate,,success,RETRO-H1,retro v29: trunk-CD prereq corollary; WAF semantics to skill; scores in v28 snapshot
+2026-06-06T17:36:02Z,oxo-online,7,s005-h1-waf,documenter,task_start,,na,DOCS-H1-WAF,Updating usage.md and runbook.md for s005-h1-waf WAF slice
+2026-06-06T17:38:43Z,oxo-online,7,s005-h1-waf,documenter,task_end,,success,DOCS-H1-WAF,"docs/runbook.md: WAF §8 added (oxo-online-cf-global, us-east-1, symptoms 429+masked-403, build identity, cost, rollback); gaps updated. docs/usage.md: rate-limit known-limitation added."

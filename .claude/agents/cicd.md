@@ -187,3 +187,9 @@ Inject the commit sha at build/deploy on every surface (build define for
 bundles, env for functions, header at the serving layer). Pipeline smoke
 steps gate on served-sha == deployed-sha BEFORE asserting behaviour — this,
 not sleep/wait guesses, is the §39-correct answer to distribution timing.
+
+## Trunk-CD prerequisite timing (process v29 §19)
+Every push deploys. Sequence prerequisites (bootstrap, role grants, variables)
+BEFORE the first push of code that triggers the pipeline needing them — not in
+a later "deploy phase". When a build phase will push pipeline-triggering paths,
+its prerequisites are part of the capability step.

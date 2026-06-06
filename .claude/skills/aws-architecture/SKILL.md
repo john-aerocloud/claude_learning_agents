@@ -312,3 +312,13 @@ MINIMAL (only the forced resources), the cross-region value handoff is a §30
 contract (synth-assert the reference), and the deploy order/rollback notes
 state the extra region explicitly. An undocumented out-of-region resource is
 a review failure.
+
+## WAFv2 rate-rule evaluation semantics (observed 2026-06-06)
+Rate-based rules aggregate over a SLIDING window (default 300s) with periodic
+evaluation (~30s cycles) and propagation latency. A short synchronous burst
+completes before the counter trips — false negative. Designs and validation
+specs must use SUSTAINED over-limit traffic (cross the threshold early, keep
+several evaluation cycles of headroom). Blocks default to 403; if CloudFront
+fronts the resource and maps 403 in CustomErrorResponses, use a custom block
+response code DISJOINT from the CF error mapping (e.g. 429) and synth-assert
+the disjointness, or blocks are invisible at HTTP level.

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as cdk from 'aws-cdk-lib';
 import { Template, Match } from 'aws-cdk-lib/assertions';
-import { OxoGameStack, WS_RATE_LIMIT_PER_5MIN } from '../lib/game-stack';
+import { OxoGameStack } from '../lib/game-stack';
 
 function synthStack(): OxoGameStack {
   const app = new cdk.App();
@@ -409,144 +409,36 @@ describe('OxoGameStack — WS cross-stack outputs additive; s004 HttpApiEndpoint
 });
 
 // ===========================================================================
-// s005-h1-waf — UC2: regional WebACL on the WS prod stage (Steps 4 & 5).
-// SYNTH-CONTRACT-WAF-3 (REGIONAL ACL + association) and
-// SYNTH-CONTRACT-WAF-4 (negative: no association on the HTTP API stage).
+// s005-h1-waf — UC2 DESCOPE (GATE-AMEND-H1-A, human-approved Option A).
+//
+// PLATFORM-HONESTY REGRESSION (negative pin).
+// The original UC2 added a REGIONAL WAFv2 WebACL + a CfnWebACLAssociation
+// targeting the WebSocket (API Gateway v2) `prod` stage. That deploy FAILED at
+// OxoGameProd CREATE: WAFv2 rejects the WS-v2 stage ARN as an unsupported
+// resource type —
+//   "The ARN isn't valid ... arn:aws:apigateway:eu-west-2::/apis/<id>/stages/prod"
+//   (Service: Wafv2, Status 400, RESOURCE_ARN). Run 27066828546.
+// WAFv2 CfnWebACLAssociation supports ALB / API GW v1 (REST) / AppSync /
+// Cognito / App Runner / Verified Access — NOT API GW v2 (HTTP or WebSocket).
+// There is therefore no way to put a WAFv2 ACL in front of the WS stage.
+//
+// Per GATE-AMEND-H1-A the WS regional WAF is dropped; the in-slice abuse floor
+// for the WS transport remains the prod-stage default-route throttle
+// (ThrottlingRateLimit/BurstLimit, asserted above). The HTTP half of the slice
+// (CloudFront global ACL on /api/*) is unaffected and still ships.
+//
+// These assertions PIN that OxoGameProd synthesises NO WAFv2 resources at all,
+// so the unsupported association cannot silently return.
 // ===========================================================================
-
-function webAcls(template: Template): Array<Record<string, unknown>> {
-  return Object.values(template.findResources('AWS::WAFv2::WebACL')).map(
-    (r) => r.Properties as Record<string, unknown>,
-  );
-}
-
-function webAclAssociations(
-  template: Template,
-): Array<Record<string, unknown>> {
-  return Object.values(
-    template.findResources('AWS::WAFv2::WebACLAssociation'),
-  ).map((r) => r.Properties as Record<string, unknown>);
-}
-
-describe('OxoGameStack — regional WebACL (SYNTH-CONTRACT-WAF-3, AC2.2/2.3, DEPLOY-IDENTITY-WAF)', () => {
-  it('synthesises exactly one REGIONAL WebACL with default action Allow', () => {
+describe('OxoGameStack — UC2 descope: NO WAFv2 on this stack (GATE-AMEND-H1-A platform-honesty pin)', () => {
+  it('synthesises no AWS::WAFv2::WebACL (WAFv2 cannot front an API GW v2 stage)', () => {
     const template = synth();
-    template.resourceCountIs('AWS::WAFv2::WebACL', 1);
-    const acl = webAcls(template)[0];
-    expect(acl.Scope).toBe('REGIONAL');
-    // DefaultAction must be Allow (default-allow, transparent to legit traffic).
-    expect(acl.DefaultAction).toBeDefined();
-    expect(Object.keys(acl.DefaultAction as Record<string, unknown>)).toEqual([
-      'Allow',
-    ]);
+    template.resourceCountIs('AWS::WAFv2::WebACL', 0);
   });
 
-  it('rate-based rule Limit <= 20 and equals the WS_RATE_LIMIT_PER_5MIN constant (not a hardcoded literal)', () => {
-    expect(WS_RATE_LIMIT_PER_5MIN).toBeLessThanOrEqual(20);
-    const acl = webAcls(synth())[0];
-    const rules = acl.Rules as Array<Record<string, unknown>>;
-    const rateRule = rules.find(
-      (r) =>
-        (r.Statement as Record<string, unknown>)?.RateBasedStatement !==
-        undefined,
-    );
-    expect(rateRule).toBeDefined();
-    const rbs = (rateRule!.Statement as Record<string, unknown>)
-      .RateBasedStatement as Record<string, unknown>;
-    expect(rbs.AggregateKeyType).toBe('IP');
-    expect(rbs.Limit).toBe(WS_RATE_LIMIT_PER_5MIN);
-    expect(rbs.Limit as number).toBeLessThanOrEqual(20);
-  });
-
-  it('includes the AWSManagedRulesAmazonIpReputationList managed rule group', () => {
-    const acl = webAcls(synth())[0];
-    const rules = acl.Rules as Array<Record<string, unknown>>;
-    const ipRep = rules.find((r) => {
-      const stmt = r.Statement as Record<string, unknown>;
-      const mrg = stmt?.ManagedRuleGroupStatement as
-        | Record<string, unknown>
-        | undefined;
-      return mrg?.Name === 'AWSManagedRulesAmazonIpReputationList';
-    });
-    expect(ipRep).toBeDefined();
-    const mrg = (ipRep!.Statement as Record<string, unknown>)
-      .ManagedRuleGroupStatement as Record<string, unknown>;
-    expect(mrg.VendorName).toBe('AWS');
-  });
-
-  it('enables CloudWatch metrics + sampled requests visibility on the ACL default and every rule', () => {
-    const acl = webAcls(synth())[0];
-    const vis = acl.VisibilityConfig as Record<string, unknown>;
-    expect(vis.CloudWatchMetricsEnabled).toBe(true);
-    expect(vis.SampledRequestsEnabled).toBe(true);
-    const rules = acl.Rules as Array<Record<string, unknown>>;
-    for (const r of rules) {
-      const rv = r.VisibilityConfig as Record<string, unknown>;
-      expect(rv.CloudWatchMetricsEnabled).toBe(true);
-      expect(rv.SampledRequestsEnabled).toBe(true);
-    }
-  });
-
-  it('carries Project/Env/ManagedBy=cdk tags (DEPLOY-IDENTITY-WAF)', () => {
-    const acl = webAcls(synth())[0];
-    const tags = (acl.Tags as Array<{ Key: string; Value: string }>) ?? [];
-    const tagMap = Object.fromEntries(tags.map((t) => [t.Key, t.Value]));
-    expect(tagMap.Project).toBe('oxo-online');
-    expect(tagMap.Env).toBe('prod');
-    expect(tagMap.ManagedBy).toBe('cdk');
-  });
-});
-
-describe('OxoGameStack — WebACL association to WS prod stage (SYNTH-CONTRACT-WAF-3/4, AC2.1)', () => {
-  it('creates exactly one WebACLAssociation whose ResourceArn derives from the WS API id + prod stage (not a hardcoded literal ARN)', () => {
+  it('synthesises no AWS::WAFv2::WebACLAssociation (the WS-v2 stage ARN is an unsupported WAFv2 resource type — run 27066828546)', () => {
     const template = synth();
-    template.resourceCountIs('AWS::WAFv2::WebACLAssociation', 1);
-    const assoc = webAclAssociations(template)[0];
-    const resourceArn = assoc.ResourceArn;
-    // Derived, not a plain literal string ARN — must be a CFN intrinsic
-    // (Fn::Sub / Fn::Join referencing the WS API + stage Refs).
-    expect(typeof resourceArn).not.toBe('string');
-    const json = JSON.stringify(resourceArn);
-    // References the WS API logical id and the prod stage (derived).
-    expect(json).toContain('prod');
-    // Targets an apigateway WS stage ARN shape.
-    expect(json).toContain('apigateway');
-    expect(json).toContain('/stages/');
-    // The WebACLArn must reference the regional WebACL (GetAtt on its Arn).
-    expect(JSON.stringify(assoc.WebACLArn)).toContain('Arn');
-  });
-
-  it('SYNTH-CONTRACT-WAF-4: no WebACLAssociation targets the HTTP API id / HTTP stage', () => {
-    const template = synth();
-    // Resolve the HTTP API and WS API logical ids to distinguish them.
-    const httpApis = template.findResources('AWS::ApiGatewayV2::Api', {
-      Properties: { ProtocolType: Match.absent() },
-    });
-    // HTTP API (oxo-game-api) has no ProtocolType WEBSOCKET; find by name.
-    const allApis = template.findResources('AWS::ApiGatewayV2::Api');
-    const httpApiLogicalId = Object.keys(allApis).find(
-      (id) =>
-        (allApis[id].Properties as Record<string, unknown>).Name ===
-        'oxo-game-api',
-    );
-    expect(httpApiLogicalId).toBeDefined();
-    // The HTTP API ($default) stage logical ids.
-    const httpStages = template.findResources('AWS::ApiGatewayV2::Stage', {
-      Properties: { StageName: '$default' },
-    });
-    const associations = webAclAssociations(template);
-    for (const assoc of associations) {
-      const json = JSON.stringify(assoc.ResourceArn);
-      // Must NOT reference the HTTP API logical id.
-      expect(json).not.toContain(httpApiLogicalId!);
-      // Must NOT reference any HTTP ($default) stage logical id.
-      for (const stageId of Object.keys(httpStages)) {
-        expect(json).not.toContain(stageId);
-      }
-      // And must NOT reference the $default stage name.
-      expect(json).not.toContain('$default');
-    }
-    void httpApis;
+    template.resourceCountIs('AWS::WAFv2::WebACLAssociation', 0);
   });
 });
 

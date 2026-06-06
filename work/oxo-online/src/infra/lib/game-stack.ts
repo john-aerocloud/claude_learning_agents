@@ -169,7 +169,7 @@ export class OxoGameStack extends cdk.Stack {
     // -------------------------------------------------------------------------
     const wsRole = new iam.Role(this, 'WsFunctionRole', {
       assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
-      description: 'oxo-ws-fn execution role — least privilege (s005).',
+      description: 'oxo-ws-fn execution role - least privilege (s005).',
     });
     // Own log-group actions only (no AWSLambdaBasicExecutionRole managed policy,
     // which is not ARN-scoped). Scoped to this function's log group.

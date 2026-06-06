@@ -211,3 +211,5 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-06T12:44:56Z,oxo-online,6,005-join-game,orchestrator,gate,,success,PROCESS-V22,v22: hexagonal + supportability standard; OI-17/18/19 registered
 2026-06-06T12:50:36Z,oxo-online,6,005-join-game,orchestrator,gate,,success,GATE-4-S005,Gate 4 approved: deploy s005 as built; hexagonal refactor scheduled s006
 2026-06-06T12:52:39Z,oxo-online,6,005-join-game,cicd,task_start,,na,GATE-4-S005,E0-E3 deploy phase: build-wiring fix + OIDC extension + infra pipeline + config injection
+2026-06-06T12:55:57Z,oxo-online,6,005-join-game,cicd,deploy,,success,OxoOnlineOidcStack,E1: deploy-oidc applied WsLambdaCodeDeploy (oxo-ws-fn in LambdaCodeDeploy resource list); DescribeStacks covered by existing CdkDeploy wildcard; DeployRole/DefaultPolicy updated in 26s
+2026-06-06T12:58:20Z,oxo-online,6,005-join-game,cicd,pipeline_failure,,fail,27062892736,E2 infra run failed: WsFunctionRole IAM description contains em-dash (U+2014) outside IAM-allowed charset; roll-forward fix: replace em-dash with ASCII hyphen in game-stack.ts

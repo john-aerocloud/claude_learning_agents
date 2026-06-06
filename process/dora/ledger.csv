@@ -250,3 +250,4 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-06T14:50:30Z,oxo-online,6,005-join-game,tester,validation_run,,fail,15c32c9:validation,tests/validation FAILED via make validate
 2026-06-06T14:55:29Z,oxo-online,6,005-join-game,tester,validation_run,,success,15c32c9:validation,tests/validation green via make validate
 2026-06-06T14:56:58Z,oxo-online,6,005-join-game,tester,recovery,5807,success,ff06b15:DEFECT-005-001,"DEFECT-005-001 closed: 38/38 smoke + 14/14 validation green. R2 engineer fixes (register PutCommand, drain+grace, GONE-host 4041, config.js load order, CSP wss) + tester harness fixes (F7 disabled assert, validation JSDoc parse error). MTTR 1h36m47s from failure at 13:20Z"
+2026-06-06T14:59:19Z,oxo-online,6,005-join-game,orchestrator,task_end,,success,SLICE-005-DELIVERED,iteration 6 delivered; auto-retro starting

@@ -33,9 +33,10 @@ dora-compute:
 	$(DORA) compute
 
 # --- Validation & smoke (run + record in one step) ----------------------------
-# make validate ITER=5 SLICE=004-create-game   (PROD_URL/AWS_PROFILE via spec defaults)
+# make validate ITER=5 SLICE=004-create-game [PROD_URL=https://…] [AWS_PROFILE=dev-int]
+# PROD_URL and AWS_PROFILE are forwarded to the playwright test runner when set.
 validate:
-	npm --prefix $(APP) run test:validation && \
+	$(if $(PROD_URL),PROD_URL=$(PROD_URL) ,)$(if $(AWS_PROFILE),AWS_PROFILE=$(AWS_PROFILE) ,)npm --prefix $(APP) run test:validation && \
 	$(DORA) record --project $(PROJECT) --iteration $(ITER) --slice $(SLICE) \
 	  --agent tester --event validation_run \
 	  --ref "$$(git rev-parse --short HEAD):validation" --outcome success \
@@ -45,9 +46,10 @@ validate:
 	  --ref "$$(git rev-parse --short HEAD):validation" --outcome fail \
 	  --note "tests/validation FAILED via make validate" ; exit 1 )
 
-# make smoke ITER=5 SLICE=004-create-game
+# make smoke ITER=5 SLICE=004-create-game [PROD_URL=https://…]
+# PROD_URL is forwarded to the playwright test runner when set.
 smoke:
-	npm --prefix $(APP) run test:smoke && \
+	$(if $(PROD_URL),PROD_URL=$(PROD_URL) ,)npm --prefix $(APP) run test:smoke && \
 	$(DORA) record --project $(PROJECT) --iteration $(ITER) --slice $(SLICE) \
 	  --agent tester --event validation_run \
 	  --ref "$$(git rev-parse --short HEAD):smoke" --outcome success \

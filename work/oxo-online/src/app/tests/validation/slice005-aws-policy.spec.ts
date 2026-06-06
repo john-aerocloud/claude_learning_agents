@@ -26,6 +26,20 @@ import { fileURLToPath } from 'node:url';
  * Skips gracefully: when AWS credentials are absent/expired (sts get-caller-identity
  *                   fails), all AWS assertion tests self-skip with a clear message.
  * Replaces:         ad-hoc CLI spot-checks from the s005 validation pass.
+ *
+ * S2 spec amendment (DEFECT-005-001 Bug B):
+ *   The original S2 contract specified ManageConnections scoped to
+ *   `POST/@connections/*` (POST only). DEFECT-005-001 Bug B (platform constraint:
+ *   API GW @connections only supports DELETE for closing connections, not a custom
+ *   close code) required widening the verb to `*` (covering both POST for sending
+ *   messages and DELETE for closing connections). The deployed resource is now
+ *   `arn:aws:execute-api:<region>:<acct>:<wsApiId>/prod/*/@connections/*`.
+ *   The S2 assertion still holds: ManageConnections is scoped to THIS WS API ARN
+ *   only (not `*`), with the correct API id, prod stage, and @connections path.
+ *   The spec assertions (.toContain(WS_API_ID), .toContain('/prod/'),
+ *   .toContain('@connections'), .not.toBe('*')) remain valid for the amended
+ *   contract. The verb wildcard is intentional and documented (game-stack.ts S2
+ *   comment). Decision: accept the widened verb; WAF/rate-limiting deferred to h1.
  * =============================================================================
  */
 

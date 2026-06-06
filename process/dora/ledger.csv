@@ -240,3 +240,5 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-06T13:53:33Z,oxo-online,6,005-join-game,tester,validation_run,,fail,8d5c23a:smoke,tests/smoke FAILED via make smoke
 2026-06-06T13:54:58Z,oxo-online,6,005-join-game,tester,validation_run,,fail,1d8f730:validation,tests/validation FAILED via make validate
 2026-06-06T13:55:00Z,oxo-online,6,005-join-game,orchestrator,gate,,success,PROCESS-V24,v24: optimal-concise-necessary replaces size-minimisation framing in §36 + refactor-process
+2026-06-06T13:55:29Z,oxo-online,6,005-join-game,tester,task_start,,na,0fa1187,Tester re-validating DEFECT-005-001 fix at c2c6169 — MTTR clock running
+2026-06-06T13:55:55Z,oxo-online,6,005-join-game,tester,task_end,,fail,0fa1187,"DEFECT-005-001 re-validation FAIL: register_failed (UpdateItem on Connections denied by IAM) causes F1/T1/F7/T2+T3/T5 to fail; F3/T4 error message race condition. Smoke 34/38, validation 12/14. Hand to engineer."

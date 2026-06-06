@@ -5,7 +5,15 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as apigatewayv2 from 'aws-cdk-lib/aws-apigatewayv2';
 import * as apigatewayv2integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 import { Construct } from 'constructs';
+
+// s005-h1-waf (UC2): regional WAF rate threshold on WS $connect, expressed as a
+// named constant so the limit is auditable in one place and never a magic
+// literal buried in the rule (SYNTH-CONTRACT-WAF-3 pins the rule to this value).
+// 20 connect requests / 5-min / source IP — pre-launch placeholder (delta §9
+// open-risk 1: re-calibrate against real traffic before public launch).
+export const WS_RATE_LIMIT_PER_5MIN = 20;
 
 // slice 004: OxoGameStack
 // Resources:
@@ -343,5 +351,101 @@ export class OxoGameStack extends cdk.Stack {
       description: 'WebSocket API id — used by the deploy/config step',
       exportName: 'OxoGameProd-WsApiId',
     });
+
+    // =========================================================================
+    // s005-h1-waf — UC2: REGIONAL WebACL on the WS prod stage (Steps 4 & 5).
+    //
+    // Bounds anonymous connection floods per source IP at the API-GW edge,
+    // ABOVE the existing stage-throttle floor. Default action ALLOW keeps it
+    // transparent to legitimate players; only the IP-reputation managed group
+    // and the rate-based rule can block. The CloudFront global ACL
+    // (OxoOnlineWafUsEast1) covers /api/*; this regional ACL covers the WS
+    // transport, which is direct (not via CloudFront). Gate-2: NO WebACL on the
+    // HTTP API REGIONAL stage (SYNTH-CONTRACT-WAF-4) — duplicating it adds cost
+    // with no new path covered.
+    // =========================================================================
+    const wsWebAcl = new wafv2.CfnWebACL(this, 'WsWebAcl', {
+      name: 'oxo-ws-regional-acl',
+      scope: 'REGIONAL',
+      // Default ALLOW — transparent to legit traffic (delta §default-allow).
+      defaultAction: { allow: {} },
+      visibilityConfig: {
+        cloudWatchMetricsEnabled: true,
+        sampledRequestsEnabled: true,
+        metricName: 'oxo-ws-regional-acl',
+      },
+      rules: [
+        {
+          // priority 0 — AWS-managed IP-reputation list (action inherited from
+          // the managed group). Drops known-bad source IPs (AC2.3).
+          name: 'AWSManagedRulesAmazonIpReputationList',
+          priority: 0,
+          statement: {
+            managedRuleGroupStatement: {
+              vendorName: 'AWS',
+              name: 'AWSManagedRulesAmazonIpReputationList',
+            },
+          },
+          overrideAction: { none: {} },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            sampledRequestsEnabled: true,
+            metricName: 'oxo-ws-ip-reputation',
+          },
+        },
+        {
+          // priority 1 — rate-based block on connect volume per source IP.
+          // Threshold sourced from the named constant (AC2.2) — never a magic
+          // literal in the rule body.
+          name: 'oxo-ws-rate-limit',
+          priority: 1,
+          statement: {
+            rateBasedStatement: {
+              limit: WS_RATE_LIMIT_PER_5MIN,
+              aggregateKeyType: 'IP',
+            },
+          },
+          action: { block: {} },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            sampledRequestsEnabled: true,
+            metricName: 'oxo-ws-rate-limit',
+          },
+        },
+      ],
+    });
+
+    // Build-identity carrier for a non-served control-plane resource
+    // (principles/01 / DEPLOY-IDENTITY-WAF): tags tie the ACL to the deploying
+    // stack/template version.
+    cdk.Tags.of(wsWebAcl).add('Project', 'oxo-online');
+    cdk.Tags.of(wsWebAcl).add('Env', 'prod');
+    cdk.Tags.of(wsWebAcl).add('ManagedBy', 'cdk');
+
+    // Associate the regional ACL to the WS `prod` stage. ResourceArn is DERIVED
+    // from the WS API id + stage name (CFN intrinsic), never a hardcoded literal
+    // (SYNTH-CONTRACT-WAF-3). The WS API stage ARN shape for WAFv2 association is
+    // arn:aws:apigateway:<region>::/apis/<apiId>/stages/<stageName>.
+    // Associates ONLY the WS stage — never the HTTP API stage
+    // (SYNTH-CONTRACT-WAF-4 / Gate-2).
+    const wsStageArn = cdk.Fn.sub(
+      'arn:aws:apigateway:${Region}::/apis/${ApiId}/stages/${StageName}',
+      {
+        Region: this.region,
+        ApiId: wsApi.ref,
+        StageName: wsStage.stageName ?? 'prod',
+      },
+    );
+    const wsWebAclAssociation = new wafv2.CfnWebACLAssociation(
+      this,
+      'WsWebAclAssociation',
+      {
+        resourceArn: wsStageArn,
+        webAclArn: wsWebAcl.attrArn,
+      },
+    );
+    // The stage must exist (and be deployed) before it can be associated.
+    wsWebAclAssociation.addDependency(wsStage);
+    wsWebAclAssociation.addDependency(wsWebAcl);
   }
 }

@@ -18,7 +18,7 @@ and marks actuals when a slice is delivered.
 | C1 | Deployable shell | delivered | 1 (s001) | 0 | — |
 | C2 | Local two-player game | delivered | 1 (s002) | 0 | — |
 | C3 | Single-player vs AI | delivered | 1 (s003) | 0 | — |
-| C4 | Online two-player match | in-progress | 1 (s004) | 4 (s005–s008) | s005 join-by-code + WebSocket connect |
+| C4 | Online two-player match | in-progress | 1 (s004) | 4 (s005–s008) | s005 join-by-code (in-flight) |
 | C5 | Leaderboard | not started | 0 | 3 (s009–s011) | s009 record-game-result |
 | C6 | Player identity (lightweight) | not started | 0 | 2 (s012–s013) | s012 display-name-entry |
 | C7 | In-game chat | not started | 0 | 2 (s014–s015) | s014 in-game-message-send |
@@ -108,29 +108,38 @@ shown to both players; disconnection is handled gracefully. No accounts required
 | Slice | Status | Delivered | Outcome |
 |-------|--------|-----------|---------|
 | s004 — create-game | delivered | 2026-06-06 | POST /api/games live via CloudFront; Lambda + DynamoDB Games table + HTTP API provisioned; 6-char code shown in UI |
+| s005 — join-by-code | in-flight | — | — |
 
 **Remaining forecast (s005–s008) — ordered thinnest-first:**
 
-### s005 — join-by-code + WebSocket connect
-**Scope:** A second player enters the 6-char code in the UI; the client opens a
-WebSocket connection to API Gateway; the server looks up the game by code (GSI on
-`Games`), validates it is in `waiting` status, writes both `hostConnectionId` and
-`guestConnectionId` to the record, sets status to `active`, and sends a
-`game-ready` message to both connections. The host's "waiting for opponent" screen
-transitions to the game board. No move relay yet.
+### s005 — join-by-code + WebSocket connect (IN-FLIGHT)
+**Scope:** A second player enters the 6-char code on a new join screen; both
+players open a WebSocket connection to API Gateway (host on the waiting screen,
+joiner on submit). The `join` Lambda route looks up the game by code (GSI on
+`Games`), validates status=`waiting` and no existing guest, writes both
+`hostConnectionId` and `guestConnectionId` atomically and sets status=`active`,
+then sends `game-ready` to both connections. Both screens transition to the game
+board showing player roles. Board is visible but moves do nothing (relay is s006).
+A new `Connections` DynamoDB table stores connectionId→gameId with a 2h TTL.
+`$disconnect` is a stub (no-op). SPA connects directly to the WSS endpoint (no
+CloudFront WebSocket proxying). Three error paths handled: code not found, game
+already active, server error — each returns a readable message on the join screen.
 
-**Killick test:** A second player can now do something they could not do before —
-join a specific game and reach an active game screen, knowing their opponent is
-connected.
+**Killick test:** A second player can join a specific game and both players see
+the board together — something impossible before this slice.
 
 **What is NOT in scope:** move relay, server-authoritative game state, win/draw
-detection on the server, disconnect handling — all deferred to s006+.
+detection on the server, disconnect handling (`$disconnect` stub only), reconnect,
+share-link UX, CloudFront WebSocket proxying — all deferred to s006+.
 
 **Success measures:**
-1. Player B enters a valid code, the UI transitions from join-screen to game board for both players within 3 seconds.
+1. Player B enters a valid code; within 3 seconds both players see the game board with roles labelled.
 2. DynamoDB `Games` record shows status=`active`, both connectionIds populated.
-3. A code that does not exist or is already active returns a readable error; the join screen remains accessible.
-4. Existing modes (local, vs-AI) are unaffected.
+3. A code that does not exist returns "Game not found" error; join screen remains.
+4. A code for an already-active game returns "no longer available" error; joiner cannot hijack.
+5. `Connections` table shows both entries with ~2h TTL.
+6. Existing modes (local, vs-AI) are unaffected.
+7. Pipeline deploys new WebSocket stack cleanly with no manual steps.
 
 ### s006 — move relay + server-authoritative play
 **Scope:** When a player makes a move, the SPA sends it via WebSocket; the Lambda

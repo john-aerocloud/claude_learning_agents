@@ -18,7 +18,7 @@ and marks actuals when a slice is delivered.
 | C1 | Deployable shell | delivered | 1 (s001) | 0 | — |
 | C2 | Local two-player game | delivered | 1 (s002) | 0 | — |
 | C3 | Single-player vs AI | delivered | 1 (s003) | 0 | — |
-| C4 | Online two-player match | in-progress | 1 (s004) | 7 (s005–s008 + s005-h1/h2/h3) | s005 join-by-code (in-flight) |
+| C4 | Online two-player match | in-progress | 1 (s004) | 7 (s005–s008 + s005-h1/h2/h3) | s005-h1 WAF (in planning, pipelined N+1) |
 | C5 | Leaderboard | not started | 0 | 3 (s009–s011) | s009 record-game-result |
 | C6 | Player identity (lightweight) | not started | 0 | 2 (s012–s013) | s012 display-name-entry |
 | C7 | In-game chat | not started | 0 | 2 (s014–s015) | s014 in-game-message-send |
@@ -152,14 +152,16 @@ endpoint.
 
 Forecasts are revisable; the human gate at each slice governs actual priority.
 
-**s005-h1 — WAF / rate-limiting on the WebSocket API (security risk 1)**
+**s005-h1 — WAF / rate-limiting on CloudFront + WebSocket API (security risk 1) [IN PLANNING]**
 Sequence: after s005 delivered, before s006. Rationale: s006 introduces the
 move-relay write surface; containing connection-flood risk before that surface
-is live reduces attack exposure at the lowest-volume moment. Scope: add an AWS
-WAF WebACL with a rate rule to the WS API stage. No functional change to game
-flow. Done condition: a rate-exceeded connection attempt is rejected at the WAF
-layer; the WS API stage shows an associated WebACL in `aws wafv2 list-resources-
-for-web-acl`.
+is live reduces attack exposure at the lowest-volume moment. Scope: attach a
+GLOBAL WAF WebACL (rate rule + IP reputation) to the CloudFront distribution
+(covering POST /api/games), and attach a REGIONAL WAF WebACL (rate rule + IP
+reputation) to the WS API prod stage. No functional change to game flow.
+Done conditions: (1) rate-exceeded requests to CloudFront receive HTTP 403;
+(2) rate-exceeded WS connect attempts are blocked; (3) normal create + join
+flow unaffected; (4) smoke green. See slices/s005-h1-waf/slice.md + use-cases.md.
 
 **s005-h2 — Join-token / $connect authorization (security risk 2)**
 Sequence: after s005-h1, before or concurrent with s006. Rationale: the

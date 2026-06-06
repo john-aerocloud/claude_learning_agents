@@ -20,9 +20,13 @@
 #   OXO_ONLINE_CLOUDFRONT_DISTRIBUTION  CloudFront distribution ID
 #   OXO_ONLINE_S3_BUCKET                S3 bucket name
 #   OXO_ONLINE_PROD_URL                 e.g. https://d3pf3kcvzpau1x.cloudfront.net
-#   OXO_ONLINE_LAMBDA_FUNCTION_NAME     Lambda function name for UpdateFunctionCode
+#   OXO_ONLINE_LAMBDA_FUNCTION_NAME     Lambda function name for game fn UpdateFunctionCode
 #                                       (set to the value of the LambdaFunctionName
 #                                       CfnOutput from OxoGameProd stack — e.g. oxo-game-fn)
+#   OXO_ONLINE_WS_LAMBDA_FUNCTION_NAME  Lambda function name for WS fn UpdateFunctionCode
+#                                       (set to the value of the WsLambdaFunctionName
+#                                       CfnOutput from OxoGameProd stack — e.g. oxo-ws-fn)
+#                                       Added slice 005. Same hot-swap pattern as game fn.
 #
 # GitHub Actions secrets:
 #   OXO_ONLINE_DEPLOY_ROLE_ARN          IAM role ARN (from OxoOnlineOidcStack output)
@@ -174,13 +178,17 @@ jobs:
       # -------------------------------------------------------------------------
       # Lambda code update — only runs when work/oxo-online/src/lambda/** changed.
       #
-      # The oxo-deploy role must have lambda:UpdateFunctionCode on the function ARN.
+      # The oxo-deploy role must have lambda:UpdateFunctionCode on each function ARN.
       # See work/oxo-online/src/infra/DEPLOY_ROLE_EXTENSIONS.md for the permissions
       # that must be added to the role before this step will work.
       #
       # OXO_ONLINE_LAMBDA_FUNCTION_NAME is a GitHub Actions variable (not a secret):
       # set it to the LambdaFunctionName CfnOutput value from the OxoGameProd stack
-      # (e.g. "oxo-game-fn" or the CDK-generated logical name).
+      # (e.g. "oxo-game-fn").
+      #
+      # OXO_ONLINE_WS_LAMBDA_FUNCTION_NAME is a GitHub Actions variable (not a secret):
+      # set it to the WsLambdaFunctionName CfnOutput value from the OxoGameProd stack
+      # (e.g. "oxo-ws-fn"). Added slice 005.
       # -------------------------------------------------------------------------
       - name: Detect Lambda source changes
         id: lambda-changed
@@ -193,18 +201,78 @@ jobs:
           fi
 
       - name: Package Lambda source
-        if: steps.lambda-changed.outputs.changed == 'true' && vars.OXO_ONLINE_LAMBDA_FUNCTION_NAME != ''
+        if: steps.lambda-changed.outputs.changed == 'true'
         run: |
-          cd work/oxo-online/src/lambda
-          zip -r /tmp/lambda-package.zip . -x "*.test.*" -x "node_modules/.cache/*"
+          zip -r /tmp/lambda-package.zip work/oxo-online/src/lambda/ -x "*.test.*" -x "*/node_modules/.cache/*"
 
-      - name: Deploy Lambda code
+      - name: Deploy game Lambda code (oxo-game-fn)
         if: steps.lambda-changed.outputs.changed == 'true' && vars.OXO_ONLINE_LAMBDA_FUNCTION_NAME != ''
         run: |
           aws lambda update-function-code \
             --function-name ${{ vars.OXO_ONLINE_LAMBDA_FUNCTION_NAME }} \
             --zip-file fileb:///tmp/lambda-package.zip \
             --region ${{ env.AWS_REGION }}
+
+      - name: Deploy WS Lambda code (oxo-ws-fn)
+        if: steps.lambda-changed.outputs.changed == 'true' && vars.OXO_ONLINE_WS_LAMBDA_FUNCTION_NAME != ''
+        run: |
+          aws lambda update-function-code \
+            --function-name ${{ vars.OXO_ONLINE_WS_LAMBDA_FUNCTION_NAME }} \
+            --zip-file fileb:///tmp/lambda-package.zip \
+            --region ${{ env.AWS_REGION }}
+
+      # -------------------------------------------------------------------------
+      # wss URL injection — writes runtime config to S3 so the SPA knows the
+      # WebSocket endpoint without baking it into the bundle at build time.
+      #
+      # The SPA reads window.OXO_CONFIG (injected via /config.js on the S3 bucket)
+      # instead of a build-time constant. This means a CDK-generated endpoint URL
+      # can change without requiring a new SPA build.
+      #
+      # Mechanism (chosen slice 005):
+      #   1. Fetch the OxoGameProd-WsApiEndpoint CloudFormation export (the wss://
+      #      URL including /prod stage) using aws cloudformation describe-stacks.
+      #   2. Write a minimal JS file: window.OXO_CONFIG={wsUrl:"wss://..."};
+      #   3. Upload to s3://<bucket>/config.js with no-cache headers so browsers
+      #      always fetch the latest value.
+      #
+      # The SPA's index.html must include <script src="/config.js"></script> before
+      # the main bundle so OXO_CONFIG is defined at runtime. The engineer wires this
+      # in the SPA template; the deploy step only writes the file.
+      #
+      # Why this mechanism (not build-time env var):
+      #   The WSS endpoint URL contains the API Gateway ID, which is only known
+      #   after CDK deploys OxoGameProd. Baking it into the Vite build would require
+      #   the infra pipeline to trigger the app pipeline — coupling the two pipelines.
+      #   Runtime config injection decouples them: the app pipeline reads the live
+      #   CloudFormation export at deploy time, not at build time.
+      #
+      # Why CloudFormation describe-stacks (not SSM):
+      #   OxoGameProd already outputs OxoGameProd-WsApiEndpoint as a CfnOutput.
+      #   Reading it directly via describe-stacks requires no extra infra (no SSM
+      #   write in OxoGameStack, no new IAM permission beyond cloudformation:DescribeStacks
+      #   which the oxo-deploy role already has from the CDK helpers). SSM would need
+      #   an additional write in the CDK stack and a new SSM read permission.
+      #
+      # The oxo-deploy role needs cloudformation:DescribeStacks on OxoGameProd ARN.
+      # See DEPLOY_ROLE_EXTENSIONS.md — this is a new permission for slice 005.
+      # -------------------------------------------------------------------------
+      - name: Fetch wss URL from CloudFormation and write runtime config
+        run: |
+          WSS_URL=$(aws cloudformation describe-stacks \
+            --stack-name OxoGameProd \
+            --region ${{ env.AWS_REGION }} \
+            --query "Stacks[0].Outputs[?OutputKey=='WsApiEndpoint'].OutputValue" \
+            --output text)
+          if [ -z "$WSS_URL" ] || [ "$WSS_URL" = "None" ]; then
+            echo "WARNING: OxoGameProd WsApiEndpoint output not found — config.js will have empty wsUrl."
+            WSS_URL=""
+          fi
+          printf 'window.OXO_CONFIG=%s;\n' "{\"wsUrl\":\"${WSS_URL}\"}" > /tmp/config.js
+          aws s3 cp /tmp/config.js s3://${{ vars.OXO_ONLINE_S3_BUCKET }}/config.js \
+            --region ${{ env.AWS_REGION }} \
+            --cache-control "no-cache, no-store, must-revalidate" \
+            --content-type "application/javascript"
 
       - name: Record DORA deploy event
         run: |

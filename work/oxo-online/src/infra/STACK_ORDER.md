@@ -4,8 +4,8 @@
 
 | CDK construct ID  | CloudFormation stack name | Purpose                                           | Deploy cadence          |
 |-------------------|--------------------------|---------------------------------------------------|-------------------------|
-| `OxoOnlineOidcStack` | `OxoOnlineOidcStack`  | OIDC provider + `oxo-deploy` + `oxo-infra-deploy` IAM roles | One-time manual         |
-| `OxoGameProd`     | `OxoGameProd`            | Lambda (`oxo-game-fn`) + DynamoDB `Games` + HTTP API Gateway | Every infra push (infra pipeline) |
+| `OxoOnlineOidcStack` | `OxoOnlineOidcStack`  | OIDC provider + `oxo-deploy` + `oxo-infra-deploy` IAM roles | One-time manual (`make -C work/oxo-online/src/infra deploy-oidc`) |
+| `OxoGameProd`     | `OxoGameProd`            | Lambda (`oxo-game-fn`, `oxo-ws-fn`) + DynamoDB `Games` + `Connections` + HTTP API + WS API | Every infra push (infra pipeline) |
 | `OxoOnlineProd`   | `OxoOnlineProd`          | S3 bucket + CloudFront distribution + Route 53    | Every infra push (infra pipeline) |
 
 ## Why OxoGameProd must deploy before OxoOnlineProd
@@ -20,13 +20,23 @@ If you deploy `OxoOnlineProd` before `OxoGameProd` on the first run, CloudFormat
 will fail with "Export OxoGameProd-HttpApiEndpoint does not exist." Always deploy
 `OxoGameProd` first.
 
+**Slice 005 note:** The new WS API resources (`oxo-ws-fn`, `Connections` table,
+`OxoGameProd-WsApiEndpoint` CfnOutput) are ALL inside `OxoGameProd`. `OxoOnlineProd`
+does NOT import the WS endpoint — the SPA connects directly to the WSS URL via
+runtime config injection (see below). Therefore the sequential deploy order is
+unchanged and no new cross-stack CloudFormation dependency is introduced.
+
 The pipeline command reflects this order:
 
 ```
-npx cdk deploy OxoGameProd OxoOnlineProd --require-approval never
+npx cdk deploy OxoGameProd --require-approval never   # step 1
+npx cdk deploy OxoOnlineProd --require-approval never  # step 2 (separate step — not batch)
 ```
 
 CDK/CloudFormation honours the positional order and the cross-stack dependency graph.
+The stacks are deployed as **separate sequential pipeline steps** (not a single
+`cdk deploy A B` batch) because batch mode deploys concurrently and the export does
+not exist on first deploy (v14 §19 checklist item).
 
 ## Cross-stack reference pattern — HTTP API domain to CloudFront origin
 
@@ -129,3 +139,72 @@ const gameFn = new lambda.Function(this, 'GameFn', {
   // ...
 });
 ```
+
+---
+
+## Slice 005 — new CfnOutputs in OxoGameStack
+
+Add these outputs to `OxoGameStack` (alongside the existing `HttpApiEndpoint` and
+`LambdaFunctionName` outputs). All are additive — the s004 export-ordering lesson
+(never remove/rename an export another stack imports) applies: these are new and not
+imported by `OxoOnlineProd`.
+
+```typescript
+// WebSocket API endpoint — consumed by the deploy pipeline for runtime config injection.
+// NOT imported by OxoOnlineProd (no new CFN cross-stack dependency).
+new cdk.CfnOutput(this, 'WsApiEndpoint', {
+  value: webSocketApi.attrApiEndpoint + '/prod',  // wss://<id>.execute-api.<region>.amazonaws.com/prod
+  exportName: 'OxoGameProd-WsApiEndpoint',
+  description: 'WebSocket API WSS invoke URL — read by deploy pipeline for SPA runtime config',
+});
+
+// WS function name — set as GitHub Actions variable OXO_ONLINE_WS_LAMBDA_FUNCTION_NAME.
+new cdk.CfnOutput(this, 'WsLambdaFunctionName', {
+  value: wsFn.functionName,          // 'oxo-ws-fn' (fixed functionName prop)
+  exportName: 'OxoGameProd-WsLambdaFunctionName',
+  description: 'WS Lambda function name — set as GH var OXO_ONLINE_WS_LAMBDA_FUNCTION_NAME',
+});
+```
+
+---
+
+## wss URL injection mechanism (slice 005)
+
+**Chosen mechanism: deploy-time CloudFormation describe-stacks → S3 config.js**
+
+The SPA cannot know the API Gateway WebSocket URL at build time (it contains the
+API ID, which is determined by CDK/CloudFormation). The chosen approach:
+
+1. After deploying the SPA to S3, the `deploy-oxo-online.yml` pipeline calls:
+   ```
+   aws cloudformation describe-stacks --stack-name OxoGameProd
+   ```
+   and extracts `OxoGameProd-WsApiEndpoint` from the stack outputs.
+
+2. It writes a minimal JS file to `/config.js` on the S3 bucket:
+   ```js
+   window.OXO_CONFIG={"wsUrl":"wss://<api-id>.execute-api.<region>.amazonaws.com/prod"};
+   ```
+   with `Cache-Control: no-cache` so browsers always fetch the latest value.
+
+3. The SPA's `index.html` includes `<script src="/config.js"></script>` **before**
+   the main bundle, so `window.OXO_CONFIG` is defined when the app initialises.
+   The engineer wires this in the SPA HTML template.
+
+**Why this mechanism over alternatives:**
+
+| Alternative | Why not chosen |
+|-------------|---------------|
+| Vite build-time env var (`VITE_WS_URL`) | Requires the infra pipeline to trigger the app pipeline (coupling); URL only known after CDK runs |
+| SSM Parameter Store | Requires a new `ssm:PutParameter` in OxoGameStack and `ssm:GetParameter` in the deploy role; more moving parts for no benefit |
+| CloudFront Lambda@Edge rewrite | Far too complex; CloudFront does not proxy WebSocket connections; not needed |
+| CfnOutput import into OxoOnlineProd | Would create a new hard CFN cross-stack dependency; s004 export-ordering lesson advises against new import coupling |
+
+**IAM:** The `oxo-deploy` role needs `cloudformation:DescribeStacks` on
+`arn:aws:cloudformation:*:<account>:stack/OxoGameProd/*`. See DEPLOY_ROLE_EXTENSIONS.md.
+
+**Graceful degradation:** If the CloudFormation call fails or the output is absent
+(e.g., before `OxoGameProd` has been deployed with WS resources), the pipeline
+writes `wsUrl: ""` and logs a warning. The SPA must handle a missing/empty `wsUrl`
+by showing a readable error on the join screen ("Service unavailable — try again
+later") rather than a white-screen crash. The engineer wires this guard in the SPA.

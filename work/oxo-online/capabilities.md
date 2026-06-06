@@ -330,3 +330,156 @@ Deferred to slice 005+:
 - `Connections` DynamoDB table
 - `code` GSI + join lookup
 - WAF rate-based rule on CloudFront + HTTP API
+
+---
+
+## Slice 005 — join game by WebSocket (current)
+
+### What this slice adds
+
+First WebSocket surface: a new API Gateway WebSocket API, a new `oxo-ws-fn`
+Lambda, a `Connections` DynamoDB table, and a `Games.code` GSI — all added to the
+existing `OxoGameProd` stack. Stack count stays at three. The SPA connects directly
+to the WSS endpoint (not via CloudFront); the wss URL is injected at deploy time as
+a runtime config.
+
+### Environments in play
+
+**Production only.** Unchanged from slices 001–004. No new environment needed.
+
+### Deploy path
+
+Two pipelines, unchanged in structure. Key additions for slice 005:
+
+```
+push to main (work/oxo-online/src/infra/**)
+  → infra-oxo-online.yml:
+      build CDK TypeScript + Lambda TypeScript (existing steps cover new ws/ subdir)
+      OIDC assume oxo-infra-deploy
+      cdk deploy OxoGameProd  ← adds WS API, oxo-ws-fn, Connections table, code GSI
+      cdk deploy OxoOnlineProd  ← no change (no new CFN import from OxoGameProd)
+
+push to main (work/oxo-online/src/app/** or src/lambda/**)
+  → deploy-oxo-online.yml:
+      build job: npm ci → lint → unit tests → build SPA
+      deploy job:
+        OIDC assume oxo-deploy
+        S3 sync (3-pass cache strategy)  ← SPA now includes config.js script tag
+        CloudFront invalidation
+        IF src/lambda/** changed:
+          zip Lambda source
+          UpdateFunctionCode → oxo-game-fn  (if OXO_ONLINE_LAMBDA_FUNCTION_NAME set)
+          UpdateFunctionCode → oxo-ws-fn    (if OXO_ONLINE_WS_LAMBDA_FUNCTION_NAME set)
+        Fetch wss URL from OxoGameProd CloudFormation outputs
+        Write /config.js to S3 (window.OXO_CONFIG = {wsUrl: "wss://..."})
+      smoke test: Playwright against live HTTPS URL
+      DORA deploy event recorded
+```
+
+### wss URL injection mechanism
+
+The SPA receives the WebSocket endpoint via a runtime config file (`/config.js`)
+written to S3 at deploy time. The deploy pipeline:
+
+1. Calls `aws cloudformation describe-stacks --stack-name OxoGameProd` to read
+   the `OxoGameProd-WsApiEndpoint` output (the wss:// URL incl. `/prod` stage).
+2. Writes `window.OXO_CONFIG={"wsUrl":"wss://..."};` to `/config.js` with
+   `Cache-Control: no-cache` so browsers always pick up the latest value.
+3. The SPA's `index.html` has `<script src="/config.js"></script>` before the
+   main bundle; the app reads `window.OXO_CONFIG.wsUrl` at runtime.
+
+This decouples the app build from the infra deploy: the Vite build does not need
+to know the API Gateway ID; the deploy pipeline reads it live from CloudFormation.
+
+Graceful degradation: if `wsUrl` is absent or empty, the join screen shows a
+readable error ("Service unavailable — try again later") rather than crashing.
+
+### Infrastructure as code
+
+| File | Purpose |
+|------|---------|
+| `src/infra/lib/game-stack.ts` | Gains: WS API + prod stage, `oxo-ws-fn` Lambda, `Connections` table, `code-index` GSI, new CfnOutputs (WsApiEndpoint, WsLambdaFunctionName) |
+| `src/infra/lib/oxo-online-oidc-stack.ts` | Gains: `WsLambdaCodeDeploy` + `ReadGameStackOutputs` policy statements on `oxo-deploy` role |
+| `src/infra/STACK_ORDER.md` | Documents new CfnOutputs + wss URL injection mechanism |
+| `src/infra/DEPLOY_ROLE_EXTENSIONS.md` | Documents slice 005 OIDC role extensions |
+| `src/lambda/ws/` | New WS handler subdir — covered by existing Lambda build step and `src/lambda/**` path trigger |
+
+### New GitHub Actions variables required (slice 005)
+
+| Name | Type | Set to |
+|------|------|--------|
+| `OXO_ONLINE_WS_LAMBDA_FUNCTION_NAME` | Variable (not secret) | `WsLambdaFunctionName` CfnOutput value from `OxoGameProd` (e.g. `oxo-ws-fn`) |
+
+The following already exist and are reused:
+- `OXO_ONLINE_LAMBDA_FUNCTION_NAME` (variable) — `oxo-game-fn` (unchanged)
+- `OXO_ONLINE_S3_BUCKET` (variable) — target for `/config.js` upload
+- `OXO_ONLINE_DEPLOY_ROLE_ARN` (secret) — `oxo-deploy` role (now extended)
+
+### Deploy role extension (oxo-deploy) — slice 005 additions
+
+Before the ws-fn update step and wss URL injection step will work, the engineer
+must add two policy statements to `oxo-online-oidc-stack.ts` and redeploy
+`OxoOnlineOidcStack` manually:
+
+1. `WsLambdaCodeDeploy` — `lambda:UpdateFunctionCode` + `lambda:GetFunction`
+   scoped to `arn:aws:lambda:*:<account>:function:oxo-ws-fn`
+2. `ReadGameStackOutputs` — `cloudformation:DescribeStacks` scoped to
+   `arn:aws:cloudformation:*:<account>:stack/OxoGameProd/*`
+
+See `src/infra/DEPLOY_ROLE_EXTENSIONS.md` for the exact TypeScript statements.
+
+Manual step: `make -C work/oxo-online/src/infra deploy-oidc`
+
+### Infra pipeline — path trigger coverage
+
+The infra pipeline already triggers on `work/oxo-online/src/lambda/**`. The new
+`src/lambda/ws/` subdirectory for `oxo-ws-fn` handlers falls under this glob —
+no trigger change needed. The Lambda build step (`npm run build` in
+`work/oxo-online/src/lambda`) compiles all TypeScript under `src/` regardless of
+subdirectory depth — no build step change needed.
+
+`OxoOnlineProd` gains **no** new CloudFormation import from `OxoGameProd` (the wss
+URL handoff is a deploy-time config injection, not a CFN import). The sequential
+`OxoGameProd` then `OxoOnlineProd` deploy order in the infra pipeline is
+sufficient and unchanged.
+
+### §19 pre-flight checklist — slice 005
+
+| Check | Result |
+|-------|--------|
+| New Lambda dir (`src/lambda/ws/`) covered by path trigger `src/lambda/**` | PASS — existing glob covers all subdirs |
+| Lambda build step compiles new ws/ subdir | PASS — `npm run build` in `src/lambda/` is not subdir-scoped |
+| Sequential export-linked deploys (OxoGameProd then OxoOnlineProd) | PASS — unchanged; no new CFN import in OxoOnlineProd |
+| Vitest run in CI uses `--run` flag (no watch-mode hang) | PASS — `npm test -- --run` in deploy workflow |
+| Lock-file platform (npm ci vs npm install) | PASS for app (npm ci); CAUTION for infra (npm install — OI-7 open item) |
+| No `GITHUB_` prefix env vars | PASS — all vars use `OXO_ONLINE_` prefix or `github.*` expressions |
+| All new vars documented | PASS — `OXO_ONLINE_WS_LAMBDA_FUNCTION_NAME` documented above |
+| `environment: production` gate absent (no approval queue) | PASS — no `environment:` block added |
+| New OIDC permissions are ARN-scoped, no `iam:*` | PASS — `WsLambdaCodeDeploy` and `ReadGameStackOutputs` both ARN-scoped |
+| wss URL injection graceful-degrades on missing output | PASS — pipeline logs warning and writes `wsUrl: ""`; SPA must handle (engineer task) |
+
+### Rollback assets — slice 005
+
+**SPA + config.js:** S3 versioned bucket covers both. Rollback: restore prior
+`config.js` version + CloudFront invalidation.
+
+**oxo-ws-fn Lambda code:** Roll forward preferred (no versioning). Push a
+corrected commit; pipeline overwrites the function code.
+
+**OxoGameProd infra (WS API, Connections table, code GSI):** All additive
+resources. CloudFormation rollback removes them atomically; the s004 create-game
+path (HTTP API + Games + oxo-game-fn) is unaffected. The `Connections` table
+uses `RemovalPolicy.DESTROY` (ephemeral data; engineer must set this explicitly —
+PITR off by design per the delta). The `Games` table uses `RemovalPolicy.RETAIN`
+(unchanged from s004).
+
+**GSI add (Games.code-index):** An in-place table update (no table replacement);
+additive, backfills automatically. Rolling back `OxoGameProd` removes the GSI.
+Low risk.
+
+**Lambda code rollback (oxo-ws-fn):** Roll forward. No versioning enabled in
+this slice (consistent with oxo-game-fn default).
+
+**Wss URL config.js rollback:** If the wss URL in config.js is stale (e.g., after
+a CDK stack re-deploy that regenerated the API Gateway ID), re-running the
+deploy pipeline re-fetches and overwrites config.js automatically.

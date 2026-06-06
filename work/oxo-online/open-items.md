@@ -23,6 +23,11 @@ job served — core jobs beat secondary (see project.md classification);
 | OI-11 | tester (IMP-002) | Validation-spec relevancy review due — first review cycle of pinned s004 specs | process/quality hygiene | tests/validation/README.md lifecycle | at s005 retro |
 | OI-12 | product (job classification) | Precedent watch: C3 (secondary, AI) delivered before C4 (core, online play) — pre-§38 sequencing; confirm core-first rule prevents recurrence | process discipline | this register + s005 retro | review at s005 retro |
 
+| OI-13 | cicd (s005) | Tester will need to send WS messages to the WSS endpoint — wscat or a node script is the natural tool; wscat is not in the allowlist. Proposed pattern: `Bash(npx wscat --connect wss://* --execute *)` or a root-relative node test script via `Bash(node work/oxo-online/scripts/ws-probe.js *)`. Recommend: node script (deterministic, no extra tool install friction, already allowed via `node` via npm scripts). Add `Bash(node work/oxo-online/scripts/* *)` to allowlist. | risk: tester blocked | allowlist + tester | before s005 tester |
+| OI-14 | cicd (s005) | `aws apigatewayv2 get-stages` not in allowlist — needed to verify WS API stage is `prod` and AutoDeploy=true. Proposed: `Bash(aws apigatewayv2 get-stages *)`. Add to allowlist. | risk: tester blocked | allowlist | before s005 tester |
+| OI-15 | cicd (s005) | `aws dynamodb query` not in allowlist — tester will need to query the Connections table by connectionId and Games table by code GSI to verify items. Proposed: `Bash(aws dynamodb query *)`. Add to allowlist. | risk: tester blocked | allowlist | before s005 tester |
+| OI-16 | cicd (s005) | `/config.js` is a new file on S3/CloudFront with `no-cache` headers — the smoke test should assert it is reachable (HTTP 200) and contains `OXO_CONFIG`. No action for CICD (engineer wires the script tag in index.html; tester validates via curl). `Bash(curl https://d3pf3kcvzpau1x.cloudfront.net/config.js*)` may need to be added to the allowlist. | risk: tester blocked | allowlist | before s005 tester |
+
 Process-side items (project-agnostic) live in `/process/improvement-slices/`
 and the §27 retro queue — currently: pipeline-N+1-planning-over-build
 (operationalise §8b), §37 parallel-build scoring on s005, IMP-001/002/003

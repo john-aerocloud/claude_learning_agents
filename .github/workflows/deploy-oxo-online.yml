@@ -208,16 +208,26 @@ jobs:
       - name: Deploy game Lambda code (oxo-game-fn)
         if: steps.lambda-changed.outputs.changed == 'true' && vars.OXO_ONLINE_LAMBDA_FUNCTION_NAME != ''
         run: |
+          FN="${{ vars.OXO_ONLINE_LAMBDA_FUNCTION_NAME }}"
+          if ! aws lambda get-function --function-name "$FN" --region ${{ env.AWS_REGION }} > /dev/null 2>&1; then
+            echo "::warning::game fn '$FN' not yet provisioned — skipping code deploy; will hot-swap on next push after infra deploy"
+            exit 0
+          fi
           aws lambda update-function-code \
-            --function-name ${{ vars.OXO_ONLINE_LAMBDA_FUNCTION_NAME }} \
+            --function-name "$FN" \
             --zip-file fileb:///tmp/lambda-package.zip \
             --region ${{ env.AWS_REGION }}
 
       - name: Deploy WS Lambda code (oxo-ws-fn)
         if: steps.lambda-changed.outputs.changed == 'true' && vars.OXO_ONLINE_WS_LAMBDA_FUNCTION_NAME != ''
         run: |
+          FN="${{ vars.OXO_ONLINE_WS_LAMBDA_FUNCTION_NAME }}"
+          if ! aws lambda get-function --function-name "$FN" --region ${{ env.AWS_REGION }} > /dev/null 2>&1; then
+            echo "::warning::WS fn '$FN' not yet provisioned — skipping code deploy; will hot-swap on next push after infra deploy"
+            exit 0
+          fi
           aws lambda update-function-code \
-            --function-name ${{ vars.OXO_ONLINE_WS_LAMBDA_FUNCTION_NAME }} \
+            --function-name "$FN" \
             --zip-file fileb:///tmp/lambda-package.zip \
             --region ${{ env.AWS_REGION }}
 

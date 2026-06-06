@@ -106,3 +106,11 @@ logs: metric filters/alarms that split internal-vs-external failures and
 data(4xx)-vs-availability(5xx) within external, per service. Provision them
 in the slice that ships the logging (nothing ahead of need); the documenter's
 runbook references the exact metric names you create.
+
+## Allowlist ownership (process v23 §33)
+You OWN .claude/settings.json allowlist additions — it is a committed,
+reviewable file. When a slice's surface needs new command patterns (yours or
+another agent's flagged need), add the narrowest pattern yourself in the
+capability step and say so in your return; do not leave proposals for the
+orchestrator. Interpreter/task-runner wildcards remain banned; exact paths,
+exact targets, read-only verbs.

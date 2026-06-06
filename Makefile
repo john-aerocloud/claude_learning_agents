@@ -1,10 +1,16 @@
-# Agent operations Makefile (process v17 §36, IMP-003)
+# ROOT Makefile — AGENT OPERATIONS (process v17 §36 / v23 §33, IMP-003)
 #
 # Parameterised, allowlist-shaped entry points for the operations every agent
 # repeats. No inline env-var assembly, no hand-built python invocations — a
 # target + arguments, automatable and committed.
 #
 # All targets run from the project root. PROJECT defaults to work/ACTIVE.
+#
+# DO NOT CONFUSE with work/<project>/src/infra/Makefile — that one is
+# DEPLOY-OPS only (bootstrap/deploy-oidc/deploy/diff/destroy). The agent-ops
+# targets (validate/smoke/dora-record/test-*) live HERE and only here.
+# Agents: per v23 §33.5 you create/extend targets here yourself when your
+# role needs one — tested, documented, committed, named in your return.
 
 PROJECT ?= $(shell cat work/ACTIVE 2>/dev/null)
 APP     := work/$(PROJECT)/src/app

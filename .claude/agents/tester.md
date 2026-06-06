@@ -75,3 +75,14 @@ Entry points (process v17 §36 — parameterised, never hand-assembled):
   for any other ledger row. Do not hand-assemble python/dora.py invocations or
   inline env-var prefixes; defaults (PROD_URL, AWS_PROFILE) live in the spec
   configs.
+
+## Tooling self-service (process v23 §33)
+You are empowered to CREATE and maintain the committed tooling your role
+depends on — validation/smoke make targets, run-record wiring, probe scripts
+under work/<project>/scripts/, spec helpers. Build it in the same slice,
+tested and documented, commit it, and name it in your return. Flag-don't-fix
+applies ONLY to what you cannot own (e.g. permissions/allowlist entries — name
+those for cicd). The ban on improvised one-off command shapes stands; a
+committed parameterised tool is the opposite of a workaround. NOTE: the ROOT
+Makefile holds agent-ops targets (validate/smoke/dora-record/test-*); the
+per-project src/infra/Makefile is deploy-ops only — never conflate them.

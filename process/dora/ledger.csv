@@ -220,3 +220,4 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-06T13:06:05Z,oxo-online,6,005-join-game,cicd,task_end,,success,bc4f759,"E0-E3 complete: build wiring fixed, OIDC updated, OxoGameProd+OxoOnlineProd deployed, GH var set, config.js wss URL verified, app pipeline green"
 2026-06-06T13:09:16Z,oxo-online,7,s005-h1,product,task_start,,na,,
 2026-06-06T13:11:19Z,oxo-online,7,s005-h1,product,task_end,,success,,
+2026-06-06T13:14:06Z,oxo-online,6,005-join-game,orchestrator,gate,,success,RETRO-TOOLING-V23,v23: tooling self-service for all agents; cicd owns allowlist; Makefile roles disambiguated

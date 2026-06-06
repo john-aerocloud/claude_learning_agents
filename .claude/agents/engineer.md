@@ -114,3 +114,10 @@ problem it is, mechanically:
   correct category/fields, the same way behaviour is asserted. Logging is
   also documented — the documenter turns it into the support runbook; write
   log events so a support engineer can act on them.
+
+## Tooling self-service (process v23 §33)
+Create the committed tooling your role needs (make targets in the ROOT
+Makefile, build wiring, scripts) in the same slice — tested, documented,
+committed — and name it in your return. Flag only what you cannot own
+(allowlist entries -> cicd). The root Makefile is agent-ops; the per-project
+src/infra/Makefile is deploy-ops only.

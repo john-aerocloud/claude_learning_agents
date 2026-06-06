@@ -1,7 +1,26 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { GameRoot } from './GameRoot';
+import type { ConnectOptions, GameSocket, GameSocketFactory } from './socket';
+
+/** Capture the latest ConnectOptions so a test can drive game-ready/close. */
+function captureFactory() {
+  const sent: unknown[] = [];
+  let captured: ConnectOptions | null = null;
+  const socket: GameSocket = { send: (f) => sent.push(f), close: vi.fn() };
+  const factory: GameSocketFactory = (opts) => {
+    captured = opts;
+    return socket;
+  };
+  return {
+    factory,
+    sent,
+    get opts() {
+      return captured;
+    },
+  };
+}
 
 /** Count rendered cells currently holding a given symbol. */
 function countSymbol(symbol: 'X' | 'O'): number {
@@ -299,5 +318,70 @@ describe('GameRoot — Play Online failure degrades gracefully (F4, F5)', () => 
     expect(
       screen.getByRole('button', { name: /two player/i }),
     ).toBeInTheDocument();
+  });
+});
+
+describe('GameRoot — Join a game flow (B4, F1)', () => {
+  it('offers a "Join a game" control on the mode selector', () => {
+    render(<GameRoot />);
+    expect(
+      screen.getByRole('button', { name: /join a game/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('opens the join screen with a code input when Join a game is clicked', async () => {
+    render(<GameRoot socketFactory={captureFactory().factory} />);
+    await userEvent.click(screen.getByRole('button', { name: /join a game/i }));
+    expect(screen.getByLabelText(/game code/i)).toBeInTheDocument();
+  });
+
+  it('transitions the joiner from connecting to the board with role O on game-ready', async () => {
+    const cap = captureFactory();
+    render(<GameRoot socketFactory={cap.factory} />);
+    await userEvent.click(screen.getByRole('button', { name: /join a game/i }));
+    await userEvent.type(screen.getByLabelText(/game code/i), 'ABC234');
+    await userEvent.click(screen.getByRole('button', { name: /^join$/i }));
+    // Server pairs the game.
+    act(() => cap.opts?.onMessage({ type: 'game-ready', role: 'guest' }));
+    expect(screen.getByTestId('online-role')).toHaveTextContent('You are O');
+    expect(
+      screen.getByText('Game active — moves coming in the next update'),
+    ).toBeInTheDocument();
+  });
+
+  it('transitions the host waiting screen to the board with role X on game-ready', async () => {
+    const cap = captureFactory();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ gameId: 'g-1', code: 'HST234' }), {
+        status: 201,
+      }),
+    );
+    render(<GameRoot socketFactory={cap.factory} />);
+    await userEvent.click(screen.getByRole('button', { name: /play online/i }));
+    await waitFor(() =>
+      expect(screen.getByText(/waiting for opponent/i)).toBeInTheDocument(),
+    );
+    // Host has opened the socket and registered; server pairs.
+    act(() => cap.opts?.onMessage({ type: 'game-ready', role: 'host' }));
+    expect(screen.getByTestId('online-role')).toHaveTextContent('You are X');
+  });
+});
+
+describe('GameRoot — local modes unaffected by online wiring (B4, F8)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('still offers Two player and vs Computer and completes a local game', async () => {
+    render(<GameRoot />);
+    expect(
+      screen.getByRole('button', { name: /two player/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /vs computer/i }),
+    ).toBeInTheDocument();
+    // A local two-player game still plays to a win.
+    await clickCells([0, 3, 1, 4, 2]);
+    expect(screen.getByRole('status')).toHaveTextContent('X wins');
   });
 });

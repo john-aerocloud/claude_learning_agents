@@ -28,11 +28,14 @@ export async function handler(
   const code = generateCode();
   const nowSeconds = Math.floor(Date.now() / 1000);
 
+  // DEFECT-005-001 Bug A: do NOT write a NULL hostConnectionId. A stored NULL
+  // attribute "exists" in DynamoDB, which broke register's
+  // attribute_not_exists(hostConnectionId) bind. The attribute is simply absent
+  // until the host registers, so attribute_not_exists holds for a fresh game.
   const item = {
     gameId,
     code,
     status: 'waiting' as const,
-    hostConnectionId: null,
     createdAt: new Date().toISOString(),
     ttl: nowSeconds + TTL_SECONDS,
   };

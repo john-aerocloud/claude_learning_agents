@@ -5,6 +5,24 @@ import { handleRegister } from './register';
 
 const ddbMock = mockClient(DynamoDBDocumentClient);
 
+// Strings that must NEVER appear in a client-visible close payload (S3).
+const INTERNAL_LEAK_MARKERS = [
+  'stack',
+  'Exception',
+  'arn:aws',
+  'oxo-games',
+  'oxo-connections',
+  'requestId',
+  'RequestId',
+];
+
+function assertNoLeak(payload: unknown) {
+  const json = JSON.stringify(payload);
+  for (const marker of INTERNAL_LEAK_MARKERS) {
+    expect(json).not.toContain(marker);
+  }
+}
+
 function registerEvent(connectionId: string, body: unknown) {
   return {
     requestContext: { connectionId, routeKey: 'register' },
@@ -39,6 +57,17 @@ describe('register — binds host connection to the game (T6, S1, F6)', () => {
     expect(gamesUpdate.args[0].input.ConditionExpression).toContain(
       'attribute_not_exists(hostConnectionId)',
     );
+    // DEFECT-005-001 Bug A: a stored NULL hostConnectionId attribute (from an
+    // older create write) must ALSO satisfy the bind condition — the condition
+    // tolerates an existing NULL via the OR clause.
+    expect(gamesUpdate.args[0].input.ConditionExpression).toContain(
+      'hostConnectionId = :null',
+    );
+    const gamesNames = gamesUpdate.args[0].input.ExpressionAttributeValues as Record<
+      string,
+      unknown
+    >;
+    expect(gamesNames[':null']).toBeNull();
     // The persisted host id is the caller's context id.
     const gamesValues = gamesUpdate.args[0].input.ExpressionAttributeValues as Record<
       string,
@@ -80,5 +109,40 @@ describe('register — binds host connection to the game (T6, S1, F6)', () => {
       unknown
     >;
     expect(Object.values(gamesValues)).toContain('CTX-ID');
+  });
+});
+
+describe('register — defensive error handling (DEFECT-005-001 Bug A; S3)', () => {
+  it('ConditionalCheckFailedException (host already bound) closes 4041, no leak', async () => {
+    const condErr = new Error('The conditional request failed');
+    (condErr as { name: string }).name = 'ConditionalCheckFailedException';
+    ddbMock.on(UpdateCommand).rejects(condErr);
+
+    const res = await handleRegister(
+      registerEvent('CTX-ID', { action: 'register', gameId: 'G-1' }),
+    );
+
+    // The register path must NOT throw unhandled — it returns a clean close.
+    expect(res.close).toBeDefined();
+    expect(res.close!.code).toBe(4041);
+    assertNoLeak(res.close);
+  });
+
+  it('an unexpected fault closes 4500 with a generic message, no leak', async () => {
+    ddbMock
+      .on(UpdateCommand)
+      .rejects(
+        new Error(
+          'ProvisionedThroughputExceededException: secret stack trace, arn:aws:dynamodb:...:table/oxo-games, RequestId 123',
+        ),
+      );
+
+    const res = await handleRegister(
+      registerEvent('CTX-ID', { action: 'register', gameId: 'G-1' }),
+    );
+
+    expect(res.close).toBeDefined();
+    expect(res.close!.code).toBe(4500);
+    assertNoLeak(res.close);
   });
 });

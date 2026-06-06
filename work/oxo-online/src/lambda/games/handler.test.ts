@@ -55,6 +55,12 @@ describe('handler — POST /games success (T1, F1)', () => {
     // ttl ~ 24h ahead of request time, within a small skew tolerance.
     expect(item.ttl as number).toBeGreaterThanOrEqual(before + 86400 - 5);
     expect(item.ttl as number).toBeLessThanOrEqual(after + 86400 + 5);
+
+    // DEFECT-005-001 Bug A (primary fix): the create write must NOT store a NULL
+    // hostConnectionId attribute. Storing NULL made the attribute "exist", which
+    // broke register's attribute_not_exists(hostConnectionId) bind condition.
+    // Omitting it entirely lets a fresh game satisfy attribute_not_exists.
+    expect('hostConnectionId' in item).toBe(false);
   });
 });
 

@@ -228,12 +228,105 @@ are required for this slice.
 
 ---
 
-## Forward note — not built in slices 001–003
+## Slice 004 — create game + shareable code (first backend slice)
 
-From Chunk 4 the pipeline gains:
-- Lambda packaging + `lambda:UpdateFunctionCode` deploy step
-- DynamoDB table provisioning via IaC
-- WebSocket + HTTP API deployment
-- Backend integration tests
-- WAF WebACL attached to CloudFront (per security note; deferred to C4)
-- Capabilities file revised then.
+### What this slice adds
+
+First stateful backend: Lambda + DynamoDB + HTTP API Gateway. CloudFront gains a
+`/api/*` behaviour routing to the HTTP API. New CDK stack `OxoGameProd` deployed
+before `OxoOnlineProd`.
+
+### Environments in play
+
+**Production only.** Unchanged from slices 001–003.
+
+### Deploy path
+
+Two pipelines, both triggered on push to main:
+
+```
+push to main (work/oxo-online/src/infra/**)
+  → infra-oxo-online.yml:
+      validate context flags
+      npm ci + tsc build
+      OIDC assume oxo-infra-deploy
+      cdk deploy OxoGameProd (Lambda + DynamoDB + HTTP API)
+      cdk deploy OxoOnlineProd (CloudFront /api/* behaviour added)
+
+push to main (work/oxo-online/src/app/** or src/lambda/**)
+  → deploy-oxo-online.yml:
+      build job: npm ci → lint → unit tests → build SPA
+      deploy job:
+        OIDC assume oxo-deploy
+        S3 sync (3-pass cache strategy)
+        CloudFront invalidation
+        IF src/lambda/** changed: zip Lambda source → UpdateFunctionCode
+      smoke test: Playwright against live HTTPS URL
+      DORA deploy event recorded
+```
+
+### Infrastructure as code
+
+| File | Purpose |
+|------|---------|
+| `src/infra/bin/app.ts` | CDK app entry; instantiates OxoGameProd BEFORE OxoOnlineProd |
+| `src/infra/lib/game-stack.ts` | OxoGameStack stub — engineer fills: Lambda + DynamoDB + HTTP API |
+| `src/infra/lib/oxo-online-shell-stack.ts` | OxoOnlineProd: S3 + CloudFront + /api/* origin |
+| `src/infra/lib/oxo-online-oidc-stack.ts` | OIDC stack (one-time manual deploy) |
+| `src/infra/STACK_ORDER.md` | Cross-stack reference pattern + deploy order explanation |
+| `src/infra/DEPLOY_ROLE_EXTENSIONS.md` | Permissions to add to oxo-deploy for Lambda code update |
+
+### New GitHub Actions variables/secrets required (slice 004)
+
+| Name | Type | Set to |
+|------|------|--------|
+| `OXO_ONLINE_LAMBDA_FUNCTION_NAME` | Variable (not secret) | `LambdaFunctionName` CfnOutput value from `OxoGameProd` stack |
+
+The following already exist and are reused:
+- `OXO_ONLINE_INFRA_DEPLOY_ROLE_ARN` (secret) — `oxo-infra-deploy` role
+- `AWS_ACCOUNT_ID` (secret) — used by infra pipeline for CDK
+
+### Deploy role extension (oxo-deploy)
+
+Before the Lambda update step in `deploy-oxo-online.yml` will work, the engineer
+must add `lambda:UpdateFunctionCode` + `lambda:GetFunction` to the `oxo-deploy`
+role (scoped to the function ARN) and redeploy `OxoOnlineOidcStack` manually.
+See `src/infra/DEPLOY_ROLE_EXTENSIONS.md`.
+
+### Rollback assets
+
+**SPA:** S3 versioned bucket + CloudFront invalidation (unchanged from slices 001–003).
+
+**Lambda:** Roll forward preferred. If Lambda versioning is enabled (set
+`currentVersionOptions` on the CDK Function), re-deploy the prior package via
+the pipeline. Without versioning: push a corrected commit; the pipeline overwrites
+the function code.
+
+**DynamoDB `Games` table:** Items are ephemeral (24h TTL). No migrations.
+`RemovalPolicy.RETAIN` on the table (the engineer must set this) so stack destroy
+does not delete the table. Items are not irreversible — any item written by a bad
+deploy self-deletes after 24h.
+
+**CloudFormation infra rollback:** `cdk deploy OxoGameProd --rollback` or
+`cdk deploy OxoOnlineProd --rollback` (uses the previous change-set).
+
+### Pre-flight checklist (§19) — result for slice 004
+
+| Check | Result |
+|-------|--------|
+| No `GITHUB_` prefix env vars | PASS — pipeline uses `github.repository_owner` / `github.event.repository.name` expressions, not `GITHUB_*` env vars |
+| All required vars documented | PASS — `OXO_ONLINE_LAMBDA_FUNCTION_NAME` documented above |
+| `environment: production` gate | PASS — no `environment:` gate added; no approval queue introduced |
+| CDK `cdk.json` app entry correct | PASS — `"app": "npx ts-node --prefer-ts-exts bin/app.ts"` unchanged |
+| `ts-node` in devDependencies | PASS — `"ts-node": "^10.9.2"` present |
+| CDK bootstrap trust covers infra role | PASS — `oxo-infra-deploy` was bootstrapped with `--trust 817047731316` (from existing pipeline comment) |
+| `npm ci` in each job that needs it | PASS — infra pipeline: `npm ci` before `npm run build`; app pipeline: `npm ci` in build job |
+| oxo-deploy has Lambda permissions | BLOCKED — engineer must add `LambdaCodeDeploy` policy to `oxo-online-oidc-stack.ts` and redeploy `OxoOnlineOidcStack` manually |
+
+### Forward note
+
+Deferred to slice 005+:
+- WebSocket API (join, move relay)
+- `Connections` DynamoDB table
+- `code` GSI + join lookup
+- WAF rate-based rule on CloudFront + HTTP API

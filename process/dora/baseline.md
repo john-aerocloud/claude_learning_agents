@@ -1,26 +1,26 @@
 # DORA Baseline (computed)
 
-_Generated 2026-06-05T18:57:02Z from ledger.csv. Do not hand-edit._
+_Generated 2026-06-06T07:04:58Z from ledger.csv. Do not hand-edit._
 
 ## Four key metrics (whole pipeline)
 
 | Metric | Value | Window |
 |--------|-------|--------|
-| Gross lead time (median) | 2340 s | 5 slice(s) |
-| Deployment frequency | 3 /active-day | 2 day(s) |
-| Change failure rate | 33 % | 6 deploy(s) |
-| MTTR (median) | 257 s | 2 failure(s) |
+| Gross lead time (median) | 2979 s | 6 slice(s) |
+| Deployment frequency | 3 /active-day | 3 day(s) |
+| Change failure rate | 67 % | 9 deploy(s) |
+| MTTR (median) | 111 s | 6 failure(s) |
 
 ## Per-agent task completion (seconds)
 
 | Agent | n | modal | median | mean |
 |-------|---|-------|--------|------|
-| product | 3 | 120 | 120 | 159 |
-| solution-architect | 9 | 1200 | 900 | 780 |
-| cicd | 6 | 1080 | 152 | 297 |
-| engineer | 6 | 360 | 240 | 489 |
-| tester | 7 | 1200 | 1059 | 943 |
-| orchestrator | 0 | — | — | — |
+| product | 4 | 120 | 95 | 137 |
+| solution-architect | 11 | 1200 | 780 | 667 |
+| cicd | 9 | 207 | 207 | 384 |
+| engineer | 7 | 360 | 360 | 522 |
+| tester | 9 | 1200 | 1059 | 1107 |
+| orchestrator | 1 | 900 | 900 | 900 |
 
 ## Theory-of-Constraints read
 

@@ -18,3 +18,12 @@ Checkable controls:
       API Gateway integrations.
 - [ ] Env vars contain no secrets in plaintext (tokens/keys via SSM/Secrets
       Manager if any are needed).
+
+## s004 subset (create-game only)
+For slice 004 the `oxo-game-fn` policy is narrowed to the minimum for create:
+- [ ] `dynamodb:PutItem` on the `Games` table ARN **only** — no read/query, no
+      `Connections` table (deferred s005), no `execute-api:ManageConnections`
+      (deferred s005). CloudWatch Logs on its own log group.
+- [ ] Reserved concurrency cap set (bounds unauthenticated-write cost/abuse).
+- [ ] `TABLE_NAME` is the only env var; not a secret.
+The full RW + ManageConnections set above is added in s005 when join/relay land.

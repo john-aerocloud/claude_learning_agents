@@ -15,3 +15,12 @@ Checkable controls:
       except validated moves through the Game service.
 - [ ] Point-in-time recovery is NOT required (ephemeral data) — documented as a
       deliberate cost choice, not an oversight.
+
+## s004 subset (Games table only)
+- [ ] Only the `Games` table is created in s004; `Connections` is deferred (s005).
+- [ ] Partition key `gameId` (UUID); items written: `gameId`, `code`, `status`,
+      `hostConnectionId`, `createdAt`, `ttl`.
+- [ ] `ttl` set ~24h ahead on every created item; TTL enabled on the table.
+- [ ] Access is `dynamodb:PutItem` via `oxo-game-fn` only; no `code` GSI yet
+      (added in s005 with a collision check when lookup-by-code is introduced).
+- [ ] No PII stored (display names are C6).

@@ -3,9 +3,12 @@ description: Refactor the process file — route agent-specific content into age
 allowed-tools: Read, Write, Edit, Bash, Task
 ---
 
-Act as the **orchestrator**. The process file's value is inverse to its size:
-it must stay concise, relevant, and easy to add to / remove from. Agent
-definitions — not the global process — are the unit of agent behaviour.
+Act as the **orchestrator**. The goal is an **optimal** process file:
+concise, necessary, and easy to add to / remove from. Growth is fine — even
+good — when content is genuinely general and load-bearing; the refactor
+removes what is misplaced, redundant, or no longer necessary, never length
+for its own sake. Agent definitions — not the global process — are the unit
+of agent behaviour.
 
 1. **Read** `/process/process-current.md` end to end.
 
@@ -46,7 +49,8 @@ definitions — not the global process — are the unit of agent behaviour.
    substantive change you think is also needed.
 
 7. **Verify**: nothing project-specific remains in `/process`; every removed
-   rule exists verbatim-or-stronger in its new home; the file got shorter;
+   rule exists verbatim-or-stronger in its new home; everything that remains
+   is general, necessary, and stated once (length itself is not a defect);
    `git diff --stat` confirms agent files absorbed what the process file shed.
 
 8. **Commit** process file + history + agent files together; log a `process`

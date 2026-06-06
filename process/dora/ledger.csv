@@ -237,3 +237,6 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-06T13:46:51Z,oxo-online,6,005-join-game,orchestrator,gate,,success,PRINCIPLE-01-VERSION,principles/01 version-identifiable deployments routed to 5 agent defs; OI-25 registered
 2026-06-06T13:50:21Z,oxo-online,6,005-join-game,cicd,task_start,,na,DEFECT-005-001,Pipeline fixes OI-23+OI-24: CF invalidation wait + hot-swap removal
 2026-06-06T13:51:09Z,oxo-online,6,005-join-game,cicd,task_end,,success,ba94a87,OI-23 CF invalidation wait added; OI-24 hot-swap removed; OI-20 resolved by consequence
+2026-06-06T13:53:33Z,oxo-online,6,005-join-game,tester,validation_run,,fail,8d5c23a:smoke,tests/smoke FAILED via make smoke
+2026-06-06T13:54:58Z,oxo-online,6,005-join-game,tester,validation_run,,fail,1d8f730:validation,tests/validation FAILED via make validate
+2026-06-06T13:55:00Z,oxo-online,6,005-join-game,orchestrator,gate,,success,PROCESS-V24,v24: optimal-concise-necessary replaces size-minimisation framing in §36 + refactor-process

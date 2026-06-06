@@ -178,3 +178,12 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-06T08:44:46Z,oxo-online,5,004-create-game,tester,validation_run,,success,a9fb9f1dc9e4983cc9c7d17d95f211dd3be3c7b1:aws-policy,"slice004-aws-policy.spec.ts vs live AWS dev-int/eu-west-2: 4/4 passed (T1-persisted,S1-stored,T3,T5,T2)"
 2026-06-06T08:45:26Z,oxo-online,5,004-create-game,engineer,task_end,,success,a9fb9f1dc9e4983cc9c7d17d95f211dd3be3c7b1,IMP-002 framework + slice004 pinned validation specs (7/7 vs prod); validation_run provenance documented
 2026-06-06T08:50:09Z,oxo-online,5,004-create-game,orchestrator,gate,,success,PROCESS-V17,"v17: improvement routing + parameterised operations; IMP-002 delivered (8cb2b7a), IMP-003 delivered"
+2026-06-06T08:52:00Z,oxo-online,6,005-planning,orchestrator,task_start,,na,,slice-next for chunk C4 slice 005
+2026-06-06T08:52:37Z,oxo-online,6,005-join-game,product,task_start,,na,,Proposing slice 005: join-by-code + WebSocket connect
+2026-06-06T08:54:41Z,oxo-online,6,005-join-game,product,task_end,,success,,"slice.md + chunk-plan.md committed 80a0578; WebSocket over polling, direct WSS not CloudFront-proxied"
+2026-06-06T09:00:52Z,oxo-online,6,005-join-game,orchestrator,gate,,success,GATE-2-S005,Gate 2 approved by human: slice 005-join-game
+2026-06-06T09:01:17Z,oxo-online,6,005-join-game,solution-architect,task_start,,na,,arch delta + security review for join-game WS slice
+2026-06-06T09:05:55Z,oxo-online,6,005-join-game,solution-architect,task_end,540,success,,"s005 full delta + GATE3 security review committed 04819d4; WS API in OxoGameProd, oxo-ws-fn scoped, no-hijack conditional writes, open risks enumerated"
+2026-06-06T11:49:44Z,oxo-online,6,005-join-game,orchestrator,gate,,success,GATE-3-S005,Gate 3 approved; risks 1-3 deferred to named hardening slices
+2026-06-06T11:50:21Z,oxo-online,6,005-join-game,product,task_start,,na,,use-case decomposition and acceptance cases for s005
+2026-06-06T11:51:53Z,oxo-online,6,005-join-game,orchestrator,gate,,success,PROCESS-V18,v18: use-case construct beneath slices for parallel builds

@@ -67,3 +67,11 @@ so it runs without a permission prompt. That means:
   command shapes.
 - A permission prompt caused by an avoidable command form is a principle
   failure — log it.
+
+## Use-case routing (process v18 §37)
+Route and build per use case (slices/<nnn>-<slug>/use-cases.md): group route
+steps under the use case they complete; a use case is done when its own
+acceptance cases pass independently of other UCs. When you are one of several
+parallel engineers, your claimed use cases define your WIP boundary — do not
+touch files another UC owns; flag shared-file collisions to the orchestrator
+instead of working around them.

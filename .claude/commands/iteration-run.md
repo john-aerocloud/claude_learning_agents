@@ -12,10 +12,14 @@ Bracket every dispatch with ledger rows; emit deploy/failure/recovery events.
 1. **Capabilities.** Dispatch `cicd` to ensure the environments, pipeline and
    rollback assets the slice needs exist (nothing ahead of need).
 2. **Thin route.** Dispatch `engineer` to lay a clean route through the
-   acceptance cases that advances the solution most per step -> `route.md`.
-3. **Build (TDD, possibly parallel).** Dispatch `engineer`(s) to implement strict
-   red->green->refactor on trunk, keeping WIP sequentially independent. Repeat
-   until acceptance cases pass. Security notes become policy tests.
+   acceptance cases that advances the solution most per step -> `route.md`,
+   grouped by use case (`use-cases.md`, process §37).
+3. **Build (TDD, parallel by use case).** Read the use-case dependency edges:
+   dispatch parallel `engineer`s (worktree isolation) for use-case sets with no
+   mutual dependency and no shared-file mutation; serialise the rest. Strict
+   red->green->refactor on trunk, WIP sequentially independent. A use case is
+   done when its own acceptance cases pass. Repeat until all cases pass.
+   Security notes become policy tests.
    -> GATE 4: go/no-go to deploy. Log it.
 4. **Continuous deploy.** Merge to main triggers the pipeline to production.
 5. **Validate in prod.** Dispatch `tester` to exercise the public surface

@@ -16,9 +16,13 @@ Act as the **orchestrator** for project **$1**.
    (`architecture/deltas/<nnn>-<slug>.md`), update `architecture/current.md`, and
    run the security review for the delta.
    -> GATE 3: human accepts architecture + security. Log it.
-3. Dispatch `product` + `solution-architect` to co-author acceptance test cases
-   into `slices/<nnn>-<slug>/acceptance.md` (product: customer-observable; arch:
-   technical/security-policy conditions).
+3. Dispatch `product` + `solution-architect` to co-author:
+   - `slices/<nnn>-<slug>/use-cases.md` (process §37): separately buildable,
+     separately testable use cases with dependency edges — the parallelism plan
+     for the build.
+   - `slices/<nnn>-<slug>/acceptance.md` (product: customer-observable; arch:
+     technical/security-policy conditions). Every case is tagged with its
+     use case.
 
 This planning may run in PARALLEL with a prior slice's build if the two are
 sequentially independent — confirm independence before overlapping; otherwise

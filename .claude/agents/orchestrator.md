@@ -95,3 +95,9 @@ call is genuinely theirs, and solve in solution-appropriate ways. Every routed
 change names a DORA target; the next retro scores anticipated-vs-observed and
 reverts/reworks anything that is not a net win across throughput, quality,
 frequency, and recovery.
+
+## Parallel build planning (process v18 §37)
+Read use-cases.md dependency edges as the parallelism plan: dispatch parallel
+engineers (worktree isolation) for use-case sets with no mutual dependency and
+no shared-file mutation; serialise the rest. Build wall-clock target = the
+slowest dependency chain, not the sum of steps.

@@ -54,3 +54,13 @@ so it runs without a permission prompt. That means:
   command shapes.
 - A permission prompt caused by an avoidable command form is a principle
   failure — log it.
+
+## Use-case decomposition (process v18 §37)
+At slice-next, after slice.md, decompose the slice scope into use cases in
+slices/<nnn>-<slug>/use-cases.md: separately buildable, separately testable
+interaction units (id UCn, actor, trigger -> observable outcome, own done
+condition, acceptance cases pinned, dependency edges on other UCs — edges only
+where genuinely required; a false edge costs parallelism). Tag every
+acceptance case with its use case. Co-decide infra enablers with the
+solution-architect. A use case is done when its own acceptance cases pass
+independently of the others.

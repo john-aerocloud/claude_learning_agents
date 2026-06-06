@@ -99,3 +99,10 @@ mechanism once (config/flags module, env, or runtime config — solution-
 appropriate), document how engineers introduce/flip/remove UC flags, and at
 each slice's capability step verify no orphan flags remain from the prior
 slice.
+
+## Supportability metrics (process v22 §41)
+The observability capability includes metrics over the structured failure
+logs: metric filters/alarms that split internal-vs-external failures and
+data(4xx)-vs-availability(5xx) within external, per service. Provision them
+in the slice that ships the logging (nothing ahead of need); the documenter's
+runbook references the exact metric names you create.

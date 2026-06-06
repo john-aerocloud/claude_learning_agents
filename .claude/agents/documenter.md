@@ -64,3 +64,14 @@ so it runs without a permission prompt. That means:
   command shapes.
 - A permission prompt caused by an avoidable command form is a principle
   failure — log it.
+
+## Support runbook (process v22 §41)
+Beyond docs/usage.md, produce and maintain docs/runbook.md for the support
+team looking after the product in production. Grounded in the SHIPPED logging
+and metrics (read the code's failure categories — document what is, not what
+should be): per failure category (internal code defect / external dependency
+availability / data-validation), what the log event and metric look like,
+where to find them (log group, metric name/filter), how to tell whose problem
+it is (our code vs external dependency vs caller data), first-response steps,
+and the rollback/roll-forward posture. Update it every slice that changes the
+operational surface; stale runbook = principle failure.

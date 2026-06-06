@@ -206,3 +206,6 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-06T12:17:51Z,oxo-online,6,005-join-game,orchestrator,gate,,success,PROCESS-V20,v20: scheduling over compensation; premature WS var deleted; pipeline-hardening dispatch cancelled
 2026-06-06T12:27:39Z,oxo-online,6,005-join-game,engineer,task_end,,success,,"Set A + D1: A0.1-A0.6 infra, A1 connect/register, A2 4040/4500, A4 4041, D1 contract; 40 infra + 16 unit green; synth all stacks ok"
 2026-06-06T12:31:12Z,oxo-online,6,005-join-game,orchestrator,gate,,success,PROCESS-V21,v21: use-case flags over worktrees; synth-infra target added
+2026-06-06T12:31:41Z,oxo-online,6,005-join-game,engineer,task_start,,na,,Set C integration
+2026-06-06T12:39:33Z,oxo-online,6,005-join-game,engineer,task_end,,success,,Set C C1+C2 merged: join happy-path fan-out + real WS factory; lambda20/infra40/app93 green
+2026-06-06T12:44:56Z,oxo-online,6,005-join-game,orchestrator,gate,,success,PROCESS-V22,v22: hexagonal + supportability standard; OI-17/18/19 registered

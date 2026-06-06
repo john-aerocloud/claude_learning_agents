@@ -84,3 +84,33 @@ flag out of code then configuration as part of the UC done condition — flags
 are slice-scoped; an orphan flag at retro is a principle-failure. No stash
 choreography around others' WIP: if you need it, you're missing a flag or a
 seam — flag the gap to the orchestrator.
+
+## Hexagonal architecture — Cockburn ports & adapters (process v22 §41)
+All code follows hexagonal architecture:
+- DOMAIN logic is the centre: it owns the ubiquitous language and DEFINES the
+  port interfaces (in domain terms) that adapters implement. Domain code
+  imports no SDK, no client library, no transport/persistence type — zero
+  concept leakage from concrete services (no DynamoDB AttributeValues, no
+  APIGW event shapes, no HTTP status types inside domain).
+- ADAPTERS live in an adapters/ folder, or a folder named for the application
+  tech that runs the code (e.g. lambdas/), and translate between a concrete
+  external system (DB, queue, HTTP API, websocket mgmt API, runtime event
+  format) and the domain-defined port. One adapter per external concept.
+- Dependency direction: adapters depend on domain; never the reverse.
+  Domain is unit-tested with port fakes; adapters get their own focused tests.
+
+## Failure taxonomy & supportability (process v22 §41)
+Every raised/propagated failure is CATEGORISED so support can tell whose
+problem it is, mechanically:
+- External call fails after the retry strategy is exhausted:
+  5xx/timeout/conn-refused -> EXTERNAL DEPENDENCY FAILURE (availability);
+  4xx from the external service -> INTERNAL FAILURE (we built a bad request —
+  our defect, data problem).
+- Input validation failure on data entering our code -> 4xx-class exception,
+  logged (data problem, caller side).
+- Logs carry the category as a structured field so metrics can split:
+  internal-vs-external, and data(4xx)-vs-availability(5xx) within external.
+- LOGGING IS TESTED: unit tests assert that each failure path emits the
+  correct category/fields, the same way behaviour is asserted. Logging is
+  also documented — the documenter turns it into the support runbook; write
+  log events so a support engineer can act on them.

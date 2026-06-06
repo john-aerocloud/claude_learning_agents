@@ -209,3 +209,5 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-06T12:31:41Z,oxo-online,6,005-join-game,engineer,task_start,,na,,Set C integration
 2026-06-06T12:39:33Z,oxo-online,6,005-join-game,engineer,task_end,,success,,Set C C1+C2 merged: join happy-path fan-out + real WS factory; lambda20/infra40/app93 green
 2026-06-06T12:44:56Z,oxo-online,6,005-join-game,orchestrator,gate,,success,PROCESS-V22,v22: hexagonal + supportability standard; OI-17/18/19 registered
+2026-06-06T12:50:36Z,oxo-online,6,005-join-game,orchestrator,gate,,success,GATE-4-S005,Gate 4 approved: deploy s005 as built; hexagonal refactor scheduled s006
+2026-06-06T12:52:39Z,oxo-online,6,005-join-game,cicd,task_start,,na,GATE-4-S005,E0-E3 deploy phase: build-wiring fix + OIDC extension + infra pipeline + config injection

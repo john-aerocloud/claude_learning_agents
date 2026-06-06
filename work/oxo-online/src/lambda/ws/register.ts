@@ -1,6 +1,6 @@
-import { UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { UpdateCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
 import type { APIGatewayProxyWebsocketEventV2 } from 'aws-lambda';
-import { ddb } from './ddb';
+import { ddb, CONNECTION_TTL_SECONDS } from './ddb';
 import { close, type WsResult } from './ws-result';
 
 /**
@@ -44,13 +44,24 @@ export async function handleRegister(
     );
 
     // Bind the Connections item to this game with the host role.
+    //
+    // DEFECT-005-001-R2 (Issue 1): the oxo-ws-fn execution role grants ONLY
+    // PutItem/DeleteItem on the Connections table (least-privilege, by design).
+    // An UpdateItem here drifted from that policy and produced AccessDenied ->
+    // register_failed -> a 4500 close on every host register. We obey the
+    // granted action set: write the FULL item with PutItem. PutItem REPLACES the
+    // item, so it resets the connection's ~2h TTL on each register — acceptable,
+    // since a freshly-registering host's connection should live a full window.
+    const nowSeconds = Math.floor(Date.now() / 1000);
     await ddb.send(
-      new UpdateCommand({
+      new PutCommand({
         TableName: process.env.CONNECTIONS_TABLE,
-        Key: { connectionId },
-        UpdateExpression: 'SET gameId = :gid, #role = :role',
-        ExpressionAttributeNames: { '#role': 'role' },
-        ExpressionAttributeValues: { ':gid': gameId, ':role': 'host' },
+        Item: {
+          connectionId,
+          gameId,
+          role: 'host',
+          ttl: nowSeconds + CONNECTION_TTL_SECONDS,
+        },
       }),
     );
 

@@ -301,3 +301,4 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-06T17:30:28Z,oxo-online,7,s005-h1-waf,tester,validation_run,,success,80bc2ef:smoke,tests/smoke green via make smoke
 2026-06-06T17:32:11Z,oxo-online,7,s005-h1-waf,tester,recovery,4851,rolled_forward,e523948:DEFECT-WAF-001,DEFECT-WAF-001 CLOSED: 18/18 validation + 38/38 smoke PASS. WAF Block=429 (not CF-masked 403). probe=200req@800ms wafBlocked=79 CW-BlockedRequests=103. MTTR=4851s (16:22:09Z fail -> 17:43:00Z validated).
 2026-06-06T17:32:31Z,oxo-online,7,s005-h1-waf,tester,task_end,,success,80bc2ef:s005-h1-waf-done,s005-h1-waf DONE: 18/18 validation + 38/38 smoke green. DEFECT-WAF-001 closed (MTTR=4851s). Probe 200@800ms committed. CW dim fix (no Region=CloudFront). workers=1 validation config. result.md written.
+2026-06-06T17:35:06Z,oxo-online,7,s005-h1-waf,orchestrator,task_end,,success,SLICE-H1-DELIVERED,iteration 7 delivered; auto-retro starting

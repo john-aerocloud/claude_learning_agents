@@ -64,6 +64,9 @@ build-app:
 test-infra:
 	npm --prefix $(INFRA) test
 
+test-lambda:
+	npm --prefix work/$(PROJECT)/src/lambda test
+
 # Synth all stacks with the project-pinned CDK (not a global npx install).
 # STACKS optional: make synth-infra STACKS="OxoGameProd"
 # githubOrg/githubRepo go as -c context flags per process §19 (GITHUB_ env prefix is reserved).

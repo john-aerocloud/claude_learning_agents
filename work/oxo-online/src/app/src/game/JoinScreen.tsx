@@ -1,6 +1,23 @@
 import { useRef, useState } from 'react';
 import type { GameSocket, GameSocketFactory, ServerMessage } from './socket';
 
+const GENERIC_ERROR = 'Something went wrong. Please try again.';
+
+/**
+ * Maps the defined WebSocket close codes to readable messages (S3). Only the
+ * three defined codes get a specific message; anything else degrades to the
+ * generic one — the client never surfaces internal detail.
+ */
+const CLOSE_MESSAGES: Record<number, string> = {
+  4040: 'Game not found. Check the code and try again.',
+  4041: 'This game is no longer available.',
+  4500: GENERIC_ERROR,
+};
+
+function messageForClose(code: number): string {
+  return CLOSE_MESSAGES[code] ?? GENERIC_ERROR;
+}
+
 interface JoinScreenProps {
   /** Socket seam — Set C supplies the real WebSocket-backed factory. */
   connect: GameSocketFactory;
@@ -17,20 +34,23 @@ interface JoinScreenProps {
 export function JoinScreen({ connect, onGameReady }: JoinScreenProps) {
   const [code, setCode] = useState('');
   const [connecting, setConnecting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const socketRef = useRef<GameSocket | null>(null);
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     if (connecting) return;
     setConnecting(true);
+    setError(null);
     const socket = connect({
       onMessage: (message) => {
         if (message.type === 'game-ready') {
           onGameReady?.(message);
         }
       },
-      onClose: () => {
+      onClose: (closeCode) => {
         setConnecting(false);
+        setError(messageForClose(closeCode));
         // Code is intentionally retained for retry (F3).
       },
     });
@@ -62,6 +82,11 @@ export function JoinScreen({ connect, onGameReady }: JoinScreenProps) {
           data-testid="join-connecting"
         >
           Connecting…
+        </p>
+      )}
+      {error && (
+        <p className="join-error" role="alert">
+          {error}
         </p>
       )}
     </section>

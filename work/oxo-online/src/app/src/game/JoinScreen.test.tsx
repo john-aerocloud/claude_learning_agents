@@ -54,3 +54,44 @@ describe('JoinScreen — code input + submit + connecting indicator (B1, F3, F6)
     expect(screen.getByLabelText(/game code/i)).toHaveValue('ABC234');
   });
 });
+
+describe('JoinScreen — close-code error messages (B2, F3/F4/F9, S3)', () => {
+  const cases: Array<[number, string]> = [
+    [4040, 'Game not found. Check the code and try again.'],
+    [4041, 'This game is no longer available.'],
+    [4500, 'Something went wrong. Please try again.'],
+  ];
+
+  it.each(cases)('renders the exact message for close code %i', async (code, message) => {
+    const m = mockFactory();
+    render(<JoinScreen connect={m.factory} />);
+    await userEvent.type(screen.getByLabelText(/game code/i), 'ABC234');
+    await userEvent.click(screen.getByRole('button', { name: /join/i }));
+    act(() => m.opts?.onClose(code));
+    expect(screen.getByRole('alert')).toHaveTextContent(message);
+    // Screen stays mounted + accessible; code retained.
+    expect(screen.getByLabelText(/game code/i)).toHaveValue('ABC234');
+    expect(screen.getByRole('button', { name: /join/i })).toBeInTheDocument();
+  });
+
+  it('clears the connecting indicator once a close arrives', async () => {
+    const m = mockFactory();
+    render(<JoinScreen connect={m.factory} />);
+    await userEvent.type(screen.getByLabelText(/game code/i), 'ABC234');
+    await userEvent.click(screen.getByRole('button', { name: /join/i }));
+    expect(screen.getByTestId('join-connecting')).toBeInTheDocument();
+    act(() => m.opts?.onClose(4041));
+    expect(screen.queryByTestId('join-connecting')).not.toBeInTheDocument();
+  });
+
+  it('maps an unexpected close code to the generic message (no leak)', async () => {
+    const m = mockFactory();
+    render(<JoinScreen connect={m.factory} />);
+    await userEvent.type(screen.getByLabelText(/game code/i), 'ABC234');
+    await userEvent.click(screen.getByRole('button', { name: /join/i }));
+    act(() => m.opts?.onClose(1006));
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Something went wrong. Please try again.',
+    );
+  });
+});

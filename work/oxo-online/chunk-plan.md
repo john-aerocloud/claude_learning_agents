@@ -18,7 +18,7 @@ and marks actuals when a slice is delivered.
 | C1 | Deployable shell | delivered | 1 (s001) | 0 | — |
 | C2 | Local two-player game | delivered | 1 (s002) | 0 | — |
 | C3 | Single-player vs AI | delivered | 1 (s003) | 0 | — |
-| C4 | Online two-player match | in-progress | 1 (s004) | 4 (s005–s008) | s005 join-by-code (in-flight) |
+| C4 | Online two-player match | in-progress | 1 (s004) | 7 (s005–s008 + s005-h1/h2/h3) | s005 join-by-code (in-flight) |
 | C5 | Leaderboard | not started | 0 | 3 (s009–s011) | s009 record-game-result |
 | C6 | Player identity (lightweight) | not started | 0 | 2 (s012–s013) | s012 display-name-entry |
 | C7 | In-game chat | not started | 0 | 2 (s014–s015) | s014 in-game-message-send |
@@ -108,7 +108,7 @@ shown to both players; disconnection is handled gracefully. No accounts required
 | Slice | Status | Delivered | Outcome |
 |-------|--------|-----------|---------|
 | s004 — create-game | delivered | 2026-06-06 | POST /api/games live via CloudFront; Lambda + DynamoDB Games table + HTTP API provisioned; 6-char code shown in UI |
-| s005 — join-by-code | in-flight | — | — |
+| s005 — join-by-code | in-flight (use-case decomposition done) | — | — |
 
 **Remaining forecast (s005–s008) — ordered thinnest-first:**
 
@@ -140,6 +140,54 @@ share-link UX, CloudFront WebSocket proxying — all deferred to s006+.
 5. `Connections` table shows both entries with ~2h TTL.
 6. Existing modes (local, vs-AI) are unaffected.
 7. Pipeline deploys new WebSocket stack cleanly with no manual steps.
+
+### C4 hardening (security debt, human-directed at Gate-3 s005)
+
+Three risks were explicitly deferred at the s005 Gate-3 security review and
+recorded as open risks in `architecture/deltas/005-join-game.md`. They are
+sequenced here as thin hardening slices before C5 opens a further public write
+surface (s009 leaderboard write) — because each risk becomes cheaper to fix
+before more dependent slices are built on top of the unauthenticated WS
+endpoint.
+
+Forecasts are revisable; the human gate at each slice governs actual priority.
+
+**s005-h1 — WAF / rate-limiting on the WebSocket API (security risk 1)**
+Sequence: after s005 delivered, before s006. Rationale: s006 introduces the
+move-relay write surface; containing connection-flood risk before that surface
+is live reduces attack exposure at the lowest-volume moment. Scope: add an AWS
+WAF WebACL with a rate rule to the WS API stage. No functional change to game
+flow. Done condition: a rate-exceeded connection attempt is rejected at the WAF
+layer; the WS API stage shows an associated WebACL in `aws wafv2 list-resources-
+for-web-acl`.
+
+**s005-h2 — Join-token / $connect authorization (security risk 2)**
+Sequence: after s005-h1, before or concurrent with s006. Rationale: the
+unauthenticated WS endpoint is the project's highest-risk open surface. Minting
+a per-game join token in `POST /games` and verifying it at `$connect` closes
+the capability-by-connection binding gap before move relay (s006) adds further
+write capability. Scope: `POST /games` response adds a short-lived join token;
+the SPA passes it as a query-string parameter at `$connect`; a Lambda authorizer
+(or `$connect` handler) rejects connections without a valid token. Done
+condition: a `$connect` without a valid token is rejected; a `$connect` with
+the token proceeds; existing create-game + join flow continues to work.
+
+**s005-h3 — Guaranteed code uniqueness (security risk 3)**
+Sequence: after s005-h2 (or parallel — no code dependency). Rationale: code
+collision risk is bounded by entropy at hobby volume but is not hard-guaranteed.
+Before the game grows beyond hobby volume (C5+), enforce uniqueness. Scope:
+add a conditional-put on a `Codes` table (or a conditional expression on the
+GSI sort key) so a duplicate code triggers a retry on the server; the client
+sees no change. Done condition: a synthetic duplicate-code injection test
+confirms the create-game path retries and produces a unique code; no duplicate-
+waiting-game scenario is possible.
+
+**Renumbering note:** the three hardening slices carry identifiers s005-h1,
+s005-h2, s005-h3 (suffixed, not displacing s006–s008 ordinals). They sit
+logically between s005 and s006 in the delivery queue; if any is promoted to
+a full sprint it will receive an ordinal at that time.
+
+---
 
 ### s006 — move relay + server-authoritative play
 **Scope:** When a player makes a move, the SPA sends it via WebSocket; the Lambda

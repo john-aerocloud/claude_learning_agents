@@ -111,15 +111,218 @@ And the `wss://` URL is present and correct in the deployed SPA's runtime config
 
 ---
 
-## Technical / security-policy cases (solution-architect)
+## Technical (architecture/security policy)
 
-<!-- The architect appends T-numbered cases here. -->
-<!-- Suggested anchors from architecture/deltas/005-join-game.md §Acceptance: -->
-<!-- T1 — game-ready received by both connections within 3s (delta condition 1) -->
-<!-- T2 — Games record shape after successful join (delta condition 2) -->
-<!-- T3 — Connections entries with correct TTL (delta condition 3) -->
-<!-- T4 — 4040 close + Games unchanged on unknown code (delta condition 4) -->
-<!-- T5 — 4041 close + no-hijack conditional write (delta condition 5) -->
-<!-- T6 — oxo-ws-fn IAM policy scope (delta condition 6) -->
-<!-- T7 — synth-time contract test: WS route keys + WsApiEndpoint output + wsUrl config (delta §30 condition) -->
-<!-- T8 — regression: existing create-game path and HTTP API unaffected (delta condition 8) -->
+Each case is tagged with its use case (UC1–UC5) and the security-note file it
+operationalises (the note's checkable statements are the source for these policy
+tests). "Check type" names the verification mechanism: **synth** (CDK assertion
+over a synthesised template), **CLI** (`aws` command against the deployed
+account), **unit** (handler unit/integration test), or **live** (probe against
+the deployed WSS endpoint).
+
+**T1 — `game-ready` reaches both connections within 3s of a valid join [UC3, delta cond.1]**
+Given Player A (host) has registered (`hostConnectionId` set, `status='waiting'`)
+and Player B sends `{ action: 'join', code: '<VALID>' }`,
+Then within 3 seconds `oxo-ws-fn` posts a `{ type: 'game-ready', role: 'host' }`
+frame to the host connection and a `{ type: 'game-ready', role: 'guest' }` frame
+to the guest connection, each via `execute-api:ManageConnections`.
+And the `game-ready` payload carries only `{ type, role }` — it does NOT disclose
+the other player's `connectionId` or any other game field.
+Check type: **live** (two WSS clients; assert both receive `game-ready` within 3s
+and the payload keys are exactly `type` + `role`). Operationalises
+`architecture/security/apigw-websocket.md` (Data classification).
+
+**T2 — `Games` record shape after a successful join [UC3, delta cond.2]**
+Given a successful join has completed (T1 passing),
+Then `aws dynamodb get-item --table-name <Games> --key '{"gameId":{"S":"<id>"}}'`
+returns an item where `status='active'`, `hostConnectionId` is a non-empty
+string, and `guestConnectionId` is a non-empty string. No manual DynamoDB write
+was needed to reach this state.
+Check type: **CLI** (`aws dynamodb get-item`). Operationalises
+`architecture/security/dynamodb-games.md` (s005 join write path).
+
+**T3 — `Connections` entries exist with ~2h TTL [UC1, UC3, delta cond.3]**
+Given a successful join has completed,
+Then the `Connections` table holds two items for this game — one `role='host'`,
+one `role='guest'` — each with a numeric `ttl` between 1h55m and 2h5m ahead of
+the join time (5-minute clock-skew tolerance).
+Check type: **CLI** (`aws dynamodb scan --table-name <Connections>` filtered to
+the `gameId`; assert two items, distinct roles, `ttl` in range). Operationalises
+`architecture/security/dynamodb-connections.md` (TTL ~2h on every item).
+
+**T4 — Unknown code closes with 4040 and leaves `Games` unchanged [UC2, delta cond.4]**
+Given Player B sends `{ action: 'join', code: '<NONEXISTENT>' }`,
+Then `oxo-ws-fn` queries the `code-index` GSI, finds no item, and closes the
+socket with close code 4040, and no `Connections` item is created for the failed
+join.
+And a `scan` of `Games` confirms no new record and no mutation of any existing
+record.
+Check type: **live** (assert close code 4040) + **CLI** (`scan` before/after,
+unchanged). Operationalises `architecture/security/dynamodb-games.md`
+(`code-index` GSI lookup) and `apigw-websocket.md` (clean close-code contract).
+
+**T5 — Already-active game closes with 4041; no-hijack conditional write holds live [UC4, delta cond.5]**
+Given a game in `status='active'` with an existing `guestConnectionId = G1`,
+When a second party sends `{ action: 'join', code: '<THAT-CODE>' }`,
+Then the `UpdateItem` `ConditionExpression` (`status='waiting'` AND
+`attribute_not_exists(guestConnectionId)`) fails with
+`ConditionalCheckFailedException`, `oxo-ws-fn` performs NO write, and closes the
+socket with close code 4041.
+And `aws dynamodb get-item` after the rejected attempt shows `guestConnectionId`
+still equals `G1` and `status` still equals `active` — the record is byte-for-byte
+unchanged.
+Verifiable: seed an active game (record `G1`), drive a second `join` against its
+code over the live WSS endpoint, assert close 4041, then `get-item` and diff the
+item against the pre-attempt snapshot (must be identical).
+Check type: **live** (close 4041) + **CLI** (`get-item` diff, unchanged).
+Operationalises `architecture/security/dynamodb-games.md` (no-hijack join
+conditional write) and `apigw-websocket.md` (no-hijack conditional write).
+
+**T6 — `connectionId` is taken from request context, never the client body [UC1, UC3]**
+Given a `register` or `join` message whose body additionally plants a
+`connectionId` (or `hostConnectionId`/`guestConnectionId`) field,
+Then the value `oxo-ws-fn` persists for `hostConnectionId`/`guestConnectionId` is
+the caller's own `event.requestContext.connectionId`, and the planted body value
+is never read or stored.
+Verifiable: handler unit/integration test invokes the handler with a
+`requestContext.connectionId = 'CTX-ID'` and a body field `connectionId='SPOOF'`;
+assert the persisted item carries `CTX-ID` and `SPOOF` appears nowhere.
+Check type: **unit** (handler test asserting the persisted id source).
+Operationalises `architecture/security/dynamodb-games.md` (connectionId from
+context) and `apigw-websocket.md` (register binds caller's own connectionId).
+
+**T7 — Composed §30 contract: four WS route keys, action match, endpoint export, wsUrl source [UC1–UC4, delta §30]**
+Given the synthesised `OxoGameProd` template (and the `OxoOnlineProd` SPA-config
+source),
+Then the WebSocket API synthesises exactly the four route keys `$connect`,
+`$disconnect`, `register`, `join` and no `$default` catch-all,
+And the client `action` values the SPA sends (`register`, `join`) each equal a
+synthesised `RouteKey` (the `$request.body.action` selector value matches a
+route — the WS analogue of the s004 path/route-key match),
+And `OxoGameProd` synthesises a `CfnOutput` whose `exportName` is exactly
+`OxoGameProd-WsApiEndpoint`, resolving to the `prod`-stage WSS invoke URL (id +
+`/prod`), not a placeholder,
+And the SPA `wsUrl` config is sourced from `OxoGameProd-WsApiEndpoint` (the deploy
+config-injection step / SPA constant references that exact export name) — a
+rename on either side fails at synth/CI, not in prod.
+Check type: **synth** (CDK assertion across templates: `RouteKey` set + selector
+expression + `hasOutput` on `OxoGameProd-WsApiEndpoint` + assertion that the
+config-injection source string equals that export name). Operationalises
+`architecture/security/apigw-websocket.md` (transport & API surface: four route
+keys, no `$default`).
+
+**T8 — Reserved concurrency and stage route throttling present on the WS path [UC1–UC4]**
+Given the synthesised `OxoGameProd` template,
+Then `oxo-ws-fn` has `ReservedConcurrentExecutions` set to a finite value > 0,
+And the WebSocket API `prod` stage sets `DefaultRouteSettings` with
+`ThrottlingRateLimit` and `ThrottlingBurstLimit` at a finite (non-default) hobby
+cap.
+Verifiable live: `aws lambda get-function-concurrency --function-name oxo-ws-fn`
+returns `ReservedConcurrentExecutions > 0`.
+Check type: **synth** (assert both properties present and finite) + **CLI**
+(reserved-concurrency probe). Operationalises
+`architecture/security/apigw-websocket.md` (resource-exhaustion controls) and
+`lambda-execution-roles.md` (s005 reserved concurrency).
+
+**T9 — `Connections` table is SSE-on, TTL-on-`ttl`, on-demand, no public resource policy [UC1, UC3]**
+Given the synthesised `OxoGameProd` template,
+Then the `Connections` `AWS::DynamoDB::Table` has partition key `connectionId`
+(String, HASH) and no sort key, `SSESpecification.SSEEnabled = true`,
+`TimeToLiveSpecification = { AttributeName: 'ttl', Enabled: true }`,
+`BillingMode = 'PAY_PER_REQUEST'`, and no `ResourcePolicy` granting a public
+principal (no `ResourcePolicy` at all is acceptable).
+Check type: **synth** (`hasResourceProperties` on the Connections table +
+`findResources` confirming no public `ResourcePolicy`). Operationalises
+`architecture/security/dynamodb-connections.md` (table shape, SSE, TTL, billing,
+no public access).
+
+**T10 — `Games.code-index` GSI exists; base-table key schema unchanged [UC2, UC3, UC4]**
+Given the synthesised `OxoGameProd` template,
+Then the `Games` table declares a GSI `code-index` with partition key `code`
+(String, HASH) and a minimal projection (KEYS_ONLY+INCLUDE or ALL — not wider
+than the join-needed `status`/`hostConnectionId`/`guestConnectionId`),
+And the `Games` base-table `KeySchema` is still exactly
+`[{ AttributeName: 'gameId', KeyType: 'HASH' }]` (s004 schema unchanged — GSI is
+an additive, in-place update, no table replacement).
+Check type: **synth** (`hasResourceProperties` on the Games table:
+`GlobalSecondaryIndexes` contains `code-index` and `KeySchema` unchanged).
+Operationalises `architecture/security/dynamodb-games.md` (s005 `code-index`
+GSI).
+
+## Security policy
+
+**S1 — `oxo-ws-fn` DynamoDB scope is exactly the delta grants — and nothing wider [UC1–UC4]**
+Given the `oxo-ws-fn` execution-role policy (synth and deployed),
+Then its DynamoDB statements grant ONLY:
+`dynamodb:Query`/`dynamodb:GetItem` scoped to the `Games` table ARN and its
+`code-index` GSI ARN; `dynamodb:UpdateItem` on the `Games` table ARN;
+`dynamodb:PutItem` and `dynamodb:DeleteItem` on the `Connections` table ARN,
+And it grants NO `dynamodb:Scan`, NO `dynamodb:*`, NO `PutItem`/`DeleteItem` on
+`Games`, NO read/`Scan` on `Connections`, NO wildcard `Resource` (`*`), and NO
+third/unrelated table on any statement.
+Verifiable: **synth** assertion over the role's `AWS::IAM::Policy` statements
+(enumerate actions per resource; assert the exact allowed set and the absence of
+`Scan`/`*`/extra tables) and **CLI** `aws iam get-role-policy` /
+`list-attached-role-policies` on the deployed role.
+Check type: **synth** + **CLI**. Operationalises
+`architecture/security/lambda-execution-roles.md` (s005 `oxo-ws-fn` DynamoDB
+scope) and `dynamodb-games.md` / `dynamodb-connections.md` (per-table grant).
+
+**S2 — `execute-api:ManageConnections` is scoped to this WS API ARN only — not `*`, not a second API [UC3]**
+Given the `oxo-ws-fn` execution-role policy,
+Then it grants `execute-api:ManageConnections` on this WebSocket API's ARN only
+(`arn:aws:execute-api:<region>:<acct>:<wsApiId>/prod/POST/@connections/*`), and on
+NO other resource — explicitly not `*`, not `execute-api:*`, and not any second
+API id.
+Verifiable: **synth** assertion that the only `execute-api:` statement's
+`Resource` references this API id (no bare `*`) and the action is exactly
+`ManageConnections`; **CLI** `get-role-policy` confirming the same on the deployed
+role.
+Check type: **synth** + **CLI**. Operationalises
+`architecture/security/lambda-execution-roles.md` (ManageConnections on this API
+ARN only).
+
+**S3 — Clean error contract: only the defined close codes, no stack/internal leakage [UC2, UC3, UC4]**
+Given any failing join/register attempt,
+Then `oxo-ws-fn` closes the socket with one of exactly: 4040 (unknown code),
+4041 (game no longer available / no-hijack rejection), or 4500 (internal error),
+And no frame, close reason, or log delivered to the client contains a stack
+trace, exception class name, table ARN, AWS request id, or other internal
+detail; the customer-facing message is the human-readable text from the
+F-cases.
+Verifiable: **live** probes for each branch (nonexistent code → 4040; active game
+→ 4041; forced backend fault → 4500) asserting the close code and that the
+client-visible payload carries no internal strings.
+Check type: **live** (close-code + payload-leakage probe) backed by **unit**
+(handler maps each error class to its close code and a generic message).
+Operationalises `architecture/security/apigw-websocket.md` (no `$default`; close
+codes) — ties to F3/F4/F9.
+
+**S4 — `oxo-deploy` WS extension is ARN-scoped with no `iam:*` mutation [UC1–UC4]**
+Given the extended `oxo-deploy` role,
+Then its s005 additions grant `lambda:UpdateFunctionCode` and `lambda:GetFunction`
+scoped to the `oxo-ws-fn` function ARN only, and its effective permissions do NOT
+include `iam:CreateRole`, `iam:AttachRolePolicy`, or `iam:PutRolePolicy` on any
+resource (role creation stays with the CDK CloudFormation execution role under
+bootstrap trust).
+Verifiable: **CLI** `aws iam get-role-policy` / `list-attached-role-policies` on
+`oxo-deploy` confirming the scoped Lambda actions and the absence of the three
+IAM-mutation actions.
+Check type: **CLI**. Operationalises
+`architecture/security/lambda-execution-roles.md` (`oxo-deploy` extension,
+ARN-scoped, no `iam:*`).
+
+**S5 — Existing s004 pinned validations remain green (regression) [UC5, delta cond.8]**
+Given s005 has been built,
+Then the full s004 infra synth suite (`game-stack.test.ts`,
+`shell-stack.test.ts`, `oidc-stack.test.ts`) and the s004 acceptance checks still
+pass unchanged: `POST /api/games` route key present, `/api/*` CloudFront
+behaviour `CachingDisabled`, `oxo-game-fn` PutItem-on-Games-only,
+`OxoGameProd-HttpApiEndpoint` export untouched and still imported by
+`OxoOnlineProd`, and the create-game S1/S3 security policies hold.
+Verifiable: `npm --prefix work/oxo-online/src/infra run test` is green with all
+pre-existing s004 cases passing; the `OxoGameProd-HttpApiEndpoint` export name is
+unchanged in the synthesised template.
+Check type: **synth** (existing suite green; export-name assertion).
+Operationalises `architecture/security/dynamodb-games.md` (s004 subset unchanged)
+and `lambda-execution-roles.md` (s004 `oxo-game-fn` subset unchanged).

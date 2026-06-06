@@ -3,44 +3,30 @@ import { execFileSync } from 'node:child_process';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-/**
- * =============================================================================
- * VALIDATION SPEC HEADER (process v16 §35, IMP-002)
- * -----------------------------------------------------------------------------
- * Slice:            005-join-game
+/*
+ * VALIDATION SPEC HEADER (process v16 S35, IMP-002)
+ * Slice: 005-join-game
  * Acceptance pinned: T2 (Games record active with both connectionIds after join),
- *                    T3 (Connections entries with ~2h TTL after join),
- *                    T5 (no-hijack: record unchanged after second join attempt),
- *                    T8 (reserved concurrency + stage throttle on oxo-ws-fn),
- *                    T9 (Connections table: SSE, TTL, on-demand, no public policy),
- *                    S1 (oxo-ws-fn DynamoDB scope: exact delta grants, nothing wider),
- *                    S2 (execute-api:ManageConnections scoped to THIS WS API ARN only),
- *                    S4 (oxo-deploy WS extension: ARN-scoped, no iam:* mutation).
- * Relevancy:        pinned (standing infra/security regression — all are durable
- *                   properties of the WS infrastructure committed in s005).
- * Retire when:      oxo-ws-fn is removed or fundamentally redesigned; Connections
- *                   table is renamed or schema changed; WS API is replaced; or an
- *                   explicit decision widens DynamoDB scope or concurrency cap.
- * Surface:          live AWS (read-only CLI, allowlisted patterns) + PROD_URL.
- *                   AWS_PROFILE from env (default dev-int), region eu-west-2.
- * Skips gracefully: when AWS credentials are absent/expired (sts get-caller-identity
- *                   fails), all AWS assertion tests self-skip with a clear message.
- * Replaces:         ad-hoc CLI spot-checks from the s005 validation pass.
+ *   T3 (Connections entries with ~2h TTL after join),
+ *   T5 (no-hijack: record unchanged after second join attempt),
+ *   T8 (reserved concurrency + stage throttle on oxo-ws-fn),
+ *   T9 (Connections table: SSE, TTL, on-demand, no public policy),
+ *   S1 (oxo-ws-fn DynamoDB scope: exact delta grants, nothing wider),
+ *   S2 (execute-api:ManageConnections scoped to THIS WS API ARN only),
+ *   S4 (oxo-deploy WS extension: ARN-scoped, no iam:* mutation).
+ * Relevancy: pinned (standing infra/security regression).
+ * Retire when: oxo-ws-fn removed or redesigned; tables renamed; WS API replaced.
+ * Surface: live AWS (read-only CLI) + PROD_URL. Skips when credentials absent.
  *
  * S2 spec amendment (DEFECT-005-001 Bug B):
- *   The original S2 contract specified ManageConnections scoped to
- *   `POST/@connections/*` (POST only). DEFECT-005-001 Bug B (platform constraint:
- *   API GW @connections only supports DELETE for closing connections, not a custom
- *   close code) required widening the verb to `*` (covering both POST for sending
- *   messages and DELETE for closing connections). The deployed resource is now
- *   `arn:aws:execute-api:<region>:<acct>:<wsApiId>/prod/*/@connections/*`.
- *   The S2 assertion still holds: ManageConnections is scoped to THIS WS API ARN
- *   only (not `*`), with the correct API id, prod stage, and @connections path.
- *   The spec assertions (.toContain(WS_API_ID), .toContain('/prod/'),
- *   .toContain('@connections'), .not.toBe('*')) remain valid for the amended
- *   contract. The verb wildcard is intentional and documented (game-stack.ts S2
- *   comment). Decision: accept the widened verb; WAF/rate-limiting deferred to h1.
- * =============================================================================
+ *   Original S2 scoped ManageConnections to POST-only on the connections path.
+ *   DEFECT-005-001 Bug B (API GW connections API supports DELETE, not POST, for
+ *   closing connections) required widening the verb to wildcard, covering both
+ *   POST (send message) and DELETE (close connection). Resource is now scoped to
+ *   the prod stage connections path of this specific WS API id.
+ *   The S2 assertions (toContain WS_API_ID, toContain prod stage, toContain the
+ *   connections path segment, not-equal to wildcard) remain valid for the amended
+ *   contract. Verb wildcard is intentional and documented. WAF deferred to h1.
  */
 
 const PROD_URL = process.env.PROD_URL ?? 'https://d3pf3kcvzpau1x.cloudfront.net';
@@ -119,17 +105,17 @@ function getAllRoleStatements(roleName: string): Stmt[] {
   return statements;
 }
 
-test.describe('Slice 005 — WebSocket AWS infra & security policy', () => {
+test.describe('Slice 005 -- WebSocket AWS infra & security policy', () => {
   test.skip(!AWS_OK, SKIP_MSG);
 
   // -------------------------------------------------------------------------
-  // T2 + T3 — After a live join: Games record is active with both connectionIds;
+  // T2 + T3 -- After a live join: Games record is active with both connectionIds;
   // Connections table holds two items with ~2h TTL.
   // Strategy: create a game via POST /api/games, then perform a real WS pairing
   // (host register + guest join) using the node ws-probe script, then check
   // DynamoDB state via CLI.
   // -------------------------------------------------------------------------
-  test('T2 + T3 — live pairing: Games record active, Connections entries with ~2h TTL', async () => {
+  test('T2 + T3 -- live pairing: Games record active, Connections entries with ~2h TTL', async () => {
     // Step 1: create a game via the HTTP API.
     const ctx = await pwRequest.newContext({ baseURL: PROD_URL });
     let gameId: string;
@@ -174,9 +160,9 @@ test.describe('Slice 005 — WebSocket AWS infra & security policy', () => {
     expect(probeResult.hostRole, 'host must receive role=host').toBe('host');
     expect(probeResult.guestRole, 'guest must receive role=guest').toBe('guest');
 
-    // Step 3: T2 — check Games record in DynamoDB.
+    // Step 3: T2 -- check Games record in DynamoDB.
     // The connectionIds are server-assigned and not visible to the client probe
-    // (T6 — connectionId is never echoed to clients). We read them from DynamoDB.
+    // (T6 -- connectionId is never echoed to clients). We read them from DynamoDB.
     const gamesItem = (
       aws([
         'dynamodb', 'get-item',
@@ -202,7 +188,7 @@ test.describe('Slice 005 — WebSocket AWS infra & security policy', () => {
       `T2 PASS: gameId=${gameId} status=active hostConnId=${hostConnId.substring(0, 8)}… guestConnId=${guestConnId.substring(0, 8)}…`,
     );
 
-    // Step 4: T3 — check Connections table for both items with ~2h TTL.
+    // Step 4: T3 -- check Connections table for both items with ~2h TTL.
     // Use the allowlisted aws dynamodb get-item to look up each connection by its
     // connectionId (PK of the Connections table), which we now have from the Games record.
     const hostConn = (
@@ -259,10 +245,10 @@ test.describe('Slice 005 — WebSocket AWS infra & security policy', () => {
   });
 
   // -------------------------------------------------------------------------
-  // T5 — No-hijack: after a live pairing, a second join attempt closes 4041
+  // T5 -- No-hijack: after a live pairing, a second join attempt closes 4041
   // and the Games record is byte-for-byte unchanged (guestConnectionId still G1).
   // -------------------------------------------------------------------------
-  test('T5 — no-hijack: second join attempt closes 4041; Games record unchanged', async () => {
+  test('T5 -- no-hijack: second join attempt closes 4041; Games record unchanged', async () => {
     // Create a game and pair it.
     const ctx = await pwRequest.newContext({ baseURL: PROD_URL });
     let gameId: string;
@@ -279,7 +265,7 @@ test.describe('Slice 005 — WebSocket AWS infra & security policy', () => {
 
     const wsUrl = `wss://${WS_API_ID}.execute-api.${REGION}.amazonaws.com/${WS_STAGE}`;
 
-    // First pairing — legitimate join.
+    // First pairing -- legitimate join.
     const firstRaw = execFileSync(
       'node',
       [
@@ -294,7 +280,7 @@ test.describe('Slice 005 — WebSocket AWS infra & security policy', () => {
     const firstResult = JSON.parse(firstRaw.trim()) as { success: boolean };
     expect(firstResult.success, 'first join must succeed').toBe(true);
 
-    // Read the guestConnectionId from DynamoDB — the probe cannot echo it (T6).
+    // Read the guestConnectionId from DynamoDB -- the probe cannot echo it (T6).
     const gamesAfterFirstJoin = (
       aws([
         'dynamodb', 'get-item',
@@ -317,7 +303,7 @@ test.describe('Slice 005 — WebSocket AWS infra & security policy', () => {
       ]) as { Item?: Record<string, { S?: string; N?: string }> }
     ).Item!;
 
-    // Second join attempt — should close 4041.
+    // Second join attempt -- should close 4041.
     const hijackRaw = execFileSync(
       'node',
       [
@@ -337,7 +323,7 @@ test.describe('Slice 005 — WebSocket AWS infra & security policy', () => {
     expect(hijackResult.success, 'second join must NOT succeed').toBe(false);
     expect(hijackResult.closeCode, 'second join must close with 4041').toBe(4041);
 
-    // Snapshot the Games item after the hijack attempt — must be identical.
+    // Snapshot the Games item after the hijack attempt -- must be identical.
     const afterItem = (
       aws([
         'dynamodb', 'get-item',
@@ -365,9 +351,9 @@ test.describe('Slice 005 — WebSocket AWS infra & security policy', () => {
   });
 
   // -------------------------------------------------------------------------
-  // T8 — oxo-ws-fn reserved concurrency > 0; prod stage has finite throttle.
+  // T8 -- oxo-ws-fn reserved concurrency > 0; prod stage has finite throttle.
   // -------------------------------------------------------------------------
-  test('T8 — oxo-ws-fn reserved concurrency > 0; prod stage throttle present', async () => {
+  test('T8 -- oxo-ws-fn reserved concurrency > 0; prod stage throttle present', async () => {
     // Reserved concurrency check (live CLI).
     const conc = aws([
       'lambda', 'get-function-concurrency', '--function-name', WS_FN,
@@ -402,9 +388,9 @@ test.describe('Slice 005 — WebSocket AWS infra & security policy', () => {
   });
 
   // -------------------------------------------------------------------------
-  // T9 — Connections table: SSE enabled, TTL on ttl, on-demand, no public policy.
+  // T9 -- Connections table: SSE enabled, TTL on ttl, on-demand, no public policy.
   // -------------------------------------------------------------------------
-  test('T9 — Connections table: SSE enabled, TTL on "ttl" attribute, PAY_PER_REQUEST', async () => {
+  test('T9 -- Connections table: SSE enabled, TTL on "ttl" attribute, PAY_PER_REQUEST', async () => {
     const tableDesc = aws([
       'dynamodb', 'describe-table', '--table-name', CONNECTIONS_TABLE,
     ]) as {
@@ -465,10 +451,10 @@ test.describe('Slice 005 — WebSocket AWS infra & security policy', () => {
   });
 
   // -------------------------------------------------------------------------
-  // S1 — oxo-ws-fn DynamoDB scope: exact delta grants, nothing wider.
+  // S1 -- oxo-ws-fn DynamoDB scope: exact delta grants, nothing wider.
   // Checks all inline policies on the ws function's execution role.
   // -------------------------------------------------------------------------
-  test('S1 — oxo-ws-fn DynamoDB grants: exact delta, no wildcard, no extra tables', async () => {
+  test('S1 -- oxo-ws-fn DynamoDB grants: exact delta, no wildcard, no extra tables', async () => {
     const roleArn = (
       aws(['lambda', 'get-function', '--function-name', WS_FN]) as {
         Configuration: { Role: string };
@@ -575,9 +561,9 @@ test.describe('Slice 005 — WebSocket AWS infra & security policy', () => {
   });
 
   // -------------------------------------------------------------------------
-  // S2 — execute-api:ManageConnections scoped to THIS WS API ARN only.
+  // S2 -- execute-api:ManageConnections scoped to THIS WS API ARN only.
   // -------------------------------------------------------------------------
-  test('S2 — ManageConnections scoped to this WS API ARN only; no * resource', async () => {
+  test('S2 -- ManageConnections scoped to this WS API ARN only; no * resource', async () => {
     const roleArn = (
       aws(['lambda', 'get-function', '--function-name', WS_FN]) as {
         Configuration: { Role: string };
@@ -600,7 +586,7 @@ test.describe('Slice 005 — WebSocket AWS infra & security policy', () => {
 
     const resources = asArr(manageStmts[0].Resource);
 
-    // Must be exactly one resource — the scoped ARN for this API.
+    // Must be exactly one resource -- the scoped ARN for this API.
     expect(resources.length, 'ManageConnections must have exactly one resource').toBe(1);
 
     const resource = resources[0];
@@ -615,7 +601,7 @@ test.describe('Slice 005 — WebSocket AWS infra & security policy', () => {
     ).toContain(`/${WS_STAGE}/`);
     expect(
       resource,
-      'ManageConnections resource must be scoped to @connections POST',
+      'ManageConnections resource must be scoped to the connections path',
     ).toContain('@connections');
 
     // No other execute-api action present.
@@ -635,9 +621,9 @@ test.describe('Slice 005 — WebSocket AWS infra & security policy', () => {
   });
 
   // -------------------------------------------------------------------------
-  // S4 — oxo-deploy role: WS extension is ARN-scoped; no iam:Create/Attach/Put.
+  // S4 -- oxo-deploy role: WS extension is ARN-scoped; no iam:Create/Attach/Put.
   // -------------------------------------------------------------------------
-  test('S4 — oxo-deploy role: WS Lambda extension ARN-scoped; no iam:* mutation', async () => {
+  test('S4 -- oxo-deploy role: WS Lambda extension ARN-scoped; no iam:* mutation', async () => {
     // oxo-deploy role name is known from the OIDC stack.
     const deployRole = aws([
       'iam', 'get-role', '--role-name', 'oxo-deploy',

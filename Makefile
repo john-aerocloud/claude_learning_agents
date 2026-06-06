@@ -59,6 +59,16 @@ smoke:
 	  --ref "$$(git rev-parse --short HEAD):smoke" --outcome fail \
 	  --note "tests/smoke FAILED via make smoke" ; exit 1 )
 
+# --- WAF walking-skeleton probe (s005-h1-waf Step 9) --------------------------
+# Drives the deployed CloudFront global WAFv2 ACL: HTTP burst past the rate-rule
+# threshold expects >=1 edge 403, then one clean POST /api/games expects 201.
+# The WS half is retired with UC2 (GATE-AMEND-H1-A). Node fetch probe is §17-
+# justified — WAF acts below browser-layer concerns.
+# make waf-probe BASE_URL=https://d3pf3kcvzpau1x.cloudfront.net [BURST=160]
+waf-probe:
+	node work/$(PROJECT)/scripts/waf-burst-probe.js --base-url $(BASE_URL) \
+	  $(if $(BURST),--burst $(BURST),)
+
 # --- App / infra test entry points --------------------------------------------
 test-app:
 	npm --prefix $(APP) run test:run
@@ -84,4 +94,4 @@ synth-infra:
 	npm --prefix $(INFRA) run cdk -- synth $(STACKS) --quiet \
 	  -c githubOrg=$(GH_ORG) -c githubRepo=$(GH_REPO)
 
-.PHONY: dora-record dora-compute validate smoke test-app lint-app build-app test-infra synth-infra
+.PHONY: dora-record dora-compute validate smoke waf-probe test-app lint-app build-app test-infra synth-infra

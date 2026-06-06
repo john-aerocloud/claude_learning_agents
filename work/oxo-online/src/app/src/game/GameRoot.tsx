@@ -5,10 +5,11 @@ import { Board } from './Board';
 import { Status } from './Status';
 import { JoinScreen } from './JoinScreen';
 import { OnlineBoard } from './OnlineBoard';
-import type {
-  GameSocket,
-  GameSocketFactory,
-  ServerMessage,
+import {
+  createRealSocketFactory,
+  type GameSocket,
+  type GameSocketFactory,
+  type ServerMessage,
 } from './socket';
 
 type Mode = 'two-player' | 'vs-computer';
@@ -24,28 +25,26 @@ const ONLINE_ERROR = 'Could not start online game — please try again';
 const SPINNER_DELAY_MS = 500;
 
 /**
- * Default socket factory. Set B ships a stub so the mocked `game-ready`
- * transition is exercised in tests via an injected factory; Set C (C2)
- * replaces this with a real `WebSocket`-backed factory reading
- * `window.OXO_CONFIG.wsUrl`. The components never see the transport.
+ * Default socket factory. C2 plugs in the real `WebSocket`-backed factory that
+ * reads `window.OXO_CONFIG.wsUrl` and degrades gracefully when no URL is
+ * configured. Tests still inject an in-memory factory so no network is touched.
+ * The components never see the transport.
  */
-const stubFactory: GameSocketFactory = () => ({
-  send: () => {},
-  close: () => {},
-});
+const realFactory: GameSocketFactory = createRealSocketFactory();
 
 interface GameRootProps {
-  /** Injectable socket seam (defaults to a no-op stub; Set C plugs the real WS). */
+  /** Injectable socket seam (defaults to the real WS factory; tests inject a mock). */
   socketFactory?: GameSocketFactory;
 }
 
 /** Root of the game: owns state + mode, wires the mode selector, Status, Board. */
-export function GameRoot({ socketFactory = stubFactory }: GameRootProps = {}) {
+export function GameRoot({ socketFactory = realFactory }: GameRootProps = {}) {
   const [state, setState] = useState(initialState);
   const [mode, setMode] = useState<Mode>('two-player');
   const [onlinePhase, setOnlinePhase] = useState<OnlinePhase>('idle');
   const [showSpinner, setShowSpinner] = useState(false);
   const [gameCode, setGameCode] = useState<string | null>(null);
+  const [gameId, setGameId] = useState<string | null>(null);
   const [onlineRole, setOnlineRole] = useState<'host' | 'guest'>('host');
   const spinnerTimer = useRef<ReturnType<typeof setTimeout>>();
   const hostSocketRef = useRef<GameSocket | null>(null);
@@ -73,6 +72,7 @@ export function GameRoot({ socketFactory = stubFactory }: GameRootProps = {}) {
       });
       if (!res.ok) throw new Error(`status ${res.status}`);
       const body = (await res.json()) as { gameId: string; code: string };
+      setGameId(body.gameId);
       setGameCode(body.code);
       setOnlinePhase('waiting');
     } catch {
@@ -83,23 +83,24 @@ export function GameRoot({ socketFactory = stubFactory }: GameRootProps = {}) {
     }
   };
 
-  // When the host reaches the waiting screen, open the socket so the server
-  // can reach them with `game-ready` (UC1). Set C sends the `register` frame
-  // through the same seam; Set B only needs the listener wired.
+  // When the host reaches the waiting screen, open the socket and register the
+  // game so the server can reach them with `game-ready` (UC1/C2). The register
+  // frame binds this connection to the gameId returned by create-game.
   useEffect(() => {
-    if (onlinePhase !== 'waiting') return;
+    if (onlinePhase !== 'waiting' || !gameId) return;
     const socket = socketFactory({
       onMessage: handleGameReady,
       onClose: () => {},
     });
     hostSocketRef.current = socket;
+    socket.send({ action: 'register', gameId });
     return () => {
       socket.close();
       hostSocketRef.current = null;
     };
-    // socketFactory is stable for a render tree; re-run only on phase change.
+    // socketFactory is stable for a render tree; re-run only on phase/gameId change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onlinePhase]);
+  }, [onlinePhase, gameId]);
 
   // In vs-Computer mode the AI plays O. Run it in an effect (not the click
   // handler) so the human's X paints first, then O follows synchronously.
@@ -119,11 +120,13 @@ export function GameRoot({ socketFactory = stubFactory }: GameRootProps = {}) {
     // Leaving the online flow returns to a clean local game (F4/F5 fallback).
     setOnlinePhase('idle');
     setGameCode(null);
+    setGameId(null);
   };
 
   const joinGame = () => {
     setOnlinePhase('joining');
     setGameCode(null);
+    setGameId(null);
   };
 
   const locked = state.status !== 'playing';

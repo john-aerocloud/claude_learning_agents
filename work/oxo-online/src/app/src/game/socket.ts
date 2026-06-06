@@ -48,3 +48,76 @@ export interface ConnectOptions {
  * Set B's tests supply an in-memory mock that drives `onMessage`/`onClose`.
  */
 export type GameSocketFactory = (opts: ConnectOptions) => GameSocket;
+
+/** Runtime config injected into the SPA at deploy time (see deploy phase E3). */
+interface OxoConfig {
+  wsUrl?: string;
+}
+
+declare global {
+  interface Window {
+    OXO_CONFIG?: OxoConfig;
+  }
+}
+
+/** Internal-error close code mirrored from the server contract (S3). */
+const INTERNAL_CLOSE = 4500;
+
+/**
+ * The real WebSocket-backed factory (C2). Reads the WSS endpoint from
+ * `window.OXO_CONFIG.wsUrl`. When no URL is configured (e.g. the config artifact
+ * is missing), it degrades gracefully in the s004 style — it opens no socket and
+ * reports a 4500 close so the screens render the generic error rather than
+ * white-screening. Inbound frames are parsed JSON and delivered to `onMessage`;
+ * the close `code` is delivered to `onClose`. Outbound `send`s are buffered until
+ * the socket is open. `close()` is idempotent.
+ */
+export function createRealSocketFactory(): GameSocketFactory {
+  return ({ onMessage, onClose }) => {
+    const url = window.OXO_CONFIG?.wsUrl;
+
+    if (!url) {
+      // No transport available — surface a generic failure, open nothing.
+      onClose(INTERNAL_CLOSE);
+      return { send: () => {}, close: () => {} };
+    }
+
+    const ws = new WebSocket(url);
+    let open = false;
+    let closed = false;
+    const pending: ClientFrame[] = [];
+
+    ws.onopen = () => {
+      open = true;
+      for (const frame of pending) ws.send(JSON.stringify(frame));
+      pending.length = 0;
+    };
+
+    ws.onmessage = (event: MessageEvent) => {
+      try {
+        onMessage(JSON.parse(event.data as string) as ServerMessage);
+      } catch {
+        // A malformed frame is ignored rather than crashing the UI.
+      }
+    };
+
+    ws.onclose = (event: CloseEvent) => {
+      onClose(event.code);
+    };
+
+    return {
+      send(frame: ClientFrame) {
+        if (open) {
+          ws.send(JSON.stringify(frame));
+        } else {
+          pending.push(frame);
+        }
+      },
+      close() {
+        if (closed) return;
+        closed = true;
+        ws.close();
+      },
+    };
+  };
+}

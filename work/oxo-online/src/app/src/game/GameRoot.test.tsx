@@ -367,6 +367,37 @@ describe('GameRoot — Join a game flow (B4, F1)', () => {
   });
 });
 
+describe('GameRoot — real socket frames (C2, UC3, F1, F6)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('host sends {action:register,gameId} when the waiting screen opens the socket', async () => {
+    const cap = captureFactory();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ gameId: 'g-42', code: 'REG234' }), {
+        status: 201,
+      }),
+    );
+    render(<GameRoot socketFactory={cap.factory} />);
+    await userEvent.click(screen.getByRole('button', { name: /play online/i }));
+    await waitFor(() =>
+      expect(screen.getByText(/waiting for opponent/i)).toBeInTheDocument(),
+    );
+    // The host registers the game it just created over the same seam.
+    expect(cap.sent).toContainEqual({ action: 'register', gameId: 'g-42' });
+  });
+
+  it('joiner sends {action:join,code} when the join form is submitted', async () => {
+    const cap = captureFactory();
+    render(<GameRoot socketFactory={cap.factory} />);
+    await userEvent.click(screen.getByRole('button', { name: /join a game/i }));
+    await userEvent.type(screen.getByLabelText(/game code/i), 'JON234');
+    await userEvent.click(screen.getByRole('button', { name: /^join$/i }));
+    expect(cap.sent).toContainEqual({ action: 'join', code: 'JON234' });
+  });
+});
+
 describe('GameRoot — local modes unaffected by online wiring (B4, F8)', () => {
   afterEach(() => {
     vi.restoreAllMocks();

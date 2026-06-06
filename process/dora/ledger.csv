@@ -187,3 +187,7 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-06T11:49:44Z,oxo-online,6,005-join-game,orchestrator,gate,,success,GATE-3-S005,Gate 3 approved; risks 1-3 deferred to named hardening slices
 2026-06-06T11:50:21Z,oxo-online,6,005-join-game,product,task_start,,na,,use-case decomposition and acceptance cases for s005
 2026-06-06T11:51:53Z,oxo-online,6,005-join-game,orchestrator,gate,,success,PROCESS-V18,v18: use-case construct beneath slices for parallel builds
+2026-06-06T11:53:08Z,oxo-online,6,005-join-game,product,task_end,,ok,,"use-cases.md (5 UCs, dependency graph), acceptance.md (10 F-cases), chunk-plan.md (3 hardening slices + s005 status updated)"
+2026-06-06T11:53:54Z,oxo-online,6,005-join-game,solution-architect,task_start,,na,,Append technical/security-policy acceptance cases for slice 005-join-game
+2026-06-06T11:55:34Z,oxo-online,6,005-join-game,solution-architect,task_end,,success,,"Appended T1-T10/S1-S5 acceptance cases (15 cases) for s005, committed e0a4e3e"
+2026-06-06T11:56:22Z,oxo-online,6,005-planning,orchestrator,task_end,,success,,slice-next complete: slice.md + use-cases.md + arch delta + security + 25 acceptance cases; hardening slices h1-h3 queued; ready for iteration-run

@@ -342,6 +342,16 @@ command patterns.
 - **§30 cross-stack contract test** — slice 005 (WebSocket join) adds a new
   cross-stack route (`/ws` or similar via CF/API); the contract test must exist
   before deploy. Target: CFR 0% on s005.
+- **(human-directed, consider at next retro) Pipeline planning over build** —
+  operationalise §8b: while slice N is in build/deploy/validate, product +
+  solution-architect queue slice N+1 (slice-next runs concurrently when
+  sequentially independent). Today §8b is a one-liner nobody acts on; make it
+  a standing iteration-run step. Target: delivery gap (§6) → ~0; gross lead
+  time per slice approaches build wall-clock.
+- **(human-directed, exercise on s005) §37 parallel use-case engineering** —
+  s005 has 3 independent buildable sets (A: UC1/UC2/UC4 backend, B: UC5 UI,
+  C: UC3 integration). Dispatch parallel engineers for A and B; measure build
+  wall-clock vs the serial sum and score §37 with real data.
 - **§28 auto-retro + §29 parallel documenter** — measure end-of-iteration wait:
   target zero human-prompt wait between `delivered` and retro start; documenter
   wall-clock fully overlapped with retro.

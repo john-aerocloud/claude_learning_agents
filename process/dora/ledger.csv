@@ -229,3 +229,4 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-06T13:21:29Z,oxo-online,6,005-join-game,tester,validation_run,,fail,02e85e7:validation,tests/validation FAILED via make validate
 2026-06-06T13:22:10Z,oxo-online,6,005-join-game,tester,validation_run,,fail,02e85e7:validation,tests/validation FAILED via make validate
 2026-06-06T13:23:15Z,oxo-online,6,005-join-game,tester,task_end,5400,fail,60e092e,"Slice 005 FAIL: DEFECT-005-001 open. Specs committed (smoke: 34/38 pass pre-defect, 4 fail; validation: 12/14 pass, T2+T3 and T5 fail). WS close mechanism broken — game-ready not delivered, close codes wrong. Hand to engineer."
+2026-06-06T13:26:34Z,oxo-online,6,005-join-game,engineer,task_start,,na,DEFECT-005-001,

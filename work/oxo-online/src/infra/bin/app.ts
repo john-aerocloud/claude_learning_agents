@@ -4,6 +4,7 @@ import * as cdk from 'aws-cdk-lib';
 import { OxoOnlineShellStack } from '../lib/oxo-online-shell-stack';
 import { OxoOnlineOidcStack } from '../lib/oxo-online-oidc-stack';
 import { OxoGameStack } from '../lib/game-stack';
+import { OxoOnlineWafUsEast1Stack } from '../lib/waf-us-east-1-stack';
 
 /**
  * oxo-online CDK app entry point.
@@ -68,6 +69,14 @@ const env: cdk.Environment = {
   region: process.env.CDK_DEFAULT_REGION ?? 'eu-west-2',
 };
 
+// s005-h1-waf — global CLOUDFRONT WebACL lives in us-east-1 (AWS hard
+// constraint; region-policy exception documented in the delta). Same account,
+// pinned region. Its ARN is handed to OxoOnlineProd cross-region (below).
+const usEast1Env: cdk.Environment = {
+  account: process.env.CDK_DEFAULT_ACCOUNT,
+  region: 'us-east-1',
+};
+
 // OIDC stack — created once; not re-deployed on every app release.
 // Deploy this stack manually the first time, then protect it from accidental updates.
 new OxoOnlineOidcStack(app, 'OxoOnlineOidcStack', {
@@ -94,13 +103,32 @@ new OxoGameStack(app, 'OxoGameProd', {
   },
 });
 
+// s005-h1-waf — global CLOUDFRONT WebACL stack (us-east-1). Deploys FIRST
+// (STACK_ORDER.md): exports its WebACL ARN, which OxoOnlineProd imports
+// cross-region to set the distribution webAclId. crossRegionReferences lets
+// CDK write the ARN to an SSM parameter in us-east-1 and read it via a custom
+// resource in eu-west-2 (CloudFormation has no native cross-region import).
+const wafStack = new OxoOnlineWafUsEast1Stack(app, 'OxoOnlineWafUsEast1', {
+  env: usEast1Env,
+  crossRegionReferences: true,
+  tags: {
+    Project: 'oxo-online',
+    Env: 'prod',
+    ManagedBy: 'cdk',
+  },
+});
+
 // Application (SPA hosting) stack — deployed by GitHub Actions on every push to main.
-// Consumes the HTTP API endpoint from OxoGameProd to wire the /api/* origin.
+// Consumes the HTTP API endpoint from OxoGameProd to wire the /api/* origin,
+// and the global WebACL ARN from OxoOnlineWafUsEast1 (cross-region) for the
+// distribution webAclId (s005-h1-waf, SYNTH-CONTRACT-WAF-1).
 new OxoOnlineShellStack(app, 'OxoOnlineProd', {
   env,
+  crossRegionReferences: true,
   certArn,
   hostedZoneId,
   domainName,
+  globalWebAclArn: wafStack.webAclArn,
   tags: {
     Project: 'oxo-online',
     Env: 'prod',

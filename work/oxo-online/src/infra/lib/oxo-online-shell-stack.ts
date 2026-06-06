@@ -23,6 +23,14 @@ export interface OxoOnlineShellStackProps extends cdk.StackProps {
   hostedZoneId?: string;
   /** Domain name served (e.g. oxo.example.com). Omit for dev. */
   domainName?: string;
+  /**
+   * s005-h1-waf — ARN of the global CLOUDFRONT WebACL, supplied cross-region
+   * from OxoOnlineWafUsEast1 (us-east-1) via CDK crossRegionReferences. When
+   * present it is set as the distribution's webAclId (SYNTH-CONTRACT-WAF-1).
+   * Omit for dev / when no WAF stack is wired — the distribution then carries
+   * no WebACLId. Never a hardcoded literal: it is the us-east-1 stack property.
+   */
+  globalWebAclArn?: string;
 }
 
 export class OxoOnlineShellStack extends cdk.Stack {
@@ -169,6 +177,12 @@ export class OxoOnlineShellStack extends cdk.Stack {
       ...(props.domainName && cert
         ? { domainNames: [props.domainName], certificate: cert }
         : {}),
+      // s005-h1-waf — attach the global CLOUDFRONT WebACL. The ARN arrives
+      // cross-region from OxoOnlineWafUsEast1 (us-east-1) via
+      // crossRegionReferences; CDK tokenises it into an SSM-reader custom
+      // resource / Fn::GetAtt — NOT a hardcoded literal (SYNTH-CONTRACT-WAF-1).
+      // Omitted entirely when no ARN is supplied (dev / pre-WAF synth).
+      ...(props.globalWebAclArn ? { webAclId: props.globalWebAclArn } : {}),
       minimumProtocolVersion: cloudfront.SecurityPolicyProtocol.TLS_V1_2_2021,
       httpVersion: cloudfront.HttpVersion.HTTP2_AND_3,
       priceClass: cloudfront.PriceClass.PRICE_CLASS_100,

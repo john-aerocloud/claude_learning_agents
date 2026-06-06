@@ -124,10 +124,35 @@ export async function handleJoin(
 
     // game-ready fan-out. Each payload carries ONLY { type, role } — never the
     // other player's connectionId or any other game field (T1, data-classification).
-    await postToConnection(game.hostConnectionId as string, {
-      type: 'game-ready',
-      role: 'host',
-    });
+    //
+    // DEFECT-005-001-R2 (Issue 2 cheap verify): the host connection may have
+    // vanished between register and join (GoneException / 410). The guest's join
+    // itself already succeeded, but with the host gone the game cannot proceed —
+    // so the guest gets the SPECIFIC "no longer available" 4041 rather than a
+    // generic 4500 that would mask the situation. The 410 is logged distinctly as
+    // an EXTERNAL/availability category (the host's connection became unavailable
+    // — not our bad request) so support can split it from our own 4xx defects.
+    // NOTE: this does not reap the stale host Connections/Games rows — fuller
+    // host-disconnect handling is deferred to s007.
+    try {
+      await postToConnection(game.hostConnectionId as string, {
+        type: 'game-ready',
+        role: 'host',
+      });
+    } catch (err) {
+      if ((err as { name?: string })?.name === 'GoneException') {
+        console.warn(
+          JSON.stringify({
+            event: 'join_host_gone',
+            category: 'external',
+            subcategory: 'availability',
+            closeCode: 4041,
+          }),
+        );
+        return close(4041);
+      }
+      throw err;
+    }
     await postToConnection(connectionId, { type: 'game-ready', role: 'guest' });
 
     return { statusCode: 200 };

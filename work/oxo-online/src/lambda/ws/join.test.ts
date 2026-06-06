@@ -222,3 +222,49 @@ describe('join — happy path: activate + game-ready both sides (C1; F1, F2, F5,
     expect(apiMock.commandCalls(PostToConnectionCommand)).toHaveLength(2);
   });
 });
+
+// DEFECT-005-001-R2 (Issue 2 cheap verify) — a GONE host connection (410) on the
+// game-ready fan-out must NOT mask a successful guest join behind a generic
+// 4500. The guest's join itself succeeded (game activated, guest Connections
+// written), but with the host gone the game cannot proceed — so the guest gets
+// the SPECIFIC "no longer available" 4041, not a generic 4500. The 410 is logged
+// distinctly as an EXTERNAL/availability category so support can split it from
+// our own 4xx defects. (Fuller host-disconnect reaping is deferred to s007.)
+describe('join — GONE host on fan-out closes 4041, not a masking 4500 (DEFECT-005-001-R2)', () => {
+  beforeEach(() => {
+    ddbMock.on(QueryCommand).resolves({
+      Items: [
+        {
+          gameId: 'G-1',
+          code: 'ABC123',
+          status: 'waiting',
+          hostConnectionId: 'HOST-CONN',
+        },
+      ],
+      Count: 1,
+    });
+    ddbMock.on(UpdateCommand).resolves({});
+    ddbMock.on(PutCommand).resolves({});
+  });
+
+  it('posting game-ready to a vanished host (GoneException) closes 4041, no leak', async () => {
+    const gone = new Error('connection gone');
+    (gone as { name: string }).name = 'GoneException';
+    // The HOST post fails 410; the guest post (if any) would succeed.
+    apiMock
+      .on(PostToConnectionCommand, { ConnectionId: 'HOST-CONN' })
+      .rejects(gone);
+    apiMock
+      .on(PostToConnectionCommand, { ConnectionId: 'GUEST-CONN' })
+      .resolves({});
+
+    const res = await handleJoin(
+      joinEvent('GUEST-CONN', { action: 'join', code: 'ABC123' }),
+    );
+
+    // Specific, coherent outcome — NOT a generic 4500 masking the situation.
+    expect(res.close).toBeDefined();
+    expect(res.close!.code).toBe(4041);
+    assertNoLeak(res.close);
+  });
+});

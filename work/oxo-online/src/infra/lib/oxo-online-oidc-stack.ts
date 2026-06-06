@@ -116,11 +116,16 @@ export class OxoOnlineOidcStack extends cdk.Stack {
     // CloudFront invalidation — scoped to distributions in this account.
     // CreateInvalidation requires the distribution ARN; we allow all distributions
     // owned by this account (not a wildcard across all of AWS).
+    // GetInvalidation is required by `aws cloudfront wait invalidation-completed`
+    // which polls the invalidation status before smoke tests run (OI-23 fix).
     deployRole.addToPolicy(
       new iam.PolicyStatement({
         sid: 'CloudFrontInvalidate',
         effect: iam.Effect.ALLOW,
-        actions: ['cloudfront:CreateInvalidation'],
+        actions: [
+          'cloudfront:CreateInvalidation',
+          'cloudfront:GetInvalidation',
+        ],
         resources: [
           `arn:aws:cloudfront::${this.account}:distribution/*`,
         ],

@@ -90,3 +90,11 @@ integration mechanism (first use of a service/protocol/behaviour class in
 this system). When yes, name the walking-skeleton probe the route must
 include (what one real-client request through the deployed path proves) —
 the engineer schedules it before use-case build-out.
+
+## Design for local standability (v28, principles/02)
+Architecture must allow most of the system to stand up locally (hexagonal
+ports with local adapter substitutes). Every delta ENUMERATES the local/prod
+gap: which parts stand locally, which are cloud-only (CDN/CSP, IAM, platform
+runtime semantics), and for each cloud-only item, the control that covers it
+(walking-skeleton probe, synth contract test, code-policy pin, or prod
+validation). A delta without the gap list is incomplete.

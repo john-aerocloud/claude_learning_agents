@@ -44,6 +44,8 @@ job served — core jobs beat secondary (see project.md classification);
 
 | OI-27 | engineer (R2) | deploy workflow has no workflow_dispatch — an infra-only change that alters browser-served behaviour (e.g. CSP) cannot re-run SPA smoke without an app-path push | deploy ergonomics | engineer R2 return | cicd, next pipeline-touching slice |
 
+| OI-28 | engineering (principles/02, v28) | No local stand-up exists: SPA dev server runs, but lambdas/DynamoDB/WS have no local substitutes; engineer browser tests currently impossible pre-deploy | quality into the tester (constraint); lead time | principles/02 | build at s006 with the hexagonal refactor (OI-17) — ports/adapters and local substitutes are the same work |
+
 Process-side items (project-agnostic) live in `/process/improvement-slices/`
 and the §27 retro queue — currently: pipeline-N+1-planning-over-build
 (operationalise §8b), §37 parallel-build scoring on s005, IMP-001/002/003

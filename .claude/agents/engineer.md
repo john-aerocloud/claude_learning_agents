@@ -196,3 +196,15 @@ Wherever IAM grants a NARROW action set on a resource, the writing code carries
 a test pinning it to the granted actions (assert command types; assert no
 ungranted command against that table) — least-privilege and code cannot then
 silently diverge into a prod AccessDenied.
+
+## Local stand-up + browser tests in the build (v28, principles/02)
+Browser-delivered behaviour is developed WITH A BROWSER during the build:
+write Playwright specs red->green against a LOCAL stand-up of the system —
+the stand-up (dev server + local adapter substitutes behind the same ports:
+local DynamoDB/emulator, local WS server, stubbed HTTP) is part of your build
+deliverable, exposed as a committed parameterised entry point (run-local
+class make target, self-serviced per tooling rules). jsdom/unit tests remain
+for domain logic; they are never the only coverage for browser behaviour.
+Consult the delta's local/prod gap list — what the stand-up can't prove
+(CDN/CSP, IAM, platform semantics) is covered by skeleton probe / synth
+contract / policy pin, not by hoping.

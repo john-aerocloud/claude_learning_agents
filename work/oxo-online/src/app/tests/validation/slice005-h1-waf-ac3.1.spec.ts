@@ -42,9 +42,21 @@ import { fileURLToPath } from 'node:url';
  *   PERIODICALLY (WAF evaluates ~every 30s), NOT per-request. A fast burst
  *   of 160 requests completes before the evaluation cycle fires; therefore the
  *   walking-skeleton fast-burst probe found 0 BlockedRequests. This spec
- *   corrects for that by PACING requests (1 req/1.5s across ~165s) so that
- *   when WAF evaluates mid-burst, >100 requests are in the 300s window AND
- *   subsequent requests arrive to receive the Block action.
+ *   corrects for that by PACING requests across the window so that when WAF
+ *   evaluates mid-burst, >100 requests are in the 300s window AND subsequent
+ *   requests arrive to receive the Block action.
+ *
+ * STANDING PROBE PROFILE (decided by tester, s005-h1-waf iter 7, 2026-06-06):
+ *   200 requests @ 800ms pace = 160s burst duration (all within 300s window).
+ *   RATIONALE: engineer live evidence confirmed 200 req @ 800ms → 200/200 HTTP
+ *   429 WAF blocks; sampled-requests showed all-BLOCK on /api/games. The earlier
+ *   110 @ 1.5s (165s) profile was NOT reliably triggering the rule (insufficient
+ *   sustained over-limit: the window holds all 110 but the ~30s WAF evaluation
+ *   cycle does not reliably fire Block within that narrower count headroom). With
+ *   200 reqs, by the time WAF's evaluation fires (req ~30-50), >100 reqs are
+ *   already in the 300s window AND 100+ more reqs remain to be blocked. This
+ *   gives the rule at least 3-4 evaluation cycles to fire within the 160s burst.
+ *   The profile is stable and does not require manual tuning per run.
  *
  * If after an honest sustained run the rule still never fires (wafBlocked=0
  * AND CloudWatch BlockedRequests=0), this spec fails with EVIDENCE: it is NOT
@@ -59,9 +71,13 @@ import { fileURLToPath } from 'node:url';
  *
  * CloudWatch metric for BlockedRequests:
  *   Namespace: AWS/WAFV2
- *   Dimensions: WebACL=oxo-online-cf-global, Rule=oxo-cf-rate-limit, Region=CloudFront
+ *   Dimensions: WebACL=oxo-online-cf-global, Rule=oxo-cf-rate-limit
  *   Region (API call): us-east-1
  *   Stat: Sum, Period: 300 (5 min)
+ *   NOTE: "Region=CloudFront" is documented in some AWS guides but is NOT actually
+ *   published as a dimension for CLOUDFRONT-scope rate rules with custom block
+ *   responses. Live list-metrics confirms the dimension set is WebACL+Rule only.
+ *   Using Region=CloudFront returns 0 datapoints even when blocks are published.
  */
 
 const PROD_URL = process.env.PROD_URL ?? 'https://d3pf3kcvzpau1x.cloudfront.net';
@@ -81,16 +97,17 @@ const RATE_RULE_METRIC = 'oxo-cf-rate-limit';
 const RATE_RULE_LIMIT = 100;
 const RATE_RULE_WINDOW_SEC = 300;
 
-// Sustained probe configuration:
-// 110 requests at 1500ms pace = ~165s burst duration.
-// After 100 requests: ~15 more requests arrive while WAF's evaluation window
-// still holds all 110 in it, giving WAF a chance to fire the block rule.
-const PROBE_COUNT = 110;
-const PROBE_PACE_MS = 1500;
+// Sustained probe configuration (standing profile — see STANDING PROBE PROFILE note above):
+// 200 requests at 800ms pace = 160s burst duration. All within the 300s window.
+// After 100 requests: WAF's next evaluation cycle (every ~30s) sees >100/300s
+// from this IP and blocks the subsequent 100+ requests.
+// Engineer live evidence: 200 req @ 800ms → 200/200 HTTP 429 wafBlocked=200 pass=true.
+const PROBE_COUNT = 200;
+const PROBE_PACE_MS = 800;
 const PROBE_TIMEOUT_MS = 12000;
 const PROBE_COOLDOWN_MS = 5000;
 
-// Total probe time: 110 * 1500ms + 5000ms = ~170s. Plus CloudWatch polling
+// Total probe time: 200 * 800ms + 5000ms = ~165s. Plus CloudWatch polling
 // (up to 2 min after burst). Set a generous per-test timeout.
 // Playwright default is 30s; override here for this long-running spec.
 const TEST_TIMEOUT_MS = 600_000; // 10 minutes
@@ -277,12 +294,13 @@ test.describe('s005-h1-waf AC3.1 — sustained-rate WAF block', () => {
   );
 
   test(
-    'AC3.1 — paced burst (110 req @ 1.5s) triggers >= 1 WAF 429 block; CloudWatch BlockedRequests > 0',
+    'AC3.1 — paced burst (200 req @ 800ms) triggers >= 1 WAF 429 block; CloudWatch BlockedRequests > 0',
     async () => {
       // Set an extended timeout for this one long-running test.
       test.setTimeout(TEST_TIMEOUT_MS);
 
       // ── Step 1: run the sustained-rate probe ──────────────────────────────
+      // Standing profile: 200 req @ 800ms = 160s burst (decided tester s005-h1-waf iter 7).
       console.log(
         `[AC3.1] Starting sustained probe: ${PROBE_COUNT} req @ ${PROBE_PACE_MS}ms pace ` +
         `→ est. ${Math.round((PROBE_COUNT * PROBE_PACE_MS) / 1000)}s burst ` +
@@ -364,27 +382,35 @@ test.describe('s005-h1-waf AC3.1 — sustained-rate WAF block', () => {
 
       // ── Step 3: assert CloudWatch BlockedRequests > 0 (if creds available) ─
       if (AWS_OK) {
-        // CloudWatch WAFv2 metrics for CLOUDFRONT-scope are in us-east-1.
-        // Dimension: WebACL=<name>, Rule=<metric-name>, Region=CloudFront.
+        // CloudWatch WAFv2 metrics for CLOUDFRONT-scope are queried in us-east-1.
+        // Dimensions: WebACL=<name>, Rule=<metric-name>.
+        // NOTE: the "Region=CloudFront" dimension documented in some AWS guides does
+        // NOT appear in the live metric (list-metrics confirms it); the actual
+        // dimension set is just WebACL+Rule. Including Region=CloudFront returns 0
+        // datapoints even when blocks are published. Verified live 2026-06-06.
         // We poll for up to 2 minutes after the burst ends to account for metric
-        // propagation latency (CloudWatch WAFv2 metrics can lag ~1-2 min).
+        // propagation latency (CloudWatch WAFv2 metrics can lag ~1-5 min).
         const pollStart = Date.now();
         const POLL_INTERVAL_MS = 30_000; // 30s between checks
-        const POLL_MAX_MS = 120_000;    // 2 min total
+        const POLL_MAX_MS = 360_000;    // 6 min total — CloudWatch WAFv2 can lag ~5min
         let cwBlockedRequests = 0;
 
-        // Build the time window: from 5 min before probe start to now + buffer.
-        // WAFv2 metrics are published per 5-minute period; we query the last 10 min.
-        const metricEndTime = new Date(probeEnd.getTime() + 90_000); // +90s buffer
+        // Build the time window: from 5 min before probe start.
+        // End time is computed dynamically per-poll so the window advances as we wait.
+        // WAFv2 metrics are published per 5-minute period; a 6-minute poll gives at
+        // least one full publication cycle to appear.
         const metricStartTime = new Date(probeStart.getTime() - 300_000); // -5min before
 
         console.log(
           `[AC3.1] Polling CloudWatch BlockedRequests (rule=${RATE_RULE_METRIC}) ` +
-          `window=${metricStartTime.toISOString()} → ${metricEndTime.toISOString()}`,
+          `window starts=${metricStartTime.toISOString()} (end advances per-poll)`,
         );
 
         while (Date.now() - pollStart < POLL_MAX_MS) {
           try {
+            // Use current time + 60s as the end so the window covers all published
+            // 5-min periods up to and including the most recently closed boundary.
+            const metricEndTime = new Date(Date.now() + 60_000);
             const cwResult = aws([
               'cloudwatch', 'get-metric-statistics',
               '--namespace', 'AWS/WAFV2',
@@ -392,7 +418,9 @@ test.describe('s005-h1-waf AC3.1 — sustained-rate WAF block', () => {
               '--dimensions',
               `Name=WebACL,Value=${WAF_ACL_NAME}`,
               `Name=Rule,Value=${RATE_RULE_METRIC}`,
-              'Name=Region,Value=CloudFront',
+              // No Region=CloudFront dimension: live list-metrics shows the actual
+              // dimensions are WebACL+Rule only (Region=CloudFront is not published
+              // as a dimension for CLOUDFRONT-scope custom-block-response rules).
               '--start-time', metricStartTime.toISOString(),
               '--end-time', metricEndTime.toISOString(),
               '--period', '300',
@@ -430,7 +458,7 @@ test.describe('s005-h1-waf AC3.1 — sustained-rate WAF block', () => {
           `after ${Math.round(POLL_MAX_MS / 1000)}s of polling. ` +
           `HTTP probe saw wafBlocked=${probe.wafBlocked} — metric publication lag may exceed ` +
           `the poll window, or the rule is not emitting metrics correctly. ` +
-          `Check CloudWatch console: namespace=AWS/WAFV2 dimensions=WebACL=${WAF_ACL_NAME},Rule=${RATE_RULE_METRIC},Region=CloudFront`,
+          `Check CloudWatch console: namespace=AWS/WAFV2 dimensions=WebACL=${WAF_ACL_NAME},Rule=${RATE_RULE_METRIC} (no Region dimension)`,
         ).toBeGreaterThan(0);
 
         console.log(

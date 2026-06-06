@@ -23,6 +23,15 @@ export default defineConfig({
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: 0,
+  // workers: 1 is required because the AC3.1 spec issues a sustained flood that
+  // trips the WAF rate rule (300s window, 100 req limit). If other specs run
+  // concurrently in parallel workers they POST /api/games during the probe and
+  // receive 429 instead of 201. Serial execution means the flood spec (last
+  // alphabetically: slice005-h1-waf-ac3.1.spec.ts) runs AFTER the other specs
+  // complete their clean-request assertions. The WAF window then expires before
+  // the next run. Tradeoff: +10min total for the AC3.1 probe; acceptable for a
+  // standing WAF-regression spec that runs on-demand (not in the hot path).
+  workers: 1,
   reporter: 'list',
   use: {
     baseURL: PROD_URL,

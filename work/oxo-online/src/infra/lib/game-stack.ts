@@ -307,15 +307,21 @@ export class OxoGameStack extends cdk.Stack {
     wsFunction.addEnvironment('WS_API_ENDPOINT', wsManagementEndpoint);
 
     // S2 — execute-api:ManageConnections scoped to THIS WS API's ARN only
-    // (prod stage, POST @connections). Not `*`, not execute-api:*, not a second
-    // API id. This is the only execute-api statement on the role.
+    // (prod stage, @connections). Not `*`, not execute-api:*, not a second API
+    // id. This is the only execute-api statement on the role.
+    // DEFECT-005-001 Bug B: the close transport both POSTs an error frame AND
+    // DELETEs the connection (PostToConnection + DeleteConnection — the latter
+    // is the only close primitive @connections offers). Both use the single
+    // execute-api:ManageConnections action but hit different HTTP verbs on the
+    // @connections resource, so the verb segment is `*` (still pinned to this
+    // API + prod stage + @connections — S2 holds).
     wsRole.addToPolicy(
       new iam.PolicyStatement({
         sid: 'ManageConnectionsThisApiOnly',
         effect: iam.Effect.ALLOW,
         actions: ['execute-api:ManageConnections'],
         resources: [
-          `arn:aws:execute-api:${this.region}:${this.account}:${wsApi.ref}/${wsStage.stageName}/POST/@connections/*`,
+          `arn:aws:execute-api:${this.region}:${this.account}:${wsApi.ref}/${wsStage.stageName}/*/@connections/*`,
         ],
       }),
     );

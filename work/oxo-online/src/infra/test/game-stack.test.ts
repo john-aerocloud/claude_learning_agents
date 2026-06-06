@@ -355,6 +355,30 @@ describe('OxoGameStack — oxo-ws-fn Lambda + least-privilege role (T8, S1, S2)'
       expect(json).toContain('@connections');
     }
   });
+
+  it('S2/Bug B: the ManageConnections resource permits DELETE (not pinned to POST only)', () => {
+    // DEFECT-005-001 Bug B: the close transport DELETEs the connection (the only
+    // close primitive @connections offers) in addition to POSTing the error
+    // frame. The IAM resource must therefore not be pinned to the POST verb
+    // segment only, or the DeleteConnection call is denied. Still scoped to this
+    // API + prod stage + @connections (S2 unchanged).
+    const statements = wsRoleStatements(synth());
+    const execApi = statements.filter((s) =>
+      actionList(s).some(
+        (a) => typeof a === 'string' && a.startsWith('execute-api:'),
+      ),
+    );
+    const resources = Array.isArray(execApi[0].Resource)
+      ? execApi[0].Resource
+      : [execApi[0].Resource];
+    for (const r of resources) {
+      const json = JSON.stringify(r);
+      // The verb segment before @connections must not restrict to POST only.
+      expect(json).not.toContain('/POST/@connections');
+      // Still scoped to the prod stage.
+      expect(json).toContain('/prod/');
+    }
+  });
 });
 
 describe('OxoGameStack — WS cross-stack outputs additive; s004 HttpApiEndpoint untouched (T7, S5)', () => {

@@ -18,8 +18,11 @@
  *     }
  *
  *   Guest-only (--guest-only): opens a single guest WS and sends join with
- *   the code against an already-active game. Expects the connection to close
- *   with a defined error code (4041). Outputs JSON:
+ *   the code against an already-active game. Expects the server to deliver an
+ *   error MESSAGE frame { type:'error', code:4041, message } and then DELETE the
+ *   connection (DEFECT-005-001 Bug B — custom WS close codes are undeliverable
+ *   via API Gateway @connections, so the code travels as a frame payload). The
+ *   probe reports the code from the error frame. Outputs JSON:
  *     { success: false, closeCode: 4041 }
  *
  * Arguments:
@@ -124,6 +127,12 @@ function openWs() {
 /**
  * Wait for a specific message type or a close event on a WebSocket.
  * Returns { type: 'message', data } or { type: 'close', code }.
+ *
+ * DEFECT-005-001 Bug B: the server reports errors as a normal MESSAGE frame
+ * { type:'error', code, message } (then DELETEs the connection). Any such error
+ * frame is treated as a terminal event regardless of expectedMessageType, so
+ * callers waiting for `game-ready` still observe a failure rather than hanging
+ * until timeout.
  */
 function waitForEvent(ws, expectedMessageType, timeoutMsLocal) {
   return new Promise((resolve) => {
@@ -140,6 +149,12 @@ function waitForEvent(ws, expectedMessageType, timeoutMsLocal) {
             ? event.data
             : event.data.toString('utf8'),
         );
+        // An error frame is always terminal — surface the carried code.
+        if (data.type === 'error') {
+          cleanup();
+          resolve({ type: 'error', code: data.code, data });
+          return;
+        }
         if (!expectedMessageType || data.type === expectedMessageType) {
           cleanup();
           resolve({ type: 'message', data });
@@ -170,18 +185,21 @@ async function runProbe() {
     // Send join immediately.
     wsConn.send(JSON.stringify({ action: 'join', code }));
 
-    // Wait for a close or a message (expecting close 4041).
+    // Wait for an error frame (Bug B) or a close. The defined code (e.g. 4041)
+    // now arrives as the error frame's `code`, not as a WS close code.
     const result = await waitForEvent(wsConn, null, timeoutMs);
     wsConn.close?.();
 
-    if (result.type === 'close') {
-      const closeCode = result.code;
-      const success = false; // A close on a "join" guest-only probe is expected failure.
-      console.log(JSON.stringify({ success, closeCode }));
+    if (result.type === 'error') {
+      // Expected failure: the server delivered { type:'error', code } then will
+      // DELETE the socket. Report the carried code as closeCode for the spec.
+      console.log(JSON.stringify({ success: false, closeCode: result.code }));
+    } else if (result.type === 'close') {
+      // A bare close with no error frame — surface its (generic) code.
+      console.log(JSON.stringify({ success: false, closeCode: result.code }));
     } else if (result.type === 'timeout') {
-      console.log(JSON.stringify({ success: false, error: 'timeout waiting for close on guest-only probe' }));
+      console.log(JSON.stringify({ success: false, error: 'timeout waiting for error frame on guest-only probe' }));
     } else {
-      // Unexpected message — still report the close code if we get one.
       console.log(JSON.stringify({ success: false, error: 'unexpected message on guest-only probe', data: result.data }));
     }
     process.exit(0);

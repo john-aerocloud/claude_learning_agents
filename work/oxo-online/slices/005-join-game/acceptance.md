@@ -150,24 +150,36 @@ Check type: **CLI** (`aws dynamodb scan --table-name <Connections>` filtered to
 the `gameId`; assert two items, distinct roles, `ttl` in range). Operationalises
 `architecture/security/dynamodb-connections.md` (TTL ~2h on every item).
 
-**T4 — Unknown code closes with 4040 and leaves `Games` unchanged [UC2, delta cond.4]**
+**Platform constraint (DEFECT-005-001 Bug B):** an API Gateway WebSocket Lambda
+integration response cannot set a client-visible close code, and the
+`@connections` management API only supports DELETE (which closes with the
+generic 1000). The defined error codes (4040/4041/4500) are therefore delivered
+as an error **MESSAGE** frame `{ type:'error', code, message }` posted to the
+caller, immediately followed by a connection DELETE — not as a WS close code.
+The codes and the customer-facing message text below are unchanged; only the
+transport (error-frame + close) differs. The solution-architect should reflect
+this transport in architecture delta 005.
+
+**T4 — Unknown code reports 4040 and leaves `Games` unchanged [UC2, delta cond.4]**
 Given Player B sends `{ action: 'join', code: '<NONEXISTENT>' }`,
-Then `oxo-ws-fn` queries the `code-index` GSI, finds no item, and closes the
-socket with close code 4040, and no `Connections` item is created for the failed
-join.
+Then `oxo-ws-fn` queries the `code-index` GSI, finds no item, posts an error
+frame `{ type:'error', code:4040, message }` to the caller and then DELETEs the
+connection, and no `Connections` item is created for the failed join.
 And a `scan` of `Games` confirms no new record and no mutation of any existing
 record.
-Check type: **live** (assert close code 4040) + **CLI** (`scan` before/after,
-unchanged). Operationalises `architecture/security/dynamodb-games.md`
-(`code-index` GSI lookup) and `apigw-websocket.md` (clean close-code contract).
+Check type: **live** (assert the error frame carries code 4040, then close) +
+**CLI** (`scan` before/after, unchanged). Operationalises
+`architecture/security/dynamodb-games.md` (`code-index` GSI lookup) and
+`apigw-websocket.md` (clean error-code contract).
 
-**T5 — Already-active game closes with 4041; no-hijack conditional write holds live [UC4, delta cond.5]**
+**T5 — Already-active game reports 4041; no-hijack conditional write holds live [UC4, delta cond.5]**
 Given a game in `status='active'` with an existing `guestConnectionId = G1`,
 When a second party sends `{ action: 'join', code: '<THAT-CODE>' }`,
 Then the `UpdateItem` `ConditionExpression` (`status='waiting'` AND
 `attribute_not_exists(guestConnectionId)`) fails with
-`ConditionalCheckFailedException`, `oxo-ws-fn` performs NO write, and closes the
-socket with close code 4041.
+`ConditionalCheckFailedException`, `oxo-ws-fn` performs NO write, and reports the
+failure via an error frame `{ type:'error', code:4041, message }` followed by a
+connection DELETE (per the platform-constraint note above).
 And `aws dynamodb get-item` after the rejected attempt shows `guestConnectionId`
 still equals `G1` and `status` still equals `active` — the record is byte-for-byte
 unchanged.
@@ -282,21 +294,23 @@ Check type: **synth** + **CLI**. Operationalises
 `architecture/security/lambda-execution-roles.md` (ManageConnections on this API
 ARN only).
 
-**S3 — Clean error contract: only the defined close codes, no stack/internal leakage [UC2, UC3, UC4]**
+**S3 — Clean error contract: only the defined error codes, no stack/internal leakage [UC2, UC3, UC4]**
 Given any failing join/register attempt,
-Then `oxo-ws-fn` closes the socket with one of exactly: 4040 (unknown code),
-4041 (game no longer available / no-hijack rejection), or 4500 (internal error),
-And no frame, close reason, or log delivered to the client contains a stack
-trace, exception class name, table ARN, AWS request id, or other internal
-detail; the customer-facing message is the human-readable text from the
-F-cases.
+Then `oxo-ws-fn` reports exactly one of: 4040 (unknown code), 4041 (game no
+longer available / no-hijack rejection), or 4500 (internal error) — delivered as
+an error frame `{ type:'error', code, message }` followed by a connection DELETE
+(per the platform-constraint note above),
+And no frame, message, or log delivered to the client contains a stack trace,
+exception class name, table ARN, AWS request id, or other internal detail; the
+customer-facing message is the human-readable text from the F-cases.
 Verifiable: **live** probes for each branch (nonexistent code → 4040; active game
-→ 4041; forced backend fault → 4500) asserting the close code and that the
-client-visible payload carries no internal strings.
-Check type: **live** (close-code + payload-leakage probe) backed by **unit**
-(handler maps each error class to its close code and a generic message).
-Operationalises `architecture/security/apigw-websocket.md` (no `$default`; close
-codes) — ties to F3/F4/F9.
+→ 4041; forced backend fault → 4500) asserting the error frame's code and that
+the client-visible payload carries no internal strings.
+Check type: **live** (error-code + payload-leakage probe) backed by **unit**
+(handler maps each error class to its code+generic message and delivers it via
+error frame + DELETE). Operationalises
+`architecture/security/apigw-websocket.md` (no `$default`; error codes) — ties to
+F3/F4/F9.
 
 **S4 — `oxo-deploy` WS extension is ARN-scoped with no `iam:*` mutation [UC1–UC4]**
 Given the extended `oxo-deploy` role,

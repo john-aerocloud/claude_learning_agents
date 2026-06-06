@@ -145,3 +145,103 @@ describe('OxoOnlineOidcStack — oxo-deploy WS Lambda deploy scope (s005 A0.6, S
     }
   });
 });
+
+// ===========================================================================
+// s005-h1-waf — Step 6: oxo-deploy WAFv2 + CloudFront grants (ORDER-WAF-1,
+// code<->policy pin per process v25 §30 / DEPLOY_ROLE_EXTENSIONS.md s005-h1).
+// ===========================================================================
+
+const EXPECTED_WAFV2_ACTIONS = [
+  'wafv2:CreateWebACL',
+  'wafv2:GetWebACL',
+  'wafv2:UpdateWebACL',
+  'wafv2:DeleteWebACL',
+  'wafv2:ListWebACLs',
+  'wafv2:TagResource',
+  'wafv2:UntagResource',
+  'wafv2:ListTagsForResource',
+  'wafv2:AssociateWebACL',
+  'wafv2:DisassociateWebACL',
+  'wafv2:ListResourcesForWebACL',
+  'wafv2:GetWebACLForResource',
+];
+
+const EXPECTED_CLOUDFRONT_WAF_ACTIONS = [
+  'cloudfront:UpdateDistribution',
+  'cloudfront:GetDistribution',
+  'cloudfront:GetDistributionConfig',
+];
+
+describe('OxoOnlineOidcStack — oxo-deploy WAFv2 management grant (s005-h1 ORDER-WAF-1)', () => {
+  it('grants exactly the enumerated wafv2 management actions — no wafv2:* wildcard', () => {
+    const statements = deployRoleStatements(synth());
+    const wafStmts = statements.filter((s) =>
+      actionsOf(s).some((a) => typeof a === 'string' && a.startsWith('wafv2:')),
+    );
+    expect(wafStmts.length).toBeGreaterThan(0);
+    const granted = new Set(
+      wafStmts.flatMap(actionsOf).filter((a) => a.startsWith('wafv2:')),
+    );
+    // No wildcard.
+    expect(granted.has('wafv2:*')).toBe(false);
+    // Every expected management action is present.
+    for (const action of EXPECTED_WAFV2_ACTIONS) {
+      expect(granted.has(action)).toBe(true);
+    }
+    // No ungranted wafv2 action sneaks in beyond the enumerated set
+    // (code<->policy pin: the granted set cannot silently widen).
+    for (const action of granted) {
+      expect(EXPECTED_WAFV2_ACTIONS).toContain(action);
+    }
+  });
+
+  it('does NOT grant wafv2:PutLoggingConfiguration (not needed; over-grant pin)', () => {
+    const statements = deployRoleStatements(synth());
+    const allActions = statements.flatMap(actionsOf);
+    expect(allActions).not.toContain('wafv2:PutLoggingConfiguration');
+  });
+});
+
+describe('OxoOnlineOidcStack — oxo-deploy CloudFront set-webAclId grant (s005-h1)', () => {
+  it('grants UpdateDistribution + Get/GetConfig scoped to the E519HYABC57ZX distribution ARN, never cloudfront:*', () => {
+    const statements = deployRoleStatements(synth());
+    const cfWafStmts = statements.filter((s) =>
+      actionsOf(s).some((a) => EXPECTED_CLOUDFRONT_WAF_ACTIONS.includes(a)),
+    );
+    expect(cfWafStmts.length).toBeGreaterThan(0);
+    const granted = new Set(cfWafStmts.flatMap(actionsOf));
+    for (const action of EXPECTED_CLOUDFRONT_WAF_ACTIONS) {
+      expect(granted.has(action)).toBe(true);
+    }
+    expect(granted.has('cloudfront:*')).toBe(false);
+    // Scoped to the specific distribution ARN — never '*'.
+    for (const stmt of cfWafStmts) {
+      for (const r of resourcesOf(stmt)) {
+        expect(r).not.toBe('*');
+        expect(typeof r).toBe('string');
+        expect(r as string).toContain('distribution/E519HYABC57ZX');
+      }
+    }
+  });
+
+  it('does NOT grant cloudfront:CreateDistribution or cloudfront:DeleteDistribution (lifecycle is CDK-owned)', () => {
+    const statements = deployRoleStatements(synth());
+    const allActions = statements.flatMap(actionsOf);
+    expect(allActions).not.toContain('cloudfront:CreateDistribution');
+    expect(allActions).not.toContain('cloudfront:DeleteDistribution');
+  });
+});
+
+describe('OxoOnlineOidcStack — no IAM escalation alongside the WAF grants (code<->policy pin)', () => {
+  it('still grants none of iam:CreateRole / iam:AttachRolePolicy / iam:PutRolePolicy after the WAF additions', () => {
+    const statements = deployRoleStatements(synth());
+    const forbidden = new Set([
+      'iam:CreateRole',
+      'iam:AttachRolePolicy',
+      'iam:PutRolePolicy',
+    ]);
+    for (const action of statements.flatMap(actionsOf)) {
+      expect(forbidden.has(action)).toBe(false);
+    }
+  });
+});

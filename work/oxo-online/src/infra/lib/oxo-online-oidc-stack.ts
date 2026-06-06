@@ -216,6 +216,58 @@ export class OxoOnlineOidcStack extends cdk.Stack {
       }),
     );
 
+    // WAFv2 WebACL management — both the global (us-east-1 CLOUDFRONT) and the
+    // regional (eu-west-2 WS-stage) ACLs are managed by CDK/CloudFormation
+    // (s005-h1-waf). No wafv2:* wildcard; only the management + association
+    // actions CDK needs. §39 config-follows-resource: this grant is applied via
+    // `make deploy-oidc` BEFORE the WAF-bearing infra deploy, or CloudFormation
+    // fails AccessDenied on wafv2:CreateWebACL. NOT wafv2:PutLoggingConfiguration.
+    deployRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'Wafv2Manage',
+        effect: iam.Effect.ALLOW,
+        actions: [
+          'wafv2:CreateWebACL',
+          'wafv2:GetWebACL',
+          'wafv2:UpdateWebACL',
+          'wafv2:DeleteWebACL',
+          'wafv2:ListWebACLs',
+          'wafv2:TagResource',
+          'wafv2:UntagResource',
+          'wafv2:ListTagsForResource',
+          'wafv2:AssociateWebACL',
+          'wafv2:DisassociateWebACL',
+          'wafv2:ListResourcesForWebACL',
+          'wafv2:GetWebACLForResource',
+        ],
+        // WAFv2 management actions do not all support resource-level ARN scoping
+        // at create time (the ACL ARN does not exist yet). Scope is bounded by
+        // the account/region the role can act in; the deploy role has NO iam:*
+        // and cannot use these to escalate. Re-scope to specific ACL ARNs once
+        // stable.
+        resources: ['*'],
+      }),
+    );
+
+    // CloudFront distribution update — to set the distribution webAclId from the
+    // cross-region global WebACL ARN (s005-h1-waf). Scoped to the existing
+    // distribution ARN; NOT cloudfront:* and NOT Create/DeleteDistribution
+    // (distribution lifecycle is CDK-owned, not a property toggle).
+    deployRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'CloudFrontSetWebAcl',
+        effect: iam.Effect.ALLOW,
+        actions: [
+          'cloudfront:UpdateDistribution',
+          'cloudfront:GetDistribution',
+          'cloudfront:GetDistributionConfig',
+        ],
+        resources: [
+          `arn:aws:cloudfront::${this.account}:distribution/E519HYABC57ZX`,
+        ],
+      }),
+    );
+
     // IAM read-only for CDK to resolve role/policy ARNs during diff/deploy.
     deployRole.addToPolicy(
       new iam.PolicyStatement({

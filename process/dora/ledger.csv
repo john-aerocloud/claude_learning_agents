@@ -259,3 +259,5 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-06T15:24:18Z,oxo-online,6,005-join-game,orchestrator,gate,,success,PROCESS-V28,v28: local standability + engineer browser tests; OI-28 registered
 2026-06-06T15:28:09Z,oxo-online,6,005-join-game,orchestrator,gate,,success,IMP-006-DEFERRED,Playwright MCP deferred with re-proposal trigger; browser-probe rules in force regardless
 2026-06-06T15:30:02Z,oxo-online,7,s005-h1-waf,orchestrator,gate,,success,GATE-2-H1,Gate 2 approved: s005-h1 WAF slice
+2026-06-06T15:31:06Z,oxo-online,7,s005-h1-waf,solution-architect,start,,na,,architecture delta + security review for WAF slice
+2026-06-06T15:32:47Z,oxo-online,7,s005-h1-waf,orchestrator,gate,,success,REGION-POLICY,single-region default routed to aws-architecture skill + architect def

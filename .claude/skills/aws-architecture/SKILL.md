@@ -268,3 +268,24 @@ condition that would trigger a reversal:
 | DynamoDB over RDS | oxo-online | No relational need; ephemeral game state | Leaderboard needs ranked queries beyond top-N |
 | No VPC (C1-C7) | oxo-online | All managed services; no EC2/ECS | Fargate reversal triggered; ECS needs VPC |
 | Well-Architected from first principles (skill was missing) | oxo-online | `aws-architecture` skill absent at project start | Skill now present; use for future projects |
+
+## Region policy (human-directed, 2026-06-06)
+
+**Single-region default: every resource lives in the project's home region
+unless there is a very good reason not to.** (For current projects the home
+region is recorded in the project's /work artifacts.)
+
+Acceptable exception classes — each must be documented IN THE DELTA as a
+justified exception, naming the forcing constraint:
+- **Platform-forced placement** (e.g. WAFv2 WebACLs with CLOUDFRONT scope and
+  ACM certs for CloudFront MUST be in us-east-1; CloudFront/IAM/Route53 are
+  global services).
+- A named, evidenced non-functional requirement (data residency, DR,
+  latency to users) — introduced only as the need demands, never
+  speculatively.
+
+Consequences when an exception is taken: the cross-region stack is kept
+MINIMAL (only the forced resources), the cross-region value handoff is a §30
+contract (synth-assert the reference), and the deploy order/rollback notes
+state the extra region explicitly. An undocumented out-of-region resource is
+a review failure.

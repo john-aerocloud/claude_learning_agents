@@ -98,3 +98,10 @@ gap: which parts stand locally, which are cloud-only (CDN/CSP, IAM, platform
 runtime semantics), and for each cloud-only item, the control that covers it
 (walking-skeleton probe, synth contract test, code-policy pin, or prod
 validation). A delta without the gap list is incomplete.
+
+## Region policy (aws-architecture skill)
+Single-region default — everything in the project's home region unless
+platform-forced or a named, evidenced non-functional need. Any exception is
+documented in the delta AS an exception (forcing constraint named, minimal
+cross-region footprint, §30 contract on the cross-region handoff). An
+undocumented out-of-region resource is a review failure.

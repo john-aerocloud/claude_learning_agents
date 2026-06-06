@@ -35,3 +35,81 @@ Checkable controls:
 - [ ] Chat is not persisted; nothing survives game end / TTL expiry.
 - [ ] Message size is capped (e.g. <= 500 chars) and output is treated as text
       (client renders escaped — no HTML injection).
+
+---
+
+## s005 subset (join / register only) — built scope
+
+The target controls above describe C4–C7. The slice 005 WebSocket API is built
+to a **narrower, explicitly-unauthenticated** scope. These are the checkable
+statements that become policy tests for s005:
+
+### Transport & API surface
+- [ ] `AWS::ApiGatewayV2::Api` has `ProtocolType: WEBSOCKET` and
+      `RouteSelectionExpression: '$request.body.action'`.
+- [ ] WSS only (TLS 1.2+ enforced by API Gateway service). No plaintext WS.
+- [ ] Exactly four route keys are synthesised: `$connect`, `$disconnect`,
+      `register`, `join`. No `$default` catch-all that would accept arbitrary
+      unrouted actions.
+- [ ] A `prod` stage exists; the SPA connects directly to
+      `wss://<api-id>.execute-api.<region>.amazonaws.com/prod` (NOT via
+      CloudFront).
+
+### Connection spoofing / replay — register binds connectionId to a game
+The host's `register` message carries `{ action: 'register', gameId }`; the join
+message carries `{ action: 'join', code }`. With no account system there is no
+user identity, so binding is **capability-by-connection**:
+- [ ] On `register`, the server writes `hostConnectionId = <the caller's own
+      $connect connectionId>` (from `event.requestContext.connectionId`) — it
+      MUST NOT trust any connectionId supplied in the message body.
+- [ ] `register` only sets `hostConnectionId` on a game whose `hostConnectionId`
+      is currently null AND `status='waiting'` (conditional write). A third party
+      cannot re-register an already-bound host slot.
+- [ ] On `join`, the server writes `guestConnectionId = <the caller's own
+      connectionId>` and only if `guestConnectionId` is null and
+      `status='waiting'` (conditional write — see no-hijack below).
+- [ ] **Residual risk (accepted/deferred):** because there is no per-game
+      capability token in s005, anyone who learns a code before the host has
+      registered could in principle register/join that game. This is bounded by:
+      the code is high-entropy and short-lived (24h TTL), the host opens its WS
+      and registers immediately on the waiting screen, and the conditional writes
+      make the *first* binder win with no overwrite. A per-game join token minted
+      by create-game (the target `apigw-http.md` control) is **deferred** and is
+      an open risk for the gate.
+
+### No-hijack conditional write (the core integrity control)
+- [ ] The `join` handler's `UpdateItem` on `Games` uses a
+      `ConditionExpression` requiring `status = 'waiting'` AND
+      `attribute_not_exists(guestConnectionId)` (or `guestConnectionId = null`).
+- [ ] On `ConditionalCheckFailedException` the handler does NOT write and closes
+      the socket with 4041 ("no longer available") — a second joiner can never
+      overwrite an existing `guestConnectionId` or flip an `active` game.
+- [ ] `status` transition to `active` happens in the **same** conditional
+      `UpdateItem` as the `guestConnectionId` set (atomic — no read-modify-write
+      race window).
+
+### Resource exhaustion on an unauthenticated WS endpoint (WAF deferred)
+- [ ] `oxo-ws-fn` has `ReservedConcurrentExecutions` set to a small cap (bounds
+      message-processing cost/blast radius).
+- [ ] The `prod` stage sets default route throttling
+      (`ThrottlingRateLimit` / `ThrottlingBurstLimit`) at a low hobby cap to blunt
+      connect/message flooding.
+- [ ] `Connections` items carry a 2h TTL so orphaned/abandoned connections from a
+      flood self-expire (storage cannot grow unboundedly).
+- [ ] **Accepted residual risk:** no WAF / no `$connect` authorizer in s005. An
+      unauthenticated attacker can still open connections up to the API Gateway
+      account limits and the throttle cap. Accepted for hobby volume; **deferred
+      controls (open risk for gate):** WAF rate rule and/or a `$connect`
+      capability-token authorizer before promoting beyond hobby volume.
+
+### Data classification
+- [ ] Messages and stored fields contain **no PII**: `connectionId` (an
+      AWS-generated opaque handle), `gameId` (UUID), `code` (server-generated
+      token), `role` (`host`/`guest`). Display names are C6.
+- [ ] `game-ready` payload carries only `{ type, role }` — no other player's
+      connection details are disclosed to a client.
+
+### Out of scope for s005 (do NOT assert as built)
+- Move forgery / server-authoritative board controls (s006).
+- `$disconnect` cleanup / "opponent disconnected" (s007).
+- Chat scope (C7).

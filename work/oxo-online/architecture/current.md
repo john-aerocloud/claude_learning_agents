@@ -16,7 +16,7 @@ is recorded; later chunks revise this when value is re-sliced.
 |-----|---------|--------|
 | **[C1]** | Needed for Chunk 1 (deployable shell) | delivered (slice 001) |
 | **[C2-3]** | Local game + AI — client-only, no new infra | **current** (C2 = slice 002, local game, delivered; C3 = AI, in progress) |
-| **[C4]** | Online match — first stateful backend + realtime | in progress (s004) |
+| **[C4]** | Online match — first stateful backend + realtime | in progress (s004 create ✓; s005 join/WS in progress) |
 | **[C5]** | Leaderboard — first durable persistence | not started |
 | **[C6]** | Player identity — session/display name | not started |
 | **[C7]** | In-game chat — reuses C4 realtime transport | not started |
@@ -86,6 +86,62 @@ C4Container
   Rel(gh, s3, "Deploy SPA + invalidate CF", "OIDC")
   Rel(gh, gamefn, "Deploy functions", "OIDC")
 ```
+
+---
+
+## C4 — what is actually built (in-progress subset of the target above)
+
+The C2 diagram is the **target through Chunk 7**. As of slice 005 the *built*
+subset is narrower; this section is the source of truth for "what exists now".
+
+```mermaid
+C4Container
+  title oxo-online — Built as of s005 (C4 in progress)
+
+  Person(player, "Player", "Anonymous browser user")
+
+  System_Boundary(aws, "AWS account (prod)") {
+    Container(cf, "CloudFront", "CDN", "[built s001/s004] SPA + /api/* behaviour (CachingDisabled). NO WS proxying.")
+    Container(s3, "S3 web bucket", "Static hosting", "[built s001] React SPA; private, OAC only. s005 adds runtime wsUrl config artifact.")
+
+    Container(httpapi, "API Gateway (HTTP)", "HTTPS", "[built s004] POST /games (create)")
+    Container(wsapi, "API Gateway (WebSocket)", "WSS", "[s005] prod stage; routes $connect/$disconnect(stub)/register/join")
+
+    Container(gamefn, "oxo-game-fn", "Lambda Node20", "[built s004] create-game; PutItem on Games only")
+    Container(wsfn, "oxo-ws-fn", "Lambda Node20", "[s005] $connect/register/join; conditional join write + game-ready fan-out")
+
+    ContainerDb(ddb_game, "DynamoDB: Games", "NoSQL", "[built s004] +code GSI & host/guest connId attrs (s005). TTL 24h, SSE, on-demand.")
+    ContainerDb(ddb_conn, "DynamoDB: Connections", "NoSQL", "[s005] connectionId -> gameId/role. TTL 2h, SSE, on-demand.")
+  }
+
+  Rel(player, cf, "Loads SPA + reads wsUrl config", "HTTPS")
+  Rel(cf, s3, "Origin fetch", "HTTPS (OAC)")
+  Rel(cf, httpapi, "Routes /api/*", "HTTPS")
+  Rel(player, httpapi, "POST /api/games (create)", "HTTPS via CF")
+  Rel(player, wsapi, "Direct WSS: register / join", "WSS (NOT via CloudFront)")
+
+  Rel(httpapi, gamefn, "Invokes create", "AWS_PROXY")
+  Rel(wsapi, wsfn, "Invokes per message", "AWS_PROXY")
+  Rel(gamefn, ddb_game, "PutItem (create)")
+  Rel(wsfn, ddb_game, "Query code-index + conditional UpdateItem")
+  Rel(wsfn, ddb_conn, "Put/Delete connection")
+  Rel(wsfn, wsapi, "game-ready fan-out", "@connections (ManageConnections, this API ARN only)")
+}
+```
+
+**Not yet built (target only):** move relay/fan-out of board state,
+server-authoritative win/draw, `$disconnect` cleanup, reconnect, Leaderboard
+table + `oxo-board-fn`, WAF, CloudFront WS proxying. See deltas 005+ for the
+deferral list.
+
+**Key s005 architectural facts:**
+- The WebSocket API is in the **same `OxoGameProd` stack** as the HTTP API +
+  `Games` table (one game-backend deployable; no new cross-stack data-plane
+  import). See `architecture/deltas/005-join-game.md` for the stack-placement
+  rationale and the §30 wss-URL-handoff contract.
+- The SPA connects **directly** to the WSS endpoint; the wss URL is injected as
+  **runtime config** at deploy time from `OxoGameProd-WsApiEndpoint`. CloudFront
+  is NOT in the WS path.
 
 ---
 
@@ -174,12 +230,15 @@ C4Container
 |------|-----------|------------------|
 | `oxo-cf-oac` | CloudFront (OAC) | `s3:GetObject` on the web bucket only |
 | `oxo-deploy` | GitHub OIDC | `s3:PutObject`/`DeleteObject` on web bucket, `cloudfront:CreateInvalidation`, `lambda:UpdateFunctionCode`, scoped by resource ARN + repo/branch claim |
-| `oxo-game-fn` | Lambda (game) | RW `Games`+`Connections` tables; `execute-api:ManageConnections` on the WS API; invoke/emit to leaderboard; CloudWatch Logs |
-| `oxo-board-fn` | Lambda (leaderboard) | RW `Leaderboard` table; read `Games`; CloudWatch Logs |
-| `oxo-ws-authorizer` | Lambda ($connect) | none beyond logs (validates connect params) |
+| `oxo-game-fn` | Lambda (create) | **s004 built:** `dynamodb:PutItem` on `Games` ARN only + own log group. (Target broader RW deferred.) |
+| `oxo-ws-fn` | Lambda (WS join/register) | **s005:** `GetItem`/`Query` on `Games` `code-index` GSI; conditional `UpdateItem` on `Games`; `PutItem`/`DeleteItem` on `Connections`; `execute-api:ManageConnections` on **this WS API ARN only**; own log group |
+| `oxo-board-fn` | Lambda (leaderboard) | RW `Leaderboard` table; read `Games`; CloudWatch Logs (C5 — not built) |
+| `oxo-ws-authorizer` | Lambda ($connect) | **Not built in s005.** WS endpoint is unauthenticated by slice decision (no account system; per-game capability-token authorizer deferred). Recorded as an open risk for the gate. |
 
-No wildcards on resources; every policy is table-/bucket-/function-ARN scoped.
-Deploy role is constrained to the repo and branch via the OIDC `sub` condition.
+No wildcards on resources; every policy is table-/index-/bucket-/function-/
+API-ARN scoped. Deploy role is constrained to the repo and branch via the OIDC
+`sub` condition, gains scoped `lambda:UpdateFunctionCode`/`GetFunction` on the
+`oxo-ws-fn` ARN (s005), and still has NO `iam:*` mutation actions.
 
 ---
 

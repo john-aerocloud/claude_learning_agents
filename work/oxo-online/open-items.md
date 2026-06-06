@@ -42,6 +42,8 @@ job served — core jobs beat secondary (see project.md classification);
 
 | OI-26 | retro input (DEFECT-005-001 R2) | Code-vs-IAM-policy contract untested: S1 asserts what the role GRANTS, nothing asserts what the code NEEDS — register.ts drifted to UpdateItem and least-privilege correctly broke it in prod. Candidate: §30-class contract test (static scan of SDK commands per handler vs granted actions at synth) | CFR | s005 retro | s005 retro |
 
+| OI-27 | engineer (R2) | deploy workflow has no workflow_dispatch — an infra-only change that alters browser-served behaviour (e.g. CSP) cannot re-run SPA smoke without an app-path push | deploy ergonomics | engineer R2 return | cicd, next pipeline-touching slice |
+
 Process-side items (project-agnostic) live in `/process/improvement-slices/`
 and the §27 retro queue — currently: pipeline-N+1-planning-over-build
 (operationalise §8b), §37 parallel-build scoring on s005, IMP-001/002/003

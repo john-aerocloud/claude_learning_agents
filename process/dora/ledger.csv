@@ -202,3 +202,4 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-06T12:07:52Z,oxo-online,6,005-join-game,engineer,task_start,,na,,Set B build
 2026-06-06T12:08:08Z,oxo-online,6,005-join-game,engineer,task_start,,na,,Set A build
 2026-06-06T12:11:16Z,oxo-online,6,005-join-game,cicd,task_start,,na,pipeline-fix,Hardening WS+game Lambda deploy steps to skip gracefully when function not yet provisioned
+2026-06-06T12:15:44Z,oxo-online,6,005-join-game,engineer,task_end,,success,,"Set B B1-B4 green: join screen, error messages, online board, mocked game-ready transition; 85 app tests"

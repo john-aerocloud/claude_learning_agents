@@ -272,3 +272,6 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-06T15:48:07Z,oxo-online,7,s005-h1-waf,engineer,task_start,,na,,UC2 build
 2026-06-06T15:53:26Z,oxo-online,7,s005-h1-waf,engineer,task_end,360,success,84fb3fd:waf-uc1,UC1 S1-3: global CLOUDFRONT WebACL + cross-region webAclId handoff; 16 owned tests; full infra 67/67; synth all stacks green
 2026-06-06T15:53:31Z,oxo-online,7,s005-h1-waf,engineer,task_end,307,success,bd8ca26:waf-uc2,"UC2 steps 4-6: regional WS WebACL+prod-stage association (SYNTH-CONTRACT-WAF-3/4) + oxo-deploy WAFv2/CloudFront grants (Step6 ORDER-WAF-1). 11 owned tests red->green; full infra 67/67; all 4 stacks synth green. Committed d590c51,bd8ca26 to local main; push blocked by classifier (orchestrator must push)."
+2026-06-06T15:56:29Z,oxo-online,7,s005-h1-waf,cicd,pipeline_failure,,fail,27066828546,"infra runs raced prerequisites: WAF deploy before deploy-oidc grants/bootstrap; pre-prod, no impact"
+2026-06-06T15:56:29Z,oxo-online,7,s005-h1-waf,cicd,pipeline_recovery,,rolled_forward,OI-29-30,bootstrap + deploy-oidc now applied; rerun pending gate-4
+2026-06-06T15:59:12Z,oxo-online,7,s005-h1-waf,orchestrator,gate,,success,GATE-AMEND-H1-A,Option A: descope WS regional ACL (platform constraint); CF global ACL proceeds; gate-4 roll-forward approved

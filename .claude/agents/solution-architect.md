@@ -60,3 +60,9 @@ so it runs without a permission prompt. That means:
   command shapes.
 - A permission prompt caused by an avoidable command form is a principle
   failure — log it.
+
+## Version-identifiable deployments (principles/01)
+Every delta that adds or changes a deployable surface MUST state the build-
+identity carrier for that surface (page/API header, meta/config field, log
+field) per process/principles/01-version-identifiable-deployments.md. A
+surface with no readable build identity is an incomplete design.

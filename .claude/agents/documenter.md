@@ -75,3 +75,8 @@ where to find them (log group, metric name/filter), how to tell whose problem
 it is (our code vs external dependency vs caller data), first-response steps,
 and the rollback/roll-forward posture. Update it every slice that changes the
 operational surface; stale runbook = principle failure.
+
+## Version identity in the runbook (principles/01)
+The runbook's first diagnostic is always: how to read the build identity of
+each surface (exact header/field/log names) and how to compare it with the
+expected deploy — version skew is checked before any behavioural diagnosis.

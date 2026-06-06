@@ -86,3 +86,10 @@ those for cicd). The ban on improvised one-off command shapes stands; a
 committed parameterised tool is the opposite of a workaround. NOTE: the ROOT
 Makefile holds agent-ops targets (validate/smoke/dora-record/test-*); the
 per-project src/infra/Makefile is deploy-ops only — never conflate them.
+
+## Identity before behaviour (principles/01)
+First assertion of ANY live validation: served build identity == sha under
+test (page header/meta, API header). On mismatch: bounded wait/retry, then
+categorise as a DISTRIBUTION condition (deploy-timing/stale-edge), never a
+behavioural failure — no failure row, no MTTR clock, until identity matches
+and behaviour is then judged.

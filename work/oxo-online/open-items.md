@@ -36,6 +36,8 @@ job served — core jobs beat secondary (see project.md classification);
 | OI-21 | tester/engineer (DEFECT-005-001) | Architect must amend delta 005: WS error transport is error MESSAGE frame + DELETE close (APIGW cannot send custom close frames) — security intent (no leak, specific codes) unchanged | architecture honesty | acceptance.md amended; delta pending | with s005 closure |
 | OI-22 | retro input (DEFECT-005-001) | New defect class: platform-semantic assumption (close-code delivery) — synth-level §30 contract tests cannot catch platform behaviour; consider a thin live walking-skeleton probe step when a slice introduces a NEW platform integration mechanism | CFR | s005 retro | s005 retro |
 
+| OI-25 | architecture principle 01 (human-directed) | Implement version-identifiable deployments in oxo-online: sha into SPA (meta/config + header), HTTP+WS API response headers, Lambda structured log field; pipeline injects; tester/smoke gate identity-before-behaviour | risk: false-negative validation, MTTR misattribution (evidenced by DEFECT-005-001 re-validation smoke race) | principles/01 | next slice that touches each surface — candidate to fold into s005-h1 build or s006 |
+
 Process-side items (project-agnostic) live in `/process/improvement-slices/`
 and the §27 retro queue — currently: pipeline-N+1-planning-over-build
 (operationalise §8b), §37 parallel-build scoring on s005, IMP-001/002/003

@@ -121,3 +121,9 @@ Makefile, build wiring, scripts) in the same slice — tested, documented,
 committed — and name it in your return. Flag only what you cannot own
 (allowlist entries -> cicd). The root Makefile is agent-ops; the per-project
 src/infra/Makefile is deploy-ops only.
+
+## Version stamping (principles/01)
+Implement build identity on every surface you build: bundles carry the commit
+sha (build-time define -> meta/config + response header where the serving
+layer allows), functions log it as a structured field and read it from env.
+The sha is injected by the pipeline — never hardcoded.

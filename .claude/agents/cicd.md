@@ -114,3 +114,9 @@ another agent's flagged need), add the narrowest pattern yourself in the
 capability step and say so in your return; do not leave proposals for the
 orchestrator. Interpreter/task-runner wildcards remain banned; exact paths,
 exact targets, read-only verbs.
+
+## Version injection + smoke gating (principles/01)
+Inject the commit sha at build/deploy on every surface (build define for
+bundles, env for functions, header at the serving layer). Pipeline smoke
+steps gate on served-sha == deployed-sha BEFORE asserting behaviour — this,
+not sleep/wait guesses, is the §39-correct answer to distribution timing.

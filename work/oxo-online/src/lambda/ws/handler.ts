@@ -6,6 +6,7 @@ import { handleConnect } from './connect';
 import { handleRegister } from './register';
 import { handleJoin } from './join';
 import type { WsResult } from './ws-result';
+import { deliverClose } from './ws-transport';
 
 /**
  * oxo-ws-fn entry point — dispatches by event.requestContext.routeKey to the
@@ -13,10 +14,12 @@ import type { WsResult } from './ws-result';
  * unrecognised routeKey is simply acknowledged without side effects.
  *
  * A handler returns a WsResult; this adapter maps it to the API Gateway proxy
- * response. A requested close is surfaced as the response status code (the
- * customer-facing close message is the handler's reason; the transport that
- * delivers the close frame to the client is wired in the deploy adapter / Set C
- * happy path). No internal error detail is ever placed in the response.
+ * response. DEFECT-005-001 Bug B: a requested close is NOT deliverable via the
+ * integration response (the platform never turns it into a close frame, and
+ * @connections only supports DELETE/1000). The close is therefore delivered to
+ * the caller as an error MESSAGE frame followed by a connection DELETE, via the
+ * ws-transport adapter. The proxy status code still mirrors the close for
+ * API Gateway's own accounting. No internal detail is ever placed in the frame.
  */
 export async function handler(
   event: APIGatewayProxyWebsocketEventV2,
@@ -44,10 +47,10 @@ export async function handler(
   }
 
   if (result.close) {
-    return {
-      statusCode: result.statusCode,
-      body: JSON.stringify({ code: result.close.code, message: result.close.reason }),
-    };
+    // Deliver the close as an error frame + DELETE (Bug B). The caller's own
+    // connectionId is the target; never trust a body-supplied id.
+    await deliverClose(event.requestContext.connectionId, result.close);
+    return { statusCode: result.statusCode };
   }
   return { statusCode: result.statusCode };
 }

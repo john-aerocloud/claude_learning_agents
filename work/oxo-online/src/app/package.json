@@ -11,7 +11,8 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:smoke": "playwright test --config=playwright.config.ts tests/smoke/"
+    "test:smoke": "playwright test --config=playwright.config.ts tests/smoke/",
+    "test:validation": "playwright test --config=playwright.validation.config.ts"
   },
   "dependencies": {
     "react": "^18.3.1",

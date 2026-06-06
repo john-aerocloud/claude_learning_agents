@@ -1,6 +1,6 @@
 # DORA Baseline (computed)
 
-_Generated 2026-06-06T07:10:41Z from ledger.csv. Do not hand-edit._
+_Generated 2026-06-06T08:44:50Z from ledger.csv. Do not hand-edit._
 
 ## Four key metrics (whole pipeline)
 

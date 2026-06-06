@@ -44,6 +44,12 @@ cost with no new path covered.
 
 ## 3. Cross-region handling — the global (CloudFront) WebACL
 
+**REGION-POLICY EXCEPTION (documented per aws-architecture skill region
+policy):** single-region default is eu-west-2; this is a **platform-forced
+exception** — a `CLOUDFRONT`-scope WAFv2 WebACL MUST be created in
+`us-east-1` (AWS hard constraint). The us-east-1 stack contains ONLY the
+forced resource; the handoff is §30-pinned (SYNTH-CONTRACT-WAF-1).
+
 **Constraint:** a `CLOUDFRONT`-scope WAFv2 WebACL MUST be created in
 `us-east-1`. All current stacks deploy to **eu-west-2**. The CloudFront
 distribution itself is a global resource defined in `OxoOnlineProd`

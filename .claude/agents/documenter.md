@@ -49,3 +49,18 @@ Bracket your work with task_start/task_end ledger rows (agent "documenter").
 
 ## Return format
 Return: one-line summary of what changed in the docs, and the path written.
+
+## Command form — allowlist contract (process v15 §33, IMP-001)
+Every Bash command must match the committed allowlist in `.claude/settings.json`
+so it runs without a permission prompt. That means:
+- Run everything from the project root. NEVER `cd … && …`, `pushd … && …`, or
+  `source … && …` — compound prefixes match no allowlist pattern and always prompt.
+- Use the allowlist-shaped forms: `npm --prefix <dir> run <script>`,
+  `make -C <dir> <target>`, `git -C <dir> …`, root-relative script paths
+  (e.g. `python3 .claude/skills/dora-ledger/scripts/dora.py …`).
+- If a task genuinely needs a command class the allowlist lacks, that is a
+  capability gap: name it in your return so the allowlist is extended in the
+  same slice (cicd capability step) — do not work around it with novel one-off
+  command shapes.
+- A permission prompt caused by an avoidable command form is a principle
+  failure — log it.

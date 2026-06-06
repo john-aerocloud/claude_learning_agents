@@ -84,19 +84,31 @@ record` accepts an arbitrary `--event`, and `compute` only keys on
 row is recorded faithfully and is inert for metric computation (verified: the
 four-key compute still runs unchanged with these rows present).
 
+**Preferred entry point (IMP-003): run + record fused in one command** — from
+the project root:
+
 ```sh
-# Record one validation_run row (run from project root). One row per suite.
-python3 .claude/skills/dora-ledger/scripts/dora.py record \
-  --project oxo-online --iteration <N> --slice 004-create-game \
-  --agent tester --event validation_run \
-  --ref "<sha-under-test>:<suite>" \
-  --outcome success \
-  --note "<suite> vs <PROD_URL>: <n passed>/<n total> (AWS policy: live|skipped)"
+# Runs tests/validation AND emits the validation_run row (sha + result):
+make validate ITER=<N> SLICE=004-create-game
+
+# Same for the smoke suite:
+make smoke ITER=<N> SLICE=004-create-game
 ```
 
-- `--ref` carries the **sha under test** plus the suite name so
+The Makefile records `success` or `fail` automatically with the current HEAD
+sha — the row can never be forgotten or back-filled.
+
+For a custom row (e.g. one row per suite with detailed notes), the
+parameterised form is:
+
+```sh
+make dora-record EVENT=validation_run AGENT=tester SLICE=004-create-game \
+  ITER=<N> REF="<sha-under-test>:<suite>" OUTCOME=success \
+  NOTE="<suite> vs <PROD_URL>: <n passed>/<n total>"
+```
+
+- `REF` carries the **sha under test** plus the suite name so
   "which ACs were verified at iteration N against which sha?" is answerable
   from `process/dora/ledger.csv` alone.
-- `--outcome success` | `fail`.
-- Emit one row per suite run (api-contract, aws-policy), or a single combined
-  row when both ran together.
+- Do not hand-assemble `python3 … dora.py` invocations or inline env-var
+  prefixes (process v17 §36); defaults live in the spec configs.

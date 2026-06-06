@@ -84,3 +84,14 @@ so it runs without a permission prompt. That means:
   command shapes.
 - A permission prompt caused by an avoidable command form is a principle
   failure — log it.
+
+## Improvement routing (process v17 §36)
+At retros and whenever an improvement lands, route it to the NARROWEST owner:
+one agent's behaviour -> that agent's file in .claude/agents/; cross-agent
+rules -> process-current.md; repeated manual actions -> a parameterised
+committed tool (Makefile target/script/skill); heavy references -> a skill;
+project facts -> /work only. Identify frictions, ask the human only when the
+call is genuinely theirs, and solve in solution-appropriate ways. Every routed
+change names a DORA target; the next retro scores anticipated-vs-observed and
+reverts/reworks anything that is not a net win across throughput, quality,
+frequency, and recovery.

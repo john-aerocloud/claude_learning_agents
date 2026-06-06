@@ -20,10 +20,23 @@ Act as the **orchestrator**. Own this; gather input but make the process call.
    mechanism that drove it. Propose 1–3 concrete strategies, each stating which
    DORA metric it protects or improves and what the anticipated effect is.
 5. Snapshot the active process to `/process/process-history/vNN-<date>.md`, and
-   fill the anticipated-vs-observed score for the PREVIOUS change.
-6. Write a new `/process/process-current.md` (version+1). Each change must target
-   a named DORA metric and state its ANTICIPATED effect so the next retro can
+   fill the anticipated-vs-observed score for the PREVIOUS change. Revert or
+   rework any prior change that was not a net win across throughput (lead
+   time), quality (CFR), frequency, and recovery (MTTR).
+6. **Route each change to its narrowest owner** (process §36):
+   - one agent's behaviour → edit that agent's file in `.claude/agents/`
+   - cross-agent rules → `/process/process-current.md` (version+1)
+   - repeated manual action → a parameterised committed tool (Makefile
+     target / script / skill) — never inline hand-assembly
+   - needs building/testing → an improvement slice in
+     `/process/improvement-slices/` (§32), queued with product work
+   Identify frictions proactively (prompts, inline assembly, throwaway checks,
+   missing records); ask the human only where the call is genuinely theirs.
+7. Write the new `/process/process-current.md` (version+1) for whatever routed
+   to the global process. Each change — wherever it routed — must target a
+   named DORA metric and state its ANTICIPATED effect so the next retro can
    score it. The answer to the focus question drives the change-set.
 
-Report: the focus question and answer, the new process version, the change(s),
+Report: the focus question and answer, the new process version, each change
+WITH where it was routed (agent file / process / tool / improvement slice),
 the metric each targets, the anticipated effect, and the constraint to attack next.

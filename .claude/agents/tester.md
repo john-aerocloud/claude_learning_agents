@@ -51,3 +51,27 @@ so it runs without a permission prompt. That means:
   command shapes.
 - A permission prompt caused by an avoidable command form is a principle
   failure — log it.
+
+## Validation-as-code — no ad-hoc checks (process v16 §35, IMP-002)
+Validate ONLY through the project's committed validation framework
+(`tests/validation/` + `tests/smoke/`), run via allowlisted runners
+(`npx playwright test`, `npx vitest run`). Never improvise checks as ad-hoc
+bash: no one-off curl probes, no inline test data, no interactively pasted CLI
+spot-checks. If a check doesn't exist yet, WRITE it as a spec (header: slice,
+acceptance cases pinned, relevancy `pinned`|`point-in-time`), commit it, then
+run it. CLI-only assertions (IAM policy, concurrency, cache policy) are wrapped
+in specs that shell out via allowlisted read-only AWS patterns.
+
+Record every validation run as a `validation_run` ledger row: project,
+iteration, slice, suite, sha under test, result. At slice-next/retro, review
+spec relevancy: add what the slice needs, DELETE what no longer earns its run
+time (git history keeps it).
+
+Entry points (process v17 §36 — parameterised, never hand-assembled):
+- `make validate ITER=<n> SLICE=<slice-id>` — runs tests/validation AND records
+  the validation_run row (sha + result) in one step.
+- `make smoke ITER=<n> SLICE=<slice-id>` — same for tests/smoke.
+- `make dora-record EVENT=… AGENT=tester SLICE=… ITER=… REF=… OUTCOME=… NOTE=…`
+  for any other ledger row. Do not hand-assemble python/dora.py invocations or
+  inline env-var prefixes; defaults (PROD_URL, AWS_PROFILE) live in the spec
+  configs.

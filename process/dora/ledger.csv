@@ -177,3 +177,4 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-06T08:44:46Z,oxo-online,5,004-create-game,tester,validation_run,,success,a9fb9f1dc9e4983cc9c7d17d95f211dd3be3c7b1:api-contract,"slice004-api-contract.spec.ts vs CloudFront prod: 3/3 passed (F2,T1-response,S1,T2-observable)"
 2026-06-06T08:44:46Z,oxo-online,5,004-create-game,tester,validation_run,,success,a9fb9f1dc9e4983cc9c7d17d95f211dd3be3c7b1:aws-policy,"slice004-aws-policy.spec.ts vs live AWS dev-int/eu-west-2: 4/4 passed (T1-persisted,S1-stored,T3,T5,T2)"
 2026-06-06T08:45:26Z,oxo-online,5,004-create-game,engineer,task_end,,success,a9fb9f1dc9e4983cc9c7d17d95f211dd3be3c7b1,IMP-002 framework + slice004 pinned validation specs (7/7 vs prod); validation_run provenance documented
+2026-06-06T08:50:09Z,oxo-online,5,004-create-game,orchestrator,gate,,success,PROCESS-V17,"v17: improvement routing + parameterised operations; IMP-002 delivered (8cb2b7a), IMP-003 delivered"

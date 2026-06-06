@@ -26,3 +26,4 @@ Process-side items (project-agnostic) live in `/process/improvement-slices/`
 and the §27 retro queue — currently: pipeline-N+1-planning-over-build
 (operationalise §8b), §37 parallel-build scoring on s005, IMP-001/002/003
 scoring, v14–v18 anticipated-vs-observed scoring (all due at s005 retro).
+| OI-12 | product (job classification) | Precedent watch: C3 (secondary, AI) delivered before C4 (core, online play) — pre-§38 sequencing; confirm core-first rule prevents recurrence | process discipline | this register + s005 retro | review at s005 retro |

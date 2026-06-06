@@ -118,27 +118,28 @@ avoids the CloudFormation hard dependency. For this project the direct
 `Fn.importValue` pattern is preferred — both stacks always deploy together and the
 ordering is explicit and enforced.
 
-## How to reference the Lambda function name from the app pipeline
+## Lambda code-deploy ownership (slice 005 — OI-24 resolution)
 
-`OxoGameStack` exports the function name via `CfnOutput` with
-`exportName: 'OxoGameProd-LambdaFunctionName'`.
+**All Lambda code deploys are owned exclusively by `infra-oxo-online.yml` (CDK
+`fromAsset`).**
 
-After the first successful infra deploy, copy the `LambdaFunctionName` output value
-from the `OxoGameProd` CloudFormation stack into the GitHub Actions variable
-`OXO_ONLINE_LAMBDA_FUNCTION_NAME` (not a secret — function names are not sensitive).
+The `deploy-oxo-online.yml` (app pipeline) no longer deploys Lambda code. The
+hot-swap steps were removed in slice 005 for three reasons:
 
-The `deploy-oxo-online.yml` pipeline reads this variable when `src/lambda/**`
-changes and passes it to `aws lambda update-function-code --function-name`.
+1. The hot-swap step zipped raw TypeScript source — un-runnable in Lambda (Node.js
+   executes compiled JS from `dist/`).
+2. Both pipelines triggered on `work/oxo-online/src/lambda/**`, creating a
+   dual-trigger race: the CDK deploy (correct compiled asset) and the hot-swap
+   (raw TypeScript) could overwrite each other mid-deploy.
+3. CDK `fromAsset` already correctly builds and deploys Lambda code on every infra
+   push. The hot-swap was duplicative and wrong.
 
-If CDK generates a non-deterministic function name (default), use a fixed
-`functionName` prop on the Lambda construct to make it stable:
+The `src/lambda/**` path filter has been removed from `deploy-oxo-online.yml`.
+Lambda changes now exclusively trigger `infra-oxo-online.yml`.
 
-```typescript
-const gameFn = new lambda.Function(this, 'GameFn', {
-  functionName: 'oxo-game-fn',   // stable name; safe for a single-stack singleton
-  // ...
-});
-```
+The GitHub Actions variables `OXO_ONLINE_LAMBDA_FUNCTION_NAME` and
+`OXO_ONLINE_WS_LAMBDA_FUNCTION_NAME` are no longer used by any pipeline and can
+be removed from the repository variables at next maintenance.
 
 ---
 

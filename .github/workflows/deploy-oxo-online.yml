@@ -20,13 +20,6 @@
 #   OXO_ONLINE_CLOUDFRONT_DISTRIBUTION  CloudFront distribution ID
 #   OXO_ONLINE_S3_BUCKET                S3 bucket name
 #   OXO_ONLINE_PROD_URL                 e.g. https://d3pf3kcvzpau1x.cloudfront.net
-#   OXO_ONLINE_LAMBDA_FUNCTION_NAME     Lambda function name for game fn UpdateFunctionCode
-#                                       (set to the value of the LambdaFunctionName
-#                                       CfnOutput from OxoGameProd stack — e.g. oxo-game-fn)
-#   OXO_ONLINE_WS_LAMBDA_FUNCTION_NAME  Lambda function name for WS fn UpdateFunctionCode
-#                                       (set to the value of the WsLambdaFunctionName
-#                                       CfnOutput from OxoGameProd stack — e.g. oxo-ws-fn)
-#                                       Added slice 005. Same hot-swap pattern as game fn.
 #
 # GitHub Actions secrets:
 #   OXO_ONLINE_DEPLOY_ROLE_ARN          IAM role ARN (from OxoOnlineOidcStack output)
@@ -35,7 +28,17 @@
 #
 # Note: CDK infra changes are NOT deployed by this pipeline. CDK is in the
 # infra-oxo-online.yml pipeline. This pipeline handles: SPA (S3 sync +
-# CloudFront invalidation) + Lambda code update when src/lambda/** changes.
+# CloudFront invalidation + invalidation wait) + wss URL runtime config injection.
+#
+# Lambda code is NEVER deployed by this pipeline. All Lambda code deploys go
+# through infra-oxo-online.yml (CDK fromAsset), which builds the correct compiled
+# JS from src/lambda/**. Hot-swap was removed (OI-24) because:
+#   1. It zipped raw TypeScript — un-runnable in Lambda (Node.js executes JS).
+#   2. Both pipelines triggered on src/lambda/** — a dual-trigger race with the
+#      CDK deploy that owns the correct compiled asset.
+#   3. CDK fromAsset already handles Lambda code deploy on every infra push.
+# See work/oxo-online/src/infra/STACK_ORDER.md for the definitive Lambda
+# code-deploy ownership record.
 #
 # GitHub Actions variables (optional — custom domain):
 #   OXO_ONLINE_DOMAIN_NAME              e.g. oxo.example.com
@@ -54,14 +57,12 @@ on:
       - main
     paths:
       - 'work/oxo-online/src/app/**'
-      - 'work/oxo-online/src/lambda/**'
       - '.github/workflows/deploy-oxo-online.yml'
   pull_request:
     branches:
       - main
     paths:
       - 'work/oxo-online/src/app/**'
-      - 'work/oxo-online/src/lambda/**'
       - '.github/workflows/deploy-oxo-online.yml'
 
 concurrency:
@@ -138,9 +139,10 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: oxo-online-deploy-${{ github.run_id }}
 
-      # CDK infra changes are deployed manually via `make deploy` in work/oxo-online/src/infra.
-      # The pipeline only handles app deployment: S3 sync + CloudFront invalidation.
-      # This keeps the OIDC role permissions minimal (S3 + CloudFront only, no IAM/CFN).
+      # CDK infra changes are deployed by infra-oxo-online.yml (CDK fromAsset).
+      # This pipeline handles app deployment only: S3 sync + CloudFront invalidation
+      # (with invalidation wait) + wss URL runtime config injection.
+      # OIDC role permissions: S3 + CloudFront + cloudformation:DescribeStacks only.
 
       - name: Download build artifact
         uses: actions/download-artifact@v4
@@ -170,66 +172,32 @@ jobs:
             --cache-control "public, max-age=86400"
 
       - name: Invalidate CloudFront cache
+        id: cf-invalidation
         run: |
-          aws cloudfront create-invalidation \
+          INVALIDATION_ID=$(aws cloudfront create-invalidation \
             --distribution-id ${{ vars.OXO_ONLINE_CLOUDFRONT_DISTRIBUTION }} \
-            --paths "/*"
+            --paths "/*" \
+            --query 'Invalidation.Id' \
+            --output text)
+          echo "invalidation_id=${INVALIDATION_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for CloudFront invalidation to complete
+        # Ensures smoke tests run against the fully propagated build, not stale
+        # edge cache. Prevents false-negative smoke failures (OI-23 fix).
+        run: |
+          aws cloudfront wait invalidation-completed \
+            --distribution-id ${{ vars.OXO_ONLINE_CLOUDFRONT_DISTRIBUTION }} \
+            --id ${{ steps.cf-invalidation.outputs.invalidation_id }}
 
       # -------------------------------------------------------------------------
-      # Lambda code update — only runs when work/oxo-online/src/lambda/** changed.
-      #
-      # The oxo-deploy role must have lambda:UpdateFunctionCode on each function ARN.
-      # See work/oxo-online/src/infra/DEPLOY_ROLE_EXTENSIONS.md for the permissions
-      # that must be added to the role before this step will work.
-      #
-      # OXO_ONLINE_LAMBDA_FUNCTION_NAME is a GitHub Actions variable (not a secret):
-      # set it to the LambdaFunctionName CfnOutput value from the OxoGameProd stack
-      # (e.g. "oxo-game-fn").
-      #
-      # OXO_ONLINE_WS_LAMBDA_FUNCTION_NAME is a GitHub Actions variable (not a secret):
-      # set it to the WsLambdaFunctionName CfnOutput value from the OxoGameProd stack
-      # (e.g. "oxo-ws-fn"). Added slice 005.
+      # Lambda code deploy is owned exclusively by infra-oxo-online.yml (CDK
+      # fromAsset). Hot-swap steps removed in slice 005 (OI-24). Rationale:
+      #   - Raw TypeScript is un-runnable in Lambda; CDK compiles and packages.
+      #   - Dual-trigger race: both pipelines triggered on src/lambda/** — removed
+      #     src/lambda/** from this workflow's path filter to eliminate the race.
+      #   - CDK fromAsset handles every Lambda code deploy correctly on infra push.
+      # See STACK_ORDER.md for Lambda code-deploy ownership documentation.
       # -------------------------------------------------------------------------
-      - name: Detect Lambda source changes
-        id: lambda-changed
-        run: |
-          CHANGED=$(git diff --name-only HEAD~1 HEAD -- work/oxo-online/src/lambda/ 2>/dev/null | wc -l)
-          if [ "$CHANGED" -gt "0" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Package Lambda source
-        if: steps.lambda-changed.outputs.changed == 'true'
-        run: |
-          zip -r /tmp/lambda-package.zip work/oxo-online/src/lambda/ -x "*.test.*" -x "*/node_modules/.cache/*"
-
-      - name: Deploy game Lambda code (oxo-game-fn)
-        if: steps.lambda-changed.outputs.changed == 'true' && vars.OXO_ONLINE_LAMBDA_FUNCTION_NAME != ''
-        run: |
-          FN="${{ vars.OXO_ONLINE_LAMBDA_FUNCTION_NAME }}"
-          if ! aws lambda get-function --function-name "$FN" --region ${{ env.AWS_REGION }} > /dev/null 2>&1; then
-            echo "::warning::game fn '$FN' not yet provisioned — skipping code deploy; will hot-swap on next push after infra deploy"
-            exit 0
-          fi
-          aws lambda update-function-code \
-            --function-name "$FN" \
-            --zip-file fileb:///tmp/lambda-package.zip \
-            --region ${{ env.AWS_REGION }}
-
-      - name: Deploy WS Lambda code (oxo-ws-fn)
-        if: steps.lambda-changed.outputs.changed == 'true' && vars.OXO_ONLINE_WS_LAMBDA_FUNCTION_NAME != ''
-        run: |
-          FN="${{ vars.OXO_ONLINE_WS_LAMBDA_FUNCTION_NAME }}"
-          if ! aws lambda get-function --function-name "$FN" --region ${{ env.AWS_REGION }} > /dev/null 2>&1; then
-            echo "::warning::WS fn '$FN' not yet provisioned — skipping code deploy; will hot-swap on next push after infra deploy"
-            exit 0
-          fi
-          aws lambda update-function-code \
-            --function-name "$FN" \
-            --zip-file fileb:///tmp/lambda-package.zip \
-            --region ${{ env.AWS_REGION }}
 
       # -------------------------------------------------------------------------
       # wss URL injection — writes runtime config to S3 so the SPA knows the
@@ -287,7 +255,7 @@ jobs:
       - name: Record DORA deploy event
         run: |
           python .claude/skills/dora-ledger/scripts/dora.py record \
-            --project oxo-online --iteration 4 --slice 004-create-game \
+            --project oxo-online --iteration 6 --slice 005-join-game \
             --agent cicd --event deploy --outcome success \
             --ref "${{ github.sha }}" \
             --note "Automated deploy via GitHub Actions run ${{ github.run_id }}"
@@ -311,7 +279,7 @@ jobs:
         if: failure()
         run: |
           python .claude/skills/dora-ledger/scripts/dora.py record \
-            --project oxo-online --iteration 4 --slice 004-create-game \
+            --project oxo-online --iteration 6 --slice 005-join-game \
             --agent cicd --event failure --outcome fail \
             --ref "${{ github.sha }}" \
             --note "Deploy or smoke test failed — run ${{ github.run_id }}"

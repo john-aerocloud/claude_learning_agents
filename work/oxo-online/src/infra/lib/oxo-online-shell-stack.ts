@@ -100,10 +100,16 @@ export class OxoOnlineShellStack extends cdk.Stack {
             override: true,
           },
           contentSecurityPolicy: {
-            // Slice 001: static SPA only; no backend, no inline scripts, no eval.
-            // Tighten connect-src to add /api and /ws in slice 4.
-            contentSecurityPolicy:
-              "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+            // connect-src: 'self' covers the same-origin /api/* fetch (routed
+            // through CloudFront). The online game's WebSocket targets the
+            // execute-api WSS endpoint, a DIFFERENT origin, so it MUST be
+            // allow-listed or the browser silently blocks the connection
+            // (DEFECT-005-001-R2 second root cause — pairing could never
+            // connect). Scoped to this region's execute-api WSS hosts only
+            // (region-scoped wildcard, not a blanket wss:*), which keeps the
+            // policy tight without taking a new cross-stack import (the s004
+            // export-ordering lesson). script/style/img/font stay locked down.
+            contentSecurityPolicy: `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' wss://*.execute-api.${this.region}.amazonaws.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`,
             override: true,
           },
           frameOptions: {

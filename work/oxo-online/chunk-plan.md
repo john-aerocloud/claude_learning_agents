@@ -152,16 +152,21 @@ endpoint.
 
 Forecasts are revisable; the human gate at each slice governs actual priority.
 
-**s005-h1 — WAF / rate-limiting on CloudFront + WebSocket API (security risk 1) [IN PLANNING]**
+**s005-h1 — WAF / rate-limiting on CloudFront (security risk 1) [AMENDED GATE-AMEND-H1-A 2026-06-06]**
 Sequence: after s005 delivered, before s006. Rationale: s006 introduces the
 move-relay write surface; containing connection-flood risk before that surface
-is live reduces attack exposure at the lowest-volume moment. Scope: attach a
-GLOBAL WAF WebACL (rate rule + IP reputation) to the CloudFront distribution
-(covering POST /api/games), and attach a REGIONAL WAF WebACL (rate rule + IP
-reputation) to the WS API prod stage. No functional change to game flow.
-Done conditions: (1) rate-exceeded requests to CloudFront receive HTTP 403;
-(2) rate-exceeded WS connect attempts are blocked; (3) normal create + join
-flow unaffected; (4) smoke green. See slices/s005-h1-waf/slice.md + use-cases.md.
+is live reduces attack exposure at the lowest-volume moment. Scope (Option A
+rescope): attach a GLOBAL WAF WebACL (rate rule + IP reputation) to the
+CloudFront distribution (covering POST /api/games). **The REGIONAL WAF WebACL on
+the WS API prod stage is REMOVED** — WAFv2 cannot associate with API Gateway v2
+APIs (rejected at deploy, invalid-ARN). WS connection-flood control is the
+existing stage throttle (20/40, account-level) + reserved-concurrency +
+Connections TTL; **per-IP WS protection is re-scoped into s005-h2's `$connect`
+authorizer** (code-level, can rate-limit on source IP). No functional change to
+game flow. Done conditions: (1) rate-exceeded requests to CloudFront receive
+HTTP 403; (2) WS burst exercises the interim stage throttle (NOT a per-IP WAF
+block — per-IP deferred to s005-h2); (3) normal create + join flow unaffected;
+(4) smoke green. See slices/s005-h1-waf/slice.md + use-cases.md + delta §0.
 
 **s005-h2 — Join-token / $connect authorization (security risk 2)**
 Sequence: after s005-h1, before or concurrent with s006. Rationale: the
@@ -173,6 +178,11 @@ the SPA passes it as a query-string parameter at `$connect`; a Lambda authorizer
 (or `$connect` handler) rejects connections without a valid token. Done
 condition: a `$connect` without a valid token is rejected; a `$connect` with
 the token proceeds; existing create-game + join flow continues to work.
+**Added scope (GATE-AMEND-H1-A):** the `$connect` authorizer also carries the
+**per-IP WS rate-limiting** re-scoped out of s005-h1 — WAFv2 cannot provide
+per-IP protection for an API GW v2 (WebSocket) API, so the authorizer
+(code-level, keyed on source IP) is the home for it. This closes the per-IP WS
+exhaustion residual left open at s005-h1.
 
 **s005-h3 — Guaranteed code uniqueness (security risk 3)**
 Sequence: after s005-h2 (or parallel — no code dependency). Rationale: code

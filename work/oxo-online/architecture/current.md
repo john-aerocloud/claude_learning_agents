@@ -102,12 +102,11 @@ C4Container
 
   System_Boundary(aws, "AWS account (prod)") {
     Container(wafg, "WAFv2 WebACL (global)", "us-east-1 CLOUDFRONT scope", "[s005-h1] rate 100/5min/IP + IP-reputation; assoc. to distribution. Lives in NEW OxoOnlineWafUsEast1 stack.")
-    Container(wafr, "WAFv2 WebACL (regional)", "eu-west-2 REGIONAL scope", "[s005-h1] rate 20/5min/IP + IP-reputation; assoc. to WS prod stage. In OxoGameProd.")
     Container(cf, "CloudFront", "CDN", "[built s001/s004; s005-h1 webAclId set] SPA + /api/* behaviour (CachingDisabled). NO WS proxying.")
     Container(s3, "S3 web bucket", "Static hosting", "[built s001] React SPA; private, OAC only. s005 adds runtime wsUrl config artifact.")
 
     Container(httpapi, "API Gateway (HTTP)", "HTTPS", "[built s004] POST /games (create). NO stage WebACL (CF WAF covers /api/*).")
-    Container(wsapi, "API Gateway (WebSocket)", "WSS", "[s005] prod stage; routes $connect/$disconnect(stub)/register/join. [s005-h1] regional WAF associated.")
+    Container(wsapi, "API Gateway (WebSocket)", "WSS", "[s005] prod stage; routes $connect/$disconnect(stub)/register/join. NO WAF (WAFv2 cannot assoc. API GW v2 — GATE-AMEND-H1-A); flood control = stage throttle 20/40 + reserved-concurrency; per-IP deferred to s005-h2 $connect authorizer.")
 
     Container(gamefn, "oxo-game-fn", "Lambda Node20", "[built s004] create-game; PutItem on Games only")
     Container(wsfn, "oxo-ws-fn", "Lambda Node20", "[s005] $connect/register/join; conditional join write + game-ready fan-out")
@@ -121,8 +120,7 @@ C4Container
   Rel(cf, s3, "Origin fetch", "HTTPS (OAC)")
   Rel(cf, httpapi, "Routes /api/*", "HTTPS")
   Rel(player, httpapi, "POST /api/games (create)", "HTTPS via CF")
-  Rel(wafr, wsapi, "Inspects/rate-limits connects", "WAF assoc")
-  Rel(player, wsapi, "Direct WSS: register / join", "WSS (NOT via CloudFront)")
+  Rel(player, wsapi, "Direct WSS: register / join (flood-bounded by stage throttle only)", "WSS (NOT via CloudFront)")
 
   Rel(httpapi, gamefn, "Invokes create", "AWS_PROXY")
   Rel(wsapi, wsfn, "Invokes per message", "AWS_PROXY")
@@ -139,16 +137,21 @@ table + `oxo-board-fn`, `$connect` capability-token authorizer (s005-h2),
 CloudFront WS proxying. **WAF is now built (s005-h1).** See deltas 005+ for the
 deferral list.
 
-**Key s005-h1 (WAF) architectural facts:**
+**Key s005-h1 (WAF) architectural facts (AMENDED 2026-06-06, GATE-AMEND-H1-A):**
+- **Option A rescope:** WAFv2 **cannot** associate with API Gateway **v2** APIs.
+  The planned **regional WS WebACL + association is REMOVED** (rejected at deploy
+  with invalid-ARN). WS connection-flood control is now the existing WS prod
+  **stage throttle (rate 20 / burst 40, account/stage-level)** + reserved
+  concurrency + 2h Connections TTL; **per-IP** WS protection is re-scoped to the
+  **s005-h2 `$connect` authorizer** (code-level, can rate-limit on source IP).
 - A **NEW us-east-1 stack `OxoOnlineWafUsEast1`** holds the global
   CloudFront-scope WebACL (CloudFront WAF must live in us-east-1; all other
   stacks are eu-west-2). Its ARN flows to `OxoOnlineProd` via CDK
   `crossRegionReferences` and is set as the distribution `webAclId` — a
   cross-stack/cross-region §30 contract pinned by SYNTH-CONTRACT-WAF-1.
-- The regional WS WebACL + association live inside `OxoGameProd` (self-contained;
-  no cross-stack import). Deploy order: `OxoOnlineWafUsEast1` → `OxoGameProd` →
-  `OxoOnlineProd`. WAF is default-allow (no app-code/data-flow change).
-- See `architecture/deltas/s005-h1-waf.md` and `architecture/security/wafv2.md`.
+  Deploy order: `OxoOnlineWafUsEast1` → `OxoOnlineProd`. WAF is default-allow
+  (no app-code/data-flow change). `OxoGameProd` carries no WAF resource now.
+- See `architecture/deltas/s005-h1-waf.md` §0 and `architecture/security/wafv2.md`.
 
 **Key s005 architectural facts:**
 - The WebSocket API is in the **same `OxoGameProd` stack** as the HTTP API +
@@ -248,7 +251,7 @@ deferral list.
 | Role | Trusted by | Allowed (scoped) |
 |------|-----------|------------------|
 | `oxo-cf-oac` | CloudFront (OAC) | `s3:GetObject` on the web bucket only |
-| `oxo-deploy` | GitHub OIDC | `s3:PutObject`/`DeleteObject` on web bucket, `cloudfront:CreateInvalidation`, `lambda:UpdateFunctionCode`, scoped by resource ARN + repo/branch claim. **s005-h1:** + scoped `wafv2:` Create/Get/Update/Delete/List/Tag/Associate/Disassociate/ListResourcesForWebACL and `cloudfront:UpdateDistribution`/`GetDistribution`/`GetDistributionConfig` (no `wafv2:*`/`cloudfront:*` wildcard; no `iam:*`). See `DEPLOY_ROLE_EXTENSIONS.md`. |
+| `oxo-deploy` | GitHub OIDC | `s3:PutObject`/`DeleteObject` on web bucket, `cloudfront:CreateInvalidation`, `lambda:UpdateFunctionCode`, scoped by resource ARN + repo/branch claim. **s005-h1 (amended GATE-AMEND-H1-A):** + scoped `wafv2:` Create/Get/Update/Delete/List/Tag (CloudFront WebACL mgmt) and `cloudfront:UpdateDistribution`/`GetDistribution`/`GetDistributionConfig` (no `wafv2:*`/`cloudfront:*` wildcard; no `iam:*`). The `wafv2:Associate`/`Disassociate`/`ListResourcesForWebACL` grants are **dropped** — the regional WS association is removed (WAFv2 cannot associate API GW v2). See `DEPLOY_ROLE_EXTENSIONS.md`. |
 | `oxo-game-fn` | Lambda (create) | **s004 built:** `dynamodb:PutItem` on `Games` ARN only + own log group. (Target broader RW deferred.) |
 | `oxo-ws-fn` | Lambda (WS join/register) | **s005:** `GetItem`/`Query` on `Games` `code-index` GSI; conditional `UpdateItem` on `Games`; `PutItem`/`DeleteItem` on `Connections`; `execute-api:ManageConnections` on **this WS API ARN only**; own log group |
 | `oxo-board-fn` | Lambda (leaderboard) | RW `Leaderboard` table; read `Games`; CloudWatch Logs (C5 — not built) |
@@ -266,10 +269,12 @@ API-ARN scoped. Deploy role is constrained to the repo and branch via the OIDC
 - **Security:** server-authoritative game logic; OIDC (no static keys); OAC
   (S3 never public); encryption at rest (S3 SSE, DynamoDB default) and in transit
   (TLS/WSS everywhere); per-service least-privilege roles; **WAFv2 rate-limiting
-  built (s005-h1):** global WebACL on CloudFront (`/api/*`, 100/5min/IP) + regional
-  WebACL on the WS prod stage (20/5min/IP), both + IP-reputation managed group,
-  default-allow. No WebACL on the HTTP API stage (CF ACL covers the path). `$connect`
-  authorizer still deferred (s005-h2). See `architecture/security/wafv2.md`.
+  (s005-h1, amended GATE-AMEND-H1-A):** global WebACL on CloudFront (`/api/*`,
+  100/5min/IP, + IP-reputation managed group, default-allow). **No WS WebACL** —
+  WAFv2 cannot associate API GW v2; WS flood control = stage throttle (20/40,
+  account-level) + reserved-concurrency + Connections TTL, with **per-IP WS
+  protection (and `$connect` authorizer) deferred to s005-h2**. No WebACL on the
+  HTTP API stage (CF ACL covers the path). See `architecture/security/wafv2.md`.
 - **Reliability:** all managed, multi-AZ services; DynamoDB TTL self-heals
   orphaned game/connection state; idempotent move application keyed by
   `(gameId, moveSeq)`.

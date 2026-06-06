@@ -189,9 +189,31 @@ Each item is a **checkable statement** that becomes a policy test.
 ### API Gateway (HTTP + WebSocket)
 - [ ] TLS only (API Gateway enforces this; document for completeness).
 - [ ] Throttle default: burst 1000, rate 500 rps (adjust per load test).
-- [ ] WAF attached at C4+.
+- [ ] WAF: **only via CloudFront-front for v2 (HTTP/WebSocket) APIs** — a WAFv2
+      WebACL cannot associate directly to a v2 API stage. See "WAFv2
+      associability" below. For REST v1 stages a REGIONAL WebACL attaches
+      directly.
 - [ ] WebSocket `$connect`: verify capability token; reject unknown origins.
 - [ ] Per-route authorizer where needed (not the same Lambda for all routes).
+
+### WAFv2 associability (read BEFORE designing any WAF attachment)
+A WAFv2 WebACL only protects targets it can actually associate with. Discovered
+the hard way (oxo-online s005-h1-waf, deploy reject 2026-06-06):
+- **CLOUDFRONT scope** (WebACL + ACM cert MUST be in **us-east-1**): attaches to
+  **CloudFront distributions** (set via the distribution `webAclId` property).
+- **REGIONAL scope** (home region): attaches to **REST API v1 stages, ALB,
+  AppSync GraphQL APIs, Cognito user pools, App Runner services, Verified Access
+  instances** — and **NOTHING ELSE**.
+- **NOT associable: API Gateway *v2* APIs (HTTP API or WebSocket API).** A
+  `CfnWebACLAssociation` against a v2 API/stage ARN is rejected at CREATE with an
+  invalid-ARN error. Do not design a regional WebACL for an HTTP-v2/WebSocket
+  stage — it will not deploy.
+- **For v2 APIs, the protection pattern is:** stage **throttling** (account/
+  stage-level rate+burst, not per-IP) + **Lambda authorizer-level controls**
+  (a `$connect`/route authorizer CAN rate-limit on source IP and authenticate) +
+  optionally **put CloudFront in front** and attach the global WebACL there
+  (per-IP WAF then applies at the edge). Choose the authorizer for per-IP/auth;
+  choose CloudFront-front for edge WAF + managed rule groups.
 
 ### Lambda
 - [ ] Execution role follows §7 (one role per function, ARN-scoped).
@@ -268,6 +290,7 @@ condition that would trigger a reversal:
 | DynamoDB over RDS | oxo-online | No relational need; ephemeral game state | Leaderboard needs ranked queries beyond top-N |
 | No VPC (C1-C7) | oxo-online | All managed services; no EC2/ECS | Fargate reversal triggered; ECS needs VPC |
 | Well-Architected from first principles (skill was missing) | oxo-online | `aws-architecture` skill absent at project start | Skill now present; use for future projects |
+| WS per-IP WAF dropped; per-IP moved to `$connect` authorizer (2026-06-06, GATE-AMEND-H1-A) | oxo-online | WAFv2 cannot associate API GW v2 (WebSocket) — deploy reject; see "WAFv2 associability" §8 | If WS migrates to a fronted CloudFront path or REST v1, a regional/edge WebACL becomes attachable again |
 
 ## Region policy (human-directed, 2026-06-06)
 

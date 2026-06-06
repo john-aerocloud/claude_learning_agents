@@ -6,6 +6,73 @@ slice: new infrastructure on the **control plane** only.
 
 ---
 
+## 0. Option A amendment (2026-06-06, GATE-AMEND-H1-A) — UC2 REMOVED
+
+**Platform constraint discovered at deploy** (infra run 27066828546): a WAFv2
+**REGIONAL** WebACL **CANNOT** associate with an **API Gateway v2** API
+(WebSocket or HTTP v2). The associable target types for a REGIONAL WebACL are:
+**REST API v1 stages, ALB, AppSync GraphQL APIs, Cognito user pools, App Runner
+services, and Verified Access instances** — not API Gateway v2. The synthesised
+`CfnWebACLAssociation` was rejected at CREATE with an invalid-ARN error for
+`arn:aws:apigateway:eu-west-2::/apis/ylbzjuo8lf/stages/prod`.
+
+**Human-approved rescope (Option A):**
+- **UC2 (regional WebACL + `CfnWebACLAssociation` on the WS API v2 stage) is
+  REMOVED from this slice.** It is not buildable as designed — the platform
+  rejects it. The regional WebACL, its association, and the deploy-role
+  `wafv2:AssociateWebACL`/`DisassociateWebACL`/`ListResourcesForWebACL` grants
+  for it are dropped from s005-h1. (The engineer concurrently removes the
+  `src/infra/**` UC2 code.)
+- **The WS connection-exhaustion control this slice = the EXISTING prod-stage
+  throttle**, already shipped in s005: default route throttling on the WS `prod`
+  stage at **rate 20 / burst 40**. This is **account/stage-level, NOT per-IP**.
+  It is documented here as the **interim** WS flood control and is honestly
+  weaker than a per-IP rate rule (a distributed source set is not bounded
+  per-IP). The `oxo-ws-fn` `ReservedConcurrentExecutions` cap and the
+  `Connections` 2h TTL remain as the defence-in-depth floor.
+- **Per-IP WS protection is RE-SCOPED to s005-h2** and folded into that slice's
+  `$connect` **authorizer**. Note carried to h2: the authorizer is a
+  **code-level** control (Lambda authorizer on `$connect`) that CAN rate-limit
+  by source IP (`event.requestContext.identity.sourceIp` / connection metadata),
+  giving the per-IP bound that WAFv2 cannot provide for a v2 API. This is the
+  honest home for the control, not a WAF resource.
+- **UC1 (CloudFront global WebACL) is UNCHANGED and still in scope.** WAFv2
+  attaches to CloudFront distributions normally; that path is unaffected by the
+  v2-API constraint. `/api/*` (HTTP API behind CloudFront) remains covered by
+  the global ACL.
+
+**§30 contract list change (this amendment):**
+- SYNTH-CONTRACT-WAF-1 (CloudFront `WebACLId` cross-region handoff) — **kept**.
+- SYNTH-CONTRACT-WAF-2 (us-east-1 CLOUDFRONT-scope WebACL) — **kept**.
+- SYNTH-CONTRACT-WAF-3 (regional WebACL + WS-stage association) — **RETIRED**
+  with the resource it pinned (no regional WebACL, no association exists).
+- SYNTH-CONTRACT-WAF-4 (no association on the HTTP API v2 stage) — **RETIRED**.
+  It is now redundant/trivially true: WAFv2 cannot associate to ANY v2 API
+  stage (HTTP or WS), so "no v2 association" holds for the whole stack by
+  platform constraint, not by a design choice worth a dedicated assertion.
+  (The "no WebACL on the HTTP API stage" intent is preserved descriptively in
+  §1 / `wafv2.md`.)
+
+**Local/prod gap, amended:** the "Rate-rule behaviour (WS)" and "ACL existence +
+association (WS stage)" cloud-only rows in §5 are **removed** along with UC2.
+The WS interim control (stage throttle) stands locally only as a config value in
+synth; its actual 429-class shedding behaviour is a cloud-only API Gateway
+runtime semantic, covered by the (honestly-scoped) AC3.2 in `acceptance.md` —
+see that file for what is testable vs deferred.
+
+**Residual risk (accepted at GATE-AMEND-H1-A):** **per-IP WS connection
+exhaustion is OPEN** until s005-h2 ships the `$connect` authorizer. The interim
+account-level stage throttle bounds aggregate WS connect/message rate but does
+not bound any single source IP. Accepted by the human gate as the cost of the
+platform constraint; closed by h2, not by this slice. (`apigw-websocket.md`
+residual line updated to match.)
+
+The sections below (§1–§9) retain the original Gate-2 design narrative for
+**history**; where they describe the regional WebACL / WS association, that
+content is **superseded by §0** and is no longer the built scope.
+
+---
+
 ## 1. Resources added
 
 | Resource | Scope / region | Stack | Associated target |

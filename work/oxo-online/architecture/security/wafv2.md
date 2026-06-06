@@ -1,5 +1,15 @@
 # Security controls — AWS WAFv2 WebACLs (rate-limiting public endpoints)
 
+> **Amended 2026-06-06 (GATE-AMEND-H1-A — Option A rescope).** WAFv2 **cannot**
+> associate with API Gateway **v2** APIs (HTTP or WebSocket). The planned
+> REGIONAL WebACL on the WS v2 stage was rejected at deploy (invalid-ARN at
+> CREATE) and is **REMOVED** from this slice. **Live control = the CloudFront
+> global WebACL only.** WS connection-flood control is now the existing
+> account/stage-level WS prod throttle (rate 20 / burst 40) as an **interim**
+> measure; **per-IP** WS protection is re-scoped to the s005-h2 `$connect`
+> authorizer (code-level). The "Regional WebACL" section below is **superseded**
+> and retained for history only.
+
 Introduced: s005-h1-waf (iteration 7). Control plane only.
 Data class: **none** — WAF inspects request metadata (source IP, request rate);
 it stores no application data. No PII.
@@ -34,7 +44,16 @@ delta §9 open risk 1).
       `SampledRequestsEnabled = true` on the ACL and every rule (blocks are
       observable / auditable).
 
-## Regional WebACL — WebSocket API stage (scope REGIONAL, eu-west-2)
+## Regional WebACL — WebSocket API stage — REMOVED (superseded, history only)
+
+> **NOT BUILT.** WAFv2 REGIONAL WebACLs cannot associate with API Gateway v2
+> (HTTP/WebSocket) APIs — associable types are REST v1 stages, ALB, AppSync,
+> Cognito user pools, App Runner, Verified Access. The association below was
+> rejected at deploy. The checkable statements in this section are **VOID** for
+> s005-h1. The WS exhaustion control that DOES hold is in the interim block
+> immediately after.
+
+### (void — original intended statements, retained for audit trail)
 
 - [ ] A `REGIONAL`-scope `AWS::WAFv2::WebACL` exists in eu-west-2 (synth:
       SYNTH-CONTRACT-WAF-3).
@@ -50,6 +69,28 @@ delta §9 open risk 1).
 - [ ] Default action is **Allow**.
 - [ ] CloudWatch metrics + sampled requests enabled.
 
+## WS connection-exhaustion — interim control (post-amendment, the one that holds)
+
+Because the regional WebACL is not buildable on the v2 WS stage, the WS
+flood/exhaustion control for s005-h1 is the **existing** prod-stage throttle
+(shipped s005) plus the reserved-concurrency + TTL floor:
+
+- [ ] The WS API `prod` stage sets default route throttling
+      `ThrottlingRateLimit = 20` / `ThrottlingBurstLimit = 40` — **account/
+      stage-level, NOT per-IP**. Bounds aggregate connect/message rate only.
+- [ ] `oxo-ws-fn` `ReservedConcurrentExecutions` cap bounds message-processing
+      blast radius (unchanged from s005).
+- [ ] `Connections` items carry a 2h TTL so orphaned connections self-expire
+      (unchanged from s005).
+- [ ] **Per-IP** WS rate-limiting is **NOT provided by this slice.** It is
+      re-scoped to the s005-h2 `$connect` Lambda authorizer (code-level rate
+      limit keyed on source IP).
+
+**Residual risk (OPEN until s005-h2; accepted at GATE-AMEND-H1-A):** a single
+source IP can open WS connections up to the account-level stage throttle —
+there is no per-IP bound until the h2 authorizer ships. Accepted by the human
+gate as the cost of the WAFv2/v2-API platform constraint.
+
 ## No WebACL on the HTTP API stage (Gate-2 decision)
 
 - [ ] There is **no** REGIONAL WebACL associated with the HTTP API
@@ -61,10 +102,14 @@ delta §9 open risk 1).
 
 ## Deploy-role least privilege (no over-broad grants)
 
-- [ ] `oxo-deploy` WAFv2 grants are limited to the management + association
-      actions listed in `DEPLOY_ROLE_EXTENSIONS.md` (Create/Get/Update/Delete/
-      List/Tag WebACL, Associate/Disassociate/ListResourcesForWebACL) — **no
-      `wafv2:*` wildcard** in the policy document.
+- [ ] `oxo-deploy` WAFv2 grants are limited to the management actions needed
+      for the **CloudFront global WebACL** (Create/Get/Update/Delete/List/Tag
+      WebACL) — **no `wafv2:*` wildcard** in the policy document.
+      **Post-amendment:** the `Associate`/`Disassociate`/`ListResourcesForWebACL`
+      grants for the (removed) regional WS association are **dropped** — they
+      are unused now that no v2-API association exists. (CloudFront association
+      is set via the distribution `webAclId` property under `cloudfront:Update
+      Distribution`, not a WAFv2 associate call.)
 - [ ] CloudFront grants are limited to
       `UpdateDistribution`/`GetDistribution`/`GetDistributionConfig` — **no
       `cloudfront:*` wildcard**, no `CreateDistribution`/`DeleteDistribution`.

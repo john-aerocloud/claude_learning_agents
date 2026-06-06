@@ -96,18 +96,23 @@ user identity, so binding is **capability-by-connection**:
       connect/message flooding.
 - [ ] `Connections` items carry a 2h TTL so orphaned/abandoned connections from a
       flood self-expire (storage cannot grow unboundedly).
-- [x] **WAF rate rule attached (s005-h1-waf — risk partially closing).** A
-      REGIONAL WAFv2 WebACL (rate-based rule 20/5-min/IP +
-      `AWSManagedRulesAmazonIpReputationList`) is associated with the WS API
-      `prod` stage, bounding connection volume per IP on top of the
-      reserved-concurrency + stage-throttle floor. See
-      `architecture/security/wafv2.md`.
-- [ ] **Residual (still open for gate):** no `$connect` capability-token
-      authorizer (s005-h2). WAF bounds connection *volume* per IP but does not
-      *authenticate* — an attacker within the rate budget can still open
-      connections. Per-game join-token authorizer remains the open control;
-      rate thresholds are pre-launch placeholders. See `deltas/s005-h1-waf.md`
-      §9 open risks.
+- [ ] **WAF NOT attached to the WS stage (platform constraint — GATE-AMEND-H1-A,
+      2026-06-06).** A REGIONAL WAFv2 WebACL **cannot** associate with an API
+      Gateway **v2** API; the planned WS-stage association was rejected at deploy
+      (invalid-ARN at CREATE) and **removed** from s005-h1. The WS
+      connection-flood control is therefore the **existing account/stage-level
+      throttle** (rate 20 / burst 40) + reserved-concurrency cap + 2h
+      `Connections` TTL — see the "Resource exhaustion" block above. This is an
+      **interim** measure and is **not per-IP**. See `wafv2.md` and
+      `deltas/s005-h1-waf.md` §0.
+- [ ] **Residual (OPEN until s005-h2; accepted at GATE-AMEND-H1-A):** no
+      per-IP WS rate-limiting and no `$connect` capability-token authorizer yet.
+      The interim stage throttle bounds *aggregate* connect/message rate but not
+      any single source IP, and does not *authenticate*. Per-IP rate-limiting +
+      capability check are both re-scoped to the s005-h2 `$connect` **authorizer**
+      (a code-level Lambda authorizer that can rate-limit on source IP — the
+      honest home for the per-IP control WAFv2 cannot provide for a v2 API).
+      Accepted by the human gate as the cost of the platform constraint.
 
 ### Data classification
 - [ ] Messages and stored fields contain **no PII**: `connectionId` (an

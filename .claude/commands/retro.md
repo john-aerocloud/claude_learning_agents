@@ -32,6 +32,9 @@ Act as the **orchestrator**. Own this; gather input but make the process call.
      `/process/improvement-slices/` (§32), queued with product work
    Identify frictions proactively (prompts, inline assembly, throwaway checks,
    missing records); ask the human only where the call is genuinely theirs.
+   If the process file has visibly accreted (many same-day versions,
+   agent-specific detail creeping into global sections), run
+   `/refactor-process` as part of this step.
 7. Write the new `/process/process-current.md` (version+1) for whatever routed
    to the global process. Each change — wherever it routed — must target a
    named DORA metric and state its ANTICIPATED effect so the next retro can

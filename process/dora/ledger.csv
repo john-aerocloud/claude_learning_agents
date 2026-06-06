@@ -258,3 +258,4 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-06T15:17:51Z,oxo-online,6,005-join-game,orchestrator,gate,,success,RETRO-S005-TESTER-INPUT,Retro v26->v27: raise quality into tester (constraint). Real-browser skeleton probe over node false-green; Playwright MCP for discovery (not redundant with committed specs=regression); wire-on-deploy + code-policy contracts; IMP-006 queued. Targets MTTR + tester
 2026-06-06T15:24:18Z,oxo-online,6,005-join-game,orchestrator,gate,,success,PROCESS-V28,v28: local standability + engineer browser tests; OI-28 registered
 2026-06-06T15:28:09Z,oxo-online,6,005-join-game,orchestrator,gate,,success,IMP-006-DEFERRED,Playwright MCP deferred with re-proposal trigger; browser-probe rules in force regardless
+2026-06-06T15:30:02Z,oxo-online,7,s005-h1-waf,orchestrator,gate,,success,GATE-2-H1,Gate 2 approved: s005-h1 WAF slice

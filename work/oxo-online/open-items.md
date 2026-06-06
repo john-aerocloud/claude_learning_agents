@@ -21,9 +21,9 @@ job served — core jobs beat secondary (see project.md classification);
 | OI-9 | documentation (s004) | 24h game TTL with no UI notification — games vanish silently | secondary: UX polish on core job | docs/usage.md known limitations | unscheduled — consider with s007 |
 | OI-10 | product (s005 slice) | Reconnect-after-reload explicitly unresolved ("s007+ or out of scope entirely") — needs a product decision | core job: play a human online (resilience) | slice 005 NOT-in-scope list | decide at s007 slice-next |
 | OI-11 | tester (IMP-002) | Validation-spec relevancy review due — first review cycle of pinned s004 specs | process/quality hygiene | tests/validation/README.md lifecycle | at s005 retro |
+| OI-12 | product (job classification) | Precedent watch: C3 (secondary, AI) delivered before C4 (core, online play) — pre-§38 sequencing; confirm core-first rule prevents recurrence | process discipline | this register + s005 retro | review at s005 retro |
 
 Process-side items (project-agnostic) live in `/process/improvement-slices/`
 and the §27 retro queue — currently: pipeline-N+1-planning-over-build
 (operationalise §8b), §37 parallel-build scoring on s005, IMP-001/002/003
 scoring, v14–v18 anticipated-vs-observed scoring (all due at s005 retro).
-| OI-12 | product (job classification) | Precedent watch: C3 (secondary, AI) delivered before C4 (core, online play) — pre-§38 sequencing; confirm core-first rule prevents recurrence | process discipline | this register + s005 retro | review at s005 retro |

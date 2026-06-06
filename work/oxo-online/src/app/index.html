@@ -5,6 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>oxo-online</title>
     <meta name="description" content="oxo-online — tic-tac-toe in your browser. No install, no sign-up." />
+    <!--
+      Runtime config (DEFECT-005-001-R2 root cause). The deploy pipeline writes
+      the live WSS endpoint to /config.js as window.OXO_CONFIG={"wsUrl":"wss://…"}.
+      This blocking, non-module script MUST load BEFORE the deferred main module
+      bundle so window.OXO_CONFIG is defined when the app reads it; otherwise the
+      socket opens to `undefined` and every online pairing fails. The file is
+      absent in local dev (the SPA degrades gracefully), present in prod.
+    -->
+    <script src="/config.js"></script>
   </head>
   <body>
     <div id="root"></div>

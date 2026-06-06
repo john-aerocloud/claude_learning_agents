@@ -3,6 +3,8 @@
 Coarse slices, ordered by value-per-lead-time. Each Chunk decomposes into slices
 at iteration time. Maintained by Product + Solution Architect.
 
+For the full delivery plan (slice-to-chunk mapping, delivered actuals, and remaining forecasts) see [chunk-plan.md](chunk-plan.md).
+
 | # | Chunk | JTBD served | depends on | status |
 |---|-------|-------------|------------|--------|
 | 1 | **Deployable shell** — React frontend + minimal server deployed to AWS behind a real URL; nothing functional yet, but a real production deployment pipeline exists | Availability (always-on, no-install) | — | pending |

@@ -349,6 +349,35 @@ describe('GameRoot — Join a game flow (B4, F1)', () => {
     ).toBeInTheDocument();
   });
 
+  it('host shows a readable error (no white-screen) on a register error frame (DEFECT-005-001 Bug B)', async () => {
+    const cap = captureFactory();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ gameId: 'g-9', code: 'ERR234' }), {
+        status: 201,
+      }),
+    );
+    render(<GameRoot socketFactory={cap.factory} />);
+    await userEvent.click(screen.getByRole('button', { name: /play online/i }));
+    await waitFor(() =>
+      expect(screen.getByText(/waiting for opponent/i)).toBeInTheDocument(),
+    );
+    // The server reports a register failure via an error frame (Bug B).
+    act(() =>
+      cap.opts?.onMessage({
+        type: 'error',
+        code: 4500,
+        message: 'Something went wrong. Please try again.',
+      }),
+    );
+    // The host must not white-screen and must not reach the board.
+    expect(screen.queryByTestId('online-role')).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    // The mode selector is still usable.
+    expect(
+      screen.getByRole('button', { name: /two player/i }),
+    ).toBeInTheDocument();
+  });
+
   it('transitions the host waiting screen to the board with role X on game-ready', async () => {
     const cap = captureFactory();
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(

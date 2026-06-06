@@ -74,6 +74,23 @@ describe('createRealSocketFactory — real WebSocket transport (C2)', () => {
     expect(onMessage).toHaveBeenCalledWith({ type: 'game-ready', role: 'guest' });
   });
 
+  it('parses an inbound error frame and forwards it to onMessage (DEFECT-005-001 Bug B)', () => {
+    const onMessage = vi.fn();
+    const factory = createRealSocketFactory();
+    factory({ onMessage, onClose: () => {} });
+    FakeWebSocket.instances[0].fireOpen();
+    FakeWebSocket.instances[0].fireMessage({
+      type: 'error',
+      code: 4040,
+      message: 'Game not found. Check the code and try again.',
+    });
+    expect(onMessage).toHaveBeenCalledWith({
+      type: 'error',
+      code: 4040,
+      message: 'Game not found. Check the code and try again.',
+    });
+  });
+
   it('forwards the close code to onClose', () => {
     const onClose = vi.fn();
     const factory = createRealSocketFactory();

@@ -21,7 +21,22 @@ export interface GameReadyMessage {
   role: 'host' | 'guest';
 }
 
-export type ServerMessage = GameReadyMessage;
+/**
+ * An error frame (DEFECT-005-001 Bug B). The platform cannot deliver a custom
+ * WebSocket close code, so the server reports a failed join/register as a normal
+ * MESSAGE frame carrying the (former close) code as a payload value plus the
+ * customer-facing message, then DELETEs the connection. The SPA maps `code` to
+ * the same three messages it previously keyed off close codes.
+ */
+export interface ServerErrorMessage {
+  type: 'error';
+  /** 4040 (unknown code) | 4041 (no longer available) | 4500 (internal). */
+  code: number;
+  /** Customer-facing message text (S3 — never internal detail). */
+  message: string;
+}
+
+export type ServerMessage = GameReadyMessage | ServerErrorMessage;
 
 /** A client-to-server action frame. */
 export type ClientFrame =

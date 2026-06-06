@@ -4,18 +4,21 @@ import type { GameSocket, GameSocketFactory, ServerMessage } from './socket';
 const GENERIC_ERROR = 'Something went wrong. Please try again.';
 
 /**
- * Maps the defined WebSocket close codes to readable messages (S3). Only the
- * three defined codes get a specific message; anything else degrades to the
- * generic one — the client never surfaces internal detail.
+ * Maps the defined error codes to readable messages (S3). DEFECT-005-001 Bug B:
+ * these codes now arrive as a {type:'error', code, message} MESSAGE frame rather
+ * than as a WS close code (the platform cannot deliver custom close codes). Only
+ * the three defined codes get a specific message; anything else (and a bare
+ * close with no preceding error frame — a real disconnect) degrades to the
+ * generic one. The client never surfaces internal detail.
  */
-const CLOSE_MESSAGES: Record<number, string> = {
+const ERROR_MESSAGES: Record<number, string> = {
   4040: 'Game not found. Check the code and try again.',
   4041: 'This game is no longer available.',
   4500: GENERIC_ERROR,
 };
 
-function messageForClose(code: number): string {
-  return CLOSE_MESSAGES[code] ?? GENERIC_ERROR;
+function messageForCode(code: number): string {
+  return ERROR_MESSAGES[code] ?? GENERIC_ERROR;
 }
 
 interface JoinScreenProps {
@@ -42,15 +45,29 @@ export function JoinScreen({ connect, onGameReady }: JoinScreenProps) {
     if (connecting) return;
     setConnecting(true);
     setError(null);
+    // Track whether the server already reported a specific error (Bug B). The
+    // subsequent DELETE-driven close must not overwrite that specific message.
+    let errorShown = false;
     const socket = connect({
       onMessage: (message) => {
         if (message.type === 'game-ready') {
           onGameReady?.(message);
+        } else if (message.type === 'error') {
+          // Bug B: failure arrives as an error MESSAGE frame.
+          errorShown = true;
+          setConnecting(false);
+          setError(messageForCode(message.code));
+          // Code is intentionally retained for retry (F3).
         }
       },
-      onClose: (closeCode) => {
+      onClose: () => {
         setConnecting(false);
-        setError(messageForClose(closeCode));
+        // A close with no preceding error frame is a real disconnect — degrade
+        // to the generic message. If an error frame already set a specific
+        // message, keep it (the error frame is authoritative).
+        if (!errorShown) {
+          setError(GENERIC_ERROR);
+        }
         // Code is intentionally retained for retry (F3).
       },
     });

@@ -49,11 +49,16 @@ export function GameRoot({ socketFactory = realFactory }: GameRootProps = {}) {
   const spinnerTimer = useRef<ReturnType<typeof setTimeout>>();
   const hostSocketRef = useRef<GameSocket | null>(null);
 
-  // A `game-ready` from either side drives both screens to the board.
+  // A `game-ready` from either side drives both screens to the board. An error
+  // frame (DEFECT-005-001 Bug B — the host's register failure path) degrades to
+  // the readable online-error screen rather than white-screening or silently
+  // sticking on "waiting". The JoinScreen handles its own error frames inline.
   const handleGameReady = (message: ServerMessage) => {
     if (message.type === 'game-ready') {
       setOnlineRole(message.role);
       setOnlinePhase('playing-online');
+    } else if (message.type === 'error') {
+      setOnlinePhase('error');
     }
   };
 

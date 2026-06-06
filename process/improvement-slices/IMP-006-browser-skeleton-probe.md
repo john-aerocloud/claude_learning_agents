@@ -1,6 +1,6 @@
 # IMP-006 — Browser-driven skeleton probe + Playwright MCP capability
 
-**Status:** queued 2026-06-06
+**Status:** MCP install DEFERRED by human (2026-06-06). The behavioural rules (real-browser probes, browser-transport specs, honest harness) are IN FORCE regardless — via committed Playwright. **Re-proposal trigger:** any defect or discovery-failure post-mortem where interactive browser exploration would have surfaced the cause before a committed spec existed (the CSP/config.js class). At that retro, cite the instance and re-propose the install.
 **Owner:** cicd (MCP/Playwright capability + allowlist) / engineer (skeleton spec author) / tester (browser-transport coverage)
 **Human decision required:** whether to install the Playwright MCP server (a
 harness/config change with cost — token budget, an extra MCP surface). The

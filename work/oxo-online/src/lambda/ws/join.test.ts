@@ -79,3 +79,32 @@ describe('join — internal fault closes 4500, generic message, no leak (A2.2; F
     assertNoLeak(res.close);
   });
 });
+
+describe('join — game not waiting closes 4041, no mutation (A4.1; F4, T5, S3)', () => {
+  it('attempts the conditional UpdateItem; on ConditionalCheckFailedException closes 4041 with no other write', async () => {
+    // GSI hit: a game exists for the code but it is not joinable.
+    ddbMock.on(QueryCommand).resolves({
+      Items: [{ gameId: 'G-1', code: 'ABC123', status: 'active' }],
+      Count: 1,
+    });
+    // The conditional activate is REJECTED (status!='waiting' or guest set).
+    const condErr = new Error('The conditional request failed');
+    (condErr as { name: string }).name = 'ConditionalCheckFailedException';
+    ddbMock.on(UpdateCommand).rejects(condErr);
+
+    const res = await handleJoin(joinEvent('CTX-ID', { action: 'join', code: 'ABC123' }));
+
+    expect(res.close).toBeDefined();
+    expect(res.close!.code).toBe(4041);
+    // Exactly one (rejected) Games write attempt; no Connections mutation.
+    const updates = ddbMock.commandCalls(UpdateCommand);
+    expect(updates).toHaveLength(1);
+    expect(updates[0].args[0].input.TableName).toBe('oxo-games');
+    expect(ddbMock.commandCalls(PutCommand)).toHaveLength(0);
+    // The rejected write carried the no-hijack ConditionExpression.
+    expect(updates[0].args[0].input.ConditionExpression).toContain(
+      'attribute_not_exists(guestConnectionId)',
+    );
+    assertNoLeak(res.close);
+  });
+});

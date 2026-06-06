@@ -1,4 +1,4 @@
-import { QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import type { APIGatewayProxyWebsocketEventV2 } from 'aws-lambda';
 import { ddb } from './ddb';
 import { close, type WsResult } from './ws-result';
@@ -39,17 +39,51 @@ export async function handleJoin(
       }),
     );
 
-    const game = result.Items?.[0];
+    const game = result.Items?.[0] as { gameId?: string } | undefined;
 
     // A2.1 — unknown code: no game for this code. Close 4040, write nothing.
     if (!game) {
       return close(4040);
     }
 
-    // Set C (C1) inserts the happy-path activation + game-ready fan-out here,
-    // and A4.1 inserts the not-waiting (4041) rejection branch. Until then a
-    // found-but-unhandled game falls through to a safe 4041 (no mutation).
-    return close(4041);
+    const connectionId = event.requestContext.connectionId;
+
+    // A4.1 — atomic no-hijack activation. The ConditionExpression guarantees
+    // exactly one joiner wins: the game must still be `waiting` AND have no
+    // guestConnectionId yet. If it is already active/finished/abandoned (UC4)
+    // or another joiner won a race, the write is rejected with
+    // ConditionalCheckFailedException and we close 4041 having mutated nothing.
+    // T6: guestConnectionId is the caller's own context connectionId.
+    try {
+      await ddb.send(
+        new UpdateCommand({
+          TableName: process.env.GAMES_TABLE,
+          Key: { gameId: game.gameId },
+          UpdateExpression:
+            'SET guestConnectionId = :cid, #status = :active',
+          ConditionExpression:
+            '#status = :waiting AND attribute_not_exists(guestConnectionId)',
+          ExpressionAttributeNames: { '#status': 'status' },
+          ExpressionAttributeValues: {
+            ':cid': connectionId,
+            ':active': 'active',
+            ':waiting': 'waiting',
+          },
+        }),
+      );
+    } catch (err) {
+      if ((err as { name?: string })?.name === 'ConditionalCheckFailedException') {
+        // Game is no longer joinable; no-hijack rejection. No further write.
+        return close(4041);
+      }
+      // Re-throw any other error to the outer 4500 handler (no leakage).
+      throw err;
+    }
+
+    // Set C (C1) inserts the happy-path tail here: write the guest Connections
+    // item and post game-ready to both connections via @connections. Until C1
+    // lands, a successful activation is acknowledged without a close.
+    return { statusCode: 200 };
   } catch {
     // A2.2 — any unexpected internal error maps to a generic 4500 close.
     // The caught error is intentionally NOT surfaced (no leakage — S3).

@@ -1,6 +1,6 @@
 # DORA Baseline (computed)
 
-_Generated 2026-06-07T09:42:16Z from ledger.csv. Do not hand-edit._
+_Generated 2026-06-07T11:51:45Z from ledger.csv. Do not hand-edit._
 
 ## Four key metrics (whole pipeline)
 
@@ -16,9 +16,9 @@ _Generated 2026-06-07T09:42:16Z from ledger.csv. Do not hand-edit._
 | Agent | n | modal | median | mean |
 |-------|---|-------|--------|------|
 | product | 4 | 120 | 95 | 137 |
-| solution-architect | 12 | 1200 | 660 | 656 |
-| cicd | 10 | 207 | 224 | 384 |
-| engineer | 20 | 360 | 390 | 519 |
+| solution-architect | 13 | 1200 | 540 | 611 |
+| cicd | 11 | 207 | 240 | 404 |
+| engineer | 24 | 360 | 423 | 597 |
 | tester | 10 | 1200 | 1130 | 1536 |
 | orchestrator | 1 | 900 | 900 | 900 |
 

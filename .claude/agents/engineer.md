@@ -69,10 +69,15 @@ so it runs without a permission prompt. That means:
 - A permission prompt caused by an avoidable command form is a principle
   failure — log it.
 
-## Use-case routing (process v18 §37)
+## Use-case routing (process v18 §37, v33 §11a)
 Route and build per use case (slices/<nnn>-<slug>/use-cases.md): group route
 steps under the use case they complete; a use case is done when its own
-acceptance cases pass independently of other UCs. When you are one of several
+acceptance cases pass independently of other UCs — AND, if it has a deployable
+surface, when it is DEPLOYED and its committed probe is green in prod (§11a:
+flag-OFF deploys count; the probe is yours — committed, parameterised, a make
+target peer of ws-skeleton; never a tester hand-off). Deploy order between UCs
+is a route edge (§19); same-pipeline serialisation is the concurrency group's
+job, not yours. When you are one of several
 parallel engineers, your claimed use cases define your WIP boundary — do not
 touch files another UC owns; flag shared-file collisions to the orchestrator
 instead of working around them.

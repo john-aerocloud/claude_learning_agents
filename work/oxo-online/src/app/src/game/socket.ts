@@ -121,15 +121,6 @@ export type GameSocketFactory = (opts: ConnectOptions) => GameSocket;
 /** Runtime config injected into the SPA at deploy time (see deploy phase E3). */
 interface OxoConfig {
   wsUrl?: string;
-  /**
-   * UC4 flag (§40, s006). Gates the server-authoritative move-send /
-   * render-on-broadcast / board-lock behaviour. DEFAULT OFF: the deployed server
-   * cannot route `action:'move'` until UC3 is deployed, so the SPA's move path
-   * must stay dark in prod until the pipeline flips this ON (runtime config — no
-   * rebuild). Engineer tests run flag-ON. Factored out of code then config as
-   * UC4's done condition (no orphan flag at retro).
-   */
-  uc4Enabled?: boolean;
 }
 
 declare global {

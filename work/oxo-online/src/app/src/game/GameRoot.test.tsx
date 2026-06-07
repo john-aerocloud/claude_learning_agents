@@ -344,9 +344,9 @@ describe('GameRoot — Join a game flow (B4, F1)', () => {
     // Server pairs the game.
     act(() => cap.opts?.onMessage({ type: 'game-ready', role: 'guest', gameId: 'g-1' }));
     expect(screen.getByTestId('online-role')).toHaveTextContent('You are O');
-    expect(
-      screen.getByText('Game active — moves coming in the next update'),
-    ).toBeInTheDocument();
+    // The flag-out board is server-authoritative: the inert status line is gone,
+    // replaced by the turn indicator (server says X to move first).
+    expect(screen.getByTestId('online-turn')).toBeInTheDocument();
   });
 
   it('host shows a readable error (no white-screen) on a register error frame (DEFECT-005-001 Bug B)', async () => {
@@ -504,10 +504,11 @@ describe('GameRoot — UC4 online move relay (flag ON, AC4.1–AC4.4)', () => {
     delete (window as unknown as { OXO_CONFIG?: unknown }).OXO_CONFIG;
   });
 
+  // The s006 UC4 flag was factored out at slice delivery (§40): the move relay
+  // is now unconditional, so enabling it is a no-op. Retained as a no-op so the
+  // AC4.x test call-sites read unchanged; remove at the next touch.
   function flagOn() {
-    (window as unknown as { OXO_CONFIG?: { uc4Enabled?: boolean } }).OXO_CONFIG = {
-      uc4Enabled: true,
-    };
+    /* flag factored out — move relay is the unconditional online behaviour */
   }
 
   /** Drive the host to the online board and return the captured socket opts. */

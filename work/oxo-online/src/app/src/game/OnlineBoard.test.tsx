@@ -1,20 +1,14 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { OnlineBoard } from './OnlineBoard';
 
 // @covers spa-online-move (class-deps.mmd)
-
-/** Set the UC4 runtime flag ON/OFF for a test block. */
-function setUc4(enabled: boolean) {
-  (window as unknown as { OXO_CONFIG?: { uc4Enabled?: boolean } }).OXO_CONFIG = {
-    uc4Enabled: enabled,
-  };
-}
-
-afterEach(() => {
-  delete (window as unknown as { OXO_CONFIG?: unknown }).OXO_CONFIG;
-});
+//
+// The s006 UC4 flag (uc4Enabled) was factored out at slice delivery (§40
+// code-then-config): the server-authoritative move relay is now the
+// unconditional online board behaviour, so there is no flag-OFF inert path left
+// to test.
 
 describe('OnlineBoard — role labels (B3, F1)', () => {
   it('shows "You are X" for the host', () => {
@@ -36,32 +30,9 @@ describe('OnlineBoard — role labels (B3, F1)', () => {
 });
 
 // -----------------------------------------------------------------------------
-// UC4 flag OFF — s005 behaviour preserved: the board is inert. This is the
-// flag-OFF path the slice ships to prod until UC3 deploys (§40 default OFF).
+// Server-authoritative move relay (AC4.1–AC4.4) — the unconditional behaviour.
 // -----------------------------------------------------------------------------
-describe('OnlineBoard — UC4 flag OFF: inert squares (s005 F7 preserved)', () => {
-  beforeEach(() => setUc4(false));
-
-  it('renders the s005 status line and disables every square', async () => {
-    const onMove = vi.fn();
-    render(<OnlineBoard role="host" onMove={onMove} />);
-    expect(
-      screen.getByText('Game active — moves coming in the next update'),
-    ).toBeInTheDocument();
-    for (let i = 0; i < 9; i += 1) {
-      expect(screen.getByLabelText(`cell ${i}`)).toBeDisabled();
-    }
-    // Disabled cells never invoke onMove.
-    expect(onMove).not.toHaveBeenCalled();
-  });
-});
-
-// -----------------------------------------------------------------------------
-// UC4 flag ON — server-authoritative move relay (AC4.1–AC4.4).
-// -----------------------------------------------------------------------------
-describe('OnlineBoard — UC4 flag ON: server-authoritative move relay', () => {
-  beforeEach(() => setUc4(true));
-
+describe('OnlineBoard — server-authoritative move relay', () => {
   // AC4.1 — clicking a square sends exactly one {action:'move', square}; the
   // board does NOT update optimistically (renders strictly from the server).
   it('AC4.1 — clicking an empty square calls onMove(square) once; no optimistic render', async () => {

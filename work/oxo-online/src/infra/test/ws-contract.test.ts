@@ -108,13 +108,12 @@ describe('§30 composed WS contract (T7) — route keys, action match, endpoint 
     // updating this consumer fails test #3 or this assertion at CI.
   });
 
-  // s006 wire-on-deploy contract (process v27) for the UC4 flag flip (§40/§19
-  // edge #4). UC3 (the 'move' route) is deployed, so the config.js the pipeline
-  // writes must turn the SPA move path ON. This pin (and the config entry it
-  // pins) is REMOVED at the R4.7 factor-out — the flag is slice-scoped.
-  it('5. the config-injection step flips uc4Enabled ON (UC3 move route is deployed)', () => {
+  // s006 R4.7 factor-out (§40): the UC4 flag was removed from code AND config at
+  // slice delivery once UC3 deployed and the walking-skeleton proved the path.
+  // This asserts the negative — the orphan flag MUST NOT linger in the pipeline
+  // (an orphan flag at retro is a §40 principle failure).
+  it('5. the config-injection step carries NO uc4Enabled flag (factored out, §40)', () => {
     const workflow = readFileSync(DEPLOY_WORKFLOW, 'utf8');
-    expect(workflow).toContain('uc4Enabled');
-    expect(workflow).toMatch(/uc4Enabled["\\:]+\s*true/);
+    expect(workflow).not.toContain('uc4Enabled');
   });
 });

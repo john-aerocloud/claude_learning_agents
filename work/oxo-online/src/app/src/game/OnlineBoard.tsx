@@ -1,9 +1,7 @@
 import type { Cell as CellValue } from './engine';
 import { Board } from './Board';
-import { uc4Enabled } from './flags';
 
 const EMPTY_BOARD_STRING = '---------';
-const STATUS_LINE = 'Game active — moves coming in the next update';
 
 /** Result strings as broadcast by the server `game-over` frame. */
 type Result = 'X-wins' | 'O-wins' | 'draw';
@@ -39,14 +37,15 @@ const RESULT_TEXT: Record<Result, string> = {
 /**
  * The online game board shown to both players after `game-ready`.
  *
- * UC4 (flag ON): server-authoritative move relay. A click on an empty square,
- * when it is THIS player's turn, sends `{action:'move', square}` via `onMove` —
- * the board is NOT updated optimistically; it re-renders only from the server's
- * `board-update` (the `board`/`currentTurn` props). On a `game-over` (`result`
- * set) the board is locked and the result is shown to both players.
+ * Server-authoritative move relay (UC4, s006). A click on an empty square, when
+ * it is THIS player's turn, sends `{action:'move', gameId, square}` via `onMove`
+ * — the board is NOT updated optimistically; it re-renders only from the
+ * server's `board-update` (the `board`/`currentTurn` props). On a `game-over`
+ * (`result` set) the board is locked and the result is shown to both players.
  *
- * UC4 flag OFF (default, until UC3 deploys — §40/§19): the board stays inert with
- * every square disabled, exactly as s005 shipped it. This is the dark prod path.
+ * (The s006 UC4 flag — uc4Enabled — was factored out at slice delivery once UC3
+ * deployed and the walking-skeleton proved the path; the move relay is now the
+ * unconditional online behaviour, §40 code-then-config done condition.)
  */
 export function OnlineBoard({
   role,
@@ -56,20 +55,6 @@ export function OnlineBoard({
   onMove,
 }: OnlineBoardProps) {
   const symbol = role === 'host' ? 'X' : 'O';
-  const flagOn = uc4Enabled();
-
-  // Flag OFF: preserve the s005 inert board (status line + all squares disabled).
-  if (!flagOn) {
-    return (
-      <section className="online-board" aria-label="online game board">
-        <p className="online-role" data-testid="online-role">{`You are ${symbol}`}</p>
-        <Board board={Array(9).fill(null)} onSelect={() => {}} locked />
-        <p className="online-board-status" role="status" aria-live="polite">
-          {STATUS_LINE}
-        </p>
-      </section>
-    );
-  }
 
   const cells = board.split('').map(toCell);
   const myTurn = currentTurn === symbol;

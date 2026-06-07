@@ -470,3 +470,6 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T17:49:09Z,oxo-online,10,s007-disconnect,tester,validation_run,,fail,90b69da:smoke,tests/smoke FAILED via make smoke
 2026-06-07T17:53:42Z,oxo-online,10,s007-disconnect,tester,validation_run,,fail,90b69da:validation,tests/validation FAILED via make validate
 2026-06-07T18:03:44Z,oxo-online,10,s007-disconnect,tester,task_end,,success,e078ea4b744085db320aa1c9eff4d018fabc6785,"UC4 prod validation PASS — both disconnect directions confirmed (host-closes AC4.1 + guest-closes AC4.1B / S007-RENDER-FIX); DDB abandoned=confirmed; S4 OI-35 amplification-1 confirmed; s007a rate-exempt log confirmed; S5 IAM pin PASS 3/3; all changed marks cleared in data-flow.mmd, class-deps.mmd, use-case-deps.mmd"
+2026-06-07T18:06:47Z,oxo-online,10,s007-disconnect,orchestrator,gate,,success,SLICE-S007-DELIVERED,delivered; documenter background; auto-retro starting
+2026-06-07T18:07:38Z,oxo-online,10,s007-disconnect,documenter,task_start,,na,,s007 disconnect: update usage.md + runbook.md
+2026-06-07T18:08:59Z,oxo-online,10,s007-disconnect,orchestrator,gate,,success,RETRO-S007,retro complete: v35, registry scored, 2 integrations, OIs updated

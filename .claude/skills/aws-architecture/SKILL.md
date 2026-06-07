@@ -337,3 +337,14 @@ the disjointness, or blocks are invisible at HTTP level.
   OMIT IdentitySource entirely — a REQUEST authorizer with no source is invoked
   UNCONDITIONALLY, and the authorizer fn does the either-or / deny-when-absent
   logic itself. (strike 5, DEFECT-H2-002)
+
+## Layered rate controls (s007 lesson)
+Rate limiting exists at MULTIPLE independent layers (edge WAF rate rules,
+API Gateway stage throttles, application-level budgets such as authorizer
+per-IP counters). An exemption granted at one layer does NOT propagate —
+removing the outermost throttle simply unmasks the next-tighter control.
+When designing a test/runner exemption, enumerate every rate-limiting layer
+on the request path and exempt (or budget for) each explicitly, with the
+same self-cleaning posture at each layer (s007: WAF IP-set exclusion alone
+left the authorizer 20/5min budget blocking CI smoke; fixed by the EXEMPT#
+item one layer deeper).

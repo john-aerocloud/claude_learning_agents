@@ -116,15 +116,14 @@ interactive element by a stable semantic identifier (`[aria-label^="…"]`,
 Fragile selectors are a recurring change-failure source; the mandate binds the
 tester at authoring time exactly as it binds the engineer.
 
-## Budget-aware validation on rate-limited surfaces (EXP-009)
-When the system under test rate-limits by source (per-IP budgets, WAF rate
-rules), your suite shares that budget with the behaviour it validates. Run
-connection/request-consuming specs SERIALISED (or explicitly ordered) so the
-suite does not exhaust the budget it is asserting — a parallel-worker flood
-produces false reds that look like the control misfiring (s005-h2: 7-worker
-smoke burned the 20/5min connect budget; WAF 429'd the page floods; 2 wasted
-runs + a 5-minute wait). Budget state is part of run provenance: record the
-counter/window state at run start when a rate-limited surface is in scope.
+## Budget-aware validation on rate-limited surfaces
+When the system under test rate-limits by source, your suite shares that
+budget with the behaviour it validates. Enumerate EVERY rate-limiting layer
+in scope (edge WAF rules AND application-level budgets — an exemption at one
+layer does not cover the next), use the committed exemption tooling where it
+exists (runner-IP add/remove cycles), serialise or order connection-consuming
+specs, and record the budget/counter state at run start as part of run
+provenance. Leave no exemption behind: verify cleanup at run end.
 
 ## Browser-transport coverage & honest harness
 For any browser-delivered slice your validation MUST include at least one spec

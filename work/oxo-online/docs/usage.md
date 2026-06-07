@@ -9,12 +9,14 @@ against a friend in a separate browser in real time. Online play is now fully
 operational: moves relay between browsers via a server-authoritative Lambda,
 the server detects wins and draws, and both players see the result simultaneously.
 The board locks after game over; out-of-turn and forged moves are rejected by the
-server with no state change.
+server with no state change. If your opponent closes their tab or loses their
+connection mid-game, you see "Your opponent disconnected." within 10 seconds and
+are returned to the mode selector — no page reload needed.
 
 **Not yet available:** reconnect after reload (a player who reloads their tab
-loses the session and must start a new game — deferred to slice 007), player
-accounts, score tracking across sessions, and share-link URL pre-fill
-(slice 008).
+loses the session and must start a new game — deferred until player identity
+ships), player accounts, score tracking across sessions, and share-link URL
+pre-fill (slice 008).
 
 ---
 
@@ -159,12 +161,10 @@ Final move completes a row
 ## Known limitations (online mode)
 
 - **Reload loses the session.** If either player reloads the page they lose
-  their WebSocket connection and cannot reconnect to the same game. Both
-  players must create/join a fresh game. Reconnection is deferred to slice 007.
-- **A disconnected opponent leaves the game hanging.** If one player closes
-  their tab during play, there is no notification to the other player and the
-  game stays on screen until the 24-hour TTL expires. Disconnect handling is
-  deferred to slice 007.
+  their WebSocket connection and cannot reconnect to the same game. The reloading
+  player lands on the mode selector; the surviving player receives "Your opponent
+  disconnected." and is also returned to the mode selector. Reconnection requires
+  player identity (unscheduled).
 - **Games expire silently.** DynamoDB TTL removes games after 24 hours and
   WebSocket connections after 2 hours. There is no UI countdown or notification.
 - **Code sharing is manual.** There is no share-link URL pre-fill; copy the
@@ -209,7 +209,7 @@ the stand-up itself; no separate `run-local` process needed):
 make test-local
 ```
 
-### Walking-skeleton probe (production — requires deployed stack)
+### Walking-skeleton probes (production — requires deployed stack)
 
 Drive one real move through the full deployed path in two real browsers
 (Playwright). Requires the SPA deployed with the move feature enabled and the
@@ -217,6 +217,14 @@ Drive one real move through the full deployed path in two real browsers
 
 ```bash
 make move-skeleton PROD_URL=https://d3pf3kcvzpau1x.cloudfront.net
+```
+
+Drive the disconnect path end-to-end: one browser closes its tab; the other
+browser must receive "Your opponent disconnected." and return to the mode
+selector (operator probe for the disconnect handler):
+
+```bash
+make disconnect-skeleton PROD_URL=https://d3pf3kcvzpau1x.cloudfront.net
 ```
 
 ### Lambda tests
@@ -243,7 +251,7 @@ npm --prefix work/oxo-online/src/app run test:smoke
 ### Validation tests (requires AWS credentials + live stack)
 
 ```bash
-make validate ITER=9 SLICE=s006-move-relay
+make validate ITER=10 SLICE=s007-disconnect
 ```
 
 ---
@@ -278,13 +286,11 @@ make -C work/oxo-online/src/infra deploy-oidc
 
 ## Known limitations
 
-- **Online mode — no reconnect.** Reloading the page loses the session; start
-  a new game.
+- **Online mode — no reconnect.** Reloading the page loses the session; both
+  players are returned to the mode selector. Reconnection requires player
+  identity (unscheduled).
 - **Online mode — silent expiry.** Games expire after 24 hours; WebSocket
   connections expire after 2 hours. No UI notification is shown.
-- **Online mode — vanished opponent.** A player who closes their tab during
-  play leaves the other player's board on screen with no notification until
-  TTL expiry. Full disconnect handling ships in slice 007.
 - **Rate limiting on game creation.** A WAF rate rule limits POST /api/games to
   100 requests per 5 minutes per IP. If exceeded, the server returns HTTP 429
   and the UI shows "Could not start online game — please try again". Wait a few

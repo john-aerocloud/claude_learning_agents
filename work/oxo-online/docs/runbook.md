@@ -1,7 +1,7 @@
 # oxo-online — Support Runbook
 
 Audience: on-call engineers and support team.
-Last updated: slice s006-move-relay (iteration 9, validated 2026-06-07).
+Last updated: slice s007-disconnect (iteration 10, validated 2026-06-07).
 
 ---
 
@@ -83,10 +83,11 @@ ledger. The CodeSize of `oxo-ws-fn` increased in s006 (move handler added). If
 the CodeSize is unchanged after a deploy that should include move-handler code,
 the infra pipeline did not deploy the Lambda update — check the pipeline run.
 
-### ws-fn build identity (oxo-ws-fn move handler)
+### ws-fn build identity (oxo-ws-fn move + disconnect handler)
 
 From s006 onward, `oxo-ws-fn` emits a `buildSha` field on every invocation
-(including the move route). Check this before diagnosing any move-path issue:
+(including the move and disconnect routes). Check this before diagnosing any
+move-path or disconnect-path issue:
 
 ```bash
 # Fetch the most recent ws-fn log lines containing buildSha
@@ -98,7 +99,17 @@ aws logs filter-log-events \
 ```
 
 The `buildSha` value must match the expected deploy SHA. If absent, the
-deployed `oxo-ws-fn` is a pre-s006 build — the move handler is not present.
+deployed `oxo-ws-fn` is a pre-s006 build — the move and disconnect handlers
+are not present.
+
+**KNOWN GAP (F1 — open as of s007):** `oxo-ws-fn` logs `buildSha="unknown"`
+on the disconnect route. The `BUILD_SHA` environment variable injection is
+present on `oxo-game-fn` and `oxo-ws-auth-fn` but was not applied to
+`oxo-ws-fn` at the s007 deploy. This means the `buildSha` filter above will
+return `"unknown"` for ws-fn invocations — it does not indicate a missing
+deploy. Use `LastModified` from `aws lambda get-function` (see §1 "Lambda code
+state") and the infra pipeline run time as the version-identity check for
+`oxo-ws-fn` until BUILD_SHA injection is added.
 
 ### Authorizer build identity (oxo-ws-auth-fn)
 
@@ -172,7 +183,7 @@ Browser
           register   -> oxo-ws-fn
           join       -> oxo-ws-fn (extends Games item: board="---------", currentTurn="X", version=0, moveCount=0)
           move       -> oxo-ws-fn move-handler (server-authoritative; see move flow below)
-          $disconnect -> oxo-ws-fn (stub; returns 200, no write)
+          $disconnect -> oxo-ws-fn disconnect-handler (real; abandon+notify+clean; see disconnect flow below)
 ```
 
 ### Move flow (s006 — server-authoritative)

@@ -74,11 +74,10 @@ so it runs without a permission prompt. That means:
 Route and build per use case (slices/<nnn>-<slug>/use-cases.md): group route
 steps under the use case they complete; a use case is done when its own
 acceptance cases pass independently of other UCs — AND, if it has a deployable
-surface, when it is DEPLOYED and its committed probe is green in prod (§11a:
-flag-OFF deploys count; the probe is yours — committed, parameterised, a make
-target peer of ws-skeleton; never a tester hand-off). Deploy order between UCs
-is a route edge (§19); same-pipeline serialisation is the concurrency group's
-job, not yours. When you are one of several parallel engineers, your claimed
+surface, when it is DEPLOYED and its committed probe is green in prod
+(flag-OFF deploys count; the probe is yours — committed, parameterised, a
+make target; never a tester hand-off). Deploy order between UCs is a route
+edge; same-pipeline serialisation is the concurrency group's job, not yours. When you are one of several parallel engineers, your claimed
 use cases define your WIP boundary — do not touch files another UC owns; flag
 shared-file collisions to the orchestrator instead of working around them.
 
@@ -96,6 +95,10 @@ needing to, you are missing a flag or a seam — flag the gap to the orchestrato
 You co-own `work/<project>/architecture/dependencies/` with the architect and
 product, and you route against it:
 - **`class-deps.mmd` is yours** — module/port/adapter seams, NOT every class.
+  When you add a node for a behaviour, trace the ACTUAL runtime routing path
+  (which component really forwards the frame/call), not the intended one — an
+  edge drawn from assumption hides exactly the seam the model exists to expose
+  (the guest-survivor frame was dropped by an unmarked forward edge).
 - **Read before you build.** Construct your route against the model; a hard edge
   in it is a schedule constraint (§19) on your commit and push order. The edge
   being present is no protection if no one reads it — a mint-before-secret push

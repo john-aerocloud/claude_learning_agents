@@ -16,7 +16,7 @@ is recorded; later chunks revise this when value is re-sliced.
 |-----|---------|--------|
 | **[C1]** | Needed for Chunk 1 (deployable shell) | delivered (slice 001) |
 | **[C2-3]** | Local game + AI — client-only, no new infra | **current** (C2 = slice 002, local game, delivered; C3 = AI, in progress) |
-| **[C4]** | Online match — first stateful backend + realtime | s004 create ✓; s005 join/WS ✓; s005-h2 connect-auth ✓; s006 move relay + server-authoritative win/draw ✓; s007 $disconnect abandon+notify ✓; **s008 share-link deep-route (client-only) — current, COMPLETES C4** |
+| **[C4]** | Online match — first stateful backend + realtime | s004 create ✓; s005 join/WS ✓; s005-h2 connect-auth ✓; s006 move relay + server-authoritative win/draw ✓; s007 $disconnect abandon+notify ✓; s008 share-link deep-route ✓ COMPLETES C4; **s005-h3 code-uniqueness (Codes reservation table, OI-3) — current, FINAL C4 hardening residual** |
 | **[C5]** | Leaderboard — first durable persistence | not started |
 | **[C6]** | Player identity — session/display name | not started |
 | **[C7]** | In-game chat — reuses C4 realtime transport | not started |
@@ -108,13 +108,14 @@ C4Container
     Container(httpapi, "API Gateway (HTTP)", "HTTPS", "[built s004] POST /games (create). NO stage WebACL (CF WAF covers /api/*).")
     Container(wsapi, "API Gateway (WebSocket)", "WSS", "[s005] prod stage; routes $connect/$disconnect/register/join. [s006] +move route (5 keys, no $default). [s007] $disconnect stub -> REAL (abandon+notify+clean up); route count unchanged. [s005-h2] $connect has a REQUEST Lambda authorizer (NO result cache — strike 4). NO WAF (WAFv2 cannot assoc. API GW v2 — GATE-AMEND-H1-A); flood control = stage throttle 20/40 + reserved-concurrency + per-IP authorizer budget.")
 
-    Container(gamefn, "oxo-game-fn", "Lambda Node20", "[built s004] create-game; PutItem on Games only. [s005-h2] also mints host wsToken (HMAC); reads shared secret.")
+    Container(gamefn, "oxo-game-fn", "Lambda Node20", "[built s004] create-game; PutItem on Games. [s005-h2] also mints host wsToken (HMAC); reads shared secret. [s005-h3] RESERVES code via conditional PutItem on Codes (attribute_not_exists) BEFORE Games write; collision => fresh-code retry (<=5) then 5xx WE own (never a wrong code). Client contract {gameId,code,wsToken} unchanged.")
     Container(wsfn, "oxo-ws-fn", "Lambda Node20", "[s005] $connect/register/join; conditional join write + game-ready fan-out. [s006] +move route: validates turn/legality/status by connectionId binding, atomic conditional UpdateItem with version CAS, server-side win/draw, board-update/game-over relay to the 2 bound conns. [s007] $disconnect REAL: GetItem(Connections, OWN connId)->gameId; conditional UpdateItem status active->abandoned (won/drawn guard); 1 survivor notify (0 on terminal/waiting); delete row. +ONE IAM grant: GetItem on Connections only (else s006 set).")
     Container(wsauthfn, "oxo-ws-auth-fn", "Lambda Node20", "[s005-h2] $connect REQUEST authorizer: verify host wsToken / lookup guest code; per-IP budget; Allow/Deny IAM policy. NO ManageConnections, NO Games write.")
 
     ContainerDb(ddb_game, "DynamoDB: Games", "NoSQL", "[built s004] +code GSI & host/guest connId attrs (s005). [s006] +board(9-char)/currentTurn/winner/version(opt-lock CAS)/moveCount attrs — authoritative board; schemaless add, no table/GSI change. TTL 24h, SSE, on-demand.")
     ContainerDb(ddb_conn, "DynamoDB: Connections", "NoSQL", "[s005] connectionId -> gameId/role. TTL 2h, SSE, on-demand. [s007] +GetItem read by $disconnect (own row by PK) — schema unchanged.")
     ContainerDb(ddb_attempts, "DynamoDB: ConnectAttempts", "NoSQL", "[s005-h2] sourceIp -> count. TTL 5min, SSE, on-demand. Best-effort per-IP connect budget.")
+    ContainerDb(ddb_codes, "DynamoDB: Codes", "NoSQL", "[s005-h3] PK=code. Conditional PutItem attribute_not_exists(code) = single-item CAS => storage-enforced code uniqueness (OI-3). WRITE-TIME GATE only; NOT on join/lookup read path (join still uses Games code-index). TTL 24h, lazy deletion, SSE, on-demand, no GSI.")
     Container(secret, "WS-token secret", "SSM SecureString / Secret", "[s005-h2] 32-byte HMAC key. Encrypted at rest; read-scoped to oxo-game-fn (mint) + oxo-ws-auth-fn (verify) only.")
   }
 
@@ -132,7 +133,8 @@ C4Container
   Rel(wsauthfn, secret, "Read HMAC secret (verify wsToken)")
   Rel(wsauthfn, ddb_game, "GetItem code-index (guest code path)")
   Rel(wsauthfn, ddb_attempts, "UpdateItem ADD (per-IP budget)")
-  Rel(gamefn, ddb_game, "PutItem (create)")
+  Rel(gamefn, ddb_codes, "[s005-h3] conditional PutItem reserve (attribute_not_exists), BEFORE Games write; collision => retry")
+  Rel(gamefn, ddb_game, "PutItem (create, AFTER reserve succeeds)")
   Rel(wsfn, ddb_game, "Query code-index + conditional UpdateItem (join/register); [s006] GetItem board + move CAS UpdateItem")
   Rel(wsfn, ddb_conn, "Put/Delete connection; [s007] GetItem own row on $disconnect (connId->gameId)")
   Rel(wsfn, wsapi, "game-ready + [s006] board-update/game-over fan-out to the 2 bound conns; [s007] $disconnect = EXACTLY 1 opponent-disconnected post to survivor (0 on terminal/waiting; 410=swallow, no retry)", "@connections (ManageConnections, this API ARN only)")
@@ -360,7 +362,7 @@ authorizer built (s005-h2); move relay + server-authoritative win/draw built
 |------|-----------|------------------|
 | `oxo-cf-oac` | CloudFront (OAC) | `s3:GetObject` on the web bucket only |
 | `oxo-deploy` | GitHub OIDC | `s3:PutObject`/`DeleteObject` on web bucket, `cloudfront:CreateInvalidation`, `lambda:UpdateFunctionCode`, scoped by resource ARN + repo/branch claim. **s005-h1 (amended GATE-AMEND-H1-A):** + scoped `wafv2:` Create/Get/Update/Delete/List/Tag (CloudFront WebACL mgmt) and `cloudfront:UpdateDistribution`/`GetDistribution`/`GetDistributionConfig` (no `wafv2:*`/`cloudfront:*` wildcard; no `iam:*`). The `wafv2:Associate`/`Disassociate`/`ListResourcesForWebACL` grants are **dropped** — the regional WS association is removed (WAFv2 cannot associate API GW v2). See `DEPLOY_ROLE_EXTENSIONS.md`. |
-| `oxo-game-fn` | Lambda (create) | **s004 built:** `dynamodb:PutItem` on `Games` ARN only + own log group. **s005-h2:** + secret read (`ssm:GetParameter`+`kms:Decrypt` or `secretsmanager:GetSecretValue`) on the **one** shared WS-token secret ARN only (mints host `wsToken`). (Target broader RW deferred.) |
+| `oxo-game-fn` | Lambda (create) | **s004 built:** `dynamodb:PutItem` on `Games` ARN only + own log group. **s005-h2:** + secret read (`ssm:GetParameter`+`kms:Decrypt` or `secretsmanager:GetSecretValue`) on the **one** shared WS-token secret ARN only (mints host `wsToken`). **s005-h3:** + **exactly** `dynamodb:PutItem` on the **`Codes` table ARN only** (the conditional code-reservation write) — **no** `DeleteItem`/`GetItem`/`Query`/`Scan`/`UpdateItem` on `Codes`, no GSI, no wildcard. (Target broader RW deferred.) |
 | `oxo-ws-fn` | Lambda (WS join/register/move/$disconnect) | **s005:** `GetItem`/`Query` on `Games` `code-index` GSI; conditional `UpdateItem` on `Games`; `PutItem`/`DeleteItem` on `Connections`; `execute-api:ManageConnections` on **this WS API ARN only**; own log group. **s007:** + **exactly** `dynamodb:GetItem` on the **`Connections` table ARN only** (the `$disconnect` connectionId→gameId read) — **no** `Query`/`Scan`, no second table, no `*`. **No** secret read, **no** `ConnectAttempts` access. |
 | `oxo-board-fn` | Lambda (leaderboard) | RW `Leaderboard` table; read `Games`; CloudWatch Logs (C5 — not built) |
 | `oxo-ws-auth-fn` | Lambda ($connect REQUEST authorizer) | **s005-h2 built:** `GetItem`/`Query` on `Games` `code-index` GSI (guest code path); `UpdateItem`/`PutItem` on `ConnectAttempts` only; secret read on the **one** shared WS-token secret ARN; own log group. **NO** `execute-api:ManageConnections`, **NO** `Games` write, **NO** `Connections` access, **NO** `iam:*`/wildcard. Disjoint from `oxo-ws-fn` (least-privilege gate). |

@@ -1,14 +1,15 @@
-%% oxo-online runtime data-flow — s008 edition (process §12a)
+%% oxo-online runtime data-flow — s005-h3 edition (process §12a)
 %% Platform GATES are explicit nodes. Non-obvious platform semantics are named ON the node.
 %% This file is the TESTER's planning input. classDef changed marks THIS slice's (s008) delta.
 %% Granularity: module / gate level (coarse). Built scope only (deferred items are NOT drawn).
 %% s007 marks: the $disconnect path becomes REAL (abandon+notify+clean up) and the
 %% CloudFront WAF gate gains the oxo-test-runner-ips IP-set scope-down annotation (IMP-008).
-%% s008 (CLIENT-ONLY / arch-lite): NO new platform-gate node, NO new data flow. The only
-%% delta is that the EXISTING CloudFront SPA-fallback gate (403/404 -> 200 + /index.html)
-%% now ALSO serves deep-link path /join/<code> so React Router resolves it client-side.
-%% Marked `changed` only to make the tester plan the deep-link-boots-SPA prod smoke (T1).
-%% The deep-link join itself reuses the EXISTING WS $connect?code + join path UNCHANGED.
+%% s005-h3 (delta 009, OI-3): code uniqueness is now STORAGE-ENFORCED. NEW node `codes`
+%% (reservation table) + NEW edge gamefn -> codes (conditional PutItem reserve). The create
+%% path reserves the code (attribute_not_exists CAS) BEFORE the Games PutItem; collision =>
+%% bounded server-side retry (<=5) then 5xx (never a wrong code). Join/lookup path UNCHANGED
+%% (still Games code-index; codes is write-time gate only). Client contract UNCHANGED.
+%% classDef changed marks THIS slice's (s005-h3) delta: codes node, gamefn->codes edge, gamefn node.
 
 flowchart TD
 
@@ -17,7 +18,8 @@ flowchart TD
   cfwaf["CloudFront + WAFv2 WebACL (global, us-east-1 scope)<br/>GATE: rate 100/5min per IP + IP-reputation, DEFAULT-ALLOW.<br/>WAF rate rule = SLIDING 300s window, ~30s eval cadence + propagation<br/>(sustained traffic trips it, a short burst can slip through).<br/>Block=403; CF maps 403 to index.html (keep block code DISJOINT, e.g. 429).<br/>SPA-FALLBACK: CustomErrorResponses 403 AND 404 -> 200 + /index.html (ttl 0);<br/>S3-OAC 403s a MISSING key, so an unknown path (e.g. /join/&lt;code&gt;) boots the SPA<br/>and React Router routes it CLIENT-SIDE. (s008 deep-link relies on this EXISTING rule;<br/>OI-31: WAF block code MUST stay disjoint from this list or blocks become invisible.)<br/>s007/IMP-008: rate rule scope-down = NOT(IPSet oxo-test-runner-ips) so RUNNER<br/>IPs bypass the COUNT (Block+limit UNCHANGED for all other IPs). IP set is<br/>TRANSIENT: added per smoke run, removed by trap, drained <=24h. Deploy-role mutate only."]:::gate
   s3[("S3 web bucket<br/>private, OAC-only; serves SPA + OXO_CONFIG runtime cfg incl. wsUrl + buildSha")]:::store
   httpapi["API Gateway HTTP API v2<br/>GATE: route POST /games only. NO stage WAF (CF WAF covers /api/*).<br/>NOT WAFv2-associable (v2 API). TLS1.2+."]:::gate
-  gamefn["oxo-game-fn (Lambda)<br/>create-game: PutItem Games; mints host wsToken (HMAC, 60s exp)"]:::compute
+  gamefn["oxo-game-fn (Lambda)<br/>create-game: RESERVE code (conditional PutItem Codes, attribute_not_exists, <=5 retries) then PutItem Games;<br/>collision => fresh code retry; 5 exhausted => 5xx WE own (reason:code-reservation-exhausted), never a wrong code;<br/>mints host wsToken (HMAC, 60s exp). Client contract {gameId,code,wsToken} UNCHANGED. (s005-h3 CHANGED)"]:::compute
+  codes[("DynamoDB Codes (reservation, s005-h3)<br/>PK=code; conditional PutItem attribute_not_exists(code) = single-item CAS =><br/>at-most-one live reservation per code (storage-enforced uniqueness, no in-mem race).<br/>WRITE-TIME GATE ONLY — NOT on the join/lookup read path (join still uses Games code-index).<br/>ttl 24h, LAZY deletion (orphan reservation lingers but harmless: nothing reads Codes).<br/>SSE, on-demand, no GSI. Grant: oxo-game-fn PutItem on this ARN ONLY (no Delete/Get/Query/Scan).")]:::store
   secret["WS-token secret (SSM SecureString)<br/>HMAC key; read-scoped: oxo-game-fn mint + oxo-ws-auth-fn verify ONLY"]:::secret
 
   %% ---- WebSocket path (WSS, NOT via CloudFront) ----
@@ -35,7 +37,8 @@ flowchart TD
   cfwaf -->|"routes /api/*"| httpapi
   player -->|"POST /api/games to gameId,code,wsToken"| cfwaf
   httpapi -->|"AWS_PROXY invoke"| gamefn
-  gamefn -->|"PutItem create"| games
+  gamefn -.->|"RESERVE code: conditional PutItem attribute_not_exists(code); ConditionalCheckFailed => retry fresh code (<=5) then 5xx (s005-h3 NEW)"| codes
+  gamefn -->|"PutItem create (AFTER reserve succeeds)"| games
   gamefn -->|"read HMAC"| secret
 
   player -->|"direct WSS $connect wsToken|code (NOT via CloudFront)"| wsupgrade
@@ -114,3 +117,15 @@ flowchart TD
   %%   The deep-link JOIN reuses the EXISTING WS $connect?code + join path UNCHANGED (no edge change).
   %% s008 changed mark CLEARED (2026-06-07 — tester consumed, UC3 prod validation PASS, C4 MET 2323ms).
   %% cfwaf: deep-link /join/<code> via existing SPA-fallback confirmed in prod.
+
+  %% ---- s005-h3 CHANGED marks (delta 009, OI-3 — tester plans from these) ----
+  %% codes: NEW store node — code-reservation table, PK=code, conditional PutItem
+  %%   attribute_not_exists(code) = single-item CAS storage-enforced uniqueness.
+  %%   Tester: AC-6 ConditionExpression code-policy pin (synth/source assert).
+  %% gamefn->codes: NEW reserve edge (dotted) — reserve BEFORE Games PutItem; collision => retry.
+  %%   Tester: AC-1 injection (collision => fresh code), AC-4 retry-cap=>5xx (never wrong code),
+  %%   AC-2 50-concurrent-distinct PIN (real DynamoDB; local map cannot prove atomicity),
+  %%   AC-5 IAM no-widening PIN (PutItem on Codes ARN only; assert negatives),
+  %%   AC-7 orphan-harmless (Games-write fail leaves TTL'd orphan; join unaffected).
+  %% gamefn node: create flow now reserve->retry->write; client contract {gameId,code,wsToken} UNCHANGED.
+  class codes,gamefn changed;

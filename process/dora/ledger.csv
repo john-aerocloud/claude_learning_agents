@@ -506,3 +506,7 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T21:11:51Z,oxo-online,12,s005-h3-code-uniqueness,product,task_start,,na,S005H3-SLICE,slice-next: propose s005-h3 code-uniqueness hardening slice
 2026-06-07T21:12:45Z,oxo-online,1,s005-h3-code-uniqueness,product,task_start,,na,S005H3-SLICE,product: writing s005-h3 slice.md + chunk-plan C4-complete update
 2026-06-07T21:14:22Z,oxo-online,1,s005-h3-code-uniqueness,product,task_end,,success,S005H3-SLICE,slice.md written; chunk-plan C4 marked complete; s008 delivered; s005-h3 in-planning; OI-3 close recorded
+2026-06-07T21:17:05Z,oxo-online,12,s005-h3-code-uniqueness,orchestrator,gate,,success,GATE-2-S005H3,slice accepted + standing approval
+2026-06-07T21:17:05Z,oxo-online,12,s005-h3-code-uniqueness,solution-architect,task_start,,na,S005H3-DELTA,arch delta: code-uniqueness mechanism (Codes table vs GSI guard) + security review + data-flow mark
+2026-06-07T21:18:34Z,oxo-online,12,s005-h3-code-uniqueness,solution-architect,task_start,,na,S005H3-DELTA,arch delta: code-uniqueness mechanism + security review
+2026-06-07T21:22:20Z,oxo-online,12,s005-h3-code-uniqueness,solution-architect,task_end,,success,S005H3-DELTA,Codes reservation table (conditional PutItem attribute_not_exists); retry-cap 5 then 5xx; PutItem-only IAM; local port adapter; security §9a auto-accept

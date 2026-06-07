@@ -44,10 +44,14 @@ write principal (`oxo-ws-fn`). New checkable controls (become policy tests):
 - [ ] The connectionId persisted for host/guest is taken from
       `event.requestContext.connectionId` (the caller's own connection), never
       from a client-supplied body field.
-- [ ] Code-uniqueness: duplicate `code` across two `waiting` games is an
-      **accepted, conditional-write-bounded** residual risk in s005 (a hard
-      uniqueness guarantee is deferred). Documented, not an oversight — open risk
-      for the gate.
+- [ ] Code-uniqueness: ~~duplicate `code` across two `waiting` games is an
+      accepted residual risk~~ **SUPERSEDED by s005-h3 (delta 009, OI-3 CLOSED).**
+      Uniqueness is now STORAGE-ENFORCED: `oxo-game-fn` reserves the code via a
+      conditional `PutItem attribute_not_exists(code)` on the new `Codes` table
+      (PK=`code`) before writing the `Games` item; a collision triggers a bounded
+      server-side retry with a fresh code (≤5, then a 5xx, never a wrong code).
+      The `Games` `code-index` read/join path is unchanged; `Codes` is a write-
+      time uniqueness gate only. See `dynamodb-codes.md`.
 
 ## s006 additions (authoritative board + move write path)
 The `Games` item gains play-state attributes written by the `move` route on the

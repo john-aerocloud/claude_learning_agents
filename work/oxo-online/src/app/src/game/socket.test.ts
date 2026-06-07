@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { createRealSocketFactory } from './socket';
+import { createRealSocketFactory, type ServerMessage } from './socket';
+
+// s007 UC3 contract (compile-time): the ServerMessage union admits the
+// opponent-disconnected frame the survivor receives. This fails `tsc`/build
+// until the union gains the member — the type-level red for UC3-S1.
+const _opponentDisconnected: ServerMessage = { type: 'opponent-disconnected' };
+void _opponentDisconnected;
 
 /**
  * A controllable fake of the browser `WebSocket`. Tests drive `open`, inbound
@@ -72,6 +78,18 @@ describe('createRealSocketFactory — real WebSocket transport (C2)', () => {
     FakeWebSocket.instances[0].fireOpen();
     FakeWebSocket.instances[0].fireMessage({ type: 'game-ready', role: 'guest', gameId: 'g-1' });
     expect(onMessage).toHaveBeenCalledWith({ type: 'game-ready', role: 'guest', gameId: 'g-1' });
+  });
+
+  // UC3 / s007 / AC3.1: the server posts an opponent-disconnected frame to the
+  // survivor when its opponent's $disconnect abandons the active game. The
+  // transport must parse it and forward it like any other ServerMessage.
+  it('parses an inbound opponent-disconnected frame and forwards it to onMessage (s007 UC3)', () => {
+    const onMessage = vi.fn();
+    const factory = createRealSocketFactory();
+    factory({ onMessage, onClose: () => {} });
+    FakeWebSocket.instances[0].fireOpen();
+    FakeWebSocket.instances[0].fireMessage({ type: 'opponent-disconnected' });
+    expect(onMessage).toHaveBeenCalledWith({ type: 'opponent-disconnected' });
   });
 
   it('parses an inbound error frame and forwards it to onMessage (DEFECT-005-001 Bug B)', () => {

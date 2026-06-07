@@ -67,11 +67,25 @@ export interface GameOverMessage {
   result: 'X-wins' | 'O-wins' | 'draw';
 }
 
+/**
+ * Survivor notification (s007/UC1→UC3). The `$disconnect` handler posts exactly
+ * ONE of these to the surviving connection when an ACTIVE game is abandoned
+ * because the opponent's socket closed (tab close, network loss, or the APIGW
+ * 10-min idle close). It carries no payload — the disconnecting connection IS
+ * the identity server-side (S1); the survivor only needs to know the opponent is
+ * gone. It is never sent on a terminal (won/drawn) or waiting game, and never on
+ * a `GoneException` survivor post (amplification bound = 1, S3).
+ */
+export interface OpponentDisconnectedMessage {
+  type: 'opponent-disconnected';
+}
+
 export type ServerMessage =
   | GameReadyMessage
   | ServerErrorMessage
   | BoardUpdateMessage
-  | GameOverMessage;
+  | GameOverMessage
+  | OpponentDisconnectedMessage;
 
 /** A client-to-server action frame. */
 export type ClientFrame =

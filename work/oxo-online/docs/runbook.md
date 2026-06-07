@@ -135,16 +135,19 @@ Browser
 | Resource | Name / ID | Notes |
 |----------|-----------|-------|
 | CloudFront distribution | d3pf3kcvzpau1x | SPA + /api/* + /config.js |
-| HTTP API (API Gateway) | via `OxoGameProd-HttpApiEndpoint` output | POST /api/games -> oxo-game-fn |
+| HTTP API (API Gateway) | via `OxoGameProd-HttpApiEndpoint` output | POST /api/games -> oxo-game-fn; response now includes wsToken |
 | WebSocket API (API Gateway) | ylbzjuo8lf, stage: prod | 4 routes; direct WSS; no CloudFront proxy |
-| Lambda — game | oxo-game-fn | Create-game handler; DynamoDB PutItem on Games |
+| Lambda — game | oxo-game-fn | Create-game handler; mints wsToken; DynamoDB PutItem on Games |
+| Lambda — ws authorizer | oxo-ws-auth-fn | REQUEST authorizer on $connect; verifies wsToken/code; per-IP budget; structured logs with buildSha |
 | Lambda — ws | oxo-ws-fn | connect/register/join/$disconnect; DynamoDB r/w Games+Connections; ManageConnections |
 | DynamoDB — games | oxo-games | PK: gameId; GSI: code-index (PK: code); 24h TTL; SSE enabled; on-demand |
 | DynamoDB — connections | oxo-connections | PK: connectionId; 2h TTL; SSE enabled; on-demand |
+| DynamoDB — connect attempts | oxo-connect-attempts | PK: sourceIp; count (N); ttl (~5min TTL); SSE enabled; on-demand; used by authorizer for per-IP budget |
 | WAFv2 WebACL — global | oxo-online-cf-global (us-east-1) | CLOUDFRONT scope; associated to d3pf3kcvzpau1x; rate rule 100/300s/IP (Block=429); IP-rep managed group |
 | CloudFormation stacks | OxoOnlineOidcStack, OxoOnlineWafUsEast1, OxoGameProd, OxoOnlineProd | Deploy order: WafUsEast1 -> OxoGameProd -> OxoOnlineProd |
 | S3 bucket | see `WebBucketName` GH var | Versioning on; SPA + config.js |
 | Log group — game fn | /aws/lambda/oxo-game-fn | No structured categories yet (OI-18) |
+| Log group — ws authorizer | /aws/lambda/oxo-ws-auth-fn | Structured JSON; buildSha on every Allow/Deny; see §4a |
 | Log group — ws fn | /aws/lambda/oxo-ws-fn | Structured JSON events (see §4) |
 
 ### Pipelines
@@ -192,11 +195,74 @@ aws dynamodb describe-table --table-name oxo-games \
 
 aws dynamodb describe-table --table-name oxo-connections \
   --query 'Table.{BillingMode:BillingModeSummary.BillingMode,SSEStatus:SSEDescription.Status,ItemCount:ItemCount}'
+
+# Connect-attempts table (per-IP budget — new in s005-h2)
+aws dynamodb describe-table --table-name oxo-connect-attempts \
+  --query 'Table.{BillingMode:BillingModeSummary.BillingMode,SSEStatus:SSEDescription.Status,ItemCount:ItemCount}'
+
+# Confirm TTL is enabled on the connect-attempts table
+aws dynamodb describe-time-to-live --table-name oxo-connect-attempts \
+  --query 'TimeToLiveDescription.{Status:TimeToLiveStatus,Attribute:AttributeName}'
 ```
 
 Validation run results are recorded in `process/dora/ledger.csv`
 (`validation_run` event rows). Check recent rows to confirm the latest suite
 was green.
+
+---
+
+## 4a. Structured log events — oxo-ws-auth-fn ($connect authorizer)
+
+Log group: `/aws/lambda/oxo-ws-auth-fn`
+
+Every Allow and Deny decision emits a structured JSON log line. **Always check
+`buildSha` first** — a version mismatch explains any unexpected authorizer
+behaviour before any other diagnosis is attempted.
+
+### Log fields on every decision line
+
+| Field | Example | Notes |
+|-------|---------|-------|
+| `buildSha` | `40b7767fc7ca1f3212ba583b23451ba703c38076` | Build identity; check this first |
+| `effect` | `Allow` or `Deny` | The authorizer decision |
+| `category` | `internal` / `external` / `data-validation` | Whose problem |
+| `reason` | see table below | Specific deny reason |
+
+### Deny reasons — what they mean and whose problem
+
+| `reason` value | `category` | Whose problem | Meaning | First response |
+|----------------|------------|---------------|---------|----------------|
+| `no-credential` | `data-validation` | Caller | Connect had no `?wsToken` or `?code` parameter | Caller error; SPA bug or unauthenticated probe. Check SPA code if widespread. |
+| `bad-signature` | `data-validation` | Caller | `wsToken` present but HMAC does not verify (tampered, wrong key, or expired differently) | Caller error or token corruption. If wsToken is fresh from POST /api/games, check secret is same between game-fn and auth-fn. |
+| `code-not-found` | `data-validation` | Caller | Guest `?code=` did not match any active game in Games GSI | Caller supplied unknown/expired/mistyped code. Check if game TTL expired (24h). |
+| `rate-limit-exceeded` | `external` | Per-IP budget (self-heals) | sourceIp exceeded ~20 connects in 5-min window; oxo-connect-attempts count >= threshold | Not a code defect. See §6 "User blocked at WebSocket connect" playbook. Window self-heals after TTL expiry (~5 min). Do NOT manually delete items unless count is corrupt. |
+
+### 5xx in authorizer
+
+If the authorizer itself throws (Lambda error, DynamoDB unavailable, etc.),
+API Gateway treats the `$connect` as rejected with HTTP 500, and oxo-ws-fn is
+NOT invoked. This is **our code or dependency problem** — raise a defect task.
+Check `/aws/lambda/oxo-ws-auth-fn` logs for Node.js stack traces.
+
+### CloudWatch Logs Insights — authorizer denies (last 1 hour)
+
+```
+fields @timestamp, buildSha, effect, category, reason
+| filter effect = "Deny"
+| sort @timestamp desc
+| limit 50
+```
+
+Run against log group `/aws/lambda/oxo-ws-auth-fn`.
+
+### CloudWatch Logs Insights — authorizer allows (spot-check)
+
+```
+fields @timestamp, buildSha, effect
+| filter effect = "Allow"
+| sort @timestamp desc
+| limit 20
+```
 
 ---
 
@@ -238,7 +304,7 @@ Run against log group `/aws/lambda/oxo-ws-fn`.
 
 | Status | Meaning |
 |--------|---------|
-| 201 | Game created; body `{gameId, code}` |
+| 201 | Game created; body `{gameId, code, wsToken}` (wsToken may be absent if the signing secret is temporarily unavailable — game creation does not fail in this case; the SPA cannot connect as host until wsToken is present) |
 | 5xx | Lambda fault; check oxo-game-fn logs |
 
 ### WebSocket
@@ -378,19 +444,76 @@ Rate-rule blocks are HTTP-observable as 429.
 
 The WS endpoint has NO WAF (WAFv2 cannot associate with API Gateway v2; this
 is a platform constraint — see s005-h1-waf architecture/deltas). Controls in
-place are:
+place (as of s005-h2) are:
 - API Gateway prod stage: default-route throttle rate=20/s, burst=40
   (account/stage level; NOT per-IP)
 - oxo-ws-fn: `ReservedConcurrentExecutions: 15`
-- Per-IP WS rate-limiting is deferred to s005-h2 ($connect authorizer).
+- oxo-ws-auth-fn ($connect authorizer): per-IP connect budget (~20/5min via
+  oxo-connect-attempts DynamoDB table). Unauthenticated/over-budget connects
+  are rejected at authorizer before reaching oxo-ws-fn. Best-effort — see
+  caveat OR-H2-a in §9.
 
 If a cost spike is observed:
-1. Check oxo-ws-fn CloudWatch metrics (`ConcurrentExecutions`, `Invocations`)
-   for volume anomalies.
-2. If the concurrency ceiling is being hit, Lambda will throttle (return 429
-   to API Gateway). This presents as connection failures in the client.
-3. Mitigation today: increase reserved concurrency temporarily via the console
-   (or push a CDK change). Per-IP WS blocking ships with s005-h2.
+1. Check oxo-ws-auth-fn CloudWatch metrics (`Invocations`, `Errors`) for
+   authorizer volume and error rate.
+2. Check oxo-ws-fn CloudWatch metrics (`ConcurrentExecutions`, `Invocations`)
+   for volume anomalies. If authorizer is functioning, only authenticated
+   connects should reach oxo-ws-fn.
+3. If the oxo-ws-fn concurrency ceiling is being hit, Lambda will throttle
+   (return 429 to API Gateway). This presents as connection failures in the
+   client.
+4. Mitigation: increase reserved concurrency temporarily via the console (or
+   push a CDK change). For sustained floods bypassing the per-IP budget (e.g.
+   IP-cycling), the reversal path is CloudFront-front WS with edge WAF (see
+   OR-H2-a).
+
+### User blocked at WebSocket connect (rate-limit-exceeded)
+
+A user reports "something went wrong" when trying to join or host an online
+game, and the authorizer logs show `reason=rate-limit-exceeded` for their IP.
+
+1. **Confirm the deny reason.** Check `/aws/lambda/oxo-ws-auth-fn` for the
+   source IP:
+   ```bash
+   aws logs filter-log-events \
+     --log-group-name /aws/lambda/oxo-ws-auth-fn \
+     --filter-pattern '{ $.reason = "rate-limit-exceeded" }' \
+     --limit 20 \
+     --query 'events[*].message'
+   ```
+
+2. **Check the connect-attempts count for the IP.** Confirm the counter is at
+   or above threshold (20):
+   ```bash
+   aws dynamodb get-item \
+     --table-name oxo-connect-attempts \
+     --key '{"sourceIp":{"S":"<IP-ADDRESS>"}}' \
+     --query 'Item.{count:count,ttl:ttl}'
+   ```
+
+3. **Confirm window expiry.** The `ttl` field is a Unix epoch timestamp.
+   Compare against `date +%s`. If `ttl` is in the past and the block is still
+   occurring, DynamoDB has not yet lazily deleted the item — but the authorizer
+   code treats an expired item as a fresh window (DEFECT-H2-003 fix, sha
+   40b7767). The block will self-clear on the next connect attempt after DynamoDB
+   performs lazy deletion, or immediately if the authorizer detects the expired
+   ttl first.
+
+4. **Wait for self-heal.** The window self-heals automatically after ~5 minutes
+   from item creation. **Do NOT manually delete the item** unless the count is
+   corrupt (e.g. it is in the millions). Manual deletion before the window
+   expires defeats the purpose of the control and may hide an abuse pattern.
+
+5. **If the user is legitimate and blocked by a shared NAT/office IP:** this is
+   caveat OR-H2-a — per-IP budget applies to the egress IP, not the individual
+   user. Multiple rapid connection attempts from the same NAT will consume the
+   shared budget. In this case, advise the user to wait ~5 minutes and retry.
+   No code change is required unless the threshold needs raising (CDK change to
+   the authorizer's threshold constant).
+
+6. **If the authorizer itself is returning 5xx** (not a Deny): this is our
+   defect. Raise a task, check authorizer logs for exceptions. The WS connect
+   will be blocked for all users until the authorizer recovers.
 
 ### POST /api/games returning 5xx
 
@@ -584,11 +707,12 @@ To remove the WAF ACL:
 | ID | Gap | Impact |
 |----|-----|--------|
 | OI-18 | No CloudWatch metrics, no alarms, no categorised logging in `oxo-game-fn` | Cannot set alert thresholds on error rate; game-fn faults require manual log scanning |
-| OI-25 | No version header on any HTTP/WS response | Cannot determine deployed version from a request; must compare bundle hash by hand (see §1) |
+| OI-25 | No version header on any HTTP/WS response | Cannot determine deployed version from a request; must compare bundle hash by hand and buildSha from authorizer logs (see §1) |
 | OI-6 | No Lambda versioning or aliases | No instant Lambda rollback; roll-forward only |
-| h1/OPEN | No WAF on the WebSocket API — WAFv2 cannot associate with API Gateway v2 (platform constraint) | WS connection-exhaustion control is account/stage-level throttle only; no per-IP bound until s005-h2 $connect authorizer ships |
 | h1/RESIDUAL | IP-reputation managed-rule-group 403 blocks are masked by CloudFront CustomErrorResponses to 200+SPA | Reputation blocks are CloudWatch-observable only (not HTTP-status observable). Rate-rule blocks return honest 429. |
+| OR-H2-a | Per-IP WS connect budget is best-effort: IP-cycling bypasses counter; layered with stage throttle 20/40 + reserved concurrency 15 | A determined attacker cycling IPs bypasses the per-IP deterrent. Reversal path: CloudFront-front WS with edge WAF. |
 | h2-waf/CLOSED | WAF rate-limiting on CloudFront/HTTP API (POST /api/games) | SHIPPED s005-h1-waf: oxo-online-cf-global ACL, 100 req/300s/IP, Block=429 |
+| h2-connect-auth/CLOSED | No per-game credential on $connect; no per-IP WS rate-limit | SHIPPED s005-h2: oxo-ws-auth-fn REQUEST authorizer; wsToken for host; code for guest; oxo-connect-attempts per-IP budget |
 | h3 | No server-authoritative move validation | Not yet relevant (moves do not relay until s006) |
 
 Gaps are tracked in the project open-items register. Do not treat open items as

@@ -365,3 +365,4 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T09:41:42Z,oxo-online,8,s005-h2-connect-auth,orchestrator,gate,,success,SLICE-H2-DELIVERED,delivered row written; OI-2 closed; documenter dispatched background; auto-retro starting
 2026-06-07T09:42:00Z,oxo-online,8,s005-h2-connect-auth,documenter,task_start,,na,40b7767,Documenting s005-h2 connect auth: update usage.md + runbook.md for authorizer surface
 2026-06-07T09:43:44Z,oxo-online,8,s005-h2-connect-auth,orchestrator,gate,,success,RETRO-H2,slice retro: 4 experiments scored (2 newly validated) + EXP-009 routed to tester.md; v32 stands; per-project row + OI-32/33 written
+2026-06-07T09:48:00Z,oxo-online,8,s005-h2-connect-auth,documenter,task_end,360,success,45b0aa4,usage.md: auth auto-handled note + per-IP rate-limit caveat; runbook.md: authorizer build-id section + §4a + system map + first-response user-blocked playbook + gap table updated

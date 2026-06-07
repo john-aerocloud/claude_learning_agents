@@ -1,6 +1,6 @@
 # DORA Baseline (computed)
 
-_Generated 2026-06-07T22:24:47Z from ledger.csv. Do not hand-edit._
+_Generated 2026-06-07T23:54:23Z from ledger.csv. Do not hand-edit._
 
 ## Four key metrics (whole pipeline)
 
@@ -18,7 +18,7 @@ _Generated 2026-06-07T22:24:47Z from ledger.csv. Do not hand-edit._
 | product | 5 | 120 | 120 | 206 |
 | solution-architect | 14 | 1200 | 420 | 568 |
 | cicd | 12 | 207 | 224 | 375 |
-| engineer | 34 | 720 | 699 | 1064 |
+| engineer | 36 | 720 | 699 | 1045 |
 | ui-designer | 0 | — | — | — |
 | tester | 11 | 1200 | 1200 | 1680 |
 | documenter | 12 | 60 | 60 | 168 |

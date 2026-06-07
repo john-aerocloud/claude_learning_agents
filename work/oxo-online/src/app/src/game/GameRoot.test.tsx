@@ -8,7 +8,8 @@ import type { ConnectOptions, GameSocket, GameSocketFactory } from './socket';
 function captureFactory() {
   const sent: unknown[] = [];
   let captured: ConnectOptions | null = null;
-  const socket: GameSocket = { send: (f) => sent.push(f), close: vi.fn() };
+  const close = vi.fn();
+  const socket: GameSocket = { send: (f) => sent.push(f), close };
   const factory: GameSocketFactory = (opts) => {
     captured = opts;
     return socket;
@@ -16,6 +17,7 @@ function captureFactory() {
   return {
     factory,
     sent,
+    close,
     get opts() {
       return captured;
     },
@@ -474,6 +476,96 @@ describe('GameRoot — $connect credential threading (UC3/AC3.1, UC4/AC4.1, T8)'
     await userEvent.type(screen.getByLabelText(/game code/i), 'GST234');
     await userEvent.click(screen.getByRole('button', { name: /^join$/i }));
     expect(cap.opts?.credential).toEqual({ code: 'GST234' });
+  });
+});
+
+// s007 UC3 — survivor UX: an opponent-disconnected frame shows a message and
+// returns the survivor to the mode selector WITHOUT a reload; the board goes
+// inert; a late frame after game-over does NOT clobber the result.
+// @covers spa-online-disconnect
+describe('GameRoot — opponent-disconnected survivor UX (s007 UC3, F1, T2, AC3.1–AC3.3)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** Drive the host to the live online board and return the captured socket. */
+  async function hostToBoard(cap: ReturnType<typeof captureFactory>) {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ gameId: 'g-dc', code: 'DSC234' }), {
+        status: 201,
+      }),
+    );
+    render(<GameRoot socketFactory={cap.factory} />);
+    await userEvent.click(screen.getByRole('button', { name: /play online/i }));
+    await waitFor(() =>
+      expect(screen.getByText(/waiting for opponent/i)).toBeInTheDocument(),
+    );
+    act(() => cap.opts?.onMessage({ type: 'game-ready', role: 'host', gameId: 'g-dc' }));
+    expect(screen.getByTestId('online-role')).toHaveTextContent('You are X');
+  }
+
+  // AC3.1 — the exact pinned message text the tester's two-browser smoke keys off.
+  it('AC3.1 — shows "Your opponent disconnected." on the opponent-disconnected frame', async () => {
+    const cap = captureFactory();
+    await hostToBoard(cap);
+    act(() => cap.opts?.onMessage({ type: 'opponent-disconnected' }));
+    expect(screen.getByTestId('opponent-disconnected')).toHaveTextContent(
+      'Your opponent disconnected.',
+    );
+    // Surfaced as an alert for assistive tech.
+    expect(screen.getByRole('alert')).toHaveTextContent('Your opponent disconnected.');
+  });
+
+  // AC3.2 — the mode selector is rendered, with NO page reload.
+  it('AC3.2 — returns to the mode selector without a window.location.reload', async () => {
+    const reloadSpy = vi.fn();
+    const original = window.location;
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...original, reload: reloadSpy },
+    });
+    try {
+      const cap = captureFactory();
+      await hostToBoard(cap);
+      act(() => cap.opts?.onMessage({ type: 'opponent-disconnected' }));
+      // The mode-selector root is present (stable aria-label group selector).
+      expect(
+        screen.getByRole('group', { name: /game mode/i }),
+      ).toBeInTheDocument();
+      // The online board is gone — the board is inert (no live game).
+      expect(screen.queryByTestId('online-role')).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/online game board/i)).not.toBeInTheDocument();
+      expect(reloadSpy).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: original,
+      });
+    }
+  });
+
+  // AC3.3 — the WS is closed after the frame is processed (no stale socket).
+  it('AC3.3 — closes the WS socket after opponent-disconnected is processed', async () => {
+    const cap = captureFactory();
+    await hostToBoard(cap);
+    cap.close.mockClear();
+    act(() => cap.opts?.onMessage({ type: 'opponent-disconnected' }));
+    expect(cap.close).toHaveBeenCalled();
+  });
+
+  // Requirement 2 — a late opponent-disconnected frame AFTER game-over must NOT
+  // clobber the result screen: the result wins. The survivor already saw the
+  // win/draw; a trailing disconnect frame is ignored.
+  it('result wins: a late opponent-disconnected after game-over keeps the result screen', async () => {
+    const cap = captureFactory();
+    await hostToBoard(cap);
+    act(() => cap.opts?.onMessage({ type: 'game-over', result: 'X-wins' }));
+    expect(screen.getByText(/x wins/i)).toBeInTheDocument();
+    // A trailing disconnect frame arrives after the result.
+    act(() => cap.opts?.onMessage({ type: 'opponent-disconnected' }));
+    // The result screen still shows; no opponent-disconnected message clobbers it.
+    expect(screen.getByText(/x wins/i)).toBeInTheDocument();
+    expect(screen.queryByTestId('opponent-disconnected')).not.toBeInTheDocument();
   });
 });
 

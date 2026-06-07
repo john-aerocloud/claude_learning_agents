@@ -36,9 +36,14 @@ type OnlinePhase =
   | 'waiting'
   | 'joining'
   | 'playing-online'
+  | 'disconnected'
   | 'error';
 
 const ONLINE_ERROR = 'Could not start online game — please try again';
+// s007 UC3 / AC3.1 — exact pinned survivor message text. The tester's
+// two-browser smoke keys off this exact string; do not reword without updating
+// AC3.1, the disconnect skeleton, and the local survivor spec.
+const OPPONENT_DISCONNECTED = 'Your opponent disconnected.';
 const SPINNER_DELAY_MS = 500;
 
 /**
@@ -77,6 +82,11 @@ export function GameRoot({ socketFactory = realFactory }: GameRootProps = {}) {
   // The gameId the server announced on game-ready — the single consistent source
   // threaded into every move frame as the non-trusted GetItem lookup key (S1).
   const playGameIdRef = useRef<string | null>(null);
+  // s007 UC3 — true once a game-over result has been shown. A late
+  // opponent-disconnected frame arriving AFTER the result is IGNORED (result
+  // wins): the survivor already saw the win/draw; a trailing disconnect from the
+  // loser closing their tab must not clobber the result screen.
+  const resultShownRef = useRef(false);
 
   // A `game-ready` from either side drives both screens to the board, captures
   // the live socket for the move loop (UC4), and resets the online board. A
@@ -92,6 +102,7 @@ export function GameRoot({ socketFactory = realFactory }: GameRootProps = {}) {
       // The guest (joined by code) has no other source; the host overwrites its
       // create-time gameId with the same value, keeping one source of truth.
       playGameIdRef.current = message.gameId;
+      resultShownRef.current = false;
       setOnlineRole(message.role);
       setOnlineGame(INITIAL_ONLINE_STATE);
       setOnlinePhase('playing-online');
@@ -102,10 +113,38 @@ export function GameRoot({ socketFactory = realFactory }: GameRootProps = {}) {
         currentTurn: message.currentTurn,
       }));
     } else if (message.type === 'game-over') {
+      resultShownRef.current = true;
       setOnlineGame((g) => ({ ...g, result: message.result }));
+    } else if (message.type === 'opponent-disconnected') {
+      // s007 UC3 — the opponent's $disconnect abandoned the active game. Show
+      // the survivor message and return to the mode selector WITHOUT a reload:
+      // close the WS and clear all online state so the board goes inert and a
+      // fresh Online game can start cleanly (UC3-S3). Result wins: a frame
+      // arriving after game-over is ignored (the survivor already saw the
+      // result; do not clobber the result screen).
+      if (resultShownRef.current) return;
+      endOnlineSession('disconnected');
     } else if (message.type === 'error') {
       setOnlinePhase('error');
     }
+  };
+
+  // Tear down the live online session and move to `phase`. Closes the WS (no
+  // stale socket — AC3.3) and clears EVERY online ref/state so the subsequent
+  // playOnline/joinGame opens a clean socket with no residual gameId, board, or
+  // connection (UC3-S3 / AC3.4). The gameId-keyed effect cleanup also closes the
+  // host socket when gameId clears; closing playSocketRef here covers the guest
+  // (whose socket is owned by JoinScreen) and makes the close synchronous.
+  const endOnlineSession = (phase: OnlinePhase) => {
+    playSocketRef.current?.close();
+    playSocketRef.current = null;
+    playGameIdRef.current = null;
+    resultShownRef.current = false;
+    setGameCode(null);
+    setGameId(null);
+    setWsToken(null);
+    setOnlineGame(INITIAL_ONLINE_STATE);
+    setOnlinePhase(phase);
   };
 
   // UC4: a square click sends exactly one {action:'move', square} over the live
@@ -203,6 +242,8 @@ export function GameRoot({ socketFactory = realFactory }: GameRootProps = {}) {
     setWsToken(null);
     setOnlineGame(INITIAL_ONLINE_STATE);
     playSocketRef.current = null;
+    playGameIdRef.current = null;
+    resultShownRef.current = false;
   };
 
   const joinGame = () => {
@@ -212,6 +253,8 @@ export function GameRoot({ socketFactory = realFactory }: GameRootProps = {}) {
     setWsToken(null);
     setOnlineGame(INITIAL_ONLINE_STATE);
     playSocketRef.current = null;
+    playGameIdRef.current = null;
+    resultShownRef.current = false;
   };
 
   const locked = state.status !== 'playing';
@@ -282,6 +325,28 @@ export function GameRoot({ socketFactory = realFactory }: GameRootProps = {}) {
           result={onlineGame.result}
           onMove={sendMove}
         />
+      )}
+      {onlinePhase === 'disconnected' && (
+        <section
+          className="opponent-disconnected"
+          aria-label="opponent disconnected"
+        >
+          <p
+            className="opponent-disconnected-message"
+            role="alert"
+            data-testid="opponent-disconnected"
+          >
+            {OPPONENT_DISCONNECTED}
+          </p>
+          <button
+            type="button"
+            className="back-to-menu"
+            data-testid="back-to-menu"
+            onClick={() => setOnlinePhase('idle')}
+          >
+            Back to menu
+          </button>
+        </section>
       )}
       {onlinePhase === 'error' && (
         <p className="online-error" role="alert">{ONLINE_ERROR}</p>

@@ -96,7 +96,10 @@ export class OxoGameStack extends cdk.Stack {
     const gameFunction = new lambda.Function(this, 'GameFunction', {
       functionName: 'oxo-game-fn',
       runtime: lambda.Runtime.NODEJS_20_X,
-      handler: 'handler.handler',
+      // A1's token/ module re-nested the compiled output: tsconfig rootDir '.'
+      // emits games/dist/games/handler.js (+ games/dist/token/**). Handler path
+      // must match the asset layout (wiring contract — see A1 commit 5b19d90).
+      handler: 'games/handler.handler',
       code: lambda.Code.fromAsset(
         path.join(__dirname, '..', '..', 'lambda', 'games', 'dist'),
       ),

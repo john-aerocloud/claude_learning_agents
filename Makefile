@@ -156,6 +156,11 @@ test-infra:
 test-lambda:
 	npm --prefix work/$(PROJECT)/src/lambda test
 
+# Unit tests for the committed scripts (IMP-008 waf-runner-ip.js etc.) — node's
+# built-in runner, no AWS. Pure logic + injected-fake-CLI orchestration only.
+test-scripts:
+	node --test work/$(PROJECT)/scripts/*.test.js
+
 # --- IMP-008 WAF runner-IP exclusion helpers ----------------------------------
 # Add/remove a CIDR from the oxo-test-runner-ips WAFv2 IP set (us-east-1,
 # CLOUDFRONT scope). The IP set is named 'oxo-test-runner-ips'; these targets
@@ -197,4 +202,4 @@ synth-infra:
 	npm --prefix $(INFRA) run cdk -- synth $(STACKS) --quiet \
 	  -c githubOrg=$(GH_ORG) -c githubRepo=$(GH_REPO)
 
-.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci
+.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci test-scripts

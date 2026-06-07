@@ -59,7 +59,7 @@ The orchestrator keeps exactly ONE current baseline here; older baselines live
 in `process-history/`. Recompute at each retro via `make dora-compute` (writes
 `/process/dora/baseline.md`).
 
-**As of 2026-06-07:** `lead=3618s freq=6/day cfr=35% mttr=1794s`.
+**As of 2026-06-07 (s005-h2 delivery):** `lead=3618s freq=6/day cfr=32% mttr=2033s`.
 **Named constraint: tester** (median 1130s; cost is dominated by re-discovering
 what changed and what it can affect — the §12a model is the standing attack).
 

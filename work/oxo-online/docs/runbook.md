@@ -1,7 +1,7 @@
 # oxo-online — Support Runbook
 
 Audience: on-call engineers and support team.
-Last updated: slice s005-h1-waf (iteration 7, sha e523948, validated 2026-06-06T17:43Z).
+Last updated: slice s005-h2-connect-auth (iteration 8, sha 45b0aa4, validated 2026-06-07).
 
 ---
 
@@ -47,20 +47,56 @@ aws lambda get-function --function-name oxo-game-fn \
 # oxo-ws-fn (WebSocket routes)
 aws lambda get-function --function-name oxo-ws-fn \
   --query 'Configuration.{Runtime:Runtime,LastModified:LastModified,CodeSize:CodeSize}'
+
+# oxo-ws-auth-fn ($connect authorizer — new in s005-h2)
+aws lambda get-function --function-name oxo-ws-auth-fn \
+  --query 'Configuration.{Runtime:Runtime,LastModified:LastModified,CodeSize:CodeSize}'
 ```
 
 Cross-reference `LastModified` against the infra pipeline deploy time in the
 ledger. CodeSize for `oxo-ws-fn` at slice 005 baseline is approximately 6054 bytes.
 
-### Stack outputs
+### Authorizer build identity (oxo-ws-auth-fn)
+
+The authorizer emits a `buildSha` field on every Allow and Deny log line.
+This is the **first** thing to check before any behavioural diagnosis of
+connect-rejection issues.
+
+```bash
+# Fetch the most recent authorizer log lines containing buildSha
+aws logs filter-log-events \
+  --log-group-name /aws/lambda/oxo-ws-auth-fn \
+  --filter-pattern '{ $.buildSha = "*" }' \
+  --limit 5 \
+  --query 'events[*].message'
+```
+
+The `buildSha` value must match the commit SHA for the expected deploy (see
+ledger `deploy` rows for `oxo-online`). If it does not match, the authorizer
+Lambda was not updated — check the infra pipeline run for the latest push to
+`main`.
+
+### Stack outputs (updated for s005-h2)
 
 ```bash
 aws cloudformation describe-stacks --stack-name OxoGameProd \
   --query 'Stacks[0].Outputs'
 ```
 
-Outputs present at slice 005: `HttpApiEndpoint`, `LambdaFunctionName`,
-`WsApiEndpoint`, `WsLambdaFunctionName`.
+Outputs present at slice s005-h2: `HttpApiEndpoint`, `LambdaFunctionName`,
+`WsApiEndpoint`, `WsLambdaFunctionName`. The authorizer and ConnectAttempts
+table are internal CDK-managed resources; they do not appear as named stack
+outputs.
+
+Verify the authorizer is attached to the $connect route:
+
+```bash
+aws apigatewayv2 get-authorizers \
+  --api-id ylbzjuo8lf \
+  --query 'Items[?Name==`oxo-ws-connect-authorizer`].{Type:AuthorizerType,Uri:AuthorizerUri}'
+```
+
+Expected: `AuthorizerType=REQUEST`, `AuthorizerUri` containing `oxo-ws-auth-fn/invocations`.
 
 ---
 
@@ -78,11 +114,17 @@ Browser
   |               |-- /config.js    --> S3 (window.OXO_CONFIG, no-cache)
   |               `-- /api/*        --> HTTP API (CachingDisabled)
   |                                     POST /api/games -> oxo-game-fn
+  |                                       response: {gameId, code, wsToken}
   |
   `-- WSS direct (not via CloudFront, NO WAF)
         wss://ylbzjuo8lf.execute-api.eu-west-2.amazonaws.com/prod
-          Interim flood control: stage throttle rate=20/s burst=40 (account-level)
-          $connect   -> oxo-ws-fn
+          Stage throttle: rate=20/s burst=40 (account-level)
+          $connect -> oxo-ws-auth-fn (REQUEST authorizer, cache TTL=0)
+                        |-- host: verifies ?wsToken= (HMAC-SHA256, exp 60s)
+                        |-- guest: verifies ?code= (DynamoDB GSI lookup)
+                        |-- per-IP budget: oxo-connect-attempts table (~20/5min)
+                        Allow -> oxo-ws-fn $connect handler
+                        Deny  -> HTTP 403 upgrade (oxo-ws-fn NOT invoked)
           register   -> oxo-ws-fn
           join       -> oxo-ws-fn
           $disconnect -> oxo-ws-fn (stub; returns 200, no write)

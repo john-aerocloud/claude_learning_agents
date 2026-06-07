@@ -79,6 +79,13 @@ The same rules apply, with these differences:
 5. Wait on the waiting screen. When your friend joins, both screens
    automatically transition to the game board.
 
+**Authentication is handled automatically.** When you click Play Online, the
+server returns a short-lived connection token alongside the game code. The
+browser appends it to the WebSocket URL invisibly — you never see or type it.
+Similarly, when a guest enters a code and clicks Join, the browser uses the
+code directly as its credential for the WebSocket connection. No additional
+steps are required.
+
 **If the backend is unavailable:** the UI displays "Could not start online game
 — please try again". The mode selector remains usable and no page reload is
 needed. The browser will not show a blank white screen.
@@ -242,7 +249,13 @@ pipeline can update Lambda code.
 - **Rate limiting on game creation.** A WAF rate rule limits POST /api/games to
   100 requests per 5 minutes per IP. If exceeded, the server returns HTTP 429
   and the UI shows "Could not start online game — please try again". Wait a few
-  minutes and try again. This limit only applies to the game-creation step; the
-  WebSocket (join/play) connection is separate.
+  minutes and try again. This limit only applies to the game-creation step.
+- **Per-IP WebSocket connection budget.** If many rapid connection attempts come
+  from the same network (approximately more than 20 within a 5-minute window),
+  subsequent connections from that IP are temporarily blocked. The block
+  self-clears automatically when the 5-minute window expires — no manual action
+  is required. This is most likely to affect automated test suites or scripts
+  making many rapid connections; it is unlikely to affect normal play. This
+  control is best-effort: IP-cycling can bypass it (caveat OR-H2-a).
 - Mobile layout is functional but not optimised for small screens.
 - There is no undo, no move history, and no score tally across sessions.

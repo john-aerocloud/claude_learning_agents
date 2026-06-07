@@ -25,14 +25,18 @@ flowchart TD
 
   %% ---- ADAPTERS + handler (declared; implementing edges land per step) ----
   wsMoveHandler["ws-move-handler<br/>ws/move-handler.ts (UC3) — parse, bind identity,<br/>call domain, write, relay"]
-  adapterGamesDdb["adapter-games-ddb<br/>ws/adapters/games-ddb.ts (UC2) — conditional UpdateItem CAS"]
+  adapterGamesDdb["adapter-games-ddb<br/>ws/adapters/games-ddb.ts (UC2) — conditional UpdateItem CAS"]:::changed
   adapterRelayMgmt["adapter-relay-mgmt<br/>ws/adapters/relay-mgmt.ts (UC3) — @connections POST"]
   adapterLocalStore["adapter-local-store<br/>src/app/local/adapters/local-store.ts (UC5) — in-memory CAS"]
   adapterLocalRelay["adapter-local-relay<br/>src/app/local/adapters/local-relay.ts (UC5) — records posts"]
   spaOnlineMove["spa-online-move<br/>src/app/src/game (UC4) — move-send + render-on-broadcast"]
 
+  %% ---- Edges ----
+  %% R2.1 (this commit): games-ddb adapter implements the Games store port.
+  adapterGamesDdb -.->|implements| portGameStore
+  linkStyle 0 stroke:#d50000,stroke-width:3px;
+
   %% ---- Edges land in their own steps (not yet drawn): ----
-  %% R2.1: adapterGamesDdb -.implements.-> portGameStore
   %% R3.1: wsMoveHandler --> domainMove / portGameStore / portRelay / portGameLookup
   %% R3.3: adapterRelayMgmt -.implements.-> portRelay
   %% R5.1: adapterLocalStore -.implements.-> portGameStore ; adapterLocalRelay -.implements.-> portRelay

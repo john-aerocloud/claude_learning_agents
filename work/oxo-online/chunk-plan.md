@@ -18,7 +18,7 @@ and marks actuals when a slice is delivered.
 | C1 | Deployable shell | delivered | 1 (s001) | 0 | — |
 | C2 | Local two-player game | delivered | 1 (s002) | 0 | — |
 | C3 | Single-player vs AI | delivered | 1 (s003) | 0 | — |
-| C4 | Online two-player match | in-progress | 6 (s004, s005-h1, s005, s005-h2, s006, s007) | 2 (s008, s005-h3) | s008 share-link (in-planning — C4-closing) |
+| C4 | Online two-player match | **complete** | 8 (s004, s005-h1, s005, s005-h2, s006, s007, s008, s005-h3) | 0 | — |
 | C5 | Leaderboard | not started | 0 | 3 (s009–s011) | s009 record-game-result |
 | C6 | Player identity (lightweight) | not started | 0 | 2 (s012–s013) | s012 display-name-entry |
 | C7 | In-game chat | not started | 0 | 2 (s014–s015) | s014 in-game-message-send |
@@ -113,10 +113,12 @@ shown to both players; disconnection is handled gracefully. No accounts required
 | s005-h2 — join-token / $connect authorization | delivered | 2026-06-07 | REQUEST authorizer on $connect; HMAC-signed wsToken (host); code-based guest auth; per-IP connect budget via ConnectAttempts table; 17/17 ACs pass |
 | s006 — move relay + server-authoritative play | delivered | 2026-06-07 | Server-authoritative move relay live; 16/16 prod ACs; p95 move latency 308ms; zero board divergence; S1a forged-gameId rejected; win/draw detection server-side; full game playable between two browsers |
 | s007 — disconnect & timeout handling | delivered | 2026-06-07 | $disconnect Lambda live; 17/17 ACs pass; Games status=abandoned on disconnect; survivor notified within 10s and returned to mode selector without reload; Connections row deleted; IMP-008 WAF runner-IP exclusion delivered |
+| s008 — share-link UX | delivered | 2026-06-07 | Deep-link URL (`/join/<code>`) live; Copy-link control on waiting screen; SM-5 (C4 done-condition proof): two players via share link, full game under 5 min |
+| s005-h3 — guaranteed code uniqueness | in-planning | — | Closes OI-3; final C4-adjacent hardening residual |
 
-**Remaining forecast (s008, s005-h3) — ordered thinnest-first:**
+**C4 done condition: MET.** Proven by s008 SM-5 (two players, different browsers, via share link, intent→result under 5 min). All elements in place: game play (s006), disconnect (s007), frictionless share (s008). s005-h3 is the final correctness-hardening residual on the C4 surface — it does not re-open C4's done-condition.
 
-**C4 done condition:** Proven by s008 SM-5 (two players, different browsers, via share link, intent→result under 5 min). All elements now in place: game play (s006), disconnect (s007), frictionless share (s008).
+**Remaining forecast:** none — C4 is complete. s005-h3 (in-planning) closes the last integrity risk on the live C4 surface before C5 opens.
 
 ### s005 — join-by-code + WebSocket connect [DELIVERED 2026-06-06]
 **Scope:** A second player enters the 6-char code on a new join screen; both
@@ -246,9 +248,9 @@ waiting-host abandonment UX, leaderboard write on abandonment, game history.
 
 See slices/s007-disconnect/slice.md.
 
-### s008 — share-link UX + C4 done condition [IN PLANNING — SEL-S008]
+### s008 — share-link UX + C4 done condition [DELIVERED 2026-06-07 — SEL-S008]
 
-**This is the C4-closing slice.** C4 done-condition proven by SM-5.
+**This was the C4-closing slice.** C4 done-condition proven by SM-5.
 
 **Scope:** The 6-char code is also presented as a copyable deep-link URL
 (`https://<domain>/join/<code>`). A "Copy link" control appears on the waiting
@@ -274,6 +276,32 @@ CloudFront WS single-origin proxying (OI-5 closed).
 - SM-5 (C4 done-condition proof): Two players in different browsers complete a full game via share link; elapsed time from host creating game to result screen is under 5 minutes.
 
 See slices/s008-share-link/slice.md.
+
+### s005-h3 — guaranteed code uniqueness [IN PLANNING — SEL-S005H3] — closes OI-3
+
+**This is the final C4-adjacent hardening residual.** It closes OI-3 (Gate-3
+s005 security review open risk). C4's done-condition is already met (s008 SM-5);
+this slice corrects a structural correctness hole on the live C4 surface.
+
+**Scope:** The create-game Lambda must guarantee that the 6-char code it assigns
+is unique across all current `waiting` games, enforced at the DynamoDB storage
+layer (not in-memory). A collision must trigger a server-side retry with a fresh
+code; the client sees no change (`{gameId, code, wsToken}` contract unchanged).
+
+**Product intent:** A conditional write (e.g. conditional `PutItem` on a `Codes`
+table keyed by `code`, or a GSI-based uniqueness guard via `ConditionExpression`)
+so that two concurrent Lambda invocations cannot race to assign the same code.
+Final mechanism: architect decides.
+
+**Success measures:**
+- SM-1: Synthetic-duplicate-injection test confirms retry produces a unique code.
+- SM-2: N=50 concurrent `POST /api/games` calls yield all-distinct codes; no two
+  `waiting` items share a `code` in DynamoDB.
+- SM-3: Client contract unchanged — still HTTP 201 `{gameId, code, wsToken}`.
+- SM-4: Exhausted-retry path (5+ forced collisions) returns a 5xx (not a silent
+  wrong code); covered by unit test.
+
+See slices/s005-h3-code-uniqueness/slice.md.
 
 ---
 

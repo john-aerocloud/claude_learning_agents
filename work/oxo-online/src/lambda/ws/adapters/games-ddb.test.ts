@@ -9,8 +9,12 @@ import {
   PutCommand,
   DeleteCommand,
 } from '@aws-sdk/lib-dynamodb';
-import { DdbGamesStore, MOVE_CONDITION_EXPRESSION } from './games-ddb';
-import { MoveConditionFailed } from '../../move/ports';
+import {
+  DdbGamesStore,
+  MOVE_CONDITION_EXPRESSION,
+  ABANDON_CONDITION_EXPRESSION,
+} from './games-ddb';
+import { MoveConditionFailed, AbandonConditionFailed } from '../../move/ports';
 
 // @covers adapter-games-ddb
 // @covers port-game-store
@@ -230,5 +234,65 @@ describe('MOVE_CONDITION_EXPRESSION — code-policy pin (AC2.6 / S3)', () => {
     expect(MOVE_CONDITION_EXPRESSION).toContain('#status = :active');
     expect(MOVE_CONDITION_EXPRESSION).toContain('currentTurn = :expRole');
     expect(MOVE_CONDITION_EXPRESSION).toContain('version = :expVersion');
+  });
+});
+
+// s007 UC1-S4 — the $disconnect abandon write. ONE conditional UpdateItem
+// flipping status active→abandoned, conditioned on status=:active (S2 — the
+// won/drawn/already-abandoned guard is the CONDITION, not code alone). A failed
+// condition is a legitimate "not active" outcome surfaced as AbandonConditionFailed
+// (no retry, no partial write). Code↔policy pin: still only GetItem/UpdateItem on
+// Games — no new command type or table (S5).
+describe('DdbGamesStore.abandonGame — conditional active→abandoned (AC1.1, S2)', () => {
+  it('issues ONE UpdateItem with the status=:active condition and SET status=:abandoned', async () => {
+    ddbMock.on(UpdateCommand).resolves({});
+    await store().abandonGame('g-1');
+    const calls = ddbMock.commandCalls(UpdateCommand);
+    expect(calls).toHaveLength(1);
+    const input = calls[0].args[0].input;
+    expect(input.TableName).toBe('oxo-games');
+    expect(input.Key).toEqual({ gameId: 'g-1' });
+    expect(input.ConditionExpression).toBe(ABANDON_CONDITION_EXPRESSION);
+    expect(input.UpdateExpression).toContain('#status = :abandoned');
+    expect(input.ExpressionAttributeNames).toMatchObject({ '#status': 'status' });
+    expect(input.ExpressionAttributeValues).toMatchObject({
+      ':active': 'active',
+      ':abandoned': 'abandoned',
+    });
+  });
+
+  it('surfaces ConditionalCheckFailed as AbandonConditionFailed (no retry, AC1.7/T4)', async () => {
+    ddbMock.on(UpdateCommand).rejects(
+      Object.assign(new Error('cond'), { name: 'ConditionalCheckFailedException' }),
+    );
+    await expect(store().abandonGame('g-1')).rejects.toBeInstanceOf(AbandonConditionFailed);
+    // reject-over-retry: exactly ONE UpdateItem.
+    expect(ddbMock.commandCalls(UpdateCommand)).toHaveLength(1);
+    const line = logs.find((l) => l.event === 'abandon_condition_failed');
+    expect(line?.category).toBe('data');
+  });
+
+  it('a DDB 5xx logs EXTERNAL_DEPENDENCY and rethrows (availability)', async () => {
+    ddbMock.on(UpdateCommand).rejects(
+      Object.assign(new Error('boom'), { $metadata: { httpStatusCode: 500 } }),
+    );
+    await expect(store().abandonGame('g-1')).rejects.toThrow();
+    const line = logs.find((l) => l.event === 'abandon_write_failed');
+    expect(line?.category).toBe('EXTERNAL_DEPENDENCY');
+  });
+
+  it('abandonGame issues ONLY UpdateItem — never Query/Scan/Put/Delete (S5 pin)', async () => {
+    ddbMock.on(UpdateCommand).resolves({});
+    await store().abandonGame('g-1');
+    expect(ddbMock.commandCalls(QueryCommand)).toHaveLength(0);
+    expect(ddbMock.commandCalls(ScanCommand)).toHaveLength(0);
+    expect(ddbMock.commandCalls(PutCommand)).toHaveLength(0);
+    expect(ddbMock.commandCalls(DeleteCommand)).toHaveLength(0);
+  });
+});
+
+describe('ABANDON_CONDITION_EXPRESSION — code-policy pin (AC1.8 / S2)', () => {
+  it('includes status = :active so the won/drawn/abandoned guard cannot be silently removed', () => {
+    expect(ABANDON_CONDITION_EXPRESSION).toContain('#status = :active');
   });
 });

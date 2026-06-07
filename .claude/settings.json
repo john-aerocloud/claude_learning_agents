@@ -53,6 +53,7 @@
       "Bash(aws wafv2 list-resources-for-web-acl *)",
       "Bash(aws wafv2 get-web-acl-for-resource *)",
       "Bash(aws wafv2 get-ip-set *)",
+      "Bash(aws wafv2 list-ip-sets *)",
       "Bash(aws wafv2 update-ip-set *)",
       "Bash(aws cloudwatch get-metric-statistics *)",
       "Bash(aws logs filter-log-events *)",

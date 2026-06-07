@@ -14,14 +14,20 @@ to know the public surface. Then the change-impact model in
 `work/<project>/architecture/dependencies/*.mmd` — you plan from it (below).
 
 ## Plan from the change map, then validate
-Before exercising anything, diff the dependency model since the last validated
-sha (`git diff <last-validated-sha> -- work/<project>/architecture/dependencies/`
-plus the `classDef changed` marks). The changed nodes/edges ARE your scope:
-1. Write a **test plan** as a tick-off list in the slice directory
-   (`slices/<nnn>-<slug>/test-plan.md`): each changed node/edge → the specs
-   that cover it (`@covers <node-id>` tags; `make impacted-tests` when IMP-007
-   lands) → planned new specs for uncovered changed areas. Tick items off as
-   validation progresses — the plan is the honest record of coverage vs scope.
+Before exercising anything, derive your scope mechanically from the dependency
+model — the changed nodes/edges ARE your scope:
+1. Run `make impacted-tests SINCE=<last-validated-sha> PROJECT=<project>`. It
+   diffs `work/<project>/architecture/dependencies/*.mmd` (added/removed nodes
+   plus working-tree `classDef changed` marks) against the committed `@covers
+   <node-id>` tags and emits two lists that ARE your **test plan** tick-off:
+   **IMPACTED SPECS** (changed node → covering spec) and **UNCOVERED CHANGED
+   NODES** (changed node with no covering spec). Capture them as
+   `slices/<nnn>-<slug>/test-plan.md` and tick items off as validation
+   progresses — the plan is the honest record of coverage vs scope. The
+   uncovered list is your new-spec work (write the spec or record an explicit
+   waiver per item). The tool's exit 2 on any uncovered node is ADVISORY (your
+   tick-off, not CI-blocking) — never skip the uncovered list because it is
+   non-empty.
 2. **Reassess validity, don't just re-run**: when a node a spec covers has
    changed, ask whether the spec's assertions still encode the contract. A
    green-but-stale spec is a false assurance — a covered contract spec needs

@@ -1,15 +1,20 @@
-%% oxo-online runtime data-flow — s007 edition (process §12a)
+%% oxo-online runtime data-flow — s008 edition (process §12a)
 %% Platform GATES are explicit nodes. Non-obvious platform semantics are named ON the node.
-%% This file is the TESTER's planning input. classDef changed marks THIS slice's (s007) delta.
+%% This file is the TESTER's planning input. classDef changed marks THIS slice's (s008) delta.
 %% Granularity: module / gate level (coarse). Built scope only (deferred items are NOT drawn).
 %% s007 marks: the $disconnect path becomes REAL (abandon+notify+clean up) and the
 %% CloudFront WAF gate gains the oxo-test-runner-ips IP-set scope-down annotation (IMP-008).
+%% s008 (CLIENT-ONLY / arch-lite): NO new platform-gate node, NO new data flow. The only
+%% delta is that the EXISTING CloudFront SPA-fallback gate (403/404 -> 200 + /index.html)
+%% now ALSO serves deep-link path /join/<code> so React Router resolves it client-side.
+%% Marked `changed` only to make the tester plan the deep-link-boots-SPA prod smoke (T1).
+%% The deep-link join itself reuses the EXISTING WS $connect?code + join path UNCHANGED.
 
 flowchart TD
 
   %% ---- Edge / SPA path (HTTPS) ----
   player(["Player browser / SPA"]):::actor
-  cfwaf["CloudFront + WAFv2 WebACL (global, us-east-1 scope)<br/>GATE: rate 100/5min per IP + IP-reputation, DEFAULT-ALLOW.<br/>WAF rate rule = SLIDING 300s window, ~30s eval cadence + propagation<br/>(sustained traffic trips it, a short burst can slip through).<br/>Block=403; CF maps 403 to index.html (keep block code DISJOINT, e.g. 429).<br/>s007/IMP-008: rate rule scope-down = NOT(IPSet oxo-test-runner-ips) so RUNNER<br/>IPs bypass the COUNT (Block+limit UNCHANGED for all other IPs). IP set is<br/>TRANSIENT: added per smoke run, removed by trap, drained <=24h. Deploy-role mutate only."]:::gate
+  cfwaf["CloudFront + WAFv2 WebACL (global, us-east-1 scope)<br/>GATE: rate 100/5min per IP + IP-reputation, DEFAULT-ALLOW.<br/>WAF rate rule = SLIDING 300s window, ~30s eval cadence + propagation<br/>(sustained traffic trips it, a short burst can slip through).<br/>Block=403; CF maps 403 to index.html (keep block code DISJOINT, e.g. 429).<br/>SPA-FALLBACK: CustomErrorResponses 403 AND 404 -> 200 + /index.html (ttl 0);<br/>S3-OAC 403s a MISSING key, so an unknown path (e.g. /join/&lt;code&gt;) boots the SPA<br/>and React Router routes it CLIENT-SIDE. (s008 deep-link relies on this EXISTING rule;<br/>OI-31: WAF block code MUST stay disjoint from this list or blocks become invisible.)<br/>s007/IMP-008: rate rule scope-down = NOT(IPSet oxo-test-runner-ips) so RUNNER<br/>IPs bypass the COUNT (Block+limit UNCHANGED for all other IPs). IP set is<br/>TRANSIENT: added per smoke run, removed by trap, drained <=24h. Deploy-role mutate only."]:::gate
   s3[("S3 web bucket<br/>private, OAC-only; serves SPA + OXO_CONFIG runtime cfg incl. wsUrl + buildSha")]:::store
   httpapi["API Gateway HTTP API v2<br/>GATE: route POST /games only. NO stage WAF (CF WAF covers /api/*).<br/>NOT WAFv2-associable (v2 API). TLS1.2+."]:::gate
   gamefn["oxo-game-fn (Lambda)<br/>create-game: PutItem Games; mints host wsToken (HMAC, 60s exp)"]:::compute
@@ -100,3 +105,11 @@ flowchart TD
   %% games: active->abandoned transition; relay: 1-post survivor notify;
   %% cfwaf: IMP-008 scope-down; wsauth: runner-exemption check; attempts: EXEMPT# namespace.
   %% class wsfn,conn,games,relay,cfwaf,wsauth,attempts changed; — CLEARED
+
+  %% ---- s008 CHANGED marks (CLIENT-ONLY / arch-lite — tester plans from these) ----
+  %% NO new node, NO new edge, NO new platform gate, NO new data flow.
+  %% cfwaf: ONLY mark — the EXISTING SPA-fallback (403/404 -> 200 + /index.html) now also
+  %%   serves the deep-link path /join/<code> so React Router resolves it client-side.
+  %%   Tester plans the deep-link-boots-SPA prod smoke (T1) + SM-5 two-browser e2e from this.
+  %%   The deep-link JOIN reuses the EXISTING WS $connect?code + join path UNCHANGED (no edge change).
+  class cfwaf changed;

@@ -477,3 +477,7 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T19:58:58Z,oxo-online,11,s008-share-link,product,task_start,,na,S008-SLICE,slice-next: propose s008 share-link slice + chunk-plan actuals + C4 done-condition framing
 2026-06-07T19:59:42Z,oxo-online,1,s008,product,task_start,,na,S008-SLICE,s008 share-link UX slice definition — completes C4
 2026-06-07T20:01:22Z,oxo-online,1,s008,product,task_end,,success,S008-SLICE,"slice.md written; chunk-plan updated (s007 delivered, s008 in-planning, C4 done-condition pinned to SM-5)"
+2026-06-07T20:05:49Z,oxo-online,11,s008-share-link,orchestrator,gate,,success,GATE-2-S008,slice accepted + standing approval gates 3+4
+2026-06-07T20:05:49Z,oxo-online,11,s008-share-link,solution-architect,task_start,,na,S008-DELTA,arch-lite delta + security review (client-only) + data-flow.mmd mark
+2026-06-07T20:07:15Z,oxo-online,11,s008-share-link,solution-architect,task_start,,na,S008-DELTA,arch-lite review: verify CloudFront SPA-fallback covers /join/<code>; share-link deep-route delta + security conclusion
+2026-06-07T20:09:38Z,oxo-online,11,s008-share-link,solution-architect,task_end,,success,S008-DELTA,"arch-lite CONFIRMED: CloudFront 403/404->200+index.html SPA-fallback already serves /join/<code> (verified in oxo-online-shell-stack.ts); client-only delta, no infra/IAM/CSP change; security §9a auto-accept (code-in-URL = same OR-H2-b capability, threat model unchanged)"

@@ -16,7 +16,7 @@ is recorded; later chunks revise this when value is re-sliced.
 |-----|---------|--------|
 | **[C1]** | Needed for Chunk 1 (deployable shell) | delivered (slice 001) |
 | **[C2-3]** | Local game + AI — client-only, no new infra | **current** (C2 = slice 002, local game, delivered; C3 = AI, in progress) |
-| **[C4]** | Online match — first stateful backend + realtime | in progress (s004 create ✓; s005 join/WS ✓; s005-h2 connect-auth ✓; s006 move relay + server-authoritative win/draw ✓; **s007 $disconnect abandon+notify — current**) |
+| **[C4]** | Online match — first stateful backend + realtime | s004 create ✓; s005 join/WS ✓; s005-h2 connect-auth ✓; s006 move relay + server-authoritative win/draw ✓; s007 $disconnect abandon+notify ✓; **s008 share-link deep-route (client-only) — current, COMPLETES C4** |
 | **[C5]** | Leaderboard — first durable persistence | not started |
 | **[C6]** | Player identity — session/display name | not started |
 | **[C7]** | In-game chat — reuses C4 realtime transport | not started |
@@ -305,6 +305,17 @@ authorizer built (s005-h2); move relay + server-authoritative win/draw built
   against the human (X), composed with the existing engine; plus a mode selector.
   No network, no persistence, no backend, no infra/IAM change. < 200ms client-side.
   See `architecture/deltas/003-ai-opponent.md`.
+- **[s008] Share-link is CLIENT-ONLY (arch-lite)** — the SPA gains a React Router
+  route `/join/:code` (URL-param pre-fill + one-click join, reusing the existing
+  WS `$connect?code`+`join` path) and a copy-to-clipboard control. **No backend,
+  no infra, no IAM, no CloudFront/WAF/CSP change.** It relies on the EXISTING
+  CloudFront `errorResponses` SPA-fallback (403/404→200+`/index.html`, in
+  `oxo-online-shell-stack.ts`) to serve the unknown `/join/<code>` path so React
+  Router can route it client-side — VERIFIED at the CDK source, not assumed. The
+  code-in-a-shareable-URL is the SAME OR-H2-b capability credential already shown
+  on screen and typed, in a different carrier — threat model unchanged. WS stays
+  DIRECT (OI-5 single-origin WS proxying remains NOT required). §9a auto-accept.
+  See `architecture/deltas/008-share-link.md`.
 
 ### Game integrity: server-authoritative
 - From C4 the **server owns the board**. Clients send a proposed move

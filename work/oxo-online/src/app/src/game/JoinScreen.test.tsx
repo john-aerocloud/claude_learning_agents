@@ -72,6 +72,39 @@ describe('JoinScreen — code input + submit + connecting indicator (B1, F3, F6)
   });
 });
 
+// s007 S007-RENDER-FIX — the LIVE transport seam UC3's mocked-socket component
+// tests could not see. The guest owns its socket through JoinScreen; the
+// $disconnect handler posts {type:'opponent-disconnected'} to the survivor as a
+// normal MESSAGE frame over THAT guest connection. JoinScreen must FORWARD it to
+// the parent (onGameReady) — exactly as it forwards board-update/game-over —
+// so GameRoot's handler runs its disconnect branch and the survivor sees the
+// message. Without this branch the frame falls through every if/else and is
+// silently dropped: the survivor browser never renders the message (the gap
+// UC1's stand-up probe found).
+describe('JoinScreen — opponent-disconnected forwarding (s007 S007-RENDER-FIX, F1/T2)', () => {
+  it('forwards a post-game-ready opponent-disconnected frame to the parent', async () => {
+    const m = mockFactory();
+    const onGameReady = vi.fn();
+    render(<JoinScreen connect={m.factory} onGameReady={onGameReady} />);
+    await userEvent.type(screen.getByLabelText(/game code/i), 'ABC234');
+    await userEvent.click(screen.getByRole('button', { name: /join/i }));
+    // Guest is paired and playing.
+    act(() =>
+      m.opts?.onMessage({ type: 'game-ready', role: 'guest', gameId: 'g-1' }),
+    );
+    onGameReady.mockClear();
+    // The opponent's $disconnect abandons the active game and posts ONE
+    // opponent-disconnected frame to the survivor (this guest).
+    act(() => m.opts?.onMessage({ type: 'opponent-disconnected' }));
+    // It MUST reach the parent so GameRoot can show the survivor message +
+    // return to the mode selector. (Routing parity with board-update/game-over.)
+    expect(onGameReady).toHaveBeenCalledWith(
+      { type: 'opponent-disconnected' },
+      m.socket,
+    );
+  });
+});
+
 describe('JoinScreen — error-frame messages (DEFECT-005-001 Bug B; B2, F3/F4/F9, S3)', () => {
   // Bug B: the codes now arrive as a {type:'error', code, message} MESSAGE
   // frame, NOT as a WS close code (which the platform cannot deliver). The UI

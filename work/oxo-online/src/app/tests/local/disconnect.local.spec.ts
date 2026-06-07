@@ -55,8 +55,12 @@ async function openGuest(page: Page): Promise<void> {
   });
 }
 
-// SKIP until UC1-S6 (local stand-up $disconnect parity) lands — see file header.
-test.describe.skip('s007 UC3 local stand-up — survivor flow (real browser)', () => {
+// UN-SKIPPED (s007 S007-RENDER-FIX): UC1-S6 local $disconnect parity has landed
+// (server.ts runs handleLocalDisconnect on close + posts the survivor frame).
+// This honest reproduction is RED because the guest-side JoinScreen drops the
+// opponent-disconnected frame (no routing branch) — the live transport seam the
+// SPA component tests (mocked socket) cannot see.
+test.describe('s007 UC3 local stand-up — survivor flow (real browser)', () => {
   // AC3.1 + AC3.2 + T2 — host closes; survivor sees the message and returns to
   // the mode selector without a reload.
   test('survivor sees "Your opponent disconnected." and returns to the mode selector', async ({
@@ -88,10 +92,16 @@ test.describe.skip('s007 UC3 local stand-up — survivor flow (real browser)', (
       ).toBeVisible();
       await expect(guest.getByTestId('online-role')).toHaveCount(0);
 
-      // Clean restart: the survivor can immediately start a fresh online game.
+      // Clean restart (F2/T6): the survivor immediately starts a FRESH online
+      // game with no residual state. Against the local stand-up the host's
+      // register short-circuits to game-ready (single-game server), so the
+      // fresh session lands on the online board as X — the same contract
+      // `openHost` asserts. Reaching a clean `You are X` over a NEW socket (no
+      // prior board, gameId, or "You are O" survivor role retained) proves the
+      // clean restart the abandoned session did not leak into.
       await guest.getByTestId('back-to-menu').click();
       await guest.getByRole('button', { name: STABLE.playOnline }).click();
-      await expect(guest.getByText(/waiting for opponent/i)).toBeVisible({
+      await expect(guest.getByTestId('online-role')).toHaveText('You are X', {
         timeout: 10_000,
       });
     } finally {

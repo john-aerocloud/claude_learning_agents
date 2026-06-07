@@ -109,9 +109,16 @@ export function JoinScreen({ connect, onGameReady }: JoinScreenProps) {
           onGameReady?.(message, socketRef.current as GameSocket);
         } else if (
           message.type === 'board-update' ||
-          message.type === 'game-over'
+          message.type === 'game-over' ||
+          message.type === 'opponent-disconnected'
         ) {
-          // Post-game-ready relay frames are routed to the parent's move loop.
+          // Post-game-ready relay frames are routed to the parent's handler.
+          // s007 S007-RENDER-FIX: opponent-disconnected is one of these — the
+          // $disconnect handler posts it to the survivor over THIS guest socket
+          // as a normal MESSAGE frame. It MUST be forwarded (not dropped) so
+          // GameRoot shows the survivor message + returns to the mode selector.
+          // Routing parity with board-update/game-over closes the live-transport
+          // seam the mocked-socket component tests could not see (F1/T2).
           onGameReady?.(message, socketRef.current as GameSocket);
         } else if (message.type === 'error') {
           // Bug B: failure arrives as an error MESSAGE frame. It is

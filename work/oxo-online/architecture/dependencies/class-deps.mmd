@@ -109,6 +109,15 @@ flowchart TD
   spaOnlineDisconnect["spa-online-disconnect<br/>src/app/src/game/GameRoot.tsx (UC3) — opponent-disconnected handler<br/>message + mode-selector return (no reload) + socket close + clean restart"]:::s007changed
   spaOnlineDisconnect -->|receives opponent-disconnected / close| spaWsClient
   linkStyle 14 stroke:#1565c0,stroke-width:3px;
+  %% S007-RENDER-FIX: the GUEST owns its socket through JoinScreen, so a survivor
+  %% (guest) receives opponent-disconnected as a normal MESSAGE frame over the
+  %% JoinScreen socket. JoinScreen MUST forward it to GameRoot's handler (routing
+  %% parity with board-update/game-over) or the frame is dropped and the survivor
+  %% never renders the message. This forward edge was an UNMARKED dependency in
+  %% the first edition — the defect UC1's stand-up probe found. Marked now.
+  spaJoinScreen["spa-join-screen<br/>src/app/src/game/JoinScreen.tsx — guest socket owner<br/>forwards game-ready/board-update/game-over/opponent-disconnected to GameRoot"]:::s007changed
+  spaJoinScreen -->|forwards opponent-disconnected frame| spaOnlineDisconnect
+  linkStyle 15 stroke:#1565c0,stroke-width:3px;
 
   %% s006 changed marks CLEARED (2026-06-07 — tester consumed, UC6 prod validation PASS).
   %% All nodes were new in this first-edition; all are now delivered/stable.

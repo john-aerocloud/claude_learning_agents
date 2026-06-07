@@ -5,15 +5,25 @@ import type { APIGatewayProxyEventV2 } from 'aws-lambda';
 import { handler, createHandler } from './handler';
 import { verify } from '../token/token';
 import type { SecretSource } from '../token/ports';
+import { CodeCollision, type CodeReservationPort } from './codes/ports';
 
 const ddbMock = mockClient(DynamoDBDocumentClient);
 
 const TEST_SECRET = 'unit-test-shared-secret-32bytes!';
 const fakeSecretSource: SecretSource = { get: async () => TEST_SECRET };
+
+// s005-h3 (UC2): the existing s004 contract tests run against a handler whose
+// CodeReservation port ALWAYS succeeds (no collision) — so they observe the
+// unchanged 201 {gameId, code, wsToken} contract exactly as before.
+const alwaysReserve: CodeReservationPort = { reserve: async () => {} };
+
 // The default exported handler reads the secret via the production adapter,
 // which would hit SSM; the existing s004 contract tests below run against the
 // port-injected handler so they stay infra-free and independent of A2.
-const testHandler = createHandler({ secretSource: fakeSecretSource });
+const testHandler = createHandler({
+  secretSource: fakeSecretSource,
+  codeReservation: alwaysReserve,
+});
 
 const FORBIDDEN = ['O', '0', '1', 'I', 'L'];
 
@@ -183,5 +193,149 @@ describe('handler — default export wires the production SecretSource (S-A1.6 s
     // We do not invoke it here (it would reach SSM); we assert the wiring exists
     // so the deployable entry point is the same shape APIGW invokes.
     expect(typeof handler).toBe('function');
+  });
+});
+
+// ===========================================================================
+// s005-h3 (UC2) — reserve-before-write + bounded retry + retry-cap 5xx.
+// @covers gamesCreateHandler, portCodeReservation (class-deps.mmd s005-h3)
+// ===========================================================================
+
+const PRESEEDED = 'XXXXXX';
+
+/**
+ * A reservation port that COLLIDES the first `collideTimes` reserve calls (as if
+ * the drawn code is already reserved) then succeeds. Records the codes it was
+ * asked to reserve so the test can assert distinct fresh redraws.
+ */
+function collideThenSucceed(collideTimes: number): CodeReservationPort & {
+  reservedCodes: string[];
+} {
+  const reservedCodes: string[] = [];
+  let calls = 0;
+  return {
+    reservedCodes,
+    async reserve(code: string) {
+      calls += 1;
+      reservedCodes.push(code);
+      if (calls <= collideTimes) throw new CodeCollision();
+    },
+  };
+}
+
+describe('handler — AC-1: collision injection retries with a FRESH code', () => {
+  it('on a first-attempt collision, returns 201 with a code != the colliding one', async () => {
+    // generateCode is mocked to return the pre-seeded code on attempt 1, then a
+    // fresh code; the reservation collides on attempt 1 only.
+    const draws = [PRESEEDED, 'FRESH2'];
+    let i = 0;
+    const reservation = collideThenSucceed(1);
+    const h = createHandler({
+      secretSource: fakeSecretSource,
+      codeReservation: reservation,
+      generateCode: () => draws[i++] ?? 'FALLBK',
+    });
+
+    const res = await h(makeEvent());
+    expect(res.statusCode).toBe(201);
+    const body = JSON.parse(res.body as string);
+    // The returned code is the FRESH redraw, never the colliding pre-seeded one.
+    expect(body.code).toBe('FRESH2');
+    expect(body.code).not.toBe(PRESEEDED);
+
+    // reserve was attempted with the colliding code FIRST, then the fresh one.
+    expect(reservation.reservedCodes).toEqual([PRESEEDED, 'FRESH2']);
+
+    // The Games PutItem carries the FRESH code (uniqueness reserved before write).
+    const put = ddbMock.commandCalls(PutCommand);
+    expect(put).toHaveLength(1);
+    const item = put[0].args[0].input.Item as Record<string, unknown>;
+    expect(item.code).toBe('FRESH2');
+    // wsToken is still minted on the (eventually) successful path.
+    expect(body.wsToken).toBeDefined();
+  });
+});
+
+describe('handler — AC-4: retry-cap → HTTP 500, no wsToken, NEVER a duplicate code', () => {
+  it('on 6 consecutive collisions returns 500 with the opaque body and no wsToken', async () => {
+    const logs: Array<Record<string, unknown>> = [];
+    // collide on every draw (more than the N=5 cap) — exhaustion.
+    const reservation = collideThenSucceed(99);
+    const h = createHandler({
+      secretSource: fakeSecretSource,
+      codeReservation: reservation,
+      generateCode: () => PRESEEDED, // always the same already-reserved code
+      buildSha: 'test-build-sha',
+      log: (line) => logs.push(line),
+    });
+
+    const res = await h(makeEvent());
+    expect(res.statusCode).toBe(500);
+    expect(JSON.parse(res.body as string)).toEqual({ error: 'Could not create game' });
+
+    // NO wsToken on the exhaustion path.
+    expect(JSON.parse(res.body as string).wsToken).toBeUndefined();
+
+    // NEVER wrote a (duplicate) game — no Games PutItem on exhaustion.
+    expect(ddbMock.commandCalls(PutCommand)).toHaveLength(0);
+
+    // Exactly N=5 reserve attempts before giving up (the cap).
+    expect(reservation.reservedCodes).toHaveLength(5);
+
+    // ONE structured log line, reason:code-reservation-exhausted, carrying the
+    // attempt count and buildSha (5xx WE own — §5a internal-service signal).
+    const exhausted = logs.filter((l) => l.reason === 'code-reservation-exhausted');
+    expect(exhausted).toHaveLength(1);
+    expect(exhausted[0].attempts).toBe(5);
+    expect(exhausted[0].buildSha).toBe('test-build-sha');
+  });
+});
+
+describe('handler — UC2: a non-collision reservation error is a straight 5xx (not masked as a redraw)', () => {
+  it('propagates an infra fault from reserve to the opaque 500 (no redraw, no write)', async () => {
+    const reservation: CodeReservationPort = {
+      async reserve() {
+        // A non-collision backend failure (throttling / 5xx) — NOT a CodeCollision.
+        throw Object.assign(new Error('throttled'), {
+          name: 'ProvisionedThroughputExceededException',
+          $metadata: { httpStatusCode: 500 },
+        });
+      },
+    };
+    const h = createHandler({
+      secretSource: fakeSecretSource,
+      codeReservation: reservation,
+    });
+    const res = await h(makeEvent());
+    expect(res.statusCode).toBe(500);
+    expect(JSON.parse(res.body as string)).toEqual({ error: 'Could not create game' });
+    // No Games write attempted; the infra fault was not masked as a collision redraw.
+    expect(ddbMock.commandCalls(PutCommand)).toHaveLength(0);
+  });
+});
+
+describe('handler — UC2: reserve happens BEFORE the Games PutItem (order)', () => {
+  it('calls reserve(code, gameId) with the SAME code that the Games item carries', async () => {
+    const seen: Array<{ code: string; gameId: string }> = [];
+    const reservation: CodeReservationPort = {
+      async reserve(code, gameId) {
+        seen.push({ code, gameId });
+      },
+    };
+    const h = createHandler({
+      secretSource: fakeSecretSource,
+      codeReservation: reservation,
+    });
+    const res = await h(makeEvent());
+    expect(res.statusCode).toBe(201);
+    const body = JSON.parse(res.body as string);
+    expect(seen).toHaveLength(1);
+    expect(seen[0].code).toBe(body.code);
+    expect(seen[0].gameId).toBe(body.gameId);
+    const item = ddbMock.commandCalls(PutCommand)[0].args[0].input.Item as Record<
+      string,
+      unknown
+    >;
+    expect(item.code).toBe(seen[0].code);
   });
 });

@@ -561,19 +561,22 @@ exports.handler = async (event) => {
 
     // -------------------------------------------------------------------------
     // REQUEST authorizer attached to the WS API (T1, SYNTH-CONTRACT-H2-1).
-    // IdentitySource = the wsToken + code query-string params (delta §1).
-    // AuthorizerResultTtlInSeconds 0 (T2, §3) — every connect runs the
-    // authorizer so the per-IP counter is accurate.
+    // IdentitySource is OMITTED (DEFECT-H2-002, platform strike 5).
     // -------------------------------------------------------------------------
     const wsAuthorizer = new apigatewayv2.CfnAuthorizer(this, 'WsConnectAuthorizer', {
       apiId: wsApi.ref,
       name: 'oxo-ws-connect-authorizer',
       authorizerType: 'REQUEST',
-      identitySource: [
-        'route.request.querystring.wsToken',
-        'route.request.querystring.code',
-      ],
       authorizerUri: `arn:aws:apigateway:${this.region}:lambda:path/2015-03-31/functions/${wsAuthFunction.functionArn}/invocations`,
+      // Platform semantic (strike 5, DEFECT-H2-002): API Gateway treats MULTIPLE
+      // IdentitySource entries as ALL-REQUIRED (AND) — a $connect missing ANY
+      // listed source is REJECTED BEFORE the authorizer is invoked. Hosts send
+      // only ?wsToken, guests send only ?code; neither sends both, so the prior
+      // two-entry list ([wsToken, code]) rejected EVERY connect pre-invocation
+      // (oxo-ws-auth-fn never ran — no log group). IdentitySource cannot express
+      // OR. Omitting it makes the REQUEST authorizer invoke UNCONDITIONALLY; the
+      // authorizer fn's own logic does the wsToken/code either-or and the
+      // deny-when-absent paths (unit-pinned).
       // Platform semantic (strike 4, run 27085881193): WEBSOCKET APIs REJECT
       // AuthorizerResultTtlInSeconds entirely — WS authorizers never cache, so
       // the delta's no-cache intent (TTL=0) is the inherent behaviour; the

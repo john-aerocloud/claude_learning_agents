@@ -16,6 +16,16 @@ PROJECT ?= $(shell cat work/ACTIVE 2>/dev/null)
 APP     := work/$(PROJECT)/src/app
 INFRA   := work/$(PROJECT)/src/infra
 DORA    := python3 .claude/skills/dora-ledger/scripts/dora.py
+AWS_PROFILE ?= $(shell cat .claude/config/aws-profile 2>/dev/null)
+
+# --- AWS SSO login -------------------------------------------------------------
+# Re-authenticate the project's SSO profile when the cached token has expired
+# (symptom: any aws CLI call fails with "Token has expired and refresh failed").
+# Opens the SSO browser flow for the human to approve; agents may invoke it and
+# wait. Profile comes from .claude/config/aws-profile (aws-profile skill).
+# make sso-login [AWS_PROFILE=dev-int]
+sso-login:
+	aws sso login --profile $(AWS_PROFILE)
 
 # --- DORA ledger -------------------------------------------------------------
 # make dora-record EVENT=validation_run AGENT=tester SLICE=004-create-game \
@@ -106,4 +116,4 @@ synth-infra:
 	npm --prefix $(INFRA) run cdk -- synth $(STACKS) --quiet \
 	  -c githubOrg=$(GH_ORG) -c githubRepo=$(GH_REPO)
 
-.PHONY: dora-record dora-compute validate smoke waf-probe waf-sustained test-app lint-app build-app test-infra synth-infra
+.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained test-app lint-app build-app test-infra synth-infra

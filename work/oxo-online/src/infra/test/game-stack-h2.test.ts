@@ -129,17 +129,26 @@ describe('s005-h2 — authorizer attached to $connect (T1)', () => {
     expect(uri).toMatch(/WsAuthFunction|oxo-ws-auth-fn/);
   });
 
-  it('IdentitySource is the wsToken + code query-string params', () => {
+  // DEFECT-H2-002 pin (platform strike 5): IdentitySource MUST BE ABSENT.
+  // API Gateway treats MULTIPLE identity sources as ALL-REQUIRED (AND): a
+  // $connect missing ANY listed source is rejected BEFORE the authorizer is
+  // invoked. Hosts send only ?wsToken, guests send only ?code — neither sends
+  // both, so the prior two-entry pin (`...wsToken` AND `...code`) caused EVERY
+  // connect to be rejected pre-invocation (oxo-ws-auth-fn never ran). IdentitySource
+  // cannot express OR. A REQUEST authorizer with NO identity source is invoked
+  // UNCONDITIONALLY; the authorizer's own logic handles the wsToken/code
+  // either-or and the deny-when-absent paths (unit-pinned). So we replace the
+  // old two-entry assertion with: the property is omitted entirely.
+  it('IdentitySource is ABSENT — APIGW ANDs multiple sources; either-or is the authorizer fn job (DEFECT-H2-002, strike 5)', () => {
     const t = synth();
     const authorizers = t.findResources('AWS::ApiGatewayV2::Authorizer');
     const reqAuth = Object.values(authorizers).find(
       (a) =>
         (a.Properties as Record<string, unknown>).AuthorizerType === 'REQUEST',
     )!;
-    const ids = (reqAuth.Properties as Record<string, unknown>)
-      .IdentitySource as string[];
-    expect(ids).toContain('route.request.querystring.wsToken');
-    expect(ids).toContain('route.request.querystring.code');
+    expect(
+      (reqAuth.Properties as Record<string, unknown>).IdentitySource,
+    ).toBeUndefined();
   });
 
   // §40 FLIP (Set-B-complete): the staged-OFF guard (cf58... cf54...) that

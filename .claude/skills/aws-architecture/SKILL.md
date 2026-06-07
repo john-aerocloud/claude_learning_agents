@@ -329,4 +329,11 @@ the disjointness, or blocks are invisible at HTTP level.
   {isAuthorized} shape.
 - WEBSOCKET APIs REJECT AuthorizerResultTtlInSeconds outright — WS
   authorizers never cache results; omit the property (no-cache is inherent).
-  Setting it (even to 0) fails CREATE with BadRequestException.
+  Setting it (even to 0) fails CREATE with BadRequestException. (strike 4)
+- IdentitySource lists are ALL-REQUIRED (AND), NOT or. API Gateway rejects a
+  $connect missing ANY listed identity source BEFORE invoking the authorizer
+  (no log group ever appears — false-clean "authorizer never ran"). It cannot
+  express OR. For either-or credentials (e.g. host ?wsToken XOR guest ?code),
+  OMIT IdentitySource entirely — a REQUEST authorizer with no source is invoked
+  UNCONDITIONALLY, and the authorizer fn does the either-or / deny-when-absent
+  logic itself. (strike 5, DEFECT-H2-002)

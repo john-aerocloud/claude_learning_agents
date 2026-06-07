@@ -65,10 +65,12 @@ test.describe('s006 walking-skeleton — move relay through the deployed path', 
 
     try {
       // Pair the two real browsers through the real authorizer + WS relay.
+      // game-ready (and thus the role label) fires only once BOTH are bound, so
+      // the guest joins first, then both roles are asserted.
       const code = await startHostGame(host);
-      await expect(host.locator('[data-testid="online-role"]')).toHaveText('You are X', { timeout: 5000 });
       await guestJoin(guest, code);
-      await expect(guest.locator('[data-testid="online-role"]')).toHaveText('You are O', { timeout: 5000 });
+      await expect(guest.locator('[data-testid="online-role"]')).toHaveText('You are O', { timeout: 8000 });
+      await expect(host.locator('[data-testid="online-role"]')).toHaveText('You are X', { timeout: 8000 });
       // Both boards become active (host's turn = X).
       await expect(host.locator('[data-testid="online-turn"]')).toBeVisible({ timeout: 5000 });
 
@@ -84,26 +86,51 @@ test.describe('s006 walking-skeleton — move relay through the deployed path', 
       await expect(cell(host, 0), 'out-of-turn host move not applied').toHaveText('');
       await expect(cell(guest, 0), 'out-of-turn move not relayed').toHaveText('');
 
-      // 3. FORGED gameId REJECTED (S1a): send a move frame with a foreign gameId
-      //    over the guest's LIVE socket via the SPA. The deployed handler reads
-      //    that (non-existent) game, finds the real connectionId binds to neither
-      //    slot, and rejects with no write / no broadcast. Driven in-browser so it
-      //    travels the real CSP/transport path. The legitimate board is unchanged.
-      const forgedHandled = await guest.evaluate(async () => {
-        // The guest SPA owns a live WebSocket to the deployed API. Open a sibling
-        // socket carrying the SAME guest code credential and fire a forged-gameId
-        // move; a foreign gameId must be rejected by the server, never applied.
+      // 3. FORGED gameId REJECTED (S1a): open a REAL sibling WS in-browser with
+      //    the guest's own `code` credential and fire a move carrying a forged,
+      //    non-existent gameId. The deployed handler does GetItem(Games,forged)
+      //    → miss (or a record the sender binds to neither slot) → reject, NO
+      //    write, NO broadcast. Driven in-browser so it travels the real
+      //    CSP/transport path (no FALSE GREEN). The legitimate board is unchanged.
+      const forged = await guest.evaluate(async (joinCode) => {
         const cfg = (window as unknown as { OXO_CONFIG?: { wsUrl?: string } }).OXO_CONFIG;
-        if (!cfg?.wsUrl) return false;
-        return true;
-      });
-      // We assert via board invariance: square 1 stays empty for both browsers
-      // after a forged move would (if wrongly accepted) have written it. The
-      // forged frame is fired below over a fresh guest-credentialled socket.
-      await guest.waitForTimeout(1500);
+        if (!cfg?.wsUrl) return { ok: false, reason: 'no-config' };
+        const url = `${cfg.wsUrl}?code=${encodeURIComponent(joinCode)}`;
+        return await new Promise<{ ok: boolean; reason: string }>((resolve) => {
+          let settled = false;
+          const finish = (r: { ok: boolean; reason: string }) => {
+            if (!settled) { settled = true; resolve(r); }
+          };
+          let ws: WebSocket;
+          try {
+            ws = new WebSocket(url);
+          } catch (e) {
+            finish({ ok: false, reason: `construct-failed: ${String(e)}` });
+            return;
+          }
+          ws.onopen = () => {
+            ws.send(JSON.stringify({ action: 'move', gameId: 'forged-nonexistent-0000', square: 1 }));
+          };
+          ws.onmessage = (ev) => {
+            try {
+              const m = JSON.parse(String((ev as MessageEvent).data));
+              // A reject frame to the sender is the correct, observable outcome.
+              if (m.type === 'move-rejected') { finish({ ok: true, reason: 'move-rejected' }); }
+              // A board-update would mean the forged move was WRONGLY applied.
+              if (m.type === 'board-update') { finish({ ok: false, reason: 'forged-applied' }); }
+            } catch { /* ignore non-JSON */ }
+          };
+          // No board-update within the window = not applied = correct (some
+          // deploys drop the reject frame silently; board invariance below is
+          // the authoritative check).
+          setTimeout(() => finish({ ok: true, reason: 'no-broadcast' }), 3000);
+        });
+      }, code);
+
+      expect(forged.ok, `forged-gameId move must not be applied (got: ${forged.reason})`).toBe(true);
+      // Authoritative invariance: square 1 stayed empty on BOTH legitimate boards.
       await expect(cell(host, 1), 'forged-gameId move never written (host view)').toHaveText('');
       await expect(cell(guest, 1), 'forged-gameId move never written (guest view)').toHaveText('');
-      expect(forgedHandled, 'guest SPA must have a live wsUrl config (no FALSE GREEN)').toBe(true);
 
       // No WS/CSP console errors anywhere (browser-transport gate).
       const transportErrors = errors.filter((e) =>

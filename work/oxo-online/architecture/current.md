@@ -106,24 +106,32 @@ C4Container
     Container(s3, "S3 web bucket", "Static hosting", "[built s001] React SPA; private, OAC only. s005 adds runtime wsUrl config artifact.")
 
     Container(httpapi, "API Gateway (HTTP)", "HTTPS", "[built s004] POST /games (create). NO stage WebACL (CF WAF covers /api/*).")
-    Container(wsapi, "API Gateway (WebSocket)", "WSS", "[s005] prod stage; routes $connect/$disconnect(stub)/register/join. NO WAF (WAFv2 cannot assoc. API GW v2 — GATE-AMEND-H1-A); flood control = stage throttle 20/40 + reserved-concurrency; per-IP deferred to s005-h2 $connect authorizer.")
+    Container(wsapi, "API Gateway (WebSocket)", "WSS", "[s005] prod stage; routes $connect/$disconnect(stub)/register/join. [s005-h2] $connect has a REQUEST Lambda authorizer (cache TTL 0). NO WAF (WAFv2 cannot assoc. API GW v2 — GATE-AMEND-H1-A); flood control = stage throttle 20/40 + reserved-concurrency + per-IP authorizer budget.")
 
-    Container(gamefn, "oxo-game-fn", "Lambda Node20", "[built s004] create-game; PutItem on Games only")
+    Container(gamefn, "oxo-game-fn", "Lambda Node20", "[built s004] create-game; PutItem on Games only. [s005-h2] also mints host wsToken (HMAC); reads shared secret.")
     Container(wsfn, "oxo-ws-fn", "Lambda Node20", "[s005] $connect/register/join; conditional join write + game-ready fan-out")
+    Container(wsauthfn, "oxo-ws-auth-fn", "Lambda Node20", "[s005-h2] $connect REQUEST authorizer: verify host wsToken / lookup guest code; per-IP budget; Allow/Deny IAM policy. NO ManageConnections, NO Games write.")
 
     ContainerDb(ddb_game, "DynamoDB: Games", "NoSQL", "[built s004] +code GSI & host/guest connId attrs (s005). TTL 24h, SSE, on-demand.")
     ContainerDb(ddb_conn, "DynamoDB: Connections", "NoSQL", "[s005] connectionId -> gameId/role. TTL 2h, SSE, on-demand.")
+    ContainerDb(ddb_attempts, "DynamoDB: ConnectAttempts", "NoSQL", "[s005-h2] sourceIp -> count. TTL 5min, SSE, on-demand. Best-effort per-IP connect budget.")
+    Container(secret, "WS-token secret", "SSM SecureString / Secret", "[s005-h2] 32-byte HMAC key. Encrypted at rest; read-scoped to oxo-game-fn (mint) + oxo-ws-auth-fn (verify) only.")
   }
 
   Rel(player, cf, "Loads SPA + reads wsUrl config", "HTTPS")
   Rel(wafg, cf, "Inspects/rate-limits all requests", "WAF assoc")
   Rel(cf, s3, "Origin fetch", "HTTPS (OAC)")
   Rel(cf, httpapi, "Routes /api/*", "HTTPS")
-  Rel(player, httpapi, "POST /api/games (create)", "HTTPS via CF")
-  Rel(player, wsapi, "Direct WSS: register / join (flood-bounded by stage throttle only)", "WSS (NOT via CloudFront)")
+  Rel(player, httpapi, "POST /api/games (create) -> {gameId, code, wsToken}", "HTTPS via CF")
+  Rel(player, wsapi, "Direct WSS: $connect?wsToken|?code, then register/join", "WSS (NOT via CloudFront)")
 
   Rel(httpapi, gamefn, "Invokes create", "AWS_PROXY")
-  Rel(wsapi, wsfn, "Invokes per message", "AWS_PROXY")
+  Rel(wsapi, wsauthfn, "$connect REQUEST authorizer (Allow/Deny)", "AWS authorizer")
+  Rel(wsapi, wsfn, "Invokes per message (only after Allow)", "AWS_PROXY")
+  Rel(gamefn, secret, "Read HMAC secret (mint wsToken)")
+  Rel(wsauthfn, secret, "Read HMAC secret (verify wsToken)")
+  Rel(wsauthfn, ddb_game, "GetItem code-index (guest code path)")
+  Rel(wsauthfn, ddb_attempts, "UpdateItem ADD (per-IP budget)")
   Rel(gamefn, ddb_game, "PutItem (create)")
   Rel(wsfn, ddb_game, "Query code-index + conditional UpdateItem")
   Rel(wsfn, ddb_conn, "Put/Delete connection")
@@ -133,9 +141,30 @@ C4Container
 
 **Not yet built (target only):** move relay/fan-out of board state,
 server-authoritative win/draw, `$disconnect` cleanup, reconnect, Leaderboard
-table + `oxo-board-fn`, `$connect` capability-token authorizer (s005-h2),
-CloudFront WS proxying. **WAF is now built (s005-h1).** See deltas 005+ for the
+table + `oxo-board-fn`, CloudFront WS proxying. **WAF built (s005-h1); `$connect`
+capability-token + per-IP authorizer built (s005-h2).** See deltas 005+ for the
 deferral list.
+
+**Key s005-h2 (connect-auth) architectural facts:**
+- First **Lambda REQUEST authorizer** on the WS API (new-mechanism, §30 probe
+  required). It gates `$connect`: host presents an HMAC `wsToken` (minted in the
+  `POST /api/games` response, 60s exp), guest presents `?code`; the authorizer
+  Allows/Denies via an **IAM-policy response** (WS APIs use the REST-style
+  `{principalId, policyDocument}` shape, **NOT** the HTTP-v2 simple
+  `{isAuthorized}` shape — pinned). Cache TTL = 0.
+- **Separate function** `oxo-ws-auth-fn` (not folded into `oxo-ws-fn`) for
+  disjoint least-privilege: it gates but cannot act on game state.
+- **Per-IP budget** via `ConnectAttempts` (sourceIp PK, 5-min TTL) — best-effort
+  (read-less counter; IP-cycling caveat). This is the per-IP control WAFv2 cannot
+  provide for a v2 API (h1 reversal-log row now implemented).
+- **Shared HMAC secret** in one SSM SecureString / Secret, read-scoped to
+  `oxo-game-fn` (mint) + `oxo-ws-auth-fn` (verify) only; never in plaintext env.
+- All eu-west-2; in `OxoGameProd`; **no new deploy-role grant** (authorizer +
+  table are CDK/CFN-managed under bootstrap trust); **no manual deploy step**
+  (secret is generated in-stack). Deploy order unchanged.
+- See `architecture/deltas/s005-h2-connect-auth.md`,
+  `architecture/security/lambda-authorizer.md`,
+  `architecture/security/dynamodb-connectattempts.md`.
 
 **Key s005-h1 (WAF) architectural facts (AMENDED 2026-06-06, GATE-AMEND-H1-A):**
 - **Option A rescope:** WAFv2 **cannot** associate with API Gateway **v2** APIs.
@@ -252,10 +281,10 @@ deferral list.
 |------|-----------|------------------|
 | `oxo-cf-oac` | CloudFront (OAC) | `s3:GetObject` on the web bucket only |
 | `oxo-deploy` | GitHub OIDC | `s3:PutObject`/`DeleteObject` on web bucket, `cloudfront:CreateInvalidation`, `lambda:UpdateFunctionCode`, scoped by resource ARN + repo/branch claim. **s005-h1 (amended GATE-AMEND-H1-A):** + scoped `wafv2:` Create/Get/Update/Delete/List/Tag (CloudFront WebACL mgmt) and `cloudfront:UpdateDistribution`/`GetDistribution`/`GetDistributionConfig` (no `wafv2:*`/`cloudfront:*` wildcard; no `iam:*`). The `wafv2:Associate`/`Disassociate`/`ListResourcesForWebACL` grants are **dropped** — the regional WS association is removed (WAFv2 cannot associate API GW v2). See `DEPLOY_ROLE_EXTENSIONS.md`. |
-| `oxo-game-fn` | Lambda (create) | **s004 built:** `dynamodb:PutItem` on `Games` ARN only + own log group. (Target broader RW deferred.) |
-| `oxo-ws-fn` | Lambda (WS join/register) | **s005:** `GetItem`/`Query` on `Games` `code-index` GSI; conditional `UpdateItem` on `Games`; `PutItem`/`DeleteItem` on `Connections`; `execute-api:ManageConnections` on **this WS API ARN only**; own log group |
+| `oxo-game-fn` | Lambda (create) | **s004 built:** `dynamodb:PutItem` on `Games` ARN only + own log group. **s005-h2:** + secret read (`ssm:GetParameter`+`kms:Decrypt` or `secretsmanager:GetSecretValue`) on the **one** shared WS-token secret ARN only (mints host `wsToken`). (Target broader RW deferred.) |
+| `oxo-ws-fn` | Lambda (WS join/register) | **s005:** `GetItem`/`Query` on `Games` `code-index` GSI; conditional `UpdateItem` on `Games`; `PutItem`/`DeleteItem` on `Connections`; `execute-api:ManageConnections` on **this WS API ARN only**; own log group. **No** secret read, **no** `ConnectAttempts` access. |
 | `oxo-board-fn` | Lambda (leaderboard) | RW `Leaderboard` table; read `Games`; CloudWatch Logs (C5 — not built) |
-| `oxo-ws-authorizer` | Lambda ($connect) | **Not built in s005.** WS endpoint is unauthenticated by slice decision (no account system; per-game capability-token authorizer deferred). Recorded as an open risk for the gate. |
+| `oxo-ws-auth-fn` | Lambda ($connect REQUEST authorizer) | **s005-h2 built:** `GetItem`/`Query` on `Games` `code-index` GSI (guest code path); `UpdateItem`/`PutItem` on `ConnectAttempts` only; secret read on the **one** shared WS-token secret ARN; own log group. **NO** `execute-api:ManageConnections`, **NO** `Games` write, **NO** `Connections` access, **NO** `iam:*`/wildcard. Disjoint from `oxo-ws-fn` (least-privilege gate). |
 
 No wildcards on resources; every policy is table-/index-/bucket-/function-/
 API-ARN scoped. Deploy role is constrained to the repo and branch via the OIDC
@@ -272,9 +301,13 @@ API-ARN scoped. Deploy role is constrained to the repo and branch via the OIDC
   (s005-h1, amended GATE-AMEND-H1-A):** global WebACL on CloudFront (`/api/*`,
   100/5min/IP, + IP-reputation managed group, default-allow). **No WS WebACL** —
   WAFv2 cannot associate API GW v2; WS flood control = stage throttle (20/40,
-  account-level) + reserved-concurrency + Connections TTL, with **per-IP WS
-  protection (and `$connect` authorizer) deferred to s005-h2**. No WebACL on the
-  HTTP API stage (CF ACL covers the path). See `architecture/security/wafv2.md`.
+  account-level) + reserved-concurrency + Connections TTL. **Per-IP WS protection
+  and the `$connect` capability-token authorizer are BUILT in s005-h2**
+  (`oxo-ws-auth-fn`: host HMAC `wsToken` / guest `code` gate + best-effort per-IP
+  budget via `ConnectAttempts`; the per-IP control WAFv2 cannot give a v2 API).
+  No WebACL on the HTTP API stage (CF ACL covers the path). See
+  `architecture/security/wafv2.md`, `architecture/security/lambda-authorizer.md`,
+  `architecture/security/dynamodb-connectattempts.md`.
 - **Reliability:** all managed, multi-AZ services; DynamoDB TTL self-heals
   orphaned game/connection state; idempotent move application keyed by
   `(gameId, moveSeq)`.

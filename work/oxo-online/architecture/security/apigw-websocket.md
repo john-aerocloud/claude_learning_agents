@@ -68,14 +68,16 @@ user identity, so binding is **capability-by-connection**:
 - [ ] On `join`, the server writes `guestConnectionId = <the caller's own
       connectionId>` and only if `guestConnectionId` is null and
       `status='waiting'` (conditional write — see no-hijack below).
-- [ ] **Residual risk (accepted/deferred):** because there is no per-game
-      capability token in s005, anyone who learns a code before the host has
-      registered could in principle register/join that game. This is bounded by:
-      the code is high-entropy and short-lived (24h TTL), the host opens its WS
-      and registers immediately on the waiting screen, and the conditional writes
-      make the *first* binder win with no overwrite. A per-game join token minted
-      by create-game (the target `apigw-http.md` control) is **deferred** and is
-      an open risk for the gate.
+- [x] **Residual PARTIALLY CLOSED (s005-h2):** the host now presents a per-game
+      signed `wsToken` (HMAC, 60s) at `$connect`, so the host slot is gated by a
+      capability the create-call minted — the target `apigw-http.md` join-token
+      control. The conditional writes (below) remain the integrity backstop. What
+      **remains open**: the **guest** still presents the `code` as its
+      credential, so a holder of a valid `code` can open a WS before declaring
+      intent to join (a `waiting`/`active` game). Bounded by the no-hijack
+      conditional write (a code-holder still cannot overwrite a bound slot) and by
+      the code's entropy + 24h TTL; **fully closed by identity (C6)**. Carried as
+      OR-H2-b (guest code-as-credential pre-join).
 
 ### No-hijack conditional write (the core integrity control)
 - [ ] The `join` handler's `UpdateItem` on `Games` uses a
@@ -105,14 +107,18 @@ user identity, so binding is **capability-by-connection**:
       `Connections` TTL — see the "Resource exhaustion" block above. This is an
       **interim** measure and is **not per-IP**. See `wafv2.md` and
       `deltas/s005-h1-waf.md` §0.
-- [ ] **Residual (OPEN until s005-h2; accepted at GATE-AMEND-H1-A):** no
-      per-IP WS rate-limiting and no `$connect` capability-token authorizer yet.
-      The interim stage throttle bounds *aggregate* connect/message rate but not
-      any single source IP, and does not *authenticate*. Per-IP rate-limiting +
-      capability check are both re-scoped to the s005-h2 `$connect` **authorizer**
-      (a code-level Lambda authorizer that can rate-limit on source IP — the
-      honest home for the per-IP control WAFv2 cannot provide for a v2 API).
-      Accepted by the human gate as the cost of the platform constraint.
+- [x] **CLOSED (s005-h2):** per-IP WS rate-limiting and the `$connect`
+      capability-token check are now built as the `$connect` **REQUEST Lambda
+      authorizer** (`oxo-ws-auth-fn`). The interim stage throttle (20/40) +
+      reserved concurrency + `Connections` 2h TTL remain as the layered floor;
+      the authorizer adds (a) capability gating (host HMAC `wsToken` / guest
+      `code` lookup) so unauthenticated/garbage connects are Denied at `$connect`
+      before any game-logic Lambda runs, and (b) a best-effort per-IP budget via
+      the `ConnectAttempts` table. See `lambda-authorizer.md` and
+      `dynamodb-connectattempts.md`. The per-IP control is **best-effort, not a
+      hard guarantee** (authorizer cache disabled for accuracy, but the counter
+      is read-less and IP-cycling can evade it) — honest limitation carried as
+      OR-H2-a.
 
 ### Data classification
 - [ ] Messages and stored fields contain **no PII**: `connectionId` (an
@@ -125,3 +131,42 @@ user identity, so binding is **capability-by-connection**:
 - Move forgery / server-authoritative board controls (s006).
 - `$disconnect` cleanup / "opponent disconnected" (s007).
 - Chat scope (C7).
+
+---
+
+## s005-h2 security conclusion (gated review)
+
+The `$connect` Lambda authorizer (`oxo-ws-auth-fn`) is the gatekeeper that turns
+the previously **unauthenticated** WebSocket endpoint into a capability-gated one.
+
+**Closed by this slice:**
+- **OI-2 (unauthenticated WS endpoint):** garbage / no-credential connects are
+  Denied at `$connect` before any game-logic Lambda runs (host HMAC `wsToken`
+  or guest `code` required). Verified by the §0 walking-skeleton probe and UC5.
+- **h1 per-IP residual:** per-IP connect budget enforced in the authorizer via
+  `ConnectAttempts` — the honest home for per-IP control on a v2 API that WAFv2
+  cannot associate with.
+- **Register slot residual (host half):** host slot now gated by a per-game
+  signed token, not just a known `code`.
+
+**New attack surface introduced & its controls:** one new principal
+(`oxo-ws-auth-fn`) and one new table (`ConnectAttempts`). Both are scoped
+exactly (see `lambda-authorizer.md`, `dynamodb-connectattempts.md`): the
+authorizer can gate but cannot act on game state (no `ManageConnections`, no
+`Games`/`Connections` write); the secret is encrypted at rest, read-scoped to
+two roles, never in plaintext env or logs.
+
+**Enumerated open risks (carried, accepted at Gate-2):**
+- **OR-H2-a — best-effort per-IP:** read-less counter + IP-cycling means the
+  per-IP budget is a layered deterrent, not a hard guarantee. Layered with the
+  stage throttle (20/40) + reserved concurrency. Reversal: CloudFront-front the
+  WS path → edge WAF per-IP.
+- **OR-H2-b — guest code-as-credential pre-join:** a valid `code` holder can
+  open a WS before declaring join intent. Bounded by the no-hijack conditional
+  write; closed by identity (C6, future).
+- **C6 (no user identity):** capability tokens prove "legitimate game context",
+  not "specific user". Unchanged scope decision; not a regression.
+
+**Conclusion:** the design is accepted for build. The two carried risks are
+deliberate, bounded, and named (not missed). No new region, no new deploy-role
+grant, no manual deploy step.

@@ -377,3 +377,5 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T10:20:32Z,oxo-online,9,s006-move-relay,product,task_end,,success,S006-UC-ACC,use-cases.md + acceptance.md (6F/6T/6S) + use-case-deps.mmd first edition written
 2026-06-07T10:23:20Z,oxo-online,9,s006-move-relay,cicd,task_start,,na,S006-CAP,capabilities: OI-25 SPA sha carrier + OI-32 smoke serialisation + orphan-flag check
 2026-06-07T10:28:30Z,oxo-online,9,s006-move-relay,cicd,task_end,600,success,S006-CAP,OI-25 SPA sha carrier (VITE_BUILD_SHA+meta+sha-gate); OI-32 smoke workers:1; H2_ENFORCE zero orphan; allowlist verified; prereq confirmed no-new-grants
+2026-06-07T10:57:43Z,oxo-online,9,s006-move-relay,engineer,task_start,,na,S006-ROUTE,thin route through 18 ACs grouped by UC; read-before-build vs dependency model (EXP-005 first exercise)
+2026-06-07T11:01:49Z,oxo-online,9,s006-move-relay,engineer,task_end,237,success,S006-ROUTE,"Thin route written: 6 UCs grouped, 39 engineer build steps; wave plan (A parallel UC1/UC2/UC4/UC5, B seam UC3, C tester UC6); 7 §19 hard edges; class-deps.mmd first edition lands in UC1 R1.1; OI-33 scheduled first in UC4 to heal red smoke"

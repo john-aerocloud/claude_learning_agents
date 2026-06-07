@@ -19,12 +19,14 @@ flowchart TD
   domainMove["domain-move<br/>move/move.ts — applyMove(board,turn,square,role,status)<br/>PURE: validate + apply + win/draw. Zero SDK/transport."]:::changed
 
   %% ---- DOMAIN-defined ports (move/ports.ts) ----
-  portGameStore["port-game-store<br/>GameStorePort — getGame, applyMoveWrite (CAS)"]:::changed
+  portGameStore["port-game-store<br/>GameStorePort — getGame(gameId), applyMoveWrite (CAS)"]:::changed
   portRelay["port-relay<br/>RelayPort — postToConnections (2 bound conns)"]:::changed
-  portGameLookup["port-game-lookup<br/>GameLookupByConnectionPort — findGameByConnection"]:::changed
+  %% GATE-AMEND 2026-06-07: port-game-lookup (findGameByConnection / Connections
+  %% Scan) is DEAD — it would widen S5. Move authorizes via getGame(gameId) +
+  %% connectionId-vs-stored-binding match. Node removed; no edges to it.
 
   %% ---- ADAPTERS + handler (declared; implementing edges land per step) ----
-  wsMoveHandler["ws-move-handler<br/>ws/move-handler.ts (UC3) — parse, bind identity,<br/>call domain, write, relay"]
+  wsMoveHandler["ws-move-handler<br/>ws/move-handler.ts (UC3) — parse, getGame(gameId),<br/>bind identity by connectionId, call domain, write, relay"]:::changed
   adapterGamesDdb["adapter-games-ddb<br/>ws/adapters/games-ddb.ts (UC2) — conditional UpdateItem CAS"]:::changed
   adapterRelayMgmt["adapter-relay-mgmt<br/>ws/adapters/relay-mgmt.ts (UC3) — @connections POST"]
   adapterLocalStore["adapter-local-store<br/>src/app/local/adapters/local-store.ts (UC5) — in-memory CAS"]:::changed
@@ -51,8 +53,17 @@ flowchart TD
   adapterLocalRelay -.->|implements| portRelay
   linkStyle 3 stroke:#d50000,stroke-width:3px;
 
+  %% R3.1 (this commit): the UC3 move handler depends on the domain + the store
+  %% and relay ports (NO game-lookup port — GATE-AMEND). It reads the game by
+  %% gameId via port-game-store and binds identity by connectionId in-handler.
+  wsMoveHandler -->|applyMove| domainMove
+  linkStyle 4 stroke:#d50000,stroke-width:3px;
+  wsMoveHandler -->|getGame + applyMoveWrite| portGameStore
+  linkStyle 5 stroke:#d50000,stroke-width:3px;
+  wsMoveHandler -->|board-update / game-over| portRelay
+  linkStyle 6 stroke:#d50000,stroke-width:3px;
+
   %% ---- Edges land in their own steps (not yet drawn): ----
-  %% R3.1: wsMoveHandler --> domainMove / portGameStore / portRelay / portGameLookup
   %% R3.3: adapterRelayMgmt -.implements.-> portRelay
 
   classDef changed fill:#fff3e0,stroke:#d50000,stroke-width:3px,color:#000;

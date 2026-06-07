@@ -85,12 +85,13 @@ export interface RelayPort {
   postToConnections(connectionIds: string[], message: unknown): Promise<void>;
 }
 
-/**
- * Looks the game up by the connection that sent a message, so the server can
- * derive `senderRole` from the connectionId↔game binding — NEVER from a
- * client-supplied field (S1). Returns null when the connection is bound to no
- * game (spectator / stale / wrong game).
+/*
+ * NOTE (GATE-AMEND 2026-06-07): there is deliberately NO connection→game lookup
+ * port. The earlier GameLookupByConnectionPort/findGameByConnection (Scan/
+ * Connections-read) approach is DEAD — it would have widened the move path's
+ * IAM grant (S5) to read Connections. The amended design authorizes by
+ * GetItem(Games, body.gameId) [an already-granted action], matching the REAL
+ * event.requestContext.connectionId against the item's host/guestConnectionId.
+ * The handler uses GameStorePort.getGame(gameId) directly; gameId is a
+ * non-trusted lookup key (apigw-websocket.md S1).
  */
-export interface GameLookupByConnectionPort {
-  findGameByConnection(connectionId: string): Promise<GameState | null>;
-}

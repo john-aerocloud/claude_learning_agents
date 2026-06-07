@@ -14,10 +14,10 @@ function synth(): Template {
   return Template.fromStack(synthStack());
 }
 
-describe('OxoGameStack — DynamoDB tables exist (Step 4 harness; s005 adds Connections, s005-h2 adds ConnectAttempts)', () => {
-  it('synthesises exactly three DynamoDB tables (Games + Connections + ConnectAttempts)', () => {
+describe('OxoGameStack — DynamoDB tables exist (Step 4 harness; s005 adds Connections, s005-h2 adds ConnectAttempts, s005-h3 adds Codes)', () => {
+  it('synthesises exactly four DynamoDB tables (Games + Connections + ConnectAttempts + Codes)', () => {
     const template = synth();
-    template.resourceCountIs('AWS::DynamoDB::Table', 3);
+    template.resourceCountIs('AWS::DynamoDB::Table', 4);
   });
 });
 
@@ -508,6 +508,184 @@ describe('OxoGameStack — HTTP API POST /games + cross-stack outputs (Step 7)',
     const template = synth();
     template.hasOutput('LambdaFunctionName', {
       Export: { Name: 'OxoGameProd-LambdaFunctionName' },
+    });
+  });
+});
+
+// ===========================================================================
+// s005-h3 — Codes reservation table + scoped PutItem grant (delta 009, OI-3).
+// AC-5 IAM PIN (no widening), table shape, AC for Codes is a write-time gate.
+// ===========================================================================
+
+/** All DynamoDB IAM statements attached to the oxo-game-fn execution role. */
+function gameFnDdbStatements(template: Template): Array<Record<string, unknown>> {
+  const roles = template.findResources('AWS::IAM::Role');
+  const gameRoleId = Object.keys(roles).find((id) =>
+    id.startsWith('GameFunctionServiceRole'),
+  );
+  expect(gameRoleId).toBeDefined();
+  const out: Array<Record<string, unknown>> = [];
+  const policies = template.findResources('AWS::IAM::Policy');
+  for (const policy of Object.values(policies)) {
+    const roleRefs = ((policy.Properties as Record<string, unknown>).Roles ??
+      []) as Array<{ Ref?: string }>;
+    if (!roleRefs.some((r) => r.Ref === gameRoleId)) continue;
+    const stmts = (
+      (policy.Properties as Record<string, unknown>).PolicyDocument as {
+        Statement?: unknown[];
+      }
+    ).Statement as Array<Record<string, unknown>>;
+    for (const s of stmts ?? []) {
+      const actions = actionList(s);
+      if (actions.some((a) => typeof a === 'string' && a.startsWith('dynamodb:'))) {
+        out.push(s);
+      }
+    }
+  }
+  return out;
+}
+
+/** Find the Codes table logical id (named oxo-codes). */
+function codesTableId(template: Template): string {
+  const tables = template.findResources('AWS::DynamoDB::Table', {
+    Properties: { TableName: 'oxo-codes' },
+  });
+  const id = Object.keys(tables)[0];
+  expect(id).toBeDefined();
+  return id;
+}
+
+describe('OxoGameStack — Codes reservation table shape (delta 009)', () => {
+  it('uses code as the HASH key, no sort key', () => {
+    const template = synth();
+    template.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'oxo-codes',
+      KeySchema: [{ AttributeName: 'code', KeyType: 'HASH' }],
+    });
+  });
+
+  it('enables TTL on the ttl attribute (orphan reservations self-delete)', () => {
+    const template = synth();
+    template.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'oxo-codes',
+      TimeToLiveSpecification: { AttributeName: 'ttl', Enabled: true },
+    });
+  });
+
+  it('enables server-side encryption at rest (SSE)', () => {
+    const template = synth();
+    template.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'oxo-codes',
+      SSESpecification: { SSEEnabled: true },
+    });
+  });
+
+  it('uses on-demand (pay-per-request) billing', () => {
+    const template = synth();
+    template.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'oxo-codes',
+      BillingMode: 'PAY_PER_REQUEST',
+    });
+  });
+
+  it('declares NO GSI on the Codes table (write-time gate only; never on a read path)', () => {
+    const template = synth();
+    const tables = template.findResources('AWS::DynamoDB::Table', {
+      Properties: { TableName: 'oxo-codes' },
+    });
+    const props = Object.values(tables)[0].Properties as Record<string, unknown>;
+    expect(props.GlobalSecondaryIndexes).toBeUndefined();
+  });
+
+  it('declares no public resource policy on the Codes table', () => {
+    const template = synth();
+    const tables = template.findResources('AWS::DynamoDB::Table', {
+      Properties: { TableName: 'oxo-codes' },
+    });
+    const props = Object.values(tables)[0].Properties as Record<string, unknown>;
+    expect(props.ResourcePolicy).toBeUndefined();
+  });
+});
+
+describe('OxoGameStack — AC-5 IAM PIN: oxo-game-fn gains EXACTLY PutItem on Codes ARN', () => {
+  it('grants dynamodb:PutItem scoped to the Codes table ARN (a statement targeting Codes)', () => {
+    const template = synth();
+    const codesId = codesTableId(template);
+    const stmts = gameFnDdbStatements(template);
+    const codesStmt = stmts.find((s) =>
+      JSON.stringify(s.Resource).includes(codesId),
+    );
+    expect(codesStmt, 'a DDB statement on the game-fn role must target the Codes table').toBeDefined();
+    // EXACTLY PutItem — nothing else on Codes.
+    expect(actionList(codesStmt as Record<string, unknown>)).toEqual(['dynamodb:PutItem']);
+  });
+
+  it('grants NO DeleteItem / GetItem / Query / Scan / UpdateItem on the Codes table (negatives)', () => {
+    const template = synth();
+    const codesId = codesTableId(template);
+    const forbidden = [
+      'dynamodb:DeleteItem',
+      'dynamodb:GetItem',
+      'dynamodb:Query',
+      'dynamodb:Scan',
+      'dynamodb:UpdateItem',
+      'dynamodb:BatchGetItem',
+      'dynamodb:BatchWriteItem',
+    ];
+    const stmts = gameFnDdbStatements(template);
+    for (const s of stmts) {
+      const resJson = JSON.stringify(s.Resource);
+      if (!resJson.includes(codesId)) continue;
+      for (const action of actionList(s)) {
+        expect(forbidden).not.toContain(action);
+        expect(action).not.toBe('dynamodb:*');
+      }
+    }
+  });
+
+  it('every game-fn DDB grant is exactly PutItem (Games + Codes), no wildcard resource', () => {
+    // The aggregate role action-set stays minimal: the s005-h2 SSM secret read is
+    // not a DDB action; the only DDB actions on this role are PutItem (Games) and
+    // PutItem (Codes). No widening into read/scan/delete across the whole role.
+    const template = synth();
+    const stmts = gameFnDdbStatements(template);
+    expect(stmts.length).toBeGreaterThanOrEqual(2);
+    for (const s of stmts) {
+      expect(actionList(s)).toEqual(['dynamodb:PutItem']);
+      const resources = Array.isArray(s.Resource) ? s.Resource : [s.Resource];
+      for (const r of resources) {
+        expect(r).not.toBe('*');
+        expect(JSON.stringify(r)).not.toContain('dynamodb:*');
+      }
+    }
+  });
+
+  it('no Codes GSI ARN appears in any game-fn grant', () => {
+    const template = synth();
+    const stmts = gameFnDdbStatements(template);
+    for (const s of stmts) {
+      const resJson = JSON.stringify(s.Resource);
+      if (resJson.includes('oxo-codes') || resJson.includes(codesTableId(template))) {
+        expect(resJson).not.toContain('index/');
+      }
+    }
+  });
+});
+
+describe('OxoGameStack — oxo-game-fn carries CODES_TABLE + BUILD_SHA env (delta 009)', () => {
+  it('passes the Codes table name via CODES_TABLE', () => {
+    const template = synth();
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      FunctionName: 'oxo-game-fn',
+      Environment: { Variables: { CODES_TABLE: Match.anyValue() } },
+    });
+  });
+
+  it('passes BUILD_SHA so the exhausted-retry 5xx log carries build identity (principles/01)', () => {
+    const template = synth();
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      FunctionName: 'oxo-game-fn',
+      Environment: { Variables: { BUILD_SHA: Match.anyValue() } },
     });
   });
 });

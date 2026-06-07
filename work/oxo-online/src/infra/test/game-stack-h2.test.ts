@@ -94,8 +94,8 @@ describe('s005-h2 — ConnectAttempts table (T5, S4)', () => {
     expect(props.ResourcePolicy).toBeUndefined();
   });
 
-  it('synthesises exactly three DynamoDB tables now (Games, Connections, ConnectAttempts)', () => {
-    synth().resourceCountIs('AWS::DynamoDB::Table', 3);
+  it('synthesises exactly four DynamoDB tables now (Games, Connections, ConnectAttempts, Codes — s005-h3 adds Codes)', () => {
+    synth().resourceCountIs('AWS::DynamoDB::Table', 4);
   });
 });
 
@@ -365,14 +365,18 @@ describe('s005-h2 — oxo-ws-auth-fn role least-privilege (S1, CP-H2-A/B/C/D)', 
 // neither game-fn nor ws-fn touches ConnectAttempts
 // ===========================================================================
 describe('s005-h2 — oxo-game-fn secret grant; no ConnectAttempts leak (S2, S4)', () => {
-  it('S2: oxo-game-fn role keeps Games PutItem and adds exactly one secret-read grant', () => {
+  it('S2: oxo-game-fn DDB grants are exactly PutItem (Games + Codes — s005-h3) and adds exactly one secret-read grant', () => {
     const stmts = roleStatements(synth(), 'GameFunctionServiceRole');
     const ddb = stmts
       .filter((s) =>
         actionList(s).some((a) => typeof a === 'string' && a.startsWith('dynamodb:')),
       )
       .flatMap(actionList);
-    expect(ddb).toEqual(['dynamodb:PutItem']);
+    // s005-h3 (delta 009): a SECOND PutItem grant lands — on the Codes table ARN.
+    // No widening: every DDB action on this role is still exactly PutItem (no
+    // read/scan/delete/update). The Codes-ARN scoping + negatives are pinned in
+    // game-stack.test.ts (AC-5). Here we assert the role-wide action set stays PutItem-only.
+    expect(ddb).toEqual(['dynamodb:PutItem', 'dynamodb:PutItem']);
     const secretGrants = stmts.filter((s) =>
       actionList(s).some(
         (a) =>

@@ -125,6 +125,46 @@ export class OxoGameStack extends cdk.Stack {
     gamesTable.grant(gameFunction, 'dynamodb:PutItem');
 
     // -------------------------------------------------------------------------
+    // s005-h3 (delta 009, OI-3) — Codes reservation table: storage-enforced
+    // code-uniqueness gate.
+    //   - PK code (String); NO sort key; NO GSI — `code` IS the key, so a
+    //     conditional PutItem attribute_not_exists(code) is a TRUE single-item
+    //     CAS (at most one live reservation per code across concurrent invokes).
+    //   - TTL on `ttl` (+24h, matches Games): orphaned reservations self-delete.
+    //   - On-demand billing; SSE (AWS-managed key); PITR off (ephemeral data).
+    //   - This table is a WRITE-TIME GATE ONLY — NEVER on the join/lookup read
+    //     path (join resolves via Games code-index, unchanged). No public policy.
+    //   - RETAIN: the uniqueness invariant's backing store is never auto-dropped.
+    // -------------------------------------------------------------------------
+    const codesTable = new dynamodb.Table(this, 'CodesTable', {
+      tableName: 'oxo-codes',
+      partitionKey: { name: 'code', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      timeToLiveAttribute: 'ttl',
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
+    // AC-5 IAM PIN — the ONLY widening this slice introduces: dynamodb:PutItem on
+    // the Codes table ARN. Nothing else on Codes (no Delete/Get/Query/Scan/Update,
+    // no GSI ARN, no wildcard). DeleteItem is DELIBERATELY declined — orphans
+    // expire via the 24h TTL (delta §"orphan question"). `grant` scopes Resource
+    // to the exact table ARN. The reserve write only needs to create the row.
+    codesTable.grant(gameFunction, 'dynamodb:PutItem');
+    gameFunction.addEnvironment('CODES_TABLE', codesTable.tableName);
+
+    // Build identity (principles/01): the create handler's exhausted-retry 5xx
+    // log line (reason:code-reservation-exhausted) must carry buildSha. The SHA
+    // is injected by the pipeline (BUILD_SHA env / -c buildSha), never hardcoded;
+    // falls back to 'dev' for local synth. (Defined below for the ws-auth fn too;
+    // declared here as a const so both consumers read the same value.)
+    const gameBuildSha: string =
+      (this.node.tryGetContext('buildSha') as string) ??
+      process.env.BUILD_SHA ??
+      'dev';
+    gameFunction.addEnvironment('BUILD_SHA', gameBuildSha);
+
+    // -------------------------------------------------------------------------
     // HTTP API — single route POST /api/games -> Lambda proxy ($default stage).
     // The SPA calls /api/games; CloudFront's /api/* behaviour forwards the full
     // path unchanged to this origin (no prefix stripping), so the route key

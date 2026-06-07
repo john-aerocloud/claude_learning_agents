@@ -31,6 +31,7 @@
       "Bash(aws cloudformation describe-stack-resources *)",
       "Bash(aws cloudformation list-exports *)",
       "Bash(aws dynamodb get-item *)",
+      "Bash(aws dynamodb scan *)",
       "Bash(aws dynamodb describe-table *)",
       "Bash(aws lambda get-function *)",
       "Bash(aws lambda get-function-concurrency *)",

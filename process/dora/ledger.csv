@@ -514,3 +514,5 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T21:23:59Z,oxo-online,12,s005-h3-code-uniqueness,product,task_start,,na,S005H3-UC,co-author use-cases.md + F-cases into acceptance.md (architect wrote T/S)
 2026-06-07T21:24:59Z,oxo-online,12,s005-h3-code-uniqueness,product,task_start,,na,S005H3-UC,co-author: use-cases + F-cases + use-case-deps.mmd
 2026-06-07T21:27:09Z,oxo-online,12,s005-h3-code-uniqueness,product,task_end,,success,S005H3-UC,use-cases.md + F-cases in acceptance.md + use-case-deps.mmd updated
+2026-06-07T21:35:25Z,oxo-online,12,s005-h3-code-uniqueness,cicd,task_start,,na,S005H3-CAP,confirm: Codes table grant ordering (§19), allowlist for tester DDB scan/describe on Codes, no deploy-role change
+2026-06-07T21:37:55Z,oxo-online,12,s005-h3-code-uniqueness,cicd,task_end,,success,S005H3-CAP,"no deploy-role grant needed; aws dynamodb scan * added to allowlist; safe commit order documented; pipeline red=pre-existing s008 sha-gate, unrelated to s005-h3"

@@ -359,3 +359,4 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T09:23:28Z,oxo-online,8,s005-h2-connect-auth,tester,validation_run,,fail,5a06555:smoke,tests/smoke FAILED via make smoke
 2026-06-07T09:29:49Z,oxo-online,8,s005-h2-connect-auth,tester,validation_run,,fail,5a06555:smoke,tests/smoke FAILED via make smoke
 2026-06-07T09:32:19Z,oxo-online,8,s005-h2-connect-auth,tester,task_end,,success,40b7767:revalidation-complete,AC7.3 PASS 2823ms; DEFECT-H2-003 closed; 17/17 ACs pass; pre-existing F3/T4 + budget-contention F7/F4/T5 noted as separate findings
+2026-06-07T09:33:29Z,oxo-online,8,s005-h2-connect-auth,engineer,task_start,,na,H2-FLAG-FACTOR-OUT,§40 lifecycle completion: validation 17/17 green, remove H2_ENFORCE conditional

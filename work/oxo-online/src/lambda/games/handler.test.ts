@@ -161,7 +161,9 @@ describe('handler — injects a host wsToken (S-A1.4, T7, AC1.1–AC1.5)', () =>
 
   // DEFECT-H2-001 (corrected): secret failure is a clean 5xx — semantics never
   // change shape. The deploy ORDER guarantees the secret exists (same stack);
-  // see process v20 §39 and the H2_ENFORCE flag for the enforcement half.
+  // see process v20 §39 and the (now unconditional) $connect REQUEST-authorizer
+  // gate for the enforcement half — the H2_ENFORCE flag that staged it was
+  // factored out at §40 lifecycle completion.
   it('returns a clean 500 (no leak) when the secret source fails', async () => {
     const failingSecretSource = {
       get: async () => {

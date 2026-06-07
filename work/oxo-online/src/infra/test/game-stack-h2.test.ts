@@ -17,26 +17,15 @@ function synth(): Template {
   );
 }
 
-// §40 flip (Set-B-complete): H2_ENFORCE default is now ON. The default synth()
-// above therefore gates $connect CUSTOM. synthEnforced() == default (kept as a
-// named alias for the flip regression). synthOff() exercises the retained
-// rollback lever: explicit `h2Enforce: false` context still leaves $connect
-// unauthenticated so a prod rollback can disable the gate without a code change
-// (flag NOT yet factored out — that is a separate later commit after the live
-// walking-skeleton probe passes).
-function synthEnforced(): Template {
-  // Default context now enforces; alias preserved for the flip regression read.
-  return synth();
-}
-
-function synthOff(): Template {
-  const app = new cdk.App({ context: { h2Enforce: false } });
-  return Template.fromStack(
-    new OxoGameStack(app, 'OxoGameProd', {
-      env: { account: '123456789012', region: 'eu-west-2' },
-    }),
-  );
-}
+// §40 lifecycle COMPLETE: the H2_ENFORCE use-case flag (two-phase credential
+// rollout, §39 ordering) has been factored out of the code. Slice validated
+// 17/17 ACs in prod (result.md, sha 7382284); its retained-rollback-lever phase
+// is over. The $connect REQUEST-authorizer gate is now UNCONDITIONAL — there is
+// no context that disables it. The former `synthOff()` helper and the
+// "ROLLBACK LEVER: explicit h2Enforce=false leaves $connect unauthenticated"
+// test were DELETED with the flag (an orphan flag at retro is a §40 principle
+// failure). The unconditional pin below asserts $connect carries CUSTOM +
+// AuthorizerId in EVERY synth, with no context dependence.
 
 // ---- helpers ---------------------------------------------------------------
 function actionList(stmt: Record<string, unknown>): string[] {
@@ -151,13 +140,13 @@ describe('s005-h2 — authorizer attached to $connect (T1)', () => {
     ).toBeUndefined();
   });
 
-  // §40 FLIP (Set-B-complete): the staged-OFF guard (cf58... cf54...) that
-  // pinned $connect unauthenticated has done its job — it prevented premature
-  // enforcement-before-credentials (§39) while Set B was unbuilt. Set B is now
-  // live at the edge, so the DEFAULT now gates the route. Replaced by the two
-  // pins below: default = CUSTOM (the flip is the standing truth), and
-  // explicit `h2Enforce: false` = unauthenticated (the retained rollback lever).
-  it('DEFAULT (no context): $connect is CUSTOM with that AuthorizerId — H2_ENFORCE on by default (T1, §40 flip)', () => {
+  // §40 lifecycle COMPLETE: the gate is UNCONDITIONAL. Every synth — there is
+  // no longer any context that disables it (the H2_ENFORCE flag and its
+  // `synthOff()` rollback-lever test were factored out after the slice
+  // validated 17/17 in prod) — must show $connect carrying AuthorizationType
+  // CUSTOM + the REQUEST authorizer's AuthorizerId, with the route depending on
+  // the authorizer. This is the standing truth the flag used to gate.
+  it('UNCONDITIONAL (no context dependence): $connect is CUSTOM with that AuthorizerId + dependency (T1, §40 lifecycle complete)', () => {
     const t = synth();
     const authorizers = t.findResources('AWS::ApiGatewayV2::Authorizer');
     const reqAuthId = Object.keys(authorizers).find(
@@ -166,37 +155,22 @@ describe('s005-h2 — authorizer attached to $connect (T1)', () => {
           .AuthorizerType === 'REQUEST',
     )!;
     const routes = t.findResources('AWS::ApiGatewayV2::Route');
-    const connect = Object.values(routes).find(
-      (r) => (r.Properties as Record<string, unknown>).RouteKey === '$connect',
+    const connectId = Object.keys(routes).find(
+      (id) =>
+        (routes[id].Properties as Record<string, unknown>).RouteKey ===
+        '$connect',
     )!;
+    const connect = routes[connectId];
     const props = connect.Properties as Record<string, unknown>;
     expect(props.AuthorizationType).toBe('CUSTOM');
     expect((props.AuthorizerId as { Ref?: string }).Ref).toBe(reqAuthId);
-  });
-
-  // §40 — the flag is RETAINED as a rollback lever until the live walking-
-  // skeleton probe passes (factor-out is a separate later commit). Explicit
-  // `h2Enforce: false` context must still leave $connect unauthenticated so a
-  // prod operator can disable the gate via a redeploy with no code change. The
-  // authorizer stays deployed (idle), ready to re-gate on the next default synth.
-  it('ROLLBACK LEVER: explicit h2Enforce=false leaves $connect unauthenticated (flag retained, §40)', () => {
-    const t = synthOff();
-    const routes = t.findResources('AWS::ApiGatewayV2::Route');
-    const connect = Object.values(routes).find(
-      (r) => (r.Properties as Record<string, unknown>).RouteKey === '$connect',
-    )!;
-    const props = connect.Properties as Record<string, unknown>;
-    expect(props.AuthorizationType ?? 'NONE').not.toBe('CUSTOM');
-    expect(props.AuthorizerId).toBeUndefined();
-    // Authorizer itself is still deployed (idle), ready to re-gate.
-    const authorizers = t.findResources('AWS::ApiGatewayV2::Authorizer');
-    expect(
-      Object.values(authorizers).some(
-        (a) =>
-          (a.Properties as Record<string, unknown>).AuthorizerType ===
-          'REQUEST',
-      ),
-    ).toBe(true);
+    // The route must depend on the authorizer (create-order safety).
+    const dependsOn = Array.isArray(connect.DependsOn)
+      ? (connect.DependsOn as string[])
+      : connect.DependsOn
+        ? [connect.DependsOn as string]
+        : [];
+    expect(dependsOn).toContain(reqAuthId);
   });
 });
 

@@ -583,30 +583,18 @@ exports.handler = async (event) => {
       // property must be OMITTED.
     });
 
-    // Gate the EXISTING $connect route: AuthorizationType CUSTOM + AuthorizerId.
+    // Gate the EXISTING $connect route with the REQUEST authorizer above:
+    // AuthorizationType CUSTOM + AuthorizerId + a dependency on the authorizer.
     // The $connect CfnRoute is created in the s005 loop above; re-set its auth
     // properties here via an escape hatch so the gate is ON the route (T1).
-    // UC-FLAG H2_ENFORCE (process §40 — two-phase credential rollout, §39
-    // ordering). FLIPPED ON (Set-B-complete): Set B is live at the CloudFront
-    // edge — the SPA now sends ?wsToken=/?code= credentials, so §39 ordering
-    // (credentials precede enforcement) is satisfied and the gate goes live.
-    // Default is now ON: with NO context, $connect gets AuthorizationType
-    // CUSTOM + the authorizer.
-    // The flag is RETAINED as a ROLLBACK LEVER, not yet factored out: explicit
-    // CDK context `h2Enforce=false` (or 'false') turns enforcement OFF for a
-    // no-code-change prod rollback. Factor-out (remove the flag from code, then
-    // configuration, §40 lifecycle) is a SEPARATE later commit, deferred until
-    // the live walking-skeleton probe through the deployed authorizer passes.
-    const h2EnforceCtx = this.node.tryGetContext('h2Enforce') as
-      | boolean
-      | string
-      | undefined;
-    const H2_ENFORCE = !(h2EnforceCtx === false || h2EnforceCtx === 'false');
+    // UNCONDITIONAL: the H2_ENFORCE use-case flag (two-phase credential rollout,
+    // §39 ordering) was factored out after the slice validated 17/17 in prod
+    // (§40 lifecycle complete). Strike pins still hold on the authorizer above:
+    // AuthorizerResultTtlInSeconds omitted (strike 4), IdentitySource absent
+    // (strike 5).
     const connectRoute = this.node.findChild('JoinWsRouteConnect') as apigatewayv2.CfnRoute;
-    if (H2_ENFORCE) {
-      connectRoute.authorizationType = 'CUSTOM';
-      connectRoute.authorizerId = wsAuthorizer.ref;
-      connectRoute.addDependency(wsAuthorizer);
-    }
+    connectRoute.authorizationType = 'CUSTOM';
+    connectRoute.authorizerId = wsAuthorizer.ref;
+    connectRoute.addDependency(wsAuthorizer);
   }
 }

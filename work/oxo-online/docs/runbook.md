@@ -1,7 +1,7 @@
 # oxo-online — Support Runbook
 
 Audience: on-call engineers and support team.
-Last updated: slice s008-share-link (iteration 11, validated 2026-06-07).
+Last updated: slice s005-h3-code-uniqueness (iteration 12, validated 2026-06-07).
 
 ---
 
@@ -130,6 +130,24 @@ The `buildSha` value must match the commit SHA for the expected deploy (see
 ledger `deploy` rows for `oxo-online`). If it does not match, the authorizer
 Lambda was not updated — check the infra pipeline run for the latest push to
 `main`.
+
+### game-fn build identity (oxo-game-fn — code-reservation path, s005-h3)
+
+From s005-h3 onward, `oxo-game-fn` emits `buildSha` on every code-reservation
+log event (`code_reservation_collision`, `code_reservation_write_failed`,
+`code_create_failed`). To verify the correct version is handling create-game:
+
+```bash
+aws logs filter-log-events \
+  --log-group-name /aws/lambda/oxo-game-fn \
+  --filter-pattern '{ $.buildSha = "*" }' \
+  --limit 5 \
+  --query 'events[*].message'
+```
+
+The `buildSha` value must match the expected deploy SHA. If no events are
+returned (no code-reservation events in the window), fall back to
+`aws lambda get-function` `LastModified` (see "Lambda code state" above).
 
 ### Stack outputs (updated for s005-h2)
 
@@ -285,12 +303,13 @@ The exemption:
 | DynamoDB — games | oxo-games | PK: gameId; GSI: code-index (PK: code); 24h TTL; SSE enabled; on-demand. Active-game items carry: board (9-char string), currentTurn (X\|O), version (N, CAS), moveCount (N), winner (X\|O, terminal only), status (waiting\|active\|won\|drawn\|abandoned) |
 | DynamoDB — connections | oxo-connections | PK: connectionId; 2h TTL; SSE enabled; on-demand |
 | DynamoDB — connect attempts | oxo-connect-attempts | PK: sourceIp; count (N); ttl (~5min TTL); SSE enabled; on-demand; used by authorizer for per-IP budget |
+| DynamoDB — code reservations | oxo-codes | PK: code; gameId; ttl (24h TTL); SSE enabled; on-demand; write-gate only (PutItem, no Query/Get/Scan/Delete) — reserve-before-write uniqueness gate (s005-h3) |
 | WAFv2 WebACL — global | oxo-online-cf-global (us-east-1) | CLOUDFRONT scope; associated to d3pf3kcvzpau1x; rate rule 100/300s/IP with NOT(oxo-test-runner-ips) scope-down (Block=429); IP-rep managed group |
 | WAFv2 IP set — runner | oxo-test-runner-ips (us-east-1) | CLOUDFRONT scope; entries written/removed per CI run (1h TTL + drain Lambda); waives only the rate Deny for runner IP |
 | Lambda — exemption drain | (CDK-managed, not a named output) | Periodically reaps any EXEMPT#* items from oxo-connect-attempts that were not cleaned up by the runner trap |
 | CloudFormation stacks | OxoOnlineOidcStack, OxoOnlineWafUsEast1, OxoGameProd, OxoOnlineProd | Deploy order: WafUsEast1 -> OxoGameProd -> OxoOnlineProd |
 | S3 bucket | see `WebBucketName` GH var | Versioning on; SPA + config.js |
-| Log group — game fn | /aws/lambda/oxo-game-fn | No structured categories yet (OI-18) |
+| Log group — game fn | /aws/lambda/oxo-game-fn | Structured JSON for code-reservation events (code_reservation_collision, code_reservation_write_failed, code_create_failed); all carry buildSha. Other paths: Lambda platform lines + unhandled exceptions only (OI-18 partially closed) |
 | Log group — ws authorizer | /aws/lambda/oxo-ws-auth-fn | Structured JSON; buildSha on every Allow/Deny; see §4a |
 | Log group — ws fn | /aws/lambda/oxo-ws-fn | Structured JSON events (see §4) |
 
@@ -363,6 +382,10 @@ aws dynamodb describe-table --table-name oxo-connections \
 
 # Connect-attempts table (per-IP budget — new in s005-h2)
 aws dynamodb describe-table --table-name oxo-connect-attempts \
+  --query 'Table.{BillingMode:BillingModeSummary.BillingMode,SSEStatus:SSEDescription.Status,ItemCount:ItemCount}'
+
+# Code-reservations table (uniqueness gate — new in s005-h3)
+aws dynamodb describe-table --table-name oxo-codes \
   --query 'Table.{BillingMode:BillingModeSummary.BillingMode,SSEStatus:SSEDescription.Status,ItemCount:ItemCount}'
 
 # Confirm TTL is enabled on the connect-attempts table
@@ -494,10 +517,38 @@ including disconnect. This is a known gap (F1). Use `LastModified` from
 | `move_store_failed` | ERROR | `external-dependency` | — | UpdateItem on Games failed after SDK retries (DDB 5xx/throttle) | Dependency; check AWS Health |
 | `disconnect-notify` | INFO | — | — | Structured log emitted on every $disconnect. Fields: `gameId`, `posted` (0 or 1 — whether opponent-disconnected was sent), `gone` (0 or 1 — whether GoneException was swallowed), `buildSha` (currently "unknown" — see §1 F1 caveat). `posted:1 gone:0` = survivor notified clean. `posted:1 gone:1` = both connections gone. `posted:0` = game was not active (terminal/waiting/abandoned). | Expected at info level on every disconnect; not an error |
 
-**oxo-game-fn has no categorised logging yet** (OI-18 open). Its log group
-(`/aws/lambda/oxo-game-fn`) contains only Lambda platform lines plus any
-unhandled Node.js exceptions. If POST /api/games returns 5xx, check those
-logs for unhandled throws; there is no `category` field to filter on.
+**oxo-game-fn code-reservation events (s005-h3)** — The code-reservation path
+now emits structured JSON lines to `/aws/lambda/oxo-game-fn`. Every line carries
+`buildSha` (read from `BUILD_SHA` env var, set at deploy time). The rest of the
+handler still has no categorised logging (OI-18 partially closed); unhandled
+exceptions appear as raw Node.js stack traces.
+
+### Code-reservation log events (oxo-game-fn)
+
+| `event` value | `category` | Whose problem | Meaning | First response |
+|---------------|------------|---------------|---------|----------------|
+| `code_reservation_collision` | `data` | Expected (not a defect) | DynamoDB conditional PutItem on `oxo-codes` failed (`attribute_not_exists(code)` — another invocation won the race for this code value). Handler redraws a fresh code and retries. | Benign at low volume. If rate is very high (thousands/minute) investigate code generator for entropy loss. |
+| `code_reservation_write_failed` | `INTERNAL` or `EXTERNAL_DEPENDENCY` | `INTERNAL` = our code defect (DDB 4xx); `EXTERNAL_DEPENDENCY` = DynamoDB availability (DDB 5xx/timeout) | Non-collision PutItem failure on `oxo-codes`. Handler breaks to 500, no game written, no wsToken. | `INTERNAL`: raise defect task — check the PutItem request shape in `ddb-code-reservation.ts`. `EXTERNAL_DEPENDENCY`: check AWS Health Dashboard for DynamoDB eu-west-2. |
+| `code_create_failed` with `reason: code-reservation-exhausted` | `internal-service` | Our code defect (effectively unreachable) | 5 consecutive collisions on code generation — retry cap exhausted. Handler returns 500 `{error:"Could not create game"}`. No game written, no wsToken. | This is a 5xx WE own. At hobby volume (~1 billion distinct codes) this is effectively unreachable; if seen repeatedly, investigate the code generator (`games/code.ts`) for entropy degradation or the `oxo-codes` table for unexpected high item count. |
+
+### CloudWatch Logs Insights — game-fn code-reservation failures (last 1 hour)
+
+```
+fields @timestamp, event, category, reason, buildSha, attempts
+| filter ispresent(event)
+| sort @timestamp desc
+| limit 50
+```
+
+Run against log group `/aws/lambda/oxo-game-fn`.
+
+### Orphan reservations
+
+When the Games PutItem succeeds but a later step fails (e.g. secret fetch), the
+`oxo-codes` row written by the reservation is left as an orphan. This is
+harmless: the join path reads the `oxo-games` GSI (`code-index`), not the
+`oxo-codes` table. The orphan row expires automatically via the 24h TTL on the
+`oxo-codes` table. No manual cleanup is required.
 
 ### CloudWatch Logs Insights query for WS errors (last 1 hour)
 
@@ -644,8 +695,7 @@ Most likely causes (in order):
 2. Typographical error in a manually entered code. Codes are 6 characters,
    uppercase letters and digits, no O/0/1/I/L. Ask the user to try again.
 3. Game TTL expired (24-hour limit). Host must create a new game.
-4. Game was already joined by someone else (code reuse is an accepted risk in
-   s005 — see OI open items).
+4. Game was already joined by someone else (status=active or status=won/drawn/abandoned — join returns 4041 "This game is no longer available").
 
 **Deep-link SPA boot failure (share link opens blank page / 404):**
 The `/join/<code>` URL relies on the CloudFront SPA fallback (CustomErrorResponse
@@ -918,11 +968,22 @@ aws dynamodb query \
 
 ### POST /api/games returning 5xx
 
-1. Check `/aws/lambda/oxo-game-fn` logs for unhandled exceptions.
-2. Note: there is no structured `category` field in oxo-game-fn logs (OI-18).
-   Look for Node.js stack traces directly.
-3. If DynamoDB `Games` table shows throttling errors, the on-demand capacity
-   may be under-provisioned for a traffic spike (unlikely at current scale).
+Client receives HTTP 500 `{"error":"Could not create game"}`. Possible causes:
+
+1. **Code-reservation failure** — check `/aws/lambda/oxo-game-fn` for structured
+   log events (see §4 "Code-reservation log events"):
+   - `code_reservation_write_failed` with `category=EXTERNAL_DEPENDENCY` → DynamoDB
+     `oxo-codes` table availability issue; check AWS Health Dashboard.
+   - `code_reservation_write_failed` with `category=INTERNAL` → our code defect on
+     the Codes PutItem shape; raise a defect task.
+   - `code_create_failed` with `reason=code-reservation-exhausted` → 5 consecutive
+     collisions; effectively unreachable — investigate code generator entropy if seen.
+2. **Games table write failure** — DynamoDB `oxo-games` throttling or availability;
+   check AWS Health Dashboard.
+3. **Secret fetch failure** (wsToken mint) — SSM unavailable or parameter deleted;
+   check SSM parameter `WS_TOKEN_SECRET_PARAM` exists.
+4. **Unhandled exception** — check `/aws/lambda/oxo-game-fn` logs for raw Node.js
+   stack traces (non-reservation paths have no structured category — OI-18).
 
 ---
 
@@ -1127,13 +1188,14 @@ To remove the WAF ACL:
 
 | ID | Gap | Impact |
 |----|-----|--------|
-| OI-18 | No CloudWatch metrics, no alarms, no categorised logging in `oxo-game-fn` | Cannot set alert thresholds on error rate; game-fn faults require manual log scanning |
+| OI-18 | No CloudWatch metrics, no alarms; oxo-game-fn categorised logging partial (code-reservation path only — s005-h3) | Alert thresholds not set; non-reservation game-fn faults require manual log scanning |
 | OI-25 | No version header on any HTTP/WS response | Cannot determine deployed version from a request; must compare bundle hash by hand and buildSha from authorizer logs (see §1) |
 | OI-6 | No Lambda versioning or aliases | No instant Lambda rollback; roll-forward only |
 | h1/RESIDUAL | IP-reputation managed-rule-group 403 blocks are masked by CloudFront CustomErrorResponses to 200+SPA | Reputation blocks are CloudWatch-observable only (not HTTP-status observable). Rate-rule blocks return honest 429. |
 | OR-H2-a | Per-IP WS connect budget is best-effort: IP-cycling bypasses counter; layered with stage throttle 20/40 + reserved concurrency 15 | A determined attacker cycling IPs bypasses the per-IP deterrent. Reversal path: CloudFront-front WS with edge WAF. |
 | h2-waf/CLOSED | WAF rate-limiting on CloudFront/HTTP API (POST /api/games) | SHIPPED s005-h1-waf: oxo-online-cf-global ACL, 100 req/300s/IP, Block=429 |
 | h2-connect-auth/CLOSED | No per-game credential on $connect; no per-IP WS rate-limit | SHIPPED s005-h2: oxo-ws-auth-fn REQUEST authorizer; wsToken for host; code for guest; oxo-connect-attempts per-IP budget |
+| h3-code-uniqueness/CLOSED | Game codes could collide (no storage gate) | SHIPPED s005-h3: oxo-codes table; conditional PutItem attribute_not_exists(code); bounded retry (max 5); 5xx on exhaustion (effectively unreachable) |
 | OR-S006-a | Near-simultaneous move CAS race → player must re-click (no auto-retry beyond one re-read) | Deliberate; bounded. Latency budget protects p95. |
 | OR-S006-b (re-worded s007) | Relay is best-effort: a dropped @connections POST is not re-pushed | Authoritative board is always correct in DynamoDB. Recovery is graceful disconnect — abandon + survivor-notify (s007). Reconnect-replay is unscheduled (candidate C6-adjacent or never; per OI-10). |
 | OR-S007-a | Connections:GetItem is a real (if minimal) grant widening — disconnect path reads Connections | Bounded to a single PK read of the disconnecting connection's own row (no Query/Scan). |

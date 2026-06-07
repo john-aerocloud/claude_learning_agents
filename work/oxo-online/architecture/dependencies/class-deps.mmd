@@ -153,6 +153,32 @@ flowchart TD
   %% spaJoinRoute and spaCopyLink are now delivered/stable.
   classDef s008changed fill:#e8f4e8,stroke:#2e7d32,color:#000;
 
+  %% ==== s005-h3 code-uniqueness (delta 009, OI-3) — appended; classDef s005h3changed ====
+  %% NEW hexagonal seam on the CREATE path. Before this slice handler.ts wrote
+  %% Games via a module-global `ddb` client with NO port (concept leakage). This
+  %% slice introduces a domain-defined CodeReservationPort (reserve(code,gameId),
+  %% throws CodeCollision) + a DynamoDB adapter (conditional PutItem
+  %% attribute_not_exists(code) = single-item CAS on the new Codes table) + an
+  %% in-memory local adapter (Map reject-branch shape). ACTUAL runtime path traced:
+  %% the create handler calls portCodeReservation.reserve BEFORE the existing Games
+  %% PutItem; on CodeCollision it redraws (<=5) then 5xx. The Codes table is a
+  %% write-time gate ONLY — NOT on the join/lookup read path (join still uses Games
+  %% code-index, unchanged). Marks are the tester's test-plan input; cleared at delivery.
+  portCodeReservation["port-code-reservation<br/>games/codes/ports.ts (UC1) — CodeReservationPort.reserve(code,gameId)<br/>throws CodeCollision on conflict. PURE: zero SDK/transport."]:::s005h3changed
+  adapterCodeReservationDdb["adapter-code-reservation-ddb<br/>games/codes/ddb-code-reservation.ts (UC1) — conditional PutItem<br/>attribute_not_exists(code) on Codes table; ConditionalCheckFailed->CodeCollision;<br/>non-collision error propagates as-is. PutItem ONLY (AC-5/AC-6 pins)."]:::s005h3changed
+  adapterLocalCodeReservation["adapter-local-code-reservation<br/>src/app/local/adapters/local-code-reservation.ts (UC1) — in-memory Map<br/>reject-branch shape only (§12a — not real CAS atomicity)"]:::s005h3changed
+  gamesCreateHandler["games-create-handler<br/>games/handler.ts (UC2) — POST /api/games: reserve(code,gameId) BEFORE<br/>Games PutItem; CodeCollision->fresh code retry (N=5); exhausted->5xx<br/>(reason:code-reservation-exhausted, buildSha); contract {gameId,code,wsToken} UNCHANGED."]:::s005h3changed
+
+  %% UC1 edges: both adapters implement the domain-defined port.
+  adapterCodeReservationDdb -.->|implements| portCodeReservation
+  linkStyle 18 stroke:#6a1b9a,stroke-width:3px;
+  adapterLocalCodeReservation -.->|implements| portCodeReservation
+  linkStyle 19 stroke:#6a1b9a,stroke-width:3px;
+  %% UC2 edge: the create handler depends on the port (reserve-before-write retry loop).
+  gamesCreateHandler -->|reserve(code,gameId) before Games PutItem; retry on CodeCollision| portCodeReservation
+  linkStyle 20 stroke:#6a1b9a,stroke-width:3px;
+  classDef s005h3changed fill:#fff3e0,stroke:#6a1b9a,color:#000,stroke-width:3px;
+
   %% s006 changed marks CLEARED (2026-06-07 — tester consumed, UC6 prod validation PASS).
   %% All nodes were new in this first-edition; all are now delivered/stable.
   classDef changed fill:#e8f4e8,stroke:#2e7d32,color:#000;

@@ -45,6 +45,10 @@ export function GameRoot({ socketFactory = realFactory }: GameRootProps = {}) {
   const [showSpinner, setShowSpinner] = useState(false);
   const [gameCode, setGameCode] = useState<string | null>(null);
   const [gameId, setGameId] = useState<string | null>(null);
+  // The host's $connect credential, minted by POST /api/games. A degraded mint
+  // (DEFECT-H2-001) legitimately omits it — the host then connects without the
+  // param rather than being blocked.
+  const [wsToken, setWsToken] = useState<string | null>(null);
   const [onlineRole, setOnlineRole] = useState<'host' | 'guest'>('host');
   const spinnerTimer = useRef<ReturnType<typeof setTimeout>>();
   const hostSocketRef = useRef<GameSocket | null>(null);
@@ -76,9 +80,15 @@ export function GameRoot({ socketFactory = realFactory }: GameRootProps = {}) {
         headers: { 'content-type': 'application/json' },
       });
       if (!res.ok) throw new Error(`status ${res.status}`);
-      const body = (await res.json()) as { gameId: string; code: string };
+      const body = (await res.json()) as {
+        gameId: string;
+        code: string;
+        // Absent on a degraded mint (DEFECT-H2-001) — the create still succeeds.
+        wsToken?: string;
+      };
       setGameId(body.gameId);
       setGameCode(body.code);
+      setWsToken(body.wsToken ?? null);
       setOnlinePhase('waiting');
     } catch {
       setOnlinePhase('error');
@@ -94,6 +104,10 @@ export function GameRoot({ socketFactory = realFactory }: GameRootProps = {}) {
   useEffect(() => {
     if (onlinePhase !== 'waiting' || !gameId) return;
     const socket = socketFactory({
+      // The host's $connect credential is the minted wsToken (UC3/AC3.1, T8).
+      // On a degraded mint it is null -> connect with no param (graceful
+      // degradation; the host is never blocked, DEFECT-H2-001).
+      ...(wsToken ? { credential: { wsToken } } : {}),
       onMessage: handleGameReady,
       onClose: () => {},
     });
@@ -104,6 +118,7 @@ export function GameRoot({ socketFactory = realFactory }: GameRootProps = {}) {
       hostSocketRef.current = null;
     };
     // socketFactory is stable for a render tree; re-run only on phase/gameId change.
+    // wsToken is set in the same transition as phase=waiting, so it is current here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onlinePhase, gameId]);
 
@@ -126,12 +141,14 @@ export function GameRoot({ socketFactory = realFactory }: GameRootProps = {}) {
     setOnlinePhase('idle');
     setGameCode(null);
     setGameId(null);
+    setWsToken(null);
   };
 
   const joinGame = () => {
     setOnlinePhase('joining');
     setGameCode(null);
     setGameId(null);
+    setWsToken(null);
   };
 
   const locked = state.status !== 'playing';

@@ -50,11 +50,27 @@ export interface GameSocket {
   close(): void;
 }
 
+/**
+ * The $connect credential threaded to the transport (s005-h2). The host carries
+ * the `wsToken` minted by `POST /api/games`; the guest carries the game `code`
+ * it entered. Exactly one is set per connection. When neither is present the
+ * socket opens with no credential param — the host's graceful-degradation path
+ * for a degraded mint (DEFECT-H2-001), where the create legitimately omits the
+ * token. The factory appends it as a query param the deployed `$connect`
+ * authorizer reads from `event.queryStringParameters`.
+ */
+export type ConnectCredential = { wsToken: string } | { code: string };
+
 export interface ConnectOptions {
   /** Called for each inbound server message. */
   onMessage(message: ServerMessage): void;
   /** Called once when the socket closes, with the close code. */
   onClose(code: number): void;
+  /**
+   * $connect credential (host `wsToken` or guest `code`). Omitted on a degraded
+   * mint — the host then connects without the param rather than being blocked.
+   */
+  credential?: ConnectCredential;
 }
 
 /**
@@ -79,6 +95,23 @@ declare global {
 const INTERNAL_CLOSE = 4500;
 
 /**
+ * Appends the $connect credential to the configured wss URL as a query param
+ * (s005-h2, UC3/UC4). The host carries `?wsToken=<token>`; the guest carries
+ * `?code=<CODE>`. Values are URL-encoded. With no credential (degraded mint) the
+ * base URL is returned unchanged so the host still connects. The query string is
+ * added to the already-permitted `connect-src` wss origin — no new CSP directive.
+ */
+function withCredential(baseUrl: string, credential?: ConnectCredential): string {
+  if (!credential) return baseUrl;
+  const [name, value] =
+    'wsToken' in credential
+      ? (['wsToken', credential.wsToken] as const)
+      : (['code', credential.code] as const);
+  const sep = baseUrl.includes('?') ? '&' : '?';
+  return `${baseUrl}${sep}${name}=${encodeURIComponent(value)}`;
+}
+
+/**
  * The real WebSocket-backed factory (C2). Reads the WSS endpoint from
  * `window.OXO_CONFIG.wsUrl`. When no URL is configured (e.g. the config artifact
  * is missing), it degrades gracefully in the s004 style — it opens no socket and
@@ -88,15 +121,16 @@ const INTERNAL_CLOSE = 4500;
  * the socket is open. `close()` is idempotent.
  */
 export function createRealSocketFactory(): GameSocketFactory {
-  return ({ onMessage, onClose }) => {
-    const url = window.OXO_CONFIG?.wsUrl;
+  return ({ onMessage, onClose, credential }) => {
+    const baseUrl = window.OXO_CONFIG?.wsUrl;
 
-    if (!url) {
+    if (!baseUrl) {
       // No transport available — surface a generic failure, open nothing.
       onClose(INTERNAL_CLOSE);
       return { send: () => {}, close: () => {} };
     }
 
+    const url = withCredential(baseUrl, credential);
     const ws = new WebSocket(url);
     let open = false;
     let closed = false;

@@ -66,6 +66,10 @@ export function JoinScreen({ connect, onGameReady }: JoinScreenProps) {
     // subsequent DELETE-driven close must not overwrite that specific message.
     let errorShown = false;
     const socket = connect({
+      // The guest's $connect credential is the entered code — the factory
+      // appends it as `?code=` so the deployed authorizer can verify the game
+      // (UC4/AC4.1, T8).
+      credential: { code },
       onMessage: (message) => {
         if (message.type === 'game-ready') {
           onGameReady?.(message);

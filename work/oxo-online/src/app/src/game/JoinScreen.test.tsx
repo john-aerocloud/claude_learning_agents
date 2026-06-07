@@ -36,6 +36,16 @@ describe('JoinScreen — code input + submit + connecting indicator (B1, F3, F6)
     expect(m.sent).toContainEqual({ action: 'join', code: 'ABC234' });
   });
 
+  it('passes the entered code as the connect credential (UC4/AC4.1, T8)', async () => {
+    const m = mockFactory();
+    render(<JoinScreen connect={m.factory} />);
+    await userEvent.type(screen.getByLabelText(/game code/i), 'ABC234');
+    await userEvent.click(screen.getByRole('button', { name: /join/i }));
+    // The factory appends `?code=` to the wss URL from this credential so the
+    // deployed $connect authorizer can run the GSI lookup.
+    expect(m.opts?.credential).toEqual({ code: 'ABC234' });
+  });
+
   it('shows a connecting indicator while the socket is pending', async () => {
     const m = mockFactory();
     render(<JoinScreen connect={m.factory} />);

@@ -427,6 +427,56 @@ describe('GameRoot — real socket frames (C2, UC3, F1, F6)', () => {
   });
 });
 
+// T8 / UC3 / AC3.1 + UC4 / AC4.1: the SPA must thread the $connect credential
+// through the socket seam — the host passes the create-game wsToken, the guest
+// passes the entered code — so the factory builds the authorised wss URL.
+describe('GameRoot — $connect credential threading (UC3/AC3.1, UC4/AC4.1, T8)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('host passes the create-game wsToken as the connect credential (UC3/AC3.1)', async () => {
+    const cap = captureFactory();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({ gameId: 'g-7', code: 'TOK234', wsToken: 'host.tok.sig' }),
+        { status: 201 },
+      ),
+    );
+    render(<GameRoot socketFactory={cap.factory} />);
+    await userEvent.click(screen.getByRole('button', { name: /play online/i }));
+    await waitFor(() =>
+      expect(screen.getByText(/waiting for opponent/i)).toBeInTheDocument(),
+    );
+    expect(cap.opts?.credential).toEqual({ wsToken: 'host.tok.sig' });
+  });
+
+  it('host connects WITHOUT a credential when the create response omits wsToken (degraded mint, DEFECT-H2-001)', async () => {
+    const cap = captureFactory();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ gameId: 'g-8', code: 'DEG234' }), {
+        status: 201,
+      }),
+    );
+    render(<GameRoot socketFactory={cap.factory} />);
+    await userEvent.click(screen.getByRole('button', { name: /play online/i }));
+    await waitFor(() =>
+      expect(screen.getByText(/waiting for opponent/i)).toBeInTheDocument(),
+    );
+    // No wsToken minted -> host still connects, just without the param.
+    expect(cap.opts?.credential).toBeUndefined();
+  });
+
+  it('guest passes the entered code as the connect credential (UC4/AC4.1)', async () => {
+    const cap = captureFactory();
+    render(<GameRoot socketFactory={cap.factory} />);
+    await userEvent.click(screen.getByRole('button', { name: /join a game/i }));
+    await userEvent.type(screen.getByLabelText(/game code/i), 'GST234');
+    await userEvent.click(screen.getByRole('button', { name: /^join$/i }));
+    expect(cap.opts?.credential).toEqual({ code: 'GST234' });
+  });
+});
+
 describe('GameRoot — local modes unaffected by online wiring (B4, F8)', () => {
   afterEach(() => {
     vi.restoreAllMocks();

@@ -123,6 +123,57 @@ describe('createRealSocketFactory — real WebSocket transport (C2)', () => {
     expect(ws.closeCalls).toBe(1);
   });
 
+  // UC3 / AC3.1 (T8): the host threads the create-game wsToken to the factory;
+  // the factory appends it as a `?wsToken=` query param on the configured wss URL
+  // so the deployed $connect authorizer can verify it.
+  it('appends ?wsToken=<token> to the URL when a wsToken credential is supplied (UC3/AC3.1)', () => {
+    const factory = createRealSocketFactory();
+    factory({
+      onMessage: () => {},
+      onClose: () => {},
+      credential: { wsToken: 'tok-abc.sig-xyz' },
+    });
+    expect(FakeWebSocket.instances[0].url).toBe(
+      'wss://ws.example.com/prod?wsToken=tok-abc.sig-xyz',
+    );
+  });
+
+  // UC3 graceful degradation (DEFECT-H2-001): a degraded mint omits wsToken, so
+  // the host connects WITHOUT the param rather than blocking — the create must
+  // never be lost just because the secret was unavailable.
+  it('connects without ?wsToken when no credential is supplied (degraded mint)', () => {
+    const factory = createRealSocketFactory();
+    factory({ onMessage: () => {}, onClose: () => {} });
+    expect(FakeWebSocket.instances[0].url).toBe('wss://ws.example.com/prod');
+  });
+
+  // UC4 / AC4.1 (T8): the guest threads the entered code to the factory; the
+  // factory appends it as a URL-encoded `?code=` query param so the authorizer
+  // can run the GSI lookup.
+  it('appends ?code=<CODE> to the URL when a code credential is supplied (UC4/AC4.1)', () => {
+    const factory = createRealSocketFactory();
+    factory({
+      onMessage: () => {},
+      onClose: () => {},
+      credential: { code: 'ABC234' },
+    });
+    expect(FakeWebSocket.instances[0].url).toBe(
+      'wss://ws.example.com/prod?code=ABC234',
+    );
+  });
+
+  it('URL-encodes a code credential with reserved characters (UC4/AC4.1)', () => {
+    const factory = createRealSocketFactory();
+    factory({
+      onMessage: () => {},
+      onClose: () => {},
+      credential: { code: 'A B&C' },
+    });
+    expect(FakeWebSocket.instances[0].url).toBe(
+      'wss://ws.example.com/prod?code=A%20B%26C',
+    );
+  });
+
   it('degrades gracefully when no wsUrl is configured (s004 style): closes 4500, opens nothing', () => {
     delete (window as unknown as { OXO_CONFIG?: unknown }).OXO_CONFIG;
     const onClose = vi.fn();

@@ -23,6 +23,14 @@ Act as the **orchestrator**. Own this; gather input but make the process call.
    fill the anticipated-vs-observed score for the PREVIOUS change. Revert or
    rework any prior change that was not a net win across throughput (lead
    time), quality (CFR), frequency, and recovery (MTTR).
+5a. **Score the experiment registry** (`/process/experiments.md`, process §25a):
+   every `active` row that had a scoring opportunity gets a scoring note;
+   horizon-reached rows with no measurable improvement move to
+   `under-question` and MUST be resolved (rewrite as a new experiment, or
+   start a `retirement-trial` — physically remove the text, run ≥2 scoring
+   opportunities, reinstate on metric drop / retire permanently on no drop;
+   max one trial per artifact at a time). Agent-def simplicity is a goal:
+   text that cannot demonstrate value does not stay.
 6. **Route each change to its narrowest owner** (process §36):
    - one agent's behaviour → edit that agent's file in `.claude/agents/`
    - cross-agent rules → `/process/process-current.md` (version+1)
@@ -39,6 +47,9 @@ Act as the **orchestrator**. Own this; gather input but make the process call.
    to the global process. Each change — wherever it routed — must target a
    named DORA metric and state its ANTICIPATED effect so the next retro can
    score it. The answer to the focus question drives the change-set.
+   **Register every routed change** (including agent-file edits and tools) as
+   a row in `/process/experiments.md` with target metric, anticipated effect,
+   and scoring horizon (default 2 scoring opportunities).
 
 Report: the focus question and answer, the new process version, each change
 WITH where it was routed (agent file / process / tool / improvement slice),

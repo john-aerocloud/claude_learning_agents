@@ -348,3 +348,4 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T08:39:15Z,oxo-online,8,s005-h2-connect-auth,tester,task_end,,fail,571d63d,DEFECT-H2-003 raised; 27/30 validation green; smoke blocked by rate-limiter TTL-reset defect; MTTR clock running
 2026-06-07T08:41:48Z,oxo-online,8,s005-h2-connect-auth,engineer,task_start,,na,DEFECT-H2-003,Fix DEFECT-H2-003: per-IP window self-heals on TTL expiry (lazy DDB deletion left stale counts blocking indefinitely). RED unit tests first; domain/adapter expiry-aware reset.
 2026-06-07T08:53:58Z,oxo-online,8,s005-h2-connect-auth,orchestrator,gate,,success,RETRO-V31-CHANGE-MAP,focused retro: v31 shared change-impact model routed to process+4 agent defs+IMP-007+OI-31; v30 scored
+2026-06-07T08:59:32Z,oxo-online,8,s005-h2-connect-auth,orchestrator,gate,,success,RETRO-V32-EXPERIMENTS,focused retro: v32 changes-as-experiments lifecycle + experiments.md registry (8 rows seeded); v31 snapshot scored

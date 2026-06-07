@@ -72,7 +72,9 @@ The same rules apply, with these differences:
 1. Click **Play Online** on the mode selector.
 2. A loading spinner appears while the game is created on the server.
 3. Within 3 seconds a "waiting for opponent" screen appears with a prominent
-   **6-character game code** and a **"Copy link"** button.
+   **6-character game code** and a **"Copy link"** button. Each code is
+   storage-guaranteed unique — two simultaneous games can never share a code,
+   so a friend's link always reaches the right game.
 4. Click **Copy link**. The URL `https://d3pf3kcvzpau1x.cloudfront.net/join/<code>`
    is placed on your clipboard.
 5. Send the link to your friend by any means (message, email, etc.).

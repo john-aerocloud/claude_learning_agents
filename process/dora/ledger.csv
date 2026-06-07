@@ -526,3 +526,6 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T22:01:53Z,oxo-online,12,s005-h3-code-uniqueness,tester,task_start,,started,74caf25,UC4 in-prod validation s005-h3 begin; plan from change-map; OI-40 fix in progress
 2026-06-07T22:20:41Z,oxo-online,12,s005-h3-code-uniqueness,tester,validation_run,,success,74caf25:validation,"s005-h3 validation spec 6/6 PASS: SM-2 50 creates distinct=50/50 p95=246ms, DDB scan 231 items 0 duplicates, AC-5 IAM PASS, F1 integrity PASS, F3 AC-7 orphan-harmless PASS; T3 stale spec amended for Codes table widening; OI-40 fixed (dynamic sha)"
 2026-06-07T22:23:18Z,oxo-online,12,s005-h3-code-uniqueness,tester,task_end,,success,8fa3549,S005H3-UC4 PASS; OI-3 CLOSED; OI-40 FIXED; 6/6 spec green; SM-2 50-distinct CAS proof; p95=246ms; pushed 8fa3549
+2026-06-07T22:24:28Z,oxo-online,12,s005-h3-code-uniqueness,orchestrator,gate,,success,SLICE-S005H3-DELIVERED,delivered; OI-3 closed; documenter background; auto-retro
+2026-06-07T22:25:18Z,oxo-online,12,s005-h3-code-uniqueness,documenter,task_start,,na,,updating usage.md and runbook.md for s005-h3 code uniqueness
+2026-06-07T22:25:38Z,oxo-online,12,s005-h3-code-uniqueness,orchestrator,gate,,success,RETRO-S005H3,retro: no v-bump, EXP-012 validated, ToC inflection→IMP-007 next lever

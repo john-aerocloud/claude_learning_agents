@@ -314,3 +314,6 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T06:45:33Z,oxo-online,8,s005-h2-connect-auth,engineer,task_start,,success,route.md:tdd-route,Lay TDD route for s005-h2 connect-auth
 2026-06-07T06:46:57Z,oxo-online,8,s005-h2-connect-auth,cicd,task_start,,na,,"s005-h2 capability step: generalise Lambda build, allowlist apigatewayv2/ssm/secretsmanager, pre-flight, capabilities.md s005-h2 section"
 2026-06-07T06:47:23Z,oxo-online,8,s005-h2-connect-auth,cicd,task_end,,success,a99fdc9,"build generalised (for-loop tsconfig.*); 3 allowlist entries (get-authorizers, ssm describe-parameters, secretsmanager describe-secret — value verbs absent by design); pre-flight all PASS; capabilities.md s005-h2 written; no new GH vars/deploy grants"
+2026-06-07T06:48:03Z,oxo-online,8,s005-h2-connect-auth,engineer,task_end,300,success,b98e372:route.md,Route laid: 26 engineer build steps across 4 phases + 3 Set-C validation hand-offs
+2026-06-07T06:50:29Z,oxo-online,8,s005-h2-connect-auth,engineer,task_start,,na,,A2 build: UC2 authorizer + ConnectAttempts + shared secret infra (S-A2.1..S-A2.15)
+2026-06-07T06:56:19Z,oxo-online,8,s005-h2-connect-auth,engineer,task_start,,na,,A1 build UC1 wsToken mint + SecretSource port + SSM adapter

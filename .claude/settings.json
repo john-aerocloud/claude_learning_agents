@@ -64,6 +64,8 @@
       "Bash(make build-app)",
       "Bash(make test-infra)",
       "Bash(make test-lambda)",
+      "Bash(make run-local)",
+      "Bash(make test-local)",
       "Bash(make synth-infra *)",
       "Bash(make synth-infra)",
       "Bash(make waf-probe)",

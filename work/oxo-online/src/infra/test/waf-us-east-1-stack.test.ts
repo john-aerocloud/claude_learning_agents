@@ -156,3 +156,84 @@ describe('OxoOnlineWafUsEast1Stack — global ACL rules (Step 2)', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// s007 UC2-S2 — IMP-008 runner-IP exclusion: oxo-test-runner-ips IP set +
+// NOT(IPSetReference) scope-down on the rate rule (AC2.3, AC2.4, AC2.6 / S6).
+// The scope-down narrows the rule's APPLICABILITY (runner IPs don't count) —
+// it does NOT change the rule's Block ACTION or LIMIT for non-runner IPs.
+// ---------------------------------------------------------------------------
+const RUNNER_IP_SET_NAME = 'oxo-test-runner-ips';
+
+describe('OxoOnlineWafUsEast1Stack — IMP-008 runner-IP exclusion (s007 UC2-S2)', () => {
+  it('AC2.3: synthesises an AWS::WAFv2::IPSet named oxo-test-runner-ips, CLOUDFRONT scope, IPV4, empty at synth', () => {
+    const { template } = synth();
+    const ipSets = template.findResources('AWS::WAFv2::IPSet');
+    const ipSet = Object.values(ipSets).find(
+      (r: any) => r.Properties?.Name === RUNNER_IP_SET_NAME,
+    ) as Record<string, any> | undefined;
+    expect(ipSet, 'expected an oxo-test-runner-ips IP set').toBeDefined();
+    expect(ipSet!.Properties.Scope).toBe('CLOUDFRONT');
+    expect(ipSet!.Properties.IPAddressVersion).toBe('IPV4');
+    // Transient-by-protocol: empty at synth; runner IPs are added per-run by
+    // make waf-runner-ip-add and removed by trap / drained by the 24h Lambda.
+    expect(ipSet!.Properties.Addresses).toEqual([]);
+  });
+
+  it('AC2.4: the rate rule carries a scopeDown = NOT(IPSetReference oxo-test-runner-ips); limit + Block 429 are byte-for-byte unchanged', () => {
+    const { template } = synth();
+    const acls = template.findResources('AWS::WAFv2::WebACL');
+    const acl = Object.values(acls)[0] as Record<string, any>;
+    const rules: any[] = acl.Properties.Rules ?? [];
+    const rateRule = rules.find((r) => r.Statement?.RateBasedStatement);
+    expect(rateRule, 'expected a rate-based rule').toBeDefined();
+    const rbs = rateRule.Statement.RateBasedStatement;
+
+    // Limit + aggregate UNCHANGED (S6 — scope-down narrows applicability only).
+    expect(rbs.Limit).toBe(CF_RATE_LIMIT_PER_5MIN);
+    expect(rbs.AggregateKeyType).toBe('IP');
+
+    // Scope-down = NOT wrapping an IPSetReferenceStatement to the runner set.
+    const scopeDown = rbs.ScopeDownStatement;
+    expect(scopeDown, 'rate rule must carry a ScopeDownStatement').toBeDefined();
+    expect(scopeDown.NotStatement, 'scope-down must be a NOT').toBeDefined();
+    const inner = scopeDown.NotStatement.Statement;
+    expect(
+      inner.IPSetReferenceStatement,
+      'NOT must wrap an IPSetReferenceStatement',
+    ).toBeDefined();
+    // The reference points at the runner IP set's ARN (CFN ref/GetAtt, not a
+    // literal) — assert it resolves to the IPSet resource, not a hard-coded ARN.
+    const arn = inner.IPSetReferenceStatement.Arn;
+    const arnStr = JSON.stringify(arn);
+    const ipSets = template.findResources('AWS::WAFv2::IPSet');
+    const ipSetLogicalId = Object.keys(ipSets).find(
+      (id) => (ipSets[id] as any).Properties?.Name === RUNNER_IP_SET_NAME,
+    );
+    expect(ipSetLogicalId).toBeDefined();
+    expect(arnStr).toContain(ipSetLogicalId as string);
+
+    // Block ACTION + custom 429 response UNCHANGED (S6 / AC2.6).
+    expect(rateRule.Action).toHaveProperty('Block');
+    expect(rateRule.Action.Block.CustomResponse.ResponseCode).toBe(429);
+  });
+
+  it('AC2.6 (S6 regression): the rate rule still Blocks at the same limit/429 for a non-runner source — scope-down does not change action/limit', () => {
+    // The s005-h1 AC3.1 semantics: Block action + CF_RATE_LIMIT_PER_5MIN limit +
+    // 429 custom response survive the scope-down. The scope-down only narrows
+    // WHO the rule counts (excludes runner IPs); for any non-runner IP the rule
+    // is identical to the pre-IMP-008 rule.
+    const { template } = synth();
+    const acls = template.findResources('AWS::WAFv2::WebACL');
+    const acl = Object.values(acls)[0] as Record<string, any>;
+    const rules: any[] = acl.Properties.Rules ?? [];
+    const rateRule = rules.find((r) => r.Statement?.RateBasedStatement);
+    const rbs = rateRule.Statement.RateBasedStatement;
+    expect(rbs.Limit).toBe(CF_RATE_LIMIT_PER_5MIN);
+    expect(rbs.Limit).toBeLessThanOrEqual(100);
+    expect(rateRule.Action.Block.CustomResponse.ResponseCode).toBe(429);
+    expect([403, 404]).not.toContain(
+      rateRule.Action.Block.CustomResponse.ResponseCode,
+    );
+  });
+});

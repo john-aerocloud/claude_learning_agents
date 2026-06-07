@@ -33,6 +33,27 @@ export class OxoOnlineWafUsEast1Stack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
+    // -------------------------------------------------------------------------
+    // IMP-008 (s007 UC2-S2) — runner-IP exclusion IP set.
+    // CLOUDFRONT scope, us-east-1 (same platform-forced region as the WebACL).
+    // Empty at synth/deploy — TRANSIENT BY PROTOCOL: the smoke runner adds its
+    // IP/32 via `make waf-runner-ip-add` (read-modify-write, append-never-replace)
+    // and removes it via `trap` on exit; the 24h drain Lambda (UC2-S3) is the
+    // standing guard against a leaked entry. The rate rule references this set in
+    // a NOT() scope-down (below) so runner traffic does NOT count toward the rate
+    // limit, while all non-runner IPs stay rate-limited + Blocked exactly as
+    // AC3.1/S6 validates.
+    // -------------------------------------------------------------------------
+    const runnerIpSet = new wafv2.CfnIPSet(this, 'TestRunnerIpSet', {
+      name: 'oxo-test-runner-ips',
+      scope: 'CLOUDFRONT',
+      ipAddressVersion: 'IPV4',
+      addresses: [],
+      description:
+        'IMP-008 transient smoke-runner IPs excluded from the CloudFront rate rule. ' +
+        'Added per-run, removed via trap, drained every 24h. Deploy-role/runner-script mutation only.',
+    });
+
     const webAcl = new wafv2.CfnWebACL(this, 'GlobalWebAcl', {
       name: 'oxo-online-cf-global',
       // Default-allow: WAF is transparent to legitimate traffic; only the
@@ -93,6 +114,22 @@ export class OxoOnlineWafUsEast1Stack extends cdk.Stack {
             rateBasedStatement: {
               limit: CF_RATE_LIMIT_PER_5MIN,
               aggregateKeyType: 'IP',
+              // IMP-008 (s007 UC2-S2 / S6) — scope-down = NOT(IPSetReference).
+              // The rule counts a request toward the per-IP limit ONLY when the
+              // source IP is NOT in oxo-test-runner-ips. This narrows the rule's
+              // APPLICABILITY (runner IPs bypass the count) without touching its
+              // ACTION (Block) or LIMIT (CF_RATE_LIMIT_PER_5MIN) — so every
+              // non-runner IP is Blocked at the same threshold exactly as the
+              // s005-h1 AC3.1 rule, preserving S6.
+              scopeDownStatement: {
+                notStatement: {
+                  statement: {
+                    ipSetReferenceStatement: {
+                      arn: runnerIpSet.attrArn,
+                    },
+                  },
+                },
+              },
             },
           },
           // DEFECT-WAF-001: a default WAF block returns HTTP 403. The shell

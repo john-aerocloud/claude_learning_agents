@@ -1,8 +1,8 @@
-%% oxo-online use-case dependency graph — FIRST EDITION (s006, process §12a)
+%% oxo-online use-case dependency graph — updated s007 (process §12a)
 %% One node per use case / delivered behaviour. Edges = genuine behavioural dependencies only.
 %% False edges are not drawn — they cost parallelism.
-%% classDef changed marks THIS slice's (s006) new nodes.
-%% Already-live behaviours from s001–s005-h2 are drawn as delivered context nodes.
+%% classDef changed marks THIS slice's (s007) new nodes.
+%% Already-live behaviours from s001–s006 are drawn as delivered context nodes.
 %% Granularity: slice-level behaviour, not UI micro-states.
 %% Engineer routes build order from this graph; tester plans coverage from it.
 
@@ -15,29 +15,42 @@ flowchart TD
   S004["s004 — create + join game\n(POST /api/games, game-ready, board visible)"]:::delivered
   S005["s005 — WS connect + register + join\n($connect authorizer, wsToken, game-ready fan-out)"]:::delivered
 
-  %% ---- s006 use cases (NEW — this slice) ----
-  UC1["UC1 — Move domain core\n(pure: validate+apply move,\nwin/draw detection)\nno infra dependency"]:::changed
-  UC2["UC2 — Games store adapter\n(conditional UpdateItem CAS\n+ join-time board init)"]:::changed
-  UC3["UC3 — ws-fn move route handler\n(parse, identity bind,\ndomain call, relay)\nSHARED SEAM"]:::changed
-  UC4["UC4 — SPA move-send +\nrender-on-broadcast +\nboard lock + OI-33 error map"]:::changed
-  UC5["UC5 — Local stand-up (OI-28)\n(committed run-local entry\n+ local adapters)"]:::changed
-  UC6["UC6 — Prod validation\n(out-of-turn/forgery rejection,\np95 latency, zero divergence)"]:::changed
+  %% ---- s006 use cases (delivered — s006 iteration) ----
+  S6UC1["s006-UC1 — Move domain core\n(pure: validate+apply move,\nwin/draw detection)"]:::delivered
+  S6UC2["s006-UC2 — Games store adapter\n(conditional UpdateItem CAS\n+ join-time board init)"]:::delivered
+  S6UC3["s006-UC3 — ws-fn move route handler\n(parse, identity bind,\ndomain call, relay)"]:::delivered
+  S6UC4["s006-UC4 — SPA move-send +\nrender-on-broadcast +\nboard lock + OI-33 error map"]:::delivered
+  S6UC5["s006-UC5 — Local stand-up (OI-28)\n(committed run-local entry\n+ local adapters)"]:::delivered
+  S6UC6["s006-UC6 — Prod validation\n(out-of-turn/forgery rejection,\np95 latency, zero divergence)"]:::delivered
 
-  %% ---- Edges: already-live context feeds s006 UCs ----
-  S005 -->|"$connect auth + game-ready flow\nalready live; UC3 adds move route\nto the same Lambda + WS API"| UC3
-  S005 -->|"join write already live;\nUC2 extends it with board init"| UC2
-  S004 -->|"SPA WS message loop\nalready wired; UC4 adds\nmove-send + render paths"| UC4
+  %% ---- s006 edges (delivered context) ----
+  S005 -->|"$connect auth + game-ready flow\nalready live; s6-UC3 adds move route"| S6UC3
+  S005 -->|"join write already live;\ns6-UC2 extends it with board init"| S6UC2
+  S004 -->|"SPA WS message loop\nalready wired; s6-UC4 adds\nmove-send + render paths"| S6UC4
+  S6UC1 -->|"port interface stable\nbefore UC3 wires handler"| S6UC3
+  S6UC2 -->|"port interface stable\nbefore UC3 wires handler"| S6UC3
+  S6UC1 -->|"domain functions\nneeded by local server"| S6UC5
+  S6UC2 -->|"store port interface\nneeded by local adapter"| S6UC5
+  S6UC3 -->|"move handler deployed\nbefore prod validation"| S6UC6
+  S6UC4 -->|"SPA deployed (move-send,\nrender, OI-33) before\nprod validation"| S6UC6
 
-  %% ---- Edges: within s006 ----
-  UC1 -->|"port interface must be stable\nbefore UC3 wires the handler"| UC3
-  UC2 -->|"port interface must be stable\nbefore UC3 wires the handler"| UC3
-  UC1 -->|"domain functions needed\nby local server (UC5)"| UC5
-  UC2 -->|"store port interface needed\nby local adapter (UC5)"| UC5
-  UC3 -->|"move handler must be deployed\nbefore prod validation can run"| UC6
-  UC4 -->|"SPA must be deployed\n(move-send, render, OI-33)\nbefore prod validation"| UC6
+  %% ---- s007 use cases (NEW — this slice) ----
+  S7UC1["s007-UC1 — disconnect handler\n(abandon + notify survivor\n+ Connections delete)\nSHARED SEAM"]:::changed
+  S7UC2["s007-UC2 — infra\n(Connections GetItem grant\n+ IMP-008 WAF IP set\n+ drain Lambda)"]:::changed
+  S7UC3["s007-UC3 — SPA survivor UX\n(opponent-disconnected message\n+ mode-selector return\nno reload)"]:::changed
+  S7UC4["s007-UC4 — prod validation\n(two-browser disconnect smoke,\nDDB checks, S4 log pin,\nIMP-008 smoke-CI)"]:::changed
+
+  %% ---- Edges: already-live context feeds s007 UCs ----
+  S6UC3 -->|"$disconnect stub already live\nin oxo-ws-fn; s7-UC1 makes\nit real (same Lambda + WS API)"]| S7UC1
+  S6UC2 -->|"Connections store port\nextended with getConnection;\nconditional abandon reuses\ns006 CAS mechanism"| S7UC1
+  S6UC4 -->|"SPA WS message loop\nalready wired; s7-UC3 adds\nopponent-disconnected handler\n+ mode-selector return"| S7UC3
+
+  %% ---- Edges: within s007 ----
+  S7UC2 -->|"Connections GetItem IAM grant\nmust be deployed at or before\nthe UC1 handler code deploy\n(§19 sequencing edge — same\nOxoGameProd stack deploy)"| S7UC1
+  S7UC1 -->|"$disconnect handler must be\ndeployed before prod validation\ncan run (smoke needs real handler)"| S7UC4
+  S7UC3 -->|"SPA must show opponent-disconnected\nmessage + return to mode selector\nbefore two-browser smoke passes"| S7UC4
+  S7UC2 -->|"WAF IP set + drain Lambda\nmust be deployed before\nIMP-008 smoke-CI path\n(make waf-runner-ip-add targets)"| S7UC4
 
   %% ---- classDef ----
-  %% s006 changed marks CLEARED (2026-06-07 — tester consumed, UC6 prod validation PASS).
-  %% UC1–UC6 are all now delivered/stable.
   classDef delivered fill:#e8f4e8,stroke:#2e7d32,color:#000;
-  classDef changed fill:#e8f4e8,stroke:#2e7d32,color:#000;
+  classDef changed fill:#fff3e0,stroke:#e65100,color:#000;

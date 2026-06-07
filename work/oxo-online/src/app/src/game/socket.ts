@@ -36,12 +36,38 @@ export interface ServerErrorMessage {
   message: string;
 }
 
-export type ServerMessage = GameReadyMessage | ServerErrorMessage;
+/**
+ * Server-authoritative board broadcast (s006/UC4). The server is the ONLY writer
+ * of the board: on every accepted move it posts this frame to BOTH connections.
+ * The SPA renders the board STRICTLY from `board` here — never optimistically
+ * from the local click. `board` is the 9-char fixed-width string (`X`/`O`/`-`),
+ * `currentTurn` is whose move the server will accept next.
+ */
+export interface BoardUpdateMessage {
+  type: 'board-update';
+  /** 9 chars, index 0..8, each `X` | `O` | `-`. */
+  board: string;
+  currentTurn: 'X' | 'O';
+  status: 'active' | 'won' | 'drawn';
+}
+
+/** Terminal result broadcast (s006/UC4). Locks the board and shows the result. */
+export interface GameOverMessage {
+  type: 'game-over';
+  result: 'X-wins' | 'O-wins' | 'draw';
+}
+
+export type ServerMessage =
+  | GameReadyMessage
+  | ServerErrorMessage
+  | BoardUpdateMessage
+  | GameOverMessage;
 
 /** A client-to-server action frame. */
 export type ClientFrame =
   | { action: 'join'; code: string }
-  | { action: 'register'; gameId: string };
+  | { action: 'register'; gameId: string }
+  | { action: 'move'; square: number };
 
 export interface GameSocket {
   /** Send an action frame to the server. */
@@ -83,6 +109,15 @@ export type GameSocketFactory = (opts: ConnectOptions) => GameSocket;
 /** Runtime config injected into the SPA at deploy time (see deploy phase E3). */
 interface OxoConfig {
   wsUrl?: string;
+  /**
+   * UC4 flag (§40, s006). Gates the server-authoritative move-send /
+   * render-on-broadcast / board-lock behaviour. DEFAULT OFF: the deployed server
+   * cannot route `action:'move'` until UC3 is deployed, so the SPA's move path
+   * must stay dark in prod until the pipeline flips this ON (runtime config — no
+   * rebuild). Engineer tests run flag-ON. Factored out of code then config as
+   * UC4's done condition (no orphan flag at retro).
+   */
+  uc4Enabled?: boolean;
 }
 
 declare global {

@@ -495,3 +495,137 @@ describe('GameRoot — local modes unaffected by online wiring (B4, F8)', () => 
     expect(screen.getByRole('status')).toHaveTextContent('X wins');
   });
 });
+
+// UC4 (s006) — server-authoritative move relay, FLAG ON. The board sends `move`
+// on click and renders STRICTLY from server broadcasts. @covers spa-online-move.
+describe('GameRoot — UC4 online move relay (flag ON, AC4.1–AC4.4)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete (window as unknown as { OXO_CONFIG?: unknown }).OXO_CONFIG;
+  });
+
+  function flagOn() {
+    (window as unknown as { OXO_CONFIG?: { uc4Enabled?: boolean } }).OXO_CONFIG = {
+      uc4Enabled: true,
+    };
+  }
+
+  /** Drive the host to the online board and return the captured socket opts. */
+  async function hostToBoard(cap: ReturnType<typeof captureFactory>) {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ gameId: 'g-mv', code: 'MOV234' }), {
+        status: 201,
+      }),
+    );
+    render(<GameRoot socketFactory={cap.factory} />);
+    await userEvent.click(screen.getByRole('button', { name: /play online/i }));
+    await waitFor(() =>
+      expect(screen.getByText(/waiting for opponent/i)).toBeInTheDocument(),
+    );
+    act(() => cap.opts?.onMessage({ type: 'game-ready', role: 'host' }));
+    expect(screen.getByTestId('online-role')).toHaveTextContent('You are X');
+  }
+
+  // AC4.1 — clicking a square in online mode sends exactly one {action:'move'}.
+  it('AC4.1 — host click on an empty square sends exactly one {action:"move", square}', async () => {
+    flagOn();
+    const cap = captureFactory();
+    await hostToBoard(cap);
+    // Server broadcasts the initial active board with X to move (host's turn).
+    act(() =>
+      cap.opts?.onMessage({
+        type: 'board-update',
+        board: '---------',
+        currentTurn: 'X',
+        status: 'active',
+      }),
+    );
+    const before = cap.sent.filter((f) => (f as { action?: string }).action === 'move').length;
+    await userEvent.click(screen.getByLabelText('cell 4'));
+    const moves = cap.sent.filter((f) => (f as { action?: string }).action === 'move');
+    expect(moves.length).toBe(before + 1);
+    expect(moves[moves.length - 1]).toEqual({ action: 'move', square: 4 });
+    // No optimistic update: cell 4 is still empty until the server broadcasts.
+    expect(screen.getByLabelText('cell 4')).toHaveTextContent('');
+  });
+
+  // AC4.2 — render-on-broadcast with no prior click.
+  it('AC4.2 — a board-update renders the server board + turn with no prior click', async () => {
+    flagOn();
+    const cap = captureFactory();
+    await hostToBoard(cap);
+    act(() =>
+      cap.opts?.onMessage({
+        type: 'board-update',
+        board: 'X--------',
+        currentTurn: 'O',
+        status: 'active',
+      }),
+    );
+    expect(screen.getByLabelText('cell 0')).toHaveTextContent('X');
+    expect(screen.getByTestId('online-turn')).toHaveTextContent(/o/i);
+  });
+
+  // AC4.3 — board lock after game-over: clicks fire 0 sends.
+  it('AC4.3 — after game-over, clicking any square sends no further move', async () => {
+    flagOn();
+    const cap = captureFactory();
+    await hostToBoard(cap);
+    act(() =>
+      cap.opts?.onMessage({
+        type: 'board-update',
+        board: 'XXX------',
+        currentTurn: 'O',
+        status: 'won',
+      }),
+    );
+    act(() => cap.opts?.onMessage({ type: 'game-over', result: 'X-wins' }));
+    const before = cap.sent.filter((f) => (f as { action?: string }).action === 'move').length;
+    for (let i = 0; i < 9; i += 1) {
+      await userEvent.click(screen.getByLabelText(`cell ${i}`));
+    }
+    const after = cap.sent.filter((f) => (f as { action?: string }).action === 'move').length;
+    expect(after).toBe(before);
+  });
+
+  // AC4.4 — result screen rendering on game-over.
+  it('AC4.4 — game-over result "X-wins" shows "X wins"', async () => {
+    flagOn();
+    const cap = captureFactory();
+    await hostToBoard(cap);
+    act(() => cap.opts?.onMessage({ type: 'game-over', result: 'X-wins' }));
+    expect(screen.getByText(/x wins/i)).toBeInTheDocument();
+  });
+
+  it('AC4.4 — game-over result "draw" shows "Draw"', async () => {
+    flagOn();
+    const cap = captureFactory();
+    await hostToBoard(cap);
+    act(() => cap.opts?.onMessage({ type: 'game-over', result: 'draw' }));
+    expect(screen.getByText(/draw/i)).toBeInTheDocument();
+  });
+
+  // The guest path also relays moves: the guest's socket (owned by JoinScreen)
+  // must be threaded up so a guest click sends `move` and broadcasts render.
+  it('guest can send a move after game-ready (guest socket threaded to the move loop)', async () => {
+    flagOn();
+    const cap = captureFactory();
+    render(<GameRoot socketFactory={cap.factory} />);
+    await userEvent.click(screen.getByRole('button', { name: /join a game/i }));
+    await userEvent.type(screen.getByLabelText(/game code/i), 'GMV234');
+    await userEvent.click(screen.getByRole('button', { name: /^join$/i }));
+    act(() => cap.opts?.onMessage({ type: 'game-ready', role: 'guest' }));
+    expect(screen.getByTestId('online-role')).toHaveTextContent('You are O');
+    // Server says it is O's turn (the guest's turn).
+    act(() =>
+      cap.opts?.onMessage({
+        type: 'board-update',
+        board: 'X--------',
+        currentTurn: 'O',
+        status: 'active',
+      }),
+    );
+    await userEvent.click(screen.getByLabelText('cell 4'));
+    expect(cap.sent).toContainEqual({ action: 'move', square: 4 });
+  });
+});

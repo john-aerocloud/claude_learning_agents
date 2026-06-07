@@ -12,6 +12,23 @@ import {
   type ServerMessage,
 } from './socket';
 
+const EMPTY_BOARD_STRING = '---------';
+
+/** Server-authoritative online board state, driven STRICTLY by server frames. */
+interface OnlineGameState {
+  /** Latest `board` string from a `board-update` (`X`/`O`/`-`). */
+  board: string;
+  /** Whose move the server will accept next. */
+  currentTurn: 'X' | 'O';
+  /** Set once a `game-over` frame arrives. */
+  result?: 'X-wins' | 'O-wins' | 'draw';
+}
+
+const INITIAL_ONLINE_STATE: OnlineGameState = {
+  board: EMPTY_BOARD_STRING,
+  currentTurn: 'X',
+};
+
 type Mode = 'two-player' | 'vs-computer';
 type OnlinePhase =
   | 'idle'
@@ -50,20 +67,44 @@ export function GameRoot({ socketFactory = realFactory }: GameRootProps = {}) {
   // param rather than being blocked.
   const [wsToken, setWsToken] = useState<string | null>(null);
   const [onlineRole, setOnlineRole] = useState<'host' | 'guest'>('host');
+  const [onlineGame, setOnlineGame] = useState<OnlineGameState>(INITIAL_ONLINE_STATE);
   const spinnerTimer = useRef<ReturnType<typeof setTimeout>>();
   const hostSocketRef = useRef<GameSocket | null>(null);
+  // The live socket carrying this player's moves and broadcasts. For the host
+  // it is the register socket; for the guest it is handed up by JoinScreen on
+  // game-ready (UC4 move loop — moves must travel over the SAME connection).
+  const playSocketRef = useRef<GameSocket | null>(null);
 
-  // A `game-ready` from either side drives both screens to the board. An error
-  // frame (DEFECT-005-001 Bug B — the host's register failure path) degrades to
-  // the readable online-error screen rather than white-screening or silently
-  // sticking on "waiting". The JoinScreen handles its own error frames inline.
-  const handleGameReady = (message: ServerMessage) => {
+  // A `game-ready` from either side drives both screens to the board, captures
+  // the live socket for the move loop (UC4), and resets the online board. A
+  // `board-update`/`game-over` (UC4) updates the server-authoritative board.
+  // An error frame (DEFECT-005-001 Bug B — the host's register failure path)
+  // degrades to the readable online-error screen rather than white-screening.
+  // The JoinScreen handles its own pre-game-ready error frames inline.
+  const handleGameReady = (message: ServerMessage, socket?: GameSocket) => {
     if (message.type === 'game-ready') {
+      if (socket) playSocketRef.current = socket;
       setOnlineRole(message.role);
+      setOnlineGame(INITIAL_ONLINE_STATE);
       setOnlinePhase('playing-online');
+    } else if (message.type === 'board-update') {
+      setOnlineGame((g) => ({
+        ...g,
+        board: message.board,
+        currentTurn: message.currentTurn,
+      }));
+    } else if (message.type === 'game-over') {
+      setOnlineGame((g) => ({ ...g, result: message.result }));
     } else if (message.type === 'error') {
       setOnlinePhase('error');
     }
+  };
+
+  // UC4: a square click sends exactly one {action:'move', square} over the live
+  // socket. The board is NOT updated optimistically — it re-renders only when the
+  // server broadcasts a `board-update` (server-authoritative contract).
+  const sendMove = (square: number) => {
+    playSocketRef.current?.send({ action: 'move', square });
   };
 
   const onSelect = (index: number) => {
@@ -108,7 +149,10 @@ export function GameRoot({ socketFactory = realFactory }: GameRootProps = {}) {
       // On a degraded mint it is null -> connect with no param (graceful
       // degradation; the host is never blocked, DEFECT-H2-001).
       ...(wsToken ? { credential: { wsToken } } : {}),
-      onMessage: handleGameReady,
+      // The host's register socket is also the move-relay socket (UC4) — route
+      // every server frame through the same handler and bind it as the play
+      // socket so the host's moves travel over this connection.
+      onMessage: (message) => handleGameReady(message, socket),
       onClose: () => {},
     });
     hostSocketRef.current = socket;
@@ -142,6 +186,8 @@ export function GameRoot({ socketFactory = realFactory }: GameRootProps = {}) {
     setGameCode(null);
     setGameId(null);
     setWsToken(null);
+    setOnlineGame(INITIAL_ONLINE_STATE);
+    playSocketRef.current = null;
   };
 
   const joinGame = () => {
@@ -149,6 +195,8 @@ export function GameRoot({ socketFactory = realFactory }: GameRootProps = {}) {
     setGameCode(null);
     setGameId(null);
     setWsToken(null);
+    setOnlineGame(INITIAL_ONLINE_STATE);
+    playSocketRef.current = null;
   };
 
   const locked = state.status !== 'playing';
@@ -211,7 +259,15 @@ export function GameRoot({ socketFactory = realFactory }: GameRootProps = {}) {
       {onlinePhase === 'joining' && (
         <JoinScreen connect={socketFactory} onGameReady={handleGameReady} />
       )}
-      {onlinePhase === 'playing-online' && <OnlineBoard role={onlineRole} />}
+      {onlinePhase === 'playing-online' && (
+        <OnlineBoard
+          role={onlineRole}
+          board={onlineGame.board}
+          currentTurn={onlineGame.currentTurn}
+          result={onlineGame.result}
+          onMove={sendMove}
+        />
+      )}
       {onlinePhase === 'error' && (
         <p className="online-error" role="alert">{ONLINE_ERROR}</p>
       )}

@@ -63,8 +63,13 @@ const ABNORMAL_CLOSE_CODES = new Set([1005, 1006]);
 interface JoinScreenProps {
   /** Socket seam — Set C supplies the real WebSocket-backed factory. */
   connect: GameSocketFactory;
-  /** Called when a `game-ready` arrives so the parent can show the board. */
-  onGameReady?: (message: ServerMessage) => void;
+  /**
+   * Called when a `game-ready` arrives so the parent can show the board. The
+   * live socket is handed up alongside the message so the parent's move loop
+   * (UC4) can `send({action:'move'})` over the SAME guest connection and route
+   * the subsequent `board-update`/`game-over` broadcasts.
+   */
+  onGameReady?: (message: ServerMessage, socket: GameSocket) => void;
 }
 
 /**
@@ -99,7 +104,15 @@ export function JoinScreen({ connect, onGameReady }: JoinScreenProps) {
       credential: { code },
       onMessage: (message) => {
         if (message.type === 'game-ready') {
-          onGameReady?.(message);
+          // Hand the live socket up so the parent's move loop can send moves and
+          // route board-update/game-over over THIS guest connection (UC4).
+          onGameReady?.(message, socketRef.current as GameSocket);
+        } else if (
+          message.type === 'board-update' ||
+          message.type === 'game-over'
+        ) {
+          // Post-game-ready relay frames are routed to the parent's move loop.
+          onGameReady?.(message, socketRef.current as GameSocket);
         } else if (message.type === 'error') {
           // Bug B: failure arrives as an error MESSAGE frame. It is
           // AUTHORITATIVE — it always wins, even if a close already opened the

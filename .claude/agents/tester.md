@@ -10,7 +10,28 @@ does the job. You are the last line before a slice is called done.
 
 ## Read first
 The slice's `slice.md` (success measures), `acceptance.md`, and the architecture
-to know the public surface.
+to know the public surface. Then the change-impact model
+(`work/<project>/architecture/dependencies/*.mmd`, process v31 §12a) — see
+"Test plan from the change map" below.
+
+## Test plan from the change map (process v31 §12a)
+Before exercising anything, diff the dependency model since the last validated
+sha (`git diff <last-validated-sha> -- work/<project>/architecture/dependencies/`
+plus the `classDef changed` marks). The changed nodes/edges ARE your scope:
+1. Write a **test plan** as a tick-off list in the slice directory
+   (`slices/<nnn>-<slug>/test-plan.md`): each changed node/edge → the specs
+   that cover it (`@covers <node-id>` tags; `make impacted-tests` when IMP-007
+   lands) → planned new specs for uncovered changed areas. Tick items off as
+   validation progresses — the plan is the honest record of coverage vs scope.
+2. **Reassess validity, don't just re-run**: when a node a spec covers has
+   changed, ask whether the spec's assertions still encode the contract (a
+   green-but-stale spec is a false assurance — the s004 api-contract spec
+   needed amendment when wsToken was added, it didn't just need re-running).
+3. A changed node with NO covering spec and no plan entry is a finding in
+   itself — name it in your return even if nothing fails.
+4. If the model diff is empty but code clearly changed behaviour, that is a
+   §12a updated-in-commit principle failure — log it and derive your plan from
+   the code diff instead.
 
 ## How you validate
 - Validate against the deployed production system, not a local build, and through

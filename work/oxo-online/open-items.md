@@ -56,3 +56,5 @@ Process-side items (project-agnostic) live in `/process/improvement-slices/`
 and the §27 retro queue — currently: pipeline-N+1-planning-over-build
 (operationalise §8b), §37 parallel-build scoring on s005, IMP-001/002/003
 scoring, v14–v18 anticipated-vs-observed scoring (all due at s005 retro).
+
+| OI-31 | retro v31 (§12a, human-directed) | Author the initial change-impact model for oxo-online: architecture/dependencies/{use-case-deps,class-deps,data-flow}.mmd — data-flow must model the platform gates that bit us as explicit nodes (CF/WAF -> CF routing -> HTTP API -> game-fn -> DDB; WS upgrade -> [identitySource gate REMOVED, strike 5] -> authorizer -> secret/Games-GSI/connect-attempts[lazy-TTL semantics] -> ws-fn -> connections). Retrofit alongside OI-17 hexagonal refactor at s006 (same archaeology, one pass). Specs gain @covers tags as they are touched (big-bang tagging not required). | tester constraint + CFR + MTTR (v31 §12a) | process v31 §12a + IMP-007 | s006 with OI-17/OI-28 |

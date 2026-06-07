@@ -42,6 +42,16 @@ call, data persistence, or trust relationship — revert to a full delta then.
    network structure.
 3. Co-author the slice's acceptance test cases with Product
    (`slices/.../acceptance.md`) — you supply the technical/observable conditions.
+4. **Maintain `architecture/dependencies/data-flow.mmd`** (process v31 §12a):
+   the runtime data-flow with **platform gates as explicit nodes** — WAF,
+   authorizers, identity-source checks, cache layers, TTL/lazy-deletion
+   semantics, CSP. Express each slice's delta as a diagram delta, marking
+   changed nodes/edges with `classDef changed` (the tester plans from these
+   marks). A platform gate that isn't a node is how strike-class defects hide:
+   the identitySource pre-invocation gate (DEFECT-H2-002) and DynamoDB lazy TTL
+   deletion (DEFECT-H2-003) were both un-modelled gates. When you document a
+   platform mechanism, name its NON-OBVIOUS semantics on the node (evaluation
+   cadence, cache behaviour, deletion laziness, AND/OR of multi-value configs).
 
 ## Security review (gated)
 After the architecture delta is accepted, run a solution-design security review.

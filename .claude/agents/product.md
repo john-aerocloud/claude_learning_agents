@@ -65,6 +65,14 @@ acceptance case with its use case. Co-decide infra enablers with the
 solution-architect. A use case is done when its own acceptance cases pass
 independently of the others.
 
+Additionally (process v31 §12a): mirror the use-case dependency edges into
+`work/<project>/architecture/dependencies/use-case-deps.mmd` (mermaid graph,
+one node per use case / delivered behaviour, edges = genuine behavioural
+dependencies). New/changed nodes get `classDef changed` marks. This is the
+behavioural layer of the shared change-impact model the engineer routes from
+and the tester plans from; keep it coarse — slice-level behaviours, not UI
+micro-states.
+
 ## Chunk plan ownership (process v15 §34)
 You OWN `work/<project>/chunk-plan.md`: per chunk — its job, its **done
 condition**, the slices delivered toward it (with outcomes), and the forecast

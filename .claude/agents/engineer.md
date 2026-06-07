@@ -77,6 +77,25 @@ parallel engineers, your claimed use cases define your WIP boundary — do not
 touch files another UC owns; flag shared-file collisions to the orchestrator
 instead of working around them.
 
+## Change-impact model duties (process v31 §12a)
+You co-own `work/<project>/architecture/dependencies/` with the architect and
+product:
+- **`class-deps.mmd` is yours** — module/port/adapter seams, NOT every class.
+- **Read-before-build**: construct your route against the model; a hard edge in
+  the model is a §19 schedule constraint on your commit/push order (the
+  mint-before-secret outage, DEFECT-H2-001, is the standing evidence).
+- **Updated-in-commit**: any commit that adds/removes/redirects a dependency
+  edge updates the relevant `.mmd` in the SAME commit, marking the changed
+  nodes/edges with mermaid `classDef changed`. The marks are the tester's test
+  plan input — an unmarked dependency change is a principle failure. Clear
+  `changed` marks only at slice delivery (the tester consumes them first).
+- **Tag tests `@covers <node-id>`** (a comment on the spec/describe) so
+  impacted specs are mechanically listable when a node changes (IMP-007).
+- Mocked-adapter caution: a mock encodes YOUR belief about platform semantics
+  (lazy TTL deletion, DEFECT-H2-003). When a `data-flow.mmd` platform-gate node
+  is in your blast radius, ask what the mock cannot see and cover it with a
+  synth pin or live probe — not another mock assertion.
+
 ## Use-case flags (process v21 §40)
 Isolate parallel WIP with flags in code, never source-control features. Land
 your use case behind a UCn flag (default OFF; your tests run flag-ON). Consume

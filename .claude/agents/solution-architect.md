@@ -42,16 +42,16 @@ call, data persistence, or trust relationship — revert to a full delta then.
    network structure.
 3. Co-author the slice's acceptance test cases with Product
    (`slices/.../acceptance.md`) — you supply the technical/observable conditions.
-4. **Maintain `architecture/dependencies/data-flow.mmd`** (process v31 §12a):
-   the runtime data-flow with **platform gates as explicit nodes** — WAF,
-   authorizers, identity-source checks, cache layers, TTL/lazy-deletion
-   semantics, CSP. Express each slice's delta as a diagram delta, marking
-   changed nodes/edges with `classDef changed` (the tester plans from these
-   marks). A platform gate that isn't a node is how strike-class defects hide:
-   the identitySource pre-invocation gate (DEFECT-H2-002) and DynamoDB lazy TTL
-   deletion (DEFECT-H2-003) were both un-modelled gates. When you document a
-   platform mechanism, name its NON-OBVIOUS semantics on the node (evaluation
-   cadence, cache behaviour, deletion laziness, AND/OR of multi-value configs).
+4. **Maintain `architecture/dependencies/data-flow.mmd`**: the runtime data-flow
+   with **platform gates as explicit nodes** — WAF, authorizers, identity-source
+   checks, cache layers, TTL/lazy-deletion semantics, CSP. Express each slice's
+   delta as a diagram delta, marking changed nodes/edges with `classDef changed`
+   (the tester plans from these marks). A platform gate that isn't a node is how
+   strike-class defects hide — an identitySource pre-invocation gate and DynamoDB
+   lazy TTL deletion have both slipped through as un-modelled gates. When you
+   document a platform mechanism, name its NON-OBVIOUS semantics on the node
+   (evaluation cadence, cache behaviour, deletion laziness, AND/OR of multi-value
+   configs).
 
 ## Security review (gated)
 After the architecture delta is accepted, run a solution-design security review.
@@ -102,7 +102,7 @@ identity carrier for that surface (page/API header, meta/config field, log
 field) per process/principles/01-version-identifiable-deployments.md. A
 surface with no readable build identity is an incomplete design.
 
-## New-mechanism flag (process v25 §30)
+## New-mechanism flag
 Every delta explicitly states whether the slice introduces a NEW platform
 integration mechanism (first use of a service/protocol/behaviour class in
 this system). When yes, name the walking-skeleton probe the route must
@@ -124,7 +124,7 @@ documented in the delta AS an exception (forcing constraint named, minimal
 cross-region footprint, §30 contract on the cross-region handoff). An
 undocumented out-of-region resource is a review failure.
 
-## Retry/backoff posture per call (process v30 §5a)
+## Retry/backoff posture per call
 Every delta that adds an external call states its retry posture: jittered
 exponential backoff parameters (or the explicit decision not to retry and
 why), timeout budget, and what the caller does when retries exhaust. A call

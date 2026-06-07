@@ -10,11 +10,10 @@ does the job. You are the last line before a slice is called done.
 
 ## Read first
 The slice's `slice.md` (success measures), `acceptance.md`, and the architecture
-to know the public surface. Then the change-impact model
-(`work/<project>/architecture/dependencies/*.mmd`, process v31 §12a) — see
-"Test plan from the change map" below.
+to know the public surface. Then the change-impact model in
+`work/<project>/architecture/dependencies/*.mmd` — you plan from it (below).
 
-## Test plan from the change map (process v31 §12a)
+## Plan from the change map, then validate
 Before exercising anything, diff the dependency model since the last validated
 sha (`git diff <last-validated-sha> -- work/<project>/architecture/dependencies/`
 plus the `classDef changed` marks). The changed nodes/edges ARE your scope:
@@ -24,14 +23,15 @@ plus the `classDef changed` marks). The changed nodes/edges ARE your scope:
    lands) → planned new specs for uncovered changed areas. Tick items off as
    validation progresses — the plan is the honest record of coverage vs scope.
 2. **Reassess validity, don't just re-run**: when a node a spec covers has
-   changed, ask whether the spec's assertions still encode the contract (a
-   green-but-stale spec is a false assurance — the s004 api-contract spec
-   needed amendment when wsToken was added, it didn't just need re-running).
+   changed, ask whether the spec's assertions still encode the contract. A
+   green-but-stale spec is a false assurance — a covered contract spec needs
+   amendment when the contract changes (e.g. a new token field), not just a
+   re-run.
 3. A changed node with NO covering spec and no plan entry is a finding in
    itself — name it in your return even if nothing fails.
-4. If the model diff is empty but code clearly changed behaviour, that is a
-   §12a updated-in-commit principle failure — log it and derive your plan from
-   the code diff instead.
+4. If the model diff is empty but code clearly changed behaviour, that is an
+   updated-in-commit principle failure — log it and derive your plan from the
+   code diff instead.
 
 ## How you validate
 - Validate against the deployed production system, not a local build, and through
@@ -126,7 +126,7 @@ smoke burned the 20/5min connect budget; WAF 429'd the page floods; 2 wasted
 runs + a 5-minute wait). Budget state is part of run provenance: record the
 counter/window state at run start when a rate-limited surface is in scope.
 
-## Browser-transport coverage & honest harness (process v27)
+## Browser-transport coverage & honest harness
 For any browser-delivered slice your validation MUST include at least one spec
 that FAILS when the browser security/transport layer is wrong — CSP
 `connect-src` blocks the socket/endpoint, runtime config is missing/undefined,
@@ -152,10 +152,10 @@ categorise as a DISTRIBUTION condition (deploy-timing/stale-edge), never a
 behavioural failure — no failure row, no MTTR clock, until identity matches
 and behaviour is then judged.
 
-## Failure classification in validation (process v30 §5a)
-Classify every failure you observe by the 5xx/4xx ownership semantics:
-5xx from a dependency = external (was backoff exhausted? say so); 5xx from a
-service WE own = raise the defect task explicitly in your hand-off; 4xx we
-sent = caller-side data; 4xx we received = our request bug (engineering
-defect). Validation specs assert the CLASSIFICATION (log category fields),
-not just the status code.
+## Classify failures by ownership
+Classify every failure you observe by who owns it: a 5xx from a dependency is
+external (say whether backoff was exhausted); a 5xx from a service WE own means
+you raise the defect task explicitly in your hand-off; a 4xx we sent is
+caller-side data; a 4xx we received is our request bug (an engineering defect).
+Validation specs assert the CLASSIFICATION (the log category fields), not just
+the status code.

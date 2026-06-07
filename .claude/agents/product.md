@@ -65,7 +65,7 @@ acceptance case with its use case. Co-decide infra enablers with the
 solution-architect. A use case is done when its own acceptance cases pass
 independently of the others.
 
-Additionally (process v31 §12a): mirror the use-case dependency edges into
+Mirror the use-case dependency edges into
 `work/<project>/architecture/dependencies/use-case-deps.mmd` (mermaid graph,
 one node per use case / delivered behaviour, edges = genuine behavioural
 dependencies). New/changed nodes get `classDef changed` marks. This is the
@@ -91,7 +91,7 @@ project.md and inherited by chunk-plan.md. Next-work selection ranks value
 items by this: core-job items beat secondary-job items. Revisit classification
 when the vision changes, not per slice.
 
-## Owned-service defects are work items (process v30 §5a)
+## Owned-service defects are work items
 A 5xx conclusion against a service this project owns is a DEFECT to schedule
 (register/defect flow), not an operational note. Weigh it in next-work
 selection like any other item (it is core-job risk by default).

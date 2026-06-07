@@ -14,10 +14,10 @@ function synth(): Template {
   return Template.fromStack(synthStack());
 }
 
-describe('OxoGameStack — DynamoDB tables exist (Step 4 harness; s005 adds Connections)', () => {
-  it('synthesises exactly two DynamoDB tables (Games + Connections)', () => {
+describe('OxoGameStack — DynamoDB tables exist (Step 4 harness; s005 adds Connections, s005-h2 adds ConnectAttempts)', () => {
+  it('synthesises exactly three DynamoDB tables (Games + Connections + ConnectAttempts)', () => {
     const template = synth();
-    template.resourceCountIs('AWS::DynamoDB::Table', 2);
+    template.resourceCountIs('AWS::DynamoDB::Table', 3);
   });
 });
 

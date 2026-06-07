@@ -5,7 +5,17 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as apigatewayv2 from 'aws-cdk-lib/aws-apigatewayv2';
 import * as apigatewayv2integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import * as customresources from 'aws-cdk-lib/custom-resources';
 import { Construct } from 'constructs';
+
+// s005-h2 — shared ws-token secret parameter name. Both oxo-game-fn (mint) and
+// oxo-ws-auth-fn (verify) read THIS one SSM SecureString by name (the single
+// shared source, SYNTH-CONTRACT-H2-2). The value is generated in-stack by a
+// custom resource (delta §4 — no manual seed; keeps §19 trunk-CD).
+const WS_TOKEN_SECRET_PARAM = '/oxo-online/prod/ws-token-secret';
+
+// s005-h2 — per-IP rolling connect window (delta §1). Items self-delete on TTL.
+const CONNECT_ATTEMPTS_TTL_SECONDS = 5 * 60;
 
 // slice 004: OxoGameStack
 // Resources:
@@ -361,5 +371,218 @@ export class OxoGameStack extends cdk.Stack {
     // protects the HTTP /api/* path. See game-stack.test.ts for the negative
     // platform-honesty pin that keeps WAFv2 out of this stack.
     // =========================================================================
+
+    // =========================================================================
+    // s005-h2 — $connect authorisation + per-IP rate-limiting (delta s005-h2).
+    // All additive, in OxoGameProd. No new stack, no new cross-stack import.
+    // =========================================================================
+
+    // Build identity (principles/01, T9): the SHA is injected by the pipeline
+    // (BUILD_SHA env / -c buildSha), NEVER hardcoded. Falls back to 'dev' for
+    // local synth so tests run; the pipeline overrides it for real deploys.
+    const buildSha: string =
+      (this.node.tryGetContext('buildSha') as string) ??
+      process.env.BUILD_SHA ??
+      'dev';
+
+    // -------------------------------------------------------------------------
+    // ConnectAttempts — per-IP rolling connect counter (T5, S4).
+    //   PK sourceIp (S), no sort key; on-demand; SSE; TTL on `ttl` (~5-min);
+    //   PITR off (deliberate — ephemeral abuse-control data); no resource
+    //   policy. DESTROY on stack delete (purely ephemeral).
+    // -------------------------------------------------------------------------
+    const connectAttemptsTable = new dynamodb.Table(this, 'ConnectAttemptsTable', {
+      tableName: 'oxo-connect-attempts',
+      partitionKey: { name: 'sourceIp', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      timeToLiveAttribute: 'ttl',
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+
+    // -------------------------------------------------------------------------
+    // Shared ws-token secret (T3, S3, delta §4). An SSM SecureString whose
+    // value is GENERATED in-stack by a custom resource (32 random bytes) —
+    // never a manual seed (§19), never a plaintext env var. Both fns read it by
+    // name. A1's mint adapter + this fn's verify adapter both call SSM
+    // GetParameter(WithDecryption) on this exact name → single shared key.
+    // -------------------------------------------------------------------------
+    const secretGeneratorFn = new lambda.Function(this, 'WsTokenSecretGenerator', {
+      runtime: lambda.Runtime.NODEJS_20_X,
+      handler: 'index.handler',
+      timeout: cdk.Duration.seconds(30),
+      // Inline CFN custom-resource handler: on Create/Update generate a 32-byte
+      // random secret and write it as an SSM SecureString; on Delete remove it.
+      code: lambda.Code.fromInline(`
+const { SSMClient, PutParameterCommand, DeleteParameterCommand } = require('@aws-sdk/client-ssm');
+const crypto = require('node:crypto');
+const ssm = new SSMClient({});
+exports.handler = async (event) => {
+  const name = event.ResourceProperties.ParameterName;
+  if (event.RequestType === 'Delete') {
+    try { await ssm.send(new DeleteParameterCommand({ Name: name })); } catch (e) {}
+    return { PhysicalResourceId: name };
+  }
+  const value = crypto.randomBytes(32).toString('base64');
+  await ssm.send(new PutParameterCommand({
+    Name: name, Value: value, Type: 'SecureString', Overwrite: true,
+  }));
+  return { PhysicalResourceId: name };
+};
+`),
+    });
+    // The generator may PutParameter/DeleteParameter on THIS one parameter only.
+    secretGeneratorFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        sid: 'GenerateWsTokenSecret',
+        effect: iam.Effect.ALLOW,
+        actions: [
+          'ssm:PutParameter',
+          'ssm:DeleteParameter',
+        ],
+        resources: [
+          `arn:aws:ssm:${this.region}:${this.account}:parameter${WS_TOKEN_SECRET_PARAM}`,
+        ],
+      }),
+    );
+
+    const secretProvider = new customresources.Provider(this, 'WsTokenSecretProvider', {
+      onEventHandler: secretGeneratorFn,
+    });
+    const wsTokenSecret = new cdk.CustomResource(this, 'WsTokenSecret', {
+      serviceToken: secretProvider.serviceToken,
+      properties: { ParameterName: WS_TOKEN_SECRET_PARAM },
+    });
+
+    // The exact ARN of the shared secret parameter — used to scope both read
+    // grants to this ONE resource (CP-H2-C). kms:Decrypt on the SSM-managed key
+    // is covered by the account-default alias when SecureString uses the
+    // default key (no customer CMK), so no extra KMS statement is required.
+    const wsTokenSecretArn = `arn:aws:ssm:${this.region}:${this.account}:parameter${WS_TOKEN_SECRET_PARAM}`;
+
+    // S-A2.12 / S2 — oxo-game-fn gains ONLY the one shared-secret read grant
+    // (retains Games PutItem). Plus the env var so it can mint (UC1 consumes it).
+    gameFunction.addEnvironment('WS_TOKEN_SECRET_PARAM', WS_TOKEN_SECRET_PARAM);
+    gameFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        sid: 'ReadWsTokenSecret',
+        effect: iam.Effect.ALLOW,
+        actions: ['ssm:GetParameter'],
+        resources: [wsTokenSecretArn],
+      }),
+    );
+
+    // -------------------------------------------------------------------------
+    // oxo-ws-auth-fn — the $connect REQUEST authorizer (delta §2 separate fn).
+    // Dedicated least-privilege role (S1, CP-H2-A/B/C/D):
+    //   - GetItem/Query on Games table + code-index GSI (guest code lookup)
+    //   - UpdateItem/PutItem on ConnectAttempts (per-IP counter)
+    //   - GetParameter on the ONE shared secret ARN (verify)
+    //   - own log group
+    // NO ManageConnections, NO Connections, NO Games write, NO wildcard.
+    // -------------------------------------------------------------------------
+    const wsAuthRole = new iam.Role(this, 'WsAuthFunctionRole', {
+      assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+      description: 'oxo-ws-auth-fn execution role — gate-only least privilege (s005-h2).',
+    });
+    wsAuthRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'OwnLogGroup',
+        effect: iam.Effect.ALLOW,
+        actions: [
+          'logs:CreateLogGroup',
+          'logs:CreateLogStream',
+          'logs:PutLogEvents',
+        ],
+        resources: [
+          `arn:aws:logs:${this.region}:${this.account}:log-group:/aws/lambda/oxo-ws-auth-fn:*`,
+        ],
+      }),
+    );
+    // CP-H2-A — read-only on Games + code-index GSI (guest code lookup).
+    wsAuthRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'GamesReadByCode',
+        effect: iam.Effect.ALLOW,
+        actions: ['dynamodb:GetItem', 'dynamodb:Query'],
+        resources: [
+          gamesTable.tableArn,
+          `${gamesTable.tableArn}/index/${GAMES_CODE_INDEX}`,
+        ],
+      }),
+    );
+    // CP-H2-B — per-IP counter writes on ConnectAttempts ARN only.
+    wsAuthRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'ConnectAttemptsWrite',
+        effect: iam.Effect.ALLOW,
+        actions: ['dynamodb:UpdateItem', 'dynamodb:PutItem'],
+        resources: [connectAttemptsTable.tableArn],
+      }),
+    );
+    // CP-H2-C — secret read on the ONE shared parameter ARN only.
+    wsAuthRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'ReadWsTokenSecret',
+        effect: iam.Effect.ALLOW,
+        actions: ['ssm:GetParameter'],
+        resources: [wsTokenSecretArn],
+      }),
+    );
+
+    const wsAuthFunction = new lambda.Function(this, 'WsAuthFunction', {
+      functionName: 'oxo-ws-auth-fn',
+      runtime: lambda.Runtime.NODEJS_20_X,
+      handler: 'ws-auth/handler.handler',
+      code: lambda.Code.fromAsset(
+        path.join(__dirname, '..', '..', 'lambda', 'ws-auth', 'dist'),
+      ),
+      role: wsAuthRole,
+      environment: {
+        GAMES_TABLE: gamesTable.tableName,
+        GAMES_CODE_INDEX,
+        CONNECT_ATTEMPTS_TABLE: connectAttemptsTable.tableName,
+        WS_TOKEN_SECRET_PARAM,
+        CONNECT_RATE_THRESHOLD: '20',
+        BUILD_SHA: buildSha,
+      },
+      reservedConcurrentExecutions: 15,
+      timeout: cdk.Duration.seconds(5),
+      memorySize: 256,
+    });
+    wsAuthFunction.node.addDependency(wsTokenSecret);
+
+    // Allow API Gateway to invoke the authorizer.
+    wsAuthFunction.addPermission('WsAuthInvoke', {
+      principal: new iam.ServicePrincipal('apigateway.amazonaws.com'),
+      action: 'lambda:InvokeFunction',
+      sourceArn: `arn:aws:execute-api:${this.region}:${this.account}:${wsApi.ref}/authorizers/*`,
+    });
+
+    // -------------------------------------------------------------------------
+    // REQUEST authorizer attached to the WS API (T1, SYNTH-CONTRACT-H2-1).
+    // IdentitySource = the wsToken + code query-string params (delta §1).
+    // AuthorizerResultTtlInSeconds 0 (T2, §3) — every connect runs the
+    // authorizer so the per-IP counter is accurate.
+    // -------------------------------------------------------------------------
+    const wsAuthorizer = new apigatewayv2.CfnAuthorizer(this, 'WsConnectAuthorizer', {
+      apiId: wsApi.ref,
+      name: 'oxo-ws-connect-authorizer',
+      authorizerType: 'REQUEST',
+      identitySource: [
+        'route.request.querystring.wsToken',
+        'route.request.querystring.code',
+      ],
+      authorizerUri: `arn:aws:apigateway:${this.region}:lambda:path/2015-03-31/functions/${wsAuthFunction.functionArn}/invocations`,
+      authorizerResultTtlInSeconds: 0,
+    });
+
+    // Gate the EXISTING $connect route: AuthorizationType CUSTOM + AuthorizerId.
+    // The $connect CfnRoute is created in the s005 loop above; re-set its auth
+    // properties here via an escape hatch so the gate is ON the route (T1).
+    const connectRoute = this.node.findChild('JoinWsRouteConnect') as apigatewayv2.CfnRoute;
+    connectRoute.authorizationType = 'CUSTOM';
+    connectRoute.authorizerId = wsAuthorizer.ref;
+    connectRoute.addDependency(wsAuthorizer);
   }
 }

@@ -107,4 +107,14 @@ describe('§30 composed WS contract (T7) — route keys, action match, endpoint 
     // A rename of the output name on the producer side (game-stack) without
     // updating this consumer fails test #3 or this assertion at CI.
   });
+
+  // s006 wire-on-deploy contract (process v27) for the UC4 flag flip (§40/§19
+  // edge #4). UC3 (the 'move' route) is deployed, so the config.js the pipeline
+  // writes must turn the SPA move path ON. This pin (and the config entry it
+  // pins) is REMOVED at the R4.7 factor-out — the flag is slice-scoped.
+  it('5. the config-injection step flips uc4Enabled ON (UC3 move route is deployed)', () => {
+    const workflow = readFileSync(DEPLOY_WORKFLOW, 'utf8');
+    expect(workflow).toContain('uc4Enabled');
+    expect(workflow).toMatch(/uc4Enabled["\\:]+\s*true/);
+  });
 });

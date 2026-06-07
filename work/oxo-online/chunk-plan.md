@@ -18,7 +18,7 @@ and marks actuals when a slice is delivered.
 | C1 | Deployable shell | delivered | 1 (s001) | 0 | — |
 | C2 | Local two-player game | delivered | 1 (s002) | 0 | — |
 | C3 | Single-player vs AI | delivered | 1 (s003) | 0 | — |
-| C4 | Online two-player match | in-progress | 5 (s004, s005-h1, s005, s005-h2, s006) | 3 (s007, s008, s005-h3) | s007 disconnect (in-planning) |
+| C4 | Online two-player match | in-progress | 6 (s004, s005-h1, s005, s005-h2, s006, s007) | 2 (s008, s005-h3) | s008 share-link (in-planning — C4-closing) |
 | C5 | Leaderboard | not started | 0 | 3 (s009–s011) | s009 record-game-result |
 | C6 | Player identity (lightweight) | not started | 0 | 2 (s012–s013) | s012 display-name-entry |
 | C7 | In-game chat | not started | 0 | 2 (s014–s015) | s014 in-game-message-send |
@@ -112,8 +112,11 @@ shown to both players; disconnection is handled gracefully. No accounts required
 | s005-h1 — WAF / rate-limiting | delivered | 2026-06-07 | CloudFront global WAF WebACL live; rate rule + IP reputation list; per-IP WS protection re-scoped to s005-h2 (platform constraint: WAFv2 cannot associate with API GW v2) |
 | s005-h2 — join-token / $connect authorization | delivered | 2026-06-07 | REQUEST authorizer on $connect; HMAC-signed wsToken (host); code-based guest auth; per-IP connect budget via ConnectAttempts table; 17/17 ACs pass |
 | s006 — move relay + server-authoritative play | delivered | 2026-06-07 | Server-authoritative move relay live; 16/16 prod ACs; p95 move latency 308ms; zero board divergence; S1a forged-gameId rejected; win/draw detection server-side; full game playable between two browsers |
+| s007 — disconnect & timeout handling | delivered | 2026-06-07 | $disconnect Lambda live; 17/17 ACs pass; Games status=abandoned on disconnect; survivor notified within 10s and returned to mode selector without reload; Connections row deleted; IMP-008 WAF runner-IP exclusion delivered |
 
-**Remaining forecast (s007, s008, s005-h3) — ordered thinnest-first:**
+**Remaining forecast (s008, s005-h3) — ordered thinnest-first:**
+
+**C4 done condition:** Proven by s008 SM-5 (two players, different browsers, via share link, intent→result under 5 min). All elements now in place: game play (s006), disconnect (s007), frictionless share (s008).
 
 ### s005 — join-by-code + WebSocket connect [DELIVERED 2026-06-06]
 **Scope:** A second player enters the 6-char code on a new join screen; both
@@ -210,7 +213,7 @@ share-link UX — all deferred to s007+.
 
 See slices/s006-move-relay/slice.md.
 
-### s007 — disconnect and timeout handling [IN PLANNING — SEL-S007]
+### s007 — disconnect and timeout handling [DELIVERED 2026-06-07]
 **Scope:** When a WebSocket connection drops (player closes the tab, network
 interruption), the `$disconnect` Lambda (currently a stub) is updated to:
 look up the disconnecting connectionId, conditionally update the `Games` record
@@ -243,23 +246,34 @@ waiting-host abandonment UX, leaderboard write on abandonment, game history.
 
 See slices/s007-disconnect/slice.md.
 
-### s008 — share-link UX + C4 done condition
-**Scope:** The 6-char code is also presented as a copyable deep-link URL (e.g.
-`https://<domain>/join/<code>`). Navigating to a join URL pre-fills the code
-field on the join screen. This is the final usability gap between "has a code"
-and "sharing a game is frictionless." No new backend; pure SPA routing change.
+### s008 — share-link UX + C4 done condition [IN PLANNING — SEL-S008]
+
+**This is the C4-closing slice.** C4 done-condition proven by SM-5.
+
+**Scope:** The 6-char code is also presented as a copyable deep-link URL
+(`https://<domain>/join/<code>`). A "Copy link" control appears on the waiting
+screen. Navigating to `/join/<code>` pre-fills the code field on the join screen
+and enables one-click join. Invalid code in URL shows a readable error. Pure SPA
+routing change via React Router — no backend changes, no new infrastructure.
+Arch-lite (client-only). OI-5 decided: CloudFront WS single-origin proxying is
+NOT required; path-based deep-link on the existing CloudFront SPA origin
+suffices.
 
 **Killick test:** A player can send a single URL to a friend who clicks it and
 lands directly on the join flow with no manual code entry — the minimum social
 coordination friction for the core job.
 
-**What is NOT in scope:** deep-link authentication, game lobbies, match history.
+**What is NOT in scope:** deep-link authentication, game lobbies, match history,
+CloudFront WS single-origin proxying (OI-5 closed).
 
 **Success measures:**
-1. Navigating to `/join/<code>` in a fresh browser pre-fills the code and enables one-click join.
-2. The game code screen shows a "copy link" control alongside the code text.
-3. An invalid code in the URL shows a readable error.
-4. C4 done condition is fully met: end-to-end game completed by two players from different browsers using the share link, within 5 minutes of first intent (host creating the game to result screen).
+- SM-1: Copy-link control copies a valid `https://<domain>/join/<code>` URL.
+- SM-2: Navigating to `/join/<code>` in a fresh browser pre-fills the code and enables one-click join.
+- SM-3: An invalid code in the URL shows a readable error (not a crash).
+- SM-4: Manual code entry is unaffected (no regression on s005 ACs).
+- SM-5 (C4 done-condition proof): Two players in different browsers complete a full game via share link; elapsed time from host creating game to result screen is under 5 minutes.
+
+See slices/s008-share-link/slice.md.
 
 ---
 

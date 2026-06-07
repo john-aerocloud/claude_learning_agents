@@ -474,3 +474,6 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T18:07:38Z,oxo-online,10,s007-disconnect,documenter,task_start,,na,,s007 disconnect: update usage.md + runbook.md
 2026-06-07T18:08:59Z,oxo-online,10,s007-disconnect,orchestrator,gate,,success,RETRO-S007,retro complete: v35, registry scored, 2 integrations, OIs updated
 2026-06-07T18:12:16Z,oxo-online,10,s007-disconnect,documenter,task_end,15,success,,"Updated usage.md (disconnect UX, reload limitation, disconnect-skeleton probe, s007 validation command) and runbook.md (disconnect flow, EXEMPT# hygiene, buildSha=unknown F1 caveat, new log events, disconnect playbook, WAF runner IP set)"
+2026-06-07T19:58:58Z,oxo-online,11,s008-share-link,product,task_start,,na,S008-SLICE,slice-next: propose s008 share-link slice + chunk-plan actuals + C4 done-condition framing
+2026-06-07T19:59:42Z,oxo-online,1,s008,product,task_start,,na,S008-SLICE,s008 share-link UX slice definition — completes C4
+2026-06-07T20:01:22Z,oxo-online,1,s008,product,task_end,,success,S008-SLICE,"slice.md written; chunk-plan updated (s007 delivered, s008 in-planning, C4 done-condition pinned to SM-5)"

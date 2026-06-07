@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
@@ -159,31 +159,20 @@ describe('handler — injects a host wsToken (S-A1.4, T7, AC1.1–AC1.5)', () =>
     expect(body.wsToken).toBeUndefined();
   });
 
-  // DEFECT-H2-001 pin: secret unavailability must NOT fail a create that
-  // already persisted — degrade by omitting wsToken and logging categorised.
-  it('returns 201 WITHOUT wsToken (degraded) when the secret source fails', async () => {
+  // DEFECT-H2-001 (corrected): secret failure is a clean 5xx — semantics never
+  // change shape. The deploy ORDER guarantees the secret exists (same stack);
+  // see process v20 §39 and the H2_ENFORCE flag for the enforcement half.
+  it('returns a clean 500 (no leak) when the secret source fails', async () => {
     const failingSecretSource = {
       get: async () => {
-        throw new Error('secret unavailable');
+        throw new Error('SSM stack trace detail should never leak');
       },
     };
-    const degradedHandler = createHandler({
-      secretSource: failingSecretSource,
-    });
-    const logSpy = vi.spyOn(console, 'log');
-    const res = await degradedHandler(makeEvent());
-    expect(res.statusCode).toBe(201);
-    const body = JSON.parse(res.body as string);
-    expect(body.gameId).toBeDefined();
-    expect(body.code).toBeDefined();
-    expect(body.wsToken).toBeUndefined();
-    const degradedLog = logSpy.mock.calls
-      .map((c) => String(c[0]))
-      .find((m) => m.includes('ws_token_mint_degraded'));
-    expect(degradedLog).toBeDefined();
-    expect(degradedLog).toContain('"category":"external"');
-    expect(degradedLog).toContain('"subcategory":"availability"');
-    logSpy.mockRestore();
+    const strictHandler = createHandler({ secretSource: failingSecretSource });
+    const res = await strictHandler(makeEvent());
+    expect(res.statusCode).toBe(500);
+    expect(JSON.parse(res.body as string)).toEqual({ error: 'Could not create game' });
+    expect(res.body as string).not.toContain('SSM');
   });
 });
 

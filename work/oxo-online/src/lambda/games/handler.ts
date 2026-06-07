@@ -76,35 +76,28 @@ export function createHandler(deps: HandlerDeps) {
       };
     }
 
-    // UC1: mint the host wsToken AFTER the game is persisted. Secret
-    // unavailability (env not yet provisioned, SSM transient, rotation) MUST
-    // NOT fail the create — the game already exists; failing here reports a
-    // false failure for a successful create (DEFECT-H2-001 prod outage).
-    // Degrade: omit wsToken, log categorised (external/availability), and let
-    // the client proceed. Safe because $connect enforcement ships in the same
-    // deploy as the secret — there is no enforce-without-token window.
-    let wsToken: string | undefined;
+    // UC1: mint the host wsToken AFTER the game is persisted. Secret-fetch
+    // failure is a 5xx (external dependency, categorised in the adapter) — the
+    // response semantics never change shape: a successful create ALWAYS
+    // carries wsToken. The mint-before-secret race is a SCHEDULING bug
+    // (secret deploys with/before this code, same stack), not a runtime state
+    // to tolerate (process v20 §39; human correction at DEFECT-H2-001).
+    let wsToken: string;
     try {
       const secret = await deps.secretSource.get();
       wsToken = mint({ gameId, role: 'host' }, secret, Math.floor(Date.now() / 1000));
     } catch {
-      console.log(
-        JSON.stringify({
-          event: 'ws_token_mint_degraded',
-          category: 'external',
-          subcategory: 'availability',
-          detail: 'secret unavailable; created game without wsToken',
-        }),
-      );
-      wsToken = undefined;
+      return {
+        statusCode: 500,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ error: 'Could not create game' }),
+      };
     }
 
     return {
       statusCode: 201,
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(
-        wsToken === undefined ? { gameId, code } : { gameId, code, wsToken },
-      ),
+      body: JSON.stringify({ gameId, code, wsToken }),
     };
   };
 }

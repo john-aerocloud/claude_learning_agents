@@ -154,14 +154,14 @@ export class OxoGameStack extends cdk.Stack {
     // -------------------------------------------------------------------------
     new cdk.CfnOutput(this, 'HttpApiEndpoint', {
       value: httpApi.apiEndpoint,
-      description: 'HTTP API invoke URL — consumed by OxoOnlineProd /api/* origin',
+      description: 'HTTP API invoke URL - consumed by OxoOnlineProd /api/* origin',
       exportName: 'OxoGameProd-HttpApiEndpoint',
     });
 
     new cdk.CfnOutput(this, 'LambdaFunctionName', {
       value: gameFunction.functionName,
       description:
-        'Lambda function name — GitHub Actions var OXO_ONLINE_LAMBDA_FUNCTION_NAME',
+        'Lambda function name - GitHub Actions var OXO_ONLINE_LAMBDA_FUNCTION_NAME',
       exportName: 'OxoGameProd-LambdaFunctionName',
     });
 
@@ -347,13 +347,13 @@ export class OxoGameStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'WsApiEndpoint', {
       value: `wss://${wsApi.ref}.execute-api.${this.region}.amazonaws.com/${wsStage.stageName}`,
       description:
-        'WebSocket invoke URL incl. /prod — consumed by SPA wsUrl config injection',
+        'WebSocket invoke URL incl. /prod - consumed by SPA wsUrl config injection',
       exportName: 'OxoGameProd-WsApiEndpoint',
     });
 
     new cdk.CfnOutput(this, 'WsApiId', {
       value: wsApi.ref,
-      description: 'WebSocket API id — used by the deploy/config step',
+      description: 'WebSocket API id - used by the deploy/config step',
       exportName: 'OxoGameProd-WsApiId',
     });
 
@@ -483,7 +483,7 @@ exports.handler = async (event) => {
     // -------------------------------------------------------------------------
     const wsAuthRole = new iam.Role(this, 'WsAuthFunctionRole', {
       assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
-      description: 'oxo-ws-auth-fn execution role — gate-only least privilege (s005-h2).',
+      description: 'oxo-ws-auth-fn execution role - gate-only least privilege (s005-h2).',
     });
     wsAuthRole.addToPolicy(
       new iam.PolicyStatement({
@@ -580,9 +580,25 @@ exports.handler = async (event) => {
     // Gate the EXISTING $connect route: AuthorizationType CUSTOM + AuthorizerId.
     // The $connect CfnRoute is created in the s005 loop above; re-set its auth
     // properties here via an escape hatch so the gate is ON the route (T1).
+    // UC-FLAG H2_ENFORCE (process §40 — two-phase credential rollout, §39
+    // ordering): enforcement MUST NOT go live before the SPA sends credentials
+    // (Set B). Deploying CUSTOM now would break live pairing (enforcement-
+    // before-credentials). Authorizer fn + secret + table deploy idle; the
+    // Set-B-complete commit flips this to true, then the flag is factored out
+    // (§40 lifecycle). Until then $connect stays unauthenticated as today.
+    // Flag is context-driven (default OFF). Prod deploys with it OFF until the
+    // Set-B SPA ships credentials; UC2's own tests synth with it ON (§40 —
+    // tests run flag-ON) to assert the gate IS on the route (T1). The
+    // Set-B-complete commit sets the default ON, then factors the flag out.
+    const H2_ENFORCE =
+      (this.node.tryGetContext('h2Enforce') as boolean | string | undefined) ===
+        true ||
+      this.node.tryGetContext('h2Enforce') === 'true';
     const connectRoute = this.node.findChild('JoinWsRouteConnect') as apigatewayv2.CfnRoute;
-    connectRoute.authorizationType = 'CUSTOM';
-    connectRoute.authorizerId = wsAuthorizer.ref;
-    connectRoute.addDependency(wsAuthorizer);
+    if (H2_ENFORCE) {
+      connectRoute.authorizationType = 'CUSTOM';
+      connectRoute.authorizerId = wsAuthorizer.ref;
+      connectRoute.addDependency(wsAuthorizer);
+    }
   }
 }

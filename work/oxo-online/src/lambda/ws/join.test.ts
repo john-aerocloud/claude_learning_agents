@@ -170,6 +170,30 @@ describe('join — happy path: activate + game-ready both sides (C1; F1, F2, F5,
     expect(JSON.stringify(update)).not.toContain('SPOOF');
   });
 
+  // R2.5 / AC2.5 / T6 — join-time board init (HARD EDGE #3). The SAME atomic
+  // waiting→active conditional write also initialises the play fields, so the
+  // first move finds an initialised item (board="---------", currentTurn="X",
+  // version=0, moveCount=0). These SET clauses live ONLY on the no-hijack
+  // condition path — they cannot be applied to a game that is not freshly joined.
+  // @covers adapter-games-ddb
+  // @covers games
+  it('initialises board/currentTurn/version/moveCount in the SAME activate write (T6/AC2.5)', async () => {
+    await handleJoin(joinEvent('GUEST-CONN', { action: 'join', code: 'ABC123' }));
+
+    const update = ddbMock.commandCalls(UpdateCommand)[0].args[0].input;
+    // Still the no-hijack conditional write (init must not weaken the guard).
+    expect(update.ConditionExpression).toContain('attribute_not_exists(guestConnectionId)');
+    // Init SET clauses present on the activate.
+    expect(update.UpdateExpression).toContain('board = :empty');
+    expect(update.UpdateExpression).toContain('currentTurn = :X');
+    expect(update.UpdateExpression).toContain('version = :zero');
+    expect(update.UpdateExpression).toContain('moveCount = :zero');
+    // Init values are exactly the spec values.
+    expect(update.ExpressionAttributeValues?.[':empty']).toBe('---------');
+    expect(update.ExpressionAttributeValues?.[':X']).toBe('X');
+    expect(update.ExpressionAttributeValues?.[':zero']).toBe(0);
+  });
+
   it('writes the guest Connections item with role=guest, gameId and ~2h ttl (T3)', async () => {
     const before = Math.floor(Date.now() / 1000);
     await handleJoin(joinEvent('GUEST-CONN', { action: 'join', code: 'ABC123' }));

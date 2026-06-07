@@ -85,8 +85,15 @@ export async function handleJoin(
         new UpdateCommand({
           TableName: process.env.GAMES_TABLE,
           Key: { gameId: game.gameId },
+          // R2.5/AC2.5/T6 (s006) — fold board init into the SAME atomic
+          // waiting→active write so the first move finds an initialised item
+          // (board="---------", currentTurn="X", version=0, moveCount=0). These
+          // SET clauses ride the no-hijack ConditionExpression, so they apply
+          // ONLY when this caller legitimately wins the join — never to an
+          // already-active game.
           UpdateExpression:
-            'SET guestConnectionId = :cid, #status = :active',
+            'SET guestConnectionId = :cid, #status = :active, ' +
+            'board = :empty, currentTurn = :X, version = :zero, moveCount = :zero',
           ConditionExpression:
             '#status = :waiting AND attribute_not_exists(guestConnectionId)',
           ExpressionAttributeNames: { '#status': 'status' },
@@ -94,6 +101,9 @@ export async function handleJoin(
             ':cid': connectionId,
             ':active': 'active',
             ':waiting': 'waiting',
+            ':empty': '---------',
+            ':X': 'X',
+            ':zero': 0,
           },
         }),
       );

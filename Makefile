@@ -141,6 +141,15 @@ run-local:
 test-local:
 	npm --prefix $(APP) run test:local
 
+# s006 walking-skeleton (§17): drive ONE real move through the FULL deployed path
+# in TWO REAL BROWSERS (Playwright, NOT a node probe — a node ws probe gives a
+# FALSE GREEN below CSP/transport). Committed regression under tests/skeleton/.
+# Post-deploy gate: requires the SPA deployed with uc4Enabled ON and the move
+# route live in OxoGameProd.
+#   make move-skeleton PROD_URL=https://d3pf3kcvzpau1x.cloudfront.net
+move-skeleton:
+	PROD_URL=$(PROD_URL) npm --prefix $(APP) run test:skeleton
+
 test-infra:
 	npm --prefix $(INFRA) test
 
@@ -156,4 +165,4 @@ synth-infra:
 	npm --prefix $(INFRA) run cdk -- synth $(STACKS) --quiet \
 	  -c githubOrg=$(GH_ORG) -c githubRepo=$(GH_REPO)
 
-.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app run-local test-local test-infra synth-infra
+.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app run-local test-local move-skeleton test-infra synth-infra

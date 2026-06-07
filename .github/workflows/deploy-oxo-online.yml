@@ -253,7 +253,11 @@ jobs:
             echo "WARNING: OxoGameProd WsApiEndpoint output not found — config.js will have empty wsUrl."
             WSS_URL=""
           fi
-          printf 'window.OXO_CONFIG=%s;\n' "{\"wsUrl\":\"${WSS_URL}\"}" > /tmp/config.js
+          # uc4Enabled:true (§40 UC4 flag flip) — UC3 (OxoGameProd move route) is
+          # deployed, satisfying §19 hard edge #4, so the SPA's move-send path is
+          # turned ON in the deployed environment WITHOUT a rebuild. Slice-scoped:
+          # the flag is factored out of code then config as UC4's done condition.
+          printf 'window.OXO_CONFIG=%s;\n' "{\"wsUrl\":\"${WSS_URL}\",\"uc4Enabled\":true}" > /tmp/config.js
           aws s3 cp /tmp/config.js s3://${{ vars.OXO_ONLINE_S3_BUCKET }}/config.js \
             --region ${{ env.AWS_REGION }} \
             --cache-control "no-cache, no-store, must-revalidate" \

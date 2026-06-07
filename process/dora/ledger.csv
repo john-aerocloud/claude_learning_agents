@@ -413,3 +413,5 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T14:32:04Z,oxo-online,9,s006-move-relay,tester,validation_run,,fail,351eee2:validation,tests/validation FAILED via make validate
 2026-06-07T14:39:34Z,oxo-online,9,s006-move-relay,tester,validation_run,,success,351eee2:validation-s006-only,"4/4 s006 validation tests green: T6 pre-join DDB state=waiting, S2 pre-condition confirmed, S5 IAM no wildcards (role=OxoGameProd-WsFunctionRole880EC232-HpSnaUdekkVV), S4 finding noted"
 2026-06-07T14:41:35Z,oxo-online,9,s006-move-relay,tester,task_end,3120,success,S006-UC6,"UC6 prod validation PASS: 18/18 ACs verified (8/8 smoke + 4/4 validation s006-only, workers=1). p95 latency=308ms<1s. Identity=ecd8c37. Marks cleared. EXP-005 MET."
+2026-06-07T14:43:18Z,oxo-online,9,s006-move-relay,orchestrator,gate,,success,SLICE-S006-DELIVERED,delivered; documenter dispatched background; auto-retro starting
+2026-06-07T14:45:06Z,oxo-online,9,s006-move-relay,orchestrator,gate,,success,RETRO-S006,slice retro: 2 newly validated, registry scored, OIs updated, integration pass dispatched

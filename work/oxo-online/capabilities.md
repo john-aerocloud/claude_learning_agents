@@ -829,3 +829,124 @@ WS messages: no rollback for in-flight messages needed.
 ### New GitHub Actions variables/secrets required (s006)
 
 None.
+
+---
+
+## Slice s007 — real $disconnect + IMP-008 WAF runner-IP exclusion (iteration 10)
+
+### What this slice adds
+
+Two independent concerns shipped together:
+
+1. **$disconnect handler (app path):** the existing stub route in `oxo-ws-fn`
+   becomes a real abandon + notify + Connections-delete handler. One IAM grant
+   added: `dynamodb:GetItem` on the `Connections` table for `oxo-ws-fn`. No new
+   route, function, table, API, or region. CDK-managed inside `OxoGameProd`.
+
+2. **IMP-008 WAF runner-IP exclusion (cicd/infra path):** a `oxo-test-runner-ips`
+   WAFv2 IP set (scope `CLOUDFRONT`, region `us-east-1`) is added to the existing
+   `OxoOnlineWafUsEast1` stack. The CloudFront rate-based rule gains a
+   `NOT(IPSetReferenceStatement)` scope-down so traffic from a whitelisted runner
+   IP does NOT count against the rate rule. The Block action and limit for all
+   other IPs are **unchanged** — AC3.1 remains valid for non-runner sources.
+   A scheduled 24h drain Lambda (also `us-east-1`, inside `OxoOnlineWafUsEast1`)
+   clears any leaked entry as standing hygiene (required, not optional — per
+   delta §IMP-008 architect blessing).
+
+### Environments in play
+
+**Production only.** Unchanged. No new environment, no new region (us-east-1
+WAF was already the documented platform-forced exception from s005-h1).
+
+### Deploy path
+
+Unchanged in structure. Key additions for s007:
+
+```
+push to main (work/oxo-online/src/infra/**)
+  → infra-oxo-online.yml:
+      npm install (infra) + npm ci (lambda) + build both
+      OIDC assume oxo-infra-deploy
+      cdk deploy OxoOnlineWafUsEast1  ← adds oxo-test-runner-ips IP set
+                                         + scope-down on rate rule
+                                         + 24h drain Lambda + EventBridge schedule
+      cdk deploy OxoGameProd           ← adds Connections:GetItem grant to
+                                         oxo-ws-fn; $disconnect handler code
+                                         ships via CDK fromAsset
+      cdk deploy OxoOnlineProd         ← SPA opponent-disconnected UI change
+
+push to main (work/oxo-online/src/app/**)
+  → deploy-oxo-online.yml: unchanged (SPA build + sync + invalidation + smoke)
+```
+
+### §19 pre-flight checklist — s007
+
+| Check | Result |
+|-------|--------|
+| No new manual pre-push step for $disconnect | PASS — Connections:GetItem grant rides the same `cdk deploy OxoGameProd` as the handler code (CDK-managed under existing bootstrap exec role; no `make deploy-oidc` needed) |
+| us-east-1 CDK bootstrap exists | PASS — confirmed bootstrapped in s005-h1; drain Lambda is us-east-1 and is inside the existing `OxoOnlineWafUsEast1` stack which already deploys in us-east-1 |
+| infra pipeline deploys `OxoOnlineWafUsEast1` | PASS — confirmed in `infra-oxo-online.yml` line 144: `npx cdk deploy OxoOnlineWafUsEast1 --require-approval never` with `CDK_DEFAULT_REGION: us-east-1` |
+| EventBridge schedule for drain Lambda needs no new deploy-role grant | PASS — `scheduler:CreateSchedule`/`DeleteSchedule` and Lambda `InvokeFunction` on a same-stack resource are executed by the CDK bootstrap execution role (AdministratorAccess), not the `oxo-infra-deploy` OIDC role. The `oxo-infra-deploy` role only needs `cloudformation:*` + CDK bootstrap assumption, both already granted. No new OIDC role extension required |
+| IMP-008 scope-down preserves AC3.1 block for non-runner IPs | PASS — scope-down is a `NOT(IPSetReferenceStatement)` on the rate rule; the Block action and rate limit are unchanged for any IP not in the set |
+| No new GH secrets or variables | PASS — IP set name resolved at call time by the waf-runner-ip.js script; no new secret needed |
+| No `GITHUB_` prefix env vars | PASS — no new env vars in pipelines |
+| Stacks deploy sequentially | PASS — three separate pipeline steps unchanged |
+| smoke-ci + waf-runner-ip-add/remove Makefile targets and allowlist entries | PASS — added in this capability step (see allowlist section below) |
+
+### IMP-008 deploy-role grant check
+
+The `oxo-infra-deploy` OIDC role already holds `Wafv2Manage` + `CloudFrontSetWebAcl`
+statements (added at s005-h1). Those grants cover:
+- `wafv2:CreateWebACL`, `UpdateWebACL`, `DeleteWebACL`, `GetWebACL`, `ListWebACLs`
+- `wafv2:TagResource`, `UntagResource`, `ListTagsForResource`
+
+The IP set management actions (`wafv2:CreateIPSet`, `wafv2:UpdateIPSet`,
+`wafv2:DeleteIPSet`, `wafv2:GetIPSet`, `wafv2:ListIPSets`) are NOT covered by
+the existing grant. **The engineer must add an `IpSetManage` policy statement to
+`oxo-online-oidc-stack.ts` and run `make -C work/oxo-online/src/infra deploy-oidc`
+BEFORE the first push of the IMP-008 CDK change.** See DEPLOY_ROLE_EXTENSIONS.md.
+
+The 24h drain Lambda's EventBridge schedule is created by CloudFormation (the CDK
+bootstrap execution role) — no additional OIDC role grant for EventBridge scheduler
+is needed.
+
+### Orphan-flag check (§40) — s007 entering
+
+- `uc4Enabled`: confirmed factored out at s006 delivery (`ecd8c37`). References
+  found are comments and test assertions about the factoring — no active flag in
+  production code paths. **Zero orphan.**
+- `H2_ENFORCE`: confirmed factored out at s005-h2 delivery (`45b0aa4`). Remaining
+  reference in `game-stack.ts` is a comment documenting removal, not an active
+  flag. **Zero orphan.**
+- No UC flags introduced in s007 ($disconnect is unconditional; IMP-008 IP set
+  is infrastructure, not a feature flag). **Zero flags to track for s008.**
+
+### New allowlist entries added — s007
+
+| Pattern | Rationale | Status |
+|---------|-----------|--------|
+| `Bash(aws wafv2 get-ip-set *)` | Tester/engineer reads IP set metadata (ARN, current addresses) to verify oxo-test-runner-ips exists and entries are correct | ADDED |
+| `Bash(aws wafv2 update-ip-set *)` | `waf-runner-ip.js` script invoked by `make waf-runner-ip-add/remove` to append/remove CIDR entries | ADDED |
+| `Bash(curl https://checkip.amazonaws.com)` | Auto-detect runner public IP in `make smoke-ci` (exact host, not a wildcard — preserves existing curl CF-domain restriction) | ADDED |
+| `Bash(make smoke-ci *)` | Tester invokes the add-smoke-remove sequence from one command | ADDED |
+| `Bash(make waf-runner-ip-add *)` | Tester/engineer manually adds a CIDR to the runner IP set | ADDED |
+| `Bash(make waf-runner-ip-remove *)` | Tester/engineer manually removes a CIDR from the runner IP set | ADDED |
+| `Bash(aws logs start-query *)` | Tester runs Logs Insights queries for OI-35 S4 pin (disconnect-notify log count) | ADDED |
+| `Bash(aws logs get-query-results *)` | Tester polls Logs Insights query results for OI-35 S4 assertion | ADDED |
+
+Already covered (no new entry needed):
+- `Bash(aws wafv2 get-web-acl *)` — already in allowlist from s005-h1
+- `Bash(aws logs filter-log-events *)` — already in allowlist; covers simpler log checks
+
+### Rollback assets — s007
+
+**$disconnect handler:** roll forward preferred. Reverting `oxo-ws-fn` code
+(via a corrected commit → infra pipeline re-deploys) restores the s006 stub.
+The `Connections:GetItem` grant removal is a CDK policy rollback. No data loss:
+any `abandoned` items TTL-reap in 24h. The s006 frozen-board behaviour is the
+rollback state.
+
+**IMP-008 IP set + scope-down + drain Lambda:** removing these CDK resources
+from `OxoOnlineWafUsEast1` returns the rate rule to applying to all IPs (the
+pre-s007 state). No app/data change. CI runs against the rate-rule-full surface
+until the IP set is re-provisioned.

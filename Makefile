@@ -156,6 +156,38 @@ test-infra:
 test-lambda:
 	npm --prefix work/$(PROJECT)/src/lambda test
 
+# --- IMP-008 WAF runner-IP exclusion helpers ----------------------------------
+# Add/remove a CIDR from the oxo-test-runner-ips WAFv2 IP set (us-east-1,
+# CLOUDFRONT scope). The IP set is named 'oxo-test-runner-ips'; these targets
+# resolve its ID from the stack output at call time so no hard-coded ID is
+# needed. Both targets read-modify-write (append/remove from the current
+# Addresses list — never replace — to survive parallel CI runs).
+#
+# make waf-runner-ip-add   CIDR=1.2.3.4/32 [AWS_PROFILE=dev-int]
+# make waf-runner-ip-remove CIDR=1.2.3.4/32 [AWS_PROFILE=dev-int]
+#
+# For CI use from GitHub Actions (no --profile), omit AWS_PROFILE.
+waf-runner-ip-add:
+	node work/$(PROJECT)/scripts/waf-runner-ip.js add $(CIDR) \
+	  $(if $(AWS_PROFILE),--profile $(AWS_PROFILE),)
+
+waf-runner-ip-remove:
+	node work/$(PROJECT)/scripts/waf-runner-ip.js remove $(CIDR) \
+	  $(if $(AWS_PROFILE),--profile $(AWS_PROFILE),)
+
+# --- IMP-008 smoke-ci: runner-IP exclusion + smoke + always remove -----------
+# Used by tester CI runs when the CloudFront WAF rate rule would otherwise
+# block the CI runner IP. Sequence: add runner IP → smoke → remove (via trap).
+# CIDR is auto-detected from checkip.amazonaws.com if not supplied.
+#
+# make smoke-ci ITER=10 SLICE=s007-disconnect [PROD_URL=https://…] [AWS_PROFILE=dev-int]
+smoke-ci:
+	@RUNNER_IP=$$(curl -s https://checkip.amazonaws.com)/32 && \
+	  echo "Runner CIDR: $$RUNNER_IP" && \
+	  trap "make waf-runner-ip-remove CIDR=$$RUNNER_IP $(if $(AWS_PROFILE),AWS_PROFILE=$(AWS_PROFILE),)" EXIT && \
+	  make waf-runner-ip-add CIDR=$$RUNNER_IP $(if $(AWS_PROFILE),AWS_PROFILE=$(AWS_PROFILE),) && \
+	  make smoke ITER=$(ITER) SLICE=$(SLICE) $(if $(PROD_URL),PROD_URL=$(PROD_URL),)
+
 # Synth all stacks with the project-pinned CDK (not a global npx install).
 # STACKS optional: make synth-infra STACKS="OxoGameProd"
 # githubOrg/githubRepo go as -c context flags per process §19 (GITHUB_ env prefix is reserved).
@@ -165,4 +197,4 @@ synth-infra:
 	npm --prefix $(INFRA) run cdk -- synth $(STACKS) --quiet \
 	  -c githubOrg=$(GH_ORG) -c githubRepo=$(GH_REPO)
 
-.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app run-local test-local move-skeleton test-infra synth-infra
+.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci

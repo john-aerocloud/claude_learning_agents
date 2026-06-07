@@ -429,3 +429,5 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T15:43:02Z,oxo-online,10,s007-disconnect,product,task_start,,na,S007-UC-ACC,co-author use-cases.md + acceptance.md + use-case-deps.mmd marks
 2026-06-07T15:43:54Z,oxo-online,10,s007,product,task_start,,na,S007-UC-ACC,co-author use-cases + acceptance for s007-disconnect
 2026-06-07T15:48:36Z,oxo-online,10,s007,product,task_end,,success,S007-UC-ACC,use-cases.md + acceptance.md + use-case-deps.mmd updated for s007-disconnect
+2026-06-07T15:51:30Z,oxo-online,10,s007-disconnect,cicd,task_start,,na,S007-CAP,capabilities: IMP-008 allowlist entries + prereq/orphan checks
+2026-06-07T15:55:22Z,oxo-online,10,s007-disconnect,cicd,task_end,,success,S007-CAP,IMP-008 + logs-query allowlist entries added; make smoke-ci/waf-runner-ip-add/remove targets created; prereq/orphan checks complete; deploy-oidc note for wafv2:IPSet actions added to capabilities

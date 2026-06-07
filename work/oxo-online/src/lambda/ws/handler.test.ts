@@ -6,6 +6,7 @@ import {
   QueryCommand,
   GetCommand,
   UpdateCommand,
+  DeleteCommand,
 } from '@aws-sdk/lib-dynamodb';
 import {
   ApiGatewayManagementApiClient,
@@ -50,10 +51,44 @@ describe('handler dispatch — routes by requestContext.routeKey', () => {
     expect(ddbMock.commandCalls(PutCommand).length).toBeGreaterThanOrEqual(1);
   });
 
-  it('routes $disconnect to a no-op 200 (stub this slice)', async () => {
+  it('routes $disconnect to the real handler: resolves connectionId→game, abandons, notifies survivor, deletes (S5/UC1)', async () => {
+    // Connections GetItem (own row) resolves the disconnecting connection's game,
+    // then Games GetItem reads the active game, abandon UpdateItem commits, the
+    // survivor gets ONE opponent-disconnected post, and the Connections row is
+    // deleted. The handler reads ONLY requestContext.connectionId — never a body.
+    ddbMock.on(GetCommand, { TableName: 'oxo-connections' }).resolves({
+      Item: { connectionId: 'CTX-ID', gameId: 'g-1', role: 'host' },
+    });
+    ddbMock.on(GetCommand, { TableName: 'oxo-games' }).resolves({
+      Item: {
+        gameId: 'g-1',
+        board: '----X----',
+        currentTurn: 'O',
+        status: 'active',
+        version: 1,
+        moveCount: 1,
+        hostConnectionId: 'CTX-ID',
+        guestConnectionId: 'survivor-conn',
+      },
+    });
+    ddbMock.on(UpdateCommand).resolves({});
+    ddbMock.on(DeleteCommand).resolves({});
+
     const res = await handler(event('$disconnect'));
     expect(res.statusCode).toBe(200);
-    expect(ddbMock.commandCalls(PutCommand)).toHaveLength(0);
+
+    // Exactly one abandon UpdateItem on Games.
+    expect(ddbMock.commandCalls(UpdateCommand)).toHaveLength(1);
+    // Exactly one survivor post to the OTHER bound connection.
+    const posts = apiMock.commandCalls(PostToConnectionCommand);
+    expect(posts).toHaveLength(1);
+    expect(posts[0].args[0].input.ConnectionId).toBe('survivor-conn');
+    expect(decodeFrame(posts[0].args[0].input.Data)).toEqual({ type: 'opponent-disconnected' });
+    // The disconnecting Connections row is deleted (DynamoDB DeleteItem).
+    expect(ddbMock.commandCalls(DeleteCommand)).toHaveLength(1);
+    expect(ddbMock.commandCalls(DeleteCommand)[0].args[0].input.Key).toEqual({
+      connectionId: 'CTX-ID',
+    });
   });
 
   it('routes join with an unknown code to a 4xx close response (4040)', async () => {

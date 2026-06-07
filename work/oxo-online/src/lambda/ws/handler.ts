@@ -9,8 +9,10 @@ import { handleJoin } from './join';
 import type { WsResult } from './ws-result';
 import { deliverClose } from './ws-transport';
 import { handleMove } from './move-handler';
+import { handleDisconnect } from './disconnect-handler';
 import { ddb } from './ddb';
 import { DdbGamesStore } from './adapters/games-ddb';
+import { DdbConnectionStore } from './adapters/connections-ddb';
 import { MgmtRelay } from './adapters/relay-mgmt';
 
 /** Structured-log sink for the move path (§41 — category-tagged JSON lines). */
@@ -70,10 +72,40 @@ export async function handler(
       await handleMove(event, { store, relay, buildSha: BUILD_SHA, log });
       return { statusCode: 200 };
     }
-    case '$disconnect':
-      // Stub this slice (delta — no $disconnect reaping; TTL cleans up).
-      result = { statusCode: 200 };
-      break;
+    case '$disconnect': {
+      // UC1 (s007) — the real $disconnect handler: resolve the disconnecting
+      // connection's OWN game (S1 — connectionId from requestContext, never a
+      // body), conditionally abandon an active game, notify the ONE survivor, and
+      // delete the Connections row in all branches. Same adapter wiring shape as
+      // the move case, plus the Connections store (UC2 Connections:GetItem grant).
+      const store = new DdbGamesStore({
+        client: ddb,
+        tableName: process.env.GAMES_TABLE as string,
+        buildSha: BUILD_SHA,
+        log,
+      });
+      const connections = new DdbConnectionStore({
+        client: ddb,
+        tableName: process.env.CONNECTIONS_TABLE as string,
+        buildSha: BUILD_SHA,
+        log,
+      });
+      const relay = new MgmtRelay({
+        client: new ApiGatewayManagementApiClient({
+          endpoint: process.env.WS_API_ENDPOINT,
+        }),
+        buildSha: BUILD_SHA,
+        log,
+      });
+      await handleDisconnect(event.requestContext.connectionId, {
+        connections,
+        store,
+        relay,
+        buildSha: BUILD_SHA,
+        log,
+      });
+      return { statusCode: 200 };
+    }
     default:
       result = { statusCode: 200 };
       break;

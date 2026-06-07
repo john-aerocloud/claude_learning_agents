@@ -159,6 +159,27 @@ describe('s005-h2 — authorizer attached to $connect (T1)', () => {
       ),
     ).toBe(true);
   });
+
+  // §40 — UC2's own tests run flag-ON: pin that flipping H2_ENFORCE ON gates
+  // the $connect route CUSTOM with the REQUEST AuthorizerId (T1, the flip the
+  // Set-B-complete commit performs). Keeps the flip behaviour as standing
+  // regression rather than a hand-watched change.
+  it('flag-ON: $connect becomes CUSTOM with that AuthorizerId (T1, §40 flip)', () => {
+    const t = synthEnforced();
+    const authorizers = t.findResources('AWS::ApiGatewayV2::Authorizer');
+    const reqAuthId = Object.keys(authorizers).find(
+      (id) =>
+        (authorizers[id].Properties as Record<string, unknown>)
+          .AuthorizerType === 'REQUEST',
+    )!;
+    const routes = t.findResources('AWS::ApiGatewayV2::Route');
+    const connect = Object.values(routes).find(
+      (r) => (r.Properties as Record<string, unknown>).RouteKey === '$connect',
+    )!;
+    const props = connect.Properties as Record<string, unknown>;
+    expect(props.AuthorizationType).toBe('CUSTOM');
+    expect((props.AuthorizerId as { Ref?: string }).Ref).toBe(reqAuthId);
+  });
 });
 
 // ===========================================================================

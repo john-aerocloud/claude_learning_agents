@@ -4,6 +4,8 @@ import {
   DynamoDBDocumentClient,
   PutCommand,
   QueryCommand,
+  GetCommand,
+  UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 import {
   ApiGatewayManagementApiClient,
@@ -64,6 +66,64 @@ describe('handler dispatch — routes by requestContext.routeKey', () => {
   it('unknown routeKey returns 200 without throwing (no $default route exists)', async () => {
     const res = await handler(event('mystery'));
     expect(res.statusCode).toBe(200);
+  });
+});
+
+// UC3 dispatch — the 'move' route wires the real DdbGamesStore + MgmtRelay
+// adapters behind the domain-defined ports and runs handleMove. A valid in-turn
+// move reads the game (GetItem), writes once (UpdateItem), and relays a
+// board-update to BOTH bound connections (S4 = 2 posts). The body gameId is the
+// non-trusted lookup key; identity is the real requestContext.connectionId.
+describe("handler dispatch — 'move' route (UC3)", () => {
+  it('routes a valid in-turn move: GetItem → UpdateItem → board-update to both', async () => {
+    ddbMock.on(GetCommand).resolves({
+      Item: {
+        gameId: 'g-1',
+        board: '---------',
+        currentTurn: 'X',
+        status: 'active',
+        version: 0,
+        moveCount: 0,
+        hostConnectionId: 'CTX-ID', // the caller's own connectionId == host (X)
+        guestConnectionId: 'guest-conn',
+      },
+    });
+    ddbMock.on(UpdateCommand).resolves({});
+
+    const res = await handler(event('move', { action: 'move', gameId: 'g-1', square: 4 }));
+    expect(res.statusCode).toBe(200);
+
+    expect(ddbMock.commandCalls(UpdateCommand)).toHaveLength(1);
+    const posts = apiMock.commandCalls(PostToConnectionCommand);
+    expect(posts).toHaveLength(2);
+    const ids = posts.map((p) => p.args[0].input.ConnectionId).sort();
+    expect(ids).toEqual(['CTX-ID', 'guest-conn']);
+    const frame = decodeFrame(posts[0].args[0].input.Data);
+    expect(frame).toMatchObject({ type: 'board-update', board: '----X----', currentTurn: 'O' });
+  });
+
+  it('S1a: a forged/foreign gameId (sender bound to neither slot) → reject, 0 writes', async () => {
+    ddbMock.on(GetCommand).resolves({
+      Item: {
+        gameId: 'g-1',
+        board: '---------',
+        currentTurn: 'X',
+        status: 'active',
+        version: 0,
+        moveCount: 0,
+        hostConnectionId: 'someone-else',
+        guestConnectionId: 'another',
+      },
+    });
+
+    const res = await handler(event('move', { action: 'move', gameId: 'g-1', square: 0 }));
+    expect(res.statusCode).toBe(200);
+    // Zero writes; exactly one move-rejected to the sender only.
+    expect(ddbMock.commandCalls(UpdateCommand)).toHaveLength(0);
+    const posts = apiMock.commandCalls(PostToConnectionCommand);
+    expect(posts).toHaveLength(1);
+    expect(posts[0].args[0].input.ConnectionId).toBe('CTX-ID');
+    expect(decodeFrame(posts[0].args[0].input.Data)).toMatchObject({ type: 'move-rejected' });
   });
 });
 

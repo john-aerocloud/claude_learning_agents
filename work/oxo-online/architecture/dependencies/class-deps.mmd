@@ -28,7 +28,7 @@ flowchart TD
   %% ---- ADAPTERS + handler (declared; implementing edges land per step) ----
   wsMoveHandler["ws-move-handler<br/>ws/move-handler.ts (UC3) — parse, getGame(gameId),<br/>bind identity by connectionId, call domain, write, relay"]:::changed
   adapterGamesDdb["adapter-games-ddb<br/>ws/adapters/games-ddb.ts (UC2) — conditional UpdateItem CAS"]:::changed
-  adapterRelayMgmt["adapter-relay-mgmt<br/>ws/adapters/relay-mgmt.ts (UC3) — @connections POST"]
+  adapterRelayMgmt["adapter-relay-mgmt<br/>ws/adapters/relay-mgmt.ts (UC3) — @connections POST"]:::changed
   adapterLocalStore["adapter-local-store<br/>src/app/local/adapters/local-store.ts (UC5) — in-memory CAS"]:::changed
   adapterLocalRelay["adapter-local-relay<br/>src/app/local/adapters/local-relay.ts (UC5) — records posts"]:::changed
   spaOnlineMove["spa-online-move<br/>src/app/src/game (UC4) — move-send + render-on-broadcast<br/>OnlineBoard(controlled) + GameRoot move loop, behind uc4Enabled flag"]:::changed
@@ -63,8 +63,9 @@ flowchart TD
   wsMoveHandler -->|board-update / game-over| portRelay
   linkStyle 6 stroke:#d50000,stroke-width:3px;
 
-  %% ---- Edges land in their own steps (not yet drawn): ----
-  %% R3.3: adapterRelayMgmt -.implements.-> portRelay
+  %% R3.3 (this commit): the @connections relay adapter implements the relay port.
+  adapterRelayMgmt -.->|implements| portRelay
+  linkStyle 7 stroke:#d50000,stroke-width:3px;
 
   classDef changed fill:#fff3e0,stroke:#d50000,stroke-width:3px,color:#000;
   classDef stable fill:#e8f4e8,stroke:#2e7d32,color:#000;

@@ -2,11 +2,24 @@ import type {
   APIGatewayProxyWebsocketEventV2,
   APIGatewayProxyResultV2,
 } from 'aws-lambda';
+import { ApiGatewayManagementApiClient } from '@aws-sdk/client-apigatewaymanagementapi';
 import { handleConnect } from './connect';
 import { handleRegister } from './register';
 import { handleJoin } from './join';
 import type { WsResult } from './ws-result';
 import { deliverClose } from './ws-transport';
+import { handleMove } from './move-handler';
+import { ddb } from './ddb';
+import { DdbGamesStore } from './adapters/games-ddb';
+import { MgmtRelay } from './adapters/relay-mgmt';
+
+/** Structured-log sink for the move path (§41 — category-tagged JSON lines). */
+const log = (line: Record<string, unknown>): void => {
+  console.log(JSON.stringify(line));
+};
+
+/** Build sha injected by the pipeline (principles/01) — never hardcoded. */
+const BUILD_SHA = process.env.BUILD_SHA ?? 'unknown';
 
 /**
  * oxo-ws-fn entry point — dispatches by event.requestContext.routeKey to the
@@ -37,6 +50,26 @@ export async function handler(
     case 'join':
       result = await handleJoin(event);
       break;
+    case 'move': {
+      // UC3 — wire the real adapters behind the domain-defined ports and run the
+      // move orchestration. The move relays directly via @connections (it does
+      // NOT use the close-frame path), so it returns a plain 200.
+      const store = new DdbGamesStore({
+        client: ddb,
+        tableName: process.env.GAMES_TABLE as string,
+        buildSha: BUILD_SHA,
+        log,
+      });
+      const relay = new MgmtRelay({
+        client: new ApiGatewayManagementApiClient({
+          endpoint: process.env.WS_API_ENDPOINT,
+        }),
+        buildSha: BUILD_SHA,
+        log,
+      });
+      await handleMove(event, { store, relay, buildSha: BUILD_SHA, log });
+      return { statusCode: 200 };
+    }
     case '$disconnect':
       // Stub this slice (delta — no $disconnect reaping; TTL cleans up).
       result = { statusCode: 200 };

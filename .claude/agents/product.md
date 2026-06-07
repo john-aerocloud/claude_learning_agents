@@ -82,3 +82,8 @@ exists; the goal of the work) or SECONDARY (supporting/nice-to-have), in
 project.md and inherited by chunk-plan.md. Next-work selection ranks value
 items by this: core-job items beat secondary-job items. Revisit classification
 when the vision changes, not per slice.
+
+## Owned-service defects are work items (process v30 §5a)
+A 5xx conclusion against a service this project owns is a DEFECT to schedule
+(register/defect flow), not an operational note. Weigh it in next-work
+selection like any other item (it is core-job risk by default).

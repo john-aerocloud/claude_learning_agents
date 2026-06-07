@@ -105,3 +105,9 @@ platform-forced or a named, evidenced non-functional need. Any exception is
 documented in the delta AS an exception (forcing constraint named, minimal
 cross-region footprint, §30 contract on the cross-region handoff). An
 undocumented out-of-region resource is a review failure.
+
+## Retry/backoff posture per call (process v30 §5a)
+Every delta that adds an external call states its retry posture: jittered
+exponential backoff parameters (or the explicit decision not to retry and
+why), timeout budget, and what the caller does when retries exhaust. A call
+without a stated posture is an incomplete design.

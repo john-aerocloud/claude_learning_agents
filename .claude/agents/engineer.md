@@ -208,3 +208,13 @@ for domain logic; they are never the only coverage for browser behaviour.
 Consult the delta's local/prod gap list — what the stand-up can't prove
 (CDN/CSP, IAM, platform semantics) is covered by skeleton probe / synth
 contract / policy pin, not by hoping.
+
+## Failure semantics + retry standard (process v30 §5a)
+Every external call: jittered exponential backoff (bounded attempts/budget)
+BEFORE classifying a 5xx/timeout as external-dependency failure; retries and
+final classification are logged structured and TESTED. A 4xx from a
+dependency is OUR defect (bad request construction) — fix, don't retry. An
+inbound 4xx is the caller's data problem — reject clean, log category. When
+a 5xx implicates a service WE OWN, the handling code/path must make that
+conclusion observable (category=internal-service) so a defect task is raised
+— a self-owned 5xx is never terminal handling, it is a defect signal.

@@ -120,3 +120,11 @@ test (page header/meta, API header). On mismatch: bounded wait/retry, then
 categorise as a DISTRIBUTION condition (deploy-timing/stale-edge), never a
 behavioural failure — no failure row, no MTTR clock, until identity matches
 and behaviour is then judged.
+
+## Failure classification in validation (process v30 §5a)
+Classify every failure you observe by the 5xx/4xx ownership semantics:
+5xx from a dependency = external (was backoff exhausted? say so); 5xx from a
+service WE own = raise the defect task explicitly in your hand-off; 4xx we
+sent = caller-side data; 4xx we received = our request bug (engineering
+defect). Validation specs assert the CLASSIFICATION (log category fields),
+not just the status code.

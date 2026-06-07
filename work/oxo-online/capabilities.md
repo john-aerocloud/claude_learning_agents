@@ -699,3 +699,116 @@ with `RemovalPolicy.RETAIN`/`DESTROY` already set from prior slices).
 | OI-H2-1 | Walking-skeleton probe (delta §0): after UC2 deploys, run one garbage-token connect (expect 403) and one valid-token connect (expect game-logic reached). This is cloud-only (APIGW authorizer attachment is not locally emulable). | tester |
 | OI-H2-2 | Engineer must add `tsconfig.auth.json` (or matching name) to `src/lambda/` before creating the auth handler source. Build will pick it up automatically. | engineer |
 | OI-H2-3 | `BUILD_SHA` env var must be injected on `oxo-ws-auth-fn` at CDK synth time (same pattern as `oxo-game-fn`/`oxo-ws-fn` per delta §8 + principles/01). | engineer |
+
+---
+
+## Slice s006 — move relay (iteration 9)
+
+### What this slice adds
+
+A `move` WS route on the EXISTING WebSocket API + `oxo-ws-fn` Lambda. Games
+table gains `board`, `currentTurn`, `winner`, `version`, and `moveCount`
+attributes. Move validation, state mutation, and relay to the opponent are
+handled in the existing Lambda (no new function, no new stack, no new IAM
+grant). s006 is a pure delta inside `OxoGameProd`.
+
+### Environments in play
+
+**Production only.** Unchanged from prior slices.
+
+### Deploy path
+
+Unchanged in structure — two pipelines, both green from s005-h2. s006
+engineers push to `src/infra/**` (CDK schema + route registration) and
+`src/lambda/**` (move handler). Both pipelines trigger as before.
+
+```
+push to main (work/oxo-online/src/infra/** or src/lambda/**)
+  → infra-oxo-online.yml:
+      npm install (infra) + npm ci (lambda) + build both
+      cdk deploy OxoOnlineWafUsEast1 (no change)
+      cdk deploy OxoGameProd  ← adds move route + schema changes
+      cdk deploy OxoOnlineProd (no change)
+
+push to main (work/oxo-online/src/app/**)
+  → deploy-oxo-online.yml:
+      Build SPA (VITE_BUILD_SHA=${{ github.sha }})
+      S3 sync (3-pass) + CloudFront invalidation + wait
+      wss URL runtime config write
+      Smoke tests (workers:1, DEPLOY_SHA=${{ github.sha }})
+      DORA record
+```
+
+### OI-25: SPA build-sha carrier (principles/01)
+
+The SPA bundle now carries the commit sha baked in at build time.
+
+**Mechanism:**
+- `vite.config.ts`: no change needed beyond existing Vite HTML env substitution.
+- `index.html`: `<meta name="build-sha" content="%VITE_BUILD_SHA%">` — Vite
+  substitutes this at build time with the value of `VITE_BUILD_SHA`.
+- Pipeline `Build SPA` step: `env: VITE_BUILD_SHA: ${{ github.sha }}`.
+- Local builds: `VITE_BUILD_SHA` is absent; Vite leaves the literal string
+  `%VITE_BUILD_SHA%` unchanged (or replaces with empty string depending on Vite
+  version — either is acceptable in local dev).
+
+**Exposure for tester:**
+```
+meta[name="build-sha"].content
+```
+Read in Playwright:
+```ts
+await page.locator('meta[name="build-sha"]').getAttribute('content')
+```
+
+**Smoke gate:**
+`shell.spec.ts` includes a `sha-gate` test (first in the describe block) that
+asserts `served_sha === DEPLOY_SHA` (env var set by pipeline to `github.sha`)
+BEFORE any behavioural tests. Skipped when `DEPLOY_SHA` is absent (local dev).
+This is the §39-correct CDN propagation check — not sleep/wait.
+
+### OI-32: Smoke serialisation
+
+`playwright.config.ts` now sets `workers: 1, fullyParallel: false`. The 6 spec
+files + 2–3 WS connections per pairing test previously fired simultaneously,
+exhausting the 20-connects/5-min WAF rate limit (observed EXP-009 false-reds in
+s005-h2 evidence). Serial execution keeps the burst within budget.
+
+### Orphan-flag check (§40)
+
+- `H2_ENFORCE`: **no orphan.** The flag was factored out at `45b0aa4`
+  (two-phase credential rollout, §40 lifecycle complete). The only remaining
+  reference is a comment in `game-stack.ts` line 590 documenting the removal
+  — not an active flag. Grep of production lambda source and SPA source:
+  zero hits.
+- No flags from s005-h2 remain in production code paths.
+- UC flag mechanism for UC4+ (SPA-side): the project uses `window.OXO_CONFIG`
+  (runtime config) and Vite build-time defines for feature flags. Introduce UC4
+  flag as `OXO_CONFIG.uc4Enabled` (default `false`) written by the deploy
+  pipeline or as a Vite define — document in delta when UC4 is sliced. No
+  orphan to create now.
+
+### §19 pre-flight checklist — s006
+
+| Check | Result |
+|-------|--------|
+| No new stacks / functions / IAM grants | PASS — delta says no new surface; move route rides existing CDK exec role |
+| No new GH secrets or variables | PASS — confirmed |
+| `VITE_BUILD_SHA` env var uses `VITE_` prefix (not reserved `GITHUB_`) | PASS |
+| `DEPLOY_SHA` env var uses non-reserved prefix | PASS |
+| Workers:1 set in playwright.config.ts before engineers push smoke-triggering code | PASS — set in this capability step |
+| Sha-gate test skips gracefully when DEPLOY_SHA absent (local dev) | PASS — `test.skip(!DEPLOY_SHA, ...)` |
+| `aws dynamodb get-item` allowlisted for UC6 DDB-unchanged-after-reject assertion | PASS — already in settings.json |
+| No new allowlist additions needed | PASS — all s006 command patterns already covered |
+
+### Rollback assets — s006
+
+No new rollback procedure. `OxoGameProd` CDK rollback (prior change-set) reverts
+the move route and any schema changes atomically. Games table schema additions are
+additive — items written before the move route existed are valid after rollback
+(no attribute is required by prior code paths). Move relay is stateless between
+WS messages: no rollback for in-flight messages needed.
+
+### New GitHub Actions variables/secrets required (s006)
+
+None.

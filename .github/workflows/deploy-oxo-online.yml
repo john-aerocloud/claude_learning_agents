@@ -109,6 +109,13 @@ jobs:
         run: npm test -- --run
 
       - name: Build SPA
+        # OI-25 (principles/01): VITE_BUILD_SHA bakes the commit sha into the
+        # bundle at build time. Vite substitutes %VITE_BUILD_SHA% in index.html
+        # and exposes the value via import.meta.env.VITE_BUILD_SHA in JS.
+        # Smoke step gates on served meta[name="build-sha"] == github.sha BEFORE
+        # asserting behaviour — §39-correct distribution timing check.
+        env:
+          VITE_BUILD_SHA: ${{ github.sha }}
         run: npm run build
 
       - name: Upload build artifact
@@ -254,8 +261,8 @@ jobs:
 
       - name: Record DORA deploy event
         run: |
-          python .claude/skills/dora-ledger/scripts/dora.py record \
-            --project oxo-online --iteration 6 --slice 005-join-game \
+          python3 .claude/skills/dora-ledger/scripts/dora.py record \
+            --project oxo-online --iteration 9 --slice s006-move-relay \
             --agent cicd --event deploy --outcome success \
             --ref "${{ github.sha }}" \
             --note "Automated deploy via GitHub Actions run ${{ github.run_id }}"
@@ -270,16 +277,22 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Smoke test — prod URL
+        # OI-25: DEPLOY_SHA passed so shell.spec.ts can gate on
+        # served meta[name="build-sha"] == deployed sha BEFORE behavioural
+        # assertions (§39-correct CDN timing check; not sleep/wait).
+        # OI-32: workers:1 in playwright.config.ts serialises tests to stay
+        # within the 20-connects/5-min WAF WS rate limit.
         working-directory: work/oxo-online/src/app
         run: npx playwright test --config=playwright.config.ts tests/smoke/
         env:
           PROD_URL: ${{ vars.OXO_ONLINE_PROD_URL }}
+          DEPLOY_SHA: ${{ github.sha }}
 
       - name: Record DORA failure event
         if: failure()
         run: |
-          python .claude/skills/dora-ledger/scripts/dora.py record \
-            --project oxo-online --iteration 6 --slice 005-join-game \
+          python3 .claude/skills/dora-ledger/scripts/dora.py record \
+            --project oxo-online --iteration 9 --slice s006-move-relay \
             --agent cicd --event failure --outcome fail \
             --ref "${{ github.sha }}" \
             --note "Deploy or smoke test failed — run ${{ github.run_id }}"

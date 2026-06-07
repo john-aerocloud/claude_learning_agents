@@ -375,3 +375,5 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T10:15:33Z,oxo-online,9,s006-move-relay,product,task_start,,na,S006-UC-ACC,co-author use-cases.md + acceptance.md (product F-cases + architect T/S overlay)
 2026-06-07T10:16:26Z,oxo-online,9,s006-move-relay,product,task_start,,na,S006-UC-ACC,Writing use-cases.md + acceptance.md + use-case-deps.mmd
 2026-06-07T10:20:32Z,oxo-online,9,s006-move-relay,product,task_end,,success,S006-UC-ACC,use-cases.md + acceptance.md (6F/6T/6S) + use-case-deps.mmd first edition written
+2026-06-07T10:23:20Z,oxo-online,9,s006-move-relay,cicd,task_start,,na,S006-CAP,capabilities: OI-25 SPA sha carrier + OI-32 smoke serialisation + orphan-flag check
+2026-06-07T10:28:30Z,oxo-online,9,s006-move-relay,cicd,task_end,600,success,S006-CAP,OI-25 SPA sha carrier (VITE_BUILD_SHA+meta+sha-gate); OI-32 smoke workers:1; H2_ENFORCE zero orphan; allowlist verified; prereq confirmed no-new-grants

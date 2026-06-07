@@ -12,7 +12,11 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:smoke": "playwright test --config=playwright.config.ts tests/smoke/",
-    "test:validation": "playwright test --config=playwright.validation.config.ts"
+    "test:validation": "playwright test --config=playwright.validation.config.ts",
+    "local": "node local/run-local.mjs",
+    "local:ws": "vite-node local/server.ts",
+    "local:spa": "vite --config vite.local.config.ts",
+    "test:local": "playwright test --config=playwright.local.config.ts tests/local/"
   },
   "dependencies": {
     "react": "^18.3.1",

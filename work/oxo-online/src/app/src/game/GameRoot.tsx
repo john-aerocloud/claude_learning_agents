@@ -139,11 +139,16 @@ export function GameRoot({ socketFactory = realFactory }: GameRootProps = {}) {
     }
   };
 
-  // When the host reaches the waiting screen, open the socket and register the
-  // game so the server can reach them with `game-ready` (UC1/C2). The register
-  // frame binds this connection to the gameId returned by create-game.
+  // When the host has created a game (gameId set), open the socket ONCE and
+  // register so the server can reach them with `game-ready` (UC1/C2). The socket
+  // MUST persist past the `waiting -> playing-online` transition because UC4's
+  // move loop sends/receives moves over this SAME connection — so the effect is
+  // keyed on `gameId` (not `onlinePhase`): it opens when the game is created and
+  // tears down only when the player leaves the online flow (gameId cleared by
+  // selectMode/joinGame). Keying it on onlinePhase would close the live socket
+  // the instant game-ready flipped the phase, breaking every host move.
   useEffect(() => {
-    if (onlinePhase !== 'waiting' || !gameId) return;
+    if (!gameId) return;
     const socket = socketFactory({
       // The host's $connect credential is the minted wsToken (UC3/AC3.1, T8).
       // On a degraded mint it is null -> connect with no param (graceful
@@ -161,10 +166,10 @@ export function GameRoot({ socketFactory = realFactory }: GameRootProps = {}) {
       socket.close();
       hostSocketRef.current = null;
     };
-    // socketFactory is stable for a render tree; re-run only on phase/gameId change.
-    // wsToken is set in the same transition as phase=waiting, so it is current here.
+    // socketFactory is stable for a render tree; wsToken is set in the same
+    // transition as gameId, so it is current here. Open-once-per-game.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onlinePhase, gameId]);
+  }, [gameId]);
 
   // In vs-Computer mode the AI plays O. Run it in an effect (not the click
   // handler) so the human's X paints first, then O follows synchronously.

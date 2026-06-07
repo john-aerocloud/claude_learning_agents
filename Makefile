@@ -123,6 +123,24 @@ lint-app:
 build-app:
 	npm --prefix $(APP) run build
 
+# --- UC5 local stand-up (OI-28, principles/02) --------------------------------
+# Start the full local move-relay stack with NO cloud creds: a local WS server
+# (in-memory Games store + relay behind the SAME ports the cloud adapters
+# implement) + the SPA dev server serving a local /config.js (wsUrl=ws://local,
+# uc4Enabled=ON). Open two browser tabs at http://localhost:5183 to play, or run
+# `make test-local` to drive the committed Playwright local suite against it.
+#   make run-local
+run-local:
+	npm --prefix $(APP) run local
+
+# Run the engineer's BUILD-phase Playwright browser suite against the local
+# stand-up (full game to win/draw, out-of-turn reject, board lock). The suite
+# starts the stand-up itself (playwright webServer), so no separate run-local
+# process is needed.
+#   make test-local
+test-local:
+	npm --prefix $(APP) run test:local
+
 test-infra:
 	npm --prefix $(INFRA) test
 
@@ -138,4 +156,4 @@ synth-infra:
 	npm --prefix $(INFRA) run cdk -- synth $(STACKS) --quiet \
 	  -c githubOrg=$(GH_ORG) -c githubRepo=$(GH_REPO)
 
-.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app test-infra synth-infra
+.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app run-local test-local test-infra synth-infra

@@ -48,9 +48,10 @@ import { test, expect, type Page } from '@playwright/test';
  */
 
 const PROD_URL = process.env.PROD_URL ?? 'https://d3pf3kcvzpau1x.cloudfront.net';
-// The sha deployed to OxoOnlineProd in s006 Wave B (factor-out commit).
+// The sha deployed to OxoOnlineProd in s007 (disconnection handling deploy).
+// Updated from s006 sha (ecd8c37) to s007 sha at s007 tester validation pass.
 // Used as the identity baseline when DEPLOY_SHA env var is absent.
-const KNOWN_DEPLOYED_SHA = 'ecd8c37';
+const KNOWN_DEPLOYED_SHA = 'e078ea4b744085db320aa1c9eff4d018fabc6785';
 const DEPLOY_SHA = process.env.DEPLOY_SHA ?? KNOWN_DEPLOYED_SHA;
 
 const WS_PAIR_TIMEOUT = 8000;
@@ -115,7 +116,7 @@ test.describe('s006 — move relay + server-authoritative play (UC6 prod validat
   // Reads meta[name="build-sha"] from the served SPA and compares to DEPLOY_SHA.
   // On mismatch: categorised as DISTRIBUTION condition, not behavioural failure.
   // --------------------------------------------------------------------------
-  test('identity: served build-sha matches deployed sha (ecd8c37)', async ({ page }) => {
+  test('identity: served build-sha matches deployed sha (e078ea4b — s007)', async ({ page }) => {
     await page.goto('/');
     const servedSha = await page.locator('meta[name="build-sha"]').getAttribute('content');
     console.log(`identity: served build-sha="${servedSha}" expected="${DEPLOY_SHA}"`);

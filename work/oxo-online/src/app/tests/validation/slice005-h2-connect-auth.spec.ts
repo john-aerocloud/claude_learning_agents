@@ -395,8 +395,9 @@ test.describe('T9 — buildSha in authorizer logs (principles/01)', () => {
 
   test('T9 — oxo-ws-auth-fn log lines carry buildSha field (Allow or Deny)', async () => {
     // The expected deployed sha under test.
-    // Updated to 40b7767 (DEFECT-H2-003 fix — per-IP window self-heal).
-    const EXPECTED_SHA = '40b7767';
+    // Updated to fa08637 (s007a — authorizer runner-exemption, DEFECT-S007-001 fix).
+    // Previously 40b7767 (DEFECT-H2-003 fix). Updated at s007 tester validation pass.
+    const EXPECTED_SHA = 'fa08637';
 
     // Fetch the most recent log events from the authorizer log group.
     // We use logs filter-log-events with a 5-minute window and search for buildSha.

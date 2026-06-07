@@ -95,4 +95,8 @@ flowchart TD
   %%   for a LIVE EXEMPT#<ip> item, ttl>now; non-exempt IP still Denies; fail-closed).
   %% attempts: gains the EXEMPT#<ip> namespace (1h TTL), written by oxo-deploy via
   %%   waf-runner-ip.js (PutItem/DeleteItem, LeadingKeys EXEMPT#*) — not the authorizer.
-  class wsfn,conn,games,relay,cfwaf,wsauth,attempts changed;
+  %% s007 changed marks CLEARED (2026-06-07 — tester consumed, UC4 prod validation PASS)
+  %% wsfn: $disconnect real (abandon+notify+clean up); conn: GetItem on $disconnect path;
+  %% games: active->abandoned transition; relay: 1-post survivor notify;
+  %% cfwaf: IMP-008 scope-down; wsauth: runner-exemption check; attempts: EXEMPT# namespace.
+  %% class wsfn,conn,games,relay,cfwaf,wsauth,attempts changed; — CLEARED

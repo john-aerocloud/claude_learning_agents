@@ -128,9 +128,110 @@ user identity, so binding is **capability-by-connection**:
       connection details are disclosed to a client.
 
 ### Out of scope for s005 (do NOT assert as built)
-- Move forgery / server-authoritative board controls (s006).
+- Move forgery / server-authoritative board controls (s006 — now built; see below).
 - `$disconnect` cleanup / "opponent disconnected" (s007).
 - Chat scope (C7).
+
+---
+
+## s006 subset (move relay + server-authoritative win/draw) — built scope
+
+s006 adds ONE route (`move`) on the existing WS API to the existing `oxo-ws-fn`.
+No new public surface, principal, table, API, region, or IAM grant. These
+checkable statements become policy tests:
+
+### Transport & route surface
+- [ ] Exactly **five** route keys are synthesised: `$connect`, `$disconnect`,
+      `register`, `join`, `move`. Still **no `$default`** catch-all — an unrouted
+      `action` is dropped by the service, not handled.
+- [ ] The `move` route integrates the **existing** `oxo-ws-fn` (AWS_PROXY) — no
+      new function, no new authorizer; `move` is post-`$connect` (the connection
+      is already authorized) and the `$connect` authorizer does NOT run per
+      message.
+
+### Move forgery — sender-is-a-player binding (the core integrity control)
+With no account system, the sender's identity is its **own** `connectionId`:
+- [ ] A `move` is accepted ONLY when `event.requestContext.connectionId` equals
+      the `hostConnectionId` **or** `guestConnectionId` of THIS game. A move from
+      a spectator/stale/other-game connection is rejected with **no write**.
+- [ ] The sender's role (X=host / O=guest) is derived **server-side** from that
+      connectionId↔game binding — NEVER from a client-supplied `role`/`player`
+      field. The client body carries only `{ action:'move', square }`.
+- [ ] The move is accepted ONLY when the sender's derived role equals
+      `currentTurn` (turn-order enforcement). Out-of-turn → `move-rejected` to the
+      sender only, `Games` byte-unchanged.
+- [ ] The target square must be empty (`board[square] == '-'`) and `square` in
+      0..8; otherwise `move-rejected`, no write.
+
+### State-transition integrity — enforced by conditional write, not just code
+- [ ] No move is written when `status != 'active'`. This is enforced by the
+      `UpdateItem` `ConditionExpression` (`status = 'active'` AND
+      `currentTurn = senderRole` AND `version = :expected`) — **a code-side `if`
+      is not sufficient on its own; the condition is the backstop**.
+- [ ] Reaching a terminal state (`won`/`drawn`, with `winner` on a win) happens
+      in the **same atomic `UpdateItem`** that applies the move — there is no
+      window in which a move can land after game-over.
+- [ ] Concurrent move writes are serialized by the `version` CAS
+      (`version = :expected`, `SET version = version + 1`) — two near-simultaneous
+      moves on the same free square yield exactly one accepted write and one
+      `move-rejected`; no lost move, no double-fill.
+
+### Relay amplification — bounded fan-out
+- [ ] An accepted **non-terminal** move triggers **exactly 2** `@connections`
+      POSTs (a `board-update` to `hostConnectionId` and `guestConnectionId` only).
+- [ ] A **terminal** move triggers at most **4** POSTs (board-update + game-over
+      to each), never a broadcast — the targets are the two bound connectionIds
+      read from the `Games` item.
+- [ ] A **rejected** move triggers **1** POST (`move-rejected` to the sender
+      only) and **0** writes.
+- [ ] A failed/`410 Gone` post to one connection is logged and does NOT block the
+      post to the other; no per-post retry storm (best-effort relay — recovery is
+      reconnect-replay in s007). `ManageConnections` is scoped to **this WS API
+      ARN only** (unchanged from s005 — assert no widening).
+
+### Data classification (unchanged class)
+- [ ] `move`/`board-update`/`game-over` payloads carry **no PII**: `square`
+      (0..8), `board` (9-char `X`/`O`/`-`), `currentTurn`/`role` (`X`/`O`),
+      `result` (`X-wins`/`O-wins`/`draw`). No connection details of the opponent
+      are disclosed to a client.
+
+### No grant widening (assert the negative)
+- [ ] `oxo-ws-fn`'s IAM policy is the s005 grant set verbatim — `move` adds zero
+      permissions (`GetItem`/conditional `UpdateItem` on `Games` and
+      `ManageConnections` on this API ARN were all already granted). No new
+      action, no `*`.
+
+### Out of scope for s006 (do NOT assert as built)
+- `$disconnect` cleanup / GoneException-driven connection reaping (s007).
+- Reconnect-after-reload / state replay (OI-10, s007).
+- Leaderboard write on game-over (C5/s009).
+
+---
+
+## s006 security conclusion (gated review)
+
+The move route turns the paired-but-inert board into a live, server-authoritative
+game. The decisive controls are all **conditions on an existing write** or
+**assertions that an existing grant was not widened** — the blast radius stays
+inside the existing `oxo-ws-fn`/`Games` trust boundary.
+
+**Is there new attack surface / data flow / trust boundary? A new DATA FLOW and a
+sharpened TRUST RULE — YES; a new public surface, principal, table, API, region,
+or IAM grant — NO; therefore this is NOT a §9a auto-accept and the gated
+security review applies, but its blast radius is bounded to the existing
+`oxo-ws-fn`/`Games` boundary and every new control is a condition on an existing
+write or an assertion that an existing grant was not widened.**
+
+**Carried open risks (accepted, named):**
+- **OR-S006-a — version CAS reject vs retry:** a legitimate near-simultaneous
+  move losing the `version` CAS is rejected (player re-clicks) rather than
+  auto-retried beyond one re-read — protects the < 1s p95. Reversal: widen the
+  bounded retry if rejects annoy users.
+- **OR-S006-b — best-effort relay:** a dropped `@connections` push is not
+  re-pushed this slice; the authoritative board in `Games` is always correct;
+  recovery is reconnect-replay in s007.
+- Inherited: OR-H2-b (guest code-as-credential pre-join, closed by C6),
+  OI-10 (no reconnect, s007).
 
 ---
 

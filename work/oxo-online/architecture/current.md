@@ -16,7 +16,7 @@ is recorded; later chunks revise this when value is re-sliced.
 |-----|---------|--------|
 | **[C1]** | Needed for Chunk 1 (deployable shell) | delivered (slice 001) |
 | **[C2-3]** | Local game + AI — client-only, no new infra | **current** (C2 = slice 002, local game, delivered; C3 = AI, in progress) |
-| **[C4]** | Online match — first stateful backend + realtime | in progress (s004 create ✓; s005 join/WS in progress) |
+| **[C4]** | Online match — first stateful backend + realtime | in progress (s004 create ✓; s005 join/WS ✓; s005-h2 connect-auth ✓; **s006 move relay + server-authoritative win/draw — current**) |
 | **[C5]** | Leaderboard — first durable persistence | not started |
 | **[C6]** | Player identity — session/display name | not started |
 | **[C7]** | In-game chat — reuses C4 realtime transport | not started |
@@ -91,12 +91,12 @@ C4Container
 
 ## C4 — what is actually built (in-progress subset of the target above)
 
-The C2 diagram is the **target through Chunk 7**. As of slice 005 the *built*
+The C2 diagram is the **target through Chunk 7**. As of slice 006 the *built*
 subset is narrower; this section is the source of truth for "what exists now".
 
 ```mermaid
 C4Container
-  title oxo-online — Built as of s005 (C4 in progress)
+  title oxo-online — Built as of s006 (C4 in progress)
 
   Person(player, "Player", "Anonymous browser user")
 
@@ -106,13 +106,13 @@ C4Container
     Container(s3, "S3 web bucket", "Static hosting", "[built s001] React SPA; private, OAC only. s005 adds runtime wsUrl config artifact.")
 
     Container(httpapi, "API Gateway (HTTP)", "HTTPS", "[built s004] POST /games (create). NO stage WebACL (CF WAF covers /api/*).")
-    Container(wsapi, "API Gateway (WebSocket)", "WSS", "[s005] prod stage; routes $connect/$disconnect(stub)/register/join. [s005-h2] $connect has a REQUEST Lambda authorizer (cache TTL 0). NO WAF (WAFv2 cannot assoc. API GW v2 — GATE-AMEND-H1-A); flood control = stage throttle 20/40 + reserved-concurrency + per-IP authorizer budget.")
+    Container(wsapi, "API Gateway (WebSocket)", "WSS", "[s005] prod stage; routes $connect/$disconnect(stub)/register/join. [s006] +move route (5 keys, no $default). [s005-h2] $connect has a REQUEST Lambda authorizer (NO result cache — strike 4). NO WAF (WAFv2 cannot assoc. API GW v2 — GATE-AMEND-H1-A); flood control = stage throttle 20/40 + reserved-concurrency + per-IP authorizer budget.")
 
     Container(gamefn, "oxo-game-fn", "Lambda Node20", "[built s004] create-game; PutItem on Games only. [s005-h2] also mints host wsToken (HMAC); reads shared secret.")
-    Container(wsfn, "oxo-ws-fn", "Lambda Node20", "[s005] $connect/register/join; conditional join write + game-ready fan-out")
+    Container(wsfn, "oxo-ws-fn", "Lambda Node20", "[s005] $connect/register/join; conditional join write + game-ready fan-out. [s006] +move route: validates turn/legality/status by connectionId binding, atomic conditional UpdateItem with version CAS, server-side win/draw, board-update/game-over relay to the 2 bound conns. NO new IAM grant (reuses s005 set).")
     Container(wsauthfn, "oxo-ws-auth-fn", "Lambda Node20", "[s005-h2] $connect REQUEST authorizer: verify host wsToken / lookup guest code; per-IP budget; Allow/Deny IAM policy. NO ManageConnections, NO Games write.")
 
-    ContainerDb(ddb_game, "DynamoDB: Games", "NoSQL", "[built s004] +code GSI & host/guest connId attrs (s005). TTL 24h, SSE, on-demand.")
+    ContainerDb(ddb_game, "DynamoDB: Games", "NoSQL", "[built s004] +code GSI & host/guest connId attrs (s005). [s006] +board(9-char)/currentTurn/winner/version(opt-lock CAS)/moveCount attrs — authoritative board; schemaless add, no table/GSI change. TTL 24h, SSE, on-demand.")
     ContainerDb(ddb_conn, "DynamoDB: Connections", "NoSQL", "[s005] connectionId -> gameId/role. TTL 2h, SSE, on-demand.")
     ContainerDb(ddb_attempts, "DynamoDB: ConnectAttempts", "NoSQL", "[s005-h2] sourceIp -> count. TTL 5min, SSE, on-demand. Best-effort per-IP connect budget.")
     Container(secret, "WS-token secret", "SSM SecureString / Secret", "[s005-h2] 32-byte HMAC key. Encrypted at rest; read-scoped to oxo-game-fn (mint) + oxo-ws-auth-fn (verify) only.")
@@ -133,17 +133,17 @@ C4Container
   Rel(wsauthfn, ddb_game, "GetItem code-index (guest code path)")
   Rel(wsauthfn, ddb_attempts, "UpdateItem ADD (per-IP budget)")
   Rel(gamefn, ddb_game, "PutItem (create)")
-  Rel(wsfn, ddb_game, "Query code-index + conditional UpdateItem")
+  Rel(wsfn, ddb_game, "Query code-index + conditional UpdateItem (join/register); [s006] GetItem board + move CAS UpdateItem")
   Rel(wsfn, ddb_conn, "Put/Delete connection")
-  Rel(wsfn, wsapi, "game-ready fan-out", "@connections (ManageConnections, this API ARN only)")
+  Rel(wsfn, wsapi, "game-ready + [s006] board-update/game-over fan-out to the 2 bound conns", "@connections (ManageConnections, this API ARN only)")
 }
 ```
 
-**Not yet built (target only):** move relay/fan-out of board state,
-server-authoritative win/draw, `$disconnect` cleanup, reconnect, Leaderboard
-table + `oxo-board-fn`, CloudFront WS proxying. **WAF built (s005-h1); `$connect`
-capability-token + per-IP authorizer built (s005-h2).** See deltas 005+ for the
-deferral list.
+**Not yet built (target only):** `$disconnect` cleanup, reconnect-after-reload
+(OI-10, s007), Leaderboard table + `oxo-board-fn` (C5), CloudFront WS proxying,
+in-game chat (C7). **WAF built (s005-h1); `$connect` capability-token + per-IP
+authorizer built (s005-h2); move relay + server-authoritative win/draw built
+(s006).** See deltas 005+/006 for the deferral list.
 
 **Key s005-h2 (connect-auth) architectural facts:**
 - First **Lambda REQUEST authorizer** on the WS API (new-mechanism, §30 probe
@@ -181,6 +181,35 @@ deferral list.
   Deploy order: `OxoOnlineWafUsEast1` → `OxoOnlineProd`. WAF is default-allow
   (no app-code/data-flow change). `OxoGameProd` carries no WAF resource now.
 - See `architecture/deltas/s005-h1-waf.md` §0 and `architecture/security/wafv2.md`.
+
+**Key s006 (move relay + server-authoritative play) architectural facts:**
+- **One new WS route `move`** on the EXISTING WS API → the EXISTING `oxo-ws-fn`
+  (route count 4→5; still no `$default`). **No new function, no new table, no
+  new API, no new principal, no new IAM grant, no new region, no new
+  deploy-role grant.** The thinnest possible delta for the core-job payoff.
+- **Server-authoritative move:** the `move` handler derives the sender's role
+  from the `connectionId`↔game binding (`event.requestContext.connectionId` must
+  equal `hostConnectionId` or `guestConnectionId` of THIS game) — never a
+  client-claimed role. It validates turn/square-free/`status=active`, then writes.
+- **Atomic conditional `UpdateItem` with optimistic-lock CAS:** the same write is
+  the turn gate, the legality gate, AND the lock — `ConditionExpression`
+  `status='active' AND currentTurn=senderRole AND version=:expected`; on success
+  it increments `version`, replaces `board`, flips `currentTurn`, and (if
+  terminal) flips `status`→`won`/`drawn` + sets `winner` in the SAME write. So
+  **reaching game-over and locking the board is one atomic op** — no
+  post-game-over move can slip in. Concurrent move writes are serialized by
+  `version` (no lost move / no double-fill).
+- **Bounded relay:** an accepted non-terminal move = **exactly 2** `@connections`
+  POSTs (board-update to host+guest); terminal ≤ 4; a rejected move = **1** post
+  (move-rejected to sender) + **0** writes. No broadcast. `ManageConnections`
+  grant is the s005 one, **unchanged**.
+- **SPA renders only server broadcasts** (no optimistic update). OI-33 folded in:
+  WS error reason `code-not-found` maps to a readable "Game not found" message
+  (one-line SPA change, no Lambda/API touch).
+- See `architecture/deltas/006-move-relay.md`,
+  `architecture/dependencies/data-flow.mmd` (FIRST edition, OI-31),
+  `architecture/security/apigw-websocket.md` (s006 section),
+  `architecture/security/dynamodb-games.md` (s006 additions).
 
 **Key s005 architectural facts:**
 - The WebSocket API is in the **same `OxoGameProd` stack** as the HTTP API +
@@ -324,6 +353,20 @@ API-ARN scoped. Deploy role is constrained to the repo and branch via the OIDC
 
 ## C3 — Components
 
-Deferred. Single Game-service handler with route-based dispatch
-($connect/$disconnect/move/chat) does not yet warrant component decomposition.
-Revisit if chat (C7) and move-relay logic diverge enough to split handlers.
+Still a single `oxo-ws-fn` handler with route-based dispatch
+(`$connect`/`$disconnect`/`register`/`join`/`move`). s006 keeps it one function
+but introduces **internal hexagonal ports** (OI-17): a pure move/win-draw
+core, a `Games` store port (with the conditional-CAS write), and a relay
+transport port — so most of the logic stands up locally (OI-28). This is
+component-level structure inside one deployable, not a handler split. Revisit a
+real split only if chat (C7) and move-relay diverge enough to warrant separate
+functions.
+
+## Runtime data-flow (process §12a)
+
+`architecture/dependencies/data-flow.mmd` is the authoritative runtime
+data-flow with platform gates as explicit nodes (CloudFront+WAF, HTTP API,
+WS upgrade, `$connect` REQUEST authorizer with strike-4/5 semantics, lazy-TTL
+stores, the `@connections` relay). It is the **tester's planning input**; each
+slice marks its delta with `classDef changed`. s006 marks `oxo-ws-fn` and
+`Games` changed and adds the four dotted `move` edges.

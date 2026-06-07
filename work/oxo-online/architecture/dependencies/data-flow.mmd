@@ -1,0 +1,67 @@
+%% oxo-online runtime data-flow — FIRST EDITION (s006, OI-31 architect share, process §12a)
+%% Platform GATES are explicit nodes. Non-obvious platform semantics are named ON the node.
+%% This file is the TESTER's planning input. classDef changed marks THIS slice's (s006) delta.
+%% Granularity: module / gate level (coarse). Built scope only (deferred items are NOT drawn).
+
+flowchart TD
+
+  %% ---- Edge / SPA path (HTTPS) ----
+  player(["Player browser / SPA"]):::actor
+  cfwaf["CloudFront + WAFv2 WebACL (global, us-east-1 scope)<br/>GATE: rate 100/5min per IP + IP-reputation, DEFAULT-ALLOW.<br/>WAF rate rule = SLIDING 300s window, ~30s eval cadence + propagation<br/>(sustained traffic trips it, a short burst can slip through).<br/>Block=403; CF maps 403 to index.html (keep block code DISJOINT, e.g. 429)."]:::gate
+  s3[("S3 web bucket<br/>private, OAC-only; serves SPA + OXO_CONFIG runtime cfg incl. wsUrl + buildSha")]:::store
+  httpapi["API Gateway HTTP API v2<br/>GATE: route POST /games only. NO stage WAF (CF WAF covers /api/*).<br/>NOT WAFv2-associable (v2 API). TLS1.2+."]:::gate
+  gamefn["oxo-game-fn (Lambda)<br/>create-game: PutItem Games; mints host wsToken (HMAC, 60s exp)"]:::compute
+  secret["WS-token secret (SSM SecureString)<br/>HMAC key; read-scoped: oxo-game-fn mint + oxo-ws-auth-fn verify ONLY"]:::secret
+
+  %% ---- WebSocket path (WSS, NOT via CloudFront) ----
+  wsupgrade["WS upgrade to API Gateway WebSocket API v2<br/>GATE: NOT WAFv2-associable. Flood control = stage throttle 20/40<br/>(account/stage-level, NOT per-IP) + reserved-concurrency."]:::gate
+  wsauth["$connect REQUEST authorizer = oxo-ws-auth-fn (Lambda)<br/>GATE: host wsToken XOR guest code; Allow/Deny via IAM-POLICY shape<br/>(REST-style principalId+policyDocument, NOT isAuthorized).<br/>NO result cache (WS authorizers reject AuthorizerResultTtlInSeconds - strike 4).<br/>IdentitySource OMITTED so authorizer runs UNCONDITIONALLY and does<br/>the either-or itself (listed sources are ANDed/pre-invocation-gated - strike 5, DEFECT-H2-002)."]:::gate
+  attempts[("DynamoDB ConnectAttempts<br/>sourceIp to count. TTL 5min, LAZY deletion: expired item may still be<br/>readable up to ~48h after TTL, so per-IP budget is BEST-EFFORT, not exact.<br/>SSE, on-demand.")]:::store
+  wsfn["oxo-ws-fn (Lambda) — route dispatch on $request.body.action<br/>Routes: $connect / $disconnect(stub) / register / join / move<br/>Validates + applies; runs ONLY after authorizer Allow."]:::compute
+  conn[("DynamoDB Connections<br/>connectionId to gameId/role. TTL 2h, LAZY deletion (expired item lingers).<br/>SSE, on-demand.")]:::store
+  games[("DynamoDB Games (+ code-index GSI)<br/>authoritative item: status, host/guestConnectionId, board, currentTurn,<br/>winner, version (optimistic-lock CAS), moveCount. TTL 24h, LAZY deletion.<br/>SSE, on-demand.")]:::store
+  relay["@connections POST (API GW Management API)<br/>GATE: relay to the TWO bound connectionIds only (host+guest).<br/>No broadcast. 410 Gone if connection dead (not cleaned up until s007)."]:::gate
+
+  %% ---- Existing edges (built s001..s005-h2) ----
+  player -->|"HTTPS load SPA + read OXO_CONFIG"| cfwaf
+  cfwaf -->|"OAC origin fetch"| s3
+  cfwaf -->|"routes /api/*"| httpapi
+  player -->|"POST /api/games to gameId,code,wsToken"| cfwaf
+  httpapi -->|"AWS_PROXY invoke"| gamefn
+  gamefn -->|"PutItem create"| games
+  gamefn -->|"read HMAC"| secret
+
+  player -->|"direct WSS $connect wsToken|code (NOT via CloudFront)"| wsupgrade
+  wsupgrade -->|"pre-invocation identity gate, then invoke"| wsauth
+  wsauth -->|"verify wsToken"| secret
+  wsauth -->|"GetItem code-index guest path"| games
+  wsauth -->|"UpdateItem ADD per-IP budget"| attempts
+  wsauth -->|"Allow IAM policy"| wsupgrade
+  wsupgrade -->|"AWS_PROXY invoke per message AFTER Allow"| wsfn
+  wsfn -->|"register: conditional UpdateItem host slot"| games
+  wsfn -->|"join: conditional UpdateItem to active + init board/currentTurn/version (s006)"| games
+  wsfn -->|"Put/Delete connection"| conn
+  wsfn -->|"game-ready fan-out to 2 conns"| relay
+  relay -->|"game-ready / board-update / game-over"| player
+
+  %% ---- s006 NEW data flow: move relay (CHANGED, dotted) ----
+  player -.->|"WS msg action=move, square (NEW)"| wsfn
+  wsfn -.->|"GetItem read current board (already-granted read)"| games
+  wsfn -.->|"move: atomic conditional UpdateItem CAS on status=active AND currentTurn=senderRole AND version=expected; SET board/turn/version+1 and on terminal status=won|drawn,winner (NEW)"| games
+  wsfn -.->|"accepted move = EXACTLY 2 board-update POSTs (terminal <=4); rejected = 1 move-rejected POST, 0 writes (NEW)"| relay
+
+  %% ---- classDef ----
+  classDef actor fill:#eef,stroke:#446,color:#000;
+  classDef gate fill:#ffe9c7,stroke:#b5651d,color:#000,stroke-width:2px;
+  classDef compute fill:#e6f3e6,stroke:#2e7d32,color:#000;
+  classDef store fill:#f0e6f6,stroke:#6a1b9a,color:#000;
+  classDef secret fill:#fde0e0,stroke:#c62828,color:#000;
+  classDef changed stroke:#d50000,stroke-width:4px,stroke-dasharray:6 3;
+
+  %% s006 changed nodes (the move handler is the touched compute; Games gains move-write semantics)
+  class wsfn changed;
+  class games changed;
+
+  %% s006 changed EDGES are the dotted (-.->) edges above:
+  %%   player->wsfn (move msg), wsfn->games (read), wsfn->games (move CAS write), wsfn->relay (2-post relay).
+  %% Tester: plan move-relay test coverage from the dashed-red nodes and dotted edges.

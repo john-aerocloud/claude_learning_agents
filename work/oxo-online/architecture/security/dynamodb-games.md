@@ -48,3 +48,35 @@ write principal (`oxo-ws-fn`). New checkable controls (become policy tests):
       **accepted, conditional-write-bounded** residual risk in s005 (a hard
       uniqueness guarantee is deferred). Documented, not an oversight — open risk
       for the gate.
+
+## s006 additions (authoritative board + move write path)
+The `Games` item gains play-state attributes written by the `move` route on the
+existing `oxo-ws-fn`. **Schemaless attribute add — no table update, no GSI, no
+new principal, no new IAM grant.** New checkable controls (become policy tests):
+- [ ] New attributes on the `Games` item: `board` (9-char `X`/`O`/`-` string),
+      `currentTurn` (`X`/`O`), `winner` (opt `X`/`O`), `version` (Number,
+      optimistic-lock counter), `moveCount` (Number). `status` gains terminal
+      values `won`/`drawn`. No PII.
+- [ ] `board`/`currentTurn`/`version`/`moveCount` are **initialised in the
+      existing s005 `join` conditional write** (`board="---------"`,
+      `currentTurn="X"`, `version=0`, `moveCount=0`) — no separate write.
+- [ ] The move write is a **single atomic conditional `UpdateItem`** whose
+      `ConditionExpression` is `status = 'active'` AND `currentTurn = :senderRole`
+      AND `version = :expectedVersion`. The state-transition lock (no move after
+      `won`/`drawn`) is enforced by this condition, **not by code alone**.
+- [ ] The `UpdateItem` `SET` increments `version` by exactly 1, replaces `board`,
+      flips `currentTurn`, increments `moveCount`, and — when the post-move board
+      is terminal — sets `status` to `won`/`drawn` and `winner` in the **same**
+      write (atomic game-over + board-lock).
+- [ ] The board is authoritative server-side: clients have **no** write path to
+      `board`/`status`/`currentTurn` except a validated `move` through
+      `oxo-ws-fn`; clients never send board state.
+- [ ] The sender's role is derived from
+      `event.requestContext.connectionId` matching `hostConnectionId`/
+      `guestConnectionId` on the item — **never** from a client-supplied field.
+- [ ] `oxo-ws-fn`'s `Games` grant is **unchanged** from s005: `GetItem`/`Query`
+      (read current board on the table/`code-index` ARN) and conditional
+      `UpdateItem` on the table ARN. `move` adds **no** `Games` permission — no
+      `PutItem`, no `DeleteItem`, no `Scan`, no `*`. Assert the negative.
+- [ ] PITR still NOT required (ephemeral game state, 24h TTL) — deliberate cost
+      choice, unchanged.

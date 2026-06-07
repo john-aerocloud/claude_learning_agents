@@ -204,7 +204,11 @@ export class OxoGameStack extends cdk.Stack {
     const wsFunction = new lambda.Function(this, 'WsFunction', {
       functionName: 'oxo-ws-fn',
       runtime: lambda.Runtime.NODEJS_20_X,
-      handler: 'handler.handler',
+      // s006: the deploy bundle (tsconfig.ws.json, rootDir=lambda root) nests the
+      // handler at ws/dist/ws/handler.js so the shared move/ domain compiles
+      // alongside it — so the entry is 'ws/handler.handler' (asset path ws/dist
+      // unchanged). Pinned by game-stack.test.ts + the lambda build-coverage test.
+      handler: 'ws/handler.handler',
       code: lambda.Code.fromAsset(
         path.join(__dirname, '..', '..', 'lambda', 'ws', 'dist'),
       ),
@@ -279,12 +283,16 @@ export class OxoGameStack extends cdk.Stack {
     );
 
     const integrationTarget = `integrations/${wsIntegration.ref}`;
-    const routeKeys = ['$connect', '$disconnect', 'register', 'join'] as const;
+    // s006: 4 -> 5 route keys. `move` integrates the SAME oxo-ws-fn (no new
+    // function, no new authorizer — move is post-$connect). Still NO $default
+    // catch-all (an unrouted action is dropped by the service, not handled).
+    const routeKeys = ['$connect', '$disconnect', 'register', 'join', 'move'] as const;
     const routeLogicalIds: Record<(typeof routeKeys)[number], string> = {
       $connect: 'JoinWsRouteConnect',
       $disconnect: 'JoinWsRouteDisconnect',
       register: 'JoinWsRouteRegister',
       join: 'JoinWsRouteJoin',
+      move: 'JoinWsRouteMove',
     };
     for (const routeKey of routeKeys) {
       new apigatewayv2.CfnRoute(this, routeLogicalIds[routeKey], {

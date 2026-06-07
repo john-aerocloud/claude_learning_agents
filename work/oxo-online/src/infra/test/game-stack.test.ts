@@ -228,7 +228,7 @@ describe('OxoGameStack — WebSocket API: four route keys, no $default, prod sta
     });
   });
 
-  it('declares exactly the four route keys $connect/$disconnect/register/join and no $default', () => {
+  it('declares exactly the five route keys $connect/$disconnect/register/join/move and no $default (s006)', () => {
     const template = synth();
     const apis = template.findResources('AWS::ApiGatewayV2::Api', {
       Properties: { ProtocolType: 'WEBSOCKET' },
@@ -244,8 +244,21 @@ describe('OxoGameStack — WebSocket API: four route keys, no $default, prod sta
       )
       .map((r) => (r.Properties as Record<string, unknown>).RouteKey as string)
       .sort();
-    expect(wsRouteKeys).toEqual(['$connect', '$disconnect', 'join', 'register']);
+    expect(wsRouteKeys).toEqual(['$connect', '$disconnect', 'join', 'move', 'register']);
     expect(wsRouteKeys).not.toContain('$default');
+  });
+
+  it("oxo-ws-fn handler entry is 'ws/handler.handler' (re-nested bundle — handler-path incident class)", () => {
+    const template = synth();
+    const fns = template.findResources('AWS::Lambda::Function', {
+      Properties: { FunctionName: 'oxo-ws-fn' },
+    });
+    const fn = Object.values(fns)[0];
+    // The s006 ws-fn deploy bundle (tsconfig.ws.json, rootDir=lambda root) nests
+    // the handler at ws/dist/ws/handler.js so the move/ domain compiles alongside
+    // it — so the CDK handler entry MUST be 'ws/handler.handler' (build-coverage
+    // test pins the emitted path; this pins the coupled CDK string).
+    expect(fn.Properties.Handler).toBe('ws/handler.handler');
   });
 
   it('configures the prod stage with finite default-route throttling (T8)', () => {

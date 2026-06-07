@@ -27,7 +27,7 @@ import { OxoGameStack } from '../lib/game-stack';
 // The client `action` values the SPA sends over the socket. These MUST match
 // synthesised WS route keys (the $request.body.action selector). Encoded here
 // as the contract boundary the SPA and the API share.
-const CLIENT_ACTION_VALUES = ['register', 'join'] as const;
+const CLIENT_ACTION_VALUES = ['register', 'join', 'move'] as const;
 
 const WS_ENDPOINT_OUTPUT_NAME = 'OxoGameProd-WsApiEndpoint';
 
@@ -71,9 +71,9 @@ function wsRouteKeys(template: Template): string[] {
 }
 
 describe('§30 composed WS contract (T7) — route keys, action match, endpoint export, wsUrl source', () => {
-  it('1. synthesises exactly the four route keys and no $default', () => {
+  it('1. synthesises exactly the five route keys (s006 move added) and no $default', () => {
     const keys = wsRouteKeys(synth()).sort();
-    expect(keys).toEqual(['$connect', '$disconnect', 'join', 'register']);
+    expect(keys).toEqual(['$connect', '$disconnect', 'join', 'move', 'register']);
     expect(keys).not.toContain('$default');
   });
 

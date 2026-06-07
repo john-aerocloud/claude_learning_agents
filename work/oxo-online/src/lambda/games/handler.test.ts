@@ -158,6 +158,33 @@ describe('handler — injects a host wsToken (S-A1.4, T7, AC1.1–AC1.5)', () =>
     const body = JSON.parse(res.body as string);
     expect(body.wsToken).toBeUndefined();
   });
+
+  // DEFECT-H2-001 pin: secret unavailability must NOT fail a create that
+  // already persisted — degrade by omitting wsToken and logging categorised.
+  it('returns 201 WITHOUT wsToken (degraded) when the secret source fails', async () => {
+    const failingSecretSource = {
+      get: async () => {
+        throw new Error('secret unavailable');
+      },
+    };
+    const degradedHandler = createHandler({
+      secretSource: failingSecretSource,
+    });
+    const logSpy = vi.spyOn(console, 'log');
+    const res = await degradedHandler(makeEvent());
+    expect(res.statusCode).toBe(201);
+    const body = JSON.parse(res.body as string);
+    expect(body.gameId).toBeDefined();
+    expect(body.code).toBeDefined();
+    expect(body.wsToken).toBeUndefined();
+    const degradedLog = logSpy.mock.calls
+      .map((c) => String(c[0]))
+      .find((m) => m.includes('ws_token_mint_degraded'));
+    expect(degradedLog).toBeDefined();
+    expect(degradedLog).toContain('"category":"external"');
+    expect(degradedLog).toContain('"subcategory":"availability"');
+    logSpy.mockRestore();
+  });
 });
 
 describe('handler — default export wires the production SecretSource (S-A1.6 seam)', () => {

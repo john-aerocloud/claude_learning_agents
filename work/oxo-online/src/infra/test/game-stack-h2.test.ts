@@ -186,17 +186,20 @@ describe('s005-h2 — authorizer attached to $connect (T1)', () => {
 // S-A2.9 [T2, SYNTH-CONTRACT-H2-3] — cache disabled
 // ===========================================================================
 describe('s005-h2 — authorizer cache disabled (T2)', () => {
-  it('AuthorizerResultTtlInSeconds is 0', () => {
+  // T2 re-pinned (platform strike 4): WEBSOCKET APIs reject the
+  // AuthorizerResultTtlInSeconds property outright — no-cache is inherent.
+  // The pin is now ABSENCE of the property (presence broke CREATE, run
+  // 27085881193).
+  it('the WS authorizer sets NO AuthorizerResultTtlInSeconds (WS APIs reject it; no-cache inherent)', () => {
     const t = synth();
     const authorizers = t.findResources('AWS::ApiGatewayV2::Authorizer');
-    const reqAuth = Object.values(authorizers).find(
+    const req = Object.values(authorizers).find(
       (a) =>
         (a.Properties as Record<string, unknown>).AuthorizerType === 'REQUEST',
     )!;
     expect(
-      (reqAuth.Properties as Record<string, unknown>)
-        .AuthorizerResultTtlInSeconds,
-    ).toBe(0);
+      (req.Properties as Record<string, unknown>).AuthorizerResultTtlInSeconds,
+    ).toBeUndefined();
   });
 });
 

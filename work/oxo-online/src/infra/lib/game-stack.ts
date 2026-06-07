@@ -574,7 +574,10 @@ exports.handler = async (event) => {
         'route.request.querystring.code',
       ],
       authorizerUri: `arn:aws:apigateway:${this.region}:lambda:path/2015-03-31/functions/${wsAuthFunction.functionArn}/invocations`,
-      authorizerResultTtlInSeconds: 0,
+      // Platform semantic (strike 4, run 27085881193): WEBSOCKET APIs REJECT
+      // AuthorizerResultTtlInSeconds entirely — WS authorizers never cache, so
+      // the delta's no-cache intent (TTL=0) is the inherent behaviour; the
+      // property must be OMITTED.
     });
 
     // Gate the EXISTING $connect route: AuthorizationType CUSTOM + AuthorizerId.

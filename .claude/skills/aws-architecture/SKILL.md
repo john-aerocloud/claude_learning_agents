@@ -322,3 +322,11 @@ several evaluation cycles of headroom). Blocks default to 403; if CloudFront
 fronts the resource and maps 403 in CustomErrorResponses, use a custom block
 response code DISJOINT from the CF error mapping (e.g. 429) and synth-assert
 the disjointness, or blocks are invisible at HTTP level.
+
+## API Gateway v2 WebSocket authorizer semantics (observed 2026-06-07)
+- REQUEST authorizers on WEBSOCKET APIs return the REST-style IAM policy
+  document ({principalId, policyDocument}), NOT the HTTP-API simple
+  {isAuthorized} shape.
+- WEBSOCKET APIs REJECT AuthorizerResultTtlInSeconds outright — WS
+  authorizers never cache results; omit the property (no-cache is inherent).
+  Setting it (even to 0) fails CREATE with BadRequestException.

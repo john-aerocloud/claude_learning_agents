@@ -173,7 +173,7 @@ const EXPECTED_CLOUDFRONT_WAF_ACTIONS = [
 ];
 
 describe('OxoOnlineOidcStack — oxo-deploy WAFv2 management grant (s005-h1 ORDER-WAF-1)', () => {
-  it('grants exactly the enumerated wafv2 management actions — no wafv2:* wildcard', () => {
+  it('grants exactly the enumerated wafv2 WebACL-management actions — no wafv2:* wildcard', () => {
     const statements = deployRoleStatements(synth());
     const wafStmts = statements.filter((s) =>
       actionsOf(s).some((a) => typeof a === 'string' && a.startsWith('wafv2:')),
@@ -184,13 +184,23 @@ describe('OxoOnlineOidcStack — oxo-deploy WAFv2 management grant (s005-h1 ORDE
     );
     // No wildcard.
     expect(granted.has('wafv2:*')).toBe(false);
-    // Every expected management action is present.
+    // Every expected WebACL-management action is present.
     for (const action of EXPECTED_WAFV2_ACTIONS) {
       expect(granted.has(action)).toBe(true);
     }
-    // No ungranted wafv2 action sneaks in beyond the enumerated set
-    // (code<->policy pin: the granted set cannot silently widen).
+    // No ungranted wafv2 action sneaks in beyond the enumerated WebACL set —
+    // EXCEPT the IMP-008 IPSet-management family, which is a separate statement
+    // (Ipv2IpSetManage) pinned by its own test below (code<->policy pin: each
+    // statement's granted set cannot silently widen).
+    const ipsetFamily = new Set([
+      'wafv2:CreateIPSet',
+      'wafv2:GetIPSet',
+      'wafv2:UpdateIPSet',
+      'wafv2:DeleteIPSet',
+      'wafv2:ListIPSets',
+    ]);
     for (const action of granted) {
+      if (ipsetFamily.has(action)) continue;
       expect(EXPECTED_WAFV2_ACTIONS).toContain(action);
     }
   });
@@ -229,6 +239,67 @@ describe('OxoOnlineOidcStack — oxo-deploy CloudFront set-webAclId grant (s005-
     const allActions = statements.flatMap(actionsOf);
     expect(allActions).not.toContain('cloudfront:CreateDistribution');
     expect(allActions).not.toContain('cloudfront:DeleteDistribution');
+  });
+});
+
+// ===========================================================================
+// s007 UC2-S0 — IMP-008 IPSet management grant (E1 BLOCKER, code<->policy pin
+// per process v25 §30). The deploy role must hold EXACTLY the five IPSet
+// management actions so the OxoOnlineWafUsEast1 stack can create + mutate the
+// oxo-test-runner-ips IP set. §39 config-follows-resource: this grant is
+// deployed via `make deploy-oidc` BEFORE any push that adds the IPSet CDK
+// resource, exactly as Wafv2Manage was grant-before-WebACL at s005-h1.
+// ===========================================================================
+
+const EXPECTED_IPSET_ACTIONS = [
+  'wafv2:CreateIPSet',
+  'wafv2:GetIPSet',
+  'wafv2:UpdateIPSet',
+  'wafv2:DeleteIPSet',
+  'wafv2:ListIPSets',
+];
+
+describe('OxoOnlineOidcStack — oxo-deploy IMP-008 IPSet management grant (s007 UC2-S0, E1)', () => {
+  it('grants exactly the five wafv2 IPSet management actions — no wafv2:* wildcard, no IAM escalation', () => {
+    const statements = deployRoleStatements(synth());
+    const ipsetStmts = statements.filter((s) =>
+      actionsOf(s).some(
+        (a) => typeof a === 'string' && a.endsWith('IPSet') || a === 'wafv2:ListIPSets',
+      ),
+    );
+    expect(ipsetStmts.length).toBeGreaterThan(0);
+    const granted = new Set(
+      statements
+        .flatMap(actionsOf)
+        .filter(
+          (a) =>
+            typeof a === 'string' &&
+            (a.endsWith('IPSet') || a === 'wafv2:ListIPSets'),
+        ),
+    );
+    // No wildcard.
+    expect(granted.has('wafv2:*')).toBe(false);
+    // Every expected IPSet management action is present.
+    for (const action of EXPECTED_IPSET_ACTIONS) {
+      expect(granted.has(action)).toBe(true);
+    }
+    // No ungranted IPSet-family action sneaks in beyond the enumerated set
+    // (code<->policy pin: the granted IPSet set cannot silently widen).
+    for (const action of granted) {
+      expect(EXPECTED_IPSET_ACTIONS).toContain(action);
+    }
+  });
+
+  it('still grants none of iam:CreateRole / iam:AttachRolePolicy / iam:PutRolePolicy after the IPSet additions', () => {
+    const statements = deployRoleStatements(synth());
+    const forbidden = new Set([
+      'iam:CreateRole',
+      'iam:AttachRolePolicy',
+      'iam:PutRolePolicy',
+    ]);
+    for (const action of statements.flatMap(actionsOf)) {
+      expect(forbidden.has(action)).toBe(false);
+    }
   });
 });
 

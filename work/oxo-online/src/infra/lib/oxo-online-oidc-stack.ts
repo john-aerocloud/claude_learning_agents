@@ -249,6 +249,31 @@ export class OxoOnlineOidcStack extends cdk.Stack {
       }),
     );
 
+    // IMP-008 (s007 UC2-S0) — WAFv2 IP SET management for the oxo-test-runner-ips
+    // exclusion set (CLOUDFRONT scope, us-east-1) in OxoOnlineWafUsEast1. The
+    // deploy/runner path creates the set (CDK) and mutates it at smoke time
+    // (`make waf-runner-ip-add/remove` → scripts/waf-runner-ip.js → Get/UpdateIPSet)
+    // plus the 24h drain Lambda. EXACTLY these five actions — no wafv2:* wildcard,
+    // no IAM escalation. §39 config-follows-resource: deployed via `make
+    // deploy-oidc` BEFORE the first push that adds the IPSet CDK resource, exactly
+    // as Wafv2Manage was grant-before-WebACL at s005-h1 (E1 BLOCKER). Same
+    // create-time-no-ARN justification as Wafv2Manage: a create-time IPSet has no
+    // ARN to scope against; bounded by the account/region the role can act in.
+    deployRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'Ipv2IpSetManage',
+        effect: iam.Effect.ALLOW,
+        actions: [
+          'wafv2:CreateIPSet',
+          'wafv2:GetIPSet',
+          'wafv2:UpdateIPSet',
+          'wafv2:DeleteIPSet',
+          'wafv2:ListIPSets',
+        ],
+        resources: ['*'],
+      }),
+    );
+
     // CloudFront distribution update — to set the distribution webAclId from the
     // cross-region global WebACL ARN (s005-h1-waf). Scoped to the existing
     // distribution ARN; NOT cloudfront:* and NOT Create/DeleteDistribution

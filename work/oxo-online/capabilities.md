@@ -576,3 +576,126 @@ disassociation.
 | Stacks deploy sequentially (not batch) | PASS — three separate pipeline steps |
 | Diff step includes OxoOnlineWafUsEast1 | PASS — updated in infra workflow |
 | No new GH secrets or variables | PASS |
+
+---
+
+## Slice s005-h2 — $connect authorizer + per-IP rate-limiting (iteration 8)
+
+### What this slice adds
+
+A Lambda REQUEST authorizer (`oxo-ws-auth-fn`) on the WebSocket API `$connect`
+route, a `ConnectAttempts` DynamoDB table for per-IP rolling counters, and a
+shared HMAC secret for host-token mint (`oxo-game-fn`) and verify
+(`oxo-ws-auth-fn`). All resources are added to the existing `OxoGameProd` stack.
+
+### Environments in play
+
+**Production only.** Unchanged from prior slices.
+
+### Deploy path
+
+```
+push to main (work/oxo-online/src/infra/** or src/lambda/**)
+  → infra-oxo-online.yml:
+      npm install (infra) + npm ci (lambda) + build both
+      OIDC assume oxo-infra-deploy
+      cdk deploy OxoOnlineWafUsEast1   (no change — included for completeness)
+      cdk deploy OxoGameProd           ← adds oxo-ws-auth-fn, ConnectAttempts table,
+                                           WS authorizer, $connect route update,
+                                           shared secret, env vars + grants on both fns
+      cdk deploy OxoOnlineProd         (no change)
+```
+
+App pipeline (deploy-oxo-online.yml) is unchanged by this slice. There are no
+new `UpdateFunctionCode` steps: the authorizer function code is deployed
+exclusively via CDK `fromAsset()` through the infra pipeline (OI-24 pattern).
+
+### Lambda build coverage — generalised (s005-h2 fix)
+
+The build script in `src/lambda/package.json` previously hardcoded each
+subdir's tsconfig. For s005-h2 it was generalised to auto-discover:
+
+```json
+"build": "tsc && for f in tsconfig.*.json; do tsc --project \"$f\"; done"
+```
+
+This means the engineer only needs to add a `tsconfig.auth.json` (or any new
+`tsconfig.<name>.json`) and the pipeline picks it up automatically. No build
+script edit required for new Lambda subdirs going forward.
+
+**Naming convention (documented here for engineer):** the `oxo-ws-auth-fn`
+handler source goes in `src/lambda/auth/` (or `ws-auth/`). The corresponding
+tsconfig must be `tsconfig.auth.json` (or `tsconfig.ws-auth.json`) at the
+`src/lambda/` root, with `"rootDir": "./auth"` and `"outDir": "./auth/dist"`.
+CDK `fromAsset('./auth/dist')` then finds the compiled output.
+
+### Stack ordering
+
+Unchanged: `OxoOnlineWafUsEast1` → `OxoGameProd` → `OxoOnlineProd`.
+All new resources live inside `OxoGameProd`. No new cross-stack import.
+
+### New GitHub Actions variables/secrets required (s005-h2)
+
+None. All new resources are CDK-managed inside `OxoGameProd` under the
+existing `OXO_ONLINE_INFRA_DEPLOY_ROLE_ARN`. No new GH secrets or variables.
+
+### Deploy-role grants — none new
+
+Confirmed per delta §9: `oxo-ws-auth-fn` lifecycle is CDK-owned; the
+`oxo-deploy` (app pipeline) role is not involved. The execution-plane IAM
+(authorizer role + two secret-read grants) is created by the CDK bootstrap
+execution role. No new statement is required in `DEPLOY_ROLE_EXTENSIONS.md`.
+
+### Rollback assets — s005-h2
+
+**Authorizer rollback:** Remove the `AuthorizationType: CUSTOM` + `AuthorizerId`
+from the `$connect` route (set route back to `NONE` in CDK), then re-deploy
+`OxoGameProd`. This detaches the authorizer without deleting it; all
+connections are immediately accepted without checking tokens. Roll forward
+is preferred. Revert commit + re-deploy is sufficient.
+
+**ConnectAttempts table:** `RemovalPolicy.DESTROY` (data is ephemeral, 5-min TTL;
+no persistent state to protect). Removed on stack destroy.
+
+**Shared secret:** CDK-generated, CDK-managed. Rotating: update the secret
+value and force a cold start on both functions (re-deploy). Deleting the secret
+is a CDK stack destroy operation — the two Lambda env vars reference it by name
+and will fail on next cold start without it.
+
+**OxoGameProd rollback:** CloudFormation rollback (`cdk deploy OxoGameProd
+--rollback`) reverts to the prior change-set, removing the authorizer + table +
+secret atomically. `Connections` + `Games` tables unaffected (separate resources
+with `RemovalPolicy.RETAIN`/`DESTROY` already set from prior slices).
+
+### §19 pre-flight checklist — s005-h2
+
+| Check | Result |
+|-------|--------|
+| No manual pre-push step | PASS — shared secret is CDK-generated in-stack; no manual seed step (delta §10) |
+| New Lambda dir (`src/lambda/auth/` or `ws-auth/`) covered by path trigger `src/lambda/**` | PASS — infra workflow already triggers on `work/oxo-online/src/lambda/**` |
+| Lambda build auto-discovers new auth tsconfig | PASS — build script generalised (this slice); engineer adds `tsconfig.auth.json` only |
+| `oxo-ws-auth-fn` code deployed via CDK `fromAsset`, not app-pipeline hot-swap | PASS — OI-24 pattern; no new `UpdateFunctionCode` step in deploy-oxo-online.yml |
+| Stack deploy order unchanged | PASS — `OxoOnlineWafUsEast1` → `OxoGameProd` → `OxoOnlineProd`; no new cross-stack import |
+| All resources inside `OxoGameProd` | PASS — no new stack, no new region |
+| No `GITHUB_` prefix env vars | PASS — no new env vars |
+| No new GH secrets or variables | PASS — confirmed in delta §9 |
+| No new deploy-role grants | PASS — confirmed in delta §9 |
+| `environment: production` gate absent | PASS — unchanged |
+| Fail-fast validation step covers all required secrets | PASS — `OXO_ONLINE_INFRA_DEPLOY_ROLE_ARN` + `AWS_ACCOUNT_ID` already validated; no new secrets added |
+| Stacks deploy sequentially | PASS — three separate pipeline steps unchanged |
+
+### New allowlist entries — s005-h2 (cicd-owned, .claude/settings.json)
+
+| Pattern | Rationale |
+|---------|-----------|
+| `Bash(aws apigatewayv2 get-authorizers *)` | Tester/probe verifies authorizer is attached to the WS API (SYNTH-CONTRACT-H2-1 live check) |
+| `Bash(aws ssm describe-parameters *)` | Metadata-only SSM check (parameter names, types, ARNs) — verifies the shared secret parameter exists without exposing its value. `GetParameter` / `GetParametersByPath` are intentionally ABSENT: they would return the decrypted SecureString value, which is a secret and must never appear in agent output or logs. |
+| `Bash(aws secretsmanager describe-secret *)` | Metadata-only secret check (ARN, name, rotation status) — if the engineer chooses `secretsmanager.Secret` instead of SSM SecureString. `GetSecretValue` is intentionally ABSENT: same rationale as SSM — value-reading verbs for secrets are banned from the allowlist regardless of construct choice. |
+
+### Open items (s005-h2)
+
+| ID | Item | Owner |
+|----|------|-------|
+| OI-H2-1 | Walking-skeleton probe (delta §0): after UC2 deploys, run one garbage-token connect (expect 403) and one valid-token connect (expect game-logic reached). This is cloud-only (APIGW authorizer attachment is not locally emulable). | tester |
+| OI-H2-2 | Engineer must add `tsconfig.auth.json` (or matching name) to `src/lambda/` before creating the auth handler source. Build will pick it up automatically. | engineer |
+| OI-H2-3 | `BUILD_SHA` env var must be injected on `oxo-ws-auth-fn` at CDK synth time (same pattern as `oxo-game-fn`/`oxo-ws-fn` per delta §8 + principles/01). | engineer |

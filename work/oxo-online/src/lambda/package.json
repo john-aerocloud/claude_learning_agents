@@ -4,7 +4,7 @@
   "private": true,
   "description": "oxo-online game backend Lambda handlers (slice 004 — create-game).",
   "scripts": {
-    "build": "tsc && tsc --project tsconfig.ws.json",
+    "build": "tsc && for f in tsconfig.*.json; do tsc --project \"$f\"; done",
     "test": "vitest run"
   },
   "dependencies": {

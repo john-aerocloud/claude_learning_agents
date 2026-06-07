@@ -640,6 +640,41 @@ describe('GameRoot — clean Online restart after opponent disconnect (s007 UC3,
   });
 });
 
+// s007 UC3-S4 — F4 regression: local two-player and vs-AI play to completion
+// with NO regression from the disconnect wiring; the opponent-disconnected path
+// (and its message) is never reached in these modes (AC3.5, AC3.6).
+describe('GameRoot — local/AI modes unaffected by disconnect wiring (s007 UC3, F4, AC3.5, AC3.6)', () => {
+  // AC3.5 — local two-player plays to a win, no disconnect message ever shows.
+  it('AC3.5 — local two-player plays to a full win with no opponent-disconnected message', async () => {
+    render(<GameRoot />);
+    await clickCells([0, 3, 1, 4, 2]); // X wins top row
+    expect(screen.getByRole('status')).toHaveTextContent('X wins');
+    expect(screen.queryByTestId('opponent-disconnected')).not.toBeInTheDocument();
+  });
+
+  // AC3.6 — vs-AI plays to completion, no disconnect message ever shows.
+  it('AC3.6 — vs-AI plays to completion with no opponent-disconnected message', async () => {
+    render(<GameRoot />);
+    await userEvent.click(screen.getByRole('button', { name: /vs computer/i }));
+    while (!screen.queryByRole('button', { name: /play again/i })) {
+      let clicked = false;
+      for (let i = 0; i < 9 && !clicked; i += 1) {
+        const c = screen.getByLabelText(`cell ${i}`);
+        if (c.textContent === '' && !(c as HTMLButtonElement).disabled) {
+          await userEvent.click(c);
+          clicked = true;
+        }
+      }
+      await waitFor(() => {});
+      if (!clicked) break;
+    }
+    expect(
+      screen.getByRole('button', { name: /play again/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('opponent-disconnected')).not.toBeInTheDocument();
+  });
+});
+
 describe('GameRoot — local modes unaffected by online wiring (B4, F8)', () => {
   afterEach(() => {
     vi.restoreAllMocks();

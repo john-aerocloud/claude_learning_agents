@@ -15,10 +15,20 @@
  *  - `close()` tears the transport down (idempotent).
  */
 
-/** A server-to-client frame. Slice 005 only emits `game-ready`. */
+/**
+ * A server-to-client frame announcing the game is paired and ready to play.
+ *
+ * `gameId` (GATE-AMEND 2026-06-07, s006): the opaque server-generated game id,
+ * carried so BOTH sides — crucially the GUEST, which joined by `code` and has no
+ * gameId client-side — can thread it into every `move` frame as the non-trusted
+ * GetItem lookup key. It is NOT the join `code` and discloses no opponent
+ * connection detail (data-classification unchanged). The SPA stores this as its
+ * single consistent source of gameId.
+ */
 export interface GameReadyMessage {
   type: 'game-ready';
   role: 'host' | 'guest';
+  gameId: string;
 }
 
 /**
@@ -67,7 +77,9 @@ export type ServerMessage =
 export type ClientFrame =
   | { action: 'join'; code: string }
   | { action: 'register'; gameId: string }
-  | { action: 'move'; square: number };
+  // GATE-AMEND (s006): the move frame carries gameId as a non-trusted lookup key
+  // (the server uses it ONLY as the GetItem key; identity stays connectionId).
+  | { action: 'move'; gameId: string; square: number };
 
 export interface GameSocket {
   /** Send an action frame to the server. */

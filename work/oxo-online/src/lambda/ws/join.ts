@@ -14,7 +14,7 @@ import { close, type WsResult } from './ws-result';
  */
 async function postToConnection(
   connectionId: string,
-  payload: { type: 'game-ready'; role: 'host' | 'guest' },
+  payload: { type: 'game-ready'; role: 'host' | 'guest'; gameId: string },
 ): Promise<void> {
   const client = new ApiGatewayManagementApiClient({
     endpoint: process.env.WS_API_ENDPOINT,
@@ -148,6 +148,11 @@ export async function handleJoin(
       await postToConnection(game.hostConnectionId as string, {
         type: 'game-ready',
         role: 'host',
+        // GATE-AMEND (s006): carry gameId so each side can thread it into its
+        // move frames as the non-trusted GetItem lookup key (S1). It is the
+        // opaque server gameId (not the join code) — discloses no connection
+        // detail, so the data-classification is unchanged.
+        gameId: game.gameId as string,
       });
     } catch (err) {
       if ((err as { name?: string })?.name === 'GoneException') {
@@ -163,7 +168,11 @@ export async function handleJoin(
       }
       throw err;
     }
-    await postToConnection(connectionId, { type: 'game-ready', role: 'guest' });
+    await postToConnection(connectionId, {
+      type: 'game-ready',
+      role: 'guest',
+      gameId: game.gameId as string,
+    });
 
     return { statusCode: 200 };
   } catch {

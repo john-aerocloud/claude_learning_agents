@@ -29,7 +29,7 @@ describe('handleLocalMove — server-authoritative orchestration (UC5)', () => {
     const store = new LocalGameStore();
     const relay = new LocalRelay();
     freshGame(store);
-    await handleLocalMove({ connectionId: 'host-conn', square: 4 }, { store, relay });
+    await handleLocalMove({ connectionId: 'host-conn', gameId: 'g-1', square: 4 }, { store, relay });
     // Exactly 2 board-update posts (one per bound connection).
     expect(relay.postCount).toBe(2);
     expect(relay.posts[0].message).toMatchObject({
@@ -49,7 +49,7 @@ describe('handleLocalMove — server-authoritative orchestration (UC5)', () => {
     const store = new LocalGameStore();
     const relay = new LocalRelay();
     freshGame(store); // X to move
-    await handleLocalMove({ connectionId: 'guest-conn', square: 0 }, { store, relay });
+    await handleLocalMove({ connectionId: 'guest-conn', gameId: 'g-1', square: 0 }, { store, relay });
     expect(relay.postCount).toBe(1);
     expect(relay.posts[0].connectionIds).toEqual(['guest-conn']);
     expect(relay.posts[0].message).toMatchObject({ type: 'move-rejected' });
@@ -62,7 +62,7 @@ describe('handleLocalMove — server-authoritative orchestration (UC5)', () => {
     const store = new LocalGameStore();
     const relay = new LocalRelay();
     freshGame(store);
-    await handleLocalMove({ connectionId: 'spectator-conn', square: 0 }, { store, relay });
+    await handleLocalMove({ connectionId: 'spectator-conn', gameId: 'g-1', square: 0 }, { store, relay });
     expect(relay.postCount).toBe(1);
     expect(relay.posts[0].connectionIds).toEqual(['spectator-conn']);
     expect(relay.posts[0].message).toMatchObject({ type: 'move-rejected' });
@@ -82,7 +82,7 @@ describe('handleLocalMove — server-authoritative orchestration (UC5)', () => {
       hostConnectionId: 'host-conn',
       guestConnectionId: 'guest-conn',
     });
-    await handleLocalMove({ connectionId: 'host-conn', square: 2 }, { store, relay });
+    await handleLocalMove({ connectionId: 'host-conn', gameId: 'g-1', square: 2 }, { store, relay });
     // 2 board-update deliveries + 2 game-over deliveries = 4 (S4 terminal ceiling).
     expect(relay.postCount).toBe(4);
     const gameOvers = relay.posts.filter(
@@ -110,7 +110,7 @@ describe('handleLocalMove — server-authoritative orchestration (UC5)', () => {
       hostConnectionId: 'host-conn',
       guestConnectionId: 'guest-conn',
     });
-    await handleLocalMove({ connectionId: 'host-conn', square: 8 }, { store, relay });
+    await handleLocalMove({ connectionId: 'host-conn', gameId: 'g-1', square: 8 }, { store, relay });
     const gameOvers = relay.posts.filter(
       (p) => (p.message as { type?: string }).type === 'game-over',
     );

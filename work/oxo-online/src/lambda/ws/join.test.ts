@@ -211,7 +211,7 @@ describe('join — happy path: activate + game-ready both sides (C1; F1, F2, F5,
     expect(item.ttl as number).toBeLessThanOrEqual(after + 7200 + 5);
   });
 
-  it('posts game-ready to BOTH connections; payload is exactly {type,role}, no id leak (T1)', async () => {
+  it('posts game-ready to BOTH connections; payload is {type,role,gameId}, no opponent-id leak (T1, GATE-AMEND)', async () => {
     await handleJoin(joinEvent('GUEST-CONN', { action: 'join', code: 'ABC123' }));
 
     const posts = apiMock.commandCalls(PostToConnectionCommand);
@@ -223,13 +223,16 @@ describe('join — happy path: activate + game-ready both sides (C1; F1, F2, F5,
       byConn.set(input.ConnectionId as string, decodeFrame(input.Data));
     }
 
-    // Host gets role=host; guest gets role=guest.
-    expect(byConn.get('HOST-CONN')).toEqual({ type: 'game-ready', role: 'host' });
-    expect(byConn.get('GUEST-CONN')).toEqual({ type: 'game-ready', role: 'guest' });
+    // GATE-AMEND (s006): each side gets its role AND the gameId (so the guest,
+    // which joined by code, can thread gameId into its move frames). gameId is
+    // the opaque server id, NOT the join code, and discloses no connection id.
+    expect(byConn.get('HOST-CONN')).toEqual({ type: 'game-ready', role: 'host', gameId: 'G-1' });
+    expect(byConn.get('GUEST-CONN')).toEqual({ type: 'game-ready', role: 'guest', gameId: 'G-1' });
 
-    // T1: each payload carries ONLY {type, role} — never the other player's id.
+    // T1 data-classification: each payload carries ONLY {type, role, gameId} —
+    // never the OTHER player's connectionId.
     for (const frame of byConn.values()) {
-      expect(Object.keys(frame).sort()).toEqual(['role', 'type']);
+      expect(Object.keys(frame).sort()).toEqual(['gameId', 'role', 'type']);
     }
     const hostFrameJson = JSON.stringify(byConn.get('HOST-CONN'));
     const guestFrameJson = JSON.stringify(byConn.get('GUEST-CONN'));

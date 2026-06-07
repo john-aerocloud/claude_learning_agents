@@ -74,6 +74,9 @@ export function GameRoot({ socketFactory = realFactory }: GameRootProps = {}) {
   // it is the register socket; for the guest it is handed up by JoinScreen on
   // game-ready (UC4 move loop — moves must travel over the SAME connection).
   const playSocketRef = useRef<GameSocket | null>(null);
+  // The gameId the server announced on game-ready — the single consistent source
+  // threaded into every move frame as the non-trusted GetItem lookup key (S1).
+  const playGameIdRef = useRef<string | null>(null);
 
   // A `game-ready` from either side drives both screens to the board, captures
   // the live socket for the move loop (UC4), and resets the online board. A
@@ -84,6 +87,11 @@ export function GameRoot({ socketFactory = realFactory }: GameRootProps = {}) {
   const handleGameReady = (message: ServerMessage, socket?: GameSocket) => {
     if (message.type === 'game-ready') {
       if (socket) playSocketRef.current = socket;
+      // GATE-AMEND (s006): the game-ready frame is the SPA's single consistent
+      // source of gameId — both host and guest thread THIS into every move send.
+      // The guest (joined by code) has no other source; the host overwrites its
+      // create-time gameId with the same value, keeping one source of truth.
+      playGameIdRef.current = message.gameId;
       setOnlineRole(message.role);
       setOnlineGame(INITIAL_ONLINE_STATE);
       setOnlinePhase('playing-online');
@@ -104,7 +112,9 @@ export function GameRoot({ socketFactory = realFactory }: GameRootProps = {}) {
   // socket. The board is NOT updated optimistically — it re-renders only when the
   // server broadcasts a `board-update` (server-authoritative contract).
   const sendMove = (square: number) => {
-    playSocketRef.current?.send({ action: 'move', square });
+    const id = playGameIdRef.current;
+    if (!id) return; // no gameId yet (pre game-ready) — nothing to address.
+    playSocketRef.current?.send({ action: 'move', gameId: id, square });
   };
 
   const onSelect = (index: number) => {

@@ -70,8 +70,8 @@ describe('createRealSocketFactory — real WebSocket transport (C2)', () => {
     const factory = createRealSocketFactory();
     factory({ onMessage, onClose: () => {} });
     FakeWebSocket.instances[0].fireOpen();
-    FakeWebSocket.instances[0].fireMessage({ type: 'game-ready', role: 'guest' });
-    expect(onMessage).toHaveBeenCalledWith({ type: 'game-ready', role: 'guest' });
+    FakeWebSocket.instances[0].fireMessage({ type: 'game-ready', role: 'guest', gameId: 'g-1' });
+    expect(onMessage).toHaveBeenCalledWith({ type: 'game-ready', role: 'guest', gameId: 'g-1' });
   });
 
   it('parses an inbound error frame and forwards it to onMessage (DEFECT-005-001 Bug B)', () => {

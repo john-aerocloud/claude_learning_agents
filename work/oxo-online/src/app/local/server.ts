@@ -71,7 +71,7 @@ wss.on('connection', (ws) => {
   relay.register(connectionId, (message) => send(ws, message));
 
   ws.on('message', async (raw) => {
-    let frame: { action?: string; square?: number };
+    let frame: { action?: string; square?: number; gameId?: string };
     try {
       frame = JSON.parse(String(raw)) as typeof frame;
     } catch {
@@ -80,18 +80,24 @@ wss.on('connection', (ws) => {
 
     if (frame.action === 'register') {
       hostConnectionId = connectionId;
-      send(ws, { type: 'game-ready', role: 'host' });
+      // GATE-AMEND: carry gameId so the client threads it into its move frames.
+      send(ws, { type: 'game-ready', role: 'host', gameId: GAME_ID });
       startWhenReady();
       return;
     }
     if (frame.action === 'join') {
       guestConnectionId = connectionId;
-      send(ws, { type: 'game-ready', role: 'guest' });
+      send(ws, { type: 'game-ready', role: 'guest', gameId: GAME_ID });
       startWhenReady();
       return;
     }
     if (frame.action === 'move' && typeof frame.square === 'number') {
-      await handleLocalMove({ connectionId, square: frame.square }, { store, relay });
+      // The client supplies gameId (the non-trusted lookup key) in the frame; the
+      // local stand-up holds one game, so it defaults to GAME_ID when absent.
+      await handleLocalMove(
+        { connectionId, gameId: frame.gameId ?? GAME_ID, square: frame.square },
+        { store, relay },
+      );
     }
   });
 

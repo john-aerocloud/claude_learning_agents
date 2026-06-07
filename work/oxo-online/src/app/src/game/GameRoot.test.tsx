@@ -342,7 +342,7 @@ describe('GameRoot — Join a game flow (B4, F1)', () => {
     await userEvent.type(screen.getByLabelText(/game code/i), 'ABC234');
     await userEvent.click(screen.getByRole('button', { name: /^join$/i }));
     // Server pairs the game.
-    act(() => cap.opts?.onMessage({ type: 'game-ready', role: 'guest' }));
+    act(() => cap.opts?.onMessage({ type: 'game-ready', role: 'guest', gameId: 'g-1' }));
     expect(screen.getByTestId('online-role')).toHaveTextContent('You are O');
     expect(
       screen.getByText('Game active — moves coming in the next update'),
@@ -391,7 +391,7 @@ describe('GameRoot — Join a game flow (B4, F1)', () => {
       expect(screen.getByText(/waiting for opponent/i)).toBeInTheDocument(),
     );
     // Host has opened the socket and registered; server pairs.
-    act(() => cap.opts?.onMessage({ type: 'game-ready', role: 'host' }));
+    act(() => cap.opts?.onMessage({ type: 'game-ready', role: 'host', gameId: 'g-1' }));
     expect(screen.getByTestId('online-role')).toHaveTextContent('You are X');
   });
 });
@@ -522,12 +522,12 @@ describe('GameRoot — UC4 online move relay (flag ON, AC4.1–AC4.4)', () => {
     await waitFor(() =>
       expect(screen.getByText(/waiting for opponent/i)).toBeInTheDocument(),
     );
-    act(() => cap.opts?.onMessage({ type: 'game-ready', role: 'host' }));
+    act(() => cap.opts?.onMessage({ type: 'game-ready', role: 'host', gameId: 'g-mv' }));
     expect(screen.getByTestId('online-role')).toHaveTextContent('You are X');
   }
 
   // AC4.1 — clicking a square in online mode sends exactly one {action:'move'}.
-  it('AC4.1 — host click on an empty square sends exactly one {action:"move", square}', async () => {
+  it('AC4.1 — host click on an empty square sends exactly one {action:"move", gameId, square}', async () => {
     flagOn();
     const cap = captureFactory();
     await hostToBoard(cap);
@@ -544,7 +544,10 @@ describe('GameRoot — UC4 online move relay (flag ON, AC4.1–AC4.4)', () => {
     await userEvent.click(screen.getByLabelText('cell 4'));
     const moves = cap.sent.filter((f) => (f as { action?: string }).action === 'move');
     expect(moves.length).toBe(before + 1);
-    expect(moves[moves.length - 1]).toEqual({ action: 'move', square: 4 });
+    // GATE-AMEND: the move frame carries the gameId the game-ready frame supplied
+    // (the SPA's single consistent source of gameId), used by the handler as the
+    // non-trusted GetItem lookup key.
+    expect(moves[moves.length - 1]).toEqual({ action: 'move', gameId: 'g-mv', square: 4 });
     // No optimistic update: cell 4 is still empty until the server broadcasts.
     expect(screen.getByLabelText('cell 4')).toHaveTextContent('');
   });
@@ -614,7 +617,9 @@ describe('GameRoot — UC4 online move relay (flag ON, AC4.1–AC4.4)', () => {
     await userEvent.click(screen.getByRole('button', { name: /join a game/i }));
     await userEvent.type(screen.getByLabelText(/game code/i), 'GMV234');
     await userEvent.click(screen.getByRole('button', { name: /^join$/i }));
-    act(() => cap.opts?.onMessage({ type: 'game-ready', role: 'guest' }));
+    // GATE-AMEND: the guest joins by code and has no gameId client-side; it
+    // learns the gameId from the game-ready frame and threads it into its moves.
+    act(() => cap.opts?.onMessage({ type: 'game-ready', role: 'guest', gameId: 'g-guest' }));
     expect(screen.getByTestId('online-role')).toHaveTextContent('You are O');
     // Server says it is O's turn (the guest's turn).
     act(() =>
@@ -626,6 +631,6 @@ describe('GameRoot — UC4 online move relay (flag ON, AC4.1–AC4.4)', () => {
       }),
     );
     await userEvent.click(screen.getByLabelText('cell 4'));
-    expect(cap.sent).toContainEqual({ action: 'move', square: 4 });
+    expect(cap.sent).toContainEqual({ action: 'move', gameId: 'g-guest', square: 4 });
   });
 });

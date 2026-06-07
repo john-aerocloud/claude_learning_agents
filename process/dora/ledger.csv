@@ -417,3 +417,4 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T14:45:06Z,oxo-online,9,s006-move-relay,orchestrator,gate,,success,RETRO-S006,slice retro: 2 newly validated, registry scored, OIs updated, integration pass dispatched
 2026-06-07T14:45:13Z,oxo-online,9,s006-move-relay,documenter,task_start,,na,0c08026:docs,s006 usage+runbook update start
 2026-06-07T14:49:17Z,oxo-online,9,s006-move-relay,documenter,task_end,,success,f339295:docs,usage.md + runbook.md updated for s006 online play complete
+2026-06-07T14:51:28Z,oxo-online,9,s006-move-relay,orchestrator,gate,,success,EXP-011-PASS-1,EXP-011 integration pass 1: integrated EXP-001/002/004/005/006/007 into agent core text; line delta -6 (engineer 244->238; tester/cicd/architect/product equal); total 828->822; 47/47 mechanisms verified intact; commit 7db8d99

@@ -306,3 +306,5 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-06T17:36:02Z,oxo-online,7,s005-h1-waf,documenter,task_start,,na,DOCS-H1-WAF,Updating usage.md and runbook.md for s005-h1-waf WAF slice
 2026-06-06T17:38:43Z,oxo-online,7,s005-h1-waf,documenter,task_end,,success,DOCS-H1-WAF,"docs/runbook.md: WAF §8 added (oxo-online-cf-global, us-east-1, symptoms 429+masked-403, build identity, cost, rollback); gaps updated. docs/usage.md: rate-limit known-limitation added."
 2026-06-07T06:29:11Z,oxo-online,8,s005-h2-connect-auth,orchestrator,task_start,,na,,iteration 8 start: h2 connect authorizer; human standing approval to delivery+retro
+2026-06-07T06:30:12Z,oxo-online,8,s005-h2-connect-auth,product,task_start,,na,GATE-2-H2,Product agent proposing s005-h2 connect-auth slice
+2026-06-07T06:34:21Z,oxo-online,8,s005-h2-connect-auth,product,task_end,,success,GATE-2-H2,"slice.md + use-cases.md + chunk-plan.md written; token model: wsToken for host (POST /api/games ext), code as credential for guest (no new HTTP endpoint)"

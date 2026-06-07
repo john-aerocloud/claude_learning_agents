@@ -18,7 +18,7 @@ and marks actuals when a slice is delivered.
 | C1 | Deployable shell | delivered | 1 (s001) | 0 | — |
 | C2 | Local two-player game | delivered | 1 (s002) | 0 | — |
 | C3 | Single-player vs AI | delivered | 1 (s003) | 0 | — |
-| C4 | Online two-player match | in-progress | 1 (s004) | 7 (s005–s008 + s005-h1/h2/h3) | s005-h1 WAF (in planning, pipelined N+1) |
+| C4 | Online two-player match | in-progress | 2 (s004, s005-h1) | 6 (s005–s008 + s005-h2/h3) | s005-h2 connect-auth (in planning) |
 | C5 | Leaderboard | not started | 0 | 3 (s009–s011) | s009 record-game-result |
 | C6 | Player identity (lightweight) | not started | 0 | 2 (s012–s013) | s012 display-name-entry |
 | C7 | In-game chat | not started | 0 | 2 (s014–s015) | s014 in-game-message-send |
@@ -109,6 +109,7 @@ shown to both players; disconnection is handled gracefully. No accounts required
 |-------|--------|-----------|---------|
 | s004 — create-game | delivered | 2026-06-06 | POST /api/games live via CloudFront; Lambda + DynamoDB Games table + HTTP API provisioned; 6-char code shown in UI |
 | s005 — join-by-code | in-flight (use-case decomposition done) | — | — |
+| s005-h1 — WAF / rate-limiting | delivered | 2026-06-07 | CloudFront global WAF WebACL live; rate rule + IP reputation list; per-IP WS protection re-scoped to s005-h2 (platform constraint: WAFv2 cannot associate with API GW v2) |
 
 **Remaining forecast (s005–s008) — ordered thinnest-first:**
 
@@ -152,37 +153,27 @@ endpoint.
 
 Forecasts are revisable; the human gate at each slice governs actual priority.
 
-**s005-h1 — WAF / rate-limiting on CloudFront (security risk 1) [AMENDED GATE-AMEND-H1-A 2026-06-06]**
-Sequence: after s005 delivered, before s006. Rationale: s006 introduces the
-move-relay write surface; containing connection-flood risk before that surface
-is live reduces attack exposure at the lowest-volume moment. Scope (Option A
-rescope): attach a GLOBAL WAF WebACL (rate rule + IP reputation) to the
-CloudFront distribution (covering POST /api/games). **The REGIONAL WAF WebACL on
-the WS API prod stage is REMOVED** — WAFv2 cannot associate with API Gateway v2
-APIs (rejected at deploy, invalid-ARN). WS connection-flood control is the
-existing stage throttle (20/40, account-level) + reserved-concurrency +
-Connections TTL; **per-IP WS protection is re-scoped into s005-h2's `$connect`
-authorizer** (code-level, can rate-limit on source IP). No functional change to
-game flow. Done conditions: (1) rate-exceeded requests to CloudFront receive
-HTTP 403; (2) WS burst exercises the interim stage throttle (NOT a per-IP WAF
-block — per-IP deferred to s005-h2); (3) normal create + join flow unaffected;
-(4) smoke green. See slices/s005-h1-waf/slice.md + use-cases.md + delta §0.
+**s005-h1 — WAF / rate-limiting on CloudFront (security risk 1) [DELIVERED 2026-06-07; GATE-AMEND-H1-A 2026-06-06]**
+Sequence: after s005 delivered, before s006. DELIVERED. CloudFront global WAF
+WebACL (CLOUDFRONT scope, us-east-1) with IP reputation rule + rate-based rule
+(100/5-min/IP) attached to the distribution. REGIONAL WS API WAF removed due
+to platform constraint (WAFv2 cannot associate with API GW v2 APIs). Per-IP WS
+protection re-scoped to s005-h2. See slices/s005-h1-waf/slice.md + delta §0.
 
-**s005-h2 — Join-token / $connect authorization (security risk 2)**
-Sequence: after s005-h1, before or concurrent with s006. Rationale: the
-unauthenticated WS endpoint is the project's highest-risk open surface. Minting
-a per-game join token in `POST /games` and verifying it at `$connect` closes
-the capability-by-connection binding gap before move relay (s006) adds further
-write capability. Scope: `POST /games` response adds a short-lived join token;
-the SPA passes it as a query-string parameter at `$connect`; a Lambda authorizer
-(or `$connect` handler) rejects connections without a valid token. Done
-condition: a `$connect` without a valid token is rejected; a `$connect` with
-the token proceeds; existing create-game + join flow continues to work.
-**Added scope (GATE-AMEND-H1-A):** the `$connect` authorizer also carries the
-**per-IP WS rate-limiting** re-scoped out of s005-h1 — WAFv2 cannot provide
-per-IP protection for an API GW v2 (WebSocket) API, so the authorizer
-(code-level, keyed on source IP) is the home for it. This closes the per-IP WS
-exhaustion residual left open at s005-h1.
+**s005-h2 — Join-token / $connect authorization (security risk 2) [IN PLANNING — iteration 8, GATE-2-H2]**
+Sequence: after s005-h1, before s006. Rationale: the unauthenticated WS
+endpoint is the project's highest-risk open surface. Scope: `POST /api/games`
+response extended with a short-lived HMAC-signed `wsToken` (host); guest uses
+the 6-char code as credential at `$connect` (no new HTTP endpoint). A
+REQUEST-type Lambda authorizer on `$connect` verifies host tokens (HMAC) and
+guest codes (GSI lookup) and enforces per-IP connect budget via a new
+`ConnectAttempts` DynamoDB table. Done conditions: (1) `$connect` with no/bad
+credential rejected before game-logic Lambda fires; (2) valid host+guest flow
+unchanged (pairing <3s); (3) per-IP burst beyond threshold denied (best-effort).
+See slices/s005-h2-connect-auth/slice.md + use-cases.md.
+**Includes (GATE-AMEND-H1-A):** per-IP WS rate-limiting re-homed here from
+s005-h1 — WAFv2 platform constraint means the `$connect` authorizer (keyed on
+sourceIp) is the honest home for this control.
 
 **s005-h3 — Guaranteed code uniqueness (security risk 3)**
 Sequence: after s005-h2 (or parallel — no code dependency). Rationale: code

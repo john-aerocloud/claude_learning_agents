@@ -18,7 +18,7 @@ and marks actuals when a slice is delivered.
 | C1 | Deployable shell | delivered | 1 (s001) | 0 | — |
 | C2 | Local two-player game | delivered | 1 (s002) | 0 | — |
 | C3 | Single-player vs AI | delivered | 1 (s003) | 0 | — |
-| C4 | Online two-player match | in-progress | 4 (s004, s005-h1, s005, s005-h2) | 3 (s006, s005-h3, s007, s008) | s006 move-relay (in-planning) |
+| C4 | Online two-player match | in-progress | 5 (s004, s005-h1, s005, s005-h2, s006) | 3 (s007, s008, s005-h3) | s007 disconnect (in-planning) |
 | C5 | Leaderboard | not started | 0 | 3 (s009–s011) | s009 record-game-result |
 | C6 | Player identity (lightweight) | not started | 0 | 2 (s012–s013) | s012 display-name-entry |
 | C7 | In-game chat | not started | 0 | 2 (s014–s015) | s014 in-game-message-send |
@@ -111,8 +111,9 @@ shown to both players; disconnection is handled gracefully. No accounts required
 | s005 — join-by-code | delivered | 2026-06-06 | Guest join screen live; WS connect flow; both players reach game board with roles; Connections table with 2h TTL; 3 error paths handled |
 | s005-h1 — WAF / rate-limiting | delivered | 2026-06-07 | CloudFront global WAF WebACL live; rate rule + IP reputation list; per-IP WS protection re-scoped to s005-h2 (platform constraint: WAFv2 cannot associate with API GW v2) |
 | s005-h2 — join-token / $connect authorization | delivered | 2026-06-07 | REQUEST authorizer on $connect; HMAC-signed wsToken (host); code-based guest auth; per-IP connect budget via ConnectAttempts table; 17/17 ACs pass |
+| s006 — move relay + server-authoritative play | delivered | 2026-06-07 | Server-authoritative move relay live; 16/16 prod ACs; p95 move latency 308ms; zero board divergence; S1a forged-gameId rejected; win/draw detection server-side; full game playable between two browsers |
 
-**Remaining forecast (s006–s008 + s005-h3) — ordered thinnest-first:**
+**Remaining forecast (s007, s008, s005-h3) — ordered thinnest-first:**
 
 ### s005 — join-by-code + WebSocket connect [DELIVERED 2026-06-06]
 **Scope:** A second player enters the 6-char code on a new join screen; both
@@ -184,7 +185,7 @@ a full sprint it will receive an ordinal at that time.
 
 ---
 
-### s006 — move relay + server-authoritative play [IN PLANNING — SEL-S006]
+### s006 — move relay + server-authoritative play [DELIVERED 2026-06-07]
 **Scope:** When a player makes a move, the SPA sends it via WebSocket; the Lambda
 validates the move (correct player's turn, square not taken, game active, sender
 is a player of this game), writes it to the `Games` record, and relays the
@@ -209,24 +210,38 @@ share-link UX — all deferred to s007+.
 
 See slices/s006-move-relay/slice.md.
 
-### s007 — disconnect and timeout handling
+### s007 — disconnect and timeout handling [IN PLANNING — SEL-S007]
 **Scope:** When a WebSocket connection drops (player closes the tab, network
-interruption), the `$disconnect` Lambda updates the `Games` record to
-`abandoned`. The waiting player's UI shows an "opponent disconnected" message
-and returns them to the mode selector. A TTL-based sweep (24h from creation, or
-a shorter idle TTL per the `hostConnectionId`-less design already in the
-`Games` table) ensures no orphaned `active` records accumulate.
+interruption), the `$disconnect` Lambda (currently a stub) is updated to:
+look up the disconnecting connectionId, conditionally update the `Games` record
+to `abandoned` (if status was `active`), notify the surviving connection with an
+`opponent-disconnected` message, and delete the disconnecting player's row from
+the `Connections` table. The surviving player's SPA returns to the mode selector
+on receipt without a page reload. The existing 2h TTL on `Connections` and 24h
+TTL on `Games` are the backstop for crash-without-disconnect edge cases — no new
+TTL infrastructure.
+
+**OI-10 decided: reconnect-after-reload is OUT of s007.** The surviving player
+gains agency (notified, mode selector returned) without full reconnect. Reconnect
+requires re-issuable credentials and rejoin logic bordering C6 scope; it is
+unscheduled (candidate post-s013 if C6 ships). OR-S006-b's recovery story is
+re-scoped: $disconnect fires → game abandoned → survivor notified (this is the
+recovery for a GoneException relay loss, not reconnect-replay).
 
 **Killick test:** A player is not left hanging indefinitely when their opponent
 disappears — they can start a new game without a page reload.
 
-**What is NOT in scope:** reconnect-to-same-game, persistent game history —
-deferred or out of scope.
+**What is NOT in scope:** reconnect-after-reload, idle-timeout keepalive,
+waiting-host abandonment UX, leaderboard write on abandonment, game history.
 
 **Success measures:**
-1. Closing one browser tab causes the other player's UI to show an "opponent disconnected" message within 10 seconds.
-2. The `Games` record is updated to `abandoned` on disconnect.
-3. The disconnecting player's `connectionId` is removed from the record — no stale connection IDs.
+1. Closing one browser tab causes the other player's UI to show an "opponent disconnected" message and return to the mode selector within 10 seconds.
+2. The `Games` record is updated to `abandoned` on disconnect (conditional — only if status was `active`).
+3. The disconnecting player's `Connections` row is deleted after disconnect — no stale connectionIds.
+4. A `$disconnect` after a completed game (`won`/`drawn`) does NOT overwrite the Games status to `abandoned`.
+5. The surviving player can start a new game from the mode selector without a browser reload.
+
+See slices/s007-disconnect/slice.md.
 
 ### s008 — share-link UX + C4 done condition
 **Scope:** The 6-char code is also presented as a copyable deep-link URL (e.g.

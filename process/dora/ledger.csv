@@ -418,3 +418,6 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T14:45:13Z,oxo-online,9,s006-move-relay,documenter,task_start,,na,0c08026:docs,s006 usage+runbook update start
 2026-06-07T14:49:17Z,oxo-online,9,s006-move-relay,documenter,task_end,,success,f339295:docs,usage.md + runbook.md updated for s006 online play complete
 2026-06-07T14:51:28Z,oxo-online,9,s006-move-relay,orchestrator,gate,,success,EXP-011-PASS-1,EXP-011 integration pass 1: integrated EXP-001/002/004/005/006/007 into agent core text; line delta -6 (engineer 244->238; tester/cicd/architect/product equal); total 828->822; 47/47 mechanisms verified intact; commit 7db8d99
+2026-06-07T14:58:30Z,oxo-online,10,s007-disconnect,product,task_start,,na,S007-SLICE,slice-next dispatch: propose s007 disconnect/timeout slice + OI-10 reconnect decision + chunk-plan actuals
+2026-06-07T14:59:34Z,oxo-online,0,s007,product,task_start,,na,S007-SLICE,s007 slice-next: disconnect and timeout handling
+2026-06-07T15:01:28Z,oxo-online,0,s007,product,task_end,480,success,S007-SLICE,s007 slice.md written; OI-10 decided (reconnect OUT); chunk-plan s006 actuals + s007 forecast updated

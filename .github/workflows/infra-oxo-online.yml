@@ -122,7 +122,8 @@ jobs:
         run: |
           npx cdk diff OxoOnlineWafUsEast1 OxoGameProd OxoOnlineProd \
             -c githubOrg=${{ github.repository_owner }} \
-            -c githubRepo=${{ github.event.repository.name }}
+            -c githubRepo=${{ github.event.repository.name }} \
+            -c buildSha=${{ github.sha }}
         env:
           CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
           CDK_DEFAULT_REGION: ${{ env.AWS_REGION }}
@@ -142,7 +143,8 @@ jobs:
         run: |
           npx cdk deploy OxoOnlineWafUsEast1 --require-approval never \
             -c githubOrg=${{ github.repository_owner }} \
-            -c githubRepo=${{ github.event.repository.name }}
+            -c githubRepo=${{ github.event.repository.name }} \
+            -c buildSha=${{ github.sha }}
         env:
           CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
           CDK_DEFAULT_REGION: us-east-1
@@ -158,7 +160,8 @@ jobs:
         run: |
           npx cdk deploy OxoGameProd --require-approval never \
             -c githubOrg=${{ github.repository_owner }} \
-            -c githubRepo=${{ github.event.repository.name }}
+            -c githubRepo=${{ github.event.repository.name }} \
+            -c buildSha=${{ github.sha }}
 
       - name: CDK deploy — OxoOnlineProd (after WAF ARN + OxoGameProd exports exist)
         # s005-h1: OxoOnlineProd now imports the global WebACL ARN from
@@ -170,7 +173,8 @@ jobs:
         run: |
           npx cdk deploy OxoOnlineProd --require-approval never \
             -c githubOrg=${{ github.repository_owner }} \
-            -c githubRepo=${{ github.event.repository.name }}
+            -c githubRepo=${{ github.event.repository.name }} \
+            -c buildSha=${{ github.sha }}
         env:
           CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
           CDK_DEFAULT_REGION: ${{ env.AWS_REGION }}

@@ -433,3 +433,7 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T15:55:22Z,oxo-online,10,s007-disconnect,cicd,task_end,,success,S007-CAP,IMP-008 + logs-query allowlist entries added; make smoke-ci/waf-runner-ip-add/remove targets created; prereq/orphan checks complete; deploy-oidc note for wafv2:IPSet actions added to capabilities
 2026-06-07T15:58:00Z,oxo-online,10,s007-disconnect,engineer,task_start,,na,S007-ROUTE,thin route: 30 AC-ids by UC; OIDC IpSetManage pre-push step zero (§19)
 2026-06-07T16:03:26Z,oxo-online,10,s007-disconnect,engineer,task_end,1500,success,S007-ROUTE,"s007 thin route laid: UC1(6)+UC2(5)+UC3(4)+shared disconnect skeleton; §19 edges E1-E6 (E1 IpSetManage deploy-oidc BLOCKER, E2 grant-before-handler); wave UC1/UC2/UC3 disjoint layers"
+2026-06-07T16:05:17Z,oxo-online,10,s007-disconnect,engineer,task_start,,na,S007-UC1-LAMBDA,Wave A parallel dispatch
+2026-06-07T16:05:17Z,oxo-online,10,s007-disconnect,engineer,task_start,,na,S007-UC2-INFRA,Wave A parallel dispatch
+2026-06-07T16:05:17Z,oxo-online,10,s007-disconnect,engineer,task_start,,na,S007-UC3-SPA,Wave A parallel dispatch
+2026-06-07T16:10:35Z,oxo-online,10,s007-disconnect,engineer,deploy,,success,S007-UC2-INFRA,"deploy-oidc: Ipv2IpSetManage live on oxo-deploy (E1 satisfied, verified via get-role-policy); IPSet CDK push now unblocked"

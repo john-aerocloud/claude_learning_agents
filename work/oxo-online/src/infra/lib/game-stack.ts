@@ -544,6 +544,23 @@ exports.handler = async (event) => {
         resources: [connectAttemptsTable.tableArn],
       }),
     );
+    // s007a (DEFECT-S007-001) — CP-H2-E: the post-threshold exemption READ.
+    // On the would-be RATE_LIMIT Deny path ONLY, the authorizer GetItems the
+    // per-run exemption item (sourceIp = EXEMPT#<ip>) to decide whether to waive
+    // the rate Deny for the one server-derived runner IP. Read-only: dynamodb:GetItem
+    // on the connect-attempts table ARN — NO Query/Scan/Delete here (the s005-h2
+    // pin that forbade "GetItem beyond the increment" is amended by delta 007a to
+    // permit exactly this one GetItem on this one table). The grant is co-located
+    // on the counter table by design (delta §5, least infra surface); the read key
+    // shape (EXEMPT#<ip>) never collides with the counter key (<ip>).
+    wsAuthRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'ConnectExemptionRead',
+        effect: iam.Effect.ALLOW,
+        actions: ['dynamodb:GetItem'],
+        resources: [connectAttemptsTable.tableArn],
+      }),
+    );
     // CP-H2-C — secret read on the ONE shared parameter ARN only.
     wsAuthRole.addToPolicy(
       new iam.PolicyStatement({

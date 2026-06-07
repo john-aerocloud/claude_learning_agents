@@ -272,13 +272,16 @@ describe('s005-h2 — oxo-ws-auth-fn role least-privilege (S1, CP-H2-A/B/C/D)', 
     const ddb = stmts.filter((s) =>
       actionList(s).some((a) => typeof a === 'string' && a.startsWith('dynamodb:')),
     );
-    const all = ddb.flatMap(actionList).slice().sort();
-    expect(all).toEqual(
+    // The UNIQUE action set is exactly these four. s007a adds a SECOND GetItem
+    // statement (the connect-attempts exemption read) so GetItem now appears in
+    // two statements — the distinct action set is unchanged; no new verb enters.
+    const unique = [...new Set(ddb.flatMap(actionList))].sort();
+    expect(unique).toEqual(
       ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:Query', 'dynamodb:UpdateItem'].sort(),
     );
-    expect(all).not.toContain('dynamodb:Scan');
-    expect(all.includes('dynamodb:*')).toBe(false);
-    expect(all).not.toContain('dynamodb:DeleteItem');
+    expect(unique).not.toContain('dynamodb:Scan');
+    expect(unique.includes('dynamodb:*')).toBe(false);
+    expect(unique).not.toContain('dynamodb:DeleteItem');
   });
 
   it('CP-H2-A: Get/Query target Games table + code-index GSI only', () => {
@@ -301,6 +304,33 @@ describe('s005-h2 — oxo-ws-auth-fn role least-privilege (S1, CP-H2-A/B/C/D)', 
     const json = JSON.stringify(writeStmt.Resource);
     expect(json).toMatch(/ConnectAttempts|oxo-connect-attempts/);
     expect(json).not.toMatch(/oxo-games|GamesTable/);
+  });
+
+  // s007a (DEFECT-S007-001) — the authorizer gains a NEW read on the
+  // connect-attempts table ARN: the post-threshold exemption GetItem. The action
+  // set is UNCHANGED (GetItem already present for the Games guest lookup); what
+  // expands is GetItem's resource scope to also cover oxo-connect-attempts. The
+  // grant is read-only on that table — NO Query/Scan/Delete against it, and the
+  // write statement keeps its exact UpdateItem/PutItem set. code<->policy pin
+  // (process v25 §30): least-privilege + the exemption-read adapter cannot diverge.
+  it('CP-H2-B (s007a): a GetItem grant targets the ConnectAttempts ARN (exemption read)', () => {
+    const stmts = roleStatements(synth(), 'WsAuthFunctionRole');
+    const connectGetStmt = stmts.find(
+      (s) =>
+        actionList(s).includes('dynamodb:GetItem') &&
+        JSON.stringify(s.Resource).match(/ConnectAttempts|oxo-connect-attempts/),
+    );
+    expect(
+      connectGetStmt,
+      'authorizer must hold GetItem on the connect-attempts ARN for the exemption read',
+    ).toBeDefined();
+    // The connect-attempts read grant is read-only: GetItem, never Query/Scan/Delete.
+    const acts = actionList(connectGetStmt!);
+    expect(acts).toContain('dynamodb:GetItem');
+    expect(acts).not.toContain('dynamodb:Query');
+    expect(acts).not.toContain('dynamodb:Scan');
+    expect(acts).not.toContain('dynamodb:DeleteItem');
+    expect(acts).not.toContain('dynamodb:UpdateItem');
   });
 
   it('CP-H2-C: a secret-read grant targets the one shared secret ARN', () => {

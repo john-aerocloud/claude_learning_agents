@@ -211,4 +211,14 @@ synth-infra:
 disconnect-skeleton:
 	PROD_URL=$(PROD_URL) npm --prefix $(APP) run test:skeleton:disconnect
 
-.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci test-scripts disconnect-skeleton
+# s008 §11a probe (UC2): deep-link boots the SPA on the DEPLOYED origin. A real
+# browser creates a game to mint a real code, then a SECOND browser navigates to
+# https://<domain>/join/<code> and asserts the SPA boots (NOT an edge error) with
+# the code pre-filled + Join enabled. Real browser (Playwright), NOT a node probe
+# (FALSE GREEN below CloudFront/CSP/transport). Skeleton-gated like move-skeleton/
+# disconnect-skeleton; green-in-prod requires the UC1+UC2 SPA deployed. Run post-deploy.
+#   make join-skeleton PROD_URL=https://d3pf3kcvzpau1x.cloudfront.net
+join-skeleton:
+	PROD_URL=$(PROD_URL) npm --prefix $(APP) run test:skeleton:join
+
+.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci test-scripts disconnect-skeleton join-skeleton

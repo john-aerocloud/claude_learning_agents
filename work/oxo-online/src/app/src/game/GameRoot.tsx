@@ -40,6 +40,10 @@ type OnlinePhase =
   | 'error';
 
 const ONLINE_ERROR = 'Could not start online game — please try again';
+// s008 UC1 — how long the copy control shows "Copied!" before reverting (~2s).
+const COPIED_REVERT_MS = 2000;
+const COPY_LINK_LABEL = 'Copy link';
+const COPIED_LABEL = 'Copied!';
 // s007 UC3 / AC3.1 — exact pinned survivor message text. The tester's
 // two-browser smoke keys off this exact string; do not reword without updating
 // AC3.1, the disconnect skeleton, and the local survivor spec.
@@ -77,6 +81,9 @@ export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameR
     initialJoinCode ? 'joining' : 'idle',
   );
   const [showSpinner, setShowSpinner] = useState(false);
+  // s008 UC1 — true for ~2s after a successful copy so the control shows "Copied!".
+  const [copied, setCopied] = useState(false);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout>>();
   const [gameCode, setGameCode] = useState<string | null>(null);
   const [gameId, setGameId] = useState<string | null>(null);
   // The host's $connect credential, minted by POST /api/games. A degraded mint
@@ -171,6 +178,30 @@ export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameR
   const onSelect = (index: number) => {
     setState((current) => applyMove(current, index));
   };
+
+  // s008 UC1 — copy the share link to the clipboard. The URL is constructed
+  // CLIENT-SIDE from the code already in state (S3): EXACTLY
+  // `window.location.origin + "/join/" + code` — a path-only deep link mirroring
+  // the UC2 route form, carrying NO token/credential query param or fragment. On
+  // success the control shows "Copied!" for ~2s; on rejection (denied permission /
+  // non-secure context) the code stays visible as plain text for manual copy
+  // (the existing fallback — no retry; navigator.clipboard is a local browser API).
+  const copyShareLink = async () => {
+    if (!gameCode) return;
+    const url = `${window.location.origin}/join/${gameCode}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(() => setCopied(false), COPIED_REVERT_MS);
+    } catch {
+      // Clipboard unavailable/denied — non-blocking; the code remains visible.
+      setCopied(false);
+    }
+  };
+
+  // Clear the "Copied!" revert timer if the component unmounts mid-window.
+  useEffect(() => () => clearTimeout(copiedTimer.current), []);
 
   const playOnline = async () => {
     setOnlinePhase('creating');
@@ -316,6 +347,15 @@ export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameR
         <section className="online-waiting" aria-label="waiting for opponent">
           <p>Waiting for opponent</p>
           <p className="game-code" data-testid="game-code">{gameCode}</p>
+          <button
+            type="button"
+            className="copy-link"
+            data-testid="copy-link"
+            aria-label="copy game link"
+            onClick={copyShareLink}
+          >
+            {copied ? COPIED_LABEL : COPY_LINK_LABEL}
+          </button>
           <p
             className="online-connecting"
             role="status"

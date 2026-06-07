@@ -833,3 +833,72 @@ describe('GameRoot — UC4 online move relay (flag ON, AC4.1–AC4.4)', () => {
     expect(cap.sent).toContainEqual({ action: 'move', gameId: 'g-guest', square: 4 });
   });
 });
+
+// s008 UC1 (T3/S3/SM-1) — copy-link control on the host waiting screen. The host
+// sees a "Copy link" control next to the already-visible 6-char code; clicking it
+// copies EXACTLY window.location.origin + "/join/" + code (S3: no token/credential
+// query param or fragment) via navigator.clipboard.writeText, shows a brief
+// "Copied!" confirmation, and leaves the code visible as plain text.
+// @covers spaCopyLink
+describe('GameRoot — copy-link control on the waiting screen (s008 UC1, T3/S3/SM-1)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  async function reachWaiting(code: string) {
+    const cap = captureFactory();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ gameId: 'g-1', code }), { status: 201 }),
+    );
+    render(<GameRoot socketFactory={cap.factory} />);
+    await userEvent.click(screen.getByRole('button', { name: /play online/i }));
+    await waitFor(() =>
+      expect(screen.getByText(/waiting for opponent/i)).toBeInTheDocument(),
+    );
+    return cap;
+  }
+
+  /** Stub navigator.clipboard.writeText, returning the spy. */
+  function stubClipboard() {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(globalThis.navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    return writeText;
+  }
+
+  it('AC1.1 — the "Copy link" control is present on the waiting screen', async () => {
+    await reachWaiting('ABC234');
+    expect(screen.getByTestId('copy-link')).toBeInTheDocument();
+  });
+
+  it('AC1.2/S3 — clicking copies exactly origin + "/join/" + code, no param/fragment', async () => {
+    const writeText = stubClipboard();
+    await reachWaiting('ABC234');
+    await userEvent.click(screen.getByTestId('copy-link'));
+    const expected = `${window.location.origin}/join/ABC234`;
+    expect(writeText).toHaveBeenCalledWith(expected);
+    // S3: the URL is exactly the path form — no query string, no fragment.
+    const copied = writeText.mock.calls[0][0] as string;
+    expect(copied).not.toContain('?');
+    expect(copied).not.toContain('#');
+    expect(copied.endsWith('/join/ABC234')).toBe(true);
+  });
+
+  it('AC1.3 — the control shows "Copied!" after clicking', async () => {
+    stubClipboard();
+    await reachWaiting('ABC234');
+    await userEvent.click(screen.getByTestId('copy-link'));
+    await waitFor(() =>
+      expect(screen.getByTestId('copy-link')).toHaveTextContent(/copied/i),
+    );
+  });
+
+  it('AC1.4 — the 6-char code stays visible as plain text after copying', async () => {
+    stubClipboard();
+    await reachWaiting('ABC234');
+    await userEvent.click(screen.getByTestId('copy-link'));
+    expect(screen.getByTestId('game-code')).toHaveTextContent('ABC234');
+  });
+});

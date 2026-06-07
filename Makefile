@@ -91,6 +91,28 @@ waf-sustained:
 	  $(if $(COUNT),--count $(COUNT),) \
 	  $(if $(PACE_MS),--pace-ms $(PACE_MS),)
 
+# --- WS $connect authorizer walking-skeleton probe (s005-h2 T6, DEFECT-H2-002) -
+# Drives the deployed REQUEST authorizer over the FULL four-path T6 acceptance in
+# one asserting run: mint wsToken+code, then assert host-wsToken OPENS, guest-code
+# OPENS, no-credential CLOSES, garbage-token CLOSES. Exits nonzero on any mismatch
+# and records a dora row. LIVE-ENDPOINT probe — deliberately NOT in test-infra/
+# test-app (those run offline). Node WS/fetch is §17-justified: the authorizer
+# gate acts at the API-GW upgrade, below browser-layer concerns. Post-deploy gate,
+# peer to waf-probe.
+# make ws-skeleton ITER=8 SLICE=s005-h2-connect-auth \
+#   API_BASE=https://d3pf3kcvzpau1x.cloudfront.net \
+#   WS_URL=wss://ylbzjuo8lf.execute-api.eu-west-2.amazonaws.com/prod
+ws-skeleton:
+	node work/$(PROJECT)/scripts/ws-skeleton-probe.js --api-base $(API_BASE) --ws-url $(WS_URL) && \
+	$(DORA) record --project $(PROJECT) --iteration $(ITER) --slice $(SLICE) \
+	  --agent engineer --event validation_run \
+	  --ref "$$(git rev-parse --short HEAD):ws-skeleton" --outcome success \
+	  --note "T6 WS \$$connect authorizer probe green (4/4 paths) via make ws-skeleton" || \
+	( $(DORA) record --project $(PROJECT) --iteration $(ITER) --slice $(SLICE) \
+	  --agent engineer --event validation_run \
+	  --ref "$$(git rev-parse --short HEAD):ws-skeleton" --outcome fail \
+	  --note "T6 WS \$$connect authorizer probe FAILED via make ws-skeleton" ; exit 1 )
+
 # --- App / infra test entry points --------------------------------------------
 test-app:
 	npm --prefix $(APP) run test:run
@@ -116,4 +138,4 @@ synth-infra:
 	npm --prefix $(INFRA) run cdk -- synth $(STACKS) --quiet \
 	  -c githubOrg=$(GH_ORG) -c githubRepo=$(GH_REPO)
 
-.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained test-app lint-app build-app test-infra synth-infra
+.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app test-infra synth-infra

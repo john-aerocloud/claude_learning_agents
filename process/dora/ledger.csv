@@ -383,3 +383,4 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T11:03:01Z,oxo-online,9,s006-move-relay,engineer,task_start,,na,S006-WAVE-A-ENG2,UC4 SPA (OI-33 first, flag-OFF move-send) + UC5 local stand-up (app side)
 2026-06-07T11:04:22Z,oxo-online,9,s006,engineer,task_start,,na,S006-WAVE-A-ENG1,UC1 move domain core + UC2 Games store adapter (Wave A)
 2026-06-07T11:13:08Z,oxo-online,9,s006,engineer,task_end,519,success,S006-WAVE-A-ENG1,"UC1 (move domain core, AC1.1-AC1.6) + UC2 (Games CAS adapter + join-init T6/AC2.1-AC2.6, S3/S5/S6) done; 141 lambda tests green; ws-fn bundle build wired"
+2026-06-07T11:28:26Z,oxo-online,9,s006-move-relay,engineer,task_end,1515,success,S006-WAVE-A-ENG2,"UC4 SPA move-relay behind uc4Enabled flag (OFF) + OI-33 heal (abnormal-close=code-not-found) + UC5 local stand-up (run-local, local adapters, 3-test browser suite green). 3 commits: 1ec848f,bbad79c,e010272. Discovered+fixed host-socket teardown defect."

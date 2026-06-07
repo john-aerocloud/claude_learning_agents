@@ -1,5 +1,9 @@
 import * as cdk from 'aws-cdk-lib';
 import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as iam from 'aws-cdk-lib/aws-iam';
+import * as events from 'aws-cdk-lib/aws-events';
+import * as targets from 'aws-cdk-lib/aws-events-targets';
 import { Construct } from 'constructs';
 
 /**
@@ -158,5 +162,90 @@ export class OxoOnlineWafUsEast1Stack extends cdk.Stack {
     });
 
     this.webAclArn = webAcl.attrArn;
+
+    // -------------------------------------------------------------------------
+    // IMP-008 (s007 UC2-S3 / AC2.5) — 24h drain Lambda + EventBridge schedule.
+    //
+    // WAF IP sets do NOT self-expire entries. The smoke runner removes its IP via
+    // `trap` on exit, but a cancelled job / network blip could leave a stale
+    // runner IP over-privileged. This scheduled Lambda is the STANDING GUARD: it
+    // runs every 24h, reads oxo-test-runner-ips (with its lock token) and rewrites
+    // it to EMPTY — anything still present at 24h is a leaked entry, not a live
+    // run (a run lasts minutes, not a day). Draining to empty is correct because
+    // the set is transient-by-protocol: it should be empty between runs.
+    //
+    // Failure handling (engineer.md): GetIPSet/UpdateIPSet use the SDK default
+    // retry (standard mode: exponential backoff + jitter). A WAFOptimisticLock /
+    // conflict is logged + retried once; an already-empty set is a no-op (logged,
+    // posted:0). All log lines carry the category so support can split
+    // availability (5xx) from our 4xx; the drain owning a self-inflicted failure
+    // surfaces as internal-service.
+    // -------------------------------------------------------------------------
+    const drainFn = new lambda.Function(this, 'RunnerIpDrainFn', {
+      functionName: 'oxo-test-runner-ip-drain',
+      runtime: lambda.Runtime.NODEJS_20_X,
+      handler: 'index.handler',
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 128,
+      environment: {
+        IP_SET_NAME: runnerIpSet.name as string,
+        IP_SET_ID: runnerIpSet.attrId,
+        IP_SET_SCOPE: 'CLOUDFRONT',
+      },
+      code: lambda.Code.fromInline(`
+const { WAFV2Client, GetIPSetCommand, UpdateIPSetCommand } = require('@aws-sdk/client-wafv2');
+// CLOUDFRONT-scope WAF lives in us-east-1; this Lambda runs in us-east-1 too.
+const waf = new WAFV2Client({ region: 'us-east-1' });
+
+exports.handler = async () => {
+  const Name = process.env.IP_SET_NAME;
+  const Id = process.env.IP_SET_ID;
+  const Scope = process.env.IP_SET_SCOPE;
+  try {
+    const got = await waf.send(new GetIPSetCommand({ Name, Id, Scope }));
+    const current = got.IPSet?.Addresses ?? [];
+    if (current.length === 0) {
+      console.log(JSON.stringify({ evt: 'runner-ip-drain', drained: 0, note: 'already empty' }));
+      return { drained: 0 };
+    }
+    await waf.send(new UpdateIPSetCommand({
+      Name, Id, Scope, LockToken: got.LockToken, Addresses: [],
+    }));
+    console.log(JSON.stringify({ evt: 'runner-ip-drain', drained: current.length, removed: current }));
+    return { drained: current.length };
+  } catch (err) {
+    // Self-owned dependency: a 5xx/throttle after SDK backoff is an
+    // internal-service availability signal (defect task), not terminal handling.
+    const code = err && (err.name || err.Code) || 'Unknown';
+    const category = String(code).includes('Throttling') || String(code).includes('Internal')
+      ? 'external-availability' : 'internal-service';
+    console.error(JSON.stringify({ evt: 'runner-ip-drain', error: code, category }));
+    throw err;
+  }
+};
+`),
+    });
+
+    // Least-privilege (§30 code<->policy pin): the drain may Get + Update the
+    // runner IP set ONLY. NO Create/Delete IPSet, NO WebACL, NO wildcard. (WAFv2
+    // Get/Update do not support create-time ARN scoping uniformly across SDK
+    // versions; bounded to the two read/rewrite actions the drain needs.)
+    drainFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        sid: 'DrainRunnerIpSet',
+        effect: iam.Effect.ALLOW,
+        actions: ['wafv2:GetIPSet', 'wafv2:UpdateIPSet'],
+        resources: [runnerIpSet.attrArn],
+      }),
+    );
+
+    // 24h schedule — the standing guard cadence (IMP-008 done-condition #5/#7).
+    new events.Rule(this, 'RunnerIpDrainSchedule', {
+      ruleName: 'oxo-test-runner-ip-drain-24h',
+      description:
+        'IMP-008 standing guard: drains oxo-test-runner-ips every 24h (stale leaked entries).',
+      schedule: events.Schedule.rate(cdk.Duration.hours(24)),
+      targets: [new targets.LambdaFunction(drainFn)],
+    });
   }
 }

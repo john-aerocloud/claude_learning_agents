@@ -44,17 +44,29 @@ describe('OxoOnlineWafUsEast1Stack — global CLOUDFRONT WebACL (Step 1)', () =>
     expect(stack.region).toBe('us-east-1');
   });
 
-  it('contains ONLY the forced WAF resource — no other AWS resources (minimality)', () => {
+  it('contains ONLY the forced WAF resources + the IMP-008 drain machinery — minimality bounded', () => {
     const { template } = synth();
-    // The region-policy exception is justified ONLY because this stack carries
-    // nothing but the platform-forced CLOUDFRONT WebACL. Any non-WAF resource
-    // here would break the minimality justification.
+    // The region-policy exception is justified because this stack carries only
+    // the platform-forced CLOUDFRONT WAF resources (WebACL + the IMP-008
+    // oxo-test-runner-ips IPSet) PLUS the IMP-008 24h drain Lambda + its
+    // EventBridge schedule + the Lambda's CDK-generated execution role/policy
+    // (AC2.5 — the drain MUST live with the IP set it drains, same region/scope).
+    // Anything outside this allow-list would break the minimality justification.
+    const ALLOWED_NON_WAF = new Set([
+      'AWS::Lambda::Function', // drain Lambda
+      'AWS::IAM::Role', // drain Lambda execution role (CDK-generated)
+      'AWS::IAM::Policy', // drain Lambda execution policy (CDK-generated)
+      'AWS::Events::Rule', // 24h EventBridge schedule
+      'AWS::Lambda::Permission', // EventBridge -> Lambda invoke permission
+    ]);
     const allResources = template.toJSON().Resources ?? {};
     const types = Object.values(allResources).map(
       (r: any) => r.Type as string,
     );
-    const nonWaf = types.filter((t) => !t.startsWith('AWS::WAFv2::'));
-    expect(nonWaf).toEqual([]);
+    const stray = types.filter(
+      (t) => !t.startsWith('AWS::WAFv2::') && !ALLOWED_NON_WAF.has(t),
+    );
+    expect(stray).toEqual([]);
   });
 
   it('the WebACL carries build-identity tags Project/Env/ManagedBy (DEPLOY-IDENTITY-WAF)', () => {
@@ -216,6 +228,74 @@ describe('OxoOnlineWafUsEast1Stack — IMP-008 runner-IP exclusion (s007 UC2-S2)
     // Block ACTION + custom 429 response UNCHANGED (S6 / AC2.6).
     expect(rateRule.Action).toHaveProperty('Block');
     expect(rateRule.Action.Block.CustomResponse.ResponseCode).toBe(429);
+  });
+
+  it('AC2.5: a scheduled drain Lambda runs every 24h targeting oxo-test-runner-ips (IMP-008 standing guard)', () => {
+    const { template } = synth();
+    // The drain Lambda exists.
+    const fns = template.findResources('AWS::Lambda::Function');
+    expect(
+      Object.keys(fns).length,
+      'expected a drain Lambda function',
+    ).toBeGreaterThan(0);
+    // It knows the IP set name to drain (env var) so the synth pins the wiring,
+    // not just the resource's existence.
+    const drainFn = Object.values(fns).find((f: any) =>
+      JSON.stringify(f.Properties?.Environment ?? {}).includes(
+        RUNNER_IP_SET_NAME,
+      ),
+    ) as Record<string, any> | undefined;
+    expect(
+      drainFn,
+      'drain Lambda must carry the oxo-test-runner-ips set name (env) so it drains the RIGHT set',
+    ).toBeDefined();
+
+    // A 24h EventBridge schedule rule exists and targets the drain Lambda.
+    const rules = template.findResources('AWS::Events::Rule');
+    expect(
+      Object.keys(rules).length,
+      'expected an EventBridge schedule rule',
+    ).toBeGreaterThan(0);
+    const scheduleRule = Object.values(rules).find((r: any) =>
+      /rate\(24 hours?\)|rate\(1 day\)|cron\(/.test(
+        String(r.Properties?.ScheduleExpression ?? ''),
+      ),
+    ) as Record<string, any> | undefined;
+    expect(
+      scheduleRule,
+      'expected a 24h (rate(24 hours)/rate(1 day)/cron) schedule',
+    ).toBeDefined();
+    // The rule targets a Lambda (the drain function).
+    const targets = scheduleRule!.Properties.Targets ?? [];
+    expect(targets.length).toBeGreaterThan(0);
+  });
+
+  it('AC2.5 code<->policy pin: the drain Lambda role may Get/Update only the runner IP set — no WebACL/Create/Delete IPSet, no wildcard', () => {
+    // The drain reads (GetIPSet) and rewrites (UpdateIPSet) the set; it must NOT
+    // be able to create/delete IP sets or touch the WebACL. Least-privilege pin
+    // (§30) on the CDK-generated execution policy for the drain function role.
+    const { template } = synth();
+    const policies = template.findResources('AWS::IAM::Policy');
+    const wafActions = new Set<string>();
+    for (const p of Object.values(policies)) {
+      const doc = (p as any).Properties?.PolicyDocument;
+      for (const stmt of doc?.Statement ?? []) {
+        const acts = Array.isArray(stmt.Action) ? stmt.Action : [stmt.Action];
+        for (const a of acts) {
+          if (typeof a === 'string' && a.startsWith('wafv2:')) wafActions.add(a);
+        }
+      }
+    }
+    // The drain needs exactly Get + Update on the IP set.
+    expect(wafActions.has('wafv2:GetIPSet')).toBe(true);
+    expect(wafActions.has('wafv2:UpdateIPSet')).toBe(true);
+    // It must NOT hold create/delete or WebACL or wildcard powers.
+    expect(wafActions.has('wafv2:CreateIPSet')).toBe(false);
+    expect(wafActions.has('wafv2:DeleteIPSet')).toBe(false);
+    expect(wafActions.has('wafv2:*')).toBe(false);
+    for (const a of wafActions) {
+      expect(a.includes('WebACL')).toBe(false);
+    }
   });
 
   it('AC2.6 (S6 regression): the rate rule still Blocks at the same limit/429 for a non-runner source — scope-down does not change action/limit', () => {

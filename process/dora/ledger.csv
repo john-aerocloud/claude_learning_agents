@@ -310,3 +310,4 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T06:34:21Z,oxo-online,8,s005-h2-connect-auth,product,task_end,,success,GATE-2-H2,"slice.md + use-cases.md + chunk-plan.md written; token model: wsToken for host (POST /api/games ext), code as credential for guest (no new HTTP endpoint)"
 2026-06-07T06:36:50Z,oxo-online,8,s005-h2-connect-auth,solution-architect,start,,na,,architecture delta + security review + technical acceptance: connect-auth
 2026-06-07T06:42:36Z,oxo-online,8,s005-h2-connect-auth,solution-architect,finish,,success,,delta + lambda-authorizer.md + dynamodb-connectattempts.md + apigw-websocket close OI-2/per-IP; current.md updated; 10 T / 8 S cases; separate authorizer fn; SSM SecureString shared secret; WS IAM-policy response; cache TTL 0; no new deploy grant
+2026-06-07T06:44:17Z,oxo-online,8,s005-h2-connect-auth,orchestrator,gate,,success,GATE-3-H2,Gate 3 under standing approval; no Option-A flags

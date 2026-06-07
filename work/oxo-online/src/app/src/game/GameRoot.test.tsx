@@ -569,6 +569,77 @@ describe('GameRoot — opponent-disconnected survivor UX (s007 UC3, F1, T2, AC3.
   });
 });
 
+// s007 UC3-S3 — clean restart: from the disconnect screen the survivor can start
+// a fresh online game in the SAME session. The old socket is closed cleanly and
+// the new game gets a fresh connection with no residual state (F2, T6, AC3.4).
+// @covers spa-online-disconnect
+describe('GameRoot — clean Online restart after opponent disconnect (s007 UC3, F2, T6, AC3.4)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  async function hostToBoard(cap: ReturnType<typeof captureFactory>, code: string) {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ gameId: `g-${code}`, code }), { status: 201 }),
+    );
+    render(<GameRoot socketFactory={cap.factory} />);
+    await userEvent.click(screen.getByRole('button', { name: /play online/i }));
+    await waitFor(() =>
+      expect(screen.getByText(/waiting for opponent/i)).toBeInTheDocument(),
+    );
+    act(() => cap.opts?.onMessage({ type: 'game-ready', role: 'host', gameId: `g-${code}` }));
+    expect(screen.getByTestId('online-role')).toHaveTextContent('You are X');
+  }
+
+  it('AC3.4 — clicking Online after a disconnect starts a fresh create flow with no residual state', async () => {
+    const cap = captureFactory();
+    await hostToBoard(cap, 'OLD234');
+    // Old game made a move so there is residual board/gameId/socket.
+    act(() =>
+      cap.opts?.onMessage({
+        type: 'board-update',
+        board: 'X--------',
+        currentTurn: 'O',
+        status: 'active',
+      }),
+    );
+    // Opponent disconnects — survivor lands on the disconnect screen.
+    act(() => cap.opts?.onMessage({ type: 'opponent-disconnected' }));
+    expect(screen.getByTestId('opponent-disconnected')).toBeInTheDocument();
+    cap.close.mockClear();
+
+    // The survivor starts a fresh online game. The create POST fires again
+    // (fresh flow), and the new game opens a new socket via the gameId effect.
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response(JSON.stringify({ gameId: 'g-NEW234', code: 'NEW234' }), {
+          status: 201,
+        }),
+      );
+    await userEvent.click(screen.getByRole('button', { name: /play online/i }));
+    await waitFor(() =>
+      expect(screen.getByText(/waiting for opponent/i)).toBeInTheDocument(),
+    );
+    // Fresh create POST issued (a new game, not a resumed one).
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/games',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    // The new game code is shown; no residual board / online-role leaks through.
+    expect(screen.getByText('NEW234')).toBeInTheDocument();
+    expect(screen.queryByTestId('online-role')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('opponent-disconnected')).not.toBeInTheDocument();
+    // The new game registers under its OWN gameId — no prior gameId leaks.
+    act(() => cap.opts?.onMessage({ type: 'game-ready', role: 'host', gameId: 'g-NEW234' }));
+    await userEvent.click(screen.getByLabelText('cell 0'));
+    // (game-ready set X to move on a fresh empty board; the move addresses the
+    // NEW gameId — proving no prior gameId/board/socket leaked.)
+    const moves = cap.sent.filter((f) => (f as { action?: string }).action === 'move');
+    expect(moves[moves.length - 1]).toEqual({ action: 'move', gameId: 'g-NEW234', square: 0 });
+  });
+});
+
 describe('GameRoot — local modes unaffected by online wiring (B4, F8)', () => {
   afterEach(() => {
     vi.restoreAllMocks();

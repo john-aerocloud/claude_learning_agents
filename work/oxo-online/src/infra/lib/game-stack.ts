@@ -584,19 +584,21 @@ exports.handler = async (event) => {
     // The $connect CfnRoute is created in the s005 loop above; re-set its auth
     // properties here via an escape hatch so the gate is ON the route (T1).
     // UC-FLAG H2_ENFORCE (process §40 — two-phase credential rollout, §39
-    // ordering): enforcement MUST NOT go live before the SPA sends credentials
-    // (Set B). Deploying CUSTOM now would break live pairing (enforcement-
-    // before-credentials). Authorizer fn + secret + table deploy idle; the
-    // Set-B-complete commit flips this to true, then the flag is factored out
-    // (§40 lifecycle). Until then $connect stays unauthenticated as today.
-    // Flag is context-driven (default OFF). Prod deploys with it OFF until the
-    // Set-B SPA ships credentials; UC2's own tests synth with it ON (§40 —
-    // tests run flag-ON) to assert the gate IS on the route (T1). The
-    // Set-B-complete commit sets the default ON, then factors the flag out.
-    const H2_ENFORCE =
-      (this.node.tryGetContext('h2Enforce') as boolean | string | undefined) ===
-        true ||
-      this.node.tryGetContext('h2Enforce') === 'true';
+    // ordering). FLIPPED ON (Set-B-complete): Set B is live at the CloudFront
+    // edge — the SPA now sends ?wsToken=/?code= credentials, so §39 ordering
+    // (credentials precede enforcement) is satisfied and the gate goes live.
+    // Default is now ON: with NO context, $connect gets AuthorizationType
+    // CUSTOM + the authorizer.
+    // The flag is RETAINED as a ROLLBACK LEVER, not yet factored out: explicit
+    // CDK context `h2Enforce=false` (or 'false') turns enforcement OFF for a
+    // no-code-change prod rollback. Factor-out (remove the flag from code, then
+    // configuration, §40 lifecycle) is a SEPARATE later commit, deferred until
+    // the live walking-skeleton probe through the deployed authorizer passes.
+    const h2EnforceCtx = this.node.tryGetContext('h2Enforce') as
+      | boolean
+      | string
+      | undefined;
+    const H2_ENFORCE = !(h2EnforceCtx === false || h2EnforceCtx === 'false');
     const connectRoute = this.node.findChild('JoinWsRouteConnect') as apigatewayv2.CfnRoute;
     if (H2_ENFORCE) {
       connectRoute.authorizationType = 'CUSTOM';

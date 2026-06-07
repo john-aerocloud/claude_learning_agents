@@ -487,3 +487,8 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T20:14:59Z,oxo-online,11,s008-share-link,product,task_end,,success,S008-UC-ACC,
 2026-06-07T20:22:19Z,oxo-online,11,s008-share-link,engineer,task_start,,na,S008-ROUTE-BUILD,route + serial SPA build (UC2 deep-link then UC1 copy-link)
 2026-06-07T20:24:22Z,oxo-online,11,s008-share-link,engineer,task_start,,na,S008-ROUTE-BUILD,"s008 share-link: UC2 deep-link route + pre-fill, UC1 copy-link control; client-only/arch-lite; serial UC2->UC1"
+2026-06-07T20:35:46Z,oxo-online,11,s008-share-link,engineer,deploy,,success,c69140a:app-pipeline,App pipeline 27103964346 success: build/lint/test (166 unit) + SPA deploy + prod smoke green. UC1 copy-link + UC2 deep-link /join/:code live on CloudFront.
+2026-06-07T20:35:47Z,oxo-online,11,s008-share-link,engineer,task_end,720,success,S008-ROUTE-BUILD,"UC2 (cb38ff4, +7 tests) + UC1 (c69140a, +4 tests) on trunk; class-deps spaJoinRoute/spaCopyLink marked; join-skeleton committed. App pipeline green; SPA deployed. join-skeleton allowlist entry flagged to cicd."
+2026-06-07T20:37:17Z,oxo-online,11,s008-share-link,orchestrator,gate,,success,GATE-4-S008,auto-approved app-only; deep-link prod-confirmed
+2026-06-07T20:37:17Z,oxo-online,11,s008-share-link,product,task_start,,na,S008-TEXT-RECONCILE,reconcile AC2.3/T4 error-text vs shipped single code-not-found message
+2026-06-07T20:37:17Z,oxo-online,11,s008-share-link,tester,task_start,,na,S008-UC3,UC3 validation + C4 done-condition SM-5

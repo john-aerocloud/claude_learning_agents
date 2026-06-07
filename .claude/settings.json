@@ -82,6 +82,7 @@
       "Bash(make waf-runner-ip-remove *)",
       "Bash(make move-skeleton *)",
       "Bash(make disconnect-skeleton *)",
+      "Bash(make join-skeleton *)",
       "Bash(make test-scripts)",
       "Bash(make ws-skeleton *)",
       "Bash(curl https://d3pf3kcvzpau1x.cloudfront.net*)",

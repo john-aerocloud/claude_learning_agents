@@ -67,7 +67,43 @@ flowchart TD
   adapterRelayMgmt -.->|implements| portRelay
   linkStyle 7 stroke:#d50000,stroke-width:3px;
 
+  %% ==== s007 disconnect (UC1) — appended; classDef changed marks this slice ====
+  %% UC1-S1: the Connections store port is extended with getConnection (the new
+  %% $disconnect read seam). connectionId IS the identity (S1) — single GetItem of
+  %% the connection's OWN row, no Query/Scan.
+  portConnectionStore["port-connection-store<br/>ConnectionStorePort (move/ports.ts) — getConnection(connectionId), deleteConnection"]:::s007changed
+
+  %% UC1-S2/S3: the pure $disconnect decision + the handler that orchestrates over
+  %% the three ports (connection store, game store, relay) + the pure decision.
+  domainDisconnect["domain-disconnect<br/>ws/disconnect/decide.ts — decideDisconnect(disconnectingId, gameItem)<br/>PURE: active→abandon+notify-survivor; terminal/waiting/missing→no-op"]:::s007changed
+  wsDisconnectHandler["ws-disconnect-handler<br/>ws/disconnect-handler.ts (UC1) — getConnection→getGame→decide,<br/>conditional abandon (CAS), 1 survivor post, DeleteItem in all branches"]:::s007changed
+
+  %% UC1-S4: the cloud Connections adapter implements the new port over DynamoDB
+  %% GetItem + DeleteItem (backed by the UC2 Connections:GetItem grant — S5).
+  adapterConnectionsDdb["adapter-connections-ddb<br/>ws/adapters/connections-ddb.ts (UC1) — GetItem + DeleteItem only (S5 pin)"]:::s007changed
+  adapterLocalConnStore["adapter-local-connection-store<br/>src/app/local/adapters/local-connection-store.ts (UC1) — in-memory binding"]:::s007changed
+
+  %% UC1-S1 edge: cloud + local adapters implement the new port.
+  adapterConnectionsDdb -.->|implements| portConnectionStore
+  linkStyle 8 stroke:#1565c0,stroke-width:3px;
+  adapterLocalConnStore -.->|implements| portConnectionStore
+  linkStyle 9 stroke:#1565c0,stroke-width:3px;
+
+  %% UC1-S3 edges: the disconnect handler depends on the pure decision + all three
+  %% ports (connection store to resolve identity, game store to abandon, relay to
+  %% notify the one survivor).
+  wsDisconnectHandler -->|decideDisconnect| domainDisconnect
+  linkStyle 10 stroke:#1565c0,stroke-width:3px;
+  wsDisconnectHandler -->|getConnection + deleteConnection| portConnectionStore
+  linkStyle 11 stroke:#1565c0,stroke-width:3px;
+  wsDisconnectHandler -->|getGame + abandonGame| portGameStore
+  linkStyle 12 stroke:#1565c0,stroke-width:3px;
+  wsDisconnectHandler -->|opponent-disconnected post| portRelay
+  linkStyle 13 stroke:#1565c0,stroke-width:3px;
+
   %% s006 changed marks CLEARED (2026-06-07 — tester consumed, UC6 prod validation PASS).
   %% All nodes were new in this first-edition; all are now delivered/stable.
   classDef changed fill:#e8f4e8,stroke:#2e7d32,color:#000;
   classDef stable fill:#e8f4e8,stroke:#2e7d32,color:#000;
+  %% s007 changed mark — cleared by the tester at slice delivery after consuming.
+  classDef s007changed fill:#e3f2fd,stroke:#1565c0,color:#000;

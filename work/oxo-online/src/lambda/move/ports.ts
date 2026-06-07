@@ -76,6 +76,39 @@ export class MoveConditionFailed extends Error {
 }
 
 /**
+ * The role a connection holds in its bound game (Connections-table value).
+ * `host` is always X, `guest` is always O — fixed at game-ready (s005).
+ */
+export type ConnectionRole = 'host' | 'guest';
+
+/**
+ * The binding the Connections table holds for one connectionId: which game it is
+ * part of and which role it plays. Returned by ConnectionStorePort.getConnection.
+ */
+export interface ConnectionBinding {
+  gameId: string;
+  role: ConnectionRole;
+}
+
+/**
+ * Connections store port (s007 — extended from s005's implicit put/delete).
+ *
+ * `getConnection(connectionId)` is the NEW $disconnect read: resolve the
+ * disconnecting connection's own gameId+role from its primary key. There is NO
+ * Query/Scan — a single GetItem of the connection's OWN row (S1: connectionId IS
+ * the identity; no cross-game enumeration). `deleteConnection` is the existing
+ * best-effort row delete used in ALL $disconnect branches.
+ *
+ * The cloud adapter (DdbConnectionStore) implements this over DynamoDB GetItem +
+ * DeleteItem (backed by the UC2 Connections:GetItem grant — S5); the local
+ * adapter is an in-memory map. Domain code imports nothing concrete from here.
+ */
+export interface ConnectionStorePort {
+  getConnection(connectionId: string): Promise<ConnectionBinding | null>;
+  deleteConnection(connectionId: string): Promise<void>;
+}
+
+/**
  * Relay port — pushes a server frame to a set of bound connections. The handler
  * passes the TWO bound connectionIds (host+guest); never a broadcast. A failed
  * post to one connection is best-effort: it is logged and the other proceeds

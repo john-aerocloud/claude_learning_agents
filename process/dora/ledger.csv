@@ -398,3 +398,4 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T11:42:01Z,oxo-online,9,s006-move-relay,engineer,task_start,,na,S006-WAVE-B-RESUME,UC3 resume per GATE-AMEND-S006-B: gameId lookup key + game-ready carries gameId + SPA threading + infra + skeleton + flag lifecycle
 2026-06-07T11:44:37Z,oxo-online,9,s006-move-relay,engineer,task_start,,na,S006-WAVE-B-RESUME,Wave B resume: GATE-AMEND ruling (gameId lookup key) + UC3 handler/route/skeleton/flag-flip
 2026-06-07T11:53:08Z,oxo-online,9,s006-move-relay,orchestrator,gate,,success,RETRO-V33-UC-FLOW,v33 §11a use-case flow routed; EXP-010 registered; EXP-005 mid-slice MET note
+2026-06-07T11:59:18Z,oxo-online,9,s006-move-relay,orchestrator,gate,,success,PROCESS-V34,v34 integration lifecycle step + EXP-011 registered

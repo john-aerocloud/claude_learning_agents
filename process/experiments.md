@@ -11,6 +11,10 @@ could have shown its effect), not calendar retros. "No opportunity" extends.
 concluded (human-corrected at v32: 1–2 opportunities is an anecdote, not a
 sample); an attributable metric drop reinstates early, a noisy early signal
 voids and re-queues the trial.
+**Validated rows trigger INTEGRATION (v34, human-directed):** the owning agent
+file is rewritten so the behaviour becomes core operating practice (shorter or
+equal, scaffolding removed, mechanism intact); the integration commit is noted
+on the row. EXP-011 scores the integration policy itself.
 
 **Grandfather rule:** agent-def content routed before v31 is not bulk-imported
 (ceremony without evidence). When a pre-existing section visibly drives — or
@@ -29,3 +33,4 @@ as its first scoring row. The inventory grows by observation, not by audit.
 | EXP-008 | v32 (2026-06-07) | §25a + §26 + this file + retro command | changes-as-experiments lifecycle (scoring, retirement, null-hypothesis) | ALL (meta) — guards simplicity of agent defs | every routed change scored within horizon; ≥1 under-question item resolved (rewritten/retired) within 3 retros; agent-def line count stops monotonic growth | 3 retros | active | self-referential: this row is scored by whether the registry is actually maintained and acted on |
 | EXP-009 | s005-h2 retro (2026-06-07) | tester.md | budget-aware validation: when the system under test rate-limits by source, connection-consuming specs run serialised/ordered so the SUITE does not exhaust the budget it is validating | tester (false-red re-runs), CFR honesty | 0 test-isolation false-reds on rate-limited surfaces | 2 | active | evidence: AC7.3 re-validation runs 1-2 failed from suite self-interference (7-worker smoke exhausted the 20/5min budget; WAF 429 from page floods) — 2 wasted runs + 1 five-minute wait |
 | EXP-010 | v33 (2026-06-07) | §11a + engineer.md | use-case flow: deployable UC done = deployed + engineer probe green in prod; deploy order by concurrency group + §19 edges; builds overlap per §37 | lead time, deploy freq, MTTR attribution | defects surface at UC probes not slice validation; tester load shrinks (constraint protected); no deploy overwrites | 2 | active | formalises the organically-emerged ws-skeleton pattern; first scoring at s006 delivery |
+| EXP-011 | v34 (2026-06-07) | §25a + retro command + agent files at each integration | validated-experiment INTEGRATION: rewrite owning agent defs so validated behaviour is core practice (plain language, no vNN/EXP scaffolding); file shorter or equal; behaviour intact | per-agent median task time, mechanism compliance, agent-def simplicity (line/section count) | integrated agents perform at least as well, with shorter defs; if integrated behaviours stop firing (mechanism regression at spot-check) the policy is questioned | 3 integrations | active | first candidates: EXP-001/004/006/007 (already validated, still carried as dated bolt-on sections in engineer/tester/cicd defs) |

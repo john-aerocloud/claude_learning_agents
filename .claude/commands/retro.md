@@ -33,6 +33,12 @@ Act as the **orchestrator**. Own this; gather input but make the process call.
    the full window; max one trial RUNNING per artifact at a time — a
    confounding guard, not a sample size). Agent-def simplicity is a goal:
    text that cannot demonstrate value does not stay.
+   **Newly-validated rows trigger INTEGRATION (§25a v34):** rewrite the owning
+   agent file(s) so the validated behaviour is woven into the agent's core
+   instructions as plain operating practice — experiment scaffolding (vNN/EXP
+   citations, trial caveats) removed, file shorter or equal, behaviour intact.
+   Note the integration commit on the registry row; the next retro spot-checks
+   the mechanism still fires (EXP-011 scores this policy itself).
 6. **Route each change to its narrowest owner** (process §36):
    - one agent's behaviour → edit that agent's file in `.claude/agents/`
    - cross-agent rules → `/process/process-current.md` (version+1)

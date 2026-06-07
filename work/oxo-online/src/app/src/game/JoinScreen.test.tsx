@@ -120,10 +120,11 @@ describe('JoinScreen — error-frame messages (DEFECT-005-001 Bug B; B2, F3/F4/F
         target: { value: 'ABC234' },
       });
       fireEvent.click(screen.getByRole('button', { name: /join/i }));
-      // A real disconnect (e.g. network drop, or the server's DELETE close 1000)
-      // with no preceding error frame degrades to the generic message — but only
-      // AFTER the grace window elapses with no error frame arriving (Issue 2).
-      act(() => m.opts?.onClose(1006));
+      // A CLEAN close (the server's DELETE close 1000) with no preceding error
+      // frame degrades to the generic message — but only AFTER the grace window
+      // elapses with no error frame arriving (Issue 2). (An ABNORMAL 1006 close
+      // is the OI-33 code-not-found signal — covered in its own describe below.)
+      act(() => m.opts?.onClose(1000));
       expect(screen.queryByRole('alert')).toBeNull();
       act(() => vi.advanceTimersByTime(300));
       expect(screen.getByRole('alert')).toHaveTextContent(
@@ -227,12 +228,71 @@ describe('JoinScreen — error-frame vs close race grace window (DEFECT-005-001-
 
   it('close-with-no-message: generic message renders only after the grace window', async () => {
     const m = submit();
-    act(() => m.opts?.onClose(1006));
+    // A CLEAN close (1000/1001 — server DELETE or graceful close) with no
+    // preceding error frame is a genuine disconnect, not a code-not-found deny.
+    act(() => m.opts?.onClose(1000));
     // Within the grace window, nothing is rendered yet.
     expect(screen.queryByRole('alert')).toBeNull();
     act(() => vi.advanceTimersByTime(300));
     expect(screen.getByRole('alert')).toHaveTextContent(
       'Something went wrong. Please try again.',
+    );
+  });
+});
+
+// OI-33 (R4.0) — the REAL wire signal for code-not-found on the JOIN-BY-CODE
+// flow. A guest submits `?code=<CODE>`; the deployed `$connect` AUTHORIZER does
+// the GSI lookup and DENIES an unknown code (reason `code-not-found`), so the WS
+// handshake is REFUSED (HTTP 403) and the `join` route NEVER runs — the server
+// therefore never emits the `{type:'error',code:4040}` MESSAGE frame. At the
+// browser an authorizer-refused handshake surfaces as an ABNORMAL close (1006)
+// with NO preceding error frame. In the join-by-code flow that abnormal,
+// frame-less close IS the code-not-found signal, so the SPA must render the
+// actionable "Game not found." message — not the generic one (F3/T5/AC4.5).
+describe('JoinScreen — OI-33: $connect-refused code (abnormal close = code-not-found)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function submitCode() {
+    const m = mockFactory();
+    render(<JoinScreen connect={m.factory} />);
+    fireEvent.change(screen.getByLabelText(/game code/i), {
+      target: { value: 'XXXXXX' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /join/i }));
+    return m;
+  }
+
+  it('abnormal close (1006) with no error frame → "Game not found." (authorizer refused the bad code)', () => {
+    const m = submitCode();
+    act(() => m.opts?.onClose(1006));
+    // No grace window: an abnormal close on the join-by-code flow is immediately
+    // the code-not-found case (the authorizer never let the handshake complete,
+    // so no in-flight error frame can ever arrive).
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Game not found. Check the code and try again.',
+    );
+    // The code is retained so the player can correct and retry (F3).
+    expect(screen.getByLabelText(/game code/i)).toHaveValue('XXXXXX');
+  });
+
+  it('an authoritative error frame still wins over an abnormal close (4041 specific message)', () => {
+    const m = submitCode();
+    act(() =>
+      m.opts?.onMessage({
+        type: 'error',
+        code: 4041,
+        message: 'This game is no longer available.',
+      }),
+    );
+    act(() => m.opts?.onClose(1006));
+    act(() => vi.advanceTimersByTime(300));
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'This game is no longer available.',
     );
   });
 });

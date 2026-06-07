@@ -33,6 +33,33 @@ function messageForCode(code: number): string {
   return ERROR_MESSAGES[code] ?? GENERIC_ERROR;
 }
 
+/**
+ * The "Game not found" text (the 4040 message), reused for the OI-33 wire-signal
+ * case below where the code arrives not as a 4040 error frame but as a refused
+ * handshake.
+ */
+const CODE_NOT_FOUND = ERROR_MESSAGES[4040];
+
+/**
+ * OI-33 — the REAL wire signal for code-not-found on the join-by-code flow.
+ *
+ * A guest's entered code is the `$connect` credential (the factory appends it as
+ * `?code=`). The DEPLOYED `$connect` authorizer does the GSI lookup itself and
+ * DENIES an unknown code (reason `code-not-found`) BEFORE the handshake completes
+ * — so the `join` route never runs and the server never emits the
+ * `{type:'error',code:4040}` MESSAGE frame this screen otherwise maps. At the
+ * browser an authorizer-refused handshake surfaces as an ABNORMAL close: the
+ * socket closes with no close frame (1006) / no status (1005) and NO preceding
+ * error frame. In THIS flow that abnormal, frame-less close IS the
+ * code-not-found signal (the only reason a guest's `$connect` is refused is a bad
+ * code or rate-limit), so we render the actionable "Game not found." message
+ * immediately rather than holding the grace window for a frame that can never
+ * arrive (the handshake never opened). A CLEAN close (1000/1001 — the server's
+ * intentional DELETE after a delivered frame, or a graceful disconnect) keeps the
+ * grace-window-then-generic behaviour for genuine post-open disconnects.
+ */
+const ABNORMAL_CLOSE_CODES = new Set([1005, 1006]);
+
 interface JoinScreenProps {
   /** Socket seam — Set C supplies the real WebSocket-backed factory. */
   connect: GameSocketFactory;
@@ -84,14 +111,26 @@ export function JoinScreen({ connect, onGameReady }: JoinScreenProps) {
           // Code is intentionally retained for retry (F3).
         }
       },
-      onClose: () => {
+      onClose: (closeCode: number) => {
         setConnecting(false);
-        // A close with no preceding error frame MIGHT be a real disconnect, or
-        // it might be the DELETE-driven close racing ahead of an in-flight error
-        // frame (Issue 2). Hold a short grace window: if an error frame arrives
-        // it wins (handled above); otherwise render the generic message once the
-        // window elapses. If a specific message is already shown, do nothing.
+        // An authoritative error frame already won — do not overwrite it.
         if (errorShown) return;
+        // OI-33: an ABNORMAL close (1006/1005) with no error frame means the
+        // `$connect` handshake was REFUSED — for the join-by-code flow that is
+        // the authorizer rejecting an unknown code (code-not-found). No frame
+        // can ever arrive (the socket never opened), so render the actionable
+        // "Game not found." message immediately — no grace window needed.
+        if (ABNORMAL_CLOSE_CODES.has(closeCode)) {
+          clearTimeout(graceTimer.current);
+          setError(CODE_NOT_FOUND);
+          // Code is intentionally retained for retry (F3).
+          return;
+        }
+        // A CLEAN close (1000/1001) with no preceding error frame MIGHT be a
+        // real disconnect, or the DELETE-driven close racing ahead of an
+        // in-flight error frame (Issue 2). Hold a short grace window: if an
+        // error frame arrives it wins (handled above); otherwise render the
+        // generic message once the window elapses.
         clearTimeout(graceTimer.current);
         graceTimer.current = setTimeout(() => {
           if (!errorShown) setError(GENERIC_ERROR);

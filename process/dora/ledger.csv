@@ -324,5 +324,9 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T07:07:22Z,oxo-online,8,s005-h2-connect-auth,engineer,task_end,960,success,,A2: S-A2.1..S-A2.15 green; authorizer+ConnectAttempts+shared secret; lambda 96 / infra 87 / synth all stacks green
 2026-06-07T07:20:20Z,oxo-online,8,s005-h2-connect-auth,orchestrator,gate,,success,PROCESS-V30,v30 failure semantics + backoff standard routed to 4 agent defs
 2026-06-07T07:33:32Z,oxo-online,8,s005-h2-connect-auth,orchestrator,recovery,,rolled_forward,096719c,"DEFECT-H2-001 recovered: 4 stacked causes (schedule race, semantic compensation reverted per human, em-dash strike 2, WS TTL property strike 4); prod 201 with wsToken verified; ~35min outage"
-2026-06-07T07:46:32Z,oxo-online,8,s005-h2-connect-auth,engineer,task_start,,na,SET-B-UC3-UC4,Set B dispatch: SPA credentials (UC3 wsToken + UC4 code) serialised — same socket.ts URL-factory seam
 2026-06-07T07:47:50Z,oxo-online,8,s005-h2-connect-auth,engineer,task_start,,na,UC3+UC4 SPA WS credential wiring (T8),Set B: host ?wsToken= + guest ?code=
+2026-06-07T07:51:01Z,oxo-online,8,s005-h2-connect-auth,engineer,deploy,,success,290c6c9,"Trunk push -> SPA CD: host ?wsToken= + guest ?code= (UC3/UC4, T8)"
+2026-06-07T07:51:01Z,oxo-online,8,s005-h2-connect-auth,engineer,task_end,720,success,290c6c9,"UC3/UC4 SPA WS credential wiring green: 109 app tests, lint+build clean"
+2026-06-07T07:55:03Z,oxo-online,8,s005-h2-connect-auth,engineer,task_start,,na,H2-ENFORCE-FLIP,Flip H2_ENFORCE default ON (flag retained as rollback lever; factor-out after T6 probe per §40)
+2026-06-07T07:58:26Z,oxo-online,8,s005-h2-connect-auth,engineer,deploy,,success,4ef7319,"Trunk push -> infra CD (run 27086747316): OxoGameProd $connect gated CUSTOM by oxo-ws-connect-authorizer (H2_ENFORCE default ON)"
+2026-06-07T07:58:26Z,oxo-online,8,s005-h2-connect-auth,engineer,task_end,203,success,4ef7319,"H2_ENFORCE flipped default ON; staged-OFF pin replaced by default=CUSTOM + explicit-false=rollback-lever pins. Infra 89/89; all 4 stacks synth green; strikes 2/4 held. Flag retained (factor-out later)"

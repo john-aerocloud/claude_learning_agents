@@ -1,5 +1,19 @@
 # Delta 006 — Server-authoritative move relay (the core-job payoff)
 
+> **AMENDMENT 2026-06-07 (GATE-AMEND, UC3 read-before-build blocker).**
+> The move frame is `{ action:'move', gameId, square }` — `gameId` added as a
+> **non-trusted lookup key** so the handler can `GetItem(Games, gameId)` (a grant
+> it already has) instead of resolving connectionId→gameId via a Connections read
+> (Option A, which would widen S5). Identity/role is STILL derived server-side by
+> matching the real `event.requestContext.connectionId` against the stored
+> host/guestConnectionId; a forged/mismatched `gameId` resolves a game the sender
+> is not in → matches neither slot → reject, no write. **S5 (IAM) unchanged.**
+> **S1 sharpened** to assert the forged-gameId reject explicitly. Cause: the
+> connectionId→gameId binding lives only in Connections, which the move path is
+> (correctly) not granted to read. Required UC3-adjacent server change: the
+> `game-ready` frame must carry `gameId` so the GUEST (who joins by code and has
+> no gameId client-side) can thread it into its move frame — see §Frame shape.
+
 ## Decision: FULL delta (arch-lite §21 does NOT apply, but the delta is SMALL)
 This slice adds a new **runtime data flow** (a `move` message that mutates the
 authoritative board and fans out to two clients) and a new **state-transition
@@ -39,7 +53,11 @@ in browser B < 1s p95) — an acceptance condition, not a skeleton probe.
 - Add one `AWS::ApiGatewayV2::Route` with `RouteKey: 'move'` to the existing
   WebSocket API in `OxoGameProd`, integrating the **existing** `oxo-ws-fn`
   Lambda (AWS_PROXY). `RouteSelectionExpression` is already
-  `$request.body.action`; the client sends `{ action: 'move', square: <0..8> }`.
+  `$request.body.action`; the client sends
+  `{ action: 'move', gameId: <string>, square: <0..8> }` where `gameId` is a
+  **non-trusted lookup key** (amended 2026-06-07 — see §Frame shape & the
+  apigw-websocket.md S1 note). The handler uses it ONLY as the `GetItem(Games,…)`
+  key; authorization is the server-side connectionId-vs-binding match.
 - **No new function.** `oxo-ws-fn` already owns the `Games` table, the
   `Connections` table, and `ManageConnections` on this API — move is the same
   ephemeral-game-state bounded context. Splitting a `move-fn` out would force
@@ -130,8 +148,42 @@ relay-amplification control (see security).
 not widen**. No GoneException-driven cleanup in this slice (that is `$disconnect`
 / s007); a stale connection 410 is logged and the other post still proceeds.
 
+### 4a. Frame shape (amended 2026-06-07) — `gameId` as non-trusted lookup key
+The move frame is `{ action:'move', gameId, square }`.
+
+- **Why `gameId` is in the frame:** UC3 must `GetItem(Games)` to authorize and
+  apply a move, and `GetItem` needs the `gameId` key. The connectionId→gameId
+  binding lives ONLY in the `Connections` table; the move path is deliberately
+  NOT granted to read `Connections` (S5), and the delta forbids a new
+  connection-keyed Games GSI. So the client supplies `gameId` as the lookup key.
+- **Why it is SAFE (no trust given to the client):** `gameId` selects WHICH game
+  record to read; it confers no role and no capability. Authorization is
+  unchanged — the handler matches the REAL
+  `event.requestContext.connectionId` against the fetched item's stored
+  `hostConnectionId`/`guestConnectionId`. A forged/guessed `gameId` resolves a
+  record the sender is not bound to → matches neither slot → **reject, no write**.
+  Identity is never read from the body (same rule as the s005 "never trust a
+  body connectionId"). See apigw-websocket.md S1 for the full invariant.
+- **Required UC3-adjacent server change — guest gameId availability.** Verified
+  in code (2026-06-07): the **host** holds `gameId` client-side (it minted the
+  game and sends `{action:'register', gameId}`), but the **guest** joins by
+  `code` and the `game-ready` frame today carries only `{ type, role }`
+  (`src/lambda/ws/join.ts:148-166`, `src/app/src/game/socket.ts` `GameReadyMessage`).
+  The guest therefore has NO `gameId` to put in its move frame.
+  **This slice must add `gameId` to the `game-ready` frame** so the guest learns
+  it. This is a small server + SPA-type change inside the s006 boundary (no new
+  data class — `gameId` is an opaque server-generated id already known to both
+  sides post-join; it is not the join `code` and discloses no opponent
+  connection detail). The engineer makes this change as part of UC3/UC4:
+    - `join.ts` `game-ready` payload: add `gameId` to BOTH the host and guest
+      `postToConnection` payloads.
+    - `socket.ts` `GameReadyMessage`: add `gameId: string`; `ClientFrame`
+      `move` variant: add `gameId: string`; SPA stores the `gameId` from
+      `game-ready` and threads it into every `move` send.
+
 ### 5. SPA — render only server broadcasts (no infra touch) + OI-33 fold-in
-- The board screen sends `{action:'move', square}` on click and **does not**
+- The board screen sends `{action:'move', gameId, square}` on click (the
+  `gameId` learned from the `game-ready` frame — §4a) and **does not**
   update optimistically; it renders `board`/`currentTurn`/`status` from the
   `board-update` it receives, and the result screen from `game-over`. This is the
   server-authoritative contract already stated in current.md §Game integrity.
@@ -304,12 +356,21 @@ T = technical/observable; S = security-policy (becomes a policy test).
   `board="---------"`, `currentTurn="X"`, `version=0`, `moveCount=0` (set in the
   join conditional write).
 
-- **S1 (sender-is-a-player binding):** A `move` is accepted ONLY when
+- **S1 (sender-is-a-player binding; amended 2026-06-07):** The move frame is
+  `{ action:'move', gameId, square }` where `gameId` is a **non-trusted lookup
+  key**. A `move` is accepted ONLY when, after `GetItem(Games, gameId)`,
   `event.requestContext.connectionId` equals the `hostConnectionId` or
-  `guestConnectionId` of THIS game, AND that connection's role equals
-  `currentTurn`. A `move` from any other connection (spectator, stale, wrong
-  game) is rejected with **no write** — the role is derived server-side from the
-  connectionId↔game binding, **never** from a client-supplied field.
+  `guestConnectionId` of THAT item, AND that connection's role equals
+  `currentTurn`. The role is derived server-side from the connectionId↔game
+  binding, **never** from a client-supplied `role`/`player`/`connectionId`/`gameId`
+  field. Explicit reject cases (each yields `move-rejected`, **no write**):
+    - **S1a forged/foreign gameId:** a `move` whose `gameId` names a game the
+      sender's REAL connectionId is NOT bound to → matches neither slot → reject;
+    - **S1b non-existent gameId:** `GetItem` miss → reject;
+    - **S1c spectator/stale/wrong-game connection** on the sender's own game →
+      reject.
+  `gameId` selects the record to authorize against; it cannot promote the sender
+  into a role its connectionId does not hold.
 - **S2 (turn enforcement, DDB unchanged):** An out-of-turn `move` yields
   `move-rejected` to the sender only and a `GetItem` confirms `board` and
   `currentTurn` are byte-identical to pre-move (success-measure #2).

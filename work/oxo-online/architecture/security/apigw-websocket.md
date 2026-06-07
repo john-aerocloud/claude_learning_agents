@@ -150,13 +150,43 @@ checkable statements become policy tests:
       message.
 
 ### Move forgery — sender-is-a-player binding (the core integrity control)
-With no account system, the sender's identity is its **own** `connectionId`:
+With no account system, the sender's identity is its **own** `connectionId`
+(`event.requestContext.connectionId`), set by the platform and unspoofable by the
+client. **Identity is never read from the message body.**
+
+The move body is `{ action:'move', gameId, square }` where **`gameId` is a
+NON-TRUSTED LOOKUP KEY, not an identity/role claim** (amended 2026-06-07 — see
+"Why client-supplied gameId is safe" below). It selects WHICH `Games` item to
+read; it grants nothing.
+
 - [ ] A `move` is accepted ONLY when `event.requestContext.connectionId` equals
-      the `hostConnectionId` **or** `guestConnectionId` of THIS game. A move from
-      a spectator/stale/other-game connection is rejected with **no write**.
-- [ ] The sender's role (X=host / O=guest) is derived **server-side** from that
-      connectionId↔game binding — NEVER from a client-supplied `role`/`player`
-      field. The client body carries only `{ action:'move', square }`.
+      the `hostConnectionId` **or** `guestConnectionId` of the `Games` item named
+      by the body `gameId`. A move whose REAL connectionId matches **neither**
+      bound connection of that game (spectator, stale, wrong/forged `gameId`,
+      other player's game) is rejected with **no write**.
+- [ ] The sender's role (X=host / O=guest) is derived **server-side** by matching
+      the connection's OWN `connectionId` against the stored
+      `hostConnectionId`/`guestConnectionId` — **NEVER** from any client-supplied
+      `role`/`player`/`connectionId`/`gameId` field. `gameId` only chooses the
+      record to authorize against; it cannot elevate the sender into a role it
+      does not hold by its connectionId.
+
+**Why client-supplied `gameId` is safe here (the authorization invariant).**
+A forged or guessed `gameId` only changes which `Games` item is fetched. The
+fetched item still lists the two connectionIds that legitimately bound to it at
+register/join. The handler authorizes by asking "is MY real connectionId one of
+this game's two bound connections, and is it the one whose turn it is?" — a
+question the client cannot influence. Outcomes of supplying a `gameId` the sender
+is not part of:
+  - non-existent `gameId` → `GetItem` miss → reject, no write;
+  - a real game the sender is not in → connectionId matches neither bound slot →
+    reject, no write;
+  - the sender's OWN game → normal authorization (turn check etc.).
+In every branch the **capability stays server-side**: identity is the platform
+connectionId; the body never carries a credential. This is the s005 design rule
+("never trust a body-supplied connectionId") applied to `gameId` — `gameId` is a
+selector, not a credential. It introduces **no new trust boundary**: the trust
+edge is still connectionId-vs-stored-binding, exactly as GATE-3-S006 approved.
 - [ ] The move is accepted ONLY when the sender's derived role equals
       `currentTurn` (turn-order enforcement). Out-of-turn → `move-rejected` to the
       sender only, `Games` byte-unchanged.
@@ -232,6 +262,27 @@ write or an assertion that an existing grant was not widened.**
   recovery is reconnect-replay in s007.
 - Inherited: OR-H2-b (guest code-as-credential pre-join, closed by C6),
   OI-10 (no reconnect, s007).
+
+### s006 AMENDMENT 2026-06-07 — move frame carries non-trusted `gameId` (Option B)
+
+The UC3 engineer surfaced (read-before-build) that the move handler must
+`GetItem(Games, gameId)` to authorize, but the connectionId→gameId binding lives
+only in `Connections`, which the move path is correctly NOT granted to read.
+Ruling: the move frame carries `gameId` as a **non-trusted lookup key**
+(`{ action:'move', gameId, square }`); authorization is unchanged — the handler
+matches the REAL `event.requestContext.connectionId` against the fetched item's
+stored host/guestConnectionId; a forged/foreign/non-existent `gameId` → reject,
+no write.
+
+**Security conclusion of the amendment (verbatim):** This amendment introduces
+NO new attack surface, NO new data flow, and NO new trust boundary beyond what
+GATE-3-S006 approved: the client now supplies a lookup KEY within the already-
+approved move data flow, the IAM grant set (S5) is byte-for-byte unchanged (no
+Connections read added), and the authorization edge is still the server-side
+match of the platform-set connectionId against the stored binding — `gameId`
+selects the record to authorize against and confers no capability; therefore
+§9a-style auto-accept of the amendment applies (the architect re-affirms the
+existing GATE-3-S006 acceptance) and no human re-gate is required.
 
 ---
 

@@ -129,14 +129,23 @@ move succeeds against the initialised fields).
 S-cases are lifted verbatim-or-tightened from delta 006. Each carries its
 original S-id.
 
-### S1 — Sender-is-a-player identity binding [UC3, UC6]
-A `move` is accepted ONLY when `event.requestContext.connectionId` equals the
-`hostConnectionId` or `guestConnectionId` of THIS game, AND that connection's
-role equals `currentTurn`. A `move` from any other connection (spectator, stale,
-wrong game) is rejected with **no write** — the role is derived server-side from
-the connectionId↔game binding, **never** from a client-supplied field.
+### S1 — Sender-is-a-player identity binding [UC3, UC6] (amended 2026-06-07)
+The move frame is `{ action:'move', gameId, square }` where `gameId` is a
+**non-trusted lookup key**. A `move` is accepted ONLY when, after
+`GetItem(Games, gameId)`, `event.requestContext.connectionId` equals the
+`hostConnectionId` or `guestConnectionId` of THAT item, AND that connection's
+role equals `currentTurn`. The role is derived server-side from the
+connectionId↔game binding, **never** from a client-supplied
+`role`/`player`/`connectionId`/`gameId` field. Each of these yields
+`move-rejected` with **no write**:
+- **S1a forged/foreign gameId** — a `move` whose `gameId` names a game the
+  sender's REAL connectionId is not bound to → matches neither slot → reject.
+- **S1b non-existent gameId** — `GetItem` miss → reject.
+- **S1c spectator/stale/wrong-game connection** on the sender's own game → reject.
+`gameId` selects which record to authorize against; it cannot promote the sender
+into a role its connectionId does not hold.
 
-Observed in: AC3.4, AC6.6.
+Observed in: AC3.4, AC6.6 (plus the explicit forged-gameId case S1a).
 
 ### S2 — Turn enforcement, DynamoDB unchanged on rejection [UC3, UC6]
 An out-of-turn `move` yields `move-rejected` to the sender only and a `GetItem`

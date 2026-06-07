@@ -41,12 +41,19 @@ flowchart TD
   wsfn -->|"register: conditional UpdateItem host slot"| games
   wsfn -->|"join: conditional UpdateItem to active + init board/currentTurn/version (s006)"| games
   wsfn -->|"Put/Delete connection"| conn
-  wsfn -->|"game-ready fan-out to 2 conns"| relay
+  wsfn -.->|"game-ready fan-out to 2 conns; payload now carries gameId so GUEST learns its lookup key for move (s006 AMEND 2026-06-07)"| relay
   relay -->|"game-ready / board-update / game-over"| player
 
   %% ---- s006 NEW data flow: move relay (CHANGED, dotted) ----
-  player -.->|"WS msg action=move, square (NEW)"| wsfn
-  wsfn -.->|"GetItem read current board (already-granted read)"| games
+  %% AMEND 2026-06-07: move frame carries gameId as a NON-TRUSTED LOOKUP KEY (selects
+  %% the Games item to read; NOT an identity/role claim). Authorization is the
+  %% server-side match of the REAL requestContext.connectionId vs stored host/guest
+  %% ConnectionId; forged gameId resolves a game the sender is not in -> reject, no
+  %% write. This is why NO Connections-read edge is added on the move path (S5 intact).
+  %% game-ready fan-out (line 44 / join.ts) must now also carry gameId so the GUEST
+  %% (joins by code) can supply the lookup key.
+  player -.->|"WS msg action=move, gameId(NON-TRUSTED lookup key), square (NEW)"| wsfn
+  wsfn -.->|"GetItem(Games, body.gameId) read current board (already-granted read; key is client-supplied, authz still by connectionId match)"| games
   wsfn -.->|"move: atomic conditional UpdateItem CAS on status=active AND currentTurn=senderRole AND version=expected; SET board/turn/version+1 and on terminal status=won|drawn,winner (NEW)"| games
   wsfn -.->|"accepted move = EXACTLY 2 board-update POSTs (terminal <=4); rejected = 1 move-rejected POST, 0 writes (NEW)"| relay
 

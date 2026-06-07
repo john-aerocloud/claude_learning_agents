@@ -21,13 +21,16 @@
 import { WebSocketServer, type WebSocket } from 'ws';
 import { LocalGameStore } from './adapters/local-store.ts';
 import { LocalRelay } from './adapters/local-relay.ts';
+import { LocalConnectionStore } from './adapters/local-connection-store.ts';
 import { handleLocalMove } from './move-handler.ts';
+import { handleLocalDisconnect } from './disconnect-handler.ts';
 
 const PORT = Number(process.env.LOCAL_WS_PORT ?? 8787);
 const GAME_ID = 'g-1';
 
 const store = new LocalGameStore();
 const relay = new LocalRelay();
+const connections = new LocalConnectionStore();
 
 let hostConnectionId: string | null = null;
 let guestConnectionId: string | null = null;
@@ -80,6 +83,22 @@ wss.on('connection', (ws) => {
 
     if (frame.action === 'register') {
       hostConnectionId = connectionId;
+      // Bind the Connections row (host) so $disconnect can resolve the game (S1).
+      connections.put({ connectionId, gameId: GAME_ID, role: 'host' });
+      // Seed the game in `waiting` so a host-only close is the thin-handling
+      // branch (T5: stays waiting, 0 posts) — flipped to `active` once the guest
+      // joins (startWhenReady).
+      if (!(await store.getGame(GAME_ID))) {
+        store.seed({
+          gameId: GAME_ID,
+          board: '---------',
+          currentTurn: 'X',
+          status: 'waiting',
+          version: 0,
+          moveCount: 0,
+          hostConnectionId: connectionId,
+        });
+      }
       // GATE-AMEND: carry gameId so the client threads it into its move frames.
       send(ws, { type: 'game-ready', role: 'host', gameId: GAME_ID });
       startWhenReady();
@@ -87,6 +106,7 @@ wss.on('connection', (ws) => {
     }
     if (frame.action === 'join') {
       guestConnectionId = connectionId;
+      connections.put({ connectionId, gameId: GAME_ID, role: 'guest' });
       send(ws, { type: 'game-ready', role: 'guest', gameId: GAME_ID });
       startWhenReady();
       return;
@@ -102,8 +122,16 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
-    relay.unregister(connectionId);
-    if (connectionId === hostConnectionId) hostConnectionId = null;
-    if (connectionId === guestConnectionId) guestConnectionId = null;
+    // s007 UC1-S6: drive the SAME $disconnect decision over the local adapters —
+    // abandon an active game + notify the ONE survivor (exactly 1 post), terminal/
+    // waiting → 0 (T5). Run BEFORE unregistering the OTHER connection's sink so the
+    // survivor still receives the opponent-disconnected frame.
+    void handleLocalDisconnect(connectionId, { connections, store, relay })
+      .catch((err) => console.error('[local-ws] disconnect error', err))
+      .finally(() => {
+        relay.unregister(connectionId);
+        if (connectionId === hostConnectionId) hostConnectionId = null;
+        if (connectionId === guestConnectionId) guestConnectionId = null;
+      });
   });
 });

@@ -43,6 +43,16 @@ const IP_SET_SCOPE = 'CLOUDFRONT';
 // CLOUDFRONT-scope WAF resources live in us-east-1 (AWS hard constraint).
 const IP_SET_REGION = 'us-east-1';
 
+// s007a (DEFECT-S007-001) — authorizer per-IP exemption item. The SAME add/remove
+// cycle that mutates the WAF IP set also writes/removes a self-cleaning exemption
+// item in the connect-attempts table so a runner over its per-IP $connect budget
+// is waived one layer deeper. Key namespace EXEMPT#<ip> (distinct from the
+// counter key <ip>); 1h TTL backstop (the if:always() remove is primary cleanup).
+// Home region eu-west-2 (the table is NOT in us-east-1; only the WAF set is).
+const EXEMPTION_TABLE = 'oxo-connect-attempts';
+const EXEMPTION_REGION = 'eu-west-2';
+const EXEMPTION_TTL_SECONDS = 3600;
+
 /** 4xx-class: the data entering our code is bad (caller's problem). */
 class CallerDataError extends Error {}
 /** 5xx/timeout-class: an external dependency is unavailable (fail closed). */
@@ -79,6 +89,16 @@ function mutateAddresses(command, current, cidr) {
     return current.includes(cidr) ? [...current] : [...current, cidr];
   }
   return current.filter((a) => a !== cidr);
+}
+
+/** Strip the /len so we have the bare IP the authorizer keys on (sourceIp). */
+function cidrToIp(cidr) {
+  return cidr.split('/')[0];
+}
+
+/** Namespace the IP under EXEMPT# — distinct from the counter PK (<ip>). */
+function exemptionKey(ip) {
+  return `EXEMPT#${ip}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -240,6 +260,70 @@ function runOnce(cli, { command, cidr, profile }) {
   }
 }
 
+/**
+ * s007a (DEFECT-S007-001) — write/remove the authorizer exemption item for this
+ * runner IP, mirroring the WAF add/remove. `now` is injected for deterministic
+ * tests (defaults to wall-clock seconds).
+ *   add    -> PutItem  { sourceIp: EXEMPT#<ip>, ttl: now + 3600 } — FAIL-CLOSED:
+ *             a Put failure throws ExternalUnavailableError so the caller exits
+ *             non-zero and the smoke does NOT run un-exempted.
+ *   remove -> DeleteItem { sourceIp: EXEMPT#<ip> } — BEST-EFFORT: a Delete failure
+ *             is swallowed (the if:always() remove must not fail the job) since the
+ *             1h TTL is the backstop for a leaked exemption.
+ * Issues ONLY PutItem/DeleteItem on the connect-attempts table under the EXEMPT#
+ * namespace — exactly the deploy-role ConnectExemptionWrite grant (LeadingKeys
+ * EXEMPT#*). No UpdateItem, no read, no counter key.
+ */
+function writeExemption(cli, { command, cidr, profile }, now = () => Math.floor(Date.now() / 1000)) {
+  const ip = cidrToIp(cidr);
+  const key = exemptionKey(ip);
+  if (command === 'add') {
+    const ttl = now() + EXEMPTION_TTL_SECONDS;
+    const item = JSON.stringify({ sourceIp: { S: key }, ttl: { N: String(ttl) } });
+    try {
+      cli([
+        'dynamodb',
+        'put-item',
+        '--table-name',
+        EXEMPTION_TABLE,
+        '--region',
+        EXEMPTION_REGION,
+        '--item',
+        item,
+        ...profileArgs(profile),
+      ]);
+    } catch (err) {
+      // Fail closed: an un-written exemption means the runner stays rate-blocked,
+      // which would look like smoke failures — surface it before smoke runs.
+      log('fail', { command, cidr, category: 'external-availability', op: 'exemption-put', error: err.stderr || err.message });
+      throw new ExternalUnavailableError(
+        `exemption put-item failed — failing closed: ${err.stderr || err.message}`,
+      );
+    }
+    log('exemption-ok', { command, key, ttl, category: 'success' });
+    return;
+  }
+  // remove — best-effort self-clean; TTL is the backstop.
+  const keyJson = JSON.stringify({ sourceIp: { S: key } });
+  try {
+    cli([
+      'dynamodb',
+      'delete-item',
+      '--table-name',
+      EXEMPTION_TABLE,
+      '--region',
+      EXEMPTION_REGION,
+      '--key',
+      keyJson,
+      ...profileArgs(profile),
+    ]);
+    log('exemption-ok', { command, key, category: 'success' });
+  } catch (err) {
+    // Best-effort: do NOT throw. The 1h TTL bounds any leaked exemption.
+    log('exemption-skip', { command, key, category: 'best-effort-cleanup', error: err.stderr || err.message });
+  }
+}
+
 function log(evt, fields) {
   // Structured single-line log (support runbook input).
   console.log(JSON.stringify({ evt: `waf-runner-ip-${evt}`, ...fields }));
@@ -255,7 +339,11 @@ function main(argv) {
     return;
   }
   try {
+    // WAF IP-set exclusion FIRST (the existing IMP-008 op, fail-closed on add).
     runOnce(defaultCli, args);
+    // s007a — then the authorizer per-IP exemption (same self-cleaning cycle).
+    // On add this fails closed; on remove it is best-effort (TTL backstop).
+    writeExemption(defaultCli, args);
   } catch (err) {
     const category =
       err instanceof ExternalUnavailableError
@@ -278,11 +366,17 @@ module.exports = {
   getIpSet,
   updateIpSet,
   runOnce,
+  cidrToIp,
+  exemptionKey,
+  writeExemption,
   ExternalUnavailableError,
   CallerDataError,
   IP_SET_NAME,
   IP_SET_SCOPE,
   IP_SET_REGION,
+  EXEMPTION_TABLE,
+  EXEMPTION_REGION,
+  EXEMPTION_TTL_SECONDS,
 };
 
 if (require.main === module) {

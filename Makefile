@@ -202,4 +202,13 @@ synth-infra:
 	npm --prefix $(INFRA) run cdk -- synth $(STACKS) --quiet \
 	  -c githubOrg=$(GH_ORG) -c githubRepo=$(GH_REPO)
 
-.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci test-scripts
+# s007 SHARED §11a probe (UC1+UC3): two-browser disconnect skeleton against the
+# DEPLOYED path (Playwright, two real browsers — pair, close one tab, survivor
+# sees "Your opponent disconnected." + returns to the mode selector ≤10s). NOT a
+# node probe (FALSE GREEN below CSP/transport). Skeleton-gated like move-skeleton;
+# green-in-prod requires UC1 handler (E4) + UC3 SPA (E5) deployed. Run post-deploy.
+#   make disconnect-skeleton PROD_URL=https://d3pf3kcvzpau1x.cloudfront.net
+disconnect-skeleton:
+	PROD_URL=$(PROD_URL) npm --prefix $(APP) run test:skeleton:disconnect
+
+.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci test-scripts disconnect-skeleton

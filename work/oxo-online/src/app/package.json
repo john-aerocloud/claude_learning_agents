@@ -17,7 +17,8 @@
     "local:ws": "vite-node local/server.ts",
     "local:spa": "vite --config vite.local.config.ts",
     "test:local": "playwright test --config=playwright.local.config.ts tests/local/",
-    "test:skeleton": "playwright test --config=playwright.skeleton.config.ts tests/skeleton/"
+    "test:skeleton": "playwright test --config=playwright.skeleton.config.ts tests/skeleton/",
+    "test:skeleton:disconnect": "playwright test --config=playwright.skeleton.config.ts tests/skeleton/disconnect.skeleton.spec.ts"
   },
   "dependencies": {
     "react": "^18.3.1",

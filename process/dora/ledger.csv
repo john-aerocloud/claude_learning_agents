@@ -473,3 +473,4 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T18:06:47Z,oxo-online,10,s007-disconnect,orchestrator,gate,,success,SLICE-S007-DELIVERED,delivered; documenter background; auto-retro starting
 2026-06-07T18:07:38Z,oxo-online,10,s007-disconnect,documenter,task_start,,na,,s007 disconnect: update usage.md + runbook.md
 2026-06-07T18:08:59Z,oxo-online,10,s007-disconnect,orchestrator,gate,,success,RETRO-S007,retro complete: v35, registry scored, 2 integrations, OIs updated
+2026-06-07T18:12:16Z,oxo-online,10,s007-disconnect,documenter,task_end,15,success,,"Updated usage.md (disconnect UX, reload limitation, disconnect-skeleton probe, s007 validation command) and runbook.md (disconnect flow, EXEMPT# hygiene, buildSha=unknown F1 caveat, new log events, disconnect playbook, WAF runner IP set)"

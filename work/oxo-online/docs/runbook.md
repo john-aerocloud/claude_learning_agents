@@ -218,20 +218,73 @@ Accepted move: 1 UpdateItem write + 2 POSTs (non-terminal) or 4 POSTs (terminal)
 Rejected move: 0 writes + 1 POST (move-rejected to sender only)
 ```
 
+### Disconnect flow (s007 — abandon + notify + clean)
+
+```
+API Gateway fires $disconnect event (tab close / network drop / idle 10-min timeout)
+  v
+oxo-ws-fn disconnect-handler
+  1. GetItem(Connections, event.requestContext.connectionId)
+     → resolve gameId + role (host or guest)
+     If absent (TTL-reaped or never registered): log + skip to step 5
+  2. GetItem(Games, gameId)
+     → read status, hostConnectionId, guestConnectionId
+     If absent (24h TTL-reaped): log + skip to step 5
+  3. Conditional abandon:
+     UpdateItem(Games, gameId, ConditionExpression: status = :active)
+       SET status = :abandoned
+     ConditionalCheckFailedException (status = won/drawn/waiting/abandoned already):
+       swallow, no write, skip step 4 (do not notify)
+  4. Notify survivor:
+     PostToConnection(survivorConnectionId, { type: 'opponent-disconnected' })
+     ONLY when step 3 committed (game was active → now abandoned)
+     Exactly 1 POST (amplification bound = 1 — never broadcast)
+     GoneException on POST: swallow + log (disconnect-notify posted:1 gone:1), 0 retries
+  5. DeleteItem(Connections, connectionId)  [best-effort; TTL backstop if it fails]
+
+Structured log emitted on every $disconnect:
+  { evt: "disconnect-notify", gameId, posted: 0|1, gone: 0|1, buildSha }
+  (posted=1 means opponent-disconnected was sent; gone=1 means GoneException swallowed)
+
+Idle timeout path: APIGW closes a connection idle for ≥10 minutes, firing the
+same $disconnect event → identical handler execution, same log shape.
+```
+
+<br>
+
+**Exemption mechanism (CI runner — s007a):**
+
+The authorizer per-IP budget (`oxo-connect-attempts` table) can be bypassed for
+a known CI runner IP by writing a self-cleaning exemption item. The CI deploy
+pipeline writes `PK=EXEMPT#<ip>` with `ttl=now+3600` (1h) into the
+`oxo-connect-attempts` table before the test run and removes it on exit (via
+`trap`). A 24h drain Lambda also reaps any EXEMPT# items that survive an
+abnormal exit.
+
+The exemption:
+- Waives ONLY the per-IP rate Deny (count check). It NEVER bypasses token/code
+  validation — the authorizer still requires a valid `?wsToken=` or `?code=`.
+- Is fail-closed: if the GetItem for the exemption item itself throws, the
+  authorizer proceeds as if no exemption exists.
+- Is transient and self-cleaning: items expire within 1 hour via TTL; the drain
+  Lambda removes them within 24 hours if TTL deletion is delayed.
+
 ### AWS resources
 
 | Resource | Name / ID | Notes |
 |----------|-----------|-------|
 | CloudFront distribution | d3pf3kcvzpau1x | SPA + /api/* + /config.js |
 | HTTP API (API Gateway) | via `OxoGameProd-HttpApiEndpoint` output | POST /api/games -> oxo-game-fn; response now includes wsToken |
-| WebSocket API (API Gateway) | ylbzjuo8lf, stage: prod | 5 routes ($connect/register/join/move/$disconnect); direct WSS; no CloudFront proxy |
+| WebSocket API (API Gateway) | ylbzjuo8lf, stage: prod | 5 routes ($connect/register/join/move/$disconnect — all real from s007); direct WSS; no CloudFront proxy |
 | Lambda — game | oxo-game-fn | Create-game handler; mints wsToken; DynamoDB PutItem on Games |
 | Lambda — ws authorizer | oxo-ws-auth-fn | REQUEST authorizer on $connect; verifies wsToken/code; per-IP budget; structured logs with buildSha |
-| Lambda — ws | oxo-ws-fn | connect/register/join/move/$disconnect; DynamoDB r/w Games+Connections; ManageConnections |
-| DynamoDB — games | oxo-games | PK: gameId; GSI: code-index (PK: code); 24h TTL; SSE enabled; on-demand. Active-game items carry: board (9-char string), currentTurn (X\|O), version (N, CAS), moveCount (N), winner (X\|O, terminal only), status (waiting\|active\|won\|drawn) |
+| Lambda — ws | oxo-ws-fn | connect/register/join/move/$disconnect; DynamoDB r/w Games+Connections; ManageConnections; GetItem Connections (disconnect path) |
+| DynamoDB — games | oxo-games | PK: gameId; GSI: code-index (PK: code); 24h TTL; SSE enabled; on-demand. Active-game items carry: board (9-char string), currentTurn (X\|O), version (N, CAS), moveCount (N), winner (X\|O, terminal only), status (waiting\|active\|won\|drawn\|abandoned) |
 | DynamoDB — connections | oxo-connections | PK: connectionId; 2h TTL; SSE enabled; on-demand |
 | DynamoDB — connect attempts | oxo-connect-attempts | PK: sourceIp; count (N); ttl (~5min TTL); SSE enabled; on-demand; used by authorizer for per-IP budget |
-| WAFv2 WebACL — global | oxo-online-cf-global (us-east-1) | CLOUDFRONT scope; associated to d3pf3kcvzpau1x; rate rule 100/300s/IP (Block=429); IP-rep managed group |
+| WAFv2 WebACL — global | oxo-online-cf-global (us-east-1) | CLOUDFRONT scope; associated to d3pf3kcvzpau1x; rate rule 100/300s/IP with NOT(oxo-test-runner-ips) scope-down (Block=429); IP-rep managed group |
+| WAFv2 IP set — runner | oxo-test-runner-ips (us-east-1) | CLOUDFRONT scope; entries written/removed per CI run (1h TTL + drain Lambda); waives only the rate Deny for runner IP |
+| Lambda — exemption drain | (CDK-managed, not a named output) | Periodically reaps any EXEMPT#* items from oxo-connect-attempts that were not cleaned up by the runner trap |
 | CloudFormation stacks | OxoOnlineOidcStack, OxoOnlineWafUsEast1, OxoGameProd, OxoOnlineProd | Deploy order: WafUsEast1 -> OxoGameProd -> OxoOnlineProd |
 | S3 bucket | see `WebBucketName` GH var | Versioning on; SPA + config.js |
 | Log group — game fn | /aws/lambda/oxo-game-fn | No structured categories yet (OI-18) |
@@ -254,6 +307,11 @@ The deploy pipeline does not touch Lambda code (OI-24 resolved).
 ## 3. Verification commands
 
 ```bash
+# disconnect-skeleton probe — operator's health check for the disconnect path (s007+)
+# Closes one browser tab; surviving browser must show "Your opponent disconnected."
+# and return to the mode selector. Run this to confirm the $disconnect handler is live.
+make disconnect-skeleton PROD_URL=https://d3pf3kcvzpau1x.cloudfront.net
+
 # move-skeleton probe — operator's health check for the complete game loop (s006+)
 # Drives ONE real move through the full deployed path in two real browsers (Playwright).
 # Run this FIRST to confirm the move route is live before investigating further.
@@ -302,6 +360,20 @@ aws dynamodb describe-table --table-name oxo-connect-attempts \
 # Confirm TTL is enabled on the connect-attempts table
 aws dynamodb describe-time-to-live --table-name oxo-connect-attempts \
   --query 'TimeToLiveDescription.{Status:TimeToLiveStatus,Attribute:AttributeName}'
+
+# Check for lingering EXEMPT# items in oxo-connect-attempts (should be absent outside CI runs)
+# A present item with ttl in the past is harmless (will be lazily deleted); a present item
+# with ttl in the future means a CI run is active or the trap did not clean up.
+aws dynamodb query \
+  --table-name oxo-connect-attempts \
+  --key-condition-expression "begins_with(sourceIp, :exempt)" \
+  --expression-attribute-values '{":exempt":{"S":"EXEMPT#"}}' \
+  --query 'Items[*].{sourceIp:sourceIp.S,ttl:ttl.N}'
+
+# Confirm $disconnect route exists on the WS API (s007+ — must be present and real, not stub)
+aws apigatewayv2 get-routes \
+  --api-id ylbzjuo8lf \
+  --query 'Items[?RouteKey==`$disconnect`].{RouteKey:RouteKey,RouteId:RouteId,Target:Target}'
 ```
 
 Validation run results are recorded in `process/dora/ledger.csv`
@@ -370,9 +442,13 @@ fields @timestamp, buildSha, effect
 Log group: `/aws/lambda/oxo-ws-fn`
 
 The WS handler emits structured JSON on warning and error paths. **Every
-invocation emits a `buildSha` field** — check this before any move-path
-diagnosis (see §1). Normal happy paths emit only Lambda platform
+invocation emits a `buildSha` field** — check this before any move-path or
+disconnect-path diagnosis (see §1). Normal happy paths emit only Lambda platform
 `START`/`END`/`REPORT` lines plus the buildSha line.
+
+**NOTE:** As of s007, `oxo-ws-fn` logs `buildSha="unknown"` on all routes
+including disconnect. This is a known gap (F1). Use `LastModified` from
+`aws lambda get-function` for version-identity checks on this function.
 
 ### §5a failure classification (move path)
 
@@ -386,6 +462,17 @@ diagnosis (see §1). Normal happy paths emit only Lambda platform
 | Relay GoneException (PostToConnection fails — connection already closed) | `external` / `availability` | Connection dropped (not our defect) | Benign race; the other connection still receives its POST. No action unless frequent. |
 | Lambda-level exception (unhandled throw) | `internal` | Our code defect | Check CloudWatch logs for Node.js stack trace; raise defect task. |
 
+### §5b failure classification (disconnect path — s007)
+
+| Failure category | `category` log value | Whose problem | First response |
+|-----------------|---------------------|---------------|----------------|
+| Connections GetItem: row absent (TTL-reaped or never registered) | (info — no log event, returns early) | Expected; not a defect | No action. 2h TTL is the backstop. |
+| Games GetItem: row absent (24h-TTL-reaped) | (info — no log event, returns early) | Expected; not a defect | No action. |
+| Conditional abandon: ConditionalCheckFailedException (non-active game) | (info — swallowed; no notify sent) | Expected for terminal/already-abandoned games | No action. F3 (finished games unaffected) is working. |
+| Survivor PostToConnection: GoneException (410) | logged as `disconnect-notify` with `gone:1` | Connection already closed; not our defect | Benign. Both players gone. `posted` field confirms 0 retries. |
+| DeleteItem(Connections) failure | `external-dependency` | DynamoDB dependency | The 2h TTL will reap the stale row. Check AWS Health. |
+| Lambda-level exception (unhandled throw) | `internal` | Our code defect | Check CloudWatch logs for Node.js stack trace; raise defect task. |
+
 ### Structured log event table
 
 | `event` value | Severity | `category` | `subcategory` | Meaning | Whose problem |
@@ -397,6 +484,7 @@ diagnosis (see §1). Normal happy paths emit only Lambda platform
 | `move_rejected` | WARN | `data` | — | Move rejected by server (wrong turn / square taken / post-terminal / wrong-game) | Caller (4xx-class — no state change occurred) |
 | `move_relay_gone` | WARN | `external` | `availability` | GoneException on a relay PostToConnection; other connection still notified | Connection dropped; best-effort relay; not a defect |
 | `move_store_failed` | ERROR | `external-dependency` | — | UpdateItem on Games failed after SDK retries (DDB 5xx/throttle) | Dependency; check AWS Health |
+| `disconnect-notify` | INFO | — | — | Structured log emitted on every $disconnect. Fields: `gameId`, `posted` (0 or 1 — whether opponent-disconnected was sent), `gone` (0 or 1 — whether GoneException was swallowed), `buildSha` (currently "unknown" — see §1 F1 caveat). `posted:1 gone:0` = survivor notified clean. `posted:1 gone:1` = both connections gone. `posted:0` = game was not active (terminal/waiting/abandoned). | Expected at info level on every disconnect; not an error |
 
 **oxo-game-fn has no categorised logging yet** (OI-18 open). Its log group
 (`/aws/lambda/oxo-game-fn`) contains only Lambda platform lines plus any
@@ -413,6 +501,28 @@ fields @timestamp, event, category, subcategory, closeCode
 ```
 
 Run against log group `/aws/lambda/oxo-ws-fn`.
+
+### CloudWatch Logs Insights query for disconnect events (last 1 hour)
+
+```
+fields @timestamp, gameId, posted, gone, buildSha
+| filter evt = "disconnect-notify"
+| sort @timestamp desc
+| limit 50
+```
+
+Run against log group `/aws/lambda/oxo-ws-fn`.
+
+To confirm amplification bound (OI-35 S4 pin — exactly 1 notify per active disconnect):
+```
+fields @timestamp, gameId, posted
+| filter evt = "disconnect-notify" and posted = 1
+| stats count() as notifyCount by gameId
+| filter notifyCount > 1
+```
+
+If this query returns any rows, a game received more than one opponent-disconnected
+post — raise a defect task immediately.
 
 ---
 
@@ -444,6 +554,57 @@ server-side DELETE of the connection. The frame shape is:
 ---
 
 ## 6. First-response playbook per symptom
+
+### Opponent disconnect not shown to survivor (s007+)
+
+A player reports the board froze and they never saw "Your opponent disconnected."
+
+1. **Run the disconnect-skeleton probe** — this is the first-response health
+   check for the disconnect path:
+   ```bash
+   make disconnect-skeleton PROD_URL=https://d3pf3kcvzpau1x.cloudfront.net
+   ```
+   If the probe fails, the $disconnect handler or SPA is not working correctly.
+   Proceed to step 2.
+
+2. **Check ws-fn build identity** (§1 — note `buildSha="unknown"` is expected;
+   use `LastModified` to confirm the s007 handler is deployed):
+   ```bash
+   aws lambda get-function --function-name oxo-ws-fn \
+     --query 'Configuration.{LastModified:LastModified,CodeSize:CodeSize}'
+   ```
+   Compare `LastModified` against the infra pipeline deploy time for s007.
+
+3. **Check for disconnect-notify log events** for the game in question:
+   ```bash
+   aws logs filter-log-events \
+     --log-group-name /aws/lambda/oxo-ws-fn \
+     --filter-pattern '{ $.evt = "disconnect-notify" }' \
+     --limit 20 \
+     --query 'events[*].message'
+   ```
+   - `posted:1 gone:0` — handler ran and notified the survivor. Issue is in
+     the SPA (survivor's browser did not render the message). Check SPA build SHA.
+   - `posted:1 gone:1` — handler ran, survivor was already gone too. Both
+     players lost connection simultaneously. Normal.
+   - `posted:0` — game was already in a terminal state at disconnect time
+     (won/drawn/abandoned). If the game should have been active, check the
+     Games item directly:
+     ```bash
+     aws dynamodb get-item \
+       --table-name oxo-games \
+       --key '{"gameId":{"S":"<GAME_ID>"}}'
+     ```
+   - No log line found — $disconnect event may not have fired (player tab closed
+     abruptly without graceful WS close). The 10-minute APIGW idle timeout will
+     eventually fire $disconnect. The 2h Connections TTL is the ultimate backstop.
+
+4. **Confirm the $disconnect route is wired** to oxo-ws-fn (not a stub):
+   ```bash
+   aws apigatewayv2 get-routes \
+     --api-id ylbzjuo8lf \
+     --query 'Items[?RouteKey==`$disconnect`]'
+   ```
 
 ### Players cannot pair (both reach board together — F1/SM1 broken)
 
@@ -699,6 +860,32 @@ game, and the authorizer logs show `reason=rate-limit-exceeded` for their IP.
    defect. Raise a task, check authorizer logs for exceptions. The WS connect
    will be blocked for all users until the authorizer recovers.
 
+### Checking for lingering EXEMPT# items (runner exemption hygiene — s007a)
+
+Run this to verify no CI runner exemption items are present outside of an active
+CI run. A lingering item means the runner `trap` did not fire (abnormal exit) and
+the drain Lambda has not yet reaped it.
+
+```bash
+aws dynamodb query \
+  --table-name oxo-connect-attempts \
+  --key-condition-expression "begins_with(sourceIp, :exempt)" \
+  --expression-attribute-values '{":exempt":{"S":"EXEMPT#"}}' \
+  --query 'Items[*].{sourceIp:sourceIp.S,ttl:ttl.N}'
+```
+
+**If a row is present:**
+- Check the `ttl` field against `date +%s`. If in the past, the item is
+  already logically expired; DynamoDB has not yet lazily deleted it. The
+  authorizer treats an expired EXEMPT# item as no exemption (fail-closed).
+  No action needed — DynamoDB lazy deletion or the drain Lambda will clean it
+  within 24 hours.
+- If `ttl` is in the future and no CI run is active, a runner job exited
+  abnormally without running its cleanup trap. The item is self-healing (1h TTL
+  max). No immediate action required unless the IP in question is a concern.
+- **Do NOT manually delete an EXEMPT# item** during an active CI run — doing so
+  will cause that run's smoke suite to fail with per-IP rate denies.
+
 ### POST /api/games returning 5xx
 
 1. Check `/aws/lambda/oxo-game-fn` logs for unhandled exceptions.
@@ -770,12 +957,32 @@ The `Games` table uses `RemovalPolicy.RETAIN`.
      malicious IPs. Block action returns 403. CloudFront's CustomErrorResponses
      maps 403 → 200+SPA index.html (see residual below).
   2. Rate rule (priority 1, metric: `oxo-cf-rate-limit`) — 100 requests per
-     300-second window per source IP. Block action returns **HTTP 429** (Too
-     Many Requests). 429 is NOT in the CF CustomErrorResponses list and passes
-     through to the client honestly.
+     300-second window per source IP, with a `NOT(IPSetReferenceStatement
+     oxo-test-runner-ips)` scope-down (IMP-008, s007a). Block action returns
+     **HTTP 429** (Too Many Requests). 429 is NOT in the CF CustomErrorResponses
+     list and passes through to the client honestly. The scope-down exempts only
+     IPs in `oxo-test-runner-ips`; all other IPs are still subject to the 429
+     block at the same limit.
 - Default action: Allow (legitimate traffic is never default-denied).
 - Build identity: tags `Project=oxo-online, Env=prod, ManagedBy=cdk` on the
   WebACL resource; CDK stack `OxoOnlineWafUsEast1` in us-east-1.
+
+**Runner IP set: `oxo-test-runner-ips`**
+- Scope: CLOUDFRONT; region: us-east-1
+- Entries are transient: written by the CI deploy pipeline at job start (via
+  `make waf-runner-ip-add`), removed on exit (via `make waf-runner-ip-remove`
+  in `trap`). A drain Lambda reaps any entries not removed within 24 hours.
+- This IP set is referenced ONLY in the rate rule scope-down. It does NOT affect
+  the IP-reputation managed-rule-group or any other rule.
+- Entries should be empty outside of active CI runs. To verify:
+  ```bash
+  aws wafv2 get-ip-set \
+    --name oxo-test-runner-ips \
+    --scope CLOUDFRONT \
+    --id <ip-set-id-from-list-ip-sets> \
+    --region us-east-1 \
+    --query 'IPSet.Addresses'
+  ```
 
 **WS endpoint: NO WAF**
 
@@ -898,7 +1105,10 @@ To remove the WAF ACL:
 | h2-waf/CLOSED | WAF rate-limiting on CloudFront/HTTP API (POST /api/games) | SHIPPED s005-h1-waf: oxo-online-cf-global ACL, 100 req/300s/IP, Block=429 |
 | h2-connect-auth/CLOSED | No per-game credential on $connect; no per-IP WS rate-limit | SHIPPED s005-h2: oxo-ws-auth-fn REQUEST authorizer; wsToken for host; code for guest; oxo-connect-attempts per-IP budget |
 | OR-S006-a | Near-simultaneous move CAS race → player must re-click (no auto-retry beyond one re-read) | Deliberate; bounded. Latency budget protects p95. |
-| OR-S006-b | Relay is best-effort: a dropped @connections POST is not re-pushed this slice | Authoritative board is always correct in DynamoDB. Affected client sees stale board until reload. Recovery (reconnect-replay) deferred to s007. |
+| OR-S006-b (re-worded s007) | Relay is best-effort: a dropped @connections POST is not re-pushed | Authoritative board is always correct in DynamoDB. Recovery is graceful disconnect — abandon + survivor-notify (s007). Reconnect-replay is unscheduled (candidate C6-adjacent or never; per OI-10). |
+| OR-S007-a | Connections:GetItem is a real (if minimal) grant widening — disconnect path reads Connections | Bounded to a single PK read of the disconnecting connection's own row (no Query/Scan). |
+| OR-S007-b | Survivor notify is best-effort, single attempt — a survivor on a flaky link who misses the one opponent-disconnected post is not re-notified | Their own $disconnect/2h TTL or a manual reload recovers them. No retry storm (S4). |
+| F1 (open s007) | oxo-ws-fn logs buildSha="unknown" — BUILD_SHA injection not applied to ws-fn | Cannot confirm ws-fn version from log buildSha field; use LastModified from aws lambda get-function instead (see §1). |
 
 Gaps are tracked in the project open-items register. Do not treat open items as
 alerts requiring immediate action unless noted otherwise; they are planned

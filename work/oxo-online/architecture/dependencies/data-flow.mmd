@@ -118,14 +118,11 @@ flowchart TD
   %% s008 changed mark CLEARED (2026-06-07 — tester consumed, UC3 prod validation PASS, C4 MET 2323ms).
   %% cfwaf: deep-link /join/<code> via existing SPA-fallback confirmed in prod.
 
-  %% ---- s005-h3 CHANGED marks (delta 009, OI-3 — tester plans from these) ----
-  %% codes: NEW store node — code-reservation table, PK=code, conditional PutItem
-  %%   attribute_not_exists(code) = single-item CAS storage-enforced uniqueness.
-  %%   Tester: AC-6 ConditionExpression code-policy pin (synth/source assert).
-  %% gamefn->codes: NEW reserve edge (dotted) — reserve BEFORE Games PutItem; collision => retry.
-  %%   Tester: AC-1 injection (collision => fresh code), AC-4 retry-cap=>5xx (never wrong code),
-  %%   AC-2 50-concurrent-distinct PIN (real DynamoDB; local map cannot prove atomicity),
-  %%   AC-5 IAM no-widening PIN (PutItem on Codes ARN only; assert negatives),
-  %%   AC-7 orphan-harmless (Games-write fail leaves TTL'd orphan; join unaffected).
-  %% gamefn node: create flow now reserve->retry->write; client contract {gameId,code,wsToken} UNCHANGED.
-  class codes,gamefn changed;
+  %% ---- s005-h3 CHANGED marks CLEARED (2026-06-07 — tester consumed, UC4 in-prod validation PASS, OI-3 CLOSED) ----
+  %% codes: NEW store node — delivered/stable. PK=code, CAS via conditional PutItem attribute_not_exists.
+  %% gamefn->codes: NEW reserve edge — delivered/stable. 50-concurrent SM-2 proof: distinct=50/50 p95=246ms.
+  %% gamefn node: create flow reserve->retry->write — delivered/stable. Contract {gameId,code,wsToken} UNCHANGED.
+  %% AC-5 IAM PASS: PutItem on Games+Codes ARNs; no Delete/Get/Query/Scan on Codes; no wildcard.
+  %% AC-6 ConditionExpression pin: unit-confirmed (attribute_not_exists(code)).
+  %% AC-7 orphan-harmless: Codes table has no GSI; join path uses Games code-index (unchanged).
+  %% OI-3 CLOSED: all C4 hardening done (s005-h1 WAF, s005-h2 connect-auth, s005-h3 code-uniqueness).

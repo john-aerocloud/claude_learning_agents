@@ -164,10 +164,10 @@ flowchart TD
   %% PutItem; on CodeCollision it redraws (<=5) then 5xx. The Codes table is a
   %% write-time gate ONLY — NOT on the join/lookup read path (join still uses Games
   %% code-index, unchanged). Marks are the tester's test-plan input; cleared at delivery.
-  portCodeReservation["port-code-reservation<br/>games/codes/ports.ts (UC1) — CodeReservationPort.reserve(code,gameId)<br/>throws CodeCollision on conflict. PURE: zero SDK/transport."]:::s005h3changed
-  adapterCodeReservationDdb["adapter-code-reservation-ddb<br/>games/codes/ddb-code-reservation.ts (UC1) — conditional PutItem<br/>attribute_not_exists(code) on Codes table; ConditionalCheckFailed->CodeCollision;<br/>non-collision error propagates as-is. PutItem ONLY (AC-5/AC-6 pins)."]:::s005h3changed
-  adapterLocalCodeReservation["adapter-local-code-reservation<br/>src/app/local/adapters/local-code-reservation.ts (UC1) — in-memory Map<br/>reject-branch shape only (§12a — not real CAS atomicity)"]:::s005h3changed
-  gamesCreateHandler["games-create-handler<br/>games/handler.ts (UC2) — POST /api/games: reserve(code,gameId) BEFORE<br/>Games PutItem; CodeCollision->fresh code retry (N=5); exhausted->5xx<br/>(reason:code-reservation-exhausted, buildSha); contract {gameId,code,wsToken} UNCHANGED."]:::s005h3changed
+  portCodeReservation["port-code-reservation<br/>games/codes/ports.ts (UC1) — CodeReservationPort.reserve(code,gameId)<br/>throws CodeCollision on conflict. PURE: zero SDK/transport."]:::stable
+  adapterCodeReservationDdb["adapter-code-reservation-ddb<br/>games/codes/ddb-code-reservation.ts (UC1) — conditional PutItem<br/>attribute_not_exists(code) on Codes table; ConditionalCheckFailed->CodeCollision;<br/>non-collision error propagates as-is. PutItem ONLY (AC-5/AC-6 pins)."]:::stable
+  adapterLocalCodeReservation["adapter-local-code-reservation<br/>src/app/local/adapters/local-code-reservation.ts (UC1) — in-memory Map<br/>reject-branch shape only (§12a — not real CAS atomicity)"]:::stable
+  gamesCreateHandler["games-create-handler<br/>games/handler.ts (UC2) — POST /api/games: reserve(code,gameId) BEFORE<br/>Games PutItem; CodeCollision->fresh code retry (N=5); exhausted->5xx<br/>(reason:code-reservation-exhausted, buildSha); contract {gameId,code,wsToken} UNCHANGED."]:::stable
 
   %% UC1 edges: both adapters implement the domain-defined port.
   adapterCodeReservationDdb -.->|implements| portCodeReservation
@@ -177,7 +177,10 @@ flowchart TD
   %% UC2 edge: the create handler depends on the port (reserve-before-write retry loop).
   gamesCreateHandler -->|reserve(code,gameId) before Games PutItem; retry on CodeCollision| portCodeReservation
   linkStyle 20 stroke:#6a1b9a,stroke-width:3px;
-  classDef s005h3changed fill:#fff3e0,stroke:#6a1b9a,color:#000,stroke-width:3px;
+  %% s005-h3 changed marks CLEARED (2026-06-07 — tester consumed, UC4 in-prod validation PASS, OI-3 CLOSED).
+  %% All s005h3changed nodes (portCodeReservation, adapterCodeReservationDdb, adapterLocalCodeReservation,
+  %% gamesCreateHandler) are now delivered/stable. SM-2 50-concurrent distinct=50/50 p95=246ms.
+  classDef s005h3changed fill:#e8f4e8,stroke:#2e7d32,color:#000;
 
   %% s006 changed marks CLEARED (2026-06-07 — tester consumed, UC6 prod validation PASS).
   %% All nodes were new in this first-edition; all are now delivered/stable.

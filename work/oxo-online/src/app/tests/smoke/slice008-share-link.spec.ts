@@ -58,10 +58,22 @@ import { test, expect, type Page } from '@playwright/test';
  */
 
 const PROD_URL = process.env.PROD_URL ?? 'https://d3pf3kcvzpau1x.cloudfront.net';
-// The sha deployed to OxoGameProd for s008 (build sha at first deploy).
-// Accept both the initial sha (c69140a) and the acceptance-only follow-up (1b138ed).
-const KNOWN_DEPLOYED_SHAS = ['c69140a', '1b138ed'];
-const DEPLOY_SHA = process.env.DEPLOY_SHA ?? KNOWN_DEPLOYED_SHAS[1];
+
+// OI-40 FIX (s005-h3): DYNAMIC sha comparison — compare to DEPLOY_SHA env var
+// when set (pipeline passes this), otherwise fall back to git rev-parse HEAD.
+// Prior hardcoded set ['c69140a', '1b138ed'] caused false DISTRIBUTION failures
+// on deploys after s008 (s005-h3 and later). The spec is now forward-compatible:
+// any deploy that sets DEPLOY_SHA matches; a local run uses HEAD.
+import { execFileSync as _execFileSync } from 'node:child_process';
+function _resolveExpectedSha(): string {
+  if (process.env.DEPLOY_SHA) return process.env.DEPLOY_SHA;
+  try {
+    return _execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  } catch {
+    return 'unknown';
+  }
+}
+const DEPLOY_SHA = _resolveExpectedSha();
 
 const BOGUS_CODE = 'XXXXXX';
 
@@ -105,20 +117,18 @@ test.describe('s008 share-link smoke — copy-link, deep-link, C4 done-condition
   // --------------------------------------------------------------------------
   // IDENTITY FIRST (principles/01)
   // --------------------------------------------------------------------------
-  test('identity: served build-sha matches s008 deployed sha', async ({ page }) => {
+  test('identity: served build-sha matches deployed sha (DEPLOY_SHA env / git HEAD — dynamic, OI-40)', async ({ page }) => {
     await page.goto('/');
     const servedSha = await page.locator('meta[name="build-sha"]').getAttribute('content');
-    console.log(`identity: served build-sha="${servedSha}" expected one of "${KNOWN_DEPLOYED_SHAS.join('|')}"`);
-    const matches = KNOWN_DEPLOYED_SHAS.some(
-      (expected) =>
-        servedSha === expected ||
-        (servedSha ?? '').startsWith(expected) ||
-        expected.startsWith(servedSha ?? ''),
-    );
+    console.log(`identity: served build-sha="${servedSha}" expected="${DEPLOY_SHA}"`);
+    const matches =
+      servedSha === DEPLOY_SHA ||
+      (servedSha ?? '').startsWith(DEPLOY_SHA) ||
+      DEPLOY_SHA.startsWith(servedSha ?? '');
     expect(
       matches,
-      `DISTRIBUTION: served build-sha (${servedSha}) does not match any known s008 sha ` +
-      `(${KNOWN_DEPLOYED_SHAS.join(', ')}). Stale-edge / CDN propagation — wait and retry. NOT a behavioural failure.`,
+      `DISTRIBUTION: served build-sha (${servedSha}) does not match deployed sha (${DEPLOY_SHA}). ` +
+      `This is a stale-edge / CDN propagation condition — wait and retry. NOT a behavioural failure.`,
     ).toBe(true);
   });
 

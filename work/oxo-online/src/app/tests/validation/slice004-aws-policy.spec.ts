@@ -130,7 +130,13 @@ test.describe('Slice 004 — AWS infra & security policy', () => {
     ).toBeGreaterThan(0);
   });
 
-  test('T3 — execution role grants dynamodb:PutItem on the oxo-games ARN only, no wildcard', async () => {
+  test('T3 — execution role grants dynamodb:PutItem on Games+Codes ARNs; no wildcard; no other actions (s005-h3 amended)', async () => {
+    // NOTE (s005-h3 amendment): the original T3 asserted PutItem on oxo-games ONLY.
+    // s005-h3 (delta 009, OI-3) introduced the Codes reservation table and added a
+    // scoped PutItem grant on the Codes table ARN to the same role. T3 is amended to
+    // assert: PutItem on Games+Codes ARNs (and their CDK-generated index/* CDK artifact);
+    // no other DynamoDB action; no wildcard resource. This is the correct post-s005-h3
+    // contract (validated and evidence in slice005-h3-code-uniqueness.spec.ts AC-5).
     // Discover the role at runtime (CDK appends a generated suffix; never hardcode).
     const roleArn = (
       aws(['lambda', 'get-function', '--function-name', FUNCTION]) as {
@@ -160,28 +166,49 @@ test.describe('Slice 004 — AWS infra & security policy', () => {
     const asArr = (x: string | string[]) => (Array.isArray(x) ? x : [x]);
 
     // PutItem on the Games ARN must be present.
-    // NOTE (s005 update): CDK's table.grant() automatically includes the GSI index ARN
-    // in the resource list when a GSI is added to the table. The s005 code-index GSI
-    // addition causes the PutItem grant to also reference the GSI ARN
-    // (arn:aws:dynamodb:…:table/oxo-games/index/*). This is a CDK artifact — DynamoDB
-    // ignores PutItem on GSI ARNs (PutItem only applies to base tables). The spirit of
-    // T3 (no wildcard, scoped to oxo-games only) is maintained; the assertion is updated
-    // to allow both the table ARN and its index ARN pattern.
+    // NOTE: CDK's table.grant() automatically includes the GSI index ARN in the resource
+    // list (e.g. oxo-games/index/* for the code-index GSI). This is a CDK artifact —
+    // DynamoDB ignores PutItem on GSI ARNs (PutItem only applies to base tables).
+    // s005-h3: PutItem is ALSO granted on the Codes table ARN (AC-5 pin). The allowed
+    // resource set is: oxo-games ARN, oxo-games/index/* (CDK artifact), oxo-codes ARN.
     const GAMES_INDEX_ARN_PATTERN = `${GAMES_TABLE_ARN}/index/`;
+    const CODES_TABLE_ARN = 'arn:aws:dynamodb:eu-west-2:817047731316:table/oxo-codes';
+
     const putStmts = statements.filter(
       (s) => s.Effect === 'Allow' && asArr(s.Action).includes('dynamodb:PutItem'),
     );
     expect(putStmts.length, 'role must allow dynamodb:PutItem').toBeGreaterThan(0);
+
+    // Collect all PutItem resources; must ALL be in the allowed set.
+    const allPutResources: string[] = [];
     for (const s of putStmts) {
       for (const r of asArr(s.Resource)) {
-        expect(
-          r === GAMES_TABLE_ARN || r.startsWith(GAMES_INDEX_ARN_PATTERN),
-          `PutItem resource "${r}" must be the oxo-games table ARN or its index ARN`,
-        ).toBe(true);
+        allPutResources.push(r);
       }
     }
 
+    // Must cover Games table.
+    expect(
+      allPutResources.some((r) => r === GAMES_TABLE_ARN),
+      `PutItem must cover Games table ARN (${GAMES_TABLE_ARN})`,
+    ).toBe(true);
+    // Must cover Codes table (s005-h3 AC-5 pin).
+    expect(
+      allPutResources.some((r) => r === CODES_TABLE_ARN),
+      `PutItem must cover Codes table ARN (${CODES_TABLE_ARN}) — s005-h3 AC-5 pin`,
+    ).toBe(true);
+    // Each resource must be in the permitted set (Games ARN, Games index/*, Codes ARN).
+    for (const r of allPutResources) {
+      expect(
+        r === GAMES_TABLE_ARN ||
+        r.startsWith(GAMES_INDEX_ARN_PATTERN) ||
+        r === CODES_TABLE_ARN,
+        `PutItem resource "${r}" must be Games ARN, Games index/*, or Codes ARN (s005-h3 AC-5)`,
+      ).toBe(true);
+    }
+
     // No statement may grant a wildcard dynamodb action or wildcard resource on dynamo.
+    // Only PutItem is allowed; no other dynamodb action on game-fn role.
     for (const s of statements) {
       const actions = asArr(s.Action);
       const resources = asArr(s.Resource);
@@ -191,19 +218,19 @@ test.describe('Slice 004 — AWS infra & security policy', () => {
       for (const a of actions) {
         expect(a, `no wildcard dynamodb action allowed (found "${a}")`).not.toBe('dynamodb:*');
         expect(a, `no full wildcard action allowed (found "${a}")`).not.toBe('*');
+        // Only PutItem is allowed on game-fn (it creates, never reads/updates/deletes).
+        expect(a, `game-fn must only have dynamodb:PutItem (found "${a}")`).toBe('dynamodb:PutItem');
       }
       for (const r of resources) {
+        expect(r, 'no full "*" resource allowed on a dynamodb-touching statement').not.toBe('*');
         if (r.includes(':dynamodb:')) {
           expect(r, `no wildcard dynamodb resource allowed (found "${r}")`).not.toContain('table/*');
-          // Resource must be either the oxo-games table ARN or its index ARN (no other tables).
-          expect(
-            r === GAMES_TABLE_ARN || r.startsWith(GAMES_INDEX_ARN_PATTERN),
-            `dynamodb resource "${r}" must be the oxo-games ARN or its index`,
-          ).toBe(true);
         }
-        expect(r, 'no full "*" resource allowed on a dynamodb-touching statement').not.toBe('*');
       }
     }
+
+    console.log(`T3 PASS (s005-h3 amended): PutItem on Games+Codes ARNs; no wildcard; only PutItem.`);
+    console.log(`  All PutItem resources: ${JSON.stringify(allPutResources)}`);
   });
 
   test('T2 — /api/* CloudFront behaviour uses managed CachingDisabled policy', async () => {

@@ -48,11 +48,24 @@ import { test, expect, type Page } from '@playwright/test';
  */
 
 const PROD_URL = process.env.PROD_URL ?? 'https://d3pf3kcvzpau1x.cloudfront.net';
-// The sha deployed to OxoOnlineProd in s007 (disconnection handling deploy).
-// Updated from s006 sha (ecd8c37) to s007 sha at s007 tester validation pass.
-// Used as the identity baseline when DEPLOY_SHA env var is absent.
-const KNOWN_DEPLOYED_SHA = 'e078ea4b744085db320aa1c9eff4d018fabc6785';
-const DEPLOY_SHA = process.env.DEPLOY_SHA ?? KNOWN_DEPLOYED_SHA;
+
+// OI-40 FIX (s005-h3): DYNAMIC sha comparison — compare to DEPLOY_SHA env var
+// when set (pipeline passes this), otherwise fall back to git rev-parse HEAD so
+// the spec never fails on a NEW deploy just because it was written against an
+// old hardcoded sha. This makes the identity gate forward-compatible: any
+// deploy that sets DEPLOY_SHA (the pipeline's current sha) will match; a local
+// run with no DEPLOY_SHA matches whatever HEAD is in the repo at run time.
+// Prior hardcoded value (e078ea4b) caused false DISTRIBUTION failures after s008.
+import { execFileSync as _execFileSync } from 'node:child_process';
+function _resolveExpectedSha(): string {
+  if (process.env.DEPLOY_SHA) return process.env.DEPLOY_SHA;
+  try {
+    return _execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  } catch {
+    return 'unknown';
+  }
+}
+const DEPLOY_SHA = _resolveExpectedSha();
 
 const WS_PAIR_TIMEOUT = 8000;
 const RELAY_TIMEOUT = 5000;
@@ -116,7 +129,7 @@ test.describe('s006 — move relay + server-authoritative play (UC6 prod validat
   // Reads meta[name="build-sha"] from the served SPA and compares to DEPLOY_SHA.
   // On mismatch: categorised as DISTRIBUTION condition, not behavioural failure.
   // --------------------------------------------------------------------------
-  test('identity: served build-sha matches deployed sha (e078ea4b — s007)', async ({ page }) => {
+  test('identity: served build-sha matches deployed sha (DEPLOY_SHA env / git HEAD — dynamic, OI-40)', async ({ page }) => {
     await page.goto('/');
     const servedSha = await page.locator('meta[name="build-sha"]').getAttribute('content');
     console.log(`identity: served build-sha="${servedSha}" expected="${DEPLOY_SHA}"`);

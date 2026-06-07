@@ -59,9 +59,21 @@ import { execFileSync } from 'node:child_process';
  */
 
 const PROD_URL = process.env.PROD_URL ?? 'https://d3pf3kcvzpau1x.cloudfront.net';
-// The sha deployed to OxoGameProd in s007.
-const KNOWN_DEPLOYED_SHA = 'e078ea4b744085db320aa1c9eff4d018fabc6785';
-const DEPLOY_SHA = process.env.DEPLOY_SHA ?? KNOWN_DEPLOYED_SHA;
+
+// OI-40 FIX (s005-h3): DYNAMIC sha comparison — compare to DEPLOY_SHA env var
+// when set (pipeline passes this), otherwise fall back to git rev-parse HEAD so
+// the spec never fails on a NEW deploy just because it was written against an
+// old hardcoded sha. This makes the identity gate forward-compatible.
+// Prior hardcoded value (e078ea4b) caused false DISTRIBUTION failures after s008.
+function _resolveExpectedSha(): string {
+  if (process.env.DEPLOY_SHA) return process.env.DEPLOY_SHA;
+  try {
+    return execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  } catch {
+    return 'unknown';
+  }
+}
+const DEPLOY_SHA = _resolveExpectedSha();
 
 const PROFILE = process.env.AWS_PROFILE ?? 'dev-int';
 const REGION = 'eu-west-2';
@@ -132,7 +144,7 @@ test.describe('s007 disconnect smoke — two-browser, DDB, mode-selector return'
   // IDENTITY FIRST (principles/01)
   // Reads meta[name="build-sha"] from the served SPA and compares to DEPLOY_SHA.
   // --------------------------------------------------------------------------
-  test('identity: served build-sha matches s007 deployed sha', async ({ page }) => {
+  test('identity: served build-sha matches deployed sha (DEPLOY_SHA env / git HEAD — dynamic, OI-40)', async ({ page }) => {
     await page.goto('/');
     const servedSha = await page.locator('meta[name="build-sha"]').getAttribute('content');
     console.log(`identity: served build-sha="${servedSha}" expected="${DEPLOY_SHA}"`);

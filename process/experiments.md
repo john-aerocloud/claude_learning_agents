@@ -7,6 +7,10 @@ scores rows at every retro (§26). Statuses: `active` | `validated` |
 
 **Horizon** counts SCORING OPPORTUNITIES (slices/iterations where the change
 could have shown its effect), not calendar retros. "No opportunity" extends.
+**Retirement-trials run 4–5 scoring opportunities** before "retired" may be
+concluded (human-corrected at v32: 1–2 opportunities is an anecdote, not a
+sample); an attributable metric drop reinstates early, a noisy early signal
+voids and re-queues the trial.
 
 **Grandfather rule:** agent-def content routed before v31 is not bulk-imported
 (ceremony without evidence). When a pre-existing section visibly drives — or

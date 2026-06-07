@@ -491,14 +491,23 @@ horizon, status. Statuses and lifecycle:
 4. **retirement-trial (null-hypothesis test)** — the text is physically
    REMOVED from its artifact (git + the registry row keep it recoverable; a
    removal that "feels risky" is exactly the experiment) and the system runs
-   ≥ 2 scoring opportunities without it:
-   - targeted metric DROPS → the change was load-bearing: **reinstate**, mark
-     validated-by-null-hypothesis.
-   - no drop → the text was ornament: **retired** permanently (registry row
-     records the evidence; the artifact stays simpler).
-5. At most ONE retirement-trial per agent artifact at a time, never on a rule
-   whose failure mode is a prod outage class still open elsewhere — null-
-   hypothesis tests are run where the blast radius is a metric, not a user.
+   **4–5 scoring opportunities** without it — one or two opportunities is not
+   a sample, it's an anecdote; "retired" may only be concluded on the full
+   window:
+   - targeted metric DROPS attributably → the change was load-bearing:
+     **reinstate**, mark validated-by-null-hypothesis. A clear, attributable
+     drop may trigger EARLY reinstatement before the window completes (the
+     safety valve) — but early reinstatement on a noisy signal voids the
+     trial; re-run it later rather than half-conclude.
+   - no drop across the full 4–5 opportunities → the text was ornament:
+     **retired** permanently (registry row records the evidence; the artifact
+     stays simpler).
+5. Concurrency guard (NOT a sample-size statement): at most ONE
+   retirement-trial RUNNING per agent artifact at a time — two simultaneous
+   removals from the same artifact confound attribution. Never trial a rule
+   whose failure mode is a prod outage class still open elsewhere —
+   null-hypothesis tests are run where the blast radius is a metric, not a
+   user.
 
 Scoring honesty: a change with a confounded window (multiple changes landed on
 the same metric in the same slice) is scored against its own MECHANISM

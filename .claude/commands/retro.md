@@ -27,9 +27,11 @@ Act as the **orchestrator**. Own this; gather input but make the process call.
    every `active` row that had a scoring opportunity gets a scoring note;
    horizon-reached rows with no measurable improvement move to
    `under-question` and MUST be resolved (rewrite as a new experiment, or
-   start a `retirement-trial` — physically remove the text, run ≥2 scoring
-   opportunities, reinstate on metric drop / retire permanently on no drop;
-   max one trial per artifact at a time). Agent-def simplicity is a goal:
+   start a `retirement-trial` — physically remove the text, run **4–5 scoring
+   opportunities** (1–2 is an anecdote, not a sample), reinstate on an
+   attributable metric drop / retire permanently only after no drop across
+   the full window; max one trial RUNNING per artifact at a time — a
+   confounding guard, not a sample size). Agent-def simplicity is a goal:
    text that cannot demonstrate value does not stay.
 6. **Route each change to its narrowest owner** (process §36):
    - one agent's behaviour → edit that agent's file in `.claude/agents/`

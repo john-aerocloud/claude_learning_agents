@@ -71,7 +71,7 @@ describe('OxoGameStack — Lambda oxo-game-fn (T3, T5, S3)', () => {
     template.hasResourceProperties('AWS::Lambda::Function', {
       FunctionName: 'oxo-game-fn',
       Runtime: 'nodejs20.x',
-      Handler: 'handler.handler',
+      Handler: 'games/handler.handler', // re-nested by token/ shared module (A1 5b19d90)
     });
   });
 

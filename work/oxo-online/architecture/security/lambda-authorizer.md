@@ -22,14 +22,19 @@ with its own role is the least-privilege control, not a packaging convenience.
       `oxo-game-fn` or `oxo-ws-fn`).
 - [ ] `dynamodb:GetItem`/`Query` scoped to the `Games` table ARN **and its
       `code-index` GSI ARN** only — no `Scan`. (Guest code lookup.)
-- [ ] `dynamodb:UpdateItem` + `dynamodb:PutItem` scoped to the `ConnectAttempts`
-      table ARN **only**. (Per-IP counter.)
+- [ ] `dynamodb:UpdateItem` + `dynamodb:PutItem` **+ (s007a) `dynamodb:GetItem`**
+      scoped to the `ConnectAttempts` table ARN **only**. The GetItem is ONLY the
+      runner-exemption check (see Per-IP budget below); no `Query`/`Scan`, no
+      second table. (s005-h2's "no GetItem beyond the increment" pin is AMENDED
+      by s007a/DEFECT-S007-001 to permit exactly this one GetItem on this table.)
 - [ ] Secret read scoped to the **one** shared secret ARN only — either
       `ssm:GetParameter` + `kms:Decrypt` on `/oxo-online/prod/ws-token-secret`,
       or `secretsmanager:GetSecretValue` on the one Secret ARN. No wildcard.
 - [ ] `logs:CreateLogGroup`/`CreateLogStream`/`PutLogEvents` on its own log
       group only.
 - [ ] **NO** `execute-api:ManageConnections` (or any `execute-api:*`).
+- [ ] **NO** `dynamodb:DeleteItem` anywhere (the authorizer never deletes — the
+      exemption item is written/removed by the deploy role, not the authorizer).
 - [ ] **NO** `dynamodb:UpdateItem`/`PutItem`/`DeleteItem` on `Games`.
 - [ ] **NO** access to the `Connections` table.
 - [ ] **NO** `dynamodb:*`, **NO** `iam:*`, **NO** `*:*`, no second/unrelated
@@ -75,6 +80,26 @@ with its own role is the least-privilege control, not a packaging convenience.
       and a determined attacker can rotate source IPs. This is a layered
       deterrent atop the stage throttle (20/40) + reserved concurrency, **not** a
       hard guarantee. See `dynamodb-connectattempts.md`.
+
+#### Runner exemption (s007a — DEFECT-S007-001)
+- [ ] **Post-threshold only.** The exemption is consulted ONLY when the
+      post-increment count has reached the threshold (the would-be RATE_LIMIT
+      Deny path). Under-budget connects incur **NO** extra `GetItem` — prod and
+      attacker happy/flood paths are byte-for-byte unchanged.
+- [ ] **Exempt iff a LIVE item exists.** `GetItem(sourceIp = "EXEMPT#<ip>")`; the
+      IP is exempt ONLY when the item exists AND `ttl > now` (lazy-delete defence,
+      DEFECT-H2-003 — never trust the lazy reap). A live exemption WAIVES the
+      RATE_LIMIT Deny and falls through to credential validation.
+- [ ] **Never waives validation.** An exempt IP with a bad token / unknown code
+      still Denies VALIDATION. The exemption only affects the rate gate.
+- [ ] **Negative invariant (AC3.1-equivalent for this layer):** a **non-exempt**
+      IP at/over threshold STILL Denies RATE_LIMIT. Fail-closed: any GetItem error
+      → treated as no exemption → Deny stands (an unavailable exemption store
+      never weakens the control).
+- [ ] **OR-H2-a unchanged.** Best-effort per-IP posture is intact for all
+      non-exempt IPs; the exemption parameterises one known, server-derived
+      runner IP written only by the deploy role. See `dynamodb-connectattempts.md`
+      (Runner exemption) for the item shape, writer, and TTL.
 
 ### Version identity (principles/01)
 - [ ] Every structured log line carries `buildSha` (from a CDK-injected

@@ -18,7 +18,7 @@ flowchart TD
   %% ---- WebSocket path (WSS, NOT via CloudFront) ----
   wsupgrade["WS upgrade to API Gateway WebSocket API v2<br/>GATE: NOT WAFv2-associable. Flood control = stage throttle 20/40<br/>(account/stage-level, NOT per-IP) + reserved-concurrency."]:::gate
   wsauth["$connect REQUEST authorizer = oxo-ws-auth-fn (Lambda)<br/>GATE: host wsToken XOR guest code; Allow/Deny via IAM-POLICY shape<br/>(REST-style principalId+policyDocument, NOT isAuthorized).<br/>NO result cache (WS authorizers reject AuthorizerResultTtlInSeconds - strike 4).<br/>IdentitySource OMITTED so authorizer runs UNCONDITIONALLY and does<br/>the either-or itself (listed sources are ANDed/pre-invocation-gated - strike 5, DEFECT-H2-002)."]:::gate
-  attempts[("DynamoDB ConnectAttempts<br/>sourceIp to count. TTL 5min, LAZY deletion: expired item may still be<br/>readable up to ~48h after TTL, so per-IP budget is BEST-EFFORT, not exact.<br/>SSE, on-demand.")]:::store
+  attempts[("DynamoDB ConnectAttempts<br/>sourceIp to count. TTL 5min, LAZY deletion: expired item may still be<br/>readable up to ~48h after TTL, so per-IP budget is BEST-EFFORT, not exact.<br/>SSE, on-demand.<br/>s007a EXEMPTION namespace: PK 'EXEMPT#&lt;ip&gt;', ttl=now+3600 (1h), no count.<br/>WRITTEN by oxo-deploy via waf-runner-ip.js (PutItem/DeleteItem, LeadingKeys EXEMPT#*)<br/>— SAME principal/tool as the WAF IP-set. NOT written by the authorizer.")]:::store
   wsfn["oxo-ws-fn (Lambda) — route dispatch on $request.body.action<br/>Routes: $connect / $disconnect(REAL s007) / register / join / move<br/>Validates + applies; runs ONLY after authorizer Allow.<br/>s007 $disconnect: GetItem(Connections, OWN connectionId) -> gameId; conditional<br/>UpdateItem Games status=active->abandoned (won/drawn guard); notify survivor; delete row.<br/>Idle: APIGW 10-min idle close fires the SAME $disconnect (no custom keepalive)."]:::compute
   conn[("DynamoDB Connections<br/>connectionId to gameId/role. TTL 2h, LAZY deletion (expired item lingers).<br/>SSE, on-demand.")]:::store
   games[("DynamoDB Games (+ code-index GSI)<br/>authoritative item: status, host/guestConnectionId, board, currentTurn,<br/>winner, version (optimistic-lock CAS), moveCount. TTL 24h, LAZY deletion.<br/>SSE, on-demand.")]:::store
@@ -38,6 +38,7 @@ flowchart TD
   wsauth -->|"verify wsToken"| secret
   wsauth -->|"GetItem code-index guest path"| games
   wsauth -->|"UpdateItem ADD per-IP budget"| attempts
+  wsauth -.->|"s007a GATE: ONLY on over-threshold path, GetItem(EXEMPT#&lt;ip&gt;); exempt IFF ttl&gt;now (lazy-delete defence); waives RATE_LIMIT Deny ONLY, never validation; non-exempt IP STILL Denies; GetItem error -> Deny (fail-closed)"| attempts
   wsauth -->|"Allow IAM policy"| wsupgrade
   wsupgrade -->|"AWS_PROXY invoke per message AFTER Allow"| wsfn
   wsfn -->|"register: conditional UpdateItem host slot"| games
@@ -89,4 +90,9 @@ flowchart TD
   %% games: gains active->abandoned conditional transition on $disconnect.
   %% relay: gains the 1-post survivor notify (0 on terminal/waiting).
   %% cfwaf: gains the IMP-008 oxo-test-runner-ips IP-set scope-down annotation.
-  class wsfn,conn,games,relay,cfwaf changed;
+  %% ---- s007a CHANGED marks (DEFECT-S007-001 authorizer runner-exemption) ----
+  %% wsauth: gains a post-threshold exemption GetItem (waives RATE_LIMIT Deny ONLY
+  %%   for a LIVE EXEMPT#<ip> item, ttl>now; non-exempt IP still Denies; fail-closed).
+  %% attempts: gains the EXEMPT#<ip> namespace (1h TTL), written by oxo-deploy via
+  %%   waf-runner-ip.js (PutItem/DeleteItem, LeadingKeys EXEMPT#*) — not the authorizer.
+  class wsfn,conn,games,relay,cfwaf,wsauth,attempts changed;

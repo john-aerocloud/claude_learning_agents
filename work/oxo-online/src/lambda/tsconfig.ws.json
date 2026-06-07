@@ -11,8 +11,9 @@
     "declaration": false,
     "sourceMap": false,
     "outDir": "./ws/dist",
-    "rootDir": "./ws"
+    "rootDir": "."
   },
-  "include": ["ws/**/*.ts"],
+  "comment": "oxo-ws-fn build. rootDir is the lambda root (s006) so the shared move/ DOMAIN module (move/move.ts + move/ports.ts) compiles INTO ws/dist alongside the handler and its adapters (ws/adapters/games-ddb.ts imports ../../move/ports). Because move/ is a sibling of ws/, tsc nests the handler at ws/dist/ws/handler.js and the domain at ws/dist/move/* — so the CDK handler entry for oxo-ws-fn MUST become 'ws/handler.handler' (asset path ws/dist unchanged). Mirrors the games/ tsconfig pattern (shared token/ module). FLAGGED to UC3/infra in the engineer S006-WAVE-A return — the CDK game-stack.ts ws-fn handler string change is the coupled half of this build-wiring change.",
+  "include": ["ws/**/*.ts", "move/**/*.ts"],
   "exclude": ["node_modules", "**/dist", "**/*.test.ts"]
 }

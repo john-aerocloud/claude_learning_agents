@@ -24,6 +24,14 @@ Act as the **orchestrator** for project **$1**.
      technical/security-policy conditions). Every case is tagged with its
      use case.
 
+4. **UI structure (UI-bearing slices only).** Dispatch `ui-designer` in STRUCTURE
+   mode to define navigation/IA, the click-path budget, and component
+   decomposition for the slice, and to co-author the WCAG 2.2 AA **acceptance
+   conditions** into `acceptance.md` (the UI analog of the architect's security
+   notes). Writes `slices/<nnn>-<slug>/ui-design.md` and the stable selectors the
+   engineer must expose. Skips itself (one-line return) if no use case has a
+   user-facing surface. Fold its output into GATE 3 — do not add a new gate.
+
 This planning may run in PARALLEL with a prior slice's build if the two are
 sequentially independent — confirm independence before overlapping; otherwise
 serialise. Bracket dispatches with ledger rows. End by offering

@@ -22,6 +22,12 @@ Bracket every dispatch with ledger rows; emit deploy/failure/recovery events.
    sequentially independent; flags factored out (code, then config) as part of
    each UC's done condition. A use case is done when its own acceptance cases
    pass. Repeat until all cases pass. Security notes become policy tests.
+3b. **UI polish (UI-bearing slices only).** Once the functional build is green,
+   dispatch `ui-designer` in POLISH mode to bring the built surface into line
+   with the design system by SMALL presentational edits only (tokens, spacing,
+   states, consistency) — never a redesign. Behaviour changes it finds go back
+   to `engineer` as defects. Skips itself if the slice has no UI surface. This
+   runs before the deploy gate so the tester validates the polished result.
    -> GATE 4: go/no-go to deploy. Log it.
 4. **Continuous deploy.** Merge to main triggers the pipeline to production.
 5. **Validate in prod.** Dispatch `tester` to exercise the public surface

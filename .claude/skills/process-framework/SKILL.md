@@ -27,6 +27,8 @@ at retro, into the process itself).
 | Define vision / slice | `principles/00-default-approaches.md` (JTBD+slicing); project `project.md`, `chunks.md` |
 | Architecture for a slice | the slice `slice.md`; `architecture/current.md`; `aws-architecture` skill |
 | Build a slice | `slice.md`, `acceptance.md`, `route.md`, the arch delta + security notes |
+| UI structure for a slice | the slice `slice.md`, `use-cases.md`, the arch delta, `work/<project>/design/`; `ui-design-system` skill |
+| UI polish for a slice | the slice `ui-design.md`, `work/<project>/design/`, the built UI; `ui-design-system` skill |
 | Validate a slice | `slice.md` (success measures), `acceptance.md` |
 | Retro | `dora/baseline.md`, `principle-failures/`, project `dora/per-project.md`, `process-current.md` |
 
@@ -45,4 +47,5 @@ decisions + paths.
 ## When docs get heavy
 Prefer adding a skill (see `skill-creator`) that abstracts a heavy document into a
 callable procedure, rather than letting the orchestrator hold it in context.
-`dora-ledger` and `delivery-principles` already do this.
+`dora-ledger` and `delivery-principles` already do this. The `ui-design-system` skill does the same for UI design
+method; the per-project design system lives in `/work/<project>/design/`.

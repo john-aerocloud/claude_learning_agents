@@ -24,6 +24,7 @@ orchestrator  (flow, gates, DORA, Theory of Constraints — NO product/eng calls
   ├── solution-architect  (C4 / AWS Well-Architected, arch delta, security review)
   ├── cicd                (environments-on-need, pipeline, rollback assets)
   ├── engineer            (strict TDD on trunk)
+  ├── ui-designer         (wraps engineer on UI slices: structure before, polish after; a11y)
   └── tester              (validate the deployed system through its public surface)
 ```
 
@@ -85,11 +86,14 @@ Three document sets carry it: `process-current.md` (now), `process-history/`
 - `dora-ledger` — record events + compute metrics.
 - `delivery-principles` — XP/TDD/slicing/trunk/CD/JTBD reference + the deviation
   procedure (loaded on demand, not held in context).
+- `ui-design-system` — the UI Designer's method (tokens, component-driven
+  decomposition, nav/click-reduction heuristics, WCAG 2.2 AA checklist, library
+  mapping, spec templates), loaded on demand.
 
 ## Layout
 
 ```
-.claude/agents/        orchestrator, product, solution-architect, cicd, engineer, tester
+.claude/agents/        orchestrator, product, solution-architect, cicd, engineer, ui-designer, tester, documenter
 .claude/commands/      the six workflow commands above
 .claude/skills/        process-framework, dora-ledger, delivery-principles
 process/               persistent self-state (see process/README.md)

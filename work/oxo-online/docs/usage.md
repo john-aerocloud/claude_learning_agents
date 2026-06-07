@@ -5,18 +5,17 @@
 oxo-online is a noughts and crosses (tic-tac-toe) game that runs in a web
 browser. You can play locally against another person on the same device, play
 solo against an unbeatable computer opponent, or play a complete online game
-against a friend in a separate browser in real time. Online play is now fully
-operational: moves relay between browsers via a server-authoritative Lambda,
-the server detects wins and draws, and both players see the result simultaneously.
-The board locks after game over; out-of-turn and forged moves are rejected by the
-server with no state change. If your opponent closes their tab or loses their
-connection mid-game, you see "Your opponent disconnected." within 10 seconds and
-are returned to the mode selector — no page reload needed.
+against a friend in a separate browser in real time. The full online flow is
+live: the host creates a game and clicks "Copy link" to get a URL they can send
+to a friend; the friend opens the URL and joins in one click; moves relay between
+browsers via a server-authoritative Lambda; the server detects wins and draws;
+both players see the result simultaneously; and if either player disconnects
+mid-game, the survivor is notified and returned to the mode selector within 10
+seconds. No accounts are required.
 
 **Not yet available:** reconnect after reload (a player who reloads their tab
 loses the session and must start a new game — deferred until player identity
-ships), player accounts, score tracking across sessions, and share-link URL
-pre-fill (slice 008).
+ships), player accounts, and score tracking across sessions.
 
 ---
 
@@ -73,10 +72,11 @@ The same rules apply, with these differences:
 1. Click **Play Online** on the mode selector.
 2. A loading spinner appears while the game is created on the server.
 3. Within 3 seconds a "waiting for opponent" screen appears with a prominent
-   **6-character game code** (uppercase letters and digits, no ambiguous
-   characters such as O, 0, 1, I, or L — example: `GZU3U2`).
-4. Share the code with your friend (copy and paste it manually).
-5. Wait. When your friend joins, both screens automatically transition to the
+   **6-character game code** and a **"Copy link"** button.
+4. Click **Copy link**. The URL `https://d3pf3kcvzpau1x.cloudfront.net/join/<code>`
+   is placed on your clipboard.
+5. Send the link to your friend by any means (message, email, etc.).
+6. Wait. When your friend joins, both screens automatically transition to the
    game board.
 
 **Authentication is handled automatically.** When you click Play Online, the
@@ -88,19 +88,34 @@ browser appends it to the WebSocket URL invisibly — you never see or type it.
 
 ---
 
-## Play Online — joining a game (second player)
+## Play Online — joining via share link (easiest)
 
-1. Ask the host for their 6-character game code.
-2. Click **Play Online** on the mode selector, then choose **Join a game**.
-3. Enter the 6-character code and click **Join**.
-4. Within 3 seconds both players see the game board. The host is **X**; the
-   joiner is **O**. Each player's screen shows "You are X" or "You are O".
+1. Open the link your host sent you. The URL has the form
+   `https://d3pf3kcvzpau1x.cloudfront.net/join/<code>`.
+2. The join screen opens with the 6-character code already filled in.
+3. Click **Join** (one click — no typing required).
+4. Within 3 seconds both players see the game board. The host is **X**;
+   the joiner is **O**.
+
+**If the link is stale or the code is wrong:**
+"Game not found. Check the code and try again." appears. Ask the host
+to create a new game and share a fresh link.
+
+---
+
+## Play Online — joining by typing the code (alternative)
+
+If you have the code but not the link:
+
+1. Click **Play Online** on the mode selector, then choose **Join a game**.
+2. Enter the 6-character code and click **Join**.
+3. Within 3 seconds both players see the game board.
 
 **Error messages you may see on the join screen:**
 
 | Message | Meaning |
 |---------|---------|
-| "Game not found. Check the code and try again." | The code does not match any active game. Check for typos; the host's code is 6 characters. |
+| "Game not found. Check the code and try again." | The code does not match any active game. The link may be stale or the code was mistyped. |
 | "This game is no longer available." | The game already has two players, or has ended. Ask the host to create a new game. |
 | "Something went wrong. Please try again." | An unexpected server error occurred. Try again; if it persists the service may be briefly unavailable. |
 
@@ -127,27 +142,34 @@ Once both players are on the board:
 
 ---
 
-## Example session — Play Online (full game)
+## Example session — Play Online via share link (full game, ~2.3 s total)
 
 ```
 Host clicks "Play Online"
   → spinner briefly
   → "Waiting for opponent"
-     Game code: GZU3U2
+     Game code: 5R2R4U
+     [Copy link] button
 
-Friend clicks "Play Online" → "Join a game"
-  → enters GZU3U2 → clicks Join
+Host clicks "Copy link"
+  → clipboard: https://d3pf3kcvzpau1x.cloudfront.net/join/5R2R4U
+
+Host sends that URL to friend
+
+Friend opens the URL in their browser
+  → join screen; code "5R2R4U" already filled in
+  → clicks "Join" (one click)
 
 Both screens → game board
   Host:  "You are X — X's turn"
   Guest: "You are O — X's turn"
 
-Host clicks square 4
-  → board updates on BOTH screens: X in centre
+Host clicks square 0
+  → board updates on BOTH screens: X in top-left
   → turn indicator: "O's turn"
 
-Guest clicks square 0
-  → board updates on both: O in top-left
+Guest clicks square 3
+  → board updates on both: O in middle-left
   → turn indicator: "X's turn"
 
 … game continues to win or draw …
@@ -167,8 +189,8 @@ Final move completes a row
   player identity (unscheduled).
 - **Games expire silently.** DynamoDB TTL removes games after 24 hours and
   WebSocket connections after 2 hours. There is no UI countdown or notification.
-- **Code sharing is manual.** There is no share-link URL pre-fill; copy the
-  code yourself. Share-link UX is planned for slice 008.
+  A share link for an expired game shows "Game not found. Check the code and
+  try again." — ask the host to create a new game.
 
 ---
 

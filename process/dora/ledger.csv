@@ -493,3 +493,11 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T20:37:17Z,oxo-online,11,s008-share-link,product,task_start,,na,S008-TEXT-RECONCILE,reconcile AC2.3/T4 error-text vs shipped single code-not-found message
 2026-06-07T20:37:17Z,oxo-online,11,s008-share-link,tester,task_start,,na,S008-UC3,UC3 validation + C4 done-condition SM-5
 2026-06-07T20:38:26Z,oxo-online,11,s008-share-link,product,task_end,,success,S008-TEXT-RECONCILE,Decision A: reconcile deep-link error text to shipped shared code-not-found message; OI-39 registered for future differentiation
+2026-06-07T20:41:21Z,oxo-online,11,s008-share-link,tester,task_start,,started,1b138ed:S008-UC3,"s008 UC3 validation start — plan-from-change-map, C4 done-condition"
+2026-06-07T20:50:59Z,oxo-online,11,s008-share-link,tester,validation_run,,fail,1b138ed:validation,tests/validation FAILED via make validate
+2026-06-07T20:51:33Z,oxo-online,11,s008-share-link,tester,validation_run,,success,1b138ed:s008-validation-S1-S2,S1/AC3.2 CSP byte-match PASS; S2/AC3.3 WS routes=5 no new infra PASS; 3/3 s008 validation specs green
+2026-06-07T20:55:08Z,oxo-online,11,s008-share-link,tester,validation_run,,success,1b138ed:s008-smoke,"s008 smoke 7/7 PASS: identity, AC3.1/T5, AC1.5/T3/S3, AC2.4/T1, AC2.6/T4, AC2.5/T2, AC3.4/T6/SM-5. SM-5 elapsed=2323ms. C4 done-condition MET."
+2026-06-07T20:58:32Z,oxo-online,11,s008-share-link,tester,task_end,,success,24ab651:S008-UC3,"s008 validation PASS, C4 done-condition MET (2323ms), marks cleared, committed+pushed 24ab651"
+2026-06-07T20:59:27Z,oxo-online,11,s008-share-link,orchestrator,gate,,success,SLICE-S008-DELIVERED,delivered; C4 complete; documenter background; auto-retro
+2026-06-07T21:00:13Z,oxo-online,11,s008-share-link,documenter,task_start,,na,,s008 share-link + C4 complete: update usage.md (share-link primary flow) and runbook.md (deep-link note)
+2026-06-07T21:01:02Z,oxo-online,11,s008-share-link,orchestrator,gate,,success,RETRO-S008,retro: v36, EXP-011 final-scored, registry updated, OI-40, C4 closed

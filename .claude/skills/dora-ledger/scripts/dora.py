@@ -19,7 +19,7 @@ LEDGER = os.path.join(ROOT, "process", "dora", "ledger.csv")
 BASELINE = os.path.join(ROOT, "process", "dora", "baseline.md")
 COLS = ["timestamp","project","iteration","slice","agent","event",
         "duration_s","outcome","ref","note"]
-AGENTS = ["product","solution-architect","cicd","engineer","tester","orchestrator"]
+AGENTS = ["product","solution-architect","cicd","engineer","ui-designer","tester","documenter","orchestrator"]
 
 def now_iso():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

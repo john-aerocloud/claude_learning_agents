@@ -144,6 +144,18 @@ Do NOT mask real failures with the harness:
   reproduction when a committed spec does not yet capture the symptom; the
   pinned spec is still the deliverable.)
 
+## Accessibility validation on UI slices (ui-designer hand-off)
+For any slice the `ui-designer` marked UI-bearing, the WCAG 2.2 AA conditions it
+co-authored into `acceptance.md` are first-class acceptance cases — validate them
+as committed specs (axe via Playwright + targeted assertions), never by eye:
+keyboard operability and focus order, contrast, target size, accessible
+name/role/state, labelled fields with programmatic errors. Select on the stable
+semantic identifiers the design spec defined (role+name / aria-label /
+data-testid) — they are the a11y contract and your selector in one. The
+`architecture/dependencies/component-map.mmd` is part of the change map you plan
+from: a `classDef changed` component is in your UI scope. An a11y acceptance case
+with no covering spec is a finding, same as any uncovered changed node.
+
 ## Identity before behaviour (principles/01)
 First assertion of ANY live validation: served build identity == sha under
 test (page header/meta, API header). On mismatch: bounded wait/retry, then

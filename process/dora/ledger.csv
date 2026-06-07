@@ -512,3 +512,5 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T21:22:20Z,oxo-online,12,s005-h3-code-uniqueness,solution-architect,task_end,,success,S005H3-DELTA,Codes reservation table (conditional PutItem attribute_not_exists); retry-cap 5 then 5xx; PutItem-only IAM; local port adapter; security §9a auto-accept
 2026-06-07T21:23:59Z,oxo-online,12,s005-h3-code-uniqueness,orchestrator,gate,,success,GATE-3-S005H3,arch+security auto-accepted §9a
 2026-06-07T21:23:59Z,oxo-online,12,s005-h3-code-uniqueness,product,task_start,,na,S005H3-UC,co-author use-cases.md + F-cases into acceptance.md (architect wrote T/S)
+2026-06-07T21:24:59Z,oxo-online,12,s005-h3-code-uniqueness,product,task_start,,na,S005H3-UC,co-author: use-cases + F-cases + use-case-deps.mmd
+2026-06-07T21:27:09Z,oxo-online,12,s005-h3-code-uniqueness,product,task_end,,success,S005H3-UC,use-cases.md + F-cases in acceptance.md + use-case-deps.mmd updated

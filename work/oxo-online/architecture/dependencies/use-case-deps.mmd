@@ -1,8 +1,8 @@
-%% oxo-online use-case dependency graph — updated s008 (process §12a)
+%% oxo-online use-case dependency graph — updated s005-h3 (process §12a)
 %% One node per use case / delivered behaviour. Edges = genuine behavioural dependencies only.
 %% False edges are not drawn — they cost parallelism.
-%% classDef changed marks THIS slice's (s008) new nodes.
-%% Already-live behaviours from s001–s007 are drawn as delivered context nodes.
+%% classDef changed marks THIS slice's (s005-h3) new nodes.
+%% Already-live behaviours from s001–s008 are drawn as delivered context nodes.
 %% Granularity: slice-level behaviour, not UI micro-states.
 %% Engineer routes build order from this graph; tester plans coverage from it.
 
@@ -65,8 +65,25 @@ flowchart TD
   S8UC1 -->|"copy-link control must be deployed\nbefore C4 done-condition smoke\n(AC3.4 requires share URL\nfrom the waiting screen)"| S8UC3
   S8UC2 -->|"deep-link route must be deployed\nbefore prod validation smoke\n(AC2.4/AC3.4 require live /join/:code)"| S8UC3
 
+  %% ---- s005-h3 use cases (NEW — this slice) ----
+  H3UC1["s005-h3-UC1 — CodeReservationPort\n(port + DynamoDB adapter +\nin-memory local adapter;\nCodeCollision typed throw)"]:::changed
+  H3UC2["s005-h3-UC2 — create-game integration\n(reserve-before-write +\nN=5 retry loop +\nretry-cap 500)"]:::changed
+  H3UC3["s005-h3-UC3 — Codes table infra\n(PK=code, TTL, SSE, on-demand;\nPutItem grant only;\nsynth/policy pins)"]:::changed
+  H3UC4["s005-h3-UC4 — validation\n(SM-1 injection, SM-2 50-concurrent-distinct\nreal DDB; AC-3 contract; AC-4 retry-cap;\nAC-5/6/7 IAM + policy + orphan pins)"]:::changed
+
+  %% ---- Edges: already-live context feeds s005-h3 ----
+  S004 -->|"create-game Lambda (oxo-game-fn)\nalready live; h3-UC2 adds\nreserve-before-write step"| H3UC2
+
+  %% ---- Edges: within s005-h3 ----
+  H3UC1 -->|"port interface stable before\ncreate handler is wired\n(UC2 depends on UC1 seam)"| H3UC2
+  H3UC1 -->|"UC1 port parallel to UC3\n(no behavioural dependency;\nconvenience only)"| H3UC4
+  H3UC3 -->|"Codes table + IAM grant must\nexist before UC2 deploy\n(UC3 infra parallel to UC1)"| H3UC2
+  H3UC2 -->|"create handler with reserve loop\nmust be deployed before\nprod validation plan runs"| H3UC4
+  H3UC3 -->|"synth/policy assertions\nexercisable before UC2 deploy"| H3UC4
+
   %% ---- classDef ----
   %% s008 changed marks CLEARED (2026-06-07 — tester consumed, UC3 prod validation PASS, C4 done-condition MET 2323ms).
   %% S8UC1 (copy-link), S8UC2 (deep-link), S8UC3 (validation) are now delivered.
+  %% s005-h3 nodes marked changed (2026-06-07 — product co-author iteration 12).
   classDef delivered fill:#e8f4e8,stroke:#2e7d32,color:#000;
-  classDef changed fill:#e8f4e8,stroke:#2e7d32,color:#000;
+  classDef changed fill:#fff8e1,stroke:#f57f17,color:#000;

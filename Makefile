@@ -221,4 +221,16 @@ disconnect-skeleton:
 join-skeleton:
 	PROD_URL=$(PROD_URL) npm --prefix $(APP) run test:skeleton:join
 
-.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci test-scripts disconnect-skeleton join-skeleton
+# s005-h3 §11a probe (UC2/UC3): drive the DEPLOYED create-game path and prove the
+# storage-enforced code-uniqueness invariant (delta 009, OI-3). Fires COUNT
+# concurrent POST /api/games against the deployed origin and asserts ALL returned
+# codes are DISTINCT — the proof the conditional-PutItem CAS truly guarantees
+# uniqueness under concurrency (SM-2 lite). The create surface is a backend HTTP
+# API, so the real client here is an HTTP request (no browser/CSP layer applies).
+# The tester runs the full SM-2 50-concurrent + Codes-table no-duplicate-PK scan.
+#   make uniqueness-probe API_BASE=https://d3pf3kcvzpau1x.cloudfront.net [COUNT=10]
+COUNT ?= 10
+uniqueness-probe:
+	node work/$(PROJECT)/scripts/uniqueness-probe.js --api-base $(API_BASE) --count $(COUNT)
+
+.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe

@@ -1,8 +1,8 @@
-%% oxo-online use-case dependency graph — updated s007 (process §12a)
+%% oxo-online use-case dependency graph — updated s008 (process §12a)
 %% One node per use case / delivered behaviour. Edges = genuine behavioural dependencies only.
 %% False edges are not drawn — they cost parallelism.
-%% classDef changed marks THIS slice's (s007) new nodes.
-%% Already-live behaviours from s001–s006 are drawn as delivered context nodes.
+%% classDef changed marks THIS slice's (s008) new nodes.
+%% Already-live behaviours from s001–s007 are drawn as delivered context nodes.
 %% Granularity: slice-level behaviour, not UI micro-states.
 %% Engineer routes build order from this graph; tester plans coverage from it.
 
@@ -34,11 +34,11 @@ flowchart TD
   S6UC3 -->|"move handler deployed\nbefore prod validation"| S6UC6
   S6UC4 -->|"SPA deployed (move-send,\nrender, OI-33) before\nprod validation"| S6UC6
 
-  %% ---- s007 use cases (NEW — this slice) ----
-  S7UC1["s007-UC1 — disconnect handler\n(abandon + notify survivor\n+ Connections delete)\nSHARED SEAM"]:::changed
-  S7UC2["s007-UC2 — infra\n(Connections GetItem grant\n+ IMP-008 WAF IP set\n+ drain Lambda)"]:::changed
-  S7UC3["s007-UC3 — SPA survivor UX\n(opponent-disconnected message\n+ mode-selector return\nno reload)"]:::changed
-  S7UC4["s007-UC4 — prod validation\n(two-browser disconnect smoke,\nDDB checks, S4 log pin,\nIMP-008 smoke-CI)"]:::changed
+  %% ---- s007 use cases (delivered — s007 iteration) ----
+  S7UC1["s007-UC1 — disconnect handler\n(abandon + notify survivor\n+ Connections delete)"]:::delivered
+  S7UC2["s007-UC2 — infra\n(Connections GetItem grant\n+ IMP-008 WAF IP set\n+ drain Lambda)"]:::delivered
+  S7UC3["s007-UC3 — SPA survivor UX\n(opponent-disconnected message\n+ mode-selector return\nno reload)"]:::delivered
+  S7UC4["s007-UC4 — prod validation\n(two-browser disconnect smoke,\nDDB checks, S4 log pin,\nIMP-008 smoke-CI)"]:::delivered
 
   %% ---- Edges: already-live context feeds s007 UCs ----
   S6UC3 -->|"$disconnect stub already live\nin oxo-ws-fn; s7-UC1 makes\nit real (same Lambda + WS API)"]| S7UC1
@@ -51,8 +51,20 @@ flowchart TD
   S7UC3 -->|"SPA must show opponent-disconnected\nmessage + return to mode selector\nbefore two-browser smoke passes"| S7UC4
   S7UC2 -->|"WAF IP set + drain Lambda\nmust be deployed before\nIMP-008 smoke-CI path\n(make waf-runner-ip-add targets)"| S7UC4
 
+  %% ---- s008 use cases (NEW — this slice) ----
+  S8UC1["s008-UC1 — copy-link control\n(waiting screen: copy\nhttps://domain/join/code\nto clipboard; 2s confirm)"]:::changed
+  S8UC2["s008-UC2 — deep-link route\n+ pre-fill + one-click join\n(/join/:code; invalid-code error;\nno new WS contract)"]:::changed
+  S8UC3["s008-UC3 — validation\n(manual-entry regression,\nCSP+synth pins,\nC4 done-condition smoke)"]:::changed
+
+  %% ---- Edges: already-live context feeds s008 UCs ----
+  S6UC4 -->|"SPA WS message loop + join path\nalready wired; s8-UC2 adds\n/join/:code route + pre-fill"| S8UC2
+  S7UC3 -->|"SPA updated in s007;\ns8 SPA changes are additive\n(same React app artefact)"| S8UC2
+
+  %% ---- Edges: within s008 ----
+  S8UC2 -->|"route form (/join/:code) defined\nbefore copy-link URL construction\nis finalised (serial seam —\nsame SPA files)"| S8UC1
+  S8UC1 -->|"copy-link control must be deployed\nbefore C4 done-condition smoke\n(AC3.4 requires share URL\nfrom the waiting screen)"| S8UC3
+  S8UC2 -->|"deep-link route must be deployed\nbefore prod validation smoke\n(AC2.4/AC3.4 require live /join/:code)"| S8UC3
+
   %% ---- classDef ----
   classDef delivered fill:#e8f4e8,stroke:#2e7d32,color:#000;
-  %% s007 changed marks CLEARED (2026-06-07 — tester consumed, UC4 prod validation PASS).
-  %% S7UC1/S7UC2/S7UC3/S7UC4 are now delivered/stable.
-  classDef changed fill:#e8f4e8,stroke:#2e7d32,color:#000;
+  classDef changed fill:#fff3e0,stroke:#e65100,color:#000;

@@ -501,3 +501,4 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T20:59:27Z,oxo-online,11,s008-share-link,orchestrator,gate,,success,SLICE-S008-DELIVERED,delivered; C4 complete; documenter background; auto-retro
 2026-06-07T21:00:13Z,oxo-online,11,s008-share-link,documenter,task_start,,na,,s008 share-link + C4 complete: update usage.md (share-link primary flow) and runbook.md (deep-link note)
 2026-06-07T21:01:02Z,oxo-online,11,s008-share-link,orchestrator,gate,,success,RETRO-S008,retro: v36, EXP-011 final-scored, registry updated, OI-40, C4 closed
+2026-06-07T21:02:11Z,oxo-online,11,s008-share-link,documenter,task_end,12,success,,"Updated usage.md (share-link as primary join flow, C4 complete, join-skeleton probe, stale limitation removed) and runbook.md (deep-link SPA fallback note, join-skeleton probe, Game-not-found playbook expanded, s008 infra confirmation)"

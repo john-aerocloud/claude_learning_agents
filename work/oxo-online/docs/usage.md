@@ -249,6 +249,13 @@ selector (operator probe for the disconnect handler):
 make disconnect-skeleton PROD_URL=https://d3pf3kcvzpau1x.cloudfront.net
 ```
 
+Verify the deep-link `/join/<code>` boots the SPA via CloudFront's SPA fallback
+and pre-fills the join code (operator probe for the share-link path):
+
+```bash
+make join-skeleton PROD_URL=https://d3pf3kcvzpau1x.cloudfront.net
+```
+
 ### Lambda tests
 
 ```bash
@@ -273,7 +280,7 @@ npm --prefix work/oxo-online/src/app run test:smoke
 ### Validation tests (requires AWS credentials + live stack)
 
 ```bash
-make validate ITER=10 SLICE=s007-disconnect
+make validate ITER=11 SLICE=s008-share-link
 ```
 
 ---

@@ -1,7 +1,7 @@
 # oxo-online — Support Runbook
 
 Audience: on-call engineers and support team.
-Last updated: slice s007-disconnect (iteration 10, validated 2026-06-07).
+Last updated: slice s008-share-link (iteration 11, validated 2026-06-07).
 
 ---
 
@@ -167,6 +167,9 @@ Browser
   |             CloudFront d3pf3kcvzpau1x
   |               |-- /             --> S3 (SPA bundle, index.html)
   |               |-- /config.js    --> S3 (window.OXO_CONFIG, no-cache)
+  |               |-- /join/<code>  --> S3 (SPA fallback: CF 403/404→200+index.html)
+  |               |                     React Router handles /join/:code client-side;
+  |               |                     no new CloudFront behaviour added in s008.
   |               `-- /api/*        --> HTTP API (CachingDisabled)
   |                                     POST /api/games -> oxo-game-fn
   |                                       response: {gameId, code, wsToken}
@@ -307,6 +310,11 @@ The deploy pipeline does not touch Lambda code (OI-24 resolved).
 ## 3. Verification commands
 
 ```bash
+# join-skeleton probe — operator's health check for the share-link deep-link path (s008+)
+# Opens /join/<real-code> in a fresh tab; SPA must boot (HTTP 200) with code pre-filled.
+# No new infra: relies on the existing CloudFront 403/404→index.html SPA fallback.
+make join-skeleton PROD_URL=https://d3pf3kcvzpau1x.cloudfront.net
+
 # disconnect-skeleton probe — operator's health check for the disconnect path (s007+)
 # Closes one browser tab; surviving browser must show "Your opponent disconnected."
 # and return to the mode selector. Run this to confirm the $disconnect handler is live.
@@ -626,14 +634,36 @@ A player reports the board froze and they never saw "Your opponent disconnected.
    indicate IAM drift — compare the current role policy against the security
    notes in `work/oxo-online/architecture/security/lambda-execution-roles.md`.
 
-### "Game not found" complaints
+### "Game not found" complaints (manual code or share link)
 
 Most likely causes (in order):
-1. Typographical error in the code. Codes are 6 characters, uppercase
-   letters and digits, no O/0/1/I/L. Ask the user to try again.
-2. Game TTL expired (24-hour limit). Host must create a new game.
-3. Game was already joined by someone else (code reuse is an accepted risk in
+1. Stale share link. The game code in the URL path refers to a game that has
+   ended or expired. Ask the host to create a new game and share a fresh link.
+   The error message in both the share-link and manual-join flows is the same:
+   "Game not found. Check the code and try again."
+2. Typographical error in a manually entered code. Codes are 6 characters,
+   uppercase letters and digits, no O/0/1/I/L. Ask the user to try again.
+3. Game TTL expired (24-hour limit). Host must create a new game.
+4. Game was already joined by someone else (code reuse is an accepted risk in
    s005 — see OI open items).
+
+**Deep-link SPA boot failure (share link opens blank page / 404):**
+The `/join/<code>` URL relies on the CloudFront SPA fallback (CustomErrorResponse
+403/404→200+index.html). If this fallback is absent or misconfigured, the deep
+link returns a raw S3 404. Verify:
+```bash
+aws cloudfront get-distribution-config --id E519HYABC57ZX \
+  --query 'DistributionConfig.CustomErrorResponses'
+```
+Expected: two entries mapping `ErrorCode` 403 and 404 to `ResponseCode` 200,
+`ResponsePagePath` `/index.html`. If absent, the infra pipeline (`OxoOnlineProd`
+CDK) was not deployed. Re-run the infra pipeline; no new resource is needed —
+these error responses have been present since initial SPA deploy.
+
+Run the join-skeleton probe to confirm the fallback is live:
+```bash
+make join-skeleton PROD_URL=https://d3pf3kcvzpau1x.cloudfront.net
+```
 
 Check DynamoDB directly if needed:
 ```bash

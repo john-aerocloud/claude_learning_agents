@@ -72,10 +72,12 @@ Each review emits a log line stating specs added/retired, or explicitly
 
 Current specs (all `pinned`):
 
-- `slice004-api-contract.spec.ts` — F2, T1 (response), S1, T2 (observable).
+- `slice004-api-contract.spec.ts` — F2, T1 (response), S1, T2 (observable). [s005-h2 amendment: now asserts 3 fields {gameId,code,wsToken}]
 - `slice004-aws-policy.spec.ts` — T1 (persisted), S1 (stored), T2, T3, T5.
-- `slice005-aws-policy.spec.ts` — T2+T3 (live WS pairing+DynamoDB), T5 (no-hijack), T8 (reserved concurrency+stage throttle), T9 (Connections table), S1 (ws-fn grants), S2 (ManageConnections scope), S4 (deploy role no iam:*).
+- `slice005-aws-policy.spec.ts` — T2+T3 (live WS pairing+DynamoDB), T5 (no-hijack), T8 (reserved concurrency+stage throttle), T9 (Connections table), S1 (ws-fn grants), S2 (ManageConnections scope), S4 (deploy role no iam:*). [s005-h2: passes --ws-token to ws-probe so host connects with ?wsToken= and guest with ?code=]
 - `slice005-h1-waf-ac3.1.spec.ts` — AC1.4 (WebACL listed us-east-1), AC1.5 (CF dist webAclId), DEPLOY-IDENTITY-WAF (rate rule config), AC3.1 (sustained-rate WAF block: 110 req @ 1.5s pace → >= 1 HTTP 403 + CloudWatch BlockedRequests > 0). Long-running: ~3 min. Requires PROD_URL + AWS creds (dev-int, us-east-1).
+- `slice005-h2-connect-auth.spec.ts` — T1 (REQUEST authorizer attached, AC2.10), T5 (ConnectAttempts TTL, AC2.11), T7 (wsToken mint shape AC1.1-AC1.6), T9 (buildSha in auth logs), S5 (rejection paths AC5.1-AC5.4 + AC5.5 invocations flat), AC3.3/AC4.3 (no Deny for legit connects), AC4.4 note. Requires AWS creds (dev-int, eu-west-2) + WS direct access.
+- `slice005-h2-burst.spec.ts` — AC6.1 (burst>threshold → Deny), AC6.2 (ConnectAttempts count>=threshold), AC6.4 (OR-H2-a caveat), S7. RUN LAST — exhausts per-IP budget. Requires AWS creds.
 
 ## Run-record command (provenance)
 

@@ -1,20 +1,45 @@
 # oxo-online — Support Runbook
 
 Audience: on-call engineers and support team.
-Last updated: slice s005-h2-connect-auth (iteration 8, sha 45b0aa4, validated 2026-06-07).
+Last updated: slice s006-move-relay (iteration 9, validated 2026-06-07).
 
 ---
 
 ## 1. Build identity — check this first
 
-There is **no version response header** on any surface yet (OI-25, open). To
-establish what is actually deployed before diagnosing any behaviour:
+**Before any behavioural diagnosis, verify the deployed version of every
+surface.** A version mismatch (stale SPA, stale Lambda, stale authorizer)
+explains most unexpected behaviours without further investigation.
 
-### SPA bundle hash
+### SPA build SHA (primary identifier — check this first)
+
+The SPA embeds the commit SHA at build time in `<meta name="build-sha">`.
+This is the canonical version identity for the frontend from slice s006 onward.
+
+```bash
+# Read the build-sha meta tag from the live SPA index.html
+curl -s https://d3pf3kcvzpau1x.cloudfront.net/ | grep -o 'build-sha" content="[^"]*"'
+```
+
+Expected output example:
+```
+build-sha" content="ecd8c37"
+```
+
+Compare the SHA against the expected deploy SHA (ledger `deploy` rows for
+`oxo-online`, or the `KNOWN_DEPLOYED_SHA` constant in
+`tests/smoke/slice006-move-relay.spec.ts`). A mismatch means the deploy has not
+propagated — check the GitHub Actions run for the latest push to `main` and
+wait for the CloudFront invalidation to complete.
+
+If the content is `%VITE_BUILD_SHA%` (the unreplaced placeholder), the pipeline
+did not inject the env var during build — check the `deploy-oxo-online.yml`
+"Build SPA" step.
+
+### SPA bundle hash (secondary — legacy form)
 
 ```bash
 # Fetch the SPA's index.html and extract the hashed bundle filename.
-# The hash in the filename IS the build identity for the frontend.
 curl -s https://d3pf3kcvzpau1x.cloudfront.net/ | grep -o 'assets/index-[^"]*\.js'
 ```
 
@@ -54,7 +79,26 @@ aws lambda get-function --function-name oxo-ws-auth-fn \
 ```
 
 Cross-reference `LastModified` against the infra pipeline deploy time in the
-ledger. CodeSize for `oxo-ws-fn` at slice 005 baseline is approximately 6054 bytes.
+ledger. The CodeSize of `oxo-ws-fn` increased in s006 (move handler added). If
+the CodeSize is unchanged after a deploy that should include move-handler code,
+the infra pipeline did not deploy the Lambda update — check the pipeline run.
+
+### ws-fn build identity (oxo-ws-fn move handler)
+
+From s006 onward, `oxo-ws-fn` emits a `buildSha` field on every invocation
+(including the move route). Check this before diagnosing any move-path issue:
+
+```bash
+# Fetch the most recent ws-fn log lines containing buildSha
+aws logs filter-log-events \
+  --log-group-name /aws/lambda/oxo-ws-fn \
+  --filter-pattern '{ $.buildSha = "*" }' \
+  --limit 5 \
+  --query 'events[*].message'
+```
+
+The `buildSha` value must match the expected deploy SHA. If absent, the
+deployed `oxo-ws-fn` is a pre-s006 build — the move handler is not present.
 
 ### Authorizer build identity (oxo-ws-auth-fn)
 
@@ -126,8 +170,41 @@ Browser
                         Allow -> oxo-ws-fn $connect handler
                         Deny  -> HTTP 403 upgrade (oxo-ws-fn NOT invoked)
           register   -> oxo-ws-fn
-          join       -> oxo-ws-fn
+          join       -> oxo-ws-fn (extends Games item: board="---------", currentTurn="X", version=0, moveCount=0)
+          move       -> oxo-ws-fn move-handler (server-authoritative; see move flow below)
           $disconnect -> oxo-ws-fn (stub; returns 200, no write)
+```
+
+### Move flow (s006 — server-authoritative)
+
+```
+Browser A (current player)
+  | WS frame: { action:'move', gameId, square }
+  v
+API Gateway route: 'move'
+  v
+oxo-ws-fn move-handler
+  1. Parse square from body; reject malformed (move-rejected → sender, 0 writes)
+  2. Read connectionId from event.requestContext (server-derived, never from client)
+  3. GetItem(Connections, connectionId) → look up gameId
+     GetItem(Games, gameId) → load board/currentTurn/version/status
+  4. Derive senderRole: connectionId==hostConnectionId→X, guestConnectionId→O
+     If neither: move-rejected → sender, 0 writes (S1 — wrong-game/spectator)
+  5. applyMove(board, currentTurn, square, senderRole)
+     If rejected (wrong turn, square taken, post-terminal): move-rejected → sender, 0 writes
+  6. UpdateItem(Games, ConditionExpression: status=active AND currentTurn=senderRole
+     AND version=expectedVersion)
+     SET board/currentTurn/version+1/moveCount+1 [+ status/winner if terminal]
+     If ConditionalCheckFailedException (version race): ≤1 re-read then move-rejected
+  7. On success: PostToConnection(hostConnectionId, board-update) +
+                 PostToConnection(guestConnectionId, board-update)  [2 POSTs]
+     If terminal: also PostToConnection(host, game-over) +
+                       PostToConnection(guest, game-over)           [+2 POSTs = 4 total]
+  8. GoneException on any POST: logged (best-effort), other POST proceeds
+     (no per-post retry; recovery deferred to s007)
+
+Accepted move: 1 UpdateItem write + 2 POSTs (non-terminal) or 4 POSTs (terminal)
+Rejected move: 0 writes + 1 POST (move-rejected to sender only)
 ```
 
 ### AWS resources
@@ -136,11 +213,11 @@ Browser
 |----------|-----------|-------|
 | CloudFront distribution | d3pf3kcvzpau1x | SPA + /api/* + /config.js |
 | HTTP API (API Gateway) | via `OxoGameProd-HttpApiEndpoint` output | POST /api/games -> oxo-game-fn; response now includes wsToken |
-| WebSocket API (API Gateway) | ylbzjuo8lf, stage: prod | 4 routes; direct WSS; no CloudFront proxy |
+| WebSocket API (API Gateway) | ylbzjuo8lf, stage: prod | 5 routes ($connect/register/join/move/$disconnect); direct WSS; no CloudFront proxy |
 | Lambda — game | oxo-game-fn | Create-game handler; mints wsToken; DynamoDB PutItem on Games |
 | Lambda — ws authorizer | oxo-ws-auth-fn | REQUEST authorizer on $connect; verifies wsToken/code; per-IP budget; structured logs with buildSha |
-| Lambda — ws | oxo-ws-fn | connect/register/join/$disconnect; DynamoDB r/w Games+Connections; ManageConnections |
-| DynamoDB — games | oxo-games | PK: gameId; GSI: code-index (PK: code); 24h TTL; SSE enabled; on-demand |
+| Lambda — ws | oxo-ws-fn | connect/register/join/move/$disconnect; DynamoDB r/w Games+Connections; ManageConnections |
+| DynamoDB — games | oxo-games | PK: gameId; GSI: code-index (PK: code); 24h TTL; SSE enabled; on-demand. Active-game items carry: board (9-char string), currentTurn (X\|O), version (N, CAS), moveCount (N), winner (X\|O, terminal only), status (waiting\|active\|won\|drawn) |
 | DynamoDB — connections | oxo-connections | PK: connectionId; 2h TTL; SSE enabled; on-demand |
 | DynamoDB — connect attempts | oxo-connect-attempts | PK: sourceIp; count (N); ttl (~5min TTL); SSE enabled; on-demand; used by authorizer for per-IP budget |
 | WAFv2 WebACL — global | oxo-online-cf-global (us-east-1) | CLOUDFRONT scope; associated to d3pf3kcvzpau1x; rate rule 100/300s/IP (Block=429); IP-rep managed group |
@@ -166,7 +243,13 @@ The deploy pipeline does not touch Lambda code (OI-24 resolved).
 ## 3. Verification commands
 
 ```bash
-# Smoke suite (38 tests; runs against live CloudFront URL)
+# move-skeleton probe — operator's health check for the complete game loop (s006+)
+# Drives ONE real move through the full deployed path in two real browsers (Playwright).
+# Run this FIRST to confirm the move route is live before investigating further.
+# Requires SPA deployed with move feature enabled and move route live in OxoGameProd.
+make move-skeleton PROD_URL=https://d3pf3kcvzpau1x.cloudfront.net
+
+# Smoke suite (runs against live CloudFront URL)
 make -C work/oxo-online smoke
 
 # Validation suite (18 tests; requires AWS credentials + live stack)
@@ -185,6 +268,11 @@ aws wafv2 list-tags-for-resource \
   --resource-arn "$(aws wafv2 list-web-acls --scope CLOUDFRONT --region us-east-1 \
     --query 'WebACLs[?Name==`oxo-online-cf-global`].ARN' --output text)" \
   --region us-east-1
+
+# Confirm move route exists on the WS API (s006+ — must be present)
+aws apigatewayv2 get-routes \
+  --api-id ylbzjuo8lf \
+  --query 'Items[?RouteKey==`move`].{RouteKey:RouteKey,RouteId:RouteId}'
 
 # Lambda reserved concurrency (must be 15 for oxo-ws-fn)
 aws lambda get-function-concurrency --function-name oxo-ws-fn
@@ -270,8 +358,24 @@ fields @timestamp, buildSha, effect
 
 Log group: `/aws/lambda/oxo-ws-fn`
 
-The WS handler emits structured JSON on warning and error paths. Normal happy
-path emits only Lambda platform `START`/`END`/`REPORT` lines.
+The WS handler emits structured JSON on warning and error paths. **Every
+invocation emits a `buildSha` field** — check this before any move-path
+diagnosis (see §1). Normal happy paths emit only Lambda platform
+`START`/`END`/`REPORT` lines plus the buildSha line.
+
+### §5a failure classification (move path)
+
+| Failure category | `category` log value | Whose problem | First response |
+|-----------------|---------------------|---------------|----------------|
+| Inbound: malformed square / wrong turn / square taken / post-terminal | `data` (4xx-class) | Caller (SPA bug or probe) | Check SPA version (§1). If widespread: SPA defect or replay attack. |
+| Wrong-game connection (connectionId not bound to this game) | `data` (4xx-class) | Caller | Probe or SPA sending to wrong game. No state change occurred. |
+| Version CAS race (ConditionalCheckFailedException after re-read) | `data` (4xx-class) | Caller — concurrent move; legitimate contention | Player re-clicks; self-healing. If frequent: concurrent move volume. |
+| DynamoDB 5xx / throttle (SDK backoff exhausted) | `external-dependency` | AWS dependency | Check AWS Health Dashboard. DynamoDB on-demand; throttle rare at this scale. |
+| DynamoDB 4xx on our UpdateItem (bad request) | `internal-service` | Our code defect | Raise defect task. Check the UpdateItem call shape in oxo-ws-fn. |
+| Relay GoneException (PostToConnection fails — connection already closed) | `external` / `availability` | Connection dropped (not our defect) | Benign race; the other connection still receives its POST. No action unless frequent. |
+| Lambda-level exception (unhandled throw) | `internal` | Our code defect | Check CloudWatch logs for Node.js stack trace; raise defect task. |
+
+### Structured log event table
 
 | `event` value | Severity | `category` | `subcategory` | Meaning | Whose problem |
 |---------------|----------|------------|---------------|---------|---------------|
@@ -279,6 +383,9 @@ path emits only Lambda platform `START`/`END`/`REPORT` lines.
 | `register_failed` | ERROR | `external` | — | DynamoDB call failed after SDK retries; oxo-ws-fn could not write Connections | Dependency (DynamoDB) or IAM; check AWS Health |
 | `join_host_gone` | WARN | `external` | `availability` | Guest joined but host WS connection had vanished (GoneException); guest gets 4041 | Host disconnected before join; not our code defect |
 | `ws_error_frame_post_failed` | WARN | `external` | — | Could not POST error frame to client (already gone); DELETE still attempted | Connection already closed; benign race |
+| `move_rejected` | WARN | `data` | — | Move rejected by server (wrong turn / square taken / post-terminal / wrong-game) | Caller (4xx-class — no state change occurred) |
+| `move_relay_gone` | WARN | `external` | `availability` | GoneException on a relay PostToConnection; other connection still notified | Connection dropped; best-effort relay; not a defect |
+| `move_store_failed` | ERROR | `external-dependency` | — | UpdateItem on Games failed after SDK retries (DDB 5xx/throttle) | Dependency; check AWS Health |
 
 **oxo-game-fn has no categorised logging yet** (OI-18 open). Its log group
 (`/aws/lambda/oxo-game-fn`) contains only Lambda platform lines plus any
@@ -366,13 +473,79 @@ aws dynamodb query \
   --expression-attribute-values '{":code":{"S":"<CODE>"}}'
 ```
 
+### Moves not relaying / board not updating for opponent
+
+Players are paired and see the board, but clicking squares has no effect on
+the opponent's board:
+
+1. **Check build identity first (§1).** Read the SPA `<meta name="build-sha">`
+   and compare to the expected deploy SHA. A stale SPA (pre-s006) does not send
+   `action:'move'` WS frames. Ask the user to hard-refresh if mismatched.
+
+2. **Run the move-skeleton probe.** This drives one real move through the full
+   deployed path in two real browsers — it is the operator's health check for
+   the complete game loop:
+   ```bash
+   make move-skeleton PROD_URL=https://d3pf3kcvzpau1x.cloudfront.net
+   ```
+   If the probe fails but pairing succeeds, the move route or ws-fn is at fault
+   (not the $connect/authorizer path).
+
+3. **Check for `move_rejected` or `move_store_failed` in ws-fn logs:**
+   ```
+   fields @timestamp, buildSha, event, category
+   | filter ispresent(event) and (event = "move_rejected" or event = "move_store_failed")
+   | sort @timestamp desc
+   | limit 50
+   ```
+   Run against `/aws/lambda/oxo-ws-fn`.
+   - `move_rejected` with `category=data` is expected for wrong-turn or
+     post-game-over attempts; not a defect.
+   - `move_store_failed` with `category=external-dependency` indicates a DynamoDB
+     availability problem — check AWS Health Dashboard.
+
+4. **Confirm the `move` route key exists on the WS API:**
+   ```bash
+   aws apigatewayv2 get-routes \
+     --api-id ylbzjuo8lf \
+     --query 'Items[?RouteKey==`move`]'
+   ```
+   If the `move` route is absent, the infra pipeline did not deploy the s006
+   CDK change. Re-run the infra pipeline.
+
+5. **Check the Games item schema.** An active game post-join must have
+   `board`, `currentTurn`, `version`, `moveCount` fields (set by the join
+   conditional write). If these are absent the first move will be rejected:
+   ```bash
+   aws dynamodb get-item \
+     --table-name oxo-games \
+     --key '{"gameId":{"S":"<GAME_ID>"}}'
+   ```
+   Expected fields: `status=active`, `board="---------"` (or updated), `version`
+   (N), `moveCount` (N), `currentTurn` (X or O).
+
+### Move rejected unexpectedly (player on correct turn, square free)
+
+1. Check the Games item `currentTurn` and `version` fields directly (see DynamoDB
+   query above). A version CAS race is benign — the player re-clicks. If the
+   `currentTurn` does not match what both screens show, there may be a relay
+   divergence — check `move_relay_gone` log events (relay failure on one side).
+2. If `status=won` or `status=drawn` and both clients show an active game,
+   the `game-over` message was not received by one browser (relay GoneException
+   at game end). The authoritative state is in DynamoDB; the board display is
+   stale. The affected player must reload and start a new game (no reconnect until
+   s007).
+
 ### Stale-page / wrong-bundle behaviour
 
-No version response header exists yet (OI-25). To check whether the browser
-has an old bundle:
+To check whether the browser has an old bundle, use the primary identity check
+from §1:
 
 ```bash
-# What the CDN currently serves
+# Primary: read build-sha meta tag
+curl -s https://d3pf3kcvzpau1x.cloudfront.net/ | grep -o 'build-sha" content="[^"]*"'
+
+# Secondary: hashed bundle filename
 curl -s https://d3pf3kcvzpau1x.cloudfront.net/ | grep -o 'assets/index-[^"]*\.js'
 
 # Check if CloudFront has a pending invalidation
@@ -381,10 +554,10 @@ aws cloudfront list-invalidations \
   --query 'InvalidationList.Items[0]'
 ```
 
-If a deploy ran recently and the bundle hash has not changed on CloudFront,
-the CF invalidation may still be propagating (the pipeline now waits for
-completion, but propagation can take a few minutes globally). Ask the user to
-hard-refresh (Ctrl+Shift+R / Cmd+Shift+R).
+If a deploy ran recently and the build-sha or bundle hash has not changed on
+CloudFront, the CF invalidation may still be propagating (the pipeline waits
+for completion, but propagation can take a few minutes globally). Ask the user
+to hard-refresh (Ctrl+Shift+R / Cmd+Shift+R).
 
 ### Client receives HTTP 429 from POST /api/games
 
@@ -713,7 +886,8 @@ To remove the WAF ACL:
 | OR-H2-a | Per-IP WS connect budget is best-effort: IP-cycling bypasses counter; layered with stage throttle 20/40 + reserved concurrency 15 | A determined attacker cycling IPs bypasses the per-IP deterrent. Reversal path: CloudFront-front WS with edge WAF. |
 | h2-waf/CLOSED | WAF rate-limiting on CloudFront/HTTP API (POST /api/games) | SHIPPED s005-h1-waf: oxo-online-cf-global ACL, 100 req/300s/IP, Block=429 |
 | h2-connect-auth/CLOSED | No per-game credential on $connect; no per-IP WS rate-limit | SHIPPED s005-h2: oxo-ws-auth-fn REQUEST authorizer; wsToken for host; code for guest; oxo-connect-attempts per-IP budget |
-| h3 | No server-authoritative move validation | Not yet relevant (moves do not relay until s006) |
+| OR-S006-a | Near-simultaneous move CAS race → player must re-click (no auto-retry beyond one re-read) | Deliberate; bounded. Latency budget protects p95. |
+| OR-S006-b | Relay is best-effort: a dropped @connections POST is not re-pushed this slice | Authoritative board is always correct in DynamoDB. Affected client sees stale board until reload. Recovery (reconnect-replay) deferred to s007. |
 
 Gaps are tracked in the project open-items register. Do not treat open items as
 alerts requiring immediate action unless noted otherwise; they are planned

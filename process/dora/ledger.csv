@@ -415,3 +415,5 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T14:41:35Z,oxo-online,9,s006-move-relay,tester,task_end,3120,success,S006-UC6,"UC6 prod validation PASS: 18/18 ACs verified (8/8 smoke + 4/4 validation s006-only, workers=1). p95 latency=308ms<1s. Identity=ecd8c37. Marks cleared. EXP-005 MET."
 2026-06-07T14:43:18Z,oxo-online,9,s006-move-relay,orchestrator,gate,,success,SLICE-S006-DELIVERED,delivered; documenter dispatched background; auto-retro starting
 2026-06-07T14:45:06Z,oxo-online,9,s006-move-relay,orchestrator,gate,,success,RETRO-S006,slice retro: 2 newly validated, registry scored, OIs updated, integration pass dispatched
+2026-06-07T14:45:13Z,oxo-online,9,s006-move-relay,documenter,task_start,,na,0c08026:docs,s006 usage+runbook update start
+2026-06-07T14:49:17Z,oxo-online,9,s006-move-relay,documenter,task_end,,success,f339295:docs,usage.md + runbook.md updated for s006 online play complete

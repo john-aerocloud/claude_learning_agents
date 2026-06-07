@@ -303,6 +303,45 @@ describe('OxoOnlineOidcStack — oxo-deploy IMP-008 IPSet management grant (s007
   });
 });
 
+// ===========================================================================
+// s007 UC2-S4 CI wire — WafRunnerIpExclusion statement (smoke-time runner-IP
+// exclusion). Narrowest grant: Get/Update/List scoped to the specific IP set
+// ARN, never '*'. CreateIPSet/DeleteIPSet remain in Ipv2IpSetManage for CDK.
+// §39 code<->policy pin: this test locks the ARN scope so it cannot silently
+// widen to '*'.
+// ===========================================================================
+
+describe('OxoOnlineOidcStack — WafRunnerIpExclusion statement (s007 UC2-S4 CI wire)', () => {
+  it('grants only ListIPSets + GetIPSet + UpdateIPSet — not Create/Delete — scoped to oxo-test-runner-ips ARN', () => {
+    const statements = deployRoleStatements(synth());
+    const exclusionStmts = statements.filter(
+      (s) => (s.Sid as string | undefined) === 'WafRunnerIpExclusion',
+    );
+    expect(exclusionStmts.length).toBe(1);
+    const stmt = exclusionStmts[0];
+    const actions = new Set(actionsOf(stmt));
+    // Must include the three smoke-time operations.
+    expect(actions.has('wafv2:ListIPSets')).toBe(true);
+    expect(actions.has('wafv2:GetIPSet')).toBe(true);
+    expect(actions.has('wafv2:UpdateIPSet')).toBe(true);
+    // Must NOT include create/delete (CDK ownership stays in Ipv2IpSetManage).
+    expect(actions.has('wafv2:CreateIPSet')).toBe(false);
+    expect(actions.has('wafv2:DeleteIPSet')).toBe(false);
+    // Resource must be scoped to the specific IP set ARN — never '*'.
+    const resources = resourcesOf(stmt);
+    expect(resources).toHaveLength(1);
+    const arn = resources[0];
+    expect(typeof arn === 'string' || (typeof arn === 'object' && arn !== null)).toBe(true);
+    // The ARN must reference the oxo-test-runner-ips name in us-east-1 global scope.
+    const arnStr = JSON.stringify(arn);
+    expect(arnStr).toContain('oxo-test-runner-ips');
+    expect(arnStr).toContain('us-east-1');
+    expect(arnStr).toContain('global/ipset');
+    // Must not be a bare wildcard.
+    expect(resources[0]).not.toBe('*');
+  });
+});
+
 describe('OxoOnlineOidcStack — no IAM escalation alongside the WAF grants (code<->policy pin)', () => {
   it('still grants none of iam:CreateRole / iam:AttachRolePolicy / iam:PutRolePolicy after the WAF additions', () => {
     const statements = deployRoleStatements(synth());

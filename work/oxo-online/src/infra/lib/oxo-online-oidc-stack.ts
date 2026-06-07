@@ -274,6 +274,32 @@ export class OxoOnlineOidcStack extends cdk.Stack {
       }),
     );
 
+    // IMP-008 smoke-time runner-IP exclusion (s007 UC2-S4 CI wire).
+    // The deploy workflow detects the runner IP, adds it to oxo-test-runner-ips
+    // before the smoke step, and removes it after (if: always()).
+    // Narrowest possible grant: only Get/Update/List on the specific IP set ARN.
+    // CreateIPSet/DeleteIPSet remain in Ipv2IpSetManage (CDK stack ownership).
+    // §39: this statement is deployed via `make deploy-oidc` BEFORE the workflow
+    // change that exercises it (trunk-CD prerequisite timing).
+    deployRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'WafRunnerIpExclusion',
+        effect: iam.Effect.ALLOW,
+        actions: [
+          'wafv2:ListIPSets',
+          'wafv2:GetIPSet',
+          'wafv2:UpdateIPSet',
+        ],
+        // CLOUDFRONT-scope WAFv2 resources are global resources in us-east-1.
+        // The ARN uses the pattern: arn:aws:wafv2:<region>:<account>:global/ipset/<name>/<id>
+        // The Id is a UUID assigned at create time; we use /* to cover the create-
+        // assigned Id without hard-coding it (the name is the stable identity).
+        resources: [
+          `arn:aws:wafv2:us-east-1:${this.account}:global/ipset/oxo-test-runner-ips/*`,
+        ],
+      }),
+    );
+
     // CloudFront distribution update — to set the distribution webAclId from the
     // cross-region global WebACL ARN (s005-h1-waf). Scoped to the existing
     // distribution ARN; NOT cloudfront:* and NOT Create/DeleteDistribution

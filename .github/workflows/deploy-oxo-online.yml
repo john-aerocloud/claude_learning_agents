@@ -262,14 +262,21 @@ jobs:
             --cache-control "no-cache, no-store, must-revalidate" \
             --content-type "application/javascript"
 
-      - name: Record DORA deploy event
+      - name: Record DORA s3-deploy event
         run: |
           python3 .claude/skills/dora-ledger/scripts/dora.py record \
-            --project oxo-online --iteration 9 --slice s006-move-relay \
+            --project oxo-online --iteration 10 --slice s007-disconnect \
             --agent cicd --event deploy --outcome success \
             --ref "${{ github.sha }}" \
-            --note "Automated deploy via GitHub Actions run ${{ github.run_id }}"
+            --note "S3+CF deploy via GitHub Actions run ${{ github.run_id }}"
         continue-on-error: true
+
+      - name: Set up Node 22 (smoke)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: work/oxo-online/src/app/package-lock.json
 
       - name: Install app dependencies
         working-directory: work/oxo-online/src/app
@@ -278,6 +285,28 @@ jobs:
       - name: Install Playwright
         working-directory: work/oxo-online/src/app
         run: npx playwright install --with-deps chromium
+
+      # -----------------------------------------------------------------------
+      # IMP-008 runner-IP exclusion (s007 UC2-S4 CI wire).
+      # Detect the runner's public IP and add it to the oxo-test-runner-ips WAF
+      # IP set so the CloudFront rate rule's NOT() scope-down lets CI smoke
+      # traffic through without hitting the 100-req/5-min limit.
+      # The remove step uses `if: always()` (trap semantics) so the IP is
+      # cleaned up even if the smoke step fails.
+      # The script uses --region us-east-1 internally (CLOUDFRONT WAF scope is
+      # a hard AWS requirement); the job's default region (eu-west-2) does not
+      # affect it. Fail-closed: non-zero exit aborts the job before smoke runs
+      # (prevents false smoke failures that look like code bugs).
+      # -----------------------------------------------------------------------
+      - name: Detect runner IP
+        id: runner-ip
+        run: |
+          IP=$(curl -sf https://checkip.amazonaws.com)
+          echo "cidr=${IP}/32" >> "$GITHUB_OUTPUT"
+          echo "Runner IP: ${IP}/32"
+
+      - name: Add runner IP to WAF exclusion set
+        run: node work/oxo-online/scripts/waf-runner-ip.js add ${{ steps.runner-ip.outputs.cidr }}
 
       - name: Smoke test — prod URL
         # OI-25: DEPLOY_SHA passed so shell.spec.ts can gate on
@@ -291,11 +320,25 @@ jobs:
           PROD_URL: ${{ vars.OXO_ONLINE_PROD_URL }}
           DEPLOY_SHA: ${{ github.sha }}
 
+      - name: Remove runner IP from WAF exclusion set
+        if: always()
+        run: node work/oxo-online/scripts/waf-runner-ip.js remove ${{ steps.runner-ip.outputs.cidr }}
+
+      - name: Record DORA deploy event (s007)
+        if: success()
+        run: |
+          python3 .claude/skills/dora-ledger/scripts/dora.py record \
+            --project oxo-online --iteration 10 --slice s007-disconnect \
+            --agent cicd --event deploy --outcome success \
+            --ref "${{ github.sha }}" \
+            --note "Automated deploy via GitHub Actions run ${{ github.run_id }}"
+        continue-on-error: true
+
       - name: Record DORA failure event
         if: failure()
         run: |
           python3 .claude/skills/dora-ledger/scripts/dora.py record \
-            --project oxo-online --iteration 9 --slice s006-move-relay \
+            --project oxo-online --iteration 10 --slice s007-disconnect \
             --agent cicd --event failure --outcome fail \
             --ref "${{ github.sha }}" \
             --note "Deploy or smoke test failed — run ${{ github.run_id }}"

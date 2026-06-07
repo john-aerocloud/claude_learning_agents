@@ -342,6 +342,59 @@ describe('OxoOnlineOidcStack — WafRunnerIpExclusion statement (s007 UC2-S4 CI 
   });
 });
 
+// ===========================================================================
+// s007a (DEFECT-S007-001) — ConnectExemptionWrite statement. The deploy role
+// gains EXACTLY dynamodb:PutItem + dynamodb:DeleteItem on the
+// oxo-connect-attempts table ARN, conditioned dynamodb:LeadingKeys = ["EXEMPT#*"]
+// so it can write ONLY the exemption namespace, never counter items. No
+// UpdateItem, no GetItem/Query/Scan, no second table, no '*'. §39
+// config-follows-resource: deployed via `make deploy-oidc` BEFORE the workflow
+// add/remove path exercises it, exactly as WafRunnerIpExclusion was. code<->policy
+// pin per process v25 §30: this test locks the action set + namespace condition
+// so they cannot silently widen.
+// ===========================================================================
+
+describe('OxoOnlineOidcStack — ConnectExemptionWrite statement (s007a, DEFECT-S007-001)', () => {
+  it('grants exactly PutItem + DeleteItem on oxo-connect-attempts ARN — no UpdateItem/Get/Query/Scan, no *', () => {
+    const statements = deployRoleStatements(synth());
+    const exemptStmts = statements.filter(
+      (s) => (s.Sid as string | undefined) === 'ConnectExemptionWrite',
+    );
+    expect(exemptStmts.length).toBe(1);
+    const stmt = exemptStmts[0];
+    const actions = new Set(actionsOf(stmt));
+    expect([...actions].sort()).toEqual(['dynamodb:DeleteItem', 'dynamodb:PutItem']);
+    // No counter-mutation, no read, no wildcard creep.
+    expect(actions.has('dynamodb:UpdateItem')).toBe(false);
+    expect(actions.has('dynamodb:GetItem')).toBe(false);
+    expect(actions.has('dynamodb:Query')).toBe(false);
+    expect(actions.has('dynamodb:Scan')).toBe(false);
+    expect(actions.has('dynamodb:*')).toBe(false);
+    // Resource scoped to the connect-attempts table ARN only — never '*',
+    // never the Games table.
+    const resources = resourcesOf(stmt);
+    expect(resources).toHaveLength(1);
+    expect(resources[0]).not.toBe('*');
+    const arnStr = JSON.stringify(resources[0]);
+    expect(arnStr).toContain('oxo-connect-attempts');
+    expect(arnStr).not.toContain('oxo-games');
+  });
+
+  it('pins the write to the EXEMPT# namespace via dynamodb:LeadingKeys condition (cannot write counter items)', () => {
+    const statements = deployRoleStatements(synth());
+    const stmt = statements.find(
+      (s) => (s.Sid as string | undefined) === 'ConnectExemptionWrite',
+    )!;
+    const condition = stmt.Condition as
+      | { [op: string]: { [key: string]: unknown } }
+      | undefined;
+    expect(condition, 'ConnectExemptionWrite must carry a request-key condition').toBeDefined();
+    const condStr = JSON.stringify(condition);
+    expect(condStr).toContain('dynamodb:LeadingKeys');
+    expect(condStr).toContain('EXEMPT#');
+  });
+});
+
 describe('OxoOnlineOidcStack — no IAM escalation alongside the WAF grants (code<->policy pin)', () => {
   it('still grants none of iam:CreateRole / iam:AttachRolePolicy / iam:PutRolePolicy after the WAF additions', () => {
     const statements = deployRoleStatements(synth());

@@ -300,6 +300,34 @@ export class OxoOnlineOidcStack extends cdk.Stack {
       }),
     );
 
+    // s007a (DEFECT-S007-001) — ConnectExemptionWrite. The deploy/runner path
+    // writes a per-run, self-cleaning exemption item into oxo-connect-attempts
+    // under the reserved EXEMPT#<runnerIp> namespace (via scripts/waf-runner-ip.js,
+    // mirroring the WAF IP-set add/remove), so the $connect authorizer waives the
+    // per-IP RATE_LIMIT Deny for the one server-derived runner IP. EXACTLY
+    // PutItem + DeleteItem on the table ARN, conditioned dynamodb:LeadingKeys =
+    // ["EXEMPT#*"] so the deploy role can write ONLY exemption items, never the
+    // counter items (PK = <ip>). NO UpdateItem (never increments a counter), NO
+    // read, NO second table, NO '*'. §39 config-follows-resource: deployed via
+    // `make deploy-oidc` BEFORE the workflow add/remove path exercises it, exactly
+    // as WafRunnerIpExclusion was. The table is in the home region (eu-west-2);
+    // its name is the deterministic stable identity (oxo-connect-attempts).
+    deployRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'ConnectExemptionWrite',
+        effect: iam.Effect.ALLOW,
+        actions: ['dynamodb:PutItem', 'dynamodb:DeleteItem'],
+        resources: [
+          `arn:aws:dynamodb:eu-west-2:${this.account}:table/oxo-connect-attempts`,
+        ],
+        conditions: {
+          'ForAllValues:StringLike': {
+            'dynamodb:LeadingKeys': ['EXEMPT#*'],
+          },
+        },
+      }),
+    );
+
     // CloudFront distribution update — to set the distribution webAclId from the
     // cross-region global WebACL ARN (s005-h1-waf). Scoped to the existing
     // distribution ARN; NOT cloudfront:* and NOT Create/DeleteDistribution

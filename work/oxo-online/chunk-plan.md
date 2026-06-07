@@ -18,7 +18,7 @@ and marks actuals when a slice is delivered.
 | C1 | Deployable shell | delivered | 1 (s001) | 0 | — |
 | C2 | Local two-player game | delivered | 1 (s002) | 0 | — |
 | C3 | Single-player vs AI | delivered | 1 (s003) | 0 | — |
-| C4 | Online two-player match | in-progress | 2 (s004, s005-h1) | 6 (s005–s008 + s005-h2/h3) | s005-h2 connect-auth (in planning) |
+| C4 | Online two-player match | in-progress | 4 (s004, s005-h1, s005, s005-h2) | 3 (s006, s005-h3, s007, s008) | s006 move-relay (in-planning) |
 | C5 | Leaderboard | not started | 0 | 3 (s009–s011) | s009 record-game-result |
 | C6 | Player identity (lightweight) | not started | 0 | 2 (s012–s013) | s012 display-name-entry |
 | C7 | In-game chat | not started | 0 | 2 (s014–s015) | s014 in-game-message-send |
@@ -108,12 +108,13 @@ shown to both players; disconnection is handled gracefully. No accounts required
 | Slice | Status | Delivered | Outcome |
 |-------|--------|-----------|---------|
 | s004 — create-game | delivered | 2026-06-06 | POST /api/games live via CloudFront; Lambda + DynamoDB Games table + HTTP API provisioned; 6-char code shown in UI |
-| s005 — join-by-code | in-flight (use-case decomposition done) | — | — |
+| s005 — join-by-code | delivered | 2026-06-06 | Guest join screen live; WS connect flow; both players reach game board with roles; Connections table with 2h TTL; 3 error paths handled |
 | s005-h1 — WAF / rate-limiting | delivered | 2026-06-07 | CloudFront global WAF WebACL live; rate rule + IP reputation list; per-IP WS protection re-scoped to s005-h2 (platform constraint: WAFv2 cannot associate with API GW v2) |
+| s005-h2 — join-token / $connect authorization | delivered | 2026-06-07 | REQUEST authorizer on $connect; HMAC-signed wsToken (host); code-based guest auth; per-IP connect budget via ConnectAttempts table; 17/17 ACs pass |
 
-**Remaining forecast (s005–s008) — ordered thinnest-first:**
+**Remaining forecast (s006–s008 + s005-h3) — ordered thinnest-first:**
 
-### s005 — join-by-code + WebSocket connect (IN-FLIGHT)
+### s005 — join-by-code + WebSocket connect [DELIVERED 2026-06-06]
 **Scope:** A second player enters the 6-char code on a new join screen; both
 players open a WebSocket connection to API Gateway (host on the waiting screen,
 joiner on submit). The `join` Lambda route looks up the game by code (GSI on
@@ -160,20 +161,11 @@ WebACL (CLOUDFRONT scope, us-east-1) with IP reputation rule + rate-based rule
 to platform constraint (WAFv2 cannot associate with API GW v2 APIs). Per-IP WS
 protection re-scoped to s005-h2. See slices/s005-h1-waf/slice.md + delta §0.
 
-**s005-h2 — Join-token / $connect authorization (security risk 2) [IN PLANNING — iteration 8, GATE-2-H2]**
-Sequence: after s005-h1, before s006. Rationale: the unauthenticated WS
-endpoint is the project's highest-risk open surface. Scope: `POST /api/games`
-response extended with a short-lived HMAC-signed `wsToken` (host); guest uses
-the 6-char code as credential at `$connect` (no new HTTP endpoint). A
-REQUEST-type Lambda authorizer on `$connect` verifies host tokens (HMAC) and
-guest codes (GSI lookup) and enforces per-IP connect budget via a new
-`ConnectAttempts` DynamoDB table. Done conditions: (1) `$connect` with no/bad
-credential rejected before game-logic Lambda fires; (2) valid host+guest flow
-unchanged (pairing <3s); (3) per-IP burst beyond threshold denied (best-effort).
-See slices/s005-h2-connect-auth/slice.md + use-cases.md.
-**Includes (GATE-AMEND-H1-A):** per-IP WS rate-limiting re-homed here from
-s005-h1 — WAFv2 platform constraint means the `$connect` authorizer (keyed on
-sourceIp) is the honest home for this control.
+**s005-h2 — Join-token / $connect authorization (security risk 2) [DELIVERED 2026-06-07]**
+Sequence: after s005-h1, before s006. DELIVERED. REQUEST-type Lambda authorizer
+on `$connect`; HMAC-signed `wsToken` for host; 6-char code as guest credential;
+per-IP connect budget via `ConnectAttempts` DynamoDB table. 17/17 ACs pass.
+See slices/s005-h2-connect-auth/result.md.
 
 **s005-h3 — Guaranteed code uniqueness (security risk 3)**
 Sequence: after s005-h2 (or parallel — no code dependency). Rationale: code
@@ -192,25 +184,30 @@ a full sprint it will receive an ordinal at that time.
 
 ---
 
-### s006 — move relay + server-authoritative play
+### s006 — move relay + server-authoritative play [IN PLANNING — SEL-S006]
 **Scope:** When a player makes a move, the SPA sends it via WebSocket; the Lambda
-validates the move (correct player's turn, square not taken), writes it to the
-`Games` record, and relays the updated board state to both connections. The UI
-updates on receipt of the server's broadcast. Win/draw is detected server-side;
-a `game-over` message with the result is sent to both players and the result
-screen is shown. The board is locked after a result.
+validates the move (correct player's turn, square not taken, game active, sender
+is a player of this game), writes it to the `Games` record, and relays the
+updated board state to both connections. The UI updates ONLY on receipt of the
+server's broadcast (no optimistic update — server-authoritative is the s004
+architecture decision). Win/draw is detected server-side; a `game-over` message
+with the result is sent to both players and the result screen is shown. The board
+is locked after a result. OI-33 (error-message mismatch on code-not-found) folded
+in as a two-line UI fix.
 
 **Killick test:** A full game can be played to completion between two browsers;
 neither player can cheat by replaying moves or moving out of turn.
 
-**What is NOT in scope:** disconnect handling, reconnect, leaderboard writes —
-all deferred to s007+.
+**What is NOT in scope:** disconnect handling, reconnect, leaderboard writes,
+share-link UX — all deferred to s007+.
 
 **Success measures:**
-1. A move made in browser A appears in browser B within 1 second (p95, measured in smoke test).
-2. The server rejects an out-of-turn move (the board state in DynamoDB is unchanged).
+1. A move made in browser A appears in browser B within 1 second (p95).
+2. The server rejects an out-of-turn move with DynamoDB board state unchanged.
 3. A win/draw detected by the server causes both browsers to show the correct result screen simultaneously.
 4. No board divergence: at game end, both browsers show identical board state.
+
+See slices/s006-move-relay/slice.md.
 
 ### s007 — disconnect and timeout handling
 **Scope:** When a WebSocket connection drops (player closes the tab, network

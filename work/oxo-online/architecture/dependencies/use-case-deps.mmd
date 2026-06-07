@@ -1,0 +1,41 @@
+%% oxo-online use-case dependency graph — FIRST EDITION (s006, process §12a)
+%% One node per use case / delivered behaviour. Edges = genuine behavioural dependencies only.
+%% False edges are not drawn — they cost parallelism.
+%% classDef changed marks THIS slice's (s006) new nodes.
+%% Already-live behaviours from s001–s005-h2 are drawn as delivered context nodes.
+%% Granularity: slice-level behaviour, not UI micro-states.
+%% Engineer routes build order from this graph; tester plans coverage from it.
+
+flowchart TD
+
+  %% ---- Already-live delivered behaviours (s001–s005-h2) ----
+  S001["s001 — SPA served\n(CloudFront + S3, OXO_CONFIG)"]:::delivered
+  S002["s002 — local two-player\n(client-only, no backend)"]:::delivered
+  S003["s003 — vs-AI\n(client-only, no backend)"]:::delivered
+  S004["s004 — create + join game\n(POST /api/games, game-ready, board visible)"]:::delivered
+  S005["s005 — WS connect + register + join\n($connect authorizer, wsToken, game-ready fan-out)"]:::delivered
+
+  %% ---- s006 use cases (NEW — this slice) ----
+  UC1["UC1 — Move domain core\n(pure: validate+apply move,\nwin/draw detection)\nno infra dependency"]:::changed
+  UC2["UC2 — Games store adapter\n(conditional UpdateItem CAS\n+ join-time board init)"]:::changed
+  UC3["UC3 — ws-fn move route handler\n(parse, identity bind,\ndomain call, relay)\nSHARED SEAM"]:::changed
+  UC4["UC4 — SPA move-send +\nrender-on-broadcast +\nboard lock + OI-33 error map"]:::changed
+  UC5["UC5 — Local stand-up (OI-28)\n(committed run-local entry\n+ local adapters)"]:::changed
+  UC6["UC6 — Prod validation\n(out-of-turn/forgery rejection,\np95 latency, zero divergence)"]:::changed
+
+  %% ---- Edges: already-live context feeds s006 UCs ----
+  S005 -->|"$connect auth + game-ready flow\nalready live; UC3 adds move route\nto the same Lambda + WS API"| UC3
+  S005 -->|"join write already live;\nUC2 extends it with board init"| UC2
+  S004 -->|"SPA WS message loop\nalready wired; UC4 adds\nmove-send + render paths"| UC4
+
+  %% ---- Edges: within s006 ----
+  UC1 -->|"port interface must be stable\nbefore UC3 wires the handler"| UC3
+  UC2 -->|"port interface must be stable\nbefore UC3 wires the handler"| UC3
+  UC1 -->|"domain functions needed\nby local server (UC5)"| UC5
+  UC2 -->|"store port interface needed\nby local adapter (UC5)"| UC5
+  UC3 -->|"move handler must be deployed\nbefore prod validation can run"| UC6
+  UC4 -->|"SPA must be deployed\n(move-send, render, OI-33)\nbefore prod validation"| UC6
+
+  %% ---- classDef ----
+  classDef delivered fill:#e8f4e8,stroke:#2e7d32,color:#000;
+  classDef changed fill:#fff3e0,stroke:#d50000,stroke-width:3px,color:#000;

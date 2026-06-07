@@ -4,6 +4,7 @@ import type {
   SecretSource,
   ConnectCounterPort,
   GameLookupPort,
+  ExemptionPort,
 } from './ports';
 
 /**
@@ -42,6 +43,8 @@ export interface AuthorizerDeps {
   secretSource: SecretSource;
   counter: ConnectCounterPort;
   lookup: GameLookupPort;
+  /** Per-IP rate-limit exemption — consulted ONLY on the over-budget path (s007a). */
+  exemption: ExemptionPort;
   threshold: number;
   now: () => number;
   buildSha: string;
@@ -59,7 +62,25 @@ export async function authorize(
   // validity (AC2.9): a valid token from an over-budget IP is still denied.
   const count = await deps.counter.increment(sourceIp);
   if (decideRateLimit(count, deps.threshold) === 'Deny') {
-    return deny(deps, 'RATE_LIMIT', 'rate-limit-exceeded', { sourceIp, count });
+    // s007a (DEFECT-S007-001) — over-budget path ONLY: consult the per-IP
+    // exemption (zero happy-path reads). A LIVE exemption (item exists AND
+    // ttl > now — the adapter evaluates expiry, fail-closed on error) WAIVES the
+    // RATE_LIMIT Deny and the connect FALLS THROUGH to credential validation
+    // below. It NEVER bypasses token/code validation. A non-exempt over-budget IP
+    // (every prod/attacker IP) Denies exactly as before — no rate-exempt line.
+    const exempt = await deps.exemption.isExempt(sourceIp, deps.now());
+    if (!exempt) {
+      return deny(deps, 'RATE_LIMIT', 'rate-limit-exceeded', { sourceIp, count });
+    }
+    // Exemption applied — attributable to a build, visible in CloudWatch, and the
+    // carrier for the negative test that prod traffic never logs rate-exempt.
+    deps.log({
+      buildSha: deps.buildSha,
+      effect: 'Allow',
+      reason: 'rate-exempt',
+      sourceIp,
+      count,
+    });
   }
 
   // Host token path.

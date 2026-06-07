@@ -9,6 +9,7 @@ import {
   type WsAuthPolicyResponse,
 } from './adapters/apigw-authorizer';
 import { DdbConnectCounter } from './adapters/ddb-connect-counter';
+import { DdbConnectExemption } from './adapters/ddb-connect-exemption';
 import { DdbGameLookup } from './adapters/ddb-game-lookup';
 import { SsmSecretSource } from './adapters/ssm-secret-source';
 
@@ -52,6 +53,13 @@ export async function handler(
     buildSha,
     log,
   });
+  // s007a (DEFECT-S007-001) — per-IP exemption read, SAME table as the counter.
+  const exemption = new DdbConnectExemption({
+    client: ddb,
+    tableName: process.env.CONNECT_ATTEMPTS_TABLE as string,
+    buildSha,
+    log,
+  });
   const lookup = new DdbGameLookup({
     client: ddb,
     tableName: process.env.GAMES_TABLE as string,
@@ -63,6 +71,7 @@ export async function handler(
   const decision = await authorize(eventToInput(event), {
     secretSource,
     counter,
+    exemption,
     lookup,
     threshold: Number(process.env.CONNECT_RATE_THRESHOLD ?? '20'),
     now,

@@ -119,9 +119,24 @@ flowchart TD
   spaJoinScreen -->|forwards opponent-disconnected frame| spaOnlineDisconnect
   linkStyle 15 stroke:#1565c0,stroke-width:3px;
 
+  %% ==== s007a authorizer runner-exemption (DEFECT-S007-001) — appended; ====
+  %% classDef s007aChanged marks this slice's new port/adapter seam + read edge.
+  %% The $connect authorizer gains a post-threshold per-IP exemption read on the
+  %% SAME oxo-connect-attempts table (zero happy-path reads). Cleared by the tester
+  %% at slice delivery after consuming.
+  portExemption["port-exemption<br/>ExemptionPort (ws-auth/ports.ts) — isExempt(sourceIp, now)<br/>LIVE iff item exists AND ttl>now (lazy-delete defence)"]:::s007aChanged
+  domainAuthorize["domain-authorize<br/>ws-auth/authorizer.ts — over-budget path ONLY: consult exemption,<br/>waive RATE_LIMIT Deny (log rate-exempt) then fall through to credential validation"]:::s007aChanged
+  adapterConnectExemption["adapter-connect-exemption<br/>ws-auth/adapters/ddb-connect-exemption.ts — GetItem EXEMPT#&lt;ip&gt; only,<br/>ttl&gt;now live/stale branch, fail-closed (read error -> not exempt)"]:::s007aChanged
+  ddbConnectAttempts["ddb-connect-attempts<br/>oxo-connect-attempts table — counter PK &lt;ip&gt; + exemption PK EXEMPT#&lt;ip&gt; (shared ttl)"]:::s007aChanged
+  domainAuthorize -->|over-budget path only: isExempt| portExemption
+  portExemption -.implemented by.-> adapterConnectExemption
+  adapterConnectExemption -->|GetItem EXEMPT#&lt;ip&gt;| ddbConnectAttempts
+
   %% s006 changed marks CLEARED (2026-06-07 — tester consumed, UC6 prod validation PASS).
   %% All nodes were new in this first-edition; all are now delivered/stable.
   classDef changed fill:#e8f4e8,stroke:#2e7d32,color:#000;
   classDef stable fill:#e8f4e8,stroke:#2e7d32,color:#000;
   %% s007 changed mark — cleared by the tester at slice delivery after consuming.
   classDef s007changed fill:#e3f2fd,stroke:#1565c0,color:#000;
+  %% s007a changed mark — cleared by the tester at slice delivery after consuming.
+  classDef s007aChanged fill:#fff3e0,stroke:#e65100,color:#000;

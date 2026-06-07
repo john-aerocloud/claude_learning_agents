@@ -27,3 +27,18 @@ export interface ConnectCounterPort {
 export interface GameLookupPort {
   findByCode(code: string): Promise<{ status: string } | null>;
 }
+
+/**
+ * Per-IP rate-limit exemption (s007a, DEFECT-S007-001). Reports whether a LIVE
+ * exemption exists for the given source IP at time `now`. "Live" means an
+ * exemption item exists AND its TTL is still in the future — the adapter
+ * evaluates `ttl > now` itself and NEVER trusts DynamoDB's lazy delete
+ * (DEFECT-H2-003). Consulted by the authorizer ONLY on the would-be RATE_LIMIT
+ * Deny path (zero happy-path reads). Fail-closed: on a read error the adapter
+ * returns false so the RATE_LIMIT Deny stands (an unavailable exemption store
+ * never weakens the control). The exemption waives ONLY the rate Deny — token
+ * and code validation still apply.
+ */
+export interface ExemptionPort {
+  isExempt(sourceIp: string, now: number): Promise<boolean>;
+}

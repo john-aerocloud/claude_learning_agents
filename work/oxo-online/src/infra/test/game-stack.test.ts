@@ -308,7 +308,11 @@ describe('OxoGameStack — oxo-ws-fn Lambda + least-privilege role (T8, S1, S2)'
         (a) => typeof a === 'string' && a.startsWith('dynamodb:'),
       ),
     );
-    const allDdbActions = ddb.flatMap(actionList).slice().sort();
+    // Unique action set (s007 UC2-S1: GetItem now appears on TWO ARNs — Games
+    // and the new Connections read — so the flattened list has a duplicate; the
+    // PIN is the distinct action set, which is byte-for-byte the s006 set,
+    // AC2.2 negative arm "nothing else widened").
+    const allDdbActions = [...new Set(ddb.flatMap(actionList))].slice().sort();
     expect(allDdbActions).toEqual(
       [
         'dynamodb:DeleteItem',
@@ -347,6 +351,29 @@ describe('OxoGameStack — oxo-ws-fn Lambda + least-privilege role (T8, S1, S2)'
       actionList(s).includes('dynamodb:UpdateItem'),
     )!;
     expect(actionList(updateStmt)).toEqual(['dynamodb:UpdateItem']);
+  });
+
+  it('S5 (s007 AC2.1 positive arm): dynamodb:GetItem is granted on the Connections table ARN (the ONE new grant)', () => {
+    // s007 UC2-S1: the $disconnect handler resolves connectionId -> gameId via
+    // GetItem(Connections, connectionId). This is the EXACTLY-ONE-assertion change
+    // from the s006 ws-fn pin (delta §3, AC2.1). The aggregate action-set test
+    // (S1 above) is unchanged because GetItem already appears (on Games); this
+    // arm pins that GetItem is ALSO scoped to the Connections ARN — the new read.
+    const statements = wsRoleStatements(synth());
+    const ddb = statements.filter((s) =>
+      actionList(s).some(
+        (a) => typeof a === 'string' && a.startsWith('dynamodb:'),
+      ),
+    );
+    const connectionsGetItem = ddb.find(
+      (s) =>
+        actionList(s).includes('dynamodb:GetItem') &&
+        JSON.stringify(s.Resource).includes('ConnectionsTable'),
+    );
+    expect(
+      connectionsGetItem,
+      'expected a dynamodb:GetItem grant scoped to the Connections table ARN (AC2.1)',
+    ).toBeDefined();
   });
 
   it('S2: the only execute-api statement is ManageConnections scoped to this WS API id, not *', () => {

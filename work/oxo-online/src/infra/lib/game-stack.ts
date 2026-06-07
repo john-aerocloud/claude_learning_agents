@@ -257,6 +257,22 @@ export class OxoGameStack extends cdk.Stack {
         resources: [connectionsTable.tableArn],
       }),
     );
+    // s007 UC2-S1 (AC2.1 / S5) — the ONE new grant: dynamodb:GetItem on the
+    // Connections table ARN ONLY. The $disconnect handler resolves
+    // connectionId -> gameId by primary-key GetItem of the disconnecting
+    // connection's OWN row. NO Query, NO Scan (cannot enumerate other games'
+    // connection rows — S1 no-cross-game-spoof). Separate statement so the
+    // existing ConnectionsWrite pin (Put+Delete only) and the aggregate
+    // action-set pin (GetItem already present via Games) both stay byte-for-byte
+    // unchanged — exactly one assertion changes from the s006 pin.
+    wsRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'ConnectionsRead',
+        effect: iam.Effect.ALLOW,
+        actions: ['dynamodb:GetItem'],
+        resources: [connectionsTable.tableArn],
+      }),
+    );
 
     // -------------------------------------------------------------------------
     // WebSocket API — RouteSelectionExpression keys off the client message's

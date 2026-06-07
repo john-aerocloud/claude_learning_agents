@@ -9,6 +9,7 @@ import {
   type MovePatch,
   type Role,
   MoveConditionFailed,
+  AbandonConditionFailed,
 } from '../../move/ports';
 import {
   categoriseDdbError,
@@ -44,6 +45,15 @@ import {
  */
 export const MOVE_CONDITION_EXPRESSION =
   '#status = :active AND currentTurn = :expRole AND version = :expVersion';
+
+/**
+ * The $disconnect abandon CAS condition string — pinned in a test (AC1.8 / S2) so
+ * the won/drawn/already-abandoned guard cannot be silently removed. The local
+ * mock CANNOT enforce real DDB conditional atomicity under a concurrent double-
+ * disconnect; this pin + UC4 prod success-measure-#4 cover that `games`
+ * platform-gate gap. Mirrors MOVE_CONDITION_EXPRESSION.
+ */
+export const ABANDON_CONDITION_EXPRESSION = '#status = :active';
 
 export interface DdbGamesStoreDeps {
   client: DynamoDBDocumentClient;
@@ -151,6 +161,51 @@ export class DdbGamesStore implements GameStorePort {
         buildSha: this.deps.buildSha,
         category: categoriseDdbError(err),
         op: 'Games.applyMoveWrite',
+        gameId,
+      });
+      throw err;
+    }
+  }
+
+  /**
+   * $disconnect abandon (UC1): a SINGLE conditional UpdateItem flipping status
+   * active→abandoned, conditioned on `status = :active` (S2). On a failed
+   * condition it surfaces a typed AbandonConditionFailed (the game was not
+   * active — terminal/waiting/already-abandoned, or a racing second disconnect)
+   * — NO retry, NO partial write (reject-over-retry). Transient 5xx after SDK
+   * backoff is logged EXTERNAL_DEPENDENCY and rethrown; a 4xx is INTERNAL.
+   *
+   * Code↔policy pin (S5): this is an UpdateItem on the Games table — already in
+   * the s005/s006 grant set; this method adds NO new command type or table.
+   */
+  async abandonGame(gameId: string): Promise<void> {
+    try {
+      await this.deps.client.send(
+        new UpdateCommand({
+          TableName: this.deps.tableName,
+          Key: { gameId },
+          ConditionExpression: ABANDON_CONDITION_EXPRESSION,
+          UpdateExpression: 'SET #status = :abandoned',
+          ExpressionAttributeNames: { '#status': 'status' },
+          ExpressionAttributeValues: { ':active': 'active', ':abandoned': 'abandoned' },
+        }),
+      );
+    } catch (err) {
+      if (isConditionalCheckFailed(err)) {
+        // Legitimate "not active" outcome — swallowed by the handler, not retried.
+        this.deps.log({
+          event: 'abandon_condition_failed',
+          buildSha: this.deps.buildSha,
+          category: 'data',
+          gameId,
+        });
+        throw new AbandonConditionFailed();
+      }
+      this.deps.log({
+        event: 'abandon_write_failed',
+        buildSha: this.deps.buildSha,
+        category: categoriseDdbError(err),
+        op: 'Games.abandonGame',
         gameId,
       });
       throw err;

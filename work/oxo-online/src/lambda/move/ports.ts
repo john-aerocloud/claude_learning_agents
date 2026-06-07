@@ -13,8 +13,13 @@
 /** A player role. Host is always X, guest is always O (fixed at s005 game-ready). */
 export type Role = 'X' | 'O';
 
-/** Terminal/active state of a game, in domain terms. */
-export type GameStatus = 'active' | 'won' | 'drawn';
+/**
+ * Lifecycle state of a game, in domain terms. `waiting` (host created, no guest
+ * yet) and `abandoned` (s007 graceful-disconnect terminal) join the s006 trio.
+ * The move flow only ever writes `active`/`won`/`drawn`; the $disconnect flow
+ * reads `waiting`/`abandoned` and writes `abandoned`.
+ */
+export type GameStatus = 'active' | 'won' | 'drawn' | 'waiting' | 'abandoned';
 
 /**
  * The authoritative game state the move flow reads and mutates, expressed in
@@ -65,6 +70,15 @@ export interface GameStorePort {
     expectedTurn: Role;
     patch: MovePatch;
   }): Promise<void>;
+  /**
+   * s007 $disconnect abandon (UC1): a SINGLE conditional UpdateItem that flips
+   * status active→abandoned, conditioned on `status = :active` (S2 — the won/
+   * drawn/already-abandoned guard is the CONDITION, not code alone). On a failed
+   * condition (the game was not active — terminal/waiting/already-abandoned, or a
+   * simultaneous second disconnect already abandoned it) it raises a typed
+   * AbandonConditionFailed; the adapter does NOT retry (reject-over-retry).
+   */
+  abandonGame(gameId: string): Promise<void>;
 }
 
 /** Raised by GameStorePort.applyMoveWrite when the CAS condition fails. */
@@ -72,6 +86,19 @@ export class MoveConditionFailed extends Error {
   constructor(message = 'move condition failed') {
     super(message);
     this.name = 'MoveConditionFailed';
+  }
+}
+
+/**
+ * Raised by GameStorePort.abandonGame when the `status = :active` condition fails
+ * — the game was not active (terminal/waiting/already-abandoned, or a
+ * simultaneous second $disconnect already abandoned it). A legitimate "not
+ * active" outcome, swallowed by the handler (no notify, no retry — AC1.7/T4/S2).
+ */
+export class AbandonConditionFailed extends Error {
+  constructor(message = 'abandon condition failed') {
+    super(message);
+    this.name = 'AbandonConditionFailed';
   }
 }
 

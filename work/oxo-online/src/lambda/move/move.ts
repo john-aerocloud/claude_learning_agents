@@ -5,7 +5,7 @@
  * through live in ./ports.ts; this module imports only domain types from there.
  */
 
-import type { Role } from './ports';
+import type { GameStatus, Role } from './ports';
 
 export interface MoveOutcome {
   accepted: boolean;
@@ -54,7 +54,10 @@ export function applyMove(
   currentTurn: Role,
   square: number,
   senderRole: Role,
-  status: 'active' | 'won' | 'drawn' = 'active',
+  // s007 widened the GameStatus union (waiting/abandoned added); applyMove still
+  // accepts a move ONLY when active — any other status (incl. waiting/abandoned)
+  // is the post-terminal/not-playable guard (AC1.5).
+  status: GameStatus = 'active',
 ): MoveOutcome {
   if (status !== 'active') return REJECT;
   if (!Number.isInteger(square) || square < 0 || square > 8) return REJECT;

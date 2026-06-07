@@ -1,4 +1,5 @@
 import {
+  AbandonConditionFailed,
   MoveConditionFailed,
   type GameState,
   type GameStorePort,
@@ -75,5 +76,20 @@ export class LocalGameStore implements GameStorePort {
       ...(args.patch.status ? { status: args.patch.status } : {}),
       ...(args.patch.winner ? { winner: args.patch.winner } : {}),
     });
+  }
+
+  /**
+   * $disconnect abandon (UC1-S6 local parity): flip active→abandoned conditioned
+   * on `status === 'active'` (the local reproduction of the S2 CAS BRANCH — a JS
+   * map cannot reproduce real DDB conditional atomicity, only the branch shape;
+   * the platform guarantee is the ABANDON_CONDITION_EXPRESSION pin + UC4 prod).
+   * A non-active game raises AbandonConditionFailed (swallowed by the handler).
+   */
+  async abandonGame(gameId: string): Promise<void> {
+    const current = this.games.get(gameId);
+    if (!current || current.status !== 'active') {
+      throw new AbandonConditionFailed();
+    }
+    this.games.set(gameId, { ...current, status: 'abandoned' as GameState['status'] });
   }
 }

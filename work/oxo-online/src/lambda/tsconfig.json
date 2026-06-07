@@ -11,8 +11,9 @@
     "declaration": false,
     "sourceMap": false,
     "outDir": "./games/dist",
-    "rootDir": "./games"
+    "rootDir": "."
   },
-  "include": ["games/**/*.ts"],
+  "comment": "oxo-game-fn build. rootDir is the lambda root so the shared token/ DOMAIN module (token.ts + token/adapters/ssm-secret-source.ts) compiles INTO games/dist alongside the handler. Because token/ is a sibling of games/, tsc nests the handler at games/dist/games/handler.js and token at games/dist/token/* — the CDK handler entry for oxo-game-fn must therefore be 'games/handler.handler' (asset path games/dist unchanged). See engineer A1 return / build-coverage note.",
+  "include": ["games/**/*.ts", "token/**/*.ts"],
   "exclude": ["node_modules", "**/dist", "**/*.test.ts"]
 }

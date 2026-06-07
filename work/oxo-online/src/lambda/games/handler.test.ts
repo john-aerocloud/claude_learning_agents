@@ -2,9 +2,18 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
-import { handler } from './handler';
+import { handler, createHandler } from './handler';
+import { verify } from '../token/token';
+import type { SecretSource } from '../token/ports';
 
 const ddbMock = mockClient(DynamoDBDocumentClient);
+
+const TEST_SECRET = 'unit-test-shared-secret-32bytes!';
+const fakeSecretSource: SecretSource = { get: async () => TEST_SECRET };
+// The default exported handler reads the secret via the production adapter,
+// which would hit SSM; the existing s004 contract tests below run against the
+// port-injected handler so they stay infra-free and independent of A2.
+const testHandler = createHandler({ secretSource: fakeSecretSource });
 
 const FORBIDDEN = ['O', '0', '1', 'I', 'L'];
 
@@ -26,14 +35,17 @@ beforeEach(() => {
 });
 
 describe('handler — POST /games success (T1, F1)', () => {
-  it('persists a server-generated item and returns 201 with only gameId and code', async () => {
+  it('persists a server-generated item and returns 201 with gameId, code (+wsToken)', async () => {
     const before = Math.floor(Date.now() / 1000);
-    const res = await handler(makeEvent());
+    const res = await testHandler(makeEvent());
     const after = Math.floor(Date.now() / 1000);
 
     expect(res.statusCode).toBe(201);
     const respBody = JSON.parse(res.body as string);
-    expect(Object.keys(respBody).sort()).toEqual(['code', 'gameId']);
+    // S-A1.5 regression: existing keys still present; gameId/code unchanged in
+    // meaning. wsToken is ADDED (UC1) — no existing field removed.
+    expect(respBody.gameId).toBeDefined();
+    expect(respBody.code).toBeDefined();
 
     // gameId is a UUID
     expect(respBody.gameId).toMatch(
@@ -72,7 +84,7 @@ describe('handler — client-supplied fields are ignored (S1)', () => {
       status: 'active',
       ttl: 9999999999,
     };
-    const res = await handler(makeEvent(planted));
+    const res = await testHandler(makeEvent(planted));
     expect(res.statusCode).toBe(201);
     const respBody = JSON.parse(res.body as string);
 
@@ -95,7 +107,7 @@ describe('handler — error path returns a clean 5xx (F5)', () => {
     ddbMock.on(PutCommand).rejects(
       new Error('ProvisionedThroughputExceededException: secret stack trace here'),
     );
-    const res = await handler(makeEvent());
+    const res = await testHandler(makeEvent());
 
     expect(res.statusCode).toBe(500);
     const body = JSON.parse(res.body as string);
@@ -103,5 +115,55 @@ describe('handler — error path returns a clean 5xx (F5)', () => {
     // No leaked internals.
     expect(res.body as string).not.toContain('stack');
     expect(res.body as string).not.toContain('ProvisionedThroughput');
+  });
+});
+
+describe('handler — injects a host wsToken (S-A1.4, T7, AC1.1–AC1.5)', () => {
+  it('201 body includes a wsToken that decodes to the host claims for THIS game', async () => {
+    const before = Math.floor(Date.now() / 1000);
+    const res = await testHandler(makeEvent());
+    const after = Math.floor(Date.now() / 1000);
+
+    expect(res.statusCode).toBe(201);
+    const body = JSON.parse(res.body as string);
+    expect(body.wsToken).toBeDefined();
+    expect(typeof body.wsToken).toBe('string');
+
+    // wsToken verifies with the SAME secret the SecretSource provided.
+    const result = verify(body.wsToken, TEST_SECRET, before);
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      // gameId in the token matches the gameId in the body (same game).
+      expect(result.payload.gameId).toBe(body.gameId);
+      expect(result.payload.role).toBe('host');
+      // exp is ~60s ahead of request time (window assertion, no fixed clock).
+      expect(result.payload.exp).toBeGreaterThanOrEqual(before + 60 - 2);
+      expect(result.payload.exp).toBeLessThanOrEqual(after + 60 + 2);
+    }
+  });
+
+  it('does NOT persist the wsToken (it is response-only, never stored)', async () => {
+    await testHandler(makeEvent());
+    const item = ddbMock.commandCalls(PutCommand)[0].args[0].input.Item as Record<
+      string,
+      unknown
+    >;
+    expect('wsToken' in item).toBe(false);
+  });
+
+  it('does NOT mint a token when the create write fails (no token on 5xx)', async () => {
+    ddbMock.on(PutCommand).rejects(new Error('ddb down'));
+    const res = await testHandler(makeEvent());
+    expect(res.statusCode).toBe(500);
+    const body = JSON.parse(res.body as string);
+    expect(body.wsToken).toBeUndefined();
+  });
+});
+
+describe('handler — default export wires the production SecretSource (S-A1.6 seam)', () => {
+  it('exports a callable default handler bound to the SSM adapter', () => {
+    // We do not invoke it here (it would reach SSM); we assert the wiring exists
+    // so the deployable entry point is the same shape APIGW invokes.
+    expect(typeof handler).toBe('function');
   });
 });

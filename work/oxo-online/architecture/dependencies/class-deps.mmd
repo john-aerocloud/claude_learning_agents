@@ -101,6 +101,15 @@ flowchart TD
   wsDisconnectHandler -->|opponent-disconnected post| portRelay
   linkStyle 13 stroke:#1565c0,stroke-width:3px;
 
+  %% ==== s007 disconnect (UC3 SPA survivor UX) — appended; classDef s007changed ==
+  %% UC3-S2/S3: the SPA consumes the opponent-disconnected frame over the same WS
+  %% client transport seam, shows the survivor message, closes the socket and
+  %% returns to the mode selector (no reload), then supports a clean Online
+  %% restart. Distinct SPA seam from spa-online-move (same component file tree).
+  spaOnlineDisconnect["spa-online-disconnect<br/>src/app/src/game/GameRoot.tsx (UC3) — opponent-disconnected handler<br/>message + mode-selector return (no reload) + socket close + clean restart"]:::s007changed
+  spaOnlineDisconnect -->|receives opponent-disconnected / close| spaWsClient
+  linkStyle 14 stroke:#1565c0,stroke-width:3px;
+
   %% s006 changed marks CLEARED (2026-06-07 — tester consumed, UC6 prod validation PASS).
   %% All nodes were new in this first-edition; all are now delivered/stable.
   classDef changed fill:#e8f4e8,stroke:#2e7d32,color:#000;

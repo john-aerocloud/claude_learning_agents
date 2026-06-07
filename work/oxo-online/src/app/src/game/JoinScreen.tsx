@@ -70,6 +70,15 @@ interface JoinScreenProps {
    * the subsequent `board-update`/`game-over` broadcasts.
    */
   onGameReady?: (message: ServerMessage, socket: GameSocket) => void;
+  /**
+   * s008 UC2 — deep-link pre-fill. When the SPA mounts on the `/join/:code`
+   * route, the route passes the URL `:code` segment here so the code input is
+   * pre-filled and the Join button is a single click (T2/SM-2). Reuses the SAME
+   * submit + WS join path as manual entry — no new contract. Undefined for the
+   * manual-entry flow (mode selector → type code), which keeps an empty input
+   * (no spurious pre-fill, AC3.1).
+   */
+  initialCode?: string;
 }
 
 /**
@@ -78,8 +87,11 @@ interface JoinScreenProps {
  * connecting indicator while pending. The code is retained on close so the
  * player can correct and retry (F3).
  */
-export function JoinScreen({ connect, onGameReady }: JoinScreenProps) {
-  const [code, setCode] = useState('');
+export function JoinScreen({ connect, onGameReady, initialCode }: JoinScreenProps) {
+  // s008 UC2: seed the code from the deep-link URL param (upper-cased to match
+  // the manual-entry input normalisation). Manual entry passes no initialCode →
+  // empty input (AC3.1, no spurious pre-fill).
+  const [code, setCode] = useState((initialCode ?? '').toUpperCase());
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const socketRef = useRef<GameSocket | null>(null);

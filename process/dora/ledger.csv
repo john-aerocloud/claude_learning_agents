@@ -485,3 +485,5 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T20:10:48Z,oxo-online,11,s008-share-link,product,task_start,,na,S008-UC-ACC,co-author use-cases + acceptance + use-case-deps mark
 2026-06-07T20:11:28Z,oxo-online,11,s008-share-link,product,task_start,,na,S008-UC-ACC,
 2026-06-07T20:14:59Z,oxo-online,11,s008-share-link,product,task_end,,success,S008-UC-ACC,
+2026-06-07T20:22:19Z,oxo-online,11,s008-share-link,engineer,task_start,,na,S008-ROUTE-BUILD,route + serial SPA build (UC2 deep-link then UC1 copy-link)
+2026-06-07T20:24:22Z,oxo-online,11,s008-share-link,engineer,task_start,,na,S008-ROUTE-BUILD,"s008 share-link: UC2 deep-link route + pre-fill, UC1 copy-link control; client-only/arch-lite; serial UC2->UC1"

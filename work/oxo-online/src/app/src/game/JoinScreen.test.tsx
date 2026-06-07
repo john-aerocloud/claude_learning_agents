@@ -105,6 +105,53 @@ describe('JoinScreen — opponent-disconnected forwarding (s007 S007-RENDER-FIX,
   });
 });
 
+// s008 UC2 (T2/SM-2) — deep-link pre-fill seam. The /join/:code route mounts the
+// JoinScreen with the code from the URL already seeded. The code input is
+// pre-filled, the Join button is enabled with NO user interaction, and a single
+// click submits the SAME WS join action as manual entry (no new contract).
+// @covers spaJoinScreen
+describe('JoinScreen — initialCode pre-fill + one-click join (s008 UC2, T2/SM-2)', () => {
+  it('pre-fills the code input from initialCode without any user interaction', () => {
+    const m = mockFactory();
+    render(<JoinScreen connect={m.factory} initialCode="ABC234" />);
+    expect(screen.getByLabelText(/game code/i)).toHaveValue('ABC234');
+  });
+
+  it('enables the Join button with no user interaction when pre-filled', () => {
+    const m = mockFactory();
+    render(<JoinScreen connect={m.factory} initialCode="ABC234" />);
+    expect(screen.getByRole('button', { name: /join/i })).toBeEnabled();
+  });
+
+  it('one click submits the SAME WS join action with the pre-filled code', async () => {
+    const m = mockFactory();
+    render(<JoinScreen connect={m.factory} initialCode="ABC234" />);
+    // No typing — a single click on the pre-filled screen submits the join.
+    await userEvent.click(screen.getByRole('button', { name: /join/i }));
+    expect(m.sent).toContainEqual({ action: 'join', code: 'ABC234' });
+    // Byte-for-byte the s005/s006 credential — no new action key or payload field.
+    expect(m.opts?.credential).toEqual({ code: 'ABC234' });
+  });
+
+  // T4/SM-3 — a deep link to an invalid/unknown code submits over the SAME path
+  // and surfaces the EXISTING readable code-not-found message (the s006/OI-33
+  // mapping, reused — NOT a new error code). The page does not crash.
+  it('a deep-linked invalid code shows the existing readable "Game not found" error', () => {
+    vi.useFakeTimers();
+    try {
+      const m = mockFactory();
+      render(<JoinScreen connect={m.factory} initialCode="XXXXXX" />);
+      fireEvent.click(screen.getByRole('button', { name: /join/i }));
+      // The deployed $connect authorizer denies an unknown code → abnormal 1006
+      // close with no error frame (the OI-33 wire signal). Same path as manual entry.
+      act(() => m.opts?.onClose(1006));
+      expect(screen.getByRole('alert')).toHaveTextContent(/game not found/i);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('JoinScreen — error-frame messages (DEFECT-005-001 Bug B; B2, F3/F4/F9, S3)', () => {
   // Bug B: the codes now arrive as a {type:'error', code, message} MESSAGE
   // frame, NOT as a WS close code (which the platform cannot deliver). The UI

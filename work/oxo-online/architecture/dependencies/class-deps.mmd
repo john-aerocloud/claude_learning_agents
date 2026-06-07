@@ -132,6 +132,25 @@ flowchart TD
   portExemption -.implemented by.-> adapterConnectExemption
   adapterConnectExemption -->|GetItem EXEMPT#&lt;ip&gt;| ddbConnectAttempts
 
+  %% ==== s008 share-link (UC2 deep-link route + UC1 copy-link) — appended; ====
+  %% classDef s008changed marks THIS slice's new SPA seams. CLIENT-ONLY: no port,
+  %% no adapter, no backend edge change. The deep-link JOIN reuses the EXISTING
+  %% spaJoinScreen submit → s005/s006 WS join path UNCHANGED (no new contract).
+  %% ACTUAL runtime path traced (not assumed): App `/join/:code` route reads the
+  %% URL code → mounts GameRoot in the `joining` phase → renders spaJoinScreen with
+  %% initialCode pre-filled → the EXISTING submit sends {action:'join',code} over
+  %% the EXISTING socket seam. No new forward edge into the WS layer.
+  spaJoinRoute["spa-join-route<br/>src/app/src/App.tsx (UC2) — /join/:code route<br/>reads URL code, mounts GameRoot(joining) with initialJoinCode"]:::s008changed
+  spaCopyLink["spa-copy-link<br/>src/app/src/game/GameRoot.tsx (UC1) — waiting-screen copy control<br/>navigator.clipboard.writeText(origin + '/join/' + code); no token/param (S3)"]:::s008changed
+  %% UC2 edge: the deep-link route drives the EXISTING JoinScreen pre-fill seam.
+  spaJoinRoute -->|"initialJoinCode → GameRoot(joining) → JoinScreen(initialCode); reuses existing submit"| spaJoinScreen
+  linkStyle 16 stroke:#e65100,stroke-width:3px;
+  %% UC1 edge: the copy control reads the host's game code (already in GameRoot
+  %% waiting-screen state) and constructs the share URL mirroring the UC2 route form.
+  spaCopyLink -->|"share URL mirrors /join/:code route form (serial seam)"| spaJoinRoute
+  linkStyle 17 stroke:#e65100,stroke-width:3px;
+  classDef s008changed fill:#fff3e0,stroke:#e65100,color:#000;
+
   %% s006 changed marks CLEARED (2026-06-07 — tester consumed, UC6 prod validation PASS).
   %% All nodes were new in this first-edition; all are now delivered/stable.
   classDef changed fill:#e8f4e8,stroke:#2e7d32,color:#000;

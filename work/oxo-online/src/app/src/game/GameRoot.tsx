@@ -57,13 +57,25 @@ const realFactory: GameSocketFactory = createRealSocketFactory();
 interface GameRootProps {
   /** Injectable socket seam (defaults to the real WS factory; tests inject a mock). */
   socketFactory?: GameSocketFactory;
+  /**
+   * s008 UC2 — deep-link code. When the SPA mounts on the `/join/:code` route the
+   * App router passes the URL `:code` segment here so the game opens directly in
+   * the `joining` phase with the JoinScreen pre-filled (one-click join, T2/SM-2).
+   * Undefined for the normal `/` route, which opens in the local-game `idle`
+   * phase with the mode selector (no regression, AC3.1).
+   */
+  initialJoinCode?: string;
 }
 
 /** Root of the game: owns state + mode, wires the mode selector, Status, Board. */
-export function GameRoot({ socketFactory = realFactory }: GameRootProps = {}) {
+export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameRootProps = {}) {
   const [state, setState] = useState(initialState);
   const [mode, setMode] = useState<Mode>('two-player');
-  const [onlinePhase, setOnlinePhase] = useState<OnlinePhase>('idle');
+  // s008 UC2: a deep-link mounts straight into the `joining` phase so the
+  // pre-filled JoinScreen is shown immediately; otherwise the local game `idle`.
+  const [onlinePhase, setOnlinePhase] = useState<OnlinePhase>(
+    initialJoinCode ? 'joining' : 'idle',
+  );
   const [showSpinner, setShowSpinner] = useState(false);
   const [gameCode, setGameCode] = useState<string | null>(null);
   const [gameId, setGameId] = useState<string | null>(null);
@@ -315,7 +327,11 @@ export function GameRoot({ socketFactory = realFactory }: GameRootProps = {}) {
         </section>
       )}
       {onlinePhase === 'joining' && (
-        <JoinScreen connect={socketFactory} onGameReady={handleGameReady} />
+        <JoinScreen
+          connect={socketFactory}
+          onGameReady={handleGameReady}
+          initialCode={initialJoinCode}
+        />
       )}
       {onlinePhase === 'playing-online' && (
         <OnlineBoard

@@ -42,9 +42,12 @@ Observed in: AC1.2 (clipboard URL), AC2.4 (deep-link boots SPA), AC2.5
 
 If a friend opens a share link for a game that no longer exists (expired,
 already used, or the code was mistyped), they see the message "Game not found.
-The link may have expired or already been used." The page does not crash, show a
-generic 500, or display a raw CloudFront/S3 error page. The error is human-
-readable and self-explanatory.
+Check the code and try again." The page does not crash, show a generic 500, or
+display a raw CloudFront/S3 error page. The error is human-readable and self-
+explanatory. (Note: the server returns the same signal — "code not found" — for
+all three causes; a single shared message is correct. Deep-link-specific wording
+is logged as OI-39 for a future slice if judged worth the server-side
+differentiation cost.)
 
 Observed in: AC2.3, AC2.6, AC3.4 (C4 smoke — implicit: valid code path confirms
 the counter case).
@@ -112,9 +115,10 @@ Observed in: AC1.1, AC1.2, AC1.5.
 ### T4 — Invalid code → readable error, no crash [UC2, UC3]
 
 Navigating to `/join/XXXXXX` (not a valid waiting-game code) and submitting
-renders the join screen with "Game not found. The link may have expired or
-already been used." visible; the page does not crash or show a generic
-500/edge-error (SM-3; reuses the s006 `code-not-found` branch).
+renders the join screen with "Game not found. Check the code and try again."
+visible; the page does not crash or show a generic 500/edge-error (SM-3; reuses
+the s006 `code-not-found` branch — same signal, same message for deep-link and
+manual-entry paths).
 
 Observed in: AC2.3, AC2.6.
 
@@ -199,8 +203,9 @@ Observed in: AC1.2, AC3.5.
   pre-filled join screen triggers the WS `join` action with the pre-filled code
   (same WS spy assertion as s005/s006; no new action key or payload field).
 - **AC2.3** [UC2, T4]: SPA component test — when the WS join response is
-  `code-not-found`, the join screen displays "Game not found. The link may have
-  expired or already been used." (stable selector; exact text pinned).
+  `code-not-found`, the join screen displays "Game not found. Check the code and
+  try again." (stable selector; exact text pinned — shared with manual-entry
+  path; server cannot distinguish cause).
 - **AC2.4** [UC2, UC3, T1]: Playwright smoke — fresh-tab navigation to deployed
   `https://<domain>/join/<valid-code>` returns HTTP 200 with the SPA (`index.html`
   body), NOT a CloudFront or S3 error page; join screen renders with code
@@ -209,8 +214,8 @@ Observed in: AC1.2, AC3.5.
   both players (host and guest browser contexts) to the game board via the
   existing WS join path.
 - **AC2.6** [UC2, UC3, T4]: Playwright smoke — navigating to `/join/XXXXXX`
-  (invalid code) and submitting renders "Game not found. The link may have
-  expired or already been used." with no crash and no generic 500/edge error.
+  (invalid code) and submitting renders "Game not found. Check the code and try
+  again." with no crash and no generic 500/edge error.
 
 ### UC3 — validation (tester-owned, post-deploy)
 

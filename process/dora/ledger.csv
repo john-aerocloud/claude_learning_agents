@@ -492,3 +492,4 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T20:37:17Z,oxo-online,11,s008-share-link,orchestrator,gate,,success,GATE-4-S008,auto-approved app-only; deep-link prod-confirmed
 2026-06-07T20:37:17Z,oxo-online,11,s008-share-link,product,task_start,,na,S008-TEXT-RECONCILE,reconcile AC2.3/T4 error-text vs shipped single code-not-found message
 2026-06-07T20:37:17Z,oxo-online,11,s008-share-link,tester,task_start,,na,S008-UC3,UC3 validation + C4 done-condition SM-5
+2026-06-07T20:38:26Z,oxo-online,11,s008-share-link,product,task_end,,success,S008-TEXT-RECONCILE,Decision A: reconcile deep-link error text to shipped shared code-not-found message; OI-39 registered for future differentiation

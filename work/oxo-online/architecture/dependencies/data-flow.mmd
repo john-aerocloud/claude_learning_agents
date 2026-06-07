@@ -65,10 +65,6 @@ flowchart TD
   classDef secret fill:#fde0e0,stroke:#c62828,color:#000;
   classDef changed stroke:#d50000,stroke-width:4px,stroke-dasharray:6 3;
 
-  %% s006 changed nodes (the move handler is the touched compute; Games gains move-write semantics)
-  class wsfn changed;
-  class games changed;
-
-  %% s006 changed EDGES are the dotted (-.->) edges above:
-  %%   player->wsfn (move msg), wsfn->games (read), wsfn->games (move CAS write), wsfn->relay (2-post relay).
-  %% Tester: plan move-relay test coverage from the dashed-red nodes and dotted edges.
+  %% s006 changed marks CLEARED (2026-06-07 — tester consumed, UC6 prod validation PASS)
+  %% Previously marked: wsfn (move route), games (move-write semantics).
+  %% Dotted edges (move msg, GetItem, CAS write, 2-post relay) are now delivered/stable.

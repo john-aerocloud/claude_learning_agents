@@ -161,6 +161,23 @@ test-lambda:
 test-scripts:
 	node --test work/$(PROJECT)/scripts/*.test.js
 
+# --- IMP-007 impacted-tests: changed-node -> impacted-spec lookup -------------
+# CROSS-PROJECT agent-ops (not per-project): diffs work/<project>/architecture/
+# dependencies/*.mmd since <sha> + reads working-tree `changed`-class marks, then
+# greps committed specs for @covers <node-id> tags. Emits two plain-text lists
+# (IMPACTED SPECS, UNCOVERED CHANGED NODES) consumable as a tester tick-off.
+# Pure git + filesystem; NO creds, NO network. Exit 2 = ADVISORY warning when a
+# changed node has no covering spec (wired into the tester's flow first — NOT a
+# CI gate yet). PROJECT defaults to work/ACTIVE.
+#   make impacted-tests SINCE=<sha> [PROJECT=oxo-online]
+impacted-tests:
+	node .claude/tools/impacted-tests.js --since $(SINCE) --project $(PROJECT)
+
+# Self-tests for the cross-project agent-ops tooling under .claude/tools/
+# (IMP-007 impacted-tests.js). node's built-in runner, no creds, no network.
+test-tools:
+	node --test .claude/tools/*.test.js
+
 # --- IMP-008 WAF runner-IP exclusion helpers ----------------------------------
 # Add/remove a CIDR from the oxo-test-runner-ips WAFv2 IP set (us-east-1,
 # CLOUDFRONT scope). The IP set is named 'oxo-test-runner-ips'; these targets
@@ -233,4 +250,4 @@ COUNT ?= 10
 uniqueness-probe:
 	node work/$(PROJECT)/scripts/uniqueness-probe.js --api-base $(API_BASE) --count $(COUNT)
 
-.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe
+.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools

@@ -52,9 +52,9 @@ flowchart TD
   S7UC2 -->|"WAF IP set + drain Lambda\nmust be deployed before\nIMP-008 smoke-CI path\n(make waf-runner-ip-add targets)"| S7UC4
 
   %% ---- s008 use cases (NEW — this slice) ----
-  S8UC1["s008-UC1 — copy-link control\n(waiting screen: copy\nhttps://domain/join/code\nto clipboard; 2s confirm)"]:::changed
-  S8UC2["s008-UC2 — deep-link route\n+ pre-fill + one-click join\n(/join/:code; invalid-code error;\nno new WS contract)"]:::changed
-  S8UC3["s008-UC3 — validation\n(manual-entry regression,\nCSP+synth pins,\nC4 done-condition smoke)"]:::changed
+  S8UC1["s008-UC1 — copy-link control\n(waiting screen: copy\nhttps://domain/join/code\nto clipboard; 2s confirm)"]:::delivered
+  S8UC2["s008-UC2 — deep-link route\n+ pre-fill + one-click join\n(/join/:code; invalid-code error;\nno new WS contract)"]:::delivered
+  S8UC3["s008-UC3 — validation\n(manual-entry regression,\nCSP+synth pins,\nC4 done-condition smoke)"]:::delivered
 
   %% ---- Edges: already-live context feeds s008 UCs ----
   S6UC4 -->|"SPA WS message loop + join path\nalready wired; s8-UC2 adds\n/join/:code route + pre-fill"| S8UC2
@@ -66,5 +66,7 @@ flowchart TD
   S8UC2 -->|"deep-link route must be deployed\nbefore prod validation smoke\n(AC2.4/AC3.4 require live /join/:code)"| S8UC3
 
   %% ---- classDef ----
+  %% s008 changed marks CLEARED (2026-06-07 — tester consumed, UC3 prod validation PASS, C4 done-condition MET 2323ms).
+  %% S8UC1 (copy-link), S8UC2 (deep-link), S8UC3 (validation) are now delivered.
   classDef delivered fill:#e8f4e8,stroke:#2e7d32,color:#000;
-  classDef changed fill:#fff3e0,stroke:#e65100,color:#000;
+  classDef changed fill:#e8f4e8,stroke:#2e7d32,color:#000;

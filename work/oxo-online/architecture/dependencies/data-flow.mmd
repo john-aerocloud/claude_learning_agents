@@ -112,4 +112,5 @@ flowchart TD
   %%   serves the deep-link path /join/<code> so React Router resolves it client-side.
   %%   Tester plans the deep-link-boots-SPA prod smoke (T1) + SM-5 two-browser e2e from this.
   %%   The deep-link JOIN reuses the EXISTING WS $connect?code + join path UNCHANGED (no edge change).
-  class cfwaf changed;
+  %% s008 changed mark CLEARED (2026-06-07 — tester consumed, UC3 prod validation PASS, C4 MET 2323ms).
+  %% cfwaf: deep-link /join/<code> via existing SPA-fallback confirmed in prod.

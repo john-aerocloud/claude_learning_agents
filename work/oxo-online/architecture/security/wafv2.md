@@ -119,6 +119,44 @@ gate as the cost of the WAFv2/v2-API platform constraint.
 - [ ] The deploy-role extension is applied (via `make deploy-oidc`) **before**
       the WAF resources deploy (§39 config-follows-resource ordering).
 
+## IMP-008 — `oxo-test-runner-ips` IP set + rate-rule scope-down (s007)
+
+Adds a runner-IP exclusion to the **existing CloudFront-scope rate rule** so the
+test runner is not rate-limited during smoke validation, **without** weakening the
+rule for any real-user IP. New resource in the **existing** `OxoOnlineWafUsEast1`
+stack (us-east-1, CLOUDFRONT scope — the already-documented platform-forced region
+exception; **no new region**). New checkable controls (synth + prod tests):
+- [ ] An `AWS::WAFv2::IPSet` named `oxo-test-runner-ips` (scope `CLOUDFRONT`,
+      `IPAddressVersion IPV4`) exists in `OxoOnlineWafUsEast1` (synth:
+      `waf-us-east-1-stack.test.ts`).
+- [ ] The CloudFront rate-based rule's statement is wrapped in a scope-down
+      `AndStatement` containing a **`NotStatement` around an
+      `IPSetReferenceStatement`** referencing `oxo-test-runner-ips` — so the rule's
+      rate COUNT applies only to IPs **not** in the set. The rule's **action
+      (`Block`) and limit (≤100) are UNCHANGED** (synth asserts the NOT scope-down
+      is present AND that action/limit are unmodified).
+- [ ] **AC3.1 preserved for non-runner IPs:** a source IP **not** in the set is
+      still rate-limited and Blocked exactly as before — `slice005-h1-waf-ac3.1.spec.ts`
+      (or equivalent) stays green for a non-runner source. The scope-down narrows
+      *applicability*, not *action*.
+- [ ] **Governance — mutation is deploy-role / runner-script only:** the IP set is
+      mutated solely via `aws wafv2 update-ip-set` from the `make
+      waf-runner-ip-add`/`-remove` scripted flow (read-modify-write append, never
+      replace, to survive parallel CI). No human, no app principal mutates it.
+- [ ] **Entries are transient:** the runner IP/32 is added per smoke run and
+      removed by a `trap`-guarded `post` step that **always** runs; a post-run
+      `aws wafv2 get-ip-set` assertion confirms the set is empty after `make
+      smoke-ci` (IMP-008 done-condition #6).
+- [ ] **Standing drain guard (REQUIRED, not optional):** because WAF IP sets do
+      not self-expire, a **scheduled (≤24h) drain Lambda** empties any leaked
+      entry. Its synth test is the s007 cicd capability step. A leaked entry only
+      over-privileges that one stale IP; the rule still fires for all others.
+- [ ] **Deploy-role grant:** `oxo-deploy` (or the runner role) WAFv2 grants extend
+      to `wafv2:GetIPSet`/`UpdateIPSet` on the named `oxo-test-runner-ips` ARN only
+      — **no `wafv2:*` wildcard, no IP-set create/delete at runtime** (the set is
+      CDK-managed; runtime only get/update its addresses). The drain Lambda's role
+      is similarly scoped to `GetIPSet`/`UpdateIPSet` on this one ARN.
+
 ## Reversal / containment
 
 - [ ] Disassociation is a clean, data-free reversal: removing the

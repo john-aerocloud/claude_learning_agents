@@ -259,7 +259,9 @@ write or an assertion that an existing grant was not widened.**
   bounded retry if rejects annoy users.
 - **OR-S006-b — best-effort relay:** a dropped `@connections` push is not
   re-pushed this slice; the authoritative board in `Games` is always correct;
-  recovery is reconnect-replay in s007.
+  recovery is reconnect-replay in s007. **[RE-WORDED at s007, 2026-06-07 per the
+  OI-10 ruling — see the s007 section: recovery is abandon + survivor-notify, NOT
+  reconnect-replay; reconnect is unscheduled.]**
 - Inherited: OR-H2-b (guest code-as-credential pre-join, closed by C6),
   OI-10 (no reconnect, s007).
 
@@ -283,6 +285,122 @@ match of the platform-set connectionId against the stored binding — `gameId`
 selects the record to authorize against and confers no capability; therefore
 §9a-style auto-accept of the amendment applies (the architect re-affirms the
 existing GATE-3-S006 acceptance) and no human re-gate is required.
+
+---
+
+## s007 subset (`$disconnect` abandon + notify + clean up) — built scope
+
+s007 makes the EXISTING `$disconnect` **stub** route real on the existing
+`oxo-ws-fn`. No new public surface, principal, table, API, or region. **One IAM
+grant added** (`dynamodb:GetItem` on `Connections` — see `dynamodb-connections.md`
+s007 section). These checkable statements become policy tests:
+
+### Route surface (unchanged count)
+- [ ] Route count stays **five** (`$connect`/`$disconnect`/`register`/`join`/
+      `move`); **no new route**, still **no `$default`**. `$disconnect` is a
+      platform lifecycle route on the existing `oxo-ws-fn` (AWS_PROXY).
+- [ ] `$disconnect` is post-`$connect` — the `$connect` REQUEST authorizer does
+      **NOT** re-run on disconnect.
+
+### No force-abandon — connectionId IS the identity (the core integrity control)
+The `$disconnect` event carries **only** the disconnecting connection's own
+`event.requestContext.connectionId`, set by the platform — there is **no client
+body, no client-supplied gameId or connectionId**. Identity is never read from a
+body. This is the s005/s006 "never trust a body connectionId" rule applied to the
+lifecycle event.
+- [ ] A `$disconnect` resolves its game **only** via
+      `GetItem(Connections, event.requestContext.connectionId)` — the
+      disconnecting connection's OWN row, by primary key. It can touch **only** the
+      game that row names.
+- [ ] A client **cannot** force-abandon another player's game: there is no input
+      on the event a client controls, and the `Connections:GetItem` grant is a
+      single-PK read (no `Query`/`Scan`) so it cannot enumerate or abandon other
+      games' connections. **No spoof path.**
+
+### Abandon is conditional — won/drawn never overwritten
+- [ ] The abandon write is a single atomic conditional `UpdateItem` on `Games`
+      with `ConditionExpression status = 'active'`, `SET status = 'abandoned'`.
+- [ ] On `ConditionalCheckFailedException` (game is `won`/`drawn`/already
+      `abandoned`/`waiting`, or a simultaneous second disconnect already abandoned
+      it): **no write, swallow** — a terminal result is never overwritten
+      (mirrors s006 S3; the guard is the condition, not code alone).
+- [ ] A `waiting`-state disconnect (host left, no guest): condition false → no
+      abandon write, **zero** posts; just the `Connections` delete (thin handling
+      — no `waiting`→`abandoned` transition is added).
+
+### Notification amplification — bounded to ONE post
+- [ ] An **active-game** disconnect triggers **exactly 1** `@connections` POST
+      (`{ type:'opponent-disconnected' }` to the survivor only — the bound
+      connection that is NOT the disconnecting one). Never a broadcast.
+- [ ] A **terminal** or **waiting** disconnect, or a survivor `GoneException`,
+      triggers **0** posts.
+- [ ] A survivor post returning **410 Gone** (survivor also gone) is **swallowed +
+      logged with NO re-post** — no retry storm. `ManageConnections` is the s005
+      grant on **this WS API ARN only** (assert no widening).
+
+### Connection hygiene
+- [ ] The disconnecting `connectionId` row is deleted from `Connections`
+      (`DeleteItem`, already-granted) in **all** branches (active/terminal/waiting/
+      missing-game) so no stale connectionId accumulates. The 2h `Connections` TTL
+      is the backstop if the delete fails.
+
+### IAM — exactly one grant added (assert positive AND negative)
+- [ ] `oxo-ws-fn`'s policy is the s006 grant set **plus exactly**
+      `dynamodb:GetItem` on the **`Connections` table ARN only**. **No** `Query`,
+      **no** `Scan`, **no** second table, **no** `*`, and **no** widening of
+      `ManageConnections` / `UpdateItem` (Games) / `DeleteItem` (Connections).
+
+### Data classification (unchanged class)
+- [ ] The `opponent-disconnected` frame carries only `{ type }` — no opponent
+      connection detail, no PII.
+
+### Out of scope for s007 (do NOT assert as built)
+- Reconnect-after-reload / state replay (OI-10 ruled OUT; unscheduled).
+- Leaderboard write on abandonment (C5/s009).
+- Waiting-host abandonment UI / server-side keepalive (relied on APIGW 10-min
+  idle close, no custom ping/pong).
+
+---
+
+## s007 security conclusion (gated review)
+
+The `$disconnect` handler turns the frozen-board failure mode into a graceful
+abandon + survivor-notify. The decisive controls are a **conditional write**
+(won/drawn guard), a **bounded single notification**, and an **assertion that the
+one added grant is a single scoped read** — the blast radius stays inside the
+existing `oxo-ws-fn`/`Games`/`Connections` boundary.
+
+**Is there new attack surface / data flow / trust boundary? A new DATA FLOW
+(the `$disconnect`-triggered abandon + survivor notify + Connections read/delete)
+— YES; a new public surface, principal, table, API, region, or trust boundary —
+NO; the one IAM grant added (`dynamodb:GetItem` on `Connections`, used only by the
+platform-fired `$disconnect` path, keyed on the disconnecting connection's OWN
+connectionId) widens no trust boundary because the connectionId IS the identity
+and is set by the platform, not the client — so there is NO force-abandon spoof
+path; therefore this is NOT a §9a auto-accept and the gated security review
+applies, but its blast radius is bounded to the existing `oxo-ws-fn`/`Games`/
+`Connections` boundary and every control is a condition on an existing write, a
+single bounded notification, or an assertion that the one added grant was scoped
+to exactly one read action on one table.**
+
+**Carried open risks (accepted, named):**
+- **OR-S007-a — `Connections:GetItem` is a minimal real grant add:** bounded to a
+  single-PK read of the disconnecting connection's own row (no `Query`/`Scan`).
+  Reversal: a connection→game GSI on `Games` would let `$disconnect` resolve via
+  `Games` and drop this grant.
+- **OR-S007-b — survivor notify is best-effort, single attempt (closes OR-S006-b):**
+  a survivor that misses the one `opponent-disconnected` post recovers via their
+  own `$disconnect`/2h TTL or a reload. No retry storm.
+- **OR-S006-b — RE-WORDED 2026-06-07 (OI-10 ruling):** the `@connections` relay is
+  best-effort (no per-post retry; a dropped board-update is not re-pushed). The
+  authoritative board in `Games` is always correct; only the *push* can be missed.
+  **Recovery is graceful disconnect — abandon + survivor-notify (s007), NOT
+  reconnect-replay.** Reconnect-replay is **unscheduled** (candidate for a
+  C6-adjacent slice or never; per OI-10). A player who reloads loses the game (no
+  resume) and lands on a fresh mode selector — the accepted recovery story for
+  relay loss as of s007. *(Supersedes the s006-section wording of OR-S006-b above.)*
+- Inherited: OR-H2-b (guest code-as-credential pre-join, closed by C6),
+  OR-S006-a (version CAS reject vs retry, unchanged).
 
 ---
 

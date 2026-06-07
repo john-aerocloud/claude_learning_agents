@@ -16,7 +16,7 @@ is recorded; later chunks revise this when value is re-sliced.
 |-----|---------|--------|
 | **[C1]** | Needed for Chunk 1 (deployable shell) | delivered (slice 001) |
 | **[C2-3]** | Local game + AI — client-only, no new infra | **current** (C2 = slice 002, local game, delivered; C3 = AI, in progress) |
-| **[C4]** | Online match — first stateful backend + realtime | in progress (s004 create ✓; s005 join/WS ✓; s005-h2 connect-auth ✓; **s006 move relay + server-authoritative win/draw — current**) |
+| **[C4]** | Online match — first stateful backend + realtime | in progress (s004 create ✓; s005 join/WS ✓; s005-h2 connect-auth ✓; s006 move relay + server-authoritative win/draw ✓; **s007 $disconnect abandon+notify — current**) |
 | **[C5]** | Leaderboard — first durable persistence | not started |
 | **[C6]** | Player identity — session/display name | not started |
 | **[C7]** | In-game chat — reuses C4 realtime transport | not started |
@@ -101,19 +101,19 @@ C4Container
   Person(player, "Player", "Anonymous browser user")
 
   System_Boundary(aws, "AWS account (prod)") {
-    Container(wafg, "WAFv2 WebACL (global)", "us-east-1 CLOUDFRONT scope", "[s005-h1] rate 100/5min/IP + IP-reputation; assoc. to distribution. Lives in NEW OxoOnlineWafUsEast1 stack.")
+    Container(wafg, "WAFv2 WebACL (global)", "us-east-1 CLOUDFRONT scope", "[s005-h1] rate 100/5min/IP + IP-reputation; assoc. to distribution. Lives in NEW OxoOnlineWafUsEast1 stack. [s007/IMP-008] +oxo-test-runner-ips IP set; rate rule scope-down NOT(IPSet) excludes transient runner IPs (Block+limit unchanged for all others).")
     Container(cf, "CloudFront", "CDN", "[built s001/s004; s005-h1 webAclId set] SPA + /api/* behaviour (CachingDisabled). NO WS proxying.")
     Container(s3, "S3 web bucket", "Static hosting", "[built s001] React SPA; private, OAC only. s005 adds runtime wsUrl config artifact.")
 
     Container(httpapi, "API Gateway (HTTP)", "HTTPS", "[built s004] POST /games (create). NO stage WebACL (CF WAF covers /api/*).")
-    Container(wsapi, "API Gateway (WebSocket)", "WSS", "[s005] prod stage; routes $connect/$disconnect(stub)/register/join. [s006] +move route (5 keys, no $default). [s005-h2] $connect has a REQUEST Lambda authorizer (NO result cache — strike 4). NO WAF (WAFv2 cannot assoc. API GW v2 — GATE-AMEND-H1-A); flood control = stage throttle 20/40 + reserved-concurrency + per-IP authorizer budget.")
+    Container(wsapi, "API Gateway (WebSocket)", "WSS", "[s005] prod stage; routes $connect/$disconnect/register/join. [s006] +move route (5 keys, no $default). [s007] $disconnect stub -> REAL (abandon+notify+clean up); route count unchanged. [s005-h2] $connect has a REQUEST Lambda authorizer (NO result cache — strike 4). NO WAF (WAFv2 cannot assoc. API GW v2 — GATE-AMEND-H1-A); flood control = stage throttle 20/40 + reserved-concurrency + per-IP authorizer budget.")
 
     Container(gamefn, "oxo-game-fn", "Lambda Node20", "[built s004] create-game; PutItem on Games only. [s005-h2] also mints host wsToken (HMAC); reads shared secret.")
-    Container(wsfn, "oxo-ws-fn", "Lambda Node20", "[s005] $connect/register/join; conditional join write + game-ready fan-out. [s006] +move route: validates turn/legality/status by connectionId binding, atomic conditional UpdateItem with version CAS, server-side win/draw, board-update/game-over relay to the 2 bound conns. NO new IAM grant (reuses s005 set).")
+    Container(wsfn, "oxo-ws-fn", "Lambda Node20", "[s005] $connect/register/join; conditional join write + game-ready fan-out. [s006] +move route: validates turn/legality/status by connectionId binding, atomic conditional UpdateItem with version CAS, server-side win/draw, board-update/game-over relay to the 2 bound conns. [s007] $disconnect REAL: GetItem(Connections, OWN connId)->gameId; conditional UpdateItem status active->abandoned (won/drawn guard); 1 survivor notify (0 on terminal/waiting); delete row. +ONE IAM grant: GetItem on Connections only (else s006 set).")
     Container(wsauthfn, "oxo-ws-auth-fn", "Lambda Node20", "[s005-h2] $connect REQUEST authorizer: verify host wsToken / lookup guest code; per-IP budget; Allow/Deny IAM policy. NO ManageConnections, NO Games write.")
 
     ContainerDb(ddb_game, "DynamoDB: Games", "NoSQL", "[built s004] +code GSI & host/guest connId attrs (s005). [s006] +board(9-char)/currentTurn/winner/version(opt-lock CAS)/moveCount attrs — authoritative board; schemaless add, no table/GSI change. TTL 24h, SSE, on-demand.")
-    ContainerDb(ddb_conn, "DynamoDB: Connections", "NoSQL", "[s005] connectionId -> gameId/role. TTL 2h, SSE, on-demand.")
+    ContainerDb(ddb_conn, "DynamoDB: Connections", "NoSQL", "[s005] connectionId -> gameId/role. TTL 2h, SSE, on-demand. [s007] +GetItem read by $disconnect (own row by PK) — schema unchanged.")
     ContainerDb(ddb_attempts, "DynamoDB: ConnectAttempts", "NoSQL", "[s005-h2] sourceIp -> count. TTL 5min, SSE, on-demand. Best-effort per-IP connect budget.")
     Container(secret, "WS-token secret", "SSM SecureString / Secret", "[s005-h2] 32-byte HMAC key. Encrypted at rest; read-scoped to oxo-game-fn (mint) + oxo-ws-auth-fn (verify) only.")
   }
@@ -134,16 +134,17 @@ C4Container
   Rel(wsauthfn, ddb_attempts, "UpdateItem ADD (per-IP budget)")
   Rel(gamefn, ddb_game, "PutItem (create)")
   Rel(wsfn, ddb_game, "Query code-index + conditional UpdateItem (join/register); [s006] GetItem board + move CAS UpdateItem")
-  Rel(wsfn, ddb_conn, "Put/Delete connection")
-  Rel(wsfn, wsapi, "game-ready + [s006] board-update/game-over fan-out to the 2 bound conns", "@connections (ManageConnections, this API ARN only)")
+  Rel(wsfn, ddb_conn, "Put/Delete connection; [s007] GetItem own row on $disconnect (connId->gameId)")
+  Rel(wsfn, wsapi, "game-ready + [s006] board-update/game-over fan-out to the 2 bound conns; [s007] $disconnect = EXACTLY 1 opponent-disconnected post to survivor (0 on terminal/waiting; 410=swallow, no retry)", "@connections (ManageConnections, this API ARN only)")
 }
 ```
 
-**Not yet built (target only):** `$disconnect` cleanup, reconnect-after-reload
-(OI-10, s007), Leaderboard table + `oxo-board-fn` (C5), CloudFront WS proxying,
+**Not yet built (target only):** reconnect-after-reload (OI-10 ruled OUT of s007,
+unscheduled), Leaderboard table + `oxo-board-fn` (C5), CloudFront WS proxying,
 in-game chat (C7). **WAF built (s005-h1); `$connect` capability-token + per-IP
 authorizer built (s005-h2); move relay + server-authoritative win/draw built
-(s006).** See deltas 005+/006 for the deferral list.
+(s006); `$disconnect` abandon+notify+clean-up built (s007).** See deltas 005+/006/
+007 for the deferral list.
 
 **Key s005-h2 (connect-auth) architectural facts:**
 - First **Lambda REQUEST authorizer** on the WS API (new-mechanism, §30 probe
@@ -210,6 +211,44 @@ authorizer built (s005-h2); move relay + server-authoritative win/draw built
   `architecture/dependencies/data-flow.mmd` (FIRST edition, OI-31),
   `architecture/security/apigw-websocket.md` (s006 section),
   `architecture/security/dynamodb-games.md` (s006 additions).
+
+**Key s007 ($disconnect abandon + notify + clean up) architectural facts:**
+- **The EXISTING `$disconnect` stub becomes REAL** on the EXISTING `oxo-ws-fn`.
+  **No new route** (count stays 5, no `$default`), **no new function, no new
+  table, no new API, no new principal, no new region, no new deploy-role grant.**
+- **ONE IAM grant added** (the only permission change in the slice):
+  `dynamodb:GetItem` on the **`Connections` table ARN only** — `$disconnect` must
+  resolve the disconnecting `connectionId → gameId` (that binding lives only in
+  `Connections`; the move path stays Connections-read-free). Single-PK read of the
+  connection's OWN row; no `Query`/`Scan`. `ManageConnections`/`UpdateItem`(Games)/
+  `DeleteItem`(Connections) **unchanged**.
+- **Conditional abandon — won/drawn never overwritten:** a single atomic
+  `UpdateItem` with `ConditionExpression status='active'`, `SET status='abandoned'`.
+  A terminal/`waiting`/already-abandoned game fails the condition → no write,
+  swallowed (the won/drawn guard is the condition, same CAS discipline as s006).
+- **Bounded notification:** an active-game disconnect = **EXACTLY 1**
+  `@connections` post (`opponent-disconnected` to the survivor); terminal/waiting/
+  survivor-`GoneException` = **0**. A survivor 410 is swallowed with **no retry**
+  (both gone). Never a broadcast.
+- **No force-abandon spoof:** the `$disconnect` event carries only the
+  disconnecting connection's OWN platform-set `connectionId` (no client body) — a
+  client cannot abandon another's game. **connectionId IS the identity.**
+- **Idle timeout = APIGW 10-min idle close** fires the same `$disconnect` path; no
+  custom keepalive. 2h `Connections` TTL + 24h `Games` TTL are the backstops.
+- **OR-S006-b re-worded (OI-10 ruling):** relay-loss recovery is **abandon +
+  survivor-notify (s007), NOT reconnect-replay**; reconnect is unscheduled.
+- **IMP-008 (cicd/infra, not the app data plane):** a `oxo-test-runner-ips` WAF
+  IP set in the existing us-east-1 WAF stack; the CloudFront rate rule gains a
+  `NOT(IPSet)` scope-down so transient runner IPs bypass the count while Block +
+  limit stay unchanged for all other IPs (AC3.1 preserved). Mutation is
+  deploy-role/runner-script only; entries are transient (added per-run, removed by
+  `trap`, drained ≤24h by a scheduled Lambda — the s007 cicd capability step).
+- See `architecture/deltas/007-disconnect.md`,
+  `architecture/dependencies/data-flow.mmd` (s007 marks),
+  `architecture/security/apigw-websocket.md` (s007 section),
+  `architecture/security/dynamodb-connections.md` (s007 GetItem addition),
+  `architecture/security/dynamodb-games.md` (s007 abandon transition),
+  `architecture/security/wafv2.md` (IMP-008 IP set).
 
 **Key s005 architectural facts:**
 - The WebSocket API is in the **same `OxoGameProd` stack** as the HTTP API +
@@ -311,7 +350,7 @@ authorizer built (s005-h2); move relay + server-authoritative win/draw built
 | `oxo-cf-oac` | CloudFront (OAC) | `s3:GetObject` on the web bucket only |
 | `oxo-deploy` | GitHub OIDC | `s3:PutObject`/`DeleteObject` on web bucket, `cloudfront:CreateInvalidation`, `lambda:UpdateFunctionCode`, scoped by resource ARN + repo/branch claim. **s005-h1 (amended GATE-AMEND-H1-A):** + scoped `wafv2:` Create/Get/Update/Delete/List/Tag (CloudFront WebACL mgmt) and `cloudfront:UpdateDistribution`/`GetDistribution`/`GetDistributionConfig` (no `wafv2:*`/`cloudfront:*` wildcard; no `iam:*`). The `wafv2:Associate`/`Disassociate`/`ListResourcesForWebACL` grants are **dropped** — the regional WS association is removed (WAFv2 cannot associate API GW v2). See `DEPLOY_ROLE_EXTENSIONS.md`. |
 | `oxo-game-fn` | Lambda (create) | **s004 built:** `dynamodb:PutItem` on `Games` ARN only + own log group. **s005-h2:** + secret read (`ssm:GetParameter`+`kms:Decrypt` or `secretsmanager:GetSecretValue`) on the **one** shared WS-token secret ARN only (mints host `wsToken`). (Target broader RW deferred.) |
-| `oxo-ws-fn` | Lambda (WS join/register) | **s005:** `GetItem`/`Query` on `Games` `code-index` GSI; conditional `UpdateItem` on `Games`; `PutItem`/`DeleteItem` on `Connections`; `execute-api:ManageConnections` on **this WS API ARN only**; own log group. **No** secret read, **no** `ConnectAttempts` access. |
+| `oxo-ws-fn` | Lambda (WS join/register/move/$disconnect) | **s005:** `GetItem`/`Query` on `Games` `code-index` GSI; conditional `UpdateItem` on `Games`; `PutItem`/`DeleteItem` on `Connections`; `execute-api:ManageConnections` on **this WS API ARN only**; own log group. **s007:** + **exactly** `dynamodb:GetItem` on the **`Connections` table ARN only** (the `$disconnect` connectionId→gameId read) — **no** `Query`/`Scan`, no second table, no `*`. **No** secret read, **no** `ConnectAttempts` access. |
 | `oxo-board-fn` | Lambda (leaderboard) | RW `Leaderboard` table; read `Games`; CloudWatch Logs (C5 — not built) |
 | `oxo-ws-auth-fn` | Lambda ($connect REQUEST authorizer) | **s005-h2 built:** `GetItem`/`Query` on `Games` `code-index` GSI (guest code path); `UpdateItem`/`PutItem` on `ConnectAttempts` only; secret read on the **one** shared WS-token secret ARN; own log group. **NO** `execute-api:ManageConnections`, **NO** `Games` write, **NO** `Connections` access, **NO** `iam:*`/wildcard. Disjoint from `oxo-ws-fn` (least-privilege gate). |
 
@@ -360,7 +399,10 @@ core, a `Games` store port (with the conditional-CAS write), and a relay
 transport port — so most of the logic stands up locally (OI-28). This is
 component-level structure inside one deployable, not a handler split. Revisit a
 real split only if chat (C7) and move-relay diverge enough to warrant separate
-functions.
+functions. s007 reuses these ports for the `$disconnect` decision logic (a pure
+`(disconnectingConnId, gameItem) → {abandon, survivorId, notify}` function over
+the `Games` store port + relay port) and **extends the Connections store port**
+with `getConnection(connectionId)` — still one deployable, still locally standable.
 
 ## Runtime data-flow (process §12a)
 
@@ -368,5 +410,8 @@ functions.
 data-flow with platform gates as explicit nodes (CloudFront+WAF, HTTP API,
 WS upgrade, `$connect` REQUEST authorizer with strike-4/5 semantics, lazy-TTL
 stores, the `@connections` relay). It is the **tester's planning input**; each
-slice marks its delta with `classDef changed`. s006 marks `oxo-ws-fn` and
-`Games` changed and adds the four dotted `move` edges.
+slice marks its delta with `classDef changed`. s007 marks `oxo-ws-fn`,
+`Connections`, `Games`, the `@connections` relay, and the CloudFront+WAF gate
+changed; adds the dotted `$disconnect` edges (Connections GetItem → Games GetItem
+→ conditional abandon → 1 survivor notify → Connections delete) and the IMP-008
+IP-set scope-down annotation on the WAF gate.

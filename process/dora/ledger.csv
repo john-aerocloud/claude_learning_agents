@@ -421,3 +421,7 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T14:58:30Z,oxo-online,10,s007-disconnect,product,task_start,,na,S007-SLICE,slice-next dispatch: propose s007 disconnect/timeout slice + OI-10 reconnect decision + chunk-plan actuals
 2026-06-07T14:59:34Z,oxo-online,0,s007,product,task_start,,na,S007-SLICE,s007 slice-next: disconnect and timeout handling
 2026-06-07T15:01:28Z,oxo-online,0,s007,product,task_end,480,success,S007-SLICE,s007 slice.md written; OI-10 decided (reconnect OUT); chunk-plan s006 actuals + s007 forecast updated
+2026-06-07T15:05:11Z,oxo-online,10,s007-disconnect,orchestrator,gate,,success,GATE-2-S007,slice accepted at human gate
+2026-06-07T15:05:11Z,oxo-online,10,s007-disconnect,solution-architect,task_start,,na,S007-DELTA,arch delta + security review + data-flow.mmd delta + OR-S006-b re-word
+2026-06-07T15:06:17Z,oxo-online,10,s007-disconnect,solution-architect,task_start,,na,S007-DELTA,s007 arch delta: real $disconnect + IMP-008 WAF IP-set + OR-S006-b reword + sec review
+2026-06-07T15:13:03Z,oxo-online,10,s007-disconnect,solution-architect,task_end,,success,S007-DELTA,delta 007 + IMP-008 WAF IP-set blessing + OR-S006-b reword + sec review; ONE grant added (Connections GetItem)

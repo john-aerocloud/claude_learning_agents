@@ -80,3 +80,20 @@ new principal, no new IAM grant.** New checkable controls (become policy tests):
       `PutItem`, no `DeleteItem`, no `Scan`, no `*`. Assert the negative.
 - [ ] PITR still NOT required (ephemeral game state, 24h TTL) — deliberate cost
       choice, unchanged.
+
+## s007 additions (`$disconnect` abandon transition)
+s007 adds the `active → abandoned` `status` transition, written by the
+`$disconnect` path on the existing `oxo-ws-fn`. **No new attribute** (`abandoned`
+is an existing-`status` value), **no new grant on `Games`** (reuses the s005/s006
+conditional `UpdateItem`). New checkable controls (become policy tests):
+- [ ] The abandon write is a **single atomic conditional `UpdateItem`** with
+      `ConditionExpression status = 'active'` and `SET status = 'abandoned'`. A
+      `won`/`drawn`/already-`abandoned`/`waiting` game fails the condition →
+      **no write, swallow** — a terminal result is **never** overwritten (the
+      won/drawn guard is the condition, not code alone).
+- [ ] A simultaneous double-disconnect is serialized by the condition: the first
+      flips `active`→`abandoned`, the second's condition fails (no second write).
+- [ ] The `Games` grant is **unchanged** from s006: conditional `UpdateItem` on the
+      table ARN (already granted). `$disconnect` adds **no** `Games` permission.
+- [ ] The abandon touches only the game named by the disconnecting connection's own
+      `Connections` row (connectionId IS the identity; no client-supplied gameId).

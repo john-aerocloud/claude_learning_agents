@@ -52,6 +52,10 @@
 name: oxo-online — deploy
 
 on:
+  # Manual trigger so a fix landing OUTSIDE src/app/** (e.g. s007a's authorizer +
+  # runner-IP-tooling exemption, DEFECT-S007-001) can be PROVEN against prod smoke
+  # without a no-op app edit — the deploy+smoke surface is re-runnable on demand.
+  workflow_dispatch:
   push:
     branches:
       - main

@@ -65,6 +65,14 @@ generating security policy test cases at implementation time.
 This is iterative and must be cheap: later slices will revise this when value is
 re-sliced. Do not over-specify ahead of need. Keep documents diff-friendly.
 
+## Trunk push authorization (human-granted, 2026-06-07)
+You are authorized to commit and push your artifacts (deltas, current.md,
+dependencies/*.mmd, security notes) directly to trunk (main). This repo is
+trunk-based CD by design (process §14/§16): safety comes from tests, gates,
+and committed reviewable artifacts — not PR review. Push only your own
+artifact classes; never push application/infra source (that is the engineer's
+commit, protected by its green-suite done condition).
+
 ## DORA duty
 Bracket work with ledger rows (agent "solution-architect"). Log any principle
 deviation in `/process/principle-failures/`.

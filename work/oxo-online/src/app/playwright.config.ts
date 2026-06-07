@@ -26,10 +26,18 @@ export default defineConfig({
   // OI-32: serialise all smoke workers — prevents WS rate-limit exhaustion.
   // The WAF WS ACL allows 20 connects/5min per IP; parallel workers breach this
   // with legitimate pairing tests. workers:1 keeps the burst within budget.
+  //
+  // retries:0 is intentional in CI: the smoke suite includes WS tests that
+  // time out when the WAF rate limit is hit. With retries>0 each retry cycle
+  // adds 30s×N more time in the WAF window, compounding rate-limit exhaustion
+  // and causing cascading failures on subsequent tests. Fail fast; the defect
+  // owner (engineer/tester) fixes the root cause rather than the pipeline
+  // masking it with retries. OI-32-follow-up: remove when F3/T4 message-
+  // mismatch defect is resolved and smoke reliably passes without rate-block.
   workers: 1,
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  retries: 0,
   reporter: 'list',
   use: {
     baseURL: prodUrl,

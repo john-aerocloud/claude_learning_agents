@@ -141,10 +141,12 @@ test.describe('s005-h2 — Regression + browser-transport pairing (AC7.1–AC7.4
       const hostRoleText = await hostRole.textContent();
       expect(hostRoleText?.trim(), 'host role must be "You are X"').toBe('You are X');
 
-      // Status lines on both boards confirm game is active (AC7.3 completeness).
-      const STATUS = 'Game active — moves coming in the next update';
-      await expect(hostPage.locator('p.online-board-status'), 'host status line').toHaveText(STATUS, { timeout: 1000 });
-      await expect(guestPage.locator('p.online-board-status'), 'guest status line').toHaveText(STATUS, { timeout: 1000 });
+      // §23 surface migration (s006): with UC4 live the inert "moves coming in
+      // the next update" status line is replaced by the server-authoritative turn
+      // indicator. Pairing completeness is now confirmed by the turn indicator
+      // being visible on both boards (host to move = X).
+      await expect(hostPage.locator('[data-testid="online-turn"]'), 'host turn indicator').toBeVisible({ timeout: 2000 });
+      await expect(guestPage.locator('[data-testid="online-turn"]'), 'guest turn indicator').toBeVisible({ timeout: 2000 });
 
       // Browser-transport assertion: no console errors (CSP/WS failures would show here).
       expect(

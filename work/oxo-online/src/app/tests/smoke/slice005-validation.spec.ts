@@ -135,14 +135,15 @@ test.describe('Slice 005 — join game by code (live WebSocket)', () => {
       const hostRoleText = await hostRole.textContent();
       expect(hostRoleText?.trim()).toBe('You are X');
 
-      // Status line on both boards.
-      const statusLine = 'Game active — moves coming in the next update';
+      // §23 surface migration (s006): with UC4 live the inert status line is
+      // replaced by the server-authoritative turn indicator — pairing
+      // completeness is confirmed by the turn indicator on both boards.
       await expect(
-        hostPage.locator('p.online-board-status'),
-      ).toHaveText(statusLine, { timeout: 1000 });
+        hostPage.locator('[data-testid="online-turn"]'),
+      ).toBeVisible({ timeout: 2000 });
       await expect(
-        guestPage.locator('p.online-board-status'),
-      ).toHaveText(statusLine, { timeout: 1000 });
+        guestPage.locator('[data-testid="online-turn"]'),
+      ).toBeVisible({ timeout: 2000 });
 
       console.log(`F1/T1 PASS: host=X guest=O elapsed=${elapsed}ms`);
 
@@ -182,7 +183,16 @@ test.describe('Slice 005 — join game by code (live WebSocket)', () => {
   // F7 — Board squares inert; clicking does nothing; status line persists.
   // Uses a two-context pair (F1 must succeed first to reach the board).
   // -------------------------------------------------------------------------
-  test('F7 — board squares are inert after pairing; status line persists', async ({ browser }) => {
+  // §23 SURFACE-CHANGE MIGRATION (s006/R4.5): the online board is no longer
+  // permanently inert. With UC4 live (uc4Enabled ON), the board is
+  // SERVER-AUTHORITATIVE: it stays empty until a server `board-update`, the
+  // player-to-move's empty cells are actionable, and an accepted move renders on
+  // BOTH browsers from the broadcast (never optimistically). The s005 "all cells
+  // permanently disabled" assertion is RETIRED here — it described the dark
+  // flag-OFF state that no longer ships. The full F/T/S move suite is UC6
+  // (tester); this smoke pins the surface invariant: empty-on-pair, then the
+  // host's move relays to both.
+  test('F7 (s006-migrated) — board empty on pair; host move relays to both browsers', async ({ browser }) => {
     const hostContext = await browser.newContext();
     const guestContext = await browser.newContext();
     const hostPage = await hostContext.newPage();
@@ -198,7 +208,7 @@ test.describe('Slice 005 — join game by code (live WebSocket)', () => {
       await openJoinScreen(guestPage);
       await submitJoinCode(guestPage, code);
 
-      // Wait for both boards.
+      // Wait for both boards (game-ready fires once both are bound).
       await expect(
         guestPage.locator('[data-testid="online-role"]'),
       ).toBeVisible({ timeout: WS_JOIN_TIMEOUT_MS });
@@ -206,41 +216,30 @@ test.describe('Slice 005 — join game by code (live WebSocket)', () => {
         hostPage.locator('[data-testid="online-role"]'),
       ).toBeVisible({ timeout: WS_JOIN_TIMEOUT_MS });
 
-      // F7 (tester-defect fix, DEFECT-005-001): the online board renders each cell
-      // as a disabled <button> (locked=true propagated via Board -> Cell). Playwright
-      // .click() on a disabled button blocks ~30s on its actionability check, which
-      // is the correct behaviour — disabled buttons ARE non-actionable. The right
-      // assertion for "board squares are inert" is to confirm each cell is disabled,
-      // which is the HTML-level guarantee that clicks produce no state change.
       const hostCells = getCells(hostPage);
       await expect(hostCells).toHaveCount(9);
 
-      // All 9 cells must be disabled — this IS the inertness guarantee (F7).
+      // Empty on pair — no X/O placed before any move (no optimistic render).
       for (let i = 0; i < 9; i++) {
-        await expect(
-          hostCells.nth(i),
-          `Cell ${i} must be disabled on the online board`,
-        ).toBeDisabled();
+        expect((await cellText(hostPage, i)).trim(), `Cell ${i} empty on pair`).toBe('');
       }
 
-      // Status line must still read the correct value.
-      const STATUS = 'Game active — moves coming in the next update';
-      await expect(hostPage.locator('p.online-board-status')).toHaveText(
-        STATUS,
-      );
-
-      // Cells must still be empty (no X or O placed).
-      for (let i = 0; i < 9; i++) {
-        const txt = (await cellText(hostPage, i)).trim();
-        expect(txt, `Cell ${i} should still be empty`).toBe('');
-      }
+      // Server-authoritative relay: the host (X, to move) plays square 4; it must
+      // render on BOTH browsers from the server broadcast (NOT just locally).
+      await hostCells.nth(4).click();
+      await expect(getCells(hostPage).nth(4), 'host sees own move via broadcast').toHaveText('X', {
+        timeout: WS_JOIN_TIMEOUT_MS,
+      });
+      await expect(getCells(guestPage).nth(4), 'guest sees host move relayed').toHaveText('X', {
+        timeout: WS_JOIN_TIMEOUT_MS,
+      });
 
       expect(
         hostConsoleMsgs,
-        `Console errors after cell clicks: ${hostConsoleMsgs.join('; ')}`,
+        `Console errors during move relay: ${hostConsoleMsgs.join('; ')}`,
       ).toHaveLength(0);
 
-      console.log('F7 PASS: 9 cell clicks produced no state change, status persists');
+      console.log('F7 (s006-migrated) PASS: empty-on-pair, host move relayed to both');
     } finally {
       await hostContext.close();
       await guestContext.close();

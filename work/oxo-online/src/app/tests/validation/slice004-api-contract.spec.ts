@@ -40,7 +40,14 @@ const PLANTED_BODY = {
 } as const;
 
 test.describe('Slice 004 — POST /api/games public contract', () => {
-  test('T1 (response) / F2 — 201 with exactly {gameId, code}; gameId is a UUID, code is unambiguous 6-char', async () => {
+  test('T1 (response) / F2 — 201 with gameId + code (+ wsToken post-s005-h2); no internal field leakage', async () => {
+    // s005-h2 contract amendment: POST /api/games now returns { gameId, code, wsToken }.
+    // The 'wsToken' field is a short-lived HMAC-SHA256 signed token encoding
+    // { gameId, role: "host", exp }. The contract now guarantees AT LEAST gameId + code
+    // with wsToken as an additional field; the "exactly two fields" assertion is retired
+    // and replaced by: required fields present, internal fields (ttl, status) absent.
+    // Retire when: the POST /api/games response contract changes further (new required
+    //   fields or gameId/code/wsToken renamed); wsToken structure changes.
     const ctx = await pwRequest.newContext({ baseURL: PROD_URL });
     try {
       const res = await ctx.post('/api/games', { data: {} });
@@ -51,12 +58,23 @@ test.describe('Slice 004 — POST /api/games public contract', () => {
       ).toContain('application/json');
 
       const body = await res.json();
+      const keys = Object.keys(body).sort();
 
-      // Exactly the two server-owned fields — no leakage of ttl/status/etc.
+      // Required fields must be present.
+      expect(body.gameId, 'gameId must be present').toBeTruthy();
+      expect(body.code, 'code must be present').toBeTruthy();
+      expect(body.wsToken, 's005-h2: wsToken must be present').toBeTruthy();
+
+      // Internal fields must NOT be present (guard against leakage).
+      expect(body.ttl, 'ttl must not leak into response').toBeUndefined();
+      expect(body.status, 'status must not leak into response').toBeUndefined();
+      expect(body.hostConnectionId, 'hostConnectionId must not leak').toBeUndefined();
+
+      // Response must have exactly 3 fields now (gameId, code, wsToken).
       expect(
-        Object.keys(body).sort(),
-        `response keys must be exactly [code, gameId], got ${JSON.stringify(Object.keys(body))}`,
-      ).toEqual(['code', 'gameId']);
+        keys,
+        `response keys must be exactly [code, gameId, wsToken], got ${JSON.stringify(keys)}`,
+      ).toEqual(['code', 'gameId', 'wsToken']);
 
       expect(body.gameId, `gameId "${body.gameId}" must be a UUID`).toMatch(UUID_RE);
       expect(

@@ -117,9 +117,11 @@ test.describe('Slice 005 -- WebSocket AWS infra & security policy', () => {
   // -------------------------------------------------------------------------
   test('T2 + T3 -- live pairing: Games record active, Connections entries with ~2h TTL', async () => {
     // Step 1: create a game via the HTTP API.
+    // s005-h2: response now includes wsToken (short-lived HMAC credential for host).
     const ctx = await pwRequest.newContext({ baseURL: PROD_URL });
     let gameId: string;
     let code: string;
+    let wsToken: string;
     const joinedAt = Math.floor(Date.now() / 1000);
     try {
       const res = await ctx.post('/api/games', { data: {} });
@@ -127,8 +129,10 @@ test.describe('Slice 005 -- WebSocket AWS infra & security policy', () => {
       const body = await res.json();
       gameId = body.gameId;
       code = body.code;
+      wsToken = body.wsToken;
       expect(gameId, 'gameId must be present').toBeTruthy();
       expect(code, 'code must be present').toBeTruthy();
+      expect(wsToken, 's005-h2: wsToken must be present (host credential for $connect authorizer)').toBeTruthy();
     } finally {
       await ctx.dispose();
     }
@@ -136,6 +140,8 @@ test.describe('Slice 005 -- WebSocket AWS infra & security policy', () => {
     // Step 2: perform the WS pairing using the node probe script.
     // The script opens two WebSocket connections (host registers, guest joins),
     // waits for game-ready on both sides, and prints the result as JSON.
+    // s005-h2: pass --ws-token so the probe appends ?wsToken=<token> to the host URL
+    // and ?code=<code> to the guest URL. Without credentials the authorizer Denies.
     const wsUrl = `wss://${WS_API_ID}.execute-api.${REGION}.amazonaws.com/${WS_STAGE}`;
     let probeResult: { success: boolean; hostRole?: string; guestRole?: string };
 
@@ -147,7 +153,8 @@ test.describe('Slice 005 -- WebSocket AWS infra & security policy', () => {
           '--ws-url', wsUrl,
           '--game-id', gameId,
           '--code', code,
-          '--timeout', '5000',
+          '--ws-token', wsToken,
+          '--timeout', '8000',
         ],
         { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
       );
@@ -250,22 +257,27 @@ test.describe('Slice 005 -- WebSocket AWS infra & security policy', () => {
   // -------------------------------------------------------------------------
   test('T5 -- no-hijack: second join attempt closes 4041; Games record unchanged', async () => {
     // Create a game and pair it.
+    // s005-h2: also capture wsToken from the response for the $connect authorizer.
     const ctx = await pwRequest.newContext({ baseURL: PROD_URL });
     let gameId: string;
     let code: string;
+    let wsToken: string;
     try {
       const res = await ctx.post('/api/games', { data: {} });
       expect(res.status()).toBe(201);
       const body = await res.json();
       gameId = body.gameId;
       code = body.code;
+      wsToken = body.wsToken;
+      expect(wsToken, 's005-h2: wsToken required for first legitimate join').toBeTruthy();
     } finally {
       await ctx.dispose();
     }
 
     const wsUrl = `wss://${WS_API_ID}.execute-api.${REGION}.amazonaws.com/${WS_STAGE}`;
 
-    // First pairing -- legitimate join.
+    // First pairing -- legitimate join with wsToken credential.
+    // s005-h2: pass --ws-token so the probe uses ?wsToken=<token> for host and ?code=<code> for guest.
     const firstRaw = execFileSync(
       'node',
       [
@@ -273,7 +285,8 @@ test.describe('Slice 005 -- WebSocket AWS infra & security policy', () => {
         '--ws-url', wsUrl,
         '--game-id', gameId,
         '--code', code,
-        '--timeout', '5000',
+        '--ws-token', wsToken,
+        '--timeout', '8000',
       ],
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
     );
@@ -304,6 +317,11 @@ test.describe('Slice 005 -- WebSocket AWS infra & security policy', () => {
     ).Item!;
 
     // Second join attempt -- should close 4041.
+    // s005-h2: the game is now active; the authorizer allows a connect with ?code=<code>
+    // (game exists, status=active — within the allowed statuses). The no-hijack guard
+    // lives in the ws-fn conditional-write handler (T5). The guest-only probe connects
+    // with guestWsUrl (?code=<code>) and immediately sends join; the server rejects
+    // with error code 4041 because guestConnectionId is already set.
     const hijackRaw = execFileSync(
       'node',
       [
@@ -311,8 +329,9 @@ test.describe('Slice 005 -- WebSocket AWS infra & security policy', () => {
         '--ws-url', wsUrl,
         '--game-id', gameId,
         '--code', code,
-        '--guest-only',     // skip the host-register step; just try to join
-        '--timeout', '5000',
+        '--ws-token', wsToken, // needed so ws-probe builds guestWsUrl with ?code=<code>
+        '--guest-only',        // skip the host-register step; just try to join
+        '--timeout', '8000',
       ],
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
     );

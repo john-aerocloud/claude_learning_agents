@@ -26,9 +26,13 @@
  *     { success: false, closeCode: 4041 }
  *
  * Arguments:
- *   --ws-url <wss://…>   WebSocket endpoint (required)
+ *   --ws-url <wss://…>   WebSocket endpoint base (required; must NOT include a query string)
  *   --game-id <uuid>     gameId for the register message (required unless --guest-only)
  *   --code <CODE>        6-char join code (required)
+ *   --ws-token <token>   s005-h2: wsToken from POST /api/games; if supplied the host WS
+ *                        URL gets ?wsToken=<token> appended and the guest WS URL gets
+ *                        ?code=<CODE> appended. Required in prod after s005-h2 deploy.
+ *                        If omitted the probe connects with no credential (pre-h2 behaviour).
  *   --guest-only         skip the host-register step; just send a join and
  *                        report the close code
  *   --timeout <ms>       max wait in ms before failure (default 5000)
@@ -65,13 +69,14 @@ function getArg(name) {
 }
 const hasFlag = (name) => args.includes(name);
 
-const wsUrl = getArg('--ws-url');
+const wsUrlBase = getArg('--ws-url');
 const gameId = getArg('--game-id');
 const code = getArg('--code');
+const wsToken = getArg('--ws-token');   // s005-h2: host credential
 const guestOnly = hasFlag('--guest-only');
 const timeoutMs = parseInt(getArg('--timeout') ?? '5000', 10);
 
-if (!wsUrl) {
+if (!wsUrlBase) {
   console.log(JSON.stringify({ success: false, error: '--ws-url is required' }));
   process.exit(1);
 }
@@ -83,6 +88,18 @@ if (!guestOnly && !gameId) {
   console.log(JSON.stringify({ success: false, error: '--game-id is required unless --guest-only' }));
   process.exit(1);
 }
+
+// s005-h2: build credentialed URLs.
+// Host connects with ?wsToken=<token> (signed HMAC, proves game ownership).
+// Guest connects with ?code=<CODE> (game code, authorizer validates via GSI lookup).
+// If --ws-token is not supplied the URLs are used as-is (pre-h2 behaviour, will fail
+// in prod after s005-h2 deploy).
+const hostWsUrl = wsToken
+  ? `${wsUrlBase.replace(/\?.*$/, '')}?wsToken=${wsToken}`
+  : wsUrlBase;
+const guestWsUrl = code
+  ? `${wsUrlBase.replace(/\?.*$/, '')}?code=${code}`
+  : wsUrlBase;
 
 // Resolve WebSocket implementation.
 let WS;
@@ -102,12 +119,13 @@ try {
 }
 
 /**
- * Open a WebSocket connection to wsUrl. Returns a Promise that resolves with
- * { ws, opened: true } when the connection is open, or rejects on error/timeout.
+ * Open a WebSocket connection to the given url. Returns a Promise that resolves
+ * with { ws, opened: true } when the connection is open, or rejects on error/timeout.
+ * s005-h2: url must include ?wsToken=... (host) or ?code=... (guest) credentials.
  */
-function openWs() {
+function openWs(url) {
   return new Promise((resolve, reject) => {
-    const ws = new WS(wsUrl);
+    const ws = new WS(url ?? hostWsUrl); // fallback to hostWsUrl for backward compat
     const timer = setTimeout(() => {
       ws.close();
       reject(new Error('WebSocket open timed out'));
@@ -173,9 +191,10 @@ function waitForEvent(ws, expectedMessageType, timeoutMsLocal) {
 async function runProbe() {
   if (guestOnly) {
     // Guest-only mode: open a WS, send join, expect a close with 4041.
+    // s005-h2: guest-only connects with guestWsUrl (?code=<CODE>).
     let wsConn;
     try {
-      const { ws } = await openWs();
+      const { ws } = await openWs(guestWsUrl);
       wsConn = ws;
     } catch (err) {
       console.log(JSON.stringify({ success: false, error: `failed to open guest WS: ${String(err)}` }));
@@ -209,8 +228,8 @@ async function runProbe() {
   let hostWs, guestWs;
 
   try {
-    // Open host WS.
-    const hostConn = await openWs();
+    // Open host WS. s005-h2: hostWsUrl includes ?wsToken=<token>.
+    const hostConn = await openWs(hostWsUrl);
     hostWs = hostConn.ws;
 
     // Send register — binds this connection to the game.
@@ -219,8 +238,8 @@ async function runProbe() {
     // Brief pause to let the register propagate before the guest joins.
     await new Promise((res) => setTimeout(res, 300));
 
-    // Open guest WS.
-    const guestConn = await openWs();
+    // Open guest WS. s005-h2: guestWsUrl includes ?code=<CODE>.
+    const guestConn = await openWs(guestWsUrl);
     guestWs = guestConn.ws;
 
     // Listen for game-ready on host (may arrive before or after guest join).

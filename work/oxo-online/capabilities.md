@@ -767,12 +767,29 @@ asserts `served_sha === DEPLOY_SHA` (env var set by pipeline to `github.sha`)
 BEFORE any behavioural tests. Skipped when `DEPLOY_SHA` is absent (local dev).
 This is the §39-correct CDN propagation check — not sleep/wait.
 
-### OI-32: Smoke serialisation
+### OI-32: Smoke serialisation — partial (OI-32-FOLLOW-UP)
 
-`playwright.config.ts` now sets `workers: 1, fullyParallel: false`. The 6 spec
-files + 2–3 WS connections per pairing test previously fired simultaneously,
-exhausting the 20-connects/5-min WAF rate limit (observed EXP-009 false-reds in
-s005-h2 evidence). Serial execution keeps the burst within budget.
+`playwright.config.ts` retains its pre-change defaults (`fullyParallel: true`,
+default workers). The root cause of EXP-009 false-reds is the `$connect`
+authorizer's per-IP rolling counter (ConnectAttempts DDB, 5-min TTL), NOT the
+WAF 20/5-min limit. Empirical finding during s006-cap: setting `workers:1`
+(serial execution) caused the per-IP authorizer counter to accumulate across
+sequential WS tests, triggering 30s timeouts on legitimate connections (F6, F7)
+after only 4 prior connections. The pre-change parallel config passes 41/42
+tests; `workers:1` caused cascading failures.
+
+**True fix (OI-32-FOLLOW-UP, engineer+tester):** Raise the per-IP authorizer
+limit in `oxo-ws-auth-fn` for the CI runner's IP range, OR add inter-test
+cool-down delays (e.g. `page.waitForTimeout(...)`) in the WS pairing specs
+between tests that each open WS connections. CICD cannot fix a per-IP rate
+counter inside the application authorizer without changing the authorizer limit
+or test isolation strategy.
+
+**Pre-existing defect (F3/T4):** The test asserts `"Game not found. Check the
+code and try again."` but the live app returns `"Something went wrong. Please
+try again."` for unknown codes (WS close code 4500 path). This message mismatch
+was present before s006 and is unchanged by the CICD capability step. Tracked
+as a separate engineer/tester defect.
 
 ### Orphan-flag check (§40)
 

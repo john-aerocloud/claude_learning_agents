@@ -241,7 +241,7 @@ describe('OxoGameStack — WebSocket API: four route keys, no $default, prod sta
     });
   });
 
-  it('declares exactly the five route keys $connect/$disconnect/register/join/move and no $default (s006)', () => {
+  it('declares exactly the six route keys $connect/$disconnect/register/join/move/chat and no $default (s014)', () => {
     const template = synth();
     const apis = template.findResources('AWS::ApiGatewayV2::Api', {
       Properties: { ProtocolType: 'WEBSOCKET' },
@@ -257,7 +257,7 @@ describe('OxoGameStack — WebSocket API: four route keys, no $default, prod sta
       )
       .map((r) => (r.Properties as Record<string, unknown>).RouteKey as string)
       .sort();
-    expect(wsRouteKeys).toEqual(['$connect', '$disconnect', 'join', 'move', 'register']);
+    expect(wsRouteKeys).toEqual(['$connect', '$disconnect', 'chat', 'join', 'move', 'register']);
     expect(wsRouteKeys).not.toContain('$default');
   });
 

@@ -27,7 +27,7 @@ import { OxoGameStack } from '../lib/game-stack';
 // The client `action` values the SPA sends over the socket. These MUST match
 // synthesised WS route keys (the $request.body.action selector). Encoded here
 // as the contract boundary the SPA and the API share.
-const CLIENT_ACTION_VALUES = ['register', 'join', 'move'] as const;
+const CLIENT_ACTION_VALUES = ['register', 'join', 'move', 'chat'] as const;
 
 const WS_ENDPOINT_OUTPUT_NAME = 'OxoGameProd-WsApiEndpoint';
 
@@ -71,9 +71,13 @@ function wsRouteKeys(template: Template): string[] {
 }
 
 describe('§30 composed WS contract (T7) — route keys, action match, endpoint export, wsUrl source', () => {
-  it('1. synthesises exactly the five route keys (s006 move added) and no $default', () => {
+  it('1. synthesises exactly the six route keys (s014 chat added) and no $default (T-CHAT-1)', () => {
+    // s014 (delta 011 / AC1.1): route count 5 → 6 — `chat` joins the existing
+    // surface. Still NO $default catch-all (an unrouted action is dropped by the
+    // service, not handled). `chat` integrates the SAME oxo-ws-fn (no new
+    // function, no new authorizer — chat is post-$connect like move).
     const keys = wsRouteKeys(synth()).sort();
-    expect(keys).toEqual(['$connect', '$disconnect', 'join', 'move', 'register']);
+    expect(keys).toEqual(['$connect', '$disconnect', 'chat', 'join', 'move', 'register']);
     expect(keys).not.toContain('$default');
   });
 

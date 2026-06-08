@@ -359,16 +359,18 @@ export class OxoGameStack extends cdk.Stack {
     );
 
     const integrationTarget = `integrations/${wsIntegration.ref}`;
-    // s006: 4 -> 5 route keys. `move` integrates the SAME oxo-ws-fn (no new
-    // function, no new authorizer — move is post-$connect). Still NO $default
+    // s006: 4 -> 5 route keys. s014 (delta 011): 5 -> 6 — `chat` joins the same
+    // surface. Both `move` and `chat` integrate the SAME oxo-ws-fn (no new
+    // function, no new authorizer — both are post-$connect). Still NO $default
     // catch-all (an unrouted action is dropped by the service, not handled).
-    const routeKeys = ['$connect', '$disconnect', 'register', 'join', 'move'] as const;
+    const routeKeys = ['$connect', '$disconnect', 'register', 'join', 'move', 'chat'] as const;
     const routeLogicalIds: Record<(typeof routeKeys)[number], string> = {
       $connect: 'JoinWsRouteConnect',
       $disconnect: 'JoinWsRouteDisconnect',
       register: 'JoinWsRouteRegister',
       join: 'JoinWsRouteJoin',
       move: 'JoinWsRouteMove',
+      chat: 'JoinWsRouteChat',
     };
     for (const routeKey of routeKeys) {
       new apigatewayv2.CfnRoute(this, routeLogicalIds[routeKey], {

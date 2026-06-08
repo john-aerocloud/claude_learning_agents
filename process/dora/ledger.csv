@@ -577,3 +577,4 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-08T07:53:04Z,oxo-online,14,s009-arcade-scoreboard,engineer,task_start,,na,S009-FLAG-FLIP,backend live → flip uc1/uc3/uc4 ON + factor out (§40) + update s008 smoke testids
 2026-06-08T07:53:04Z,oxo-online,14,s009-arcade-scoreboard,cicd,task_start,,na,S009-ALLOWLIST,add aws dynamodb put-item/update-item for §30 skeleton unattended runs
 2026-06-08T07:54:19Z,oxo-online,9,S009,cicd,task_end,,na,S009-ALLOWLIST,
+2026-06-08T07:56:01Z,oxo-online,14,s009-arcade-scoreboard,engineer,task_start,,in-progress,S009-FLAG-FLIP,"§40 flag lifecycle: flip uc1/uc3/uc4 ON in prod config, then factor out (code-then-config); update s008 smoke testids"

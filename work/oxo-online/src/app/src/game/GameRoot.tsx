@@ -7,7 +7,6 @@ import { JoinScreen } from './JoinScreen';
 import { OnlineBoard } from './OnlineBoard';
 import { NameField } from './NameField';
 import { normaliseName, DEFAULT_NAME } from './name';
-import { isFlagEnabled } from './flags';
 import { Leaderboard } from './Leaderboard';
 import { fetchLeaderboard, type LeaderboardEntry } from './leaderboard-client';
 import {
@@ -83,13 +82,11 @@ interface GameRootProps {
 export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameRootProps = {}) {
   const [state, setState] = useState(initialState);
   const [mode, setMode] = useState<Mode>('two-player');
-  // s009 UC1 (flag uc1NameEnabled). The "Your name" arcade tag, pre-filled from
-  // sessionStorage (else "AAA"). The field NEVER gates play — the default makes
-  // it ignorable (click-path BINDING). It is normalised at send time (the SAME
-  // pinned transform the server re-applies authoritatively) and threaded into
-  // POST /api/games (host) + the WS join frame (guest). When the flag is OFF the
-  // field is not rendered and neither send carries a name (prod-unchanged).
-  const uc1NameEnabled = isFlagEnabled('uc1NameEnabled');
+  // s009 UC1. The "Your name" arcade tag, pre-filled from sessionStorage (else
+  // "AAA"). The field NEVER gates play — the default makes it ignorable
+  // (click-path BINDING). It is normalised at send time (the SAME pinned
+  // transform the server re-applies authoritatively) and threaded into
+  // POST /api/games (host) + the WS join frame (guest).
   const [playerName, setPlayerName] = useState<string>(
     () =>
       (typeof sessionStorage !== 'undefined' &&
@@ -109,11 +106,10 @@ export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameR
     return normalised;
   };
 
-  // s009 UC3 (flag uc3LeaderboardEnabled). The shared leaderboard panel renders
-  // on the idle view (below the board) and fetches GET /api/leaderboard on each
-  // idle mount / return-to-idle. Read-only + non-critical: a failed fetch shows
-  // a graceful error state, NOT an aggressive retry loop (re-fetch on next idle).
-  const uc3LeaderboardEnabled = isFlagEnabled('uc3LeaderboardEnabled');
+  // s009 UC3. The shared leaderboard panel renders on the idle view (below the
+  // board) and fetches GET /api/leaderboard on each idle mount / return-to-idle.
+  // Read-only + non-critical: a failed fetch shows a graceful error state, NOT
+  // an aggressive retry loop (re-fetch on next idle).
   const [leaderboardStatus, setLeaderboardStatus] = useState<'loading' | 'error' | 'ready'>(
     'loading',
   );
@@ -124,16 +120,12 @@ export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameR
     initialJoinCode ? 'joining' : 'idle',
   );
   const [showSpinner, setShowSpinner] = useState(false);
-  // s008 UC1 — true for ~2s after a successful copy so the control shows "Copied!".
-  const [copied, setCopied] = useState(false);
   const copiedTimer = useRef<ReturnType<typeof setTimeout>>();
-  // s009 UC4 (flag uc4TwoCopyEnabled). The waiting screen splits the single
-  // s008 copy-link into TWO controls — "Copy code" (the 6-char code, for a guest
-  // who TYPES it) and "Copy link" (the /join/:code URL, for a guest who CLICKS
-  // it). DEFECT-S008-002: only the link affordance existed, so the type path had
-  // no control. `copiedControl` tracks which button last copied (for its 2s
-  // "Copied!" feedback); flag OFF keeps the single s008 control (prod-unchanged).
-  const uc4TwoCopyEnabled = isFlagEnabled('uc4TwoCopyEnabled');
+  // s009 UC4. The waiting screen offers TWO controls — "Copy code" (the 6-char
+  // code, for a guest who TYPES it) and "Copy link" (the /join/:code URL, for a
+  // guest who CLICKS it). DEFECT-S008-002: previously only the link affordance
+  // existed, so the type path had no control. `copiedControl` tracks which
+  // button last copied (for its 2s "Copied!" feedback).
   const [copiedControl, setCopiedControl] = useState<'code' | 'link' | null>(null);
   const [gameCode, setGameCode] = useState<string | null>(null);
   const [gameId, setGameId] = useState<string | null>(null);
@@ -230,27 +222,6 @@ export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameR
     setState((current) => applyMove(current, index));
   };
 
-  // s008 UC1 — copy the share link to the clipboard. The URL is constructed
-  // CLIENT-SIDE from the code already in state (S3): EXACTLY
-  // `window.location.origin + "/join/" + code` — a path-only deep link mirroring
-  // the UC2 route form, carrying NO token/credential query param or fragment. On
-  // success the control shows "Copied!" for ~2s; on rejection (denied permission /
-  // non-secure context) the code stays visible as plain text for manual copy
-  // (the existing fallback — no retry; navigator.clipboard is a local browser API).
-  const copyShareLink = async () => {
-    if (!gameCode) return;
-    const url = `${window.location.origin}/join/${gameCode}`;
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      clearTimeout(copiedTimer.current);
-      copiedTimer.current = setTimeout(() => setCopied(false), COPIED_REVERT_MS);
-    } catch {
-      // Clipboard unavailable/denied — non-blocking; the code remains visible.
-      setCopied(false);
-    }
-  };
-
   // s009 UC4 — copy EXACTLY `text` to the clipboard and flag `control` as copied
   // for ~2s. Shared by both waiting-screen controls so each copies the correct
   // thing (code vs URL) with identical feedback. On rejection (denied / insecure
@@ -280,17 +251,14 @@ export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameR
     setOnlinePhase('creating');
     // Spinner only appears for waits longer than 500ms (F3).
     spinnerTimer.current = setTimeout(() => setShowSpinner(true), SPINNER_DELAY_MS);
-    // s009 UC1: when the name flag is ON, normalise + persist the name and send
-    // it in the POST body so `oxo-game-fn` writes hostName. Flag OFF → no body
-    // (unchanged contract; server defaults to "AAA").
-    const createName = uc1NameEnabled ? persistName() : null;
+    // s009 UC1: normalise + persist the name and send it in the POST body so
+    // `oxo-game-fn` writes hostName (an empty field posts the "AAA" default).
+    const createName = persistName();
     try {
       const res = await fetch('/api/games', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        ...(createName !== null
-          ? { body: JSON.stringify({ playerName: createName }) }
-          : {}),
+        body: JSON.stringify({ playerName: createName }),
       });
       if (!res.ok) throw new Error(`status ${res.status}`);
       const body = (await res.json()) as {
@@ -345,9 +313,8 @@ export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameR
 
   // s009 UC3: fetch the leaderboard whenever the idle view is shown (mount or
   // return-to-idle). Keyed on `onlinePhase` so returning from a game refetches.
-  // Guarded by the flag so it is inert (no network) when OFF (prod-unchanged).
   useEffect(() => {
-    if (!uc3LeaderboardEnabled || onlinePhase !== 'idle') return;
+    if (onlinePhase !== 'idle') return;
     let cancelled = false;
     setLeaderboardStatus('loading');
     fetchLeaderboard().then((result) => {
@@ -362,7 +329,7 @@ export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameR
     return () => {
       cancelled = true;
     };
-  }, [uc3LeaderboardEnabled, onlinePhase]);
+  }, [onlinePhase]);
 
   // In vs-Computer mode the AI plays O. Run it in an effect (not the click
   // handler) so the human's X paints first, then O follows synchronously.
@@ -405,7 +372,7 @@ export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameR
 
   return (
     <main className="game" aria-label="oxo game">
-      {uc1NameEnabled && onlinePhase === 'idle' && (
+      {onlinePhase === 'idle' && (
         <NameField
           value={playerName}
           onChange={setPlayerName}
@@ -455,38 +422,26 @@ export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameR
         <section className="online-waiting" aria-label="waiting for opponent">
           <p>Waiting for opponent</p>
           <p className="game-code" data-testid="game-code">{gameCode}</p>
-          {uc4TwoCopyEnabled ? (
-            // s009 UC4 — two distinct affordances for the guest's two join paths
-            // (type the code / click the link). DEFECT-S008-002 closure.
-            <div className="copy-controls">
-              <button
-                type="button"
-                className="copy-code"
-                data-testid="copy-code-btn"
-                onClick={copyCode}
-              >
-                {copiedControl === 'code' ? COPIED_LABEL : COPY_CODE_LABEL}
-              </button>
-              <button
-                type="button"
-                className="copy-link"
-                data-testid="copy-link-btn"
-                onClick={copyLink}
-              >
-                {copiedControl === 'link' ? COPIED_LABEL : COPY_LINK_LABEL}
-              </button>
-            </div>
-          ) : (
+          {/* s009 UC4 — two distinct affordances for the guest's two join paths
+              (type the code / click the link). DEFECT-S008-002 closure. */}
+          <div className="copy-controls">
+            <button
+              type="button"
+              className="copy-code"
+              data-testid="copy-code-btn"
+              onClick={copyCode}
+            >
+              {copiedControl === 'code' ? COPIED_LABEL : COPY_CODE_LABEL}
+            </button>
             <button
               type="button"
               className="copy-link"
-              data-testid="copy-link"
-              aria-label="copy game link"
-              onClick={copyShareLink}
+              data-testid="copy-link-btn"
+              onClick={copyLink}
             >
-              {copied ? COPIED_LABEL : COPY_LINK_LABEL}
+              {copiedControl === 'link' ? COPIED_LABEL : COPY_LINK_LABEL}
             </button>
-          )}
+          </div>
           <p
             className="online-connecting"
             role="status"
@@ -502,12 +457,11 @@ export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameR
           connect={socketFactory}
           onGameReady={handleGameReady}
           initialCode={initialJoinCode}
-          // s009 UC1: thread the normalised guest name into the WS join frame
-          // (flag ON only). normaliseName is pure (no side effect at render);
-          // persistence happens when the join is actually submitted (onJoin).
-          // Flag OFF → undefined (unchanged frame; server defaults "AAA").
-          playerName={uc1NameEnabled ? normaliseName(playerName) : undefined}
-          onJoin={uc1NameEnabled ? persistName : undefined}
+          // s009 UC1: thread the normalised guest name into the WS join frame.
+          // normaliseName is pure (no side effect at render); persistence
+          // happens when the join is actually submitted (onJoin).
+          playerName={normaliseName(playerName)}
+          onJoin={persistName}
         />
       )}
       {onlinePhase === 'playing-online' && (
@@ -561,9 +515,8 @@ export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameR
               Play again
             </button>
           )}
-          {uc3LeaderboardEnabled && (
-            <Leaderboard status={leaderboardStatus} entries={leaderboardEntries} />
-          )}
+          <Leaderboard status={leaderboardStatus} entries={leaderboardEntries} />
+
         </>
       )}
     </main>

@@ -5,25 +5,24 @@ import react from '@vitejs/plugin-react';
 /**
  * vite.local.config.ts — the UC5 local stand-up SPA dev server (OI-28,
  * principles/02). Identical to vite.config.ts EXCEPT it serves `/config.js`
- * in-process so the SPA's `window.OXO_CONFIG` points at the LOCAL WS server and
- * the UC4 flag is ON — no cloud creds, no deploy pipeline. In prod `/config.js`
- * is written by the deploy step; here a dev middleware substitutes it so the
- * browser-delivered move-relay behaviour can be developed WITH a browser locally.
+ * in-process so the SPA's `window.OXO_CONFIG` points at the LOCAL WS server —
+ * no cloud creds, no deploy pipeline. In prod `/config.js` is written by the
+ * deploy step; here a dev middleware substitutes it so the browser-delivered
+ * behaviour can be developed WITH a browser locally.
+ *
+ * NOTE: the s006/s009 feature flags (uc4Enabled, uc1NameEnabled,
+ * uc3LeaderboardEnabled, uc4TwoCopyEnabled) were FACTORED OUT at slice delivery
+ * (§40 code-then-config). The name field, leaderboard panel, and two copy
+ * controls are now the UNCONDITIONAL SPA behaviour, so config.js carries only
+ * the WS url — no flag entries here or in the prod deploy step.
  */
 
 const LOCAL_WS_PORT = Number(process.env.LOCAL_WS_PORT ?? 8787);
 
-/** Serve a local /config.js (local WS url + the s009 flags ON) and stub APIs. */
+/** Serve a local /config.js (local WS url only) and stub APIs. */
 function localBackend(): Plugin {
   const configBody = `window.OXO_CONFIG = ${JSON.stringify({
     wsUrl: `ws://localhost:${LOCAL_WS_PORT}`,
-    uc4Enabled: true,
-    // s009 — develop the name field, leaderboard panel, and two copy controls
-    // WITH a real browser locally (the §"local stand-up" discipline). In prod
-    // these default OFF until the orchestrator flips them after the backend lands.
-    uc1NameEnabled: true,
-    uc3LeaderboardEnabled: true,
-    uc4TwoCopyEnabled: true,
   })};`;
   // s009 UC3 — a small fixed leaderboard fixture so the panel renders populated
   // locally (the real GET /api/leaderboard is the backend engineer's surface).

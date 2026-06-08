@@ -257,9 +257,13 @@ jobs:
             echo "WARNING: OxoGameProd WsApiEndpoint output not found — config.js will have empty wsUrl."
             WSS_URL=""
           fi
-          # (The s006 UC4 move-relay flag was factored out of config at slice
-          # delivery — §40 code-then-config done condition. The server-authoritative
-          # move relay is now the unconditional online behaviour; no flag entry.)
+          # config.js carries ONLY the WS url — every SPA feature flag has been
+          # factored out at its slice's delivery (§40 code-then-config):
+          #   - s006 uc4Enabled            (server-authoritative move relay)
+          #   - s009 uc1NameEnabled        (name entry)
+          #   - s009 uc3LeaderboardEnabled (leaderboard panel)
+          #   - s009 uc4TwoCopyEnabled     (two copy controls)
+          # All four are now the UNCONDITIONAL SPA behaviour; no flag entry here.
           printf 'window.OXO_CONFIG=%s;\n' "{\"wsUrl\":\"${WSS_URL}\"}" > /tmp/config.js
           aws s3 cp /tmp/config.js s3://${{ vars.OXO_ONLINE_S3_BUCKET }}/config.js \
             --region ${{ env.AWS_REGION }} \

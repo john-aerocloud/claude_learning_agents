@@ -17,7 +17,7 @@ export function Status({ status, currentPlayer, winner }: StatusProps) {
     message = `${currentPlayer}'s turn`;
   }
   return (
-    <p className="status" role="status" aria-live="polite">
+    <p className="status" role="status" aria-live="polite" data-testid="game-status">
       {message}
     </p>
   );

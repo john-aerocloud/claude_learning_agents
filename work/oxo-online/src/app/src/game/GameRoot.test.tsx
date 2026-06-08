@@ -24,6 +24,34 @@ function captureFactory() {
   };
 }
 
+/**
+ * Spy on global fetch, routing GET /api/leaderboard to a fresh empty-leaderboard
+ * Response and every other call (the POST /api/games create) to a FRESH Response
+ * built from `gamesBody` per invocation. A fresh Response per call is essential:
+ * the leaderboard fetch (unconditional on idle mount, §40) and the create POST
+ * both read the body, and a Response body can only be consumed once. Returns the
+ * spy so call-sites can assert on the /api/games invocation (filtered by URL).
+ */
+function mockGamesFetch(gamesBody: Record<string, unknown>) {
+  return vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+    const url = typeof input === 'string' ? input : (input as Request).url;
+    if (url.includes('/api/leaderboard')) {
+      return Promise.resolve(
+        new Response(JSON.stringify({ entries: [], buildSha: 'test' }), { status: 200 }),
+      );
+    }
+    return Promise.resolve(new Response(JSON.stringify(gamesBody), { status: 201 }));
+  });
+}
+
+/** The POST /api/games calls captured by a fetch spy (leaderboard calls excluded). */
+function gamesCalls(spy: { mock: { calls: unknown[][] } }) {
+  return (spy.mock.calls as Array<[unknown, RequestInit?]>).filter(([input]) => {
+    const url = typeof input === 'string' ? input : (input as Request).url;
+    return url.includes('/api/games');
+  });
+}
+
 /** Count rendered cells currently holding a given symbol. */
 function countSymbol(symbol: 'X' | 'O'): number {
   let n = 0;
@@ -44,11 +72,11 @@ describe('GameRoot — placing a symbol (B4)', () => {
 describe('GameRoot — turn alternation in the UI (B5)', () => {
   it("reads X's turn, then O's turn, then X's turn as play proceeds", async () => {
     render(<GameRoot />);
-    expect(screen.getByRole('status')).toHaveTextContent("X's turn");
+    expect(screen.getByTestId('game-status')).toHaveTextContent("X's turn");
     await userEvent.click(screen.getByLabelText('cell 0'));
-    expect(screen.getByRole('status')).toHaveTextContent("O's turn");
+    expect(screen.getByTestId('game-status')).toHaveTextContent("O's turn");
     await userEvent.click(screen.getByLabelText('cell 1'));
-    expect(screen.getByRole('status')).toHaveTextContent("X's turn");
+    expect(screen.getByTestId('game-status')).toHaveTextContent("X's turn");
   });
 });
 
@@ -59,7 +87,7 @@ describe('GameRoot — clicking a taken cell is a no-op (B6)', () => {
     expect(screen.getByLabelText('cell 0')).toBeDisabled();
     await userEvent.click(screen.getByLabelText('cell 0')); // ignored
     expect(screen.getByLabelText('cell 0')).toHaveTextContent('X');
-    expect(screen.getByRole('status')).toHaveTextContent("O's turn");
+    expect(screen.getByTestId('game-status')).toHaveTextContent("O's turn");
   });
 });
 
@@ -74,7 +102,7 @@ describe('GameRoot — win locks the board and shows result (B7)', () => {
     render(<GameRoot />);
     // X: 0,1,2 (row 0 win) ; O: 3,4
     await clickCells([0, 3, 1, 4, 2]);
-    expect(screen.getByRole('status')).toHaveTextContent('X wins');
+    expect(screen.getByTestId('game-status')).toHaveTextContent('X wins');
     // cell 5 is still empty but the board is locked
     expect(screen.getByLabelText('cell 5')).toBeDisabled();
     await userEvent.click(screen.getByLabelText('cell 5'));
@@ -87,7 +115,7 @@ describe('GameRoot — draw shows Draw (B8)', () => {
     render(<GameRoot />);
     // Fills board with no winning line (see engine A7).
     await clickCells([0, 1, 2, 4, 3, 5, 7, 6, 8]);
-    expect(screen.getByRole('status')).toHaveTextContent('Draw');
+    expect(screen.getByTestId('game-status')).toHaveTextContent('Draw');
   });
 });
 
@@ -105,7 +133,7 @@ describe('GameRoot — Play again resets (B9)', () => {
     await userEvent.click(
       screen.getByRole('button', { name: /play again/i }),
     );
-    expect(screen.getByRole('status')).toHaveTextContent("X's turn");
+    expect(screen.getByTestId('game-status')).toHaveTextContent("X's turn");
     for (let i = 0; i < 9; i += 1) {
       expect(screen.getByLabelText(`cell ${i}`)).toHaveTextContent('');
     }
@@ -122,7 +150,7 @@ describe('GameRoot — mode selector (B1, S1, F1)', () => {
       screen.getByRole('button', { name: /vs computer/i }),
     ).toBeInTheDocument();
     // Default unchanged: empty board, X to move.
-    expect(screen.getByRole('status')).toHaveTextContent("X's turn");
+    expect(screen.getByTestId('game-status')).toHaveTextContent("X's turn");
     for (let i = 0; i < 9; i += 1) {
       expect(screen.getByLabelText(`cell ${i}`)).toHaveTextContent('');
     }
@@ -133,7 +161,7 @@ describe('GameRoot — selecting vs Computer (B2, F1)', () => {
   it('starts a fresh game with the human as X', async () => {
     render(<GameRoot />);
     await userEvent.click(screen.getByRole('button', { name: /vs computer/i }));
-    expect(screen.getByRole('status')).toHaveTextContent("X's turn");
+    expect(screen.getByTestId('game-status')).toHaveTextContent("X's turn");
     for (let i = 0; i < 9; i += 1) {
       expect(screen.getByLabelText(`cell ${i}`)).toHaveTextContent('');
     }
@@ -147,7 +175,7 @@ describe('GameRoot — switching mode resets the board (B3)', () => {
     expect(screen.getByLabelText('cell 0')).toHaveTextContent('X');
     await userEvent.click(screen.getByRole('button', { name: /vs computer/i }));
     expect(screen.getByLabelText('cell 0')).toHaveTextContent('');
-    expect(screen.getByRole('status')).toHaveTextContent("X's turn");
+    expect(screen.getByTestId('game-status')).toHaveTextContent("X's turn");
   });
 });
 
@@ -193,7 +221,7 @@ describe('GameRoot — Play again stays in vs-Computer mode (C3, F6)', () => {
       if (!clicked) break;
     }
     await userEvent.click(screen.getByRole('button', { name: /play again/i }));
-    expect(screen.getByRole('status')).toHaveTextContent("X's turn");
+    expect(screen.getByTestId('game-status')).toHaveTextContent("X's turn");
     for (let i = 0; i < 9; i += 1) {
       expect(screen.getByLabelText(`cell ${i}`)).toHaveTextContent('');
     }
@@ -209,7 +237,7 @@ describe('GameRoot — two-player mode produces no auto-O (C4, F5, T7)', () => {
     await userEvent.click(screen.getByLabelText('cell 0')); // X
     expect(countSymbol('X')).toBe(1);
     expect(countSymbol('O')).toBe(0);
-    expect(screen.getByRole('status')).toHaveTextContent("O's turn");
+    expect(screen.getByTestId('game-status')).toHaveTextContent("O's turn");
   });
 });
 
@@ -219,14 +247,7 @@ describe('GameRoot — Play Online success flow (F1, F2, F3)', () => {
   });
 
   it('issues POST /api/games when Play Online is clicked', async () => {
-    const fetchMock = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(
-        new Response(JSON.stringify({ gameId: 'g-1', code: 'ABC234' }), {
-          status: 201,
-          headers: { 'content-type': 'application/json' },
-        }),
-      );
+    const fetchMock = mockGamesFetch({ gameId: 'g-1', code: 'ABC234' });
     render(<GameRoot />);
     await userEvent.click(
       screen.getByRole('button', { name: /play online/i }),
@@ -238,12 +259,18 @@ describe('GameRoot — Play Online success flow (F1, F2, F3)', () => {
   });
 
   it('shows a loading indicator while the request is pending', async () => {
+    // Route the leaderboard GET to a resolved empty response so only the
+    // /api/games POST stays pending (the loading state we assert on).
     let resolveFetch: (r: Response) => void = () => {};
-    vi.spyOn(globalThis, 'fetch').mockReturnValue(
-      new Promise<Response>((resolve) => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      if (url.includes('/api/leaderboard')) {
+        return Promise.resolve(new Response(JSON.stringify({ entries: [] }), { status: 200 }));
+      }
+      return new Promise<Response>((resolve) => {
         resolveFetch = resolve;
-      }),
-    );
+      });
+    });
     render(<GameRoot />);
     await userEvent.click(
       screen.getByRole('button', { name: /play online/i }),
@@ -259,11 +286,7 @@ describe('GameRoot — Play Online success flow (F1, F2, F3)', () => {
   });
 
   it('shows the returned code prominently and keeps it visible', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ gameId: 'g-1', code: 'MNP234' }), {
-        status: 201,
-      }),
-    );
+    mockGamesFetch({ gameId: 'g-1', code: 'MNP234' });
     render(<GameRoot />);
     await userEvent.click(
       screen.getByRole('button', { name: /play online/i }),
@@ -300,15 +323,19 @@ describe('GameRoot — Play Online failure degrades gracefully (F4, F5)', () => 
     ).toBeInTheDocument();
     // Existing mode still works after the error.
     await userEvent.click(screen.getByRole('button', { name: /vs computer/i }));
-    expect(screen.getByRole('status')).toHaveTextContent("X's turn");
+    expect(screen.getByTestId('game-status')).toHaveTextContent("X's turn");
   });
 
   it('shows a readable error on a 5xx response', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ error: 'Could not create game' }), {
-        status: 500,
-      }),
-    );
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      if (url.includes('/api/leaderboard')) {
+        return Promise.resolve(new Response(JSON.stringify({ entries: [] }), { status: 200 }));
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ error: 'Could not create game' }), { status: 500 }),
+      );
+    });
     render(<GameRoot />);
     await userEvent.click(
       screen.getByRole('button', { name: /play online/i }),
@@ -353,11 +380,7 @@ describe('GameRoot — Join a game flow (B4, F1)', () => {
 
   it('host shows a readable error (no white-screen) on a register error frame (DEFECT-005-001 Bug B)', async () => {
     const cap = captureFactory();
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ gameId: 'g-9', code: 'ERR234' }), {
-        status: 201,
-      }),
-    );
+    mockGamesFetch({ gameId: 'g-9', code: 'ERR234' });
     render(<GameRoot socketFactory={cap.factory} />);
     await userEvent.click(screen.getByRole('button', { name: /play online/i }));
     await waitFor(() =>
@@ -382,11 +405,7 @@ describe('GameRoot — Join a game flow (B4, F1)', () => {
 
   it('transitions the host waiting screen to the board with role X on game-ready', async () => {
     const cap = captureFactory();
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ gameId: 'g-1', code: 'HST234' }), {
-        status: 201,
-      }),
-    );
+    mockGamesFetch({ gameId: 'g-1', code: 'HST234' });
     render(<GameRoot socketFactory={cap.factory} />);
     await userEvent.click(screen.getByRole('button', { name: /play online/i }));
     await waitFor(() =>
@@ -405,11 +424,7 @@ describe('GameRoot — real socket frames (C2, UC3, F1, F6)', () => {
 
   it('host sends {action:register,gameId} when the waiting screen opens the socket', async () => {
     const cap = captureFactory();
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ gameId: 'g-42', code: 'REG234' }), {
-        status: 201,
-      }),
-    );
+    mockGamesFetch({ gameId: 'g-42', code: 'REG234' });
     render(<GameRoot socketFactory={cap.factory} />);
     await userEvent.click(screen.getByRole('button', { name: /play online/i }));
     await waitFor(() =>
@@ -419,13 +434,16 @@ describe('GameRoot — real socket frames (C2, UC3, F1, F6)', () => {
     expect(cap.sent).toContainEqual({ action: 'register', gameId: 'g-42' });
   });
 
-  it('joiner sends {action:join,code} when the join form is submitted', async () => {
+  it('joiner sends {action:join,code,playerName} when the join form is submitted', async () => {
     const cap = captureFactory();
     render(<GameRoot socketFactory={cap.factory} />);
     await userEvent.click(screen.getByRole('button', { name: /join a game/i }));
     await userEvent.type(screen.getByLabelText(/game code/i), 'JON234');
     await userEvent.click(screen.getByRole('button', { name: /^join$/i }));
-    expect(cap.sent).toContainEqual({ action: 'join', code: 'JON234' });
+    // s009 UC1 is unconditional (flag factored out, §40): the join frame always
+    // carries the normalised playerName — the default "AAA" when the field is
+    // untouched. (The named-guest case is pinned by AC1.5 below.)
+    expect(cap.sent).toContainEqual({ action: 'join', code: 'JON234', playerName: 'AAA' });
   });
 });
 
@@ -439,12 +457,7 @@ describe('GameRoot — $connect credential threading (UC3/AC3.1, UC4/AC4.1, T8)'
 
   it('host passes the create-game wsToken as the connect credential (UC3/AC3.1)', async () => {
     const cap = captureFactory();
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(
-        JSON.stringify({ gameId: 'g-7', code: 'TOK234', wsToken: 'host.tok.sig' }),
-        { status: 201 },
-      ),
-    );
+    mockGamesFetch({ gameId: 'g-7', code: 'TOK234', wsToken: 'host.tok.sig' });
     render(<GameRoot socketFactory={cap.factory} />);
     await userEvent.click(screen.getByRole('button', { name: /play online/i }));
     await waitFor(() =>
@@ -455,11 +468,7 @@ describe('GameRoot — $connect credential threading (UC3/AC3.1, UC4/AC4.1, T8)'
 
   it('host connects WITHOUT a credential when the create response omits wsToken (degraded mint, DEFECT-H2-001)', async () => {
     const cap = captureFactory();
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ gameId: 'g-8', code: 'DEG234' }), {
-        status: 201,
-      }),
-    );
+    mockGamesFetch({ gameId: 'g-8', code: 'DEG234' });
     render(<GameRoot socketFactory={cap.factory} />);
     await userEvent.click(screen.getByRole('button', { name: /play online/i }));
     await waitFor(() =>
@@ -490,11 +499,7 @@ describe('GameRoot — opponent-disconnected survivor UX (s007 UC3, F1, T2, AC3.
 
   /** Drive the host to the live online board and return the captured socket. */
   async function hostToBoard(cap: ReturnType<typeof captureFactory>) {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ gameId: 'g-dc', code: 'DSC234' }), {
-        status: 201,
-      }),
-    );
+    mockGamesFetch({ gameId: 'g-dc', code: 'DSC234' });
     render(<GameRoot socketFactory={cap.factory} />);
     await userEvent.click(screen.getByRole('button', { name: /play online/i }));
     await waitFor(() =>
@@ -579,9 +584,7 @@ describe('GameRoot — clean Online restart after opponent disconnect (s007 UC3,
   });
 
   async function hostToBoard(cap: ReturnType<typeof captureFactory>, code: string) {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ gameId: `g-${code}`, code }), { status: 201 }),
-    );
+    mockGamesFetch({ gameId: `g-${code}`, code });
     render(<GameRoot socketFactory={cap.factory} />);
     await userEvent.click(screen.getByRole('button', { name: /play online/i }));
     await waitFor(() =>
@@ -610,13 +613,7 @@ describe('GameRoot — clean Online restart after opponent disconnect (s007 UC3,
 
     // The survivor starts a fresh online game. The create POST fires again
     // (fresh flow), and the new game opens a new socket via the gameId effect.
-    const fetchMock = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(
-        new Response(JSON.stringify({ gameId: 'g-NEW234', code: 'NEW234' }), {
-          status: 201,
-        }),
-      );
+    const fetchMock = mockGamesFetch({ gameId: 'g-NEW234', code: 'NEW234' });
     await userEvent.click(screen.getByRole('button', { name: /play online/i }));
     await waitFor(() =>
       expect(screen.getByText(/waiting for opponent/i)).toBeInTheDocument(),
@@ -648,7 +645,7 @@ describe('GameRoot — local/AI modes unaffected by disconnect wiring (s007 UC3,
   it('AC3.5 — local two-player plays to a full win with no opponent-disconnected message', async () => {
     render(<GameRoot />);
     await clickCells([0, 3, 1, 4, 2]); // X wins top row
-    expect(screen.getByRole('status')).toHaveTextContent('X wins');
+    expect(screen.getByTestId('game-status')).toHaveTextContent('X wins');
     expect(screen.queryByTestId('opponent-disconnected')).not.toBeInTheDocument();
   });
 
@@ -690,7 +687,7 @@ describe('GameRoot — local modes unaffected by online wiring (B4, F8)', () => 
     ).toBeInTheDocument();
     // A local two-player game still plays to a win.
     await clickCells([0, 3, 1, 4, 2]);
-    expect(screen.getByRole('status')).toHaveTextContent('X wins');
+    expect(screen.getByTestId('game-status')).toHaveTextContent('X wins');
   });
 });
 
@@ -711,11 +708,7 @@ describe('GameRoot — UC4 online move relay (flag ON, AC4.1–AC4.4)', () => {
 
   /** Drive the host to the online board and return the captured socket opts. */
   async function hostToBoard(cap: ReturnType<typeof captureFactory>) {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ gameId: 'g-mv', code: 'MOV234' }), {
-        status: 201,
-      }),
-    );
+    mockGamesFetch({ gameId: 'g-mv', code: 'MOV234' });
     render(<GameRoot socketFactory={cap.factory} />);
     await userEvent.click(screen.getByRole('button', { name: /play online/i }));
     await waitFor(() =>
@@ -834,98 +827,25 @@ describe('GameRoot — UC4 online move relay (flag ON, AC4.1–AC4.4)', () => {
   });
 });
 
-// s008 UC1 (T3/S3/SM-1) — copy-link control on the host waiting screen. The host
-// sees a "Copy link" control next to the already-visible 6-char code; clicking it
-// copies EXACTLY window.location.origin + "/join/" + code (S3: no token/credential
-// query param or fragment) via navigator.clipboard.writeText, shows a brief
-// "Copied!" confirmation, and leaves the code visible as plain text.
-// @covers spaCopyLink
-describe('GameRoot — copy-link control on the waiting screen (s008 UC1, T3/S3/SM-1)', () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
+// (s008's single copy-link control was REPLACED by the s009 UC4 two-control
+// surface at §40 factor-out. Its S3 URL-form / "Copied!" / code-stays-visible
+// assertions are now pinned by the UC4 two copy controls describe above
+// (copy-link-btn). The single `copy-link` testid no longer exists.)
 
-  async function reachWaiting(code: string) {
-    const cap = captureFactory();
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ gameId: 'g-1', code }), { status: 201 }),
-    );
-    render(<GameRoot socketFactory={cap.factory} />);
-    await userEvent.click(screen.getByRole('button', { name: /play online/i }));
-    await waitFor(() =>
-      expect(screen.getByText(/waiting for opponent/i)).toBeInTheDocument(),
-    );
-    return cap;
-  }
-
-  /** Stub navigator.clipboard.writeText, returning the spy. */
-  function stubClipboard() {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(globalThis.navigator, 'clipboard', {
-      configurable: true,
-      value: { writeText },
-    });
-    return writeText;
-  }
-
-  it('AC1.1 — the "Copy link" control is present on the waiting screen', async () => {
-    await reachWaiting('ABC234');
-    expect(screen.getByTestId('copy-link')).toBeInTheDocument();
-  });
-
-  it('AC1.2/S3 — clicking copies exactly origin + "/join/" + code, no param/fragment', async () => {
-    const writeText = stubClipboard();
-    await reachWaiting('ABC234');
-    await userEvent.click(screen.getByTestId('copy-link'));
-    const expected = `${window.location.origin}/join/ABC234`;
-    expect(writeText).toHaveBeenCalledWith(expected);
-    // S3: the URL is exactly the path form — no query string, no fragment.
-    const copied = writeText.mock.calls[0][0] as string;
-    expect(copied).not.toContain('?');
-    expect(copied).not.toContain('#');
-    expect(copied.endsWith('/join/ABC234')).toBe(true);
-  });
-
-  it('AC1.3 — the control shows "Copied!" after clicking', async () => {
-    stubClipboard();
-    await reachWaiting('ABC234');
-    await userEvent.click(screen.getByTestId('copy-link'));
-    await waitFor(() =>
-      expect(screen.getByTestId('copy-link')).toHaveTextContent(/copied/i),
-    );
-  });
-
-  it('AC1.4 — the 6-char code stays visible as plain text after copying', async () => {
-    stubClipboard();
-    await reachWaiting('ABC234');
-    await userEvent.click(screen.getByTestId('copy-link'));
-    expect(screen.getByTestId('game-code')).toHaveTextContent('ABC234');
-  });
-});
-
-// s009 UC4 — TWO copy controls on the waiting screen (DEFECT-S008-002 closure).
-// FLAG ON (uc4TwoCopyEnabled): the single s008 copy-link is replaced by
-// "Copy code" (copies the 6-char code) + "Copy link" (copies the /join/:code
-// URL), each with a brief "Copied!" feedback; the code stays visible. Flag OFF
-// keeps the single s008 control (prod-unchanged) — covered by the s008 suite.
+// s009 UC4 — TWO copy controls on the waiting screen (DEFECT-S008-002 closure),
+// now the UNCONDITIONAL waiting-screen behaviour (flag factored out, §40): the
+// single s008 copy-link is replaced by "Copy code" (copies the 6-char code) +
+// "Copy link" (copies the /join/:code URL), each with a brief "Copied!"
+// feedback; the code stays visible.
 // @covers spa-copy-controls
-describe('GameRoot — UC4 two copy controls (flag ON, AC4.1/2/3/4, D1-5, A11Y-2)', () => {
+describe('GameRoot — UC4 two copy controls (AC4.1/2/3/4, D1-5, A11Y-2)', () => {
   afterEach(() => {
     vi.restoreAllMocks();
-    delete (window as unknown as { OXO_CONFIG?: unknown }).OXO_CONFIG;
   });
-
-  function flagOn() {
-    (window as unknown as { OXO_CONFIG: Record<string, unknown> }).OXO_CONFIG = {
-      uc4TwoCopyEnabled: true,
-    };
-  }
 
   async function reachWaiting(code: string) {
     const cap = captureFactory();
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ gameId: 'g-1', code }), { status: 201 }),
-    );
+    mockGamesFetch({ gameId: 'g-1', code });
     render(<GameRoot socketFactory={cap.factory} />);
     await userEvent.click(screen.getByRole('button', { name: /play online/i }));
     await waitFor(() =>
@@ -944,16 +864,14 @@ describe('GameRoot — UC4 two copy controls (flag ON, AC4.1/2/3/4, D1-5, A11Y-2
   }
 
   it('AC4.1/D1 — the waiting screen shows BOTH "Copy code" and "Copy link" controls', async () => {
-    flagOn();
     await reachWaiting('ABC234');
     expect(screen.getByTestId('copy-code-btn')).toHaveAccessibleName(/copy code/i);
     expect(screen.getByTestId('copy-link-btn')).toHaveAccessibleName(/copy link/i);
-    // The single s008 control is replaced (no longer present under flag ON).
+    // The single s008 control is replaced (no longer present).
     expect(screen.queryByTestId('copy-link')).not.toBeInTheDocument();
   });
 
   it('AC4.2/D2 — "Copy code" copies the 6-char code, NOT the URL', async () => {
-    flagOn();
     const writeText = stubClipboard();
     await reachWaiting('ABC234');
     await userEvent.click(screen.getByTestId('copy-code-btn'));
@@ -964,7 +882,6 @@ describe('GameRoot — UC4 two copy controls (flag ON, AC4.1/2/3/4, D1-5, A11Y-2
   });
 
   it('AC4.3/D3 — "Copy link" copies origin + "/join/" + code, NOT the bare code', async () => {
-    flagOn();
     const writeText = stubClipboard();
     await reachWaiting('ABC234');
     await userEvent.click(screen.getByTestId('copy-link-btn'));
@@ -972,7 +889,6 @@ describe('GameRoot — UC4 two copy controls (flag ON, AC4.1/2/3/4, D1-5, A11Y-2
   });
 
   it('AC4.4/D4 — each control shows a "Copied!" confirmation after a write', async () => {
-    flagOn();
     stubClipboard();
     await reachWaiting('ABC234');
     await userEvent.click(screen.getByTestId('copy-code-btn'));
@@ -986,41 +902,27 @@ describe('GameRoot — UC4 two copy controls (flag ON, AC4.1/2/3/4, D1-5, A11Y-2
   });
 
   it('the 6-char code stays visible after either copy', async () => {
-    flagOn();
     stubClipboard();
     await reachWaiting('ABC234');
     await userEvent.click(screen.getByTestId('copy-code-btn'));
     expect(screen.getByTestId('game-code')).toHaveTextContent('ABC234');
   });
-
-  it('flag OFF — the single s008 "copy-link" control is shown (prod-unchanged)', async () => {
-    await reachWaiting('ABC234');
-    expect(screen.getByTestId('copy-link')).toBeInTheDocument();
-    expect(screen.queryByTestId('copy-code-btn')).not.toBeInTheDocument();
-  });
 });
 
-// s009 UC1 — name entry (both parties). FLAG ON (uc1NameEnabled). The NameField
-// sits ABOVE the mode buttons in the idle view, pre-filled from sessionStorage
-// (else "AAA"), and is NEVER a gate — "Play Online"/"Join a game" stay enabled
-// with an empty field (click-path BINDING). On create the normalised name rides
-// POST /api/games {playerName}; on join it rides the WS join frame.
+// s009 UC1 — name entry (both parties), now UNCONDITIONAL (flag factored out,
+// §40). The NameField sits ABOVE the mode buttons in the idle view, pre-filled
+// from sessionStorage (else "AAA"), and is NEVER a gate — "Play Online"/"Join a
+// game" stay enabled with an empty field (click-path BINDING). On create the
+// normalised name rides POST /api/games {playerName}; on join it rides the WS
+// join frame.
 // @covers spa-name-field spa-name-wire
-describe('GameRoot — UC1 name entry (flag ON, AC1.1/1.2/1.6, A11Y-1/3)', () => {
+describe('GameRoot — UC1 name entry (AC1.1/1.2/1.6, A11Y-1/3)', () => {
   afterEach(() => {
     vi.restoreAllMocks();
-    delete (window as unknown as { OXO_CONFIG?: unknown }).OXO_CONFIG;
     sessionStorage.clear();
   });
 
-  function flagOn() {
-    (window as unknown as { OXO_CONFIG: Record<string, unknown> }).OXO_CONFIG = {
-      uc1NameEnabled: true,
-    };
-  }
-
   it('AC1.1 — renders the "Your name" field on the idle view, pre-filled "AAA" when no session name', () => {
-    flagOn();
     render(<GameRoot />);
     const input = screen.getByRole('textbox', { name: 'Your name' });
     expect(input).toBeInTheDocument();
@@ -1028,14 +930,12 @@ describe('GameRoot — UC1 name entry (flag ON, AC1.1/1.2/1.6, A11Y-1/3)', () =>
   });
 
   it('AC1.1 — pre-fills from sessionStorage when a prior name exists', () => {
-    flagOn();
     sessionStorage.setItem('oxo.playerName', 'ZIP');
     render(<GameRoot />);
     expect(screen.getByRole('textbox', { name: 'Your name' })).toHaveValue('ZIP');
   });
 
   it('AC1.1 — the field renders ABOVE the mode buttons (focus/DOM order, A11Y-3)', () => {
-    flagOn();
     render(<GameRoot />);
     const input = screen.getByTestId('name-input');
     const playOnline = screen.getByRole('button', { name: /play online/i });
@@ -1046,68 +946,43 @@ describe('GameRoot — UC1 name entry (flag ON, AC1.1/1.2/1.6, A11Y-1/3)', () =>
   });
 
   it('AC1.2 — Play Online / Join a game are ENABLED with an empty name (non-gating)', async () => {
-    flagOn();
     render(<GameRoot />);
     const input = screen.getByTestId('name-input');
     await userEvent.clear(input);
     expect(screen.getByRole('button', { name: /play online/i })).toBeEnabled();
     expect(screen.getByRole('button', { name: /join a game/i })).toBeEnabled();
   });
-
-  it('the field is hidden when the flag is OFF (prod-unchanged)', () => {
-    render(<GameRoot />);
-    expect(screen.queryByRole('textbox', { name: 'Your name' })).not.toBeInTheDocument();
-  });
 });
 
-describe('GameRoot — UC1 name wire into create + join (flag ON, AC1.3/1.4/1.6, T-LB-2/12)', () => {
+describe('GameRoot — UC1 name wire into create + join (AC1.3/1.4/1.6, T-LB-2/12)', () => {
   afterEach(() => {
     vi.restoreAllMocks();
-    delete (window as unknown as { OXO_CONFIG?: unknown }).OXO_CONFIG;
     sessionStorage.clear();
   });
 
-  function flagOn() {
-    (window as unknown as { OXO_CONFIG: Record<string, unknown> }).OXO_CONFIG = {
-      uc1NameEnabled: true,
-    };
-  }
-
   it('AC1.3 — POST /api/games carries the normalised playerName (host)', async () => {
-    flagOn();
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ gameId: 'g-1', code: 'ABC234' }), { status: 201 }),
-    );
+    const fetchMock = mockGamesFetch({ gameId: 'g-1', code: 'ABC234' });
     render(<GameRoot />);
     const input = screen.getByTestId('name-input');
     await userEvent.clear(input);
     await userEvent.type(input, 'ace');
     await userEvent.click(screen.getByRole('button', { name: /play online/i }));
-    const body = JSON.parse(
-      (fetchMock.mock.calls[0][1] as RequestInit).body as string,
-    );
+    // Filter to the /api/games POST (the leaderboard GET also fires on idle mount).
+    const body = JSON.parse((gamesCalls(fetchMock)[0][1] as RequestInit).body as string);
     expect(body).toEqual({ playerName: 'ace' });
   });
 
   it('AC1.3 — an empty name posts "AAA" (default, no gate)', async () => {
-    flagOn();
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ gameId: 'g-1', code: 'ABC234' }), { status: 201 }),
-    );
+    const fetchMock = mockGamesFetch({ gameId: 'g-1', code: 'ABC234' });
     render(<GameRoot />);
     await userEvent.clear(screen.getByTestId('name-input'));
     await userEvent.click(screen.getByRole('button', { name: /play online/i }));
-    const body = JSON.parse(
-      (fetchMock.mock.calls[0][1] as RequestInit).body as string,
-    );
+    const body = JSON.parse((gamesCalls(fetchMock)[0][1] as RequestInit).body as string);
     expect(body).toEqual({ playerName: 'AAA' });
   });
 
   it('AC1.6/T-LB-12 — a successful create persists the name to sessionStorage', async () => {
-    flagOn();
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ gameId: 'g-1', code: 'ABC234' }), { status: 201 }),
-    );
+    mockGamesFetch({ gameId: 'g-1', code: 'ABC234' });
     render(<GameRoot />);
     await userEvent.clear(screen.getByTestId('name-input'));
     await userEvent.type(screen.getByTestId('name-input'), 'BEE');
@@ -1116,7 +991,6 @@ describe('GameRoot — UC1 name wire into create + join (flag ON, AC1.3/1.4/1.6,
   });
 
   it('AC1.5 — the WS join frame carries the normalised playerName (guest)', async () => {
-    flagOn();
     const cap = captureFactory();
     render(<GameRoot socketFactory={cap.factory} />);
     await userEvent.clear(screen.getByTestId('name-input'));
@@ -1126,33 +1000,16 @@ describe('GameRoot — UC1 name wire into create + join (flag ON, AC1.3/1.4/1.6,
     await userEvent.click(screen.getByRole('button', { name: /^join$/i }));
     expect(cap.sent).toContainEqual({ action: 'join', code: 'ABC234', playerName: 'gus' });
   });
-
-  it('flag OFF — POST body carries NO playerName (prod-unchanged contract)', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ gameId: 'g-1', code: 'ABC234' }), { status: 201 }),
-    );
-    render(<GameRoot />);
-    await userEvent.click(screen.getByRole('button', { name: /play online/i }));
-    const init = fetchMock.mock.calls[0][1] as RequestInit;
-    expect(init.body).toBeUndefined();
-  });
 });
 
-// s009 UC3 — the shared leaderboard panel on the idle view (flag
-// uc3LeaderboardEnabled). It fetches GET /api/leaderboard on mount and renders
+// s009 UC3 — the shared leaderboard panel on the idle view, now UNCONDITIONAL
+// (flag factored out, §40). It fetches GET /api/leaderboard on mount and renders
 // loading → populated; it refetches when the player returns to idle from a game.
 // @covers spa-leaderboard spa-leaderboard-client
-describe('GameRoot — UC3 leaderboard panel (flag ON, AC3.2, A11Y-12)', () => {
+describe('GameRoot — UC3 leaderboard panel (AC3.2, A11Y-12)', () => {
   afterEach(() => {
     vi.restoreAllMocks();
-    delete (window as unknown as { OXO_CONFIG?: unknown }).OXO_CONFIG;
   });
-
-  function flagOn() {
-    (window as unknown as { OXO_CONFIG: Record<string, unknown> }).OXO_CONFIG = {
-      uc3LeaderboardEnabled: true,
-    };
-  }
 
   function stubLeaderboard(entries: unknown[]) {
     return vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
@@ -1169,7 +1026,6 @@ describe('GameRoot — UC3 leaderboard panel (flag ON, AC3.2, A11Y-12)', () => {
   }
 
   it('AC3.2 — fetches /api/leaderboard on mount and renders the populated table', async () => {
-    flagOn();
     stubLeaderboard([{ name: 'ACE', wins: 2, draws: 0, losses: 1 }]);
     render(<GameRoot />);
     await waitFor(() =>
@@ -1179,7 +1035,6 @@ describe('GameRoot — UC3 leaderboard panel (flag ON, AC3.2, A11Y-12)', () => {
   });
 
   it('renders the panel below the board with an <h2> heading (A11Y-12)', async () => {
-    flagOn();
     stubLeaderboard([]);
     render(<GameRoot />);
     await waitFor(() =>
@@ -1188,14 +1043,8 @@ describe('GameRoot — UC3 leaderboard panel (flag ON, AC3.2, A11Y-12)', () => {
   });
 
   it('shows the error state on a failed fetch (graceful, no throw)', async () => {
-    flagOn();
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('boom', { status: 500 }));
     render(<GameRoot />);
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/couldn.t load/i));
-  });
-
-  it('flag OFF — the leaderboard panel is NOT rendered (prod-unchanged)', () => {
-    render(<GameRoot />);
-    expect(screen.queryByRole('table', { name: 'Leaderboard' })).not.toBeInTheDocument();
   });
 });

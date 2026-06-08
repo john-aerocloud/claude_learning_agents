@@ -16,7 +16,7 @@ describe('App routing (C1)', () => {
     renderAt('/');
     // Nine board cells and the turn indicator prove the game is mounted.
     expect(screen.getAllByRole('button', { name: /^cell \d$/ })).toHaveLength(9);
-    expect(screen.getByRole('status')).toHaveTextContent("X's turn");
+    expect(screen.getByTestId('game-status')).toHaveTextContent("X's turn");
   });
 
   it('does not render the slice-001 title placeholder at root', () => {

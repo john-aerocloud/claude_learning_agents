@@ -43,8 +43,11 @@ import { test, expect, type Page } from '@playwright/test';
  *
  * STABLE SELECTORS (process v12 §23):
  *   [data-testid="game-code"]          — host game code on waiting screen
- *   [data-testid="copy-link"]          — copy link button on waiting screen
- *   [aria-label="copy game link"]      — copy link button aria-label (stable semantic)
+ *   [data-testid="copy-link-btn"]      — "Copy link" button on waiting screen
+ *                                        (s009 UC4 split the single copy-link into
+ *                                        copy-code-btn + copy-link-btn; the share-URL
+ *                                        affordance is now copy-link-btn)
+ *   [data-testid="copy-code-btn"]      — "Copy code" button (copies the 6-char code)
  *   [data-testid="online-role"]        — role label (You are X / You are O)
  *   [data-testid="online-turn"]        — turn indicator (server-authoritative)
  *   [aria-label="cell N"]              — board cell N (0..8)
@@ -173,12 +176,16 @@ test.describe('s008 share-link smoke — copy-link, deep-link, C4 done-condition
       const code = await startHostGame(page);
       console.log(`AC1.5: host created game code=${code}`);
 
-      // The copy-link control must be present on the waiting screen.
-      const copyBtn = page.locator('[data-testid="copy-link"]');
-      await expect(copyBtn, '[data-testid="copy-link"] must be visible on waiting screen').toBeVisible({ timeout: 5000 });
-      await expect(copyBtn).toHaveAttribute('aria-label', 'copy game link');
+      // The "Copy link" control must be present on the waiting screen. s009 UC4
+      // split the single copy-link into copy-code-btn + copy-link-btn; the
+      // share-URL affordance is now copy-link-btn.
+      const copyBtn = page.locator('[data-testid="copy-link-btn"]');
+      await expect(copyBtn, '[data-testid="copy-link-btn"] must be visible on waiting screen').toBeVisible({ timeout: 5000 });
+      await expect(copyBtn).toHaveText(/copy link/i);
+      // The companion "Copy code" control (the type-the-code affordance) is also present.
+      await expect(page.locator('[data-testid="copy-code-btn"]')).toBeVisible();
 
-      // Click the copy control.
+      // Click the copy-link control.
       await copyBtn.click();
 
       // Read the clipboard value — Playwright granted clipboard-read permission.
@@ -383,8 +390,8 @@ test.describe('s008 share-link smoke — copy-link, deep-link, C4 done-condition
       const code = await startHostGame(host);
       console.log(`SM-5: Player A (host) created game code=${code}`);
 
-      // The copy-link control must be present.
-      const copyBtn = host.locator('[data-testid="copy-link"]');
+      // The "Copy link" control must be present (s009 UC4: copy-link-btn).
+      const copyBtn = host.locator('[data-testid="copy-link-btn"]');
       await expect(copyBtn).toBeVisible({ timeout: 5000 });
       await copyBtn.click();
 

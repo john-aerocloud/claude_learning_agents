@@ -48,19 +48,26 @@ describe('policy: cell values are closed to {X,O,null} (D2, S1)', () => {
   });
 });
 
-// D3 — no outbound network call during gameplay (T1, S2).
-describe('policy: gameplay performs no network I/O (D3, T1, S2)', () => {
+// D3 — no outbound game-state network call during gameplay (T1, S2).
+// s009 UC3 (flag factored out, §40): the idle view performs ONE sanctioned READ
+// — GET /api/leaderboard — on mount and on return-to-idle. The control this
+// policy protects is unchanged: local gameplay issues no game-state I/O, no XHR,
+// and NEVER opens a WebSocket. Any fetch must be the read-only leaderboard GET.
+describe('policy: gameplay performs no game-state network I/O (D3, T1, S2)', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
-  it('never invokes fetch, XHR, or WebSocket across moves, win, and reset', async () => {
+  it('only the read-only /api/leaderboard GET fires; no XHR, no WebSocket across moves, win, and reset', async () => {
     const { render, screen, cleanup } = await import('@testing-library/react');
     const userEvent = (await import('@testing-library/user-event')).default;
     const { GameRoot } = await import('./GameRoot');
 
-    const fetchSpy = vi.fn();
+    const fetchSpy = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ entries: [] }), { status: 200 }),
+    );
     const xhrOpen = vi.fn();
     const wsCtor = vi.fn();
     vi.stubGlobal('fetch', fetchSpy);
@@ -85,28 +92,38 @@ describe('policy: gameplay performs no network I/O (D3, T1, S2)', () => {
     await userEvent.click(screen.getByRole('button', { name: /play again/i }));
     await userEvent.click(screen.getByLabelText('cell 8'));
 
-    expect(fetchSpy).not.toHaveBeenCalled();
+    // The ONLY permitted fetch is the read-only leaderboard GET (idle view).
+    for (const call of fetchSpy.mock.calls) {
+      const url = typeof call[0] === 'string' ? call[0] : (call[0] as Request).url;
+      expect(url, `unexpected fetch to ${url}`).toContain('/api/leaderboard');
+    }
+    // No game-state writes (POST /api/games), no XHR, no WebSocket in local play.
     expect(xhrOpen).not.toHaveBeenCalled();
     expect(wsCtor).not.toHaveBeenCalled();
     cleanup();
   });
 });
 
-// D4 — no network during a full vs-Computer game (T5, S3).
-describe('policy: vs-Computer play performs no network I/O (D4, T5, S3)', () => {
+// D4 — no game-state network during a full vs-Computer game (T5, S3).
+// As D3: the idle view's read-only /api/leaderboard GET is the only permitted
+// fetch; vs-Computer play opens no socket and writes no game state.
+describe('policy: vs-Computer play performs no game-state network I/O (D4, T5, S3)', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
-  it('never invokes fetch, XHR, or WebSocket across AI moves and reset', async () => {
+  it('only the read-only /api/leaderboard GET fires; no XHR, no WebSocket across AI moves and reset', async () => {
     const { render, screen, waitFor, cleanup } = await import(
       '@testing-library/react'
     );
     const userEvent = (await import('@testing-library/user-event')).default;
     const { GameRoot } = await import('./GameRoot');
 
-    const fetchSpy = vi.fn();
+    const fetchSpy = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ entries: [] }), { status: 200 }),
+    );
     const xhrOpen = vi.fn();
     const wsCtor = vi.fn();
     vi.stubGlobal('fetch', fetchSpy);
@@ -148,7 +165,11 @@ describe('policy: vs-Computer play performs no network I/O (D4, T5, S3)', () => 
     await userEvent.click(screen.getByLabelText('cell 0'));
     await waitFor(() => {});
 
-    expect(fetchSpy).not.toHaveBeenCalled();
+    // The ONLY permitted fetch is the read-only leaderboard GET (idle view).
+    for (const call of fetchSpy.mock.calls) {
+      const url = typeof call[0] === 'string' ? call[0] : (call[0] as Request).url;
+      expect(url, `unexpected fetch to ${url}`).toContain('/api/leaderboard');
+    }
     expect(xhrOpen).not.toHaveBeenCalled();
     expect(wsCtor).not.toHaveBeenCalled();
     cleanup();

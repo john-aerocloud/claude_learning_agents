@@ -1,10 +1,13 @@
-%% oxo-online use-case dependency graph — updated s005-h3 (process §12a)
+%% oxo-online use-case dependency graph — updated s009-arcade-scoreboard (process §12a + §12b)
 %% One node per use case / delivered behaviour. Edges = genuine behavioural dependencies only.
 %% False edges are not drawn — they cost parallelism.
-%% classDef changed marks THIS slice's (s005-h3) new nodes.
+%% classDef changed marks THIS slice's (s009) new nodes.
 %% Already-live behaviours from s001–s008 are drawn as delivered context nodes.
 %% Granularity: slice-level behaviour, not UI micro-states.
 %% Engineer routes build order from this graph; tester plans coverage from it.
+%% §12b multi-party: s009 is the first two-party / two-instance slice. SP-1 (out-of-band
+%% share) is human-mediated; SP-4 + SP-5 (in-band via stream + shared backend) are
+%% the convergence mechanism for SM-1 (cross-browser leaderboard within 10s).
 
 flowchart TD
 
@@ -81,9 +84,35 @@ flowchart TD
   H3UC2 -->|"create handler with reserve loop\nmust be deployed before\nprod validation plan runs"| H3UC4
   H3UC3 -->|"synth/policy assertions\nexercisable before UC2 deploy"| H3UC4
 
+  %% ---- s009 use cases (NEW — this slice, §12b two-party model) ----
+  S9UC1["s009-UC1 — name entry (both parties)\n(NameField idle view; host POST + guest WS;\nnormalise+write hostName/guestName;\nsessionStorage SM-8)"]:::changed
+  S9UC2["s009-UC2 — Leaderboard table\n+ DynamoDB Stream + oxo-board-fn\n(idempotent tally; §30 Probe A+B;\nSM-4 scoredGames CAS)"]:::changed
+  S9UC3["s009-UC3 — GET /api/leaderboard\n+ SPA display (cross-instance read)\n(top-20; CloudFront 5s TTL;\nSM-1 SP-5 fan-out; XSS display pin)"]:::changed
+  S9UC4["s009-UC4 — two copy controls\n(DEFECT-S008-002: copy-code + copy-link;\nboth guest join paths served;\nSP-1 out-of-band sync)"]:::changed
+  S9UC5["s009-UC5 — validation\n(two-browser SM-1 smoke; idempotency\nreplay; WCAG 12 conditions;\nDEFECT-S008-002 closure)"]:::changed
+
+  %% ---- Edges: already-live context feeds s009 UCs ----
+  S6UC4 -->|"SPA idle view + WS message loop\nalready wired; s9-UC1 adds\nNameField + name wire into\nPOST /api/games + WS join"| S9UC1
+  S6UC3 -->|"oxo-ws-fn already handles join;\ns9-UC1 extends the join UpdateItem\nto write guestName (additive,\nno new IAM grant)"| S9UC1
+  S004 -->|"oxo-game-fn create handler\nalready live; s9-UC1 extends\nPOST /api/games to accept\nand store playerName"| S9UC1
+  S8UC1 -->|"waiting screen (copy-link control)\nalready exists in s8-UC1;\ns9-UC4 splits it into two\ndistinct copy controls\n(DEFECT-S008-002 fix)"| S9UC4
+  S6UC2 -->|"Games store port (conditional\nUpdateItem CAS) reused by\ns9-UC2 board-fn as the\nidempotency primitive"| S9UC2
+  S004 -->|"oxo-game-fn HTTP handler\nalready live; s9-UC3 adds\nGET /api/leaderboard route\n(same function, new read handler)"| S9UC3
+
+  %% ---- Edges: within s009 ----
+  %% UC2 (backend stream + board-fn) is independent of UC1/UC3/UC4 at build time.
+  %% UC1/UC3/UC4 are independent at build time; they share a serial SPA seam in GameRoot.
+  S9UC1 -->|"serial SPA seam: name-field\n+ leaderboard panel + copy controls\nall land in GameRoot idle view;\nengineer integrates in one artefact"| S9UC3
+  S9UC1 -->|"serial SPA seam:\nGameRoot idle + waiting screens\nshared across UC1, UC4"| S9UC4
+  S9UC2 -->|"Leaderboard table + board-fn\nmust be deployed before\ncross-browser smoke can assert\nreal tally data (SP-4)"| S9UC5
+  S9UC3 -->|"GET /api/leaderboard route\n+ SPA display must be deployed\nbefore SM-1 smoke reads the\nshared board (SP-5)"| S9UC5
+  S9UC1 -->|"name propagation onto Games\nmust be deployed before\nprod smoke drives real names\nthrough the pipeline"| S9UC5
+  S9UC4 -->|"two copy controls must be\ndeployed before DEFECT-S008-002\nclosure smoke (AC4.6 / AC5.10)"| S9UC5
+
   %% ---- classDef ----
   %% s008 changed marks CLEARED (2026-06-07 — tester consumed, UC3 prod validation PASS, C4 done-condition MET 2323ms).
   %% S8UC1 (copy-link), S8UC2 (deep-link), S8UC3 (validation) are now delivered.
   %% s005-h3 nodes marked changed (2026-06-07 — product co-author iteration 12).
+  %% s009 nodes marked changed (2026-06-08 — product co-author iteration 14, §12b two-party).
   classDef delivered fill:#e8f4e8,stroke:#2e7d32,color:#000;
   classDef changed fill:#fff8e1,stroke:#f57f17,color:#000;

@@ -12,10 +12,13 @@ types) or "Copy link" (the /join/ URL, for one-click join); the friend opens the
 URL and joins in one click; moves relay between browsers via a server-authoritative
 Lambda; the server detects wins and draws; both players see the result
 simultaneously; and if either player disconnects mid-game, the survivor is
-notified and returned to the mode selector within 10 seconds. When a game ends
-the result is recorded on a **shared arcade leaderboard**, visible to all players:
-rank, name, wins, draws, and losses. Player B can see Player A's scores within
-approximately 1.2 seconds of game-over (SLA: 10 seconds). No accounts are
+notified and returned to the mode selector within 10 seconds. During an active
+online game, each player has a **chat box** below the board — type a message and
+press Enter (or click Send) and the opponent sees it within approximately 1 second,
+labelled "Opponent"; your own message is echoed back labelled "You". When a game
+ends the result is recorded on a **shared arcade leaderboard**, visible to all
+players: rank, name, wins, draws, and losses. Player B can see Player A's scores
+within approximately 1.2 seconds of game-over (SLA: 10 seconds). No accounts are
 required.
 
 **Arcade name model:** names are not unique or authenticated. Two players can
@@ -23,9 +26,16 @@ both call themselves "AAA". Scores accumulate on a single shared row per name �
 intentional arcade behaviour. The name you last used is pre-filled on your next
 visit (sessionStorage).
 
+**Chat model:** messages are in-memory only — they vanish when the game ends or a
+player disconnects. There is no message history. Names and messages are not
+authenticated; anyone can type anything. The chat box is only visible during an
+active online game (absent on idle and waiting screens). Messages are limited to
+200 characters.
+
 **Not yet available:** reconnect after reload (a player who reloads their tab
 loses the session and must start a new game — deferred until player identity
-ships) and player accounts.
+ships), player accounts, and formal chat p95 latency proof + cross-game enforcement
+test (deferred to s015, C7 done-condition).
 
 ---
 
@@ -169,6 +179,25 @@ Once both players are on the board:
 
 ---
 
+## Play Online — in-game chat
+
+A chat panel appears below the board while the game is active.
+
+1. Type a message in the "Chat message" text field.
+2. Press **Enter** or click **Send** to send. Your message appears labelled
+   "You"; your opponent sees the same message labelled "Opponent" within
+   approximately 1 second.
+3. Messages are limited to 200 characters. Leading/trailing whitespace and
+   the characters `< > & " '` are stripped by the server before relay.
+4. **Messages are not saved.** When the game ends or either player disconnects,
+   the chat history vanishes. There is no history across games.
+5. Sending a message after your opponent has disconnected does not cause any
+   error; the message is silently discarded server-side.
+6. The chat box is absent on the idle and waiting-for-opponent screens — it
+   only appears during an active game.
+
+---
+
 ## Example session — Play Online via share link (full game, ~2.3 s total)
 
 ```
@@ -204,8 +233,13 @@ Guest clicks square 3
 
 … game continues to win or draw …
 
+Host types "gg" in the chat box and presses Enter
+  → Host sees "You: gg" immediately
+  → Guest sees "Opponent: gg" within ~1s
+
 Final move completes a row
   → both screens: "X wins" — board locked
+  → chat panel disappears (no longer an active game)
 
 Either player returns to the idle/title screen
   → shared leaderboard appears under the mode selector

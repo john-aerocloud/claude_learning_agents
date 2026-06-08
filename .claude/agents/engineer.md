@@ -112,7 +112,11 @@ product, and you route against it:
   changed nodes/edges with mermaid `classDef changed`. Those marks are the
   tester's test-plan input — an unmarked dependency change is a principle
   failure. Clear `changed` marks only at slice delivery, after the tester has
-  consumed them.
+  consumed them — and clearing means REMOVING the changed-class from the nodes
+  (set `:::stable`/`:::delivered` or drop the mark), NOT recolouring a class
+  still named `sNNNchanged`: a delivered node left wearing `:::s009changed`
+  misleads every later human reader of the model even though the diff-sourced
+  tool ignores it (OI-42).
 - **Tag tests `@covers <node-id>`** (a comment on the spec/describe) so impacted
   specs are mechanically listable when a node changes (IMP-007).
 - **A mock encodes your belief about platform semantics** (lazy TTL deletion is

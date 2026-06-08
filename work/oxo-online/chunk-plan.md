@@ -19,7 +19,7 @@ and marks actuals when a slice is delivered.
 | C2 | Local two-player game | delivered | 1 (s002) | 0 | — |
 | C3 | Single-player vs AI | delivered | 1 (s003) | 0 | — |
 | C4 | Online two-player match | **complete** | 7 (s004, s005-h1, s005, s005-h2, s006, s007, s008) + s005-h3 (in-planning) | 0 | — |
-| C5 | Leaderboard | **in-progress** | 0 | 2 (s009–s010) | s009 arcade-scoreboard |
+| C5 | Leaderboard | **complete** | 1 (s009) | 0 | — |
 | C6 | Player identity (lightweight) | **absorbed** | 0 | 0 (absorbed into s009) | — |
 | C7 | In-game chat | not started | 0 | 2 (s014–s015) | s014 in-game-message-send |
 
@@ -322,57 +322,22 @@ before play.
 
 | Slice | Status | Delivered | Outcome |
 |-------|--------|-----------|---------|
-| s009 — arcade-scoreboard | **in-planning** | — | — |
-| s010 — latency done-condition proof | forecast | — | — |
+| s009 — arcade-scoreboard | **delivered** | 2026-06-08 | Name entry, leaderboard write via DynamoDB Stream, GET /api/leaderboard, title-screen display; UC5 cross-instance latency 1248ms (8x inside 10s SLA); all ACs pass in production |
+| s010 — latency done-condition proof | **dissolved** | — | Absorbed by s009: UC5 Playwright smoke proved SM-1 cross-instance latency in production at 1248ms vs 10s SLA. No remaining work. |
 
-**C5 status: in-progress** — s009 revised 2026-06-08 (human redirect: arcade
-name-based model). Done condition requires s010 (latency proof).
+**C5 done-condition: MET.** Proved by s009 UC5 smoke: Player A named "ACE" played to win; Player B saw "ACE" on the shared leaderboard in a separate browser in 1248ms — 8x inside the 10s SLA. Read endpoint live, title-screen display live, latency proved by committed standing Playwright spec. s010 and s011 forecasts dissolved: the re-sliced s009 (arcade model) absorbed all C5 scope in one delivery.
 
-### s009 — arcade scoreboard [IN PLANNING — SEL-S009-REVISE]
+**C5 status: complete** — done-condition met by s009 2026-06-08. s010/s011 dissolved (rationale: the original C5 forecast split "read endpoint + display" into s010 and "latency proof" into s011; the human redirect to the arcade model re-sliced s009 to deliver the complete arcade moment end-to-end, including the read endpoint, display, and standing latency regression spec, making s010/s011 redundant ceremony).
 
-**Killick test: STRONG.** A player enters a name, plays a game, and their result
-appears under that name on a shared board readable in another browser. Genuine
-arcade outcome — impossible before this slice.
+### s009 — arcade scoreboard [DELIVERED 2026-06-08 — sha 75e07a57]
 
-**Human redirect 2026-06-08:** Original s009 (localStorage UUID, backend-only,
-weak Killick) withdrawn. Replaced with arcade model: name-as-key, name collision
-accepted, board shared and backend-authoritative. See
-slices/s009-arcade-scoreboard/slice.md for full rationale.
+**Outcome:** Name entry UI live; DynamoDB Stream tally write via `oxo-board-fn`; `GET /api/leaderboard` endpoint; title-screen leaderboard display. UC5 Playwright smoke confirmed: Player A ("ACE") won a game; Player B saw "ACE" on the shared leaderboard in 1248ms — 8x inside the 10s SLA. DEFECT-S008-002 (copy controls) closed. All C5 scope delivered in this slice.
 
-**Name-as-key model:** Players enter a name (max 10 chars, default "AAA") before
-creating/joining a game. The name — not a UUID — is the Leaderboard PK. Two
-players can share a name; their tallies accumulate on the same row. This is the
-arcade model, not a bug.
+**Human redirect 2026-06-08:** Original s009 (localStorage UUID, backend-only, weak Killick) withdrawn. Replaced with arcade model: name-as-key, name collision accepted, board shared and backend-authoritative. See slices/s009-arcade-scoreboard/slice.md for full rationale. See slices/s009-arcade-scoreboard/result.md for validation evidence.
 
-**Name-entry UX:** Captured at game creation/join (before play), stored in
-`sessionStorage` for in-tab pre-fill. Sent as `playerName` with `POST /api/games`
-and WS `join`. Backend writes `hostName`/`guestName` to `Games` item; reads them
-at game-over to write the tally. UI-bearing slice (ui-designer runs at structure
-time).
+### s010 — latency done-condition proof [DISSOLVED — absorbed by s009]
 
-**Mechanism direction:** DynamoDB Stream on `Games` → `oxo-board-fn` (preferred,
-decoupled from hot path); inline Lambda invoke as fallback. Architect decides.
-
-**Scope:** Name entry UI + `playerName` on wire; `hostName`/`guestName` on Games
-item; `Leaderboard` DynamoDB table (PK: playerName); `oxo-board-fn` Lambda writing
-tallies on `won`/`drawn`; `GET /api/leaderboard` endpoint; title-screen leaderboard
-display. All in one slice — delivering the complete arcade moment.
-
-**Success measures:** SM-1 (name on shared board, cross-browser within 10 s — the
-primary customer-visible measure); SM-2 (collision accepted — "AAA" row accumulates
-both players' tallies); SM-3 (blank default "AAA"); SM-4 (no double-count on
-replay); SM-5 (abandoned games produce no tally); SM-6 (no game-over regression);
-SM-7 (board loads within 2 s p95); SM-8 (name pre-fills from sessionStorage).
-
-**Not in scope:** name claiming/auth, cross-device persistence, pagination,
-game history, in-game name display to opponent, latency SLA proof (s010),
-abandon/forfeit tallies, historical backfill, C6 (absorbed/closed).
-
-### s010 — leaderboard update latency done-condition proof (forecast)
-**Scope:** Playwright smoke asserts that after a completed game the title-screen
-leaderboard reflects the result within 10 seconds. This is the C5 done-condition
-proof. Thin by design — may fold into s009 ACs at the architect's discretion; if
-so, s010 is eliminated at that slice-next.
+s009 UC5 smoke delivered the standing Playwright spec that asserts cross-instance leaderboard latency < 10s. No separate s010 is needed. The C5 done-condition proof is already committed and passing (1248ms observed). This forecast entry is closed.
 
 ---
 

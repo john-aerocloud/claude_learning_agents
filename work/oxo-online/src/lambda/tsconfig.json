@@ -13,7 +13,7 @@
     "outDir": "./games/dist",
     "rootDir": "."
   },
-  "comment": "oxo-game-fn build. rootDir is the lambda root so the shared token/ DOMAIN module (token.ts + token/adapters/ssm-secret-source.ts) compiles INTO games/dist alongside the handler. Because token/ is a sibling of games/, tsc nests the handler at games/dist/games/handler.js and token at games/dist/token/* — the CDK handler entry for oxo-game-fn must therefore be 'games/handler.handler' (asset path games/dist unchanged). See engineer A1 return / build-coverage note.",
-  "include": ["games/**/*.ts", "token/**/*.ts"],
+  "comment": "oxo-game-fn build. rootDir is the lambda root so the shared token/ DOMAIN module (token.ts + token/adapters/ssm-secret-source.ts) compiles INTO games/dist alongside the handler. Because token/ is a sibling of games/, tsc nests the handler at games/dist/games/handler.js and token at games/dist/token/* — the CDK handler entry for oxo-game-fn must therefore be 'games/handler.handler' (asset path games/dist unchanged). s009: ALSO includes board/** so the GET /api/leaderboard read handler imports the domain-defined LeaderboardStorePort + the shared DdbLeaderboardStore (topN = Scan + sort). game-fn invokes topN only (Scan grant); the recordResult/UpdateItem path on the same adapter is exercised only by oxo-board-fn. See engineer A1 return / build-coverage note.",
+  "include": ["games/**/*.ts", "token/**/*.ts", "board/**/*.ts"],
   "exclude": ["node_modules", "**/dist", "**/*.test.ts"]
 }

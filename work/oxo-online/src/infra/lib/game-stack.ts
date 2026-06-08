@@ -196,6 +196,17 @@ export class OxoGameStack extends cdk.Stack {
       integration,
     });
 
+    // s009 UC3-backend (R3.5): GET /api/leaderboard — the read route, served by
+    // the SAME oxo-game-fn (delta §4). CloudFront forwards the full path
+    // unchanged (no OriginPath stripping — consistent with /api/games), so the
+    // route key MUST include the /api prefix to match (the s004 prod-404 lesson).
+    // The handler dispatches GET+/leaderboard → the top-20 Scan read.
+    httpApi.addRoutes({
+      path: '/api/leaderboard',
+      methods: [apigatewayv2.HttpMethod.GET],
+      integration,
+    });
+
     // -------------------------------------------------------------------------
     // Cross-stack outputs (STACK_ORDER.md):
     //   - HttpApiEndpoint: consumed by OxoOnlineProd as the /api/* origin.

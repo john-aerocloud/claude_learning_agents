@@ -227,6 +227,35 @@ export class OxoOnlineShellStack extends cdk.Stack {
     });
 
     // -------------------------------------------------------------------------
+    // s009 (delta 010 §4) — dedicated /api/leaderboard behaviour with a SHORT
+    // 5s TTL. More specific than /api/* (CloudFront matches the most specific
+    // path pattern), so this behaviour wins for the leaderboard read while
+    // POST /api/games stays CachingDisabled on /api/*. The 5s window collapses
+    // many title-screen loads to one origin fetch (keeps read pressure off
+    // DynamoDB) while comfortably meeting SM-1's "within 10s" (5s cache + sub-1s
+    // stream propagation). min/default/max all 5s = a fixed 5s edge cache.
+    // -------------------------------------------------------------------------
+    const leaderboardCachePolicy = new cloudfront.CachePolicy(
+      this,
+      'LeaderboardCachePolicy',
+      {
+        cachePolicyName: 'oxo-leaderboard-5s',
+        comment: 'GET /api/leaderboard — fixed 5s edge cache (s009 delta 010).',
+        minTtl: cdk.Duration.seconds(5),
+        defaultTtl: cdk.Duration.seconds(5),
+        maxTtl: cdk.Duration.seconds(5),
+      },
+    );
+    distribution.addBehavior('/api/leaderboard', apiOrigin, {
+      cachePolicy: leaderboardCachePolicy,
+      allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD,
+      viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+      originRequestPolicy:
+        cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+      responseHeadersPolicy,
+    });
+
+    // -------------------------------------------------------------------------
     // Deny direct access to the S3 bucket from any principal other than the OAC.
     // CDK's OAC origin adds the Allow statement; this explicit Deny makes the
     // policy defence-in-depth even if the Allow were removed.

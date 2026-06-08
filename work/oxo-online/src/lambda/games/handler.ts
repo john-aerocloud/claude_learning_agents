@@ -12,6 +12,8 @@ import { createSsmSecretSource } from '../token/adapters/ssm-secret-source';
 import { CodeCollision, type CodeReservationPort } from './codes/ports';
 import { DdbCodeReservation } from './codes/ddb-code-reservation';
 import { normaliseName } from './name';
+import { createLeaderboardHandler } from './leaderboard-handler';
+import { DdbLeaderboardStore } from '../board/ddb-leaderboard-store';
 
 const TTL_SECONDS = 24 * 60 * 60; // 24h — abandoned waiting games self-delete.
 
@@ -196,10 +198,11 @@ function errorResponse(): APIGatewayProxyResultV2 {
 
 // Production entry point invoked by APIGW (handler.handler). Wires the SSM
 // SecretSource adapter (S-A1.6) and the DynamoDB CodeReservation adapter (UC1).
-// Env vars (TABLE_NAME, WS_TOKEN_SECRET_PARAM, CODES_TABLE, BUILD_SHA) are set
-// by the infra (game-stack).
+// Env vars (TABLE_NAME, WS_TOKEN_SECRET_PARAM, CODES_TABLE, LEADERBOARD_TABLE,
+// BUILD_SHA) are set by the infra (game-stack).
 const buildLog: LogFn = (line) => console.log(JSON.stringify(line));
-export const handler = createHandler({
+
+const createGameHandler = createHandler({
   secretSource: createSsmSecretSource(),
   codeReservation: new DdbCodeReservation({
     client: ddb,
@@ -210,3 +213,31 @@ export const handler = createHandler({
   buildSha: process.env.BUILD_SHA ?? 'unknown',
   log: buildLog,
 });
+
+// s009 UC3-backend (R3.5): the GET /api/leaderboard read handler rides the SAME
+// oxo-game-fn (delta §4 — no new function/role for one read). It reads via the
+// LeaderboardStorePort.topN (Scan + sort) on the shared DdbLeaderboardStore. The
+// game-fn role gains EXACTLY Scan on the Leaderboard ARN (synth-pinned).
+const leaderboardHandler = createLeaderboardHandler({
+  store: new DdbLeaderboardStore({
+    client: ddb,
+    tableName: process.env.LEADERBOARD_TABLE ?? '',
+    buildSha: process.env.BUILD_SHA ?? 'unknown',
+    log: buildLog,
+  }),
+  buildSha: process.env.BUILD_SHA ?? 'unknown',
+  log: buildLog,
+});
+
+// Single Lambda, two routes (HTTP API v2 proxy). Dispatch by method+path: a GET
+// on /api/leaderboard reads the board; everything else is the create-game POST.
+export const handler = async (
+  event: APIGatewayProxyEventV2,
+): Promise<APIGatewayProxyResultV2> => {
+  const method = event.requestContext?.http?.method ?? '';
+  const path = event.requestContext?.http?.path ?? event.rawPath ?? '';
+  if (method === 'GET' && path.endsWith('/leaderboard')) {
+    return leaderboardHandler(event);
+  }
+  return createGameHandler(event);
+};

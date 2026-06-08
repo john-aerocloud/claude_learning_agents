@@ -1040,3 +1040,65 @@ describe('GameRoot — UC1 name wire into create + join (flag ON, AC1.3/1.4/1.6,
     expect(init.body).toBeUndefined();
   });
 });
+
+// s009 UC3 — the shared leaderboard panel on the idle view (flag
+// uc3LeaderboardEnabled). It fetches GET /api/leaderboard on mount and renders
+// loading → populated; it refetches when the player returns to idle from a game.
+// @covers spa-leaderboard spa-leaderboard-client
+describe('GameRoot — UC3 leaderboard panel (flag ON, AC3.2, A11Y-12)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete (window as unknown as { OXO_CONFIG?: unknown }).OXO_CONFIG;
+  });
+
+  function flagOn() {
+    (window as unknown as { OXO_CONFIG: Record<string, unknown> }).OXO_CONFIG = {
+      uc3LeaderboardEnabled: true,
+    };
+  }
+
+  function stubLeaderboard(entries: unknown[]) {
+    return vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      if (url.includes('/api/leaderboard')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ entries, buildSha: 'sha9' }), { status: 200 }),
+        );
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ gameId: 'g-1', code: 'ABC234' }), { status: 201 }),
+      );
+    });
+  }
+
+  it('AC3.2 — fetches /api/leaderboard on mount and renders the populated table', async () => {
+    flagOn();
+    stubLeaderboard([{ name: 'ACE', wins: 2, draws: 0, losses: 1 }]);
+    render(<GameRoot />);
+    await waitFor(() =>
+      expect(screen.getByRole('table', { name: 'Leaderboard' })).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId('leaderboard-name')).toHaveTextContent('ACE');
+  });
+
+  it('renders the panel below the board with an <h2> heading (A11Y-12)', async () => {
+    flagOn();
+    stubLeaderboard([]);
+    render(<GameRoot />);
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { level: 2, name: /leaderboard/i })).toBeInTheDocument(),
+    );
+  });
+
+  it('shows the error state on a failed fetch (graceful, no throw)', async () => {
+    flagOn();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('boom', { status: 500 }));
+    render(<GameRoot />);
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/couldn.t load/i));
+  });
+
+  it('flag OFF — the leaderboard panel is NOT rendered (prod-unchanged)', () => {
+    render(<GameRoot />);
+    expect(screen.queryByRole('table', { name: 'Leaderboard' })).not.toBeInTheDocument();
+  });
+});

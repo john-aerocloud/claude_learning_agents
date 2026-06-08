@@ -8,6 +8,8 @@ import { OnlineBoard } from './OnlineBoard';
 import { NameField } from './NameField';
 import { normaliseName, DEFAULT_NAME } from './name';
 import { isFlagEnabled } from './flags';
+import { Leaderboard } from './Leaderboard';
+import { fetchLeaderboard, type LeaderboardEntry } from './leaderboard-client';
 import {
   createRealSocketFactory,
   type GameSocket,
@@ -105,6 +107,16 @@ export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameR
     }
     return normalised;
   };
+
+  // s009 UC3 (flag uc3LeaderboardEnabled). The shared leaderboard panel renders
+  // on the idle view (below the board) and fetches GET /api/leaderboard on each
+  // idle mount / return-to-idle. Read-only + non-critical: a failed fetch shows
+  // a graceful error state, NOT an aggressive retry loop (re-fetch on next idle).
+  const uc3LeaderboardEnabled = isFlagEnabled('uc3LeaderboardEnabled');
+  const [leaderboardStatus, setLeaderboardStatus] = useState<'loading' | 'error' | 'ready'>(
+    'loading',
+  );
+  const [leaderboardEntries, setLeaderboardEntries] = useState<LeaderboardEntry[]>([]);
   // s008 UC2: a deep-link mounts straight into the `joining` phase so the
   // pre-filled JoinScreen is shown immediately; otherwise the local game `idle`.
   const [onlinePhase, setOnlinePhase] = useState<OnlinePhase>(
@@ -300,6 +312,27 @@ export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameR
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameId]);
 
+  // s009 UC3: fetch the leaderboard whenever the idle view is shown (mount or
+  // return-to-idle). Keyed on `onlinePhase` so returning from a game refetches.
+  // Guarded by the flag so it is inert (no network) when OFF (prod-unchanged).
+  useEffect(() => {
+    if (!uc3LeaderboardEnabled || onlinePhase !== 'idle') return;
+    let cancelled = false;
+    setLeaderboardStatus('loading');
+    fetchLeaderboard().then((result) => {
+      if (cancelled) return;
+      if (result.status === 'ready') {
+        setLeaderboardEntries(result.entries);
+        setLeaderboardStatus('ready');
+      } else {
+        setLeaderboardStatus('error');
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [uc3LeaderboardEnabled, onlinePhase]);
+
   // In vs-Computer mode the AI plays O. Run it in an effect (not the click
   // handler) so the human's X paints first, then O follows synchronously.
   useEffect(() => {
@@ -473,6 +506,9 @@ export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameR
             >
               Play again
             </button>
+          )}
+          {uc3LeaderboardEnabled && (
+            <Leaderboard status={leaderboardStatus} entries={leaderboardEntries} />
           )}
         </>
       )}

@@ -210,6 +210,35 @@ flowchart TD
   spaNameField -->|"value/onChange (controlled)"| spaNameWire
   spaNameWire -->|"normaliseName at send time"| domainNameNormalise
   spaNameWire -->|"playerName + onJoin into existing submit"| spaJoinScreen
+  %% --- UC3 leaderboard display ---
+  spaLeaderboard["spa-leaderboard<br/>src/app/src/game/Leaderboard.tsx (UC3) — real &lt;table&gt; standings<br/>loading/empty/error/populated; &lt;th scope=col&gt;; React text render (NO dangerouslySetInnerHTML)"]:::s009changed
+  spaLeaderboardClient["spa-leaderboard-client<br/>src/app/src/game/leaderboard-client.ts (UC3) — fetch GET /api/leaderboard<br/>+ pure sort (wins desc/losses asc/name asc); ready|error, no retry loop"]:::s009changed
+  %% UC3 edges (ACTUAL runtime path): GameRoot fetches on each idle mount via the
+  %% client, then renders the table component; the table imports only the entry type.
+  spaNameWire -->|"fetchLeaderboard on idle mount/return"| spaLeaderboardClient
+  spaNameWire -->|"renders panel below board (idle)"| spaLeaderboard
+  %% --- UC2 board (FIRST DynamoDB Stream consumer) + UC3-backend read (ENGINEER-BACKEND) ---
+  %% ACTUAL runtime path traced: Games status CAS (active→won/drawn, s006 move
+  %% handler) → DynamoDB Stream (NEW_AND_OLD_IMAGES) → event-source-mapping FILTER
+  %% (MODIFY, OLD=active, NEW∈{won,drawn}) → board-fn-handler reads OLD+NEW images
+  %% FROM THE RECORD (NO Games table read — hence no Games table grant) → pure
+  %% domain-tally → port-leaderboard-store.recordResult (conditional UpdateItem ADD
+  %% + scoredGames set-marker CAS, idempotent under at-least-once redelivery) →
+  %% adapter-leaderboard-ddb (prod) / adapter-local-leaderboard (offline branch).
+  %% CAS ConditionExpression `NOT contains(scoredGames, :gameId)` is the crux; a
+  %% replay fails the condition → AlreadyScored → swallowed → byte-identical row.
+  domainTally["domain-tally<br/>board/tally.ts (UC2) — pure (transition)→[{name,field,gameId}]<br/>won→W/L, drawn→D/D, non-terminal→[]. PURE: zero SDK/transport."]:::s009changed
+  portLeaderboardStore["port-leaderboard-store<br/>board/ports.ts (UC2/UC3) — LeaderboardStorePort.recordResult(name,field,gameId)<br/>(throws AlreadyScored on replay) + topN(n). Domain-defined; zero SDK leak."]:::s009changed
+  adapterLeaderboardDdb["adapter-leaderboard-ddb<br/>board/ddb-leaderboard-store.ts (UC2/UC3) — conditional UpdateItem ADD<br/>+ scoredGames CAS (NOT contains(scoredGames,:gameId)); Scan top-N.<br/>UpdateItem (board-fn) + Scan (game-fn) ONLY (T-LB-3/9 pins)."]:::s009changed
+  adapterLocalLeaderboard["adapter-local-leaderboard<br/>board/local-leaderboard-store.ts (UC2) — in-memory Map+Set reproducing<br/>the conditional-ADD/NOT-contains BRANCH (offline SM-4/SM-2). §12a: branch<br/>shape only, not real DDB set-contains atomicity (covered by CAS pin + §30 skeleton)."]:::s009changed
+  boardFnHandler["board-fn-handler<br/>board/handler.ts (UC2) — stream-record adapter: parse OLD/NEW image FROM<br/>RECORD → domain-tally → store.recordResult; AlreadyScored→swallow+log (no retry,<br/>no batch fail); self-owned 5xx→category:internal-service+item failure. buildSha."]:::s009changed
+  boardFnHandler -->|"domain-tally(transition)"| domainTally
+  boardFnHandler -->|"recordResult per tally op"| portLeaderboardStore
+  adapterLeaderboardDdb -.->|implements| portLeaderboardStore
+  adapterLocalLeaderboard -.->|implements| portLeaderboardStore
+  %% UC3-backend: the existing create handler ALSO serves GET /api/leaderboard via
+  %% topN (Scan + sort) on the SAME ddb adapter. Annotated changed for the tester.
+  gamesCreateHandler -->|"GET /api/leaderboard → topN(20) Scan+sort"| portLeaderboardStore
   classDef s009changed fill:#fff3e0,stroke:#e65100,color:#000;
 
   %% s006 changed marks CLEARED (2026-06-07 — tester consumed, UC6 prod validation PASS).

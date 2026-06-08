@@ -9,6 +9,7 @@ import { handleJoin } from './join';
 import type { WsResult } from './ws-result';
 import { deliverClose } from './ws-transport';
 import { handleMove } from './move-handler';
+import { handleChat } from './chat-handler';
 import { handleDisconnect } from './disconnect-handler';
 import { ddb } from './ddb';
 import { DdbGamesStore } from './adapters/games-ddb';
@@ -70,6 +71,28 @@ export async function handler(
         log,
       });
       await handleMove(event, { store, relay, buildSha: BUILD_SHA, log });
+      return { statusCode: 200 };
+    }
+    case 'chat': {
+      // UC1 (s014) — chat relay. Reuses the SAME adapters behind the SAME
+      // domain-defined ports as move: GetItem(Games) for identity (no new grant)
+      // and the @connections relay for the 2-post fan-out (relay + echo). NO
+      // DynamoDB write (in-memory / no-persist). Returns a plain 200 (the echo is
+      // the only confirmation; no close-frame path).
+      const store = new DdbGamesStore({
+        client: ddb,
+        tableName: process.env.GAMES_TABLE as string,
+        buildSha: BUILD_SHA,
+        log,
+      });
+      const relay = new MgmtRelay({
+        client: new ApiGatewayManagementApiClient({
+          endpoint: process.env.WS_API_ENDPOINT,
+        }),
+        buildSha: BUILD_SHA,
+        log,
+      });
+      await handleChat(event, { store, relay, buildSha: BUILD_SHA, log });
       return { statusCode: 200 };
     }
     case '$disconnect': {

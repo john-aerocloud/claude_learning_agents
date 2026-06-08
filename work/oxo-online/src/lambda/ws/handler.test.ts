@@ -162,6 +162,70 @@ describe("handler dispatch — 'move' route (UC3)", () => {
   });
 });
 
+// UC1 dispatch (s014) — the 'chat' route wires the SAME DdbGamesStore + MgmtRelay
+// adapters as move (no new function, no new port, no new grant) and runs
+// handleChat. A valid chat reads the game (GetItem on Games), performs NO write,
+// and posts the chat-message frame to the OPPONENT (relay) + the SENDER (echo) =
+// exactly 2 PostToConnection. The body gameId is the non-trusted lookup key;
+// identity is the real requestContext.connectionId.
+describe("handler dispatch — 'chat' route (UC1, s014)", () => {
+  it('routes a valid chat: GetItem(Games) → NO write → 2 posts (relay to opponent + echo to sender)', async () => {
+    ddbMock.on(GetCommand).resolves({
+      Item: {
+        gameId: 'g-1',
+        board: '---------',
+        currentTurn: 'X',
+        status: 'active',
+        version: 0,
+        moveCount: 0,
+        hostConnectionId: 'CTX-ID', // the caller's own connectionId == host
+        guestConnectionId: 'guest-conn',
+      },
+    });
+
+    const res = await handler(event('chat', { action: 'chat', gameId: 'g-1', text: 'good luck' }));
+    expect(res.statusCode).toBe(200);
+
+    // T-CHAT-6: ZERO DynamoDB writes on the chat path.
+    expect(ddbMock.commandCalls(UpdateCommand)).toHaveLength(0);
+    expect(ddbMock.commandCalls(PutCommand)).toHaveLength(0);
+    expect(ddbMock.commandCalls(DeleteCommand)).toHaveLength(0);
+
+    // T-CHAT-8: exactly 2 posts — relay to opponent (guest) + echo to sender.
+    const posts = apiMock.commandCalls(PostToConnectionCommand);
+    expect(posts).toHaveLength(2);
+    expect(posts[0].args[0].input.ConnectionId).toBe('guest-conn');
+    expect(posts[1].args[0].input.ConnectionId).toBe('CTX-ID');
+    for (const p of posts) {
+      expect(decodeFrame(p.args[0].input.Data)).toEqual({
+        action: 'chat-message',
+        sender: 'host',
+        text: 'good luck',
+      });
+    }
+  });
+
+  it('AC1.3: a sender bound to neither slot → reject, 0 writes, 0 posts', async () => {
+    ddbMock.on(GetCommand).resolves({
+      Item: {
+        gameId: 'g-1',
+        board: '---------',
+        currentTurn: 'X',
+        status: 'active',
+        version: 0,
+        moveCount: 0,
+        hostConnectionId: 'someone-else',
+        guestConnectionId: 'another',
+      },
+    });
+
+    const res = await handler(event('chat', { action: 'chat', gameId: 'g-1', text: 'hi' }));
+    expect(res.statusCode).toBe(200);
+    expect(ddbMock.commandCalls(UpdateCommand)).toHaveLength(0);
+    expect(apiMock.commandCalls(PostToConnectionCommand)).toHaveLength(0);
+  });
+});
+
 // DEFECT-005-001 Bug B: a Lambda integration response NEVER becomes a WS close
 // frame, and @connections only supports DELETE (close 1000) — custom close
 // codes are undeliverable. The handler must therefore POST an error MESSAGE

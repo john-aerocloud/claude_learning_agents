@@ -253,6 +253,32 @@ flowchart TD
   %% SM-1 cross-instance 1248ms (SLA 10s). DEFECT-S008-002 CLOSED.
   classDef s009changed fill:#e8f4e8,stroke:#2e7d32,color:#000;
 
+  %% ==== s014 in-game chat (UC1 handler — Lambda) — appended; classDef s014changed ====
+  %% classDef s014changed marks THIS slice's new chat seams (the tester's
+  %% test-plan input; cleared at slice delivery). The chat route REUSES the
+  %% existing hexagonal ports verbatim: NO new port, NO new function, NO new IAM
+  %% grant, NO DynamoDB write (in-memory / no-persist). ACTUAL runtime path traced
+  %% (not assumed): the ws-fn dispatcher (handler.ts) routes routeKey 'chat' to
+  %% ws-chat-handler, which getGame(gameId) via the SAME port-game-store
+  %% (already-granted GetItem on Games), binds senderRole by matching the REAL
+  %% connectionId, normalises text via the PURE domain-chat bound, then posts the
+  %% chat-message frame to the OPPONENT (relay) + the SENDER (echo) over the SAME
+  %% port-relay (two PostToConnection on the s005 ManageConnections grant). The
+  %% local stand-up (adapter-local-relay + the local WS server's chat case) drives
+  %% the SAME flow over the SAME ports for the two-browser send→relay→echo test.
+  domain-chat["domain-chat<br/>ws/chat/normalise.ts (UC1) — normaliseChatText(raw)<br/>PURE: trim, empty-reject(null), 200-cap truncate, strip &lt;&gt;&amp;&quot;' + control chars.<br/>Server-side depth bound + abuse cap (T-CHAT-4); React text-render is THE XSS control."]:::s014changed
+  ws-chat-handler["ws-chat-handler<br/>ws/chat-handler.ts (UC1) — parse {action:chat,gameId,text}, getGame(gameId),<br/>bind senderRole by connectionId (reject->0 posts/0 writes), normalise,<br/>relay to opponent + echo to sender (exactly 2 posts), GoneException best-effort (no retry)."]:::s014changed
+
+  %% UC1 edges (ACTUAL runtime path): the chat handler depends on the pure domain
+  %% text bound + the EXISTING store/relay ports (no new port, no new grant).
+  ws-chat-handler -->|normaliseChatText| domain-chat
+  ws-chat-handler -->|getGame gameId only — already-granted GetItem, NO write| port-game-store
+  ws-chat-handler -->|chat-message relay to opponent + echo to sender — 2 posts on ManageConnections| port-relay
+  %% UC1 local-parity edge: the local WS server's chat case relays+echoes over the
+  %% SAME local relay adapter (closed-socket simulates GoneException).
+  adapter-local-relay -->|local chat relay+echo case drives the same 2-post fan-out| domain-chat
+  classDef s014changed fill:#fff3e0,stroke:#e65100,stroke-width:3px,color:#000;
+
   %% s006 changed marks CLEARED (2026-06-07 — tester consumed, UC6 prod validation PASS).
   %% All nodes were new in this first-edition; all are now delivered/stable.
   classDef changed fill:#e8f4e8,stroke:#2e7d32,color:#000;

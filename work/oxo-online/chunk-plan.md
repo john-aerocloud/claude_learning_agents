@@ -21,7 +21,7 @@ and marks actuals when a slice is delivered.
 | C4 | Online two-player match | **complete** | 8 (s004, s005-h1, s005, s005-h2, s006, s007, s008, s005-h3) | 0 | — |
 | C5 | Leaderboard | **complete** | 1 (s009); s010 dissolved | 0 | — |
 | C6 | Player identity (lightweight) | **absorbed** | 0 | 0 (absorbed into s009) | — |
-| C7 | In-game chat | **in-progress** | 0 | 1 (s015) | s015 scope-enforcement + 1s latency proof |
+| C7 | In-game chat | **in-progress** | 1 (s014) | 1 (s015) | s015 prod cross-game isolation guard + formal p95 latency proof |
 
 ---
 
@@ -376,16 +376,25 @@ session and messages do not persist after the game ends.
 
 | Slice | Status | Delivered | Outcome |
 |-------|--------|-----------|---------|
-| s014 — in-game message send + relay | **in-planning** | — | Chat input + send button on active-game screen; `{action:'chat'}` WS dispatch; `oxo-ws-fn` relay to opponent + echo to sender; in-memory only; disconnected-opponent GoneException drop |
+| s014 — in-game message send + relay | **delivered** | 2026-06-08 | Chat live in prod; 199ms A→B latency (informal); T-CHAT-2 waived to s015; 84/84 smoke suite green; C7 mechanism proved |
+| s015 — chat scope enforcement + done-condition proof | **in-planning** | — | Prod cross-game isolation guard (T-CHAT-2); formal p95 latency Playwright spec; game-over chat-input state; C7 done-condition proof |
 
-**Remaining forecast:**
+**Remaining forecast (updated SEL-S015):**
 
-### s015 — chat scope enforcement + done-condition proof (forecast)
-**Scope:** Confirm messages are visible only to the two players in the game
-(no cross-game relay); that no messages survive a page reload or WS close;
-that the chat input is absent/disabled after `game-over`. Playwright smoke
-covers the 1-second p95 latency assertion as the C7 done-condition proof.
-This is the closing slice for C7 and the project's last forecast chunk.
+### s015 — chat scope enforcement + done-condition proof
+**Scope:** Three committed Playwright specs: (1) prod cross-game isolation guard —
+a third connection in a different game receives zero chat-message frames (T-CHAT-2,
+waived from s014 to here); (2) formal p95 latency assertion over >= 5 sends,
+<= 1000ms; (3) chat input absent/disabled on the game-over/result screen. Possible
+tiny code change if game-over input state is not already enforced. This is the
+closing slice for C7 and the project's last forecast chunk.
+
+**Why s015 is not ceremony:** T-CHAT-2 was an explicit committed waiver at s014
+(unit-only; "prod cross-game enforcement test is s015 scope"). The p95 latency was
+labelled "informal" at s014 with the formal spec explicitly deferred. Both are
+genuine remaining gaps for the C7 done-condition.
+
+See slices/s015-chat-scope-done/slice.md.
 
 ### s014 — in-game message send + relay [IN-PLANNING — SEL-S014]
 

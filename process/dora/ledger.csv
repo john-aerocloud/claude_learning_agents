@@ -643,3 +643,5 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-08T14:19:04Z,oxo-online,17,IMP-009-faster-validation,tester,task_start,,na,IMP009-L2,make validate-impacted = impacted specs ∪ regression-core; full validate stays as backstop; define always-run core + coverage guard
 2026-06-08T14:24:30Z,oxo-online,0,IMP-009-L2,tester,task_end,,success,IMP009-L2,IMP-009 L2: validate-impacted target + regression-core (6 specs) + coverage guard + stale-comment fix. 84->43 tests (49%) for s014 window.
 2026-06-08T14:27:02Z,oxo-online,17,IMP-009-faster-validation,orchestrator,gate,,success,RETRO-IMP009,IMP-009 delivered; EXP-019 active-score-pending; OI-45 addressed
+2026-06-08T16:04:38Z,oxo-online,18,s015-chat-scope-done,product,task_start,,na,S015-SLICE,assess: thin s015 scope-guard+done-condition vs C7-already-done by s014
+2026-06-08T16:05:48Z,oxo-online,17,s015,product,task_end,,success,S015-SLICE,s015 thin slice defined: prod cross-game isolation guard (T-CHAT-2) + formal 1s p95 latency assertion + game-over chat-input state — C7 done-condition proof

@@ -250,4 +250,34 @@ COUNT ?= 10
 uniqueness-probe:
 	node work/$(PROJECT)/scripts/uniqueness-probe.js --api-base $(API_BASE) --count $(COUNT)
 
-.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools
+# s009 §30 walking-skeleton (T-LB-10) — the FIRST DynamoDB Stream gate. Drives ONE
+# controlled active→won Games transition through the DEPLOYED stream path and
+# asserts Probe A (one game-over → exactly one increment; each scoredGames carries
+# the gameId once) + Probe B (replay the same transition → Leaderboard rows
+# byte-identical, `already_scored` ConditionalCheckFailed in oxo-board-fn logs).
+# Records a DORA validation_run row (success/fail) mirroring ws-skeleton. The §30
+# real client for a DynamoDB Stream is a real DynamoDB write that fires the real
+# stream — a node script using the `aws` CLI (NOT a unit mock; the mock cannot see
+# real sharding/redelivery/set-contains atomicity). Post-deploy gate; MUST be
+# green before UC5 (E2). Requires AWS creds in env (export the SSO profile).
+#   make board-stream-skeleton ITER=14 SLICE=s009-arcade-scoreboard \
+#     GAMES_TABLE=oxo-games LEADERBOARD_TABLE=oxo-leaderboard \
+#     BOARD_FN_LOG_GROUP=/aws/lambda/oxo-board-fn [AWS_PROFILE=dev-int]
+GAMES_TABLE        ?= oxo-games
+LEADERBOARD_TABLE  ?= oxo-leaderboard
+BOARD_FN_LOG_GROUP ?= /aws/lambda/oxo-board-fn
+board-stream-skeleton:
+	node work/$(PROJECT)/scripts/board-stream-skeleton.js \
+	  --games-table $(GAMES_TABLE) --leaderboard-table $(LEADERBOARD_TABLE) \
+	  --board-fn-log-group $(BOARD_FN_LOG_GROUP) \
+	  $(if $(AWS_PROFILE),--profile $(AWS_PROFILE),) && \
+	$(DORA) record --project $(PROJECT) --iteration $(ITER) --slice $(SLICE) \
+	  --agent engineer --event validation_run \
+	  --ref "$$(git rev-parse --short HEAD):board-stream-skeleton" --outcome success \
+	  --note "§30 DynamoDB Stream skeleton Probe A+B green vs prod (T-LB-10)" || \
+	( $(DORA) record --project $(PROJECT) --iteration $(ITER) --slice $(SLICE) \
+	  --agent engineer --event validation_run \
+	  --ref "$$(git rev-parse --short HEAD):board-stream-skeleton" --outcome fail \
+	  --note "§30 DynamoDB Stream skeleton FAILED vs prod (T-LB-10)" ; exit 1 )
+
+.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton

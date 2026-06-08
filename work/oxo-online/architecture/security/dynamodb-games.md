@@ -101,3 +101,22 @@ conditional `UpdateItem`). New checkable controls (become policy tests):
       table ARN (already granted). `$disconnect` adds **no** `Games` permission.
 - [ ] The abandon touches only the game named by the disconnecting connection's own
       `Connections` row (connectionId IS the identity; no client-supplied gameId).
+
+## s009 (delta 010) — DynamoDB Stream ENABLED + name attributes
+s009 ENABLES a DynamoDB Stream on `Games` (NEW_AND_OLD_IMAGES) and adds two
+user-supplied name attributes. Checkable controls (become policy tests):
+- [ ] `Games` has a Stream with `StreamViewType = NEW_AND_OLD_IMAGES` (the
+      consumer needs OLD to detect the `active→terminal` TRANSITION and avoid
+      re-firing on every board-update MODIFY). Synth-assert the view type.
+- [ ] Stream READ is granted to `oxo-board-fn` ONLY (stream ARN-scoped); no other
+      principal reads the stream. No client/public stream access (impossible by
+      design, asserted for completeness).
+- [ ] `hostName`/`guestName` are written ONLY by the existing create `PutItem`
+      (`oxo-game-fn`) and join `UpdateItem` (`oxo-ws-fn`) respectively — **no new
+      grant**. Both are server-normalised at the write boundary (trim, ≤10,
+      charset-bounded, `"AAA"` default) — the write-side half of the stored-XSS
+      control (delta 010 §8). A client cannot inject raw HTML/script into the
+      stored name.
+- [ ] The name attributes do NOT change the `code-index` GSI, the TTL (24h,
+      ephemeral — names die with the game item; the durable copy is the
+      Leaderboard tally), or any existing condition expression.

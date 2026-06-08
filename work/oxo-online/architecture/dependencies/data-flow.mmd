@@ -1,15 +1,16 @@
-%% oxo-online runtime data-flow — s005-h3 edition (process §12a)
+%% oxo-online runtime data-flow — s009 (delta 010) edition (process §12a)
 %% Platform GATES are explicit nodes. Non-obvious platform semantics are named ON the node.
-%% This file is the TESTER's planning input. classDef changed marks THIS slice's (s008) delta.
+%% This file is the TESTER's planning input. classDef changed marks THIS slice's (s009) delta.
 %% Granularity: module / gate level (coarse). Built scope only (deferred items are NOT drawn).
-%% s007 marks: the $disconnect path becomes REAL (abandon+notify+clean up) and the
-%% CloudFront WAF gate gains the oxo-test-runner-ips IP-set scope-down annotation (IMP-008).
-%% s005-h3 (delta 009, OI-3): code uniqueness is now STORAGE-ENFORCED. NEW node `codes`
-%% (reservation table) + NEW edge gamefn -> codes (conditional PutItem reserve). The create
-%% path reserves the code (attribute_not_exists CAS) BEFORE the Games PutItem; collision =>
-%% bounded server-side retry (<=5) then 5xx (never a wrong code). Join/lookup path UNCHANGED
-%% (still Games code-index; codes is write-time gate only). Client contract UNCHANGED.
-%% classDef changed marks THIS slice's (s005-h3) delta: codes node, gamefn->codes edge, gamefn node.
+%% s009 (delta 010, C5): ARCADE SCOREBOARD — first DURABLE store + first DynamoDB STREAM.
+%% NEW nodes: leaderboard (durable, NO TTL, PITR), board-fn (stream consumer). NEW gate node:
+%% games-stream (DynamoDB Stream on Games, at-least-once delivery + active->terminal filter).
+%% NEW edges: games -> games-stream (transition records), games-stream -> board-fn (consume),
+%% board-fn -> leaderboard (conditional ADD + scoredGames marker = idempotent CAS),
+%% player -> cfwaf GET /api/leaderboard (5s TTL cache behaviour), httpapi -> gamefn (Scan read),
+%% gamefn -> leaderboard (Scan top-N). Name propagation: playerName onto Games at create/join
+%% (rides EXISTING writes — no new edge, annotated on gamefn/wsfn->games edges).
+%% classDef changed marks THIS slice's (s009) delta: see the s009 CHANGED block at the bottom.
 
 flowchart TD
 
@@ -30,6 +31,11 @@ flowchart TD
   conn[("DynamoDB Connections<br/>connectionId to gameId/role. TTL 2h, LAZY deletion (expired item lingers).<br/>SSE, on-demand.")]:::store
   games[("DynamoDB Games (+ code-index GSI)<br/>authoritative item: status, host/guestConnectionId, board, currentTurn,<br/>winner, version (optimistic-lock CAS), moveCount. TTL 24h, LAZY deletion.<br/>SSE, on-demand.")]:::store
   relay["@connections POST (API GW Management API)<br/>GATE: relay to the TWO bound connectionIds only (host+guest).<br/>No broadcast. 410 Gone if connection dead.<br/>s007: $disconnect notify = EXACTLY 1 POST to the survivor (0 on terminal/waiting);<br/>survivor GoneException -> swallow, NO retry storm (both gone)."]:::gate
+
+  %% ---- s009 (delta 010) NEW nodes: arcade scoreboard ----
+  games-stream["DynamoDB Stream on Games (NEW_AND_OLD_IMAGES) (s009 NEW)<br/>GATE: AT-LEAST-ONCE delivery (records CAN be REDELIVERED — consumer error,<br/>batch retry, resharding) => CONSUMER MUST be IDEMPOTENT.<br/>Event-source-mapping FILTER CRITERIA: eventName=MODIFY AND NEW.status in {won,drawn}<br/>AND OLD.status=active (the active->TERMINAL transition ONLY — excludes the many<br/>board-update MODIFYs during play AND status=abandoned, so abandoned -> NO tally, SM-5).<br/>Filter cuts WASTE; it does NOT make delivery exactly-once (a redelivered transition<br/>STILL matches the filter) — correctness is the idempotency marker on leaderboard.<br/>Sub-1s propagation typical (well within SM-1 10s)."]:::gate
+  boardfn["oxo-board-fn (Lambda Node20) — stream consumer (s009 NEW principal)<br/>Reads OLD+NEW image FROM THE RECORD (no Games table read). Computes outcome:<br/>won -> winner +1 wins, loser +1 losses; drawn -> both +1 draws. Two conditional<br/>UpdateItem on leaderboard (one per name). ConditionalCheckFailed (replay) =><br/>SUCCESS-ALREADY-DONE: swallow, log, NO retry, do NOT fail batch.<br/>OFF the hot path (game-over WS latency unaffected, SM-6). buildSha in log line."]:::compute
+  leaderboard[("DynamoDB Leaderboard (s009 NEW — FIRST DURABLE store)<br/>PK=playerName (entered name IS the key; collisions accumulate on one row, SM-2).<br/>attrs: wins/draws/losses (N, ADD-incremented), scoredGames (SS) = IDEMPOTENCY marker.<br/>NO TTL (standings persist BY DESIGN — first non-TTL table). PITR ENABLED.<br/>SSE, on-demand, no GSI (top-N = small Scan at hobby scale).<br/>IDEMPOTENCY: ADD wins :one, ADD scoredGames {gameId} with<br/>ConditionExpression NOT contains(scoredGames,:gameId) = SINGLE-ITEM CAS:<br/>increment+mark in ONE atomic op; replay fails the condition => no double-count (SM-4).")]:::store
 
   %% ---- Existing edges (built s001..s005-h2) ----
   player -->|"HTTPS load SPA + read OXO_CONFIG"| cfwaf
@@ -80,6 +86,21 @@ flowchart TD
   wsfn -.->|"notify survivor: EXACTLY 1 opponent-disconnected POST (0 on terminal/waiting); 410 = swallow, no retry (s007 NEW)"| relay
   wsfn -.->|"DeleteItem(Connections, OWN connectionId) ALL branches (already-granted); 2h TTL is backstop (s007 NEW)"| conn
 
+  %% ---- s009 (delta 010) NEW data flow: arcade scoreboard (CHANGED, dotted) ----
+  %% Name propagation rides EXISTING writes (no new edge, no new grant):
+  %%   gamefn PutItem(create) now also writes hostName (from POST body playerName, normalised ≤10/charset/AAA-default);
+  %%   wsfn conditional UpdateItem(join) now also writes guestName (from WS join playerName, same normalisation).
+  %%   Validation is server-side at BOTH API boundaries = write-side half of the stored-XSS control.
+  %% Result-recording = DynamoDB Stream (NOT inline): zero hot-path change, failure-isolated.
+  games -.->|"active->terminal transition emits a stream record (OLD+NEW images) (s009 NEW)"| games-stream
+  games-stream -.->|"event-source mapping: filtered (won/drawn transition only) AT-LEAST-ONCE invoke (s009 NEW)"| boardfn
+  boardfn -.->|"per participant: conditional UpdateItem ADD tally + scoredGames{gameId}, COND NOT contains(scoredGames,:gameId); ConditionalCheckFailed=already-scored, swallow (idempotent CAS, SM-4) (s009 NEW)"| leaderboard
+  %% Read path: GET /api/leaderboard -> CloudFront 5s-TTL behaviour -> HTTP API -> oxo-game-fn Scan top-N.
+  player -.->|"HTTPS GET /api/leaderboard (NEW route) (s009 NEW)"| cfwaf
+  cfwaf -.->|"routes /api/leaderboard, CACHE behaviour TTL=5s (collapses title-screen loads; meets SM-1 10s); POST /api/games stays CachingDisabled (s009 NEW)"| httpapi
+  httpapi -.->|"AWS_PROXY invoke read route (s009 NEW)"| gamefn
+  gamefn -.->|"Scan Leaderboard top-20 (wins desc, losses asc, name asc) + buildSha in body; Scan-only grant (s009 NEW)"| leaderboard
+
   %% ---- classDef ----
   classDef actor fill:#eef,stroke:#446,color:#000;
   classDef gate fill:#ffe9c7,stroke:#b5651d,color:#000,stroke-width:2px;
@@ -117,6 +138,22 @@ flowchart TD
   %%   The deep-link JOIN reuses the EXISTING WS $connect?code + join path UNCHANGED (no edge change).
   %% s008 changed mark CLEARED (2026-06-07 — tester consumed, UC3 prod validation PASS, C4 MET 2323ms).
   %% cfwaf: deep-link /join/<code> via existing SPA-fallback confirmed in prod.
+
+  %% ---- s009 (delta 010) CHANGED marks (tester plans from these — node id === @covers tag) ----
+  %% NEW nodes: leaderboard (first DURABLE store, NO TTL, PITR, scoredGames idempotency marker),
+  %%   boardfn (NEW principal, stream consumer, idempotent ConditionalCheckFailed-swallow),
+  %%   games-stream (NEW gate: AT-LEAST-ONCE delivery + active->terminal filter; filter cuts
+  %%   waste but NOT redelivery — correctness is the leaderboard marker).
+  %% NEW edges: games->games-stream, games-stream->boardfn, boardfn->leaderboard (idempotent CAS),
+  %%   player->cfwaf (GET /api/leaderboard), cfwaf->httpapi (5s TTL behaviour), httpapi->gamefn (read),
+  %%   gamefn->leaderboard (Scan top-N).
+  %% CHANGED nodes (annotation only, name-write rides existing writes): gamefn (hostName on create
+  %%   PutItem), wsfn (guestName on join UpdateItem), cfwaf (new 5s-TTL /api/leaderboard behaviour),
+  %%   games (Stream now ENABLED; +hostName/guestName attrs).
+  %% Tester pins: SM-4 idempotency (T-LB-3 replay byte-identical), SM-5 abandoned->no tally (filter),
+  %%   SM-2 collision (one row), stored-XSS (T-LB-8 escaped text + no dangerouslySetInnerHTML),
+  %%   IAM no-widening (T-LB-9), §30 skeleton Probe A+B (T-LB-10).
+  class leaderboard,boardfn,games-stream,gamefn,wsfn,cfwaf,games changed;
 
   %% ---- s005-h3 CHANGED marks CLEARED (2026-06-07 — tester consumed, UC4 in-prod validation PASS, OI-3 CLOSED) ----
   %% codes: NEW store node — delivered/stable. PK=code, CAS via conditional PutItem attribute_not_exists.

@@ -17,8 +17,8 @@ is recorded; later chunks revise this when value is re-sliced.
 | **[C1]** | Needed for Chunk 1 (deployable shell) | delivered (slice 001) |
 | **[C2-3]** | Local game + AI — client-only, no new infra | **current** (C2 = slice 002, local game, delivered; C3 = AI, in progress) |
 | **[C4]** | Online match — first stateful backend + realtime | s004 create ✓; s005 join/WS ✓; s005-h2 connect-auth ✓; s006 move relay + server-authoritative win/draw ✓; s007 $disconnect abandon+notify ✓; s008 share-link deep-route ✓ COMPLETES C4; **s005-h3 code-uniqueness (Codes reservation table, OI-3) — current, FINAL C4 hardening residual** |
-| **[C5]** | Leaderboard — first durable persistence | not started |
-| **[C6]** | Player identity — session/display name | not started |
+| **[C5]** | Leaderboard — first durable persistence + first DynamoDB Stream | **current** — s009 arcade-scoreboard (name entry + Stream-driven tally + shared read board) in planning; s010 = ≤10s latency Playwright smoke (done-condition proof, may fold into s009) |
+| **[C6]** | Player identity — session/display name | **REMOVED from plan** — absorbed by the s009 arcade name-as-key model (display names delivered in s009; no committed cross-device-identity job). See slice.md C5/C6 reshape note. |
 | **[C7]** | In-game chat — reuses C4 realtime transport | not started |
 
 Minimum-to-deliver-value rule: nothing tagged later than the active chunk is
@@ -112,11 +112,14 @@ C4Container
     Container(wsfn, "oxo-ws-fn", "Lambda Node20", "[s005] $connect/register/join; conditional join write + game-ready fan-out. [s006] +move route: validates turn/legality/status by connectionId binding, atomic conditional UpdateItem with version CAS, server-side win/draw, board-update/game-over relay to the 2 bound conns. [s007] $disconnect REAL: GetItem(Connections, OWN connId)->gameId; conditional UpdateItem status active->abandoned (won/drawn guard); 1 survivor notify (0 on terminal/waiting); delete row. +ONE IAM grant: GetItem on Connections only (else s006 set).")
     Container(wsauthfn, "oxo-ws-auth-fn", "Lambda Node20", "[s005-h2] $connect REQUEST authorizer: verify host wsToken / lookup guest code; per-IP budget; Allow/Deny IAM policy. NO ManageConnections, NO Games write.")
 
-    ContainerDb(ddb_game, "DynamoDB: Games", "NoSQL", "[built s004] +code GSI & host/guest connId attrs (s005). [s006] +board(9-char)/currentTurn/winner/version(opt-lock CAS)/moveCount attrs — authoritative board; schemaless add, no table/GSI change. TTL 24h, SSE, on-demand.")
+    ContainerDb(ddb_game, "DynamoDB: Games", "NoSQL", "[built s004] +code GSI & host/guest connId attrs (s005). [s006] +board(9-char)/currentTurn/winner/version(opt-lock CAS)/moveCount attrs. [s009] +hostName/guestName attrs (server-normalised ≤10/charset/AAA-default) + STREAM enabled (NEW_AND_OLD_IMAGES; consumed by oxo-board-fn). TTL 24h, SSE, on-demand.")
     ContainerDb(ddb_conn, "DynamoDB: Connections", "NoSQL", "[s005] connectionId -> gameId/role. TTL 2h, SSE, on-demand. [s007] +GetItem read by $disconnect (own row by PK) — schema unchanged.")
     ContainerDb(ddb_attempts, "DynamoDB: ConnectAttempts", "NoSQL", "[s005-h2] sourceIp -> count. TTL 5min, SSE, on-demand. Best-effort per-IP connect budget.")
     ContainerDb(ddb_codes, "DynamoDB: Codes", "NoSQL", "[s005-h3] PK=code. Conditional PutItem attribute_not_exists(code) = single-item CAS => storage-enforced code uniqueness (OI-3). WRITE-TIME GATE only; NOT on join/lookup read path (join still uses Games code-index). TTL 24h, lazy deletion, SSE, on-demand, no GSI.")
     Container(secret, "WS-token secret", "SSM SecureString / Secret", "[s005-h2] 32-byte HMAC key. Encrypted at rest; read-scoped to oxo-game-fn (mint) + oxo-ws-auth-fn (verify) only.")
+
+    Container(boardfn, "oxo-board-fn", "Lambda Node20", "[s009] DynamoDB-Stream consumer on Games. Reads OLD+NEW image FROM THE RECORD (no Games table read); computes outcome; TWO conditional UpdateItem on Leaderboard (ADD tally + ADD scoredGames{gameId}, COND NOT contains(scoredGames,:gameId)) = idempotent CAS. ConditionalCheckFailed=replay, swallow. OFF the hot path.")
+    ContainerDb(ddb_board, "DynamoDB: Leaderboard", "NoSQL", "[s009] FIRST DURABLE store. PK=playerName (entered name IS the key; collisions accumulate, SM-2). wins/draws/losses (N, ADD) + scoredGames (SS, idempotency marker). NO TTL (standings persist). PITR ENABLED. SSE, on-demand, no GSI (top-N Scan).")
   }
 
   Rel(player, cf, "Loads SPA + reads wsUrl config", "HTTPS")
@@ -138,12 +141,18 @@ C4Container
   Rel(wsfn, ddb_game, "Query code-index + conditional UpdateItem (join/register); [s006] GetItem board + move CAS UpdateItem")
   Rel(wsfn, ddb_conn, "Put/Delete connection; [s007] GetItem own row on $disconnect (connId->gameId)")
   Rel(wsfn, wsapi, "game-ready + [s006] board-update/game-over fan-out to the 2 bound conns; [s007] $disconnect = EXACTLY 1 opponent-disconnected post to survivor (0 on terminal/waiting; 410=swallow, no retry)", "@connections (ManageConnections, this API ARN only)")
+
+  Rel(ddb_game, boardfn, "[s009] active->won/drawn transition record via Stream (at-least-once)", "DynamoDB Stream")
+  Rel(boardfn, ddb_board, "[s009] idempotent conditional UpdateItem tally (ADD + scoredGames marker)")
+  Rel(httpapi, gamefn, "[s009] GET /api/leaderboard read route", "AWS_PROXY")
+  Rel(gamefn, ddb_board, "[s009] Scan top-N (read-only)")
 }
 ```
 
 **Not yet built (target only):** reconnect-after-reload (OI-10 ruled OUT of s007,
-unscheduled), Leaderboard table + `oxo-board-fn` (C5), CloudFront WS proxying,
-in-game chat (C7). **WAF built (s005-h1); `$connect` capability-token + per-IP
+unscheduled), CloudFront WS proxying, in-game chat (C7). **Leaderboard table +
+`oxo-board-fn` + Games Stream + `GET /api/leaderboard` are NOW DESIGNED (s009 /
+delta 010, C5) — in planning, not yet deployed.** **WAF built (s005-h1); `$connect` capability-token + per-IP
 authorizer built (s005-h2); move relay + server-authoritative win/draw built
 (s006); `$disconnect` abandon+notify+clean-up built (s007).** See deltas 005+/006/
 007 for the deferral list.
@@ -251,6 +260,53 @@ authorizer built (s005-h2); move relay + server-authoritative win/draw built
   `architecture/security/dynamodb-connections.md` (s007 GetItem addition),
   `architecture/security/dynamodb-games.md` (s007 abandon transition),
   `architecture/security/wafv2.md` (IMP-008 IP set).
+
+**Key s009 (arcade scoreboard — C5, first durable store + first DynamoDB Stream) facts:**
+- **First DURABLE store `Leaderboard`** (PK=`playerName`, NO TTL, PITR enabled) +
+  **first DynamoDB Stream** in the system → **NEW platform mechanism, §30
+  walking-skeleton probe required** (Probe A: real game-over → exactly one tally
+  increment; Probe B: replay → no double-count). The engineer runs both through
+  the DEPLOYED stream path BEFORE use-case build-out.
+- **Result recording = DynamoDB Stream on `Games`, NOT inline.** Stream
+  (NEW_AND_OLD_IMAGES) → new principal `oxo-board-fn` via event-source mapping,
+  filtered to the `active→won/drawn` TRANSITION (excludes board-update MODIFYs and
+  `abandoned` → SM-5). Zero hot-path change (SM-6 game-over WS ≤1s p95 untouched);
+  board-fn failure does not fail the game.
+- **Idempotency under at-least-once stream delivery (SM-4, the crux):** each
+  participant's tally is written by a **conditional `UpdateItem`** that does
+  `ADD wins :one, ADD scoredGames {gameId}` with
+  `ConditionExpression NOT contains(scoredGames, :gameId)` — increment AND mark in
+  ONE atomic single-item CAS, co-located on the name row. A replayed game-over
+  fails the condition → no double-count; `ConditionalCheckFailed` is treated as
+  already-done (swallow). Per-name marker (not a separate ProcessedGames table) so
+  the check and the increment can never split across two items.
+- **Name-as-key, unauthenticated:** the entered name IS the key; collisions
+  accumulate on one row BY DESIGN (SM-2). Name captured at create (`POST /api/games`
+  body `playerName`, additive) and join (WS `join` frame `playerName`, additive),
+  written onto `Games` `hostName`/`guestName` BEFORE game-over via the EXISTING
+  create/join writes (no new grant). Server-normalised (trim, ≤10, charset-bound,
+  `"AAA"` default — SM-3).
+- **Read path:** `GET /api/leaderboard` (NEW route on the existing HTTP API) →
+  existing `oxo-game-fn` (Scan-only top-20) → CloudFront **5s-TTL** cache behaviour
+  (meets SM-1 ≤10s; `POST /api/games` stays CachingDisabled). Response carries
+  `buildSha` (version-identifiable).
+- **STORED-XSS control (§9a-accepted):** a free-text name rendered in other
+  browsers is the one material new surface. Defence-in-depth: SPA renders names as
+  ESCAPED TEXT (React default) with an explicit **no-`dangerouslySetInnerHTML`**
+  code-policy pin + server-side length/charset bound at the write boundary, behind
+  the unchanged CSP. Impersonation + offensive-name abuse are INHERENT to the
+  product-chosen unauthenticated arcade model — acknowledged, moderation out of
+  scope. **Security review §9a AUTO-ACCEPT** (no human flag).
+- **IAM no-widening:** only new app-data grants are `oxo-board-fn` (stream-read +
+  Leaderboard `UpdateItem`) and `oxo-game-fn` (Leaderboard `Scan`); **`oxo-ws-fn`
+  gains NOTHING**; `oxo-deploy` += scoped `UpdateFunctionCode` on board-fn ARN only,
+  no `iam:*`. All eu-west-2 (no region exception). See
+  `architecture/deltas/010-arcade-scoreboard.md`,
+  `architecture/security/dynamodb-leaderboard.md`,
+  `architecture/security/lambda-execution-roles.md` (s009),
+  `architecture/security/apigw-http.md` (s009),
+  `architecture/security/cloudfront-distribution.md` (s009),
+  `architecture/security/dynamodb-games.md` (s009 stream + name attrs).
 
 **Key s005 architectural facts:**
 - The WebSocket API is in the **same `OxoGameProd` stack** as the HTTP API +
@@ -362,15 +418,17 @@ authorizer built (s005-h2); move relay + server-authoritative win/draw built
 |------|-----------|------------------|
 | `oxo-cf-oac` | CloudFront (OAC) | `s3:GetObject` on the web bucket only |
 | `oxo-deploy` | GitHub OIDC | `s3:PutObject`/`DeleteObject` on web bucket, `cloudfront:CreateInvalidation`, `lambda:UpdateFunctionCode`, scoped by resource ARN + repo/branch claim. **s005-h1 (amended GATE-AMEND-H1-A):** + scoped `wafv2:` Create/Get/Update/Delete/List/Tag (CloudFront WebACL mgmt) and `cloudfront:UpdateDistribution`/`GetDistribution`/`GetDistributionConfig` (no `wafv2:*`/`cloudfront:*` wildcard; no `iam:*`). The `wafv2:Associate`/`Disassociate`/`ListResourcesForWebACL` grants are **dropped** — the regional WS association is removed (WAFv2 cannot associate API GW v2). See `DEPLOY_ROLE_EXTENSIONS.md`. |
-| `oxo-game-fn` | Lambda (create) | **s004 built:** `dynamodb:PutItem` on `Games` ARN only + own log group. **s005-h2:** + secret read (`ssm:GetParameter`+`kms:Decrypt` or `secretsmanager:GetSecretValue`) on the **one** shared WS-token secret ARN only (mints host `wsToken`). **s005-h3:** + **exactly** `dynamodb:PutItem` on the **`Codes` table ARN only** (the conditional code-reservation write) — **no** `DeleteItem`/`GetItem`/`Query`/`Scan`/`UpdateItem` on `Codes`, no GSI, no wildcard. (Target broader RW deferred.) |
+| `oxo-game-fn` | Lambda (create + leaderboard read) | **s004 built:** `dynamodb:PutItem` on `Games` ARN only + own log group. **s005-h2:** + secret read (`ssm:GetParameter`+`kms:Decrypt` or `secretsmanager:GetSecretValue`) on the **one** shared WS-token secret ARN only (mints host `wsToken`). **s005-h3:** + **exactly** `dynamodb:PutItem` on the **`Codes` table ARN only** — **no** `DeleteItem`/`GetItem`/`Query`/`Scan`/`UpdateItem` on `Codes`, no GSI, no wildcard. **s009:** + **exactly** `dynamodb:Scan` on the **`Leaderboard` table ARN only** (the `GET /api/leaderboard` read) — **no** `Query`/`UpdateItem`/`DeleteItem`/`GetItem` on `Leaderboard`. The `hostName` write rides the existing `Games` `PutItem` (no new grant). |
 | `oxo-ws-fn` | Lambda (WS join/register/move/$disconnect) | **s005:** `GetItem`/`Query` on `Games` `code-index` GSI; conditional `UpdateItem` on `Games`; `PutItem`/`DeleteItem` on `Connections`; `execute-api:ManageConnections` on **this WS API ARN only**; own log group. **s007:** + **exactly** `dynamodb:GetItem` on the **`Connections` table ARN only** (the `$disconnect` connectionId→gameId read) — **no** `Query`/`Scan`, no second table, no `*`. **No** secret read, **no** `ConnectAttempts` access. |
-| `oxo-board-fn` | Lambda (leaderboard) | RW `Leaderboard` table; read `Games`; CloudWatch Logs (C5 — not built) |
+| `oxo-board-fn` | Lambda (Games-stream consumer) | **s009 built:** `dynamodb:GetRecords`/`GetShardIterator`/`DescribeStream`/`ListStreams` on the **`Games` STREAM ARN only** + `dynamodb:UpdateItem` on the **`Leaderboard` table ARN only** + own log group. **NO** Games table grant (reads OLD+NEW from the stream record), **NO** `Scan`/`Query`/`GetItem`/`DeleteItem`/`PutItem` on `Leaderboard`, **NO** `execute-api`, **NO** secret, **NO** wildcard. (NARROWER than the C5-target "RW Leaderboard, read Games" — least-privilege per actual use.) |
 | `oxo-ws-auth-fn` | Lambda ($connect REQUEST authorizer) | **s005-h2 built:** `GetItem`/`Query` on `Games` `code-index` GSI (guest code path); `UpdateItem`/`PutItem` on `ConnectAttempts` only; secret read on the **one** shared WS-token secret ARN; own log group. **NO** `execute-api:ManageConnections`, **NO** `Games` write, **NO** `Connections` access, **NO** `iam:*`/wildcard. Disjoint from `oxo-ws-fn` (least-privilege gate). |
 
 No wildcards on resources; every policy is table-/index-/bucket-/function-/
 API-ARN scoped. Deploy role is constrained to the repo and branch via the OIDC
 `sub` condition, gains scoped `lambda:UpdateFunctionCode`/`GetFunction` on the
-`oxo-ws-fn` ARN (s005), and still has NO `iam:*` mutation actions.
+`oxo-ws-fn` ARN (s005) and the `oxo-board-fn` ARN (s009), and still has NO
+`iam:*` mutation actions (the new board-fn role + Games stream + Leaderboard
+table are CDK-synthesised under existing bootstrap trust).
 
 ---
 
@@ -391,7 +449,11 @@ API-ARN scoped. Deploy role is constrained to the repo and branch via the OIDC
   `architecture/security/dynamodb-connectattempts.md`.
 - **Reliability:** all managed, multi-AZ services; DynamoDB TTL self-heals
   orphaned game/connection state; idempotent move application keyed by
-  `(gameId, moveSeq)`.
+  `(gameId, moveSeq)`. **[s009]** `Leaderboard` has **PITR enabled** (first durable
+  store; no TTL); the Stream-driven tally write is **idempotent under at-least-once
+  delivery** via a per-name conditional `scoredGames` marker (a replayed game-over
+  cannot double-count) — the board converges late on a board-fn failure, never
+  breaks play.
 - **Performance:** CDN for the SPA; DynamoDB single-item reads; move latency
   budget < 1s p95 (cold-start reversal noted above); AI runs **client-side**
   (C3) so the < 200ms target needs no backend round-trip.
@@ -423,8 +485,13 @@ with `getConnection(connectionId)` — still one deployable, still locally stand
 data-flow with platform gates as explicit nodes (CloudFront+WAF, HTTP API,
 WS upgrade, `$connect` REQUEST authorizer with strike-4/5 semantics, lazy-TTL
 stores, the `@connections` relay). It is the **tester's planning input**; each
-slice marks its delta with `classDef changed`. s007 marks `oxo-ws-fn`,
-`Connections`, `Games`, the `@connections` relay, and the CloudFront+WAF gate
-changed; adds the dotted `$disconnect` edges (Connections GetItem → Games GetItem
-→ conditional abandon → 1 survivor notify → Connections delete) and the IMP-008
-IP-set scope-down annotation on the WAF gate.
+slice marks its delta with `classDef changed`. **s009 (delta 010)** marks the
+NEW nodes `leaderboard` (durable, NO TTL, PITR, `scoredGames` idempotency
+marker), `boardfn` (stream consumer), `games-stream` (NEW gate: at-least-once
+delivery + active→terminal filter), plus changed `gamefn`/`wsfn` (name-write
+rides existing writes), `cfwaf` (5s-TTL leaderboard behaviour) and `games`
+(Stream enabled + name attrs); adds the dotted edges games→games-stream→boardfn
+→leaderboard (idempotent CAS) and the GET /api/leaderboard read path
+(player→cfwaf→httpapi→gamefn→leaderboard Scan). Node ids are kebab and === the
+`@covers` tag the engineer uses (v37 §12a.5). Prior (s007/s008/s005-h3) marks are
+CLEARED in the file (tester-consumed, prod-validated).

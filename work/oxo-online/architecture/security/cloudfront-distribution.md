@@ -15,3 +15,16 @@ Checkable controls:
 - [ ] Security response headers set (HSTS, X-Content-Type-Options,
       Content-Security-Policy) via response headers policy.
 - [ ] Access logging enabled to a separate, locked-down log bucket.
+
+## s009 (delta 010) — `/api/leaderboard` cache behaviour
+A NEW cache behaviour for `GET /api/leaderboard`. Checkable controls:
+- [ ] `/api/leaderboard` behaviour has `min/default/maxTTL = 5s` (NOT
+      `CachingDisabled`) — collapses title-screen loads to one origin fetch per
+      5s window; meets SM-1's "within 10s" (5s cache + sub-1s stream propagation).
+      Synth-assert the TTL.
+- [ ] `POST /api/games` behaviour stays `CachingDisabled` (writes must never
+      cache) — unchanged; the 5s TTL applies ONLY to the leaderboard read path.
+- [ ] The existing WAF rate rule and security response headers (HSTS, CSP,
+      X-Content-Type-Options) apply unchanged to the new behaviour; **no new CSP
+      directive** (leaderboard names are data rendered as escaped TEXT, not
+      script — delta 010 §8). The existing CSP is the stored-XSS backstop.

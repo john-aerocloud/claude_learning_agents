@@ -8,8 +8,8 @@ Checkable controls:
 - [ ] `oxo-game-fn`: RW on Games+Connections tables only;
       `execute-api:ManageConnections` on the WS API ARN only; emit to leaderboard
       via a scoped target; CloudWatch Logs. No other permissions.
-- [ ] `oxo-board-fn`: RW Leaderboard, read Games, CloudWatch Logs. No WS, no
-      bucket access.
+- [ ] `oxo-board-fn`: see the s009 section below — the C5-target "RW Leaderboard,
+      read Games" is NARROWED in s009 to stream-read + `UpdateItem` only.
 - [ ] `oxo-ws-authorizer`: validates connect token; CloudWatch Logs only, no
       data access.
 - [ ] No role has `dynamodb:*` or `*:*`; all actions enumerated, all resources
@@ -56,3 +56,32 @@ policy tests):
 - [ ] `oxo-deploy` gains `lambda:UpdateFunctionCode`/`GetFunction` scoped to the
       `oxo-ws-fn` ARN only; still NO `iam:CreateRole`/`AttachRolePolicy`/
       `PutRolePolicy`.
+
+## s009 (delta 010) — `oxo-board-fn` execution role (NEW principal) + game-fn read grant
+NEW stream-consumer principal + a narrow read grant on the existing game-fn.
+Checkable controls (become policy tests — T-LB-9 IAM no-widening pin):
+- [ ] `oxo-board-fn` has its OWN execution role (not shared with `oxo-ws-fn` or
+      `oxo-game-fn`).
+- [ ] `oxo-board-fn`: `dynamodb:GetRecords`/`GetShardIterator`/`DescribeStream`/
+      `ListStreams` scoped to the **`Games` table STREAM ARN only** (stream
+      consume) + `dynamodb:UpdateItem` on the **`Leaderboard` table ARN only** +
+      its own CloudWatch Logs group. **NOTHING else.**
+- [ ] `oxo-board-fn` has **NO Games TABLE grant** (it reads OLD+NEW images from
+      the stream RECORD, not the table); **NO** `Scan`/`Query`/`GetItem`/
+      `DeleteItem`/`PutItem` on `Leaderboard`; **NO** `execute-api`, **NO**
+      bucket, **NO** secret, **NO** `dynamodb:*`/`iam:*`/`*:*`.
+- [ ] `oxo-board-fn` `ReservedConcurrentExecutions` set (small cap) — bounds the
+      stream-consumer cost.
+- [ ] No public function URL; invoked only by the `Games`-stream event-source
+      mapping.
+- [ ] `oxo-game-fn` gains **exactly** `dynamodb:Scan` on the **`Leaderboard`
+      table ARN only** (the `GET /api/leaderboard` read). **NO** `Query`/
+      `UpdateItem`/`DeleteItem`/`GetItem` on `Leaderboard`. Its existing Games/
+      Codes/secret grants are unchanged. The name-write rides the EXISTING
+      `PutItem` on `Games` — NOT a new grant.
+- [ ] `oxo-ws-fn` gains **NO new grant** in s009 (the `guestName` write rides the
+      existing conditional `UpdateItem` on `Games`). Confirm unchanged from s007.
+- [ ] `oxo-deploy` gains `lambda:UpdateFunctionCode`/`GetFunction` scoped to the
+      **`oxo-board-fn` ARN only**; still NO `iam:CreateRole`/`AttachRolePolicy`/
+      `PutRolePolicy` (the board-fn role + stream + table are CDK-synthesised
+      under existing bootstrap trust, not created by the deploy role at runtime).

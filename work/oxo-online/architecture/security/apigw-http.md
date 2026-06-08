@@ -28,3 +28,19 @@ Checkable controls:
       cap + 24h TTL remain as the defence-in-depth floor. No separate WebACL on
       the HTTP API stage (Gate-2 decision — CloudFront ACL covers the path). See
       `architecture/security/wafv2.md` and `deltas/s005-h1-waf.md`.
+
+## s009 (delta 010) — `GET /api/leaderboard` (NEW read route)
+NEW read-only route on the EXISTING HTTP API v2, backed by `oxo-game-fn`
+(Scan-only). Checkable controls:
+- [ ] `GET /api/leaderboard` is **read-only**: it `Scan`s Leaderboard and returns
+      top-20 JSON; NO client can write a leaderboard record via any HTTP route
+      (writes happen ONLY on the server-computed game-end stream → `oxo-board-fn`).
+- [ ] The route is reached same-origin via the CloudFront `/api/leaderboard`
+      behaviour (TTL=5s; see `cloudfront-distribution.md`); `POST /api/games`
+      stays `CachingDisabled`. The existing CloudFront WAF rate rule fronts it
+      (per-IP rate-bounded before reaching the HTTP API/Lambda).
+- [ ] The response carries `buildSha` (version-identifiable surface, principles/01).
+- [ ] Names in the response are server-normalised (≤10/charset-bounded) and the
+      SPA renders them as ESCAPED text — stored-XSS control (delta 010 §8 / T-LB-8).
+- [ ] No client-supplied field controls the Scan beyond the fixed top-N; oversized/
+      unexpected query params ignored.

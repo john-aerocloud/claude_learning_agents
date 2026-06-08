@@ -208,7 +208,12 @@ test.describe('Slice 004 — AWS infra & security policy', () => {
     }
 
     // No statement may grant a wildcard dynamodb action or wildcard resource on dynamo.
-    // Only PutItem is allowed; no other dynamodb action on game-fn role.
+    // s009 amendment (T-LB-9): game-fn += dynamodb:Scan on Leaderboard ARN (GET /api/leaderboard
+    // read path). This is the ONLY new grant; existing PutItem on Games+Codes is unchanged.
+    // Permitted dynamodb actions on game-fn: PutItem (Games+Codes), Scan (Leaderboard).
+    // No other action, no wildcard.
+    const LEADERBOARD_TABLE_ARN_CONST = 'arn:aws:dynamodb:eu-west-2:817047731316:table/oxo-leaderboard';
+    const PERMITTED_ACTIONS = new Set(['dynamodb:PutItem', 'dynamodb:Scan']);
     for (const s of statements) {
       const actions = asArr(s.Action);
       const resources = asArr(s.Resource);
@@ -218,8 +223,13 @@ test.describe('Slice 004 — AWS infra & security policy', () => {
       for (const a of actions) {
         expect(a, `no wildcard dynamodb action allowed (found "${a}")`).not.toBe('dynamodb:*');
         expect(a, `no full wildcard action allowed (found "${a}")`).not.toBe('*');
-        // Only PutItem is allowed on game-fn (it creates, never reads/updates/deletes).
-        expect(a, `game-fn must only have dynamodb:PutItem (found "${a}")`).toBe('dynamodb:PutItem');
+        // game-fn permits: PutItem (Games+Codes) and Scan (Leaderboard for GET /api/leaderboard).
+        // s009 amended: was PutItem-only; now PutItem+Scan.
+        expect(
+          PERMITTED_ACTIONS.has(a),
+          `game-fn must only have dynamodb:PutItem or dynamodb:Scan (found "${a}"). ` +
+          `s009 amendment: Scan added for GET /api/leaderboard read path (T-LB-9).`,
+        ).toBe(true);
       }
       for (const r of resources) {
         expect(r, 'no full "*" resource allowed on a dynamodb-touching statement').not.toBe('*');
@@ -227,9 +237,21 @@ test.describe('Slice 004 — AWS infra & security policy', () => {
           expect(r, `no wildcard dynamodb resource allowed (found "${r}")`).not.toContain('table/*');
         }
       }
+      // Scan must ONLY be on Leaderboard (no Scan on Games or Codes)
+      const scanActions = actions.filter(a => a === 'dynamodb:Scan');
+      if (scanActions.length > 0) {
+        for (const r of resources) {
+          if (r.includes(':dynamodb:')) {
+            expect(
+              r,
+              `dynamodb:Scan must only be on oxo-leaderboard ARN (found "${r}") — T-LB-9 no-widening`,
+            ).toBe(LEADERBOARD_TABLE_ARN_CONST);
+          }
+        }
+      }
     }
 
-    console.log(`T3 PASS (s005-h3 amended): PutItem on Games+Codes ARNs; no wildcard; only PutItem.`);
+    console.log(`T3 PASS (s009 amended): PutItem on Games+Codes ARNs; Scan on Leaderboard; no wildcard; no other actions.`);
     console.log(`  All PutItem resources: ${JSON.stringify(allPutResources)}`);
   });
 

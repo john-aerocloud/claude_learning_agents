@@ -153,7 +153,15 @@ flowchart TD
   %% Tester pins: SM-4 idempotency (T-LB-3 replay byte-identical), SM-5 abandoned->no tally (filter),
   %%   SM-2 collision (one row), stored-XSS (T-LB-8 escaped text + no dangerouslySetInnerHTML),
   %%   IAM no-widening (T-LB-9), §30 skeleton Probe A+B (T-LB-10).
-  class leaderboard,boardfn,games-stream,gamefn,wsfn,cfwaf,games changed;
+  %% s009 changed marks CLEARED (2026-06-08 — tester consumed, UC5 in-prod validation PASS, C5 MET)
+  %% leaderboard: first durable store (PITR, no TTL, scoredGames idempotency) — delivered/stable.
+  %% boardfn: stream consumer, idempotent ConditionalCheckFailed-swallow — delivered/stable.
+  %% games-stream: AT-LEAST-ONCE gate + active->terminal filter — delivered/stable.
+  %% gamefn: +Scan Leaderboard top-20 on GET /api/leaderboard — delivered/stable.
+  %% wsfn: guestName on join UpdateItem rides existing write — delivered/stable.
+  %% cfwaf: +5s-TTL /api/leaderboard behaviour — delivered/stable.
+  %% games: Stream enabled + hostName/guestName attrs — delivered/stable.
+  %% SM-1 cross-instance 1248ms (SLA 10s). DEFECT-S008-002 CLOSED.
 
   %% ---- s005-h3 CHANGED marks CLEARED (2026-06-07 — tester consumed, UC4 in-prod validation PASS, OI-3 CLOSED) ----
   %% codes: NEW store node — delivered/stable. PK=code, CAS via conditional PutItem attribute_not_exists.

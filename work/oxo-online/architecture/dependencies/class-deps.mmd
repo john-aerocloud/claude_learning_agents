@@ -161,11 +161,11 @@ flowchart TD
   %% repeat(3,…) }` + square `.cell` sizing. The geometry is a real dependency of
   %% the render output on the stylesheet; pinned by tests/smoke/board-geometry.spec
   %% (bounding-box 3-rows×3-cols, @covers board-grid). Marked changed for the tester.
-  board-grid["board-grid<br/>src/app/src/game/Board.tsx + index.css `.board`<br/>RENDER seam: 9 Cells laid out as a 3×3 SQUARE grid (display:grid).<br/>Geometry pinned by tests/smoke/board-geometry.spec.ts (EXP-016)"]:::defectS002changed
-  board-grid -->|3×3 layout via .board grid CSS| board-css-geometry["board-css-geometry<br/>index.css — .board display:grid repeat(3,5rem) + .cell 5rem square"]:::defectS002changed
-  %% (no explicit linkStyle: absolute edge indices renumber on insert; the
-  %%  classDef defectS002changed node marks carry this slice's change for the tester.)
-  classDef defectS002changed fill:#fde8e8,stroke:#c62828,color:#000;
+  board-grid["board-grid<br/>src/app/src/game/Board.tsx + index.css `.board`<br/>RENDER seam: 9 Cells laid out as a 3×3 SQUARE grid (display:grid).<br/>Geometry pinned by tests/smoke/board-geometry.spec.ts (EXP-016)"]:::stable
+  board-grid -->|3×3 layout via .board grid CSS| board-css-geometry["board-css-geometry<br/>index.css — .board display:grid repeat(3,5rem) + .cell 5rem square"]:::stable
+  %% defectS002changed marks CLEARED (2026-06-08 — board-geometry geometry delivered/stable in s007,
+  %% lingered in .mmd; EXP-016 board-geometry.spec.ts green in production).
+  classDef defectS002changed fill:#e8f4e8,stroke:#2e7d32,color:#000;
 
   %% ==== s005-h3 code-uniqueness (delta 009, OI-3) — appended; classDef s005h3changed ====
   %% NEW hexagonal seam on the CREATE path. Before this slice handler.ts wrote
@@ -201,9 +201,9 @@ flowchart TD
   %% after the tester consumes them). All three SPA UCs land in GameRoot behind
   %% flags default OFF (uc1NameEnabled / uc3LeaderboardEnabled / uc4TwoCopyEnabled).
   %% --- UC1 name entry ---
-  spaNameField["spa-name-field<br/>src/app/src/game/NameField.tsx (UC1) — 'Your name' input<br/>idle view, above mode buttons; controlled, non-gating; testid name-input + role textbox"]:::s009changed
-  spaNameWire["spa-name-wire<br/>src/app/src/game/GameRoot.tsx (UC1) — playerName state + sessionStorage round-trip<br/>normaliseName → POST /api/games {playerName} (host) + JoinScreen→WS join frame (guest)"]:::s009changed
-  domainNameNormalise["domain-name-normalise<br/>src/app/src/game/name.ts — pure normaliser (SPA arm)<br/>charset-strip /[^A-Za-z0-9 ._-]/g → trim → ≤10 → blank→AAA (write-side XSS bound)"]:::s009changed
+  spaNameField["spa-name-field<br/>src/app/src/game/NameField.tsx (UC1) — 'Your name' input<br/>idle view, above mode buttons; controlled, non-gating; testid name-input + role textbox"]:::stable
+  spaNameWire["spa-name-wire<br/>src/app/src/game/GameRoot.tsx (UC1) — playerName state + sessionStorage round-trip<br/>normaliseName → POST /api/games {playerName} (host) + JoinScreen→WS join frame (guest)"]:::stable
+  domainNameNormalise["domain-name-normalise<br/>src/app/src/game/name.ts — pure normaliser (SPA arm)<br/>charset-strip /[^A-Za-z0-9 ._-]/g → trim → ≤10 → blank→AAA (write-side XSS bound)"]:::stable
   %% UC1 edges (ACTUAL runtime path traced): NameField is a controlled child of
   %% GameRoot; the wire normalises at send time and forwards into the existing
   %% create fetch + the existing JoinScreen submit (no new transport edge).
@@ -211,8 +211,8 @@ flowchart TD
   spaNameWire -->|"normaliseName at send time"| domainNameNormalise
   spaNameWire -->|"playerName + onJoin into existing submit"| spaJoinScreen
   %% --- UC3 leaderboard display ---
-  spaLeaderboard["spa-leaderboard<br/>src/app/src/game/Leaderboard.tsx (UC3) — real &lt;table&gt; standings<br/>loading/empty/error/populated; &lt;th scope=col&gt;; React text render (NO dangerouslySetInnerHTML)"]:::s009changed
-  spaLeaderboardClient["spa-leaderboard-client<br/>src/app/src/game/leaderboard-client.ts (UC3) — fetch GET /api/leaderboard<br/>+ pure sort (wins desc/losses asc/name asc); ready|error, no retry loop"]:::s009changed
+  spaLeaderboard["spa-leaderboard<br/>src/app/src/game/Leaderboard.tsx (UC3) — real &lt;table&gt; standings<br/>loading/empty/error/populated; &lt;th scope=col&gt;; React text render (NO dangerouslySetInnerHTML)"]:::stable
+  spaLeaderboardClient["spa-leaderboard-client<br/>src/app/src/game/leaderboard-client.ts (UC3) — fetch GET /api/leaderboard<br/>+ pure sort (wins desc/losses asc/name asc); ready|error, no retry loop"]:::stable
   %% UC3 edges (ACTUAL runtime path): GameRoot fetches on each idle mount via the
   %% client, then renders the table component; the table imports only the entry type.
   spaNameWire -->|"fetchLeaderboard on idle mount/return"| spaLeaderboardClient
@@ -221,7 +221,7 @@ flowchart TD
   %% Redirect/extend from the delivered spaCopyLink node: the single waiting-screen
   %% copy-link splits into TWO controls — copy-code (6-char code) + copy-link
   %% (/join/:code URL) — serving the guest's two receiving paths (type / click).
-  spaCopyControls["spa-copy-controls<br/>src/app/src/game/GameRoot.tsx (UC4) — waiting-screen copy-code + copy-link<br/>copy-code-btn → 6-char code; copy-link-btn → origin+/join/+code; 2s Copied! (flag uc4TwoCopyEnabled)"]:::s009changed
+  spaCopyControls["spa-copy-controls<br/>src/app/src/game/GameRoot.tsx (UC4) — waiting-screen copy-code + copy-link<br/>copy-code-btn → 6-char code; copy-link-btn → origin+/join/+code; 2s Copied! (flag uc4TwoCopyEnabled)"]:::stable
   spaCopyLink -->|"splits into two controls (flag ON replaces single copy-link)"| spaCopyControls
   spaCopyControls -->|"copy-link URL mirrors /join/:code route form"| spaJoinRoute
   %% --- UC2 board (FIRST DynamoDB Stream consumer) + UC3-backend read (ENGINEER-BACKEND) ---
@@ -234,11 +234,11 @@ flowchart TD
   %% adapter-leaderboard-ddb (prod) / adapter-local-leaderboard (offline branch).
   %% CAS ConditionExpression `NOT contains(scoredGames, :gameId)` is the crux; a
   %% replay fails the condition → AlreadyScored → swallowed → byte-identical row.
-  domainTally["domain-tally<br/>board/tally.ts (UC2) — pure (transition)→[{name,field,gameId}]<br/>won→W/L, drawn→D/D, non-terminal→[]. PURE: zero SDK/transport."]:::s009changed
-  portLeaderboardStore["port-leaderboard-store<br/>board/ports.ts (UC2/UC3) — LeaderboardStorePort.recordResult(name,field,gameId)<br/>(throws AlreadyScored on replay) + topN(n). Domain-defined; zero SDK leak."]:::s009changed
-  adapterLeaderboardDdb["adapter-leaderboard-ddb<br/>board/ddb-leaderboard-store.ts (UC2/UC3) — conditional UpdateItem ADD<br/>+ scoredGames CAS (NOT contains(scoredGames,:gameId)); Scan top-N.<br/>UpdateItem (board-fn) + Scan (game-fn) ONLY (T-LB-3/9 pins)."]:::s009changed
-  adapterLocalLeaderboard["adapter-local-leaderboard<br/>board/local-leaderboard-store.ts (UC2) — in-memory Map+Set reproducing<br/>the conditional-ADD/NOT-contains BRANCH (offline SM-4/SM-2). §12a: branch<br/>shape only, not real DDB set-contains atomicity (covered by CAS pin + §30 skeleton)."]:::s009changed
-  boardFnHandler["board-fn-handler<br/>board/handler.ts (UC2) — stream-record adapter: parse OLD/NEW image FROM<br/>RECORD → domain-tally → store.recordResult; AlreadyScored→swallow+log (no retry,<br/>no batch fail); self-owned 5xx→category:internal-service+item failure. buildSha."]:::s009changed
+  domainTally["domain-tally<br/>board/tally.ts (UC2) — pure (transition)→[{name,field,gameId}]<br/>won→W/L, drawn→D/D, non-terminal→[]. PURE: zero SDK/transport."]:::stable
+  portLeaderboardStore["port-leaderboard-store<br/>board/ports.ts (UC2/UC3) — LeaderboardStorePort.recordResult(name,field,gameId)<br/>(throws AlreadyScored on replay) + topN(n). Domain-defined; zero SDK leak."]:::stable
+  adapterLeaderboardDdb["adapter-leaderboard-ddb<br/>board/ddb-leaderboard-store.ts (UC2/UC3) — conditional UpdateItem ADD<br/>+ scoredGames CAS (NOT contains(scoredGames,:gameId)); Scan top-N.<br/>UpdateItem (board-fn) + Scan (game-fn) ONLY (T-LB-3/9 pins)."]:::stable
+  adapterLocalLeaderboard["adapter-local-leaderboard<br/>board/local-leaderboard-store.ts (UC2) — in-memory Map+Set reproducing<br/>the conditional-ADD/NOT-contains BRANCH (offline SM-4/SM-2). §12a: branch<br/>shape only, not real DDB set-contains atomicity (covered by CAS pin + §30 skeleton)."]:::stable
+  boardFnHandler["board-fn-handler<br/>board/handler.ts (UC2) — stream-record adapter: parse OLD/NEW image FROM<br/>RECORD → domain-tally → store.recordResult; AlreadyScored→swallow+log (no retry,<br/>no batch fail); self-owned 5xx→category:internal-service+item failure. buildSha."]:::stable
   boardFnHandler -->|"domain-tally(transition)"| domainTally
   boardFnHandler -->|"recordResult per tally op"| portLeaderboardStore
   adapterLeaderboardDdb -.->|implements| portLeaderboardStore
@@ -246,7 +246,12 @@ flowchart TD
   %% UC3-backend: the existing create handler ALSO serves GET /api/leaderboard via
   %% topN (Scan + sort) on the SAME ddb adapter. Annotated changed for the tester.
   gamesCreateHandler -->|"GET /api/leaderboard → topN(20) Scan+sort"| portLeaderboardStore
-  classDef s009changed fill:#fff3e0,stroke:#e65100,color:#000;
+  %% s009 changed marks CLEARED (2026-06-08 — tester consumed, UC5 in-prod validation PASS, C5 MET)
+  %% All s009changed nodes: spaNameField, spaNameWire, domainNameNormalise, spaLeaderboard,
+  %% spaLeaderboardClient, spaCopyControls, domainTally, portLeaderboardStore,
+  %% adapterLeaderboardDdb, adapterLocalLeaderboard, boardFnHandler — all delivered/stable.
+  %% SM-1 cross-instance 1248ms (SLA 10s). DEFECT-S008-002 CLOSED.
+  classDef s009changed fill:#e8f4e8,stroke:#2e7d32,color:#000;
 
   %% s006 changed marks CLEARED (2026-06-07 — tester consumed, UC6 prod validation PASS).
   %% All nodes were new in this first-edition; all are now delivered/stable.

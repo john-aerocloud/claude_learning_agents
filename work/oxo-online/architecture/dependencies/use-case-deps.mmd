@@ -69,10 +69,10 @@ flowchart TD
   S8UC2 -->|"deep-link route must be deployed\nbefore prod validation smoke\n(AC2.4/AC3.4 require live /join/:code)"| S8UC3
 
   %% ---- s005-h3 use cases (NEW — this slice) ----
-  H3UC1["s005-h3-UC1 — CodeReservationPort\n(port + DynamoDB adapter +\nin-memory local adapter;\nCodeCollision typed throw)"]:::changed
-  H3UC2["s005-h3-UC2 — create-game integration\n(reserve-before-write +\nN=5 retry loop +\nretry-cap 500)"]:::changed
-  H3UC3["s005-h3-UC3 — Codes table infra\n(PK=code, TTL, SSE, on-demand;\nPutItem grant only;\nsynth/policy pins)"]:::changed
-  H3UC4["s005-h3-UC4 — validation\n(SM-1 injection, SM-2 50-concurrent-distinct\nreal DDB; AC-3 contract; AC-4 retry-cap;\nAC-5/6/7 IAM + policy + orphan pins)"]:::changed
+  H3UC1["s005-h3-UC1 — CodeReservationPort\n(port + DynamoDB adapter +\nin-memory local adapter;\nCodeCollision typed throw)"]:::delivered
+  H3UC2["s005-h3-UC2 — create-game integration\n(reserve-before-write +\nN=5 retry loop +\nretry-cap 500)"]:::delivered
+  H3UC3["s005-h3-UC3 — Codes table infra\n(PK=code, TTL, SSE, on-demand;\nPutItem grant only;\nsynth/policy pins)"]:::delivered
+  H3UC4["s005-h3-UC4 — validation\n(SM-1 injection, SM-2 50-concurrent-distinct\nreal DDB; AC-3 contract; AC-4 retry-cap;\nAC-5/6/7 IAM + policy + orphan pins)"]:::delivered
 
   %% ---- Edges: already-live context feeds s005-h3 ----
   S004 -->|"create-game Lambda (oxo-game-fn)\nalready live; h3-UC2 adds\nreserve-before-write step"| H3UC2
@@ -85,11 +85,11 @@ flowchart TD
   H3UC3 -->|"synth/policy assertions\nexercisable before UC2 deploy"| H3UC4
 
   %% ---- s009 use cases (NEW — this slice, §12b two-party model) ----
-  S9UC1["s009-UC1 — name entry (both parties)\n(NameField idle view; host POST + guest WS;\nnormalise+write hostName/guestName;\nsessionStorage SM-8)"]:::changed
-  S9UC2["s009-UC2 — Leaderboard table\n+ DynamoDB Stream + oxo-board-fn\n(idempotent tally; §30 Probe A+B;\nSM-4 scoredGames CAS)"]:::changed
-  S9UC3["s009-UC3 — GET /api/leaderboard\n+ SPA display (cross-instance read)\n(top-20; CloudFront 5s TTL;\nSM-1 SP-5 fan-out; XSS display pin)"]:::changed
-  S9UC4["s009-UC4 — two copy controls\n(DEFECT-S008-002: copy-code + copy-link;\nboth guest join paths served;\nSP-1 out-of-band sync)"]:::changed
-  S9UC5["s009-UC5 — validation\n(two-browser SM-1 smoke; idempotency\nreplay; WCAG 12 conditions;\nDEFECT-S008-002 closure)"]:::changed
+  S9UC1["s009-UC1 — name entry (both parties)\n(NameField idle view; host POST + guest WS;\nnormalise+write hostName/guestName;\nsessionStorage SM-8)"]:::delivered
+  S9UC2["s009-UC2 — Leaderboard table\n+ DynamoDB Stream + oxo-board-fn\n(idempotent tally; §30 Probe A+B;\nSM-4 scoredGames CAS)"]:::delivered
+  S9UC3["s009-UC3 — GET /api/leaderboard\n+ SPA display (cross-instance read)\n(top-20; CloudFront 5s TTL;\nSM-1 SP-5 fan-out; XSS display pin)"]:::delivered
+  S9UC4["s009-UC4 — two copy controls\n(DEFECT-S008-002: copy-code + copy-link;\nboth guest join paths served;\nSP-1 out-of-band sync)"]:::delivered
+  S9UC5["s009-UC5 — validation\n(two-browser SM-1 smoke; idempotency\nreplay; WCAG 12 conditions;\nDEFECT-S008-002 closure)"]:::delivered
 
   %% ---- Edges: already-live context feeds s009 UCs ----
   S6UC4 -->|"SPA idle view + WS message loop\nalready wired; s9-UC1 adds\nNameField + name wire into\nPOST /api/games + WS join"| S9UC1
@@ -114,5 +114,7 @@ flowchart TD
   %% S8UC1 (copy-link), S8UC2 (deep-link), S8UC3 (validation) are now delivered.
   %% s005-h3 nodes marked changed (2026-06-07 — product co-author iteration 12).
   %% s009 nodes marked changed (2026-06-08 — product co-author iteration 14, §12b two-party).
+  %% s009 changed marks CLEARED (2026-06-08 — tester consumed, UC5 in-prod validation PASS, C5 MET)
+  %% S9UC1-S9UC5 all delivered. SM-1 cross-instance 1248ms. DEFECT-S008-002 CLOSED.
   classDef delivered fill:#e8f4e8,stroke:#2e7d32,color:#000;
-  classDef changed fill:#fff8e1,stroke:#f57f17,color:#000;
+  classDef changed fill:#e8f4e8,stroke:#2e7d32,color:#000;

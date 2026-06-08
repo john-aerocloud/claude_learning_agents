@@ -629,3 +629,7 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-08T12:41:13Z,oxo-online,16,014-chat-send,ui-designer,task_end,1500,success,S014-UI-POLISH,"POLISH: Send button converged to outline idiom (red-first, computed-style pin); rest of chat surface already consistent; test-app 246/246, lint/build green, deploy pipeline success sha 91b1365"
 2026-06-08T12:41:52Z,oxo-online,16,s014-chat-send,orchestrator,gate,,success,GATE-4-S014,go via standing approval; chat live both ends + polished
 2026-06-08T12:41:52Z,oxo-online,16,s014-chat-send,tester,task_start,,na,S014-UC3,UC3 27 ACs: cross-instance chat ~1s + XSS text + GoneException no-crash + WCAG; plan via impacted-tests (EXP-013 2nd score)
+2026-06-08T12:44:14Z,oxo-online,16,s014-chat-send,tester,task_start,,na,d2f7c0a,"s014 UC3 tester task start — impacted-tests run, plan derived"
+2026-06-08T12:48:35Z,oxo-online,16,s014-chat-send,tester,validation_run,,fail,d2f7c0a:smoke,tests/smoke FAILED via make smoke
+2026-06-08T12:48:56Z,oxo-online,16,s014-chat-send,tester,validation_run,,fail,d2f7c0a:smoke,tests/smoke FAILED via make smoke
+2026-06-08T12:50:06Z,oxo-online,16,s014-chat-send,tester,validation_run,,success,d2f7c0a:smoke,s014 UC3 smoke 84/84 PASS; chat cross-instance 199ms; XSS text; GoneException no-crash; WCAG structural; LAYOUT geometry; CSP unchanged; regression green. DEPLOY_SHA=91b1365 (SPA sha).

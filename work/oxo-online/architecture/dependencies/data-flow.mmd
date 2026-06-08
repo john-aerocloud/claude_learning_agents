@@ -189,7 +189,11 @@ flowchart TD
   %%   T-CHAT-9 CSP unchanged. s015 closes C7 (1s p95 + two-browser e2e + scope-enforcement).
   %% NOTE FOR TESTER (v39/OI-42): at delivery these s014 marks are REMOVED (not recoloured) — the class line below
   %%   is the ACTIVE planning mark; on UC-S014 prod-validation PASS it is deleted and the dotted edges become stable.
-  class wsfn,relay,games changed;
+  %% s014 changed marks CLEARED (2026-06-08 — tester consumed, UC3 in-prod validation PASS, C7 first slice delivered)
+  %% wsfn: +chat route (6 routes total); relay: chat 2-POST fan-out; games: chat authz read-only.
+  %% All s014 dotted edges (chat frame, GetItem authz, 2-POST relay, escaped-text render) delivered/stable.
+  %% Cross-instance latency=199ms. XSS text render confirmed in real browser. GoneException no-crash.
+  %% class wsfn,relay,games changed; — CLEARED
 
   %% s009 changed marks CLEARED (2026-06-08 — tester consumed, UC5 in-prod validation PASS, C5 MET)
   %% leaderboard: first durable store (PITR, no TTL, scoredGames idempotency) — delivered/stable.

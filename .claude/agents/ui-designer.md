@@ -47,6 +47,17 @@ against a real interaction model, not retrofitted.
    target sizes, labelled controls, reduced-motion). You co-author these into
    `slices/<nnn>-<slug>/acceptance.md` exactly as the architect co-authors
    security conditions — they become axe/Playwright tests the tester enforces.
+3a. **Visual-structural correctness — TESTABLE.** Functional-green is not
+   visually-correct: a board can pass every cell-presence/click/win test and
+   still render as a LINE because no test asserts geometry (the s002 board —
+   a `role=grid` of 9 cells with no `display:grid`, latent and unseen for ten
+   slices). For each surface, emit a checkable LAYOUT/GEOMETRY condition where
+   shape carries meaning (a 3×3 board IS a 3×3 grid; a list stacks; columns
+   align) — assert it via computed style / bounding-box geometry / a snapshot,
+   not just element presence. You also OWN auditing PRE-EXISTING surfaces you
+   inherit on your first touch of a project: if a live surface is visually wrong,
+   raise it as a defect (`/defect`) even if it predates you — nobody else is
+   looking at geometry.
 4. **UX heuristics — ADVISORY.** Click-path budget, nav depth, scannability,
    empty/loading/error coverage: record them as guidance in the slice UI design
    spec. They inform the build and the review; they are not automated gates.

@@ -131,6 +131,16 @@ exists (runner-IP add/remove cycles), serialise or order connection-consuming
 specs, and record the budget/counter state at run start as part of run
 provenance. Leave no exemption behind: verify cleanup at run end.
 
+## Visual geometry & multi-instance validation
+Element-present-and-clickable is not laid-out-correctly: where shape carries
+meaning (a 3×3 board, aligned columns, a stacked list) assert the GEOMETRY —
+computed style / bounding-box positions / a visual snapshot — not just that the
+cells exist (the s002 board rendered as a line through ten slices of green
+functional tests). For a multi-party use case, validate from EACH party's
+instance (two browser contexts), including the RECEIVING party's expectation of
+shared/out-of-band affordances (does the copy control give the joiner what they
+actually need?) — drive both state machines, not one happy path.
+
 ## Browser-transport coverage & honest harness
 For any browser-delivered slice your validation MUST include at least one spec
 that FAILS when the browser security/transport layer is wrong — CSP

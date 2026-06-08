@@ -1,6 +1,41 @@
 :root {
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color-scheme: light dark;
+
+  /* ===== Design tokens — work/oxo-online/design/design-system.md ============
+   * Single source of truth for the s009 surfaces. light-dark() resolves per
+   * color-scheme so contrast pairings hold in both schemes (A11Y-5). Existing
+   * pre-s009 components are NOT migrated this slice (design-system migration
+   * backlog) — these tokens authoritative for NEW surfaces only. */
+
+  /* Colour (semantic) */
+  --surface: light-dark(#ffffff, #1a1a1a);
+  --surface-muted: light-dark(#f4f4f5, #262626);
+  --text: light-dark(#18181b, #f4f4f5);
+  --text-muted: light-dark(#52525b, #a1a1aa);
+  --border: rgba(128, 128, 128, 0.3);
+  --accent: light-dark(#2563eb, #60a5fa);
+  --danger: light-dark(#b91c1c, #f87171);
+  --focus-ring: light-dark(#2563eb, #60a5fa);
+
+  /* Type scale */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.1rem;
+  --text-xl: 1.5rem;
+
+  /* Spacing scale — base 4px */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+
+  /* Radii / Motion */
+  --radius-sm: 0.5rem;
+  --motion-fast: 120ms ease;
 }
 
 * {
@@ -94,44 +129,52 @@ body {
 .name-field {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  margin: 0 0 1rem;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-4);
   text-align: left;
 }
 
 .name-field label {
-  font-size: 0.9rem;
-  opacity: 0.85;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
 }
 
 .name-input {
   /* A11Y-6: target ≥ 24×24 CSS px (well above with this padding/font). */
   min-height: 2.5rem;
-  padding: 0.5rem 0.75rem;
-  font-size: 1.1rem;
-  border-radius: 0.5rem;
-  border: 1px solid currentColor;
-  background: transparent;
-  color: inherit;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-lg);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  /* Arcade idiom (free): uppercase initials matching the h1 letter-spacing. */
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  transition: border-color var(--motion-fast);
+}
+
+.name-input:hover {
+  border-color: var(--accent);
 }
 
 /* A11Y-4: a visible focus ring ≥ 3:1, 2px solid + 2px offset. */
 .name-input:focus-visible {
-  outline: 2px solid #1a73e8;
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
 /* ===== s009 UC3 leaderboard panel (A11Y-5/7/8/12) ========================== */
 .leaderboard-panel {
-  border-top: 1px solid rgba(128, 128, 128, 0.3);
-  margin-top: 1.5rem;
-  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+  margin-top: var(--space-6);
+  padding-top: var(--space-6);
   text-align: left;
 }
 
 .leaderboard-panel h2 {
-  font-size: 1.25rem;
-  margin: 0 0 0.75rem;
+  font-size: var(--text-xl);
+  margin: 0 0 var(--space-3);
 }
 
 .leaderboard-panel table {
@@ -141,57 +184,92 @@ body {
 
 .leaderboard-panel th,
 .leaderboard-panel td {
-  padding: 0.4rem 0.6rem;
+  padding: var(--space-2) var(--space-3);
   text-align: left;
+  color: var(--text);
 }
 
-/* Tallies are numeric: right-aligned, tabular figures for column alignment. */
+/* Column headers: small, muted, uppercase rhythm (A11Y-8 keeps meaning in the
+   visible header, never colour). */
+.leaderboard-panel thead th {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+
+/* Numeric columns — tallies AND their headers — right-align together with
+   tabular figures so the columns read as straight rules (visual rhythm). */
 .leaderboard-panel .tally,
-.leaderboard-panel .leaderboard-rank {
+.leaderboard-panel .leaderboard-rank,
+.leaderboard-panel thead th:nth-child(n + 3),
+.leaderboard-panel thead th:first-child {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
+/* Zebra striping for row scannability — surface-muted, not a meaning-bearing
+   colour (A11Y-8 unaffected: striping is decorative). */
+.leaderboard-panel tbody tr:nth-child(even) {
+  background: var(--surface-muted);
+}
+
 /* A11Y-8: rank-1 highlight is NOT colour-only — heavier weight + accent border. */
-.leaderboard-panel tr.rank-1 {
+.leaderboard-panel tbody tr.rank-1 {
   font-weight: 700;
-  border-left: 3px solid #1a73e8;
+  box-shadow: inset 3px 0 0 0 var(--accent);
 }
 
 /* ===== s009 UC4 two copy controls (DEFECT-S008-002) ======================== */
+/* Same outline-button idiom as the existing .play-options/.mode buttons, so the
+   two copy affordances read as the project's standard button, not a one-off. */
 .copy-controls {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--space-2);
   justify-content: center;
   flex-wrap: wrap;
+  margin: var(--space-3) 0;
 }
 
 .copy-controls button {
   min-height: 2.5rem;
-  padding: 0.5rem 0.9rem;
-  border-radius: 0.5rem;
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-md);
+  border-radius: var(--radius-sm);
   border: 1px solid currentColor;
   background: transparent;
   color: inherit;
   cursor: pointer;
+  transition: border-color var(--motion-fast);
+}
+
+.copy-controls button:hover {
+  border-color: var(--accent);
 }
 
 .copy-controls button:focus-visible {
-  outline: 2px solid #1a73e8;
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
+/* Leaderboard async-state text (A11Y-9 regions; A11Y-5 contrast). */
+.leaderboard-status {
+  color: var(--text-muted);
+  margin: 0 0 var(--space-2);
+}
+
 .leaderboard-error {
-  color: #b00020;
+  color: var(--danger);
 }
 
 .leaderboard-empty {
-  opacity: 0.7;
+  color: var(--text-muted);
 }
 
 /* A11Y-10: honour reduced-motion — no transitions/animations when requested. */
 @media (prefers-reduced-motion: reduce) {
   .name-input,
+  .copy-controls button,
   .leaderboard-panel * {
     transition: none !important;
     animation: none !important;

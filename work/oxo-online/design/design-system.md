@@ -2,7 +2,16 @@
 
 Library: **none** (token-based custom components).
 Theming: tokens are CSS custom properties on `:root` in `src/app/src/index.css`;
-components reference `var(--token)`, never raw values.
+components reference `var(--token)`, never raw values. Light/dark pairings are
+resolved with CSS `light-dark(<light>, <dark>)` against the page's
+`color-scheme: light dark`, so a single token carries both scheme values.
+
+> POLISH (s009, ui-designer, iter 14): the tokens specified below were declared
+> in `:root` and the new s009 surfaces (name field, leaderboard panel, copy
+> controls) were converged onto them — they had shipped functionally with raw
+> hex (`#1a73e8`, `#b00020`) and off-4px-scale spacing (`0.35/0.4/0.6/0.85/0.9rem`,
+> `1.25rem`). No behaviour/markup/selector changed. Existing pre-s009 components
+> remain on the migration backlog (below).
 
 > First established at s009 (ui-designer, iter 14). Seeded from values already
 > present in the SPA (`index.css`, `TitleScreen.tsx`, `GameRoot.tsx`). This is a
@@ -69,6 +78,10 @@ on it. Allowed steps: `4 / 8 / 12 / 16 / 24 / 32 / 48` px
   leaderboard panel reuse it. One radius only.
 - **Elevation:** flat. Separation by `--border` hairlines (existing
   `.leaderboard` top border), not shadow. No new elevation token in this slice.
+  (The rank-1 accent rule is `box-shadow: inset 3px 0 0 var(--accent)` — an
+  accent *rule*, not elevation; chosen over `border-left` because a `<tr>`
+  border under `border-collapse: collapse` + zebra striping renders
+  inconsistently and would shift column alignment.)
 - **Motion:** `--motion-fast: 120ms ease` for the name-field focus transition and
   the leaderboard fade-in on load. MUST be wrapped in
   `@media (prefers-reduced-motion: reduce) { transition: none; }` (2.3.3 path).

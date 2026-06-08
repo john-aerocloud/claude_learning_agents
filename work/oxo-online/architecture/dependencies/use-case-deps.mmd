@@ -109,6 +109,21 @@ flowchart TD
   S9UC1 -->|"name propagation onto Games\nmust be deployed before\nprod smoke drives real names\nthrough the pipeline"| S9UC5
   S9UC4 -->|"two copy controls must be\ndeployed before DEFECT-S008-002\nclosure smoke (AC4.6 / AC5.10)"| S9UC5
 
+  %% ---- s014 use cases (NEW — this slice, §12b two-party chat sync) ----
+  S14UC1["s014-UC1 — chat handler\n(ws-fn chat route: identity bind,\nrelay+echo, GoneException drop,\nserver bound, no-new-IAM)"]:::changed
+  S14UC2["s014-UC2 — chat UI\n(ChatPanel/ChatInput/ChatMessageList\nbelow board; live region;\nXSS text render pin)"]:::changed
+  S14UC3["s014-UC3 — validation\n(two-browser send→see ~1s;\nXSS text; GoneException no-crash;\nWCAG S014-1..10; regression)"]:::changed
+
+  %% ---- Edges: already-live context feeds s014 UCs ----
+  S6UC3 -->|"oxo-ws-fn already handles move;\ns14-UC1 adds chat route (same Lambda,\nsame ManageConnections grant,\nsame s006 identity pattern)"| S14UC1
+  S6UC4 -->|"SPA playing-online branch already\nwired; s14-UC2 adds ChatPanel\nas sibling of OnlineBoard\n(additive, no file conflict)"| S14UC2
+
+  %% ---- Edges: within s014 ----
+  %% UC1 (Lambda) and UC2 (SPA) are PARALLEL — disjoint files, no cross-artefact build dep.
+  %% UC3 requires both deployed to prod.
+  S14UC1 -->|"chat handler deployed to prod\nbefore two-browser smoke can\nexercise relay+echo path"| S14UC3
+  S14UC2 -->|"chat UI deployed to prod\nbefore two-browser smoke can\nrender received frames"| S14UC3
+
   %% ---- classDef ----
   %% s008 changed marks CLEARED (2026-06-07 — tester consumed, UC3 prod validation PASS, C4 done-condition MET 2323ms).
   %% S8UC1 (copy-link), S8UC2 (deep-link), S8UC3 (validation) are now delivered.
@@ -116,5 +131,6 @@ flowchart TD
   %% s009 nodes marked changed (2026-06-08 — product co-author iteration 14, §12b two-party).
   %% s009 changed marks CLEARED (2026-06-08 — tester consumed, UC5 in-prod validation PASS, C5 MET)
   %% S9UC1-S9UC5 all delivered. SM-1 cross-instance 1248ms. DEFECT-S008-002 CLOSED.
+  %% s014 nodes marked changed (2026-06-08 — product co-author iteration 16, §12b chat sync points).
   classDef delivered fill:#e8f4e8,stroke:#2e7d32,color:#000;
-  classDef changed fill:#e8f4e8,stroke:#2e7d32,color:#000;
+  classDef changed fill:#fff3cd,stroke:#f57f17,color:#000;

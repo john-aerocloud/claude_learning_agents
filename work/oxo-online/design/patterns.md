@@ -31,6 +31,15 @@ Why the `idle` view and not `/title`: `/title` is not on the live path; placing
 new surfaces there would ship dead UI. The leaderboard also belongs where the
 player lands and returns between games (motivation-through-standing job).
 
+**s014 addition to the `playing-online` view** (active online game): a
+**ChatPanel** sits BELOW `<OnlineBoard>` as a sibling region (never inside the
+board container — the 3×3 grid geometry from the s002 fix is untouched). It is
+present only while the game is active (`result === undefined`); after a
+`game-over` frame the chat INPUT is absent (scope). Single centered column
+preserved (`max-width: 32rem`); board stays the top/primary focal surface, chat
+is secondary. No new route, modal, or navigation — chat is in-place. The chat
+input is never autofocused and never steals focus from the board or a move.
+
 ## Click-path budgets (core job -> max steps)
 
 Start state: app loaded at `/` (idle view), name field pre-filled.
@@ -40,6 +49,8 @@ Start state: app loaded at `/` (idle view), name field pre-filled.
 | Play with a name set (host) | **1 click** (0 mandatory for the name) | NameField is pre-filled (AAA or session) → click "Play Online". Typing a name is OPTIONAL keystrokes, never a required step or gate. |
 | Play with a name set (guest) | **1 click + code entry** | NameField pre-filled → click "Join a game" → enter code → Join. (Code entry is the pre-existing join cost, unchanged.) |
 | See the leaderboard | **0 clicks** | Rendered in the idle view on load; no navigation, no expand. |
+| Send a chat message (s014) | **type + 1 action** | In an active online game: focus chat input → type → press **Enter** (1 keystroke, primary arcade path) OR click Send (1 click, equal-weight pointer alt). Both submit + clear. Empty/whitespace submit is a no-op. Sending never costs a move and never moves focus off the chat input. |
+| Read incoming chat (s014) | **0 clicks** | Messages append in-place to the `role=log` live region; no expand/scroll required (scroll-to-bottom is out of s014 scope); screen reader announces additions. |
 
 Binding rule (arcade): name-entry adds NO mandatory click/keystroke to starting
 a game. The default "AAA" means a player can ignore the field entirely. A design

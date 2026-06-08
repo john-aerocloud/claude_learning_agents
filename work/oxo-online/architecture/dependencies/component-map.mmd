@@ -21,6 +21,16 @@ graph LR
   Leaderboard["Leaderboard (NEW)"] --> idleView
   LeaderboardRow["LeaderboardRow (NEW)"] --> Leaderboard
 
+  %% --- s014 NEW components (chat, active-game screen only) ---
+  ChatPanel["ChatPanel (NEW s014)"] --> playing
+  ChatMessageList["ChatMessageList (NEW s014)"] --> ChatPanel
+  ChatMessage["ChatMessage (NEW s014)"] --> ChatMessageList
+  ChatInput["ChatInput (NEW s014)"] --> ChatPanel
+
   classDef changed fill:#e8f4e8,stroke:#2e7d32,stroke-width:2px;
+  class ChatPanel,ChatMessageList,ChatMessage,ChatInput changed;
   %% s009 changed marks CLEARED (2026-06-08 — tester consumed, UC5 in-prod validation PASS, C5 MET)
   %% NameField, Leaderboard, LeaderboardRow — all delivered/stable. SM-1 PASS.
+  %% s014 changed marks ACTIVE (chat components) — tester to consume for the s014 UI
+  %% test plan; ui-designer REMOVES the chat nodes' `changed` marks at s014 delivery
+  %% (v39 REMOVE-not-recolour). Edges are "used by"; chat is confined to `playing`.

@@ -87,6 +87,17 @@ on it. Allowed steps: `4 / 8 / 12 / 16 / 24 / 32 / 48` px
   `@media (prefers-reduced-motion: reduce) { transition: none; }` (2.3.3 path).
   No flashing, no looping animation (no content flashes > 3x/s).
 
+## s014 chat — token usage (NO new token)
+
+The chat surface introduces **no new token** (additive economy). It reuses:
+message text `--text` (≥4.5:1 both schemes, verified s009); sender label `--text`
+or `--text-muted` (≥4.5:1); region/message separation by `--border` hairlines
+(flat — no new elevation); Send button + input focus on `--accent`/`--focus-ring`;
+spacing/gap from the 4px scale; `--radius-sm` on input and Send; any
+message-appear transition uses `--motion-fast` wrapped in the
+`prefers-reduced-motion` path. Sender distinction is LABEL TEXT, never colour
+alone (1.4.1) — so no "self vs other" colour pair is needed or defined.
+
 ## Migration backlog (existing off-token values — NOT fixed this slice)
 
 - `index.css` uses raw `rem` literals and UA default text colour. Converging

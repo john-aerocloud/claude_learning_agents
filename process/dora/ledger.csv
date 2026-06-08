@@ -563,3 +563,6 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-08T07:00:53Z,oxo-online,14,s009-arcade-scoreboard,product,task_end,,success,S009-UC-ACC,
 2026-06-08T07:08:36Z,oxo-online,14,s009-arcade-scoreboard,cicd,task_start,,na,S009-CAP,board-fn deploy-role grant + event-source-mapping + Leaderboard allowlist + §19 prereqs
 2026-06-08T07:10:44Z,oxo-online,14,s009-arcade-scoreboard,cicd,task_end,,success,S009-CAP,"s009 §19: no new oxo-deploy grant needed (board-fn deploys via CDK infra pipeline, not hot-swap); Stream enablement = non-destructive update confirmed; allowlist already covers; zero orphan flags; pipelines green"
+2026-06-08T07:13:40Z,oxo-online,14,s009-arcade-scoreboard,engineer,task_start,,na,S009-ROUTE,thin route 65 AC-ids by UC; impacted-tests scope (EXP-013); §30 Stream skeleton; serial GameRoot seam
+2026-06-08T07:17:45Z,oxo-online,14,s009-arcade-scoreboard,engineer,task_start,,na,S009-ROUTE,"Lay thin route for s009 arcade-scoreboard (waves, stream skeleton, serial GameRoot seam, copy-defect)"
+2026-06-08T07:17:45Z,oxo-online,14,s009-arcade-scoreboard,engineer,task_end,360,success,S009-ROUTE,route.md written: UC1(7)/UC2(7)/UC3(5)/UC4(2) steps + UC5 handoff; §30 board-stream-skeleton Probe A+B gate; kebab class-deps node ids for EXP-013

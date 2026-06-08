@@ -655,3 +655,11 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-08T16:19:14Z,oxo-online,18,s015-chat-scope-done,product,task_start,,na,S015-UC-ACC,assemble use-cases + acceptance (S-SCOPE-1 isolation, T-P95-1, T-GAMEOVER-1, S-regression)
 2026-06-08T16:20:00Z,oxo-online,18,s015-chat-scope-done,product,task_start,,na,S015-UC-ACC,
 2026-06-08T16:22:15Z,oxo-online,18,s015-chat-scope-done,product,task_end,,success,S015-UC-ACC,
+2026-06-08T16:23:14Z,oxo-online,18,s015-chat-scope-done,tester,task_start,,na,S015-UC1,C7 done-condition: cross-game isolation (3 contexts) + formal p95 + game-over chat absent; first validate-impacted run (EXP-019)
+2026-06-08T16:30:29Z,oxo-online,18,s015-chat-scope-done,tester,task_start,,na,532d746,S015-UC1: writing 3 guard specs + test-plan; then validating with smoke-ci
+2026-06-08T16:31:14Z,oxo-online,18,s015-chat-scope-done,tester,validation_run,,fail,532d746:smoke,tests/smoke FAILED via make smoke
+2026-06-08T16:32:55Z,oxo-online,18,s015-chat-scope-done,tester,validation_run,,fail,532d746:smoke,tests/smoke FAILED via make smoke
+2026-06-08T16:34:05Z,oxo-online,18,s015-chat-scope-done,tester,validation_run,,fail,532d746:smoke,tests/smoke FAILED via make smoke
+2026-06-08T16:38:19Z,oxo-online,18,s015-chat-scope-done,tester,validation_run,,fail,532d746:smoke,tests/smoke FAILED via make smoke
+2026-06-08T16:53:04Z,oxo-online,18,s015-chat-scope-done,tester,validation_run,,success,9794c5e576a946becf8abf85aa9fc65ae607fe23:smoke,"91/91 smoke PASS (14.9s) — AC1.1 S-SCOPE-1-isolation, AC1.2 S-SCOPE-1-forged, AC1.3 T-P95-1 p95=196ms, AC1.4 T-GAMEOVER-1, AC1.5 regression; WAF exemption removed"
+2026-06-08T16:53:10Z,oxo-online,18,s015-chat-scope-done,tester,task_end,,success,S015-UC1,"C7 DONE-CONDITION MET: AC1.1-AC1.5 all PASS; 3 guard specs committed (S-SCOPE-1-isolation, S-SCOPE-1-forged, T-P95-1+T-GAMEOVER-1); C1-C7 roadmap COMPLETE"

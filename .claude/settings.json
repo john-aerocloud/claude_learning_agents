@@ -48,6 +48,8 @@
       "Bash(aws ssm describe-parameters *)",
       "Bash(aws secretsmanager describe-secret *)",
       "Bash(aws dynamodb query *)",
+      "Bash(aws dynamodb put-item *)",
+      "Bash(aws dynamodb update-item *)",
       "Bash(node work/oxo-online/scripts/* *)",
       "Bash(aws wafv2 get-web-acl *)",
       "Bash(aws wafv2 list-web-acls *)",

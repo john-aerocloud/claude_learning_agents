@@ -23,6 +23,7 @@ import { LocalGameStore } from './adapters/local-store.ts';
 import { LocalRelay } from './adapters/local-relay.ts';
 import { LocalConnectionStore } from './adapters/local-connection-store.ts';
 import { handleLocalMove } from './move-handler.ts';
+import { handleLocalChat } from './chat-handler.ts';
 import { handleLocalDisconnect } from './disconnect-handler.ts';
 
 const PORT = Number(process.env.LOCAL_WS_PORT ?? 8787);
@@ -74,7 +75,7 @@ wss.on('connection', (ws) => {
   relay.register(connectionId, (message) => send(ws, message));
 
   ws.on('message', async (raw) => {
-    let frame: { action?: string; square?: number; gameId?: string };
+    let frame: { action?: string; square?: number; gameId?: string; text?: string };
     try {
       frame = JSON.parse(String(raw)) as typeof frame;
     } catch {
@@ -116,6 +117,19 @@ wss.on('connection', (ws) => {
       // local stand-up holds one game, so it defaults to GAME_ID when absent.
       await handleLocalMove(
         { connectionId, gameId: frame.gameId ?? GAME_ID, square: frame.square },
+        { store, relay },
+      );
+    }
+    if (frame.action === 'chat') {
+      // s014 UC1 local parity (delta 011 §5): drive the SAME chat decision over
+      // the local adapters + the REAL domain text bound — relay the chat-message
+      // to the OPPONENT + echo to the SENDER (2 posts), identity by connectionId
+      // (never a body field), text normalised. A post to a closed local socket
+      // (no registered sink) is the GoneException analogue: best-effort dropped by
+      // LocalRelay, no retry, no crash. Without this case the two-browser local
+      // send→relay→echo path cannot stand.
+      await handleLocalChat(
+        { connectionId, gameId: frame.gameId ?? GAME_ID, text: String(frame.text ?? '') },
         { store, relay },
       );
     }

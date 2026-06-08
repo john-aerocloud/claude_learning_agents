@@ -64,9 +64,8 @@ describe('policy: gameplay performs no game-state network I/O (D3, T1, S2)', () 
     const userEvent = (await import('@testing-library/user-event')).default;
     const { GameRoot } = await import('./GameRoot');
 
-    const fetchSpy = vi.fn(
-      async (_input: RequestInfo | URL, _init?: RequestInit) =>
-        new Response(JSON.stringify({ entries: [] }), { status: 200 }),
+    const fetchSpy = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
+      async () => new Response(JSON.stringify({ entries: [] }), { status: 200 }),
     );
     const xhrOpen = vi.fn();
     const wsCtor = vi.fn();
@@ -120,9 +119,8 @@ describe('policy: vs-Computer play performs no game-state network I/O (D4, T5, S
     const userEvent = (await import('@testing-library/user-event')).default;
     const { GameRoot } = await import('./GameRoot');
 
-    const fetchSpy = vi.fn(
-      async (_input: RequestInfo | URL, _init?: RequestInit) =>
-        new Response(JSON.stringify({ entries: [] }), { status: 200 }),
+    const fetchSpy = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
+      async () => new Response(JSON.stringify({ entries: [] }), { status: 200 }),
     );
     const xhrOpen = vi.fn();
     const wsCtor = vi.fn();

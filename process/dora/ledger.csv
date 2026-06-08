@@ -556,3 +556,7 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-08T06:45:51Z,oxo-online,14,DEFECT-S002-001,engineer,task_start,,na,DEFECT-S002-001,fix board 3x3 grid CSS + add geometry assertion (EXP-016)
 2026-06-08T06:53:18Z,oxo-online,14,s009-arcade-scoreboard,orchestrator,gate,,success,GATE-3-S009,arch+ui auto-accepted §9a
 2026-06-08T06:53:18Z,oxo-online,14,s009-arcade-scoreboard,product,task_start,,na,S009-UC-ACC,assemble use-cases (§12b two-party model) + acceptance (F + T-LB + WCAG + copy-defect AC)
+2026-06-08T06:54:25Z,oxo-online,14,s009-arcade-scoreboard,product,task_start,,na,S009-UC-ACC,
+2026-06-08T06:55:56Z,oxo-online,14,DEFECT-S002-001,engineer,deploy,,success,cd2edaf:app-deploy-27120930662,app pipeline deploy+smoke green; board-geometry.spec (EXP-016) added to prod smoke
+2026-06-08T06:55:56Z,oxo-online,14,DEFECT-S002-001,engineer,recovery,,rolled_forward,cd2edaf,"DEFECT-S002-001 closed: .board display:grid 3x3; PROD re-check 3 rows (y=79,167,255) x 3 cols (x=512,600,688), 80x80 cells; line symptom gone"
+2026-06-08T06:55:56Z,oxo-online,14,DEFECT-S002-001,engineer,task_end,595,success,DEFECT-S002-001,fix landed cd2edaf; geometry assertion red->green; all app suites + test-local green; prod 3x3 verified

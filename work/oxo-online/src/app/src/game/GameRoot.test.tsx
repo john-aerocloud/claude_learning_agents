@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor, act, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { GameRoot } from './GameRoot';
 import type { ConnectOptions, GameSocket, GameSocketFactory } from './socket';
@@ -1046,5 +1046,139 @@ describe('GameRoot — UC3 leaderboard panel (AC3.2, A11Y-12)', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('boom', { status: 500 }));
     render(<GameRoot />);
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/couldn.t load/i));
+  });
+});
+
+// s014 UC2 — in-game chat wiring. The ChatPanel renders only on the active-game
+// screen (playing-online + result undefined); a send dispatches {action:'chat',
+// gameId, text} over the live socket; a chat-message frame appends to the
+// in-memory list (own echo => "You", opponent => "Opponent"); the list clears on
+// game-end and on opponent-disconnect. F3/F5, AC2.2.
+// @covers spa-online-chat
+describe('GameRoot — in-game chat wiring (s014 UC2, F3, F5)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** Drive the host to the live online board and return the captured socket. */
+  async function hostToBoard(cap: ReturnType<typeof captureFactory>, code: string) {
+    mockGamesFetch({ gameId: `g-${code}`, code });
+    render(<GameRoot socketFactory={cap.factory} />);
+    await userEvent.click(screen.getByRole('button', { name: /play online/i }));
+    await waitFor(() =>
+      expect(screen.getByText(/waiting for opponent/i)).toBeInTheDocument(),
+    );
+    act(() => cap.opts?.onMessage({ type: 'game-ready', role: 'host', gameId: `g-${code}` }));
+    expect(screen.getByTestId('online-role')).toHaveTextContent('You are X');
+  }
+
+  // AC2.2 (scope) — chat is ABSENT off the active-game screen.
+  it('does NOT render the chat panel on the mode selector / idle screen', async () => {
+    mockGamesFetch({ gameId: 'g-IDLE', code: 'IDL234' });
+    render(<GameRoot />);
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /play online/i })).toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId('chat-panel')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('chat-input')).not.toBeInTheDocument();
+  });
+
+  it('does NOT render the chat panel on the waiting screen', async () => {
+    const cap = captureFactory();
+    mockGamesFetch({ gameId: 'g-W234', code: 'WAI234' });
+    render(<GameRoot socketFactory={cap.factory} />);
+    await userEvent.click(screen.getByRole('button', { name: /play online/i }));
+    await waitFor(() =>
+      expect(screen.getByText(/waiting for opponent/i)).toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId('chat-panel')).not.toBeInTheDocument();
+  });
+
+  // F5 / AC2.2 — chat is PRESENT on the active-game screen.
+  it('renders the chat panel on the active-game (playing-online) screen', async () => {
+    const cap = captureFactory();
+    await hostToBoard(cap, 'CHT234');
+    expect(screen.getByRole('region', { name: 'Game chat' })).toBeInTheDocument();
+    expect(screen.getByTestId('chat-input')).toBeInTheDocument();
+    // The board geometry is untouched — the board region still resolves.
+    expect(screen.getByLabelText('online game board')).toBeInTheDocument();
+  });
+
+  // Send path (SP-C1) — a submit dispatches a chat frame over the live socket.
+  it('dispatches {action:chat, gameId, text} on send over the live socket', async () => {
+    const cap = captureFactory();
+    await hostToBoard(cap, 'SND234');
+    await userEvent.type(screen.getByTestId('chat-input'), 'good luck{Enter}');
+    expect(cap.sent).toContainEqual({
+      action: 'chat',
+      gameId: 'g-SND234',
+      text: 'good luck',
+    });
+  });
+
+  // Receive path (SP-C4) — the sender's echo appears as "You"; an opponent relay
+  // appears as "Opponent". The SPA renders on the echo frame (server-authoritative
+  // — never optimistically on the local click).
+  it('appends an echoed chat-message as "You" and an opponent relay as "Opponent"', async () => {
+    const cap = captureFactory();
+    await hostToBoard(cap, 'RCV234');
+    // The host (selfRole=host) sees its own echo labelled "You".
+    act(() =>
+      cap.opts?.onMessage({ action: 'chat-message', sender: 'host', text: 'gl hf' }),
+    );
+    // The opponent's relay (sender=guest) is labelled "Opponent".
+    act(() =>
+      cap.opts?.onMessage({ action: 'chat-message', sender: 'guest', text: 'you too' }),
+    );
+    const rows = within(screen.getByTestId('chat-messages')).getAllByTestId('chat-message');
+    expect(rows).toHaveLength(2);
+    expect(within(rows[0]).getByTestId('chat-message-sender')).toHaveTextContent('You');
+    expect(within(rows[0]).getByTestId('chat-message-text')).toHaveTextContent('gl hf');
+    expect(within(rows[1]).getByTestId('chat-message-sender')).toHaveTextContent('Opponent');
+  });
+
+  // Graceful degradation — when the chat route is not live (no echo arrives), the
+  // send simply produces no message and never crashes (empty-state stays).
+  it('shows no message and does not crash when no echo arrives (route not live)', async () => {
+    const cap = captureFactory();
+    await hostToBoard(cap, 'DEG234');
+    await userEvent.type(screen.getByTestId('chat-input'), 'hello{Enter}');
+    // The send went out, but with no echo back the list stays empty (no optimistic
+    // render) — and the screen is still fully functional.
+    expect(within(screen.getByTestId('chat-messages')).queryByTestId('chat-message')).toBeNull();
+    expect(screen.getByText('No messages yet — say hi.')).toBeInTheDocument();
+    expect(screen.getByLabelText('online game board')).toBeInTheDocument();
+  });
+
+  // Chat is gone after game-over (input absent; in-memory list cleared on session
+  // end so a fresh game starts clean). Slice scope: "input is absent after
+  // game-over".
+  it('removes the chat input once a game-over frame arrives', async () => {
+    const cap = captureFactory();
+    await hostToBoard(cap, 'END234');
+    act(() => cap.opts?.onMessage({ action: 'chat-message', sender: 'host', text: 'hi' }));
+    expect(within(screen.getByTestId('chat-messages')).getAllByTestId('chat-message')).toHaveLength(1);
+    act(() => cap.opts?.onMessage({ type: 'game-over', result: 'X-wins' }));
+    // Result shown; the chat input is no longer present (game no longer active).
+    expect(screen.getByTestId('online-result')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-input')).not.toBeInTheDocument();
+  });
+
+  // On opponent-disconnect the session ends and the in-memory chat list is
+  // cleared — a subsequent online game starts with an empty chat (no leak).
+  it('clears the in-memory chat list when the online session ends (disconnect)', async () => {
+    const cap = captureFactory();
+    await hostToBoard(cap, 'CLR234');
+    act(() => cap.opts?.onMessage({ action: 'chat-message', sender: 'guest', text: 'hi' }));
+    act(() => cap.opts?.onMessage({ type: 'opponent-disconnected' }));
+    expect(screen.getByTestId('opponent-disconnected')).toBeInTheDocument();
+    // Start a fresh online game; the chat list must be empty (cleared on end).
+    mockGamesFetch({ gameId: 'g-FR234', code: 'FRH234' });
+    await userEvent.click(screen.getByRole('button', { name: /play online/i }));
+    await waitFor(() =>
+      expect(screen.getByText(/waiting for opponent/i)).toBeInTheDocument(),
+    );
+    act(() => cap.opts?.onMessage({ type: 'game-ready', role: 'host', gameId: 'g-FR234' }));
+    expect(within(screen.getByTestId('chat-messages')).queryByTestId('chat-message')).toBeNull();
   });
 });

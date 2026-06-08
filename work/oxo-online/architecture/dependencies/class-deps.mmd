@@ -277,6 +277,34 @@ flowchart TD
   %% UC1 local-parity edge: the local WS server's chat case relays+echoes over the
   %% SAME local relay adapter (closed-socket simulates GoneException).
   adapter-local-relay -->|local chat relay+echo case drives the same 2-post fan-out| domain-chat
+
+  %% ==== s014 in-game chat (UC2 chat UI — SPA) — appended; classDef s014changed ====
+  %% classDef s014changed marks THIS slice's new SPA chat seams. CLIENT-ONLY: no
+  %% new port, no adapter, no backend edge — the chat send rides the EXISTING WS
+  %% client transport seam (socket.ts), the SAME seam s006/s007 use. ACTUAL runtime
+  %% path traced (NOT assumed — the s007 unmarked-forward-edge lesson): a chat send
+  %% dispatches {action:chat,gameId,text} via spaWsClient; an inbound chat-message
+  %% frame is appended to in-memory React state and rendered. CRUCIALLY the GUEST
+  %% owns its socket through spaJoinScreen, so chat-message frames for the guest are
+  %% FORWARDED by spaJoinScreen to spa-online-chat's handler (routing parity with
+  %% board-update/game-over/opponent-disconnected) — without this forward edge the
+  %% guest never sees chat. That forward edge is marked here (NOT left implicit).
+  spa-online-chat["spa-online-chat<br/>src/app/src/game/GameRoot.tsx (UC2) — chat send (sendChat→{action:chat}),<br/>chat-message append to in-memory list (cleared on game-end/disconnect/leave),<br/>renders ChatPanel below board only while result===undefined (F5)"]:::s014changed
+  chat-panel["chat-panel<br/>src/app/src/game/ChatPanel.tsx — region 'Game chat' (WCAG-S014-2),<br/>composes ChatMessageList + ChatInput below the board (LAYOUT-S014-1)"]:::s014changed
+  chat-message-list["chat-message-list<br/>src/app/src/game/ChatMessageList.tsx — role=log aria-live=polite<br/>aria-relevant=additions (WCAG-S014-3); empty-state copy; vertical stack"]:::s014changed
+  chat-message["chat-message<br/>src/app/src/game/ChatMessage.tsx — sender label TEXT (You/Opponent, WCAG-S014-7)<br/>+ text via React {text} interpolation ONLY (T-CHAT-3/WCAG-S014-8, no raw-HTML sink)"]:::s014changed
+  chat-input["chat-input<br/>src/app/src/game/ChatInput.tsx — labelled textbox 'Chat message' + Send btn,<br/>Enter/click submit, whitespace no-op, focus-stays-on-send, never autofocus (WCAG-S014-1/5/6)"]:::s014changed
+
+  %% UC2 edges (ACTUAL runtime path): GameRoot composes the panel and rides the
+  %% existing WS client seam for send + chat-message receipt.
+  spa-online-chat -->|composes ChatPanel (messages, selfRole, onSend)| chat-panel
+  spa-online-chat -->|sends {action:chat} / appends chat-message on receipt| spaWsClient
+  chat-panel -->|renders the message log| chat-message-list
+  chat-panel -->|renders the send control| chat-input
+  chat-message-list -->|one row per message| chat-message
+  %% UC2 guest-path forward edge (the seam that would be DROPPED if unmarked): the
+  %% guest's socket owner forwards chat-message to GameRoot's chat handler.
+  spaJoinScreen -->|forwards chat-message frame (guest path)| spa-online-chat
   classDef s014changed fill:#fff3e0,stroke:#e65100,stroke-width:3px,color:#000;
 
   %% s006 changed marks CLEARED (2026-06-07 — tester consumed, UC6 prod validation PASS).

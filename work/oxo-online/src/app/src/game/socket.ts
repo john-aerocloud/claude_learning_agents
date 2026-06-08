@@ -80,12 +80,33 @@ export interface OpponentDisconnectedMessage {
   type: 'opponent-disconnected';
 }
 
+/**
+ * In-game chat relay/echo frame (s014 UC2). The `chat` handler posts this to
+ * BOTH players' connections on an accepted `chat` send: once to the opponent
+ * (relay) and once back to the sender (echo, SP-C3) so both screens update via
+ * the SAME render path. `sender` is the sender's role, DERIVED SERVER-SIDE from
+ * the connectionId↔stored-binding match (NEVER a client claim — T-CHAT-2); the
+ * viewer resolves "You"/"Opponent" by comparing it to its own role. `text` is
+ * the server-normalised message string and is rendered ONLY via React text
+ * interpolation `{text}` — never a raw-HTML sink (T-CHAT-3 / WCAG-S014-8).
+ *
+ * NB this frame uses an `action` discriminant (mirroring the wire shape the WS
+ * route emits), distinct from the `type`-discriminated game frames above; the
+ * SPA handler narrows on the presence of `'action' in message`.
+ */
+export interface ChatMessage {
+  action: 'chat-message';
+  sender: 'host' | 'guest';
+  text: string;
+}
+
 export type ServerMessage =
   | GameReadyMessage
   | ServerErrorMessage
   | BoardUpdateMessage
   | GameOverMessage
-  | OpponentDisconnectedMessage;
+  | OpponentDisconnectedMessage
+  | ChatMessage;
 
 /** A client-to-server action frame. */
 export type ClientFrame =
@@ -97,7 +118,12 @@ export type ClientFrame =
   | { action: 'register'; gameId: string }
   // GATE-AMEND (s006): the move frame carries gameId as a non-trusted lookup key
   // (the server uses it ONLY as the GetItem key; identity stays connectionId).
-  | { action: 'move'; gameId: string; square: number };
+  | { action: 'move'; gameId: string; square: number }
+  // s014 UC2 (SP-C1): the chat send frame. `gameId` is the non-trusted lookup
+  // hint (same pattern as `move` — the server authenticates by connectionId and
+  // derives senderRole from the stored binding, NEVER from this frame). `text`
+  // is the user-supplied string; the server trims/caps/strips it before relay.
+  | { action: 'chat'; gameId: string; text: string };
 
 export interface GameSocket {
   /** Send an action frame to the server. */

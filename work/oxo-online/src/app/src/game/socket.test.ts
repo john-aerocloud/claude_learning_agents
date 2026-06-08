@@ -1,11 +1,28 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { createRealSocketFactory, type ServerMessage } from './socket';
+import {
+  createRealSocketFactory,
+  type ServerMessage,
+  type ClientFrame,
+} from './socket';
 
 // s007 UC3 contract (compile-time): the ServerMessage union admits the
 // opponent-disconnected frame the survivor receives. This fails `tsc`/build
 // until the union gains the member — the type-level red for UC3-S1.
 const _opponentDisconnected: ServerMessage = { type: 'opponent-disconnected' };
 void _opponentDisconnected;
+
+// s014 UC2 contract (compile-time): the ClientFrame union admits the chat send
+// frame and the ServerMessage union admits the chat-message relay/echo frame.
+// These fail `tsc`/build until the unions gain the members — the type-level red
+// for UC2-SP1 (the chat wire shapes the SPA sends and receives).
+const _chatSend: ClientFrame = { action: 'chat', gameId: 'g1', text: 'hi' };
+void _chatSend;
+const _chatMessage: ServerMessage = {
+  action: 'chat-message',
+  sender: 'host',
+  text: 'hi',
+};
+void _chatMessage;
 
 /**
  * A controllable fake of the browser `WebSocket`. Tests drive `open`, inbound

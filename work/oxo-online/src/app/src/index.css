@@ -270,8 +270,141 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .name-input,
   .copy-controls button,
-  .leaderboard-panel * {
+  .leaderboard-panel *,
+  .chat-input,
+  .chat-send-btn {
     transition: none !important;
     animation: none !important;
   }
+}
+
+/* ===== s014 UC2 in-game chat (WCAG-S014-1..10 + LAYOUT-S014-1) =============
+ * The chat panel is a SIBLING region BELOW the board (LAYOUT-S014-1): block flow
+ * places it after .online-board, so its bounding-box top is below the board's
+ * bottom — the 3×3 grid geometry is undisturbed (never inside the board). Tokens
+ * are the s009 design-system semantic tokens; no new colour token (WCAG-S014-9:
+ * --text ≥4.5:1 vs --surface in both schemes, --text-muted ≥4.5:1, verified s009).
+ */
+.chat-panel {
+  max-width: 32rem;
+  margin: var(--space-6) auto 0;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+  text-align: left;
+}
+
+.chat-heading {
+  font-size: var(--text-lg);
+  margin: 0 0 var(--space-3);
+  color: var(--text);
+}
+
+/* LAYOUT-S014-1: messages stack VERTICALLY (column) — never side-by-side. */
+.chat-messages {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  list-style: none;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  max-height: 14rem;
+  overflow-y: auto;
+}
+
+.chat-message {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+
+/* WCAG-S014-7: sender distinction is the LABEL TEXT, not colour alone. */
+.chat-message-sender {
+  flex: 0 0 auto;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.chat-message-text {
+  color: var(--text);
+  word-break: break-word;
+  /* 200-char cap keeps a single message bounded; wrap long words. */
+  overflow-wrap: anywhere;
+}
+
+.chat-empty {
+  list-style: none;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.chat-input-form {
+  display: flex;
+  gap: var(--space-2);
+  align-items: stretch;
+}
+
+.chat-input-label {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  /* Visually-hidden but programmatically associated (WCAG-S014-1): the heading
+   * + placeholder-free field keep the visible affordance; the label names it
+   * for assistive tech. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.chat-input {
+  flex: 1 1 auto;
+  /* WCAG-S014-4: target ≥ 24×24 CSS px (well above with this min-height). */
+  min-height: 2.5rem;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-md);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  transition: border-color var(--motion-fast);
+}
+
+.chat-input:hover {
+  border-color: var(--accent);
+}
+
+.chat-input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-color: var(--accent);
+}
+
+.chat-send-btn {
+  flex: 0 0 auto;
+  /* WCAG-S014-4: ≥ 24×24 CSS px target. */
+  min-height: 2.5rem;
+  min-width: 4rem;
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-md);
+  border-radius: var(--radius-sm);
+  /* WCAG-S014-9: text-on-accent ≥ 4.5:1 — white on --accent in both schemes. */
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+  cursor: pointer;
+  transition: opacity var(--motion-fast);
+}
+
+.chat-send-btn:hover {
+  opacity: 0.9;
+}
+
+.chat-send-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }

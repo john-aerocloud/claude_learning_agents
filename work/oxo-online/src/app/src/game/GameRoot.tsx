@@ -5,6 +5,7 @@ import { Board } from './Board';
 import { Status } from './Status';
 import { JoinScreen } from './JoinScreen';
 import { OnlineBoard } from './OnlineBoard';
+import { ChatPanel } from './ChatPanel';
 import { NameField } from './NameField';
 import { normaliseName, DEFAULT_NAME } from './name';
 import { Leaderboard } from './Leaderboard';
@@ -14,6 +15,7 @@ import {
   type GameSocket,
   type GameSocketFactory,
   type ServerMessage,
+  type ChatMessage,
 } from './socket';
 
 const EMPTY_BOARD_STRING = '---------';
@@ -135,6 +137,12 @@ export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameR
   const [wsToken, setWsToken] = useState<string | null>(null);
   const [onlineRole, setOnlineRole] = useState<'host' | 'guest'>('host');
   const [onlineGame, setOnlineGame] = useState<OnlineGameState>(INITIAL_ONLINE_STATE);
+  // s014 UC2 — the in-memory chat log. Local React state ONLY: never persisted,
+  // and cleared on every online-session boundary (game-end, opponent-disconnect,
+  // leaving the online flow) so a fresh game starts with an empty chat (SP-C4 /
+  // slice "in-memory: no persistence"). Both the player's own echo and the
+  // opponent's relay arrive as `chat-message` frames and append here.
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const spinnerTimer = useRef<ReturnType<typeof setTimeout>>();
   const hostSocketRef = useRef<GameSocket | null>(null);
   // The live socket carrying this player's moves and broadcasts. For the host
@@ -157,6 +165,17 @@ export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameR
   // degrades to the readable online-error screen rather than white-screening.
   // The JoinScreen handles its own pre-game-ready error frames inline.
   const handleGameReady = (message: ServerMessage, socket?: GameSocket) => {
+    // s014 UC2 (SP-C4): a chat-message frame (own echo OR opponent relay) appends
+    // to the in-memory list via the SAME render path for both. The chat frame is
+    // discriminated by `action` (the WS route's wire shape), distinct from the
+    // `type`-discriminated game frames below — narrow on it first.
+    if ('action' in message) {
+      // Only the chat-message frame carries `action` (all game frames are
+      // `type`-discriminated); appending it here also excludes it from the
+      // `type` narrowing below so tsc resolves the remaining union cleanly.
+      setChatMessages((list) => [...list, message]);
+      return;
+    }
     if (message.type === 'game-ready') {
       if (socket) playSocketRef.current = socket;
       // GATE-AMEND (s006): the game-ready frame is the SPA's single consistent
@@ -167,6 +186,8 @@ export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameR
       resultShownRef.current = false;
       setOnlineRole(message.role);
       setOnlineGame(INITIAL_ONLINE_STATE);
+      // s014 UC2: a fresh game starts with an empty chat (no leak across games).
+      setChatMessages([]);
       setOnlinePhase('playing-online');
     } else if (message.type === 'board-update') {
       setOnlineGame((g) => ({
@@ -206,6 +227,8 @@ export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameR
     setGameId(null);
     setWsToken(null);
     setOnlineGame(INITIAL_ONLINE_STATE);
+    // s014 UC2: chat is in-memory only — drop it when the session ends (SP-C4).
+    setChatMessages([]);
     setOnlinePhase(phase);
   };
 
@@ -216,6 +239,19 @@ export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameR
     const id = playGameIdRef.current;
     if (!id) return; // no gameId yet (pre game-ready) — nothing to address.
     playSocketRef.current?.send({ action: 'move', gameId: id, square });
+  };
+
+  // s014 UC2 (SP-C1): send a chat message over the live socket. Server-
+  // authoritative — the message is NOT rendered optimistically; it appears only
+  // when the server echoes it back as a `chat-message` frame (SP-C3/SP-C4),
+  // consistent with the move loop. If the chat route is not live (no echo
+  // arrives) the SPA simply shows no message and never crashes — graceful
+  // degradation. ChatInput has already trimmed-non-empty the text (no-op guard);
+  // the server re-trims/caps/strips authoritatively (T-CHAT-4).
+  const sendChat = (text: string) => {
+    const id = playGameIdRef.current;
+    if (!id) return; // no gameId yet (pre game-ready) — nothing to address.
+    playSocketRef.current?.send({ action: 'chat', gameId: id, text });
   };
 
   const onSelect = (index: number) => {
@@ -352,6 +388,7 @@ export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameR
     setGameId(null);
     setWsToken(null);
     setOnlineGame(INITIAL_ONLINE_STATE);
+    setChatMessages([]);
     playSocketRef.current = null;
     playGameIdRef.current = null;
     resultShownRef.current = false;
@@ -363,6 +400,7 @@ export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameR
     setGameId(null);
     setWsToken(null);
     setOnlineGame(INITIAL_ONLINE_STATE);
+    setChatMessages([]);
     playSocketRef.current = null;
     playGameIdRef.current = null;
     resultShownRef.current = false;
@@ -465,13 +503,30 @@ export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameR
         />
       )}
       {onlinePhase === 'playing-online' && (
-        <OnlineBoard
-          role={onlineRole}
-          board={onlineGame.board}
-          currentTurn={onlineGame.currentTurn}
-          result={onlineGame.result}
-          onMove={sendMove}
-        />
+        <>
+          <OnlineBoard
+            role={onlineRole}
+            board={onlineGame.board}
+            currentTurn={onlineGame.currentTurn}
+            result={onlineGame.result}
+            onMove={sendMove}
+          />
+          {/* s014 UC2: chat is a SIBLING region BELOW the board (LAYOUT-S014-1 —
+              never inside the board container, so the 3×3 grid is undisturbed).
+              The input/Send are present ONLY while the game is genuinely active
+              (result === undefined); once a game-over frame sets result the chat
+              input is absent (slice scope / F5). The message list itself is part
+              of the panel; on game-over the whole panel unmounts with the board's
+              still-mounted result view, consistent with "input absent after
+              game-over". */}
+          {onlineGame.result === undefined && (
+            <ChatPanel
+              messages={chatMessages}
+              selfRole={onlineRole}
+              onSend={sendChat}
+            />
+          )}
+        </>
       )}
       {onlinePhase === 'disconnected' && (
         <section

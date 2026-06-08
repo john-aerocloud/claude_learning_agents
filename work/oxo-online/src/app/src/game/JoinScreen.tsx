@@ -138,6 +138,20 @@ export function JoinScreen({
       // (UC4/AC4.1, T8).
       credential: { code },
       onMessage: (message) => {
+        // s014 UC2: a chat-message frame (discriminated by `action`, not `type`)
+        // arrives over THIS guest socket as the opponent relay or the guest's own
+        // echo. The guest owns its socket here, so JoinScreen MUST forward it to
+        // GameRoot's handler — routing parity with board-update/game-over — or the
+        // guest would never see chat (the same live-transport seam s007 fixed for
+        // opponent-disconnected). Mocked-socket component tests can't see this
+        // forward edge; the local two-browser spec is the standing regression.
+        if ('action' in message) {
+          // Only the chat-message frame carries `action` (all game frames are
+          // `type`-discriminated) — forward it and exclude it from the narrowing
+          // below so tsc resolves the remaining union to the `type` frames.
+          onGameReady?.(message, socketRef.current as GameSocket);
+          return;
+        }
         if (message.type === 'game-ready') {
           // Hand the live socket up so the parent's move loop can send moves and
           // route board-update/game-over over THIS guest connection (UC4).

@@ -663,3 +663,5 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-08T16:38:19Z,oxo-online,18,s015-chat-scope-done,tester,validation_run,,fail,532d746:smoke,tests/smoke FAILED via make smoke
 2026-06-08T16:53:04Z,oxo-online,18,s015-chat-scope-done,tester,validation_run,,success,9794c5e576a946becf8abf85aa9fc65ae607fe23:smoke,"91/91 smoke PASS (14.9s) — AC1.1 S-SCOPE-1-isolation, AC1.2 S-SCOPE-1-forged, AC1.3 T-P95-1 p95=196ms, AC1.4 T-GAMEOVER-1, AC1.5 regression; WAF exemption removed"
 2026-06-08T16:53:10Z,oxo-online,18,s015-chat-scope-done,tester,task_end,,success,S015-UC1,"C7 DONE-CONDITION MET: AC1.1-AC1.5 all PASS; 3 guard specs committed (S-SCOPE-1-isolation, S-SCOPE-1-forged, T-P95-1+T-GAMEOVER-1); C1-C7 roadmap COMPLETE"
+2026-06-08T16:55:19Z,oxo-online,18,s015-chat-scope-done,orchestrator,gate,,success,ROADMAP-COMPLETE,C7 closed; C1-C7 delivered; documenter+final retro
+2026-06-08T16:56:10Z,oxo-online,18,s015-chat-scope-done,orchestrator,gate,,success,RETRO-S015,C7 closed; roadmap complete; EXP-019 carried; no v-bump

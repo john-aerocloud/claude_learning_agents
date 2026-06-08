@@ -2,6 +2,7 @@ import * as path from 'path';
 import * as cdk from 'aws-cdk-lib';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as lambdaeventsources from 'aws-cdk-lib/aws-lambda-event-sources';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as apigatewayv2 from 'aws-cdk-lib/aws-apigatewayv2';
 import * as apigatewayv2integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
@@ -61,6 +62,14 @@ export class OxoGameStack extends cdk.Stack {
       encryption: dynamodb.TableEncryption.AWS_MANAGED,
       timeToLiveAttribute: 'ttl',
       removalPolicy: cdk.RemovalPolicy.RETAIN,
+      // s009 (delta 010 §3) — DynamoDB Stream on Games (NEW_AND_OLD_IMAGES). The
+      // move CAS already flips status active→won/drawn in ONE atomic write; the
+      // stream record carries OLD+NEW images so oxo-board-fn sees the transition
+      // directly (no extra Games read — hence NO Games table grant on board-fn).
+      // Enabling a stream on an EXISTING table is a NON-DESTRUCTIVE UpdateTable
+      // (the base KeySchema gameId HASH is unchanged) — cicd confirmed CDK emits
+      // an update, not a replacement. Pinned by game-stack-s009.test.ts.
+      stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
     });
 
     // -------------------------------------------------------------------------
@@ -677,5 +686,146 @@ exports.handler = async (event) => {
     connectRoute.authorizationType = 'CUSTOM';
     connectRoute.authorizerId = wsAuthorizer.ref;
     connectRoute.addDependency(wsAuthorizer);
+
+    // =========================================================================
+    // s009 arcade-scoreboard (delta 010) — Leaderboard table + DynamoDB Stream
+    // consumer (oxo-board-fn) + read-route Scan grant. All additive, in this
+    // SAME OxoGameProd stack (delta §1 — no new cross-stack data-plane import).
+    // =========================================================================
+
+    // -------------------------------------------------------------------------
+    // Leaderboard — the system's FIRST and ONLY durable (non-TTL) table.
+    //   - PK playerName (S): the entered name IS the key (arcade name-as-key;
+    //     collisions accumulate on one row BY DESIGN, SM-2). No sort key, no GSI.
+    //   - Attributes wins/draws/losses (N) + scoredGames (SS) are absent-on-create
+    //     and materialised by the conditional ADD writes — not declared here.
+    //   - PITR ENABLED (delta §1): standings must survive. This is a binding
+    //     requirement, not an option (first durable store — all others TTL-ephemeral).
+    //   - NO TTL (named explicitly so the ABSENCE is a decision, not an omission).
+    //   - On-demand billing; SSE (AWS-managed key); RETAIN on stack delete.
+    // -------------------------------------------------------------------------
+    const leaderboardTable = new dynamodb.Table(this, 'LeaderboardTable', {
+      tableName: 'oxo-leaderboard',
+      partitionKey: { name: 'playerName', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
+    // -------------------------------------------------------------------------
+    // oxo-board-fn — the DynamoDB Stream consumer (tally writer). NO HTTP
+    // surface; build-sha in the structured log line is its build-identity carrier.
+    // Dedicated least-privilege role (T-LB-9):
+    //   - stream-read on the Games STREAM ARN only (the OLD+NEW images are in the
+    //     record — it NEVER reads the Games table, so NO Games table grant);
+    //   - UpdateItem on the Leaderboard ARN only (NO Scan/Query/Delete/Get/Put);
+    //   - own CloudWatch Logs group.
+    // -------------------------------------------------------------------------
+    const boardRole = new iam.Role(this, 'BoardFunctionRole', {
+      assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+      description: 'oxo-board-fn execution role - least privilege (s009).',
+    });
+    boardRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'OwnLogGroup',
+        effect: iam.Effect.ALLOW,
+        actions: [
+          'logs:CreateLogGroup',
+          'logs:CreateLogStream',
+          'logs:PutLogEvents',
+        ],
+        resources: [
+          `arn:aws:logs:${this.region}:${this.account}:log-group:/aws/lambda/oxo-board-fn:*`,
+        ],
+      }),
+    );
+    // T-LB-9 — UpdateItem on the Leaderboard ARN ONLY. The conditional ADD with
+    // the scoredGames set-marker (single-item CAS) is the only write board-fn
+    // makes. NO Scan/Query/Delete/Get/Put — pinned by game-stack-s009.test.ts.
+    boardRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'LeaderboardConditionalUpdate',
+        effect: iam.Effect.ALLOW,
+        actions: ['dynamodb:UpdateItem'],
+        resources: [leaderboardTable.tableArn],
+      }),
+    );
+
+    const boardBuildSha: string =
+      (this.node.tryGetContext('buildSha') as string) ??
+      process.env.BUILD_SHA ??
+      'dev';
+
+    const boardFunction = new lambda.Function(this, 'BoardFunction', {
+      functionName: 'oxo-board-fn',
+      runtime: lambda.Runtime.NODEJS_20_X,
+      // The board build (tsconfig.board.json, rootDir=lambda root) nests the
+      // handler at board/dist/board/handler.js (mirrors games/ + ws/ patterns).
+      handler: 'board/handler.handler',
+      code: lambda.Code.fromAsset(
+        path.join(__dirname, '..', '..', 'lambda', 'board', 'dist'),
+      ),
+      role: boardRole,
+      environment: {
+        LEADERBOARD_TABLE: leaderboardTable.tableName,
+        BUILD_SHA: boardBuildSha,
+      },
+      reservedConcurrentExecutions: 5,
+      timeout: cdk.Duration.seconds(10),
+      memorySize: 256,
+    });
+
+    // -------------------------------------------------------------------------
+    // Event-source mapping: Games stream → oxo-board-fn (AC2.2). The filter
+    // criteria are the FIRST-LINE waste cut (the idempotency marker is the
+    // CORRECTNESS gate): only the active→{won,drawn} MODIFY transition is
+    // delivered — never the many board-update MODIFYs during play, never the
+    // create INSERT, never active→abandoned (SM-5). `grantStreamRead` adds
+    // EXACTLY the four stream-read actions on the STREAM ARN (no table grant).
+    // -------------------------------------------------------------------------
+    boardFunction.addEventSource(
+      new lambdaeventsources.DynamoEventSource(gamesTable, {
+        startingPosition: lambda.StartingPosition.LATEST,
+        batchSize: 10,
+        retryAttempts: 3,
+        // A poison record (realistically a transient throttle; board-fn swallows
+        // ConditionalCheckFailed) must not wedge the shard. board-fn is off the
+        // game hot path, so bisect+retry never affects play.
+        bisectBatchOnError: true,
+        reportBatchItemFailures: true,
+        // Two filters (OR semantics across filters): active→won and active→drawn.
+        // A single filter cannot express NEW.status ∈ {won,drawn}; the
+        // event-source mapping evaluates filters as a disjunction, so each
+        // terminal transition gets its own pattern. Either way OLD.status=active
+        // AND eventName=MODIFY gate out non-transition MODIFYs (board-update) and
+        // active→abandoned (SM-5). The idempotency marker is the correctness gate.
+        filters: [
+          lambda.FilterCriteria.filter({
+            eventName: lambda.FilterRule.isEqual('MODIFY'),
+            dynamodb: {
+              OldImage: { status: { S: lambda.FilterRule.isEqual('active') } },
+              NewImage: { status: { S: lambda.FilterRule.isEqual('won') } },
+            },
+          }),
+          lambda.FilterCriteria.filter({
+            eventName: lambda.FilterRule.isEqual('MODIFY'),
+            dynamodb: {
+              OldImage: { status: { S: lambda.FilterRule.isEqual('active') } },
+              NewImage: { status: { S: lambda.FilterRule.isEqual('drawn') } },
+            },
+          }),
+        ],
+      }),
+    );
+
+    // -------------------------------------------------------------------------
+    // s009 UC3-backend — oxo-game-fn gains EXACTLY dynamodb:Scan on the
+    // Leaderboard ARN (the GET /api/leaderboard top-N read). NO other Leaderboard
+    // action; existing Games/Codes PutItem grants unchanged (T-LB-9 / AC3.7).
+    // The bound is pinned here in code; the read handler issues Scan ONLY.
+    // -------------------------------------------------------------------------
+    leaderboardTable.grant(gameFunction, 'dynamodb:Scan');
+    gameFunction.addEnvironment('LEADERBOARD_TABLE', leaderboardTable.tableName);
   }
 }

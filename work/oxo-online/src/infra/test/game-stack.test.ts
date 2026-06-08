@@ -15,9 +15,9 @@ function synth(): Template {
 }
 
 describe('OxoGameStack — DynamoDB tables exist (Step 4 harness; s005 adds Connections, s005-h2 adds ConnectAttempts, s005-h3 adds Codes)', () => {
-  it('synthesises exactly four DynamoDB tables (Games + Connections + ConnectAttempts + Codes)', () => {
+  it('synthesises exactly five DynamoDB tables (Games + Connections + ConnectAttempts + Codes + Leaderboard — s009)', () => {
     const template = synth();
-    template.resourceCountIs('AWS::DynamoDB::Table', 4);
+    template.resourceCountIs('AWS::DynamoDB::Table', 5);
   });
 });
 
@@ -92,7 +92,13 @@ describe('OxoGameStack — Lambda oxo-game-fn (T3, T5, S3)', () => {
     expect(fn.Properties.ReservedConcurrentExecutions).toBeGreaterThan(0);
   });
 
-  it('grants only dynamodb:PutItem on the Games table ARN — no wildcard, no read/scan (T3)', () => {
+  it('grants PutItem on Games/Codes + Scan on Leaderboard only — no wildcard, no other action (T3, s009 AC3.7)', () => {
+    // s009 (delta 010): game-fn legitimately gains dynamodb:Scan on the
+    // Leaderboard ARN (the GET /api/leaderboard read). The previous "every DDB
+    // grant is exactly PutItem" pin is superseded: each DDB statement is now
+    // EITHER PutItem (Games/Codes) OR Scan (Leaderboard) — never a wildcard, never
+    // a read/scan/delete on Games/Codes. The tight Leaderboard bound (Scan only)
+    // is pinned in game-stack-s009.test.ts.
     const template = synth();
     const roles = template.findResources('AWS::IAM::Role');
     const gameRoleId = Object.keys(roles).find((id) =>
@@ -119,7 +125,14 @@ describe('OxoGameStack — Lambda oxo-game-fn (T3, T5, S3)', () => {
     for (const stmt of ddbStatements) {
       const action = stmt.Action;
       const actions = Array.isArray(action) ? action : [action];
-      expect(actions).toEqual(['dynamodb:PutItem']);
+      const resJson = JSON.stringify(stmt.Resource);
+      if (resJson.includes('Leaderboard')) {
+        // The ONLY action on the Leaderboard ARN is Scan.
+        expect(actions).toEqual(['dynamodb:Scan']);
+      } else {
+        // Games / Codes — still strictly PutItem.
+        expect(actions).toEqual(['dynamodb:PutItem']);
+      }
       expect(stmt.Resource).not.toBe('*');
       const resources = Array.isArray(stmt.Resource)
         ? stmt.Resource
@@ -643,15 +656,21 @@ describe('OxoGameStack — AC-5 IAM PIN: oxo-game-fn gains EXACTLY PutItem on Co
     }
   });
 
-  it('every game-fn DDB grant is exactly PutItem (Games + Codes), no wildcard resource', () => {
-    // The aggregate role action-set stays minimal: the s005-h2 SSM secret read is
-    // not a DDB action; the only DDB actions on this role are PutItem (Games) and
-    // PutItem (Codes). No widening into read/scan/delete across the whole role.
+  it('every game-fn DDB grant is PutItem (Games+Codes) or Scan (Leaderboard), no wildcard resource', () => {
+    // s009 (delta 010): the aggregate role DDB action-set is PutItem (Games),
+    // PutItem (Codes), and Scan (Leaderboard) — the only s009 widening (AC3.7).
+    // The s005-h2 SSM secret read is not a DDB action. No read/delete on
+    // Games/Codes; no UpdateItem/Query/Get on Leaderboard; no wildcard resource.
     const template = synth();
     const stmts = gameFnDdbStatements(template);
-    expect(stmts.length).toBeGreaterThanOrEqual(2);
+    expect(stmts.length).toBeGreaterThanOrEqual(3);
     for (const s of stmts) {
-      expect(actionList(s)).toEqual(['dynamodb:PutItem']);
+      const resJson = JSON.stringify(s.Resource);
+      if (resJson.includes('Leaderboard')) {
+        expect(actionList(s)).toEqual(['dynamodb:Scan']);
+      } else {
+        expect(actionList(s)).toEqual(['dynamodb:PutItem']);
+      }
       const resources = Array.isArray(s.Resource) ? s.Resource : [s.Resource];
       for (const r of resources) {
         expect(r).not.toBe('*');

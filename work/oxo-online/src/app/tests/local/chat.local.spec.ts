@@ -12,15 +12,14 @@ import { test, expect, type Page } from '@playwright/test';
  * deploy, and pins LAYOUT-S014-1 geometry + the display-side XSS-as-text control
  * against real CSS + real React rendering.
  *
- * SKIP-GATE (NO silent skip — declared in the engineer return): this suite is
- * test.skip-gated until the LAMBDA engineer lands the local WS server `chat`
- * route (src/app/local/ — relay to the other connection + echo to sender). The
- * UC2 SPA is complete and its component tests are green; this two-browser proof
- * needs the local relay parity to stand. Flip CHAT_LOCAL_READY=1 (or remove the
- * gate) once `npm run local`'s WS server handles the `chat` action. Tracked as
- * the UC1↔UC2 local-parity seam in use-cases.md §infra-enabler-4.
+ * LOCAL-PARITY: this suite drives the LAMBDA engineer's local WS server `chat`
+ * route (landed on trunk — src/app/local/server.ts + chat-handler.ts: relay to
+ * the other connection + echo to sender). It is UN-gated and runs as standing
+ * regression in `make test-local`. (During the build it was test.skip-gated on
+ * `CHAT_LOCAL_READY` until that local relay landed — the gate is retained as an
+ * escape hatch but defaults ON now the parity is in.)
  */
-const CHAT_LOCAL_READY = process.env.CHAT_LOCAL_READY === '1';
+const CHAT_LOCAL_READY = process.env.CHAT_LOCAL_READY !== '0';
 
 const STABLE = {
   playOnline: /play online/i,
@@ -87,23 +86,39 @@ test.describe('UC2 local stand-up — in-game chat (real browser)', () => {
     }
   });
 
-  // F3 — XSS injection renders as literal text; no <img> node, no script run.
-  test('an injection string renders as literal text, no <img> node (T-CHAT-3)', async ({ browser }) => {
+  // F3 / T-CHAT-3 — an injection attempt never becomes an executable node in the
+  // recipient's DOM. End-to-end BOTH controls are active: the server strips
+  // `<>&"'` before relay (T-CHAT-4 depth) AND React renders the result as text
+  // (T-CHAT-3 display — THE control). The display-side render-as-text guarantee
+  // (raw string in → literal textContent, no node) is pinned exactly in the
+  // ChatMessage component test (AC2.10); here we pin the end-to-end USER symptom:
+  // no <img> node, no script execution, message shown as plain text.
+  test('an injection attempt creates no <img> node and renders as plain text (T-CHAT-3)', async ({ browser }) => {
     const injection = '<img src=x onerror=alert(1)>';
     const hostCtx = await browser.newContext();
     const guestCtx = await browser.newContext();
     const host = await hostCtx.newPage();
     const guest = await guestCtx.newPage();
+    let dialogFired = false;
+    guest.on('dialog', (d) => {
+      dialogFired = true;
+      void d.dismiss();
+    });
     try {
       await openHost(host);
       await openGuest(guest);
 
       await sendChat(host, injection);
 
+      // The message arrives and renders as a plain-text node (whatever the
+      // server-normalised form — the angle brackets are stripped server-side).
       const guestText = guest.getByTestId('chat-messages').getByTestId('chat-message-text').first();
-      await expect(guestText).toHaveText(injection, { timeout: 5_000 });
-      // No <img> element was created from the injected markup in the guest DOM.
+      await expect(guestText).toBeVisible({ timeout: 5_000 });
+      await expect(guestText).toContainText('img src=x onerror=alert(1)');
+      // The real XSS guard: NO <img> element was created from the markup, and no
+      // onerror handler fired a dialog, in the recipient's DOM.
       expect(await guest.locator('.chat-messages img').count()).toBe(0);
+      expect(dialogFired).toBe(false);
     } finally {
       await hostCtx.close();
       await guestCtx.close();

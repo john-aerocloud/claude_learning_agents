@@ -19,8 +19,8 @@ and marks actuals when a slice is delivered.
 | C2 | Local two-player game | delivered | 1 (s002) | 0 | — |
 | C3 | Single-player vs AI | delivered | 1 (s003) | 0 | — |
 | C4 | Online two-player match | **complete** | 7 (s004, s005-h1, s005, s005-h2, s006, s007, s008) + s005-h3 (in-planning) | 0 | — |
-| C5 | Leaderboard | **in-progress** | 0 | 3 (s009–s011) | s009 record-game-result |
-| C6 | Player identity (lightweight) | not started | 0 | 2 (s012–s013) | s012 display-name-entry |
+| C5 | Leaderboard | **in-progress** | 0 | 2 (s009–s010) | s009 arcade-scoreboard |
+| C6 | Player identity (lightweight) | **absorbed** | 0 | 0 (absorbed into s009) | — |
 | C7 | In-game chat | not started | 0 | 2 (s014–s015) | s014 in-game-message-send |
 
 ---
@@ -312,83 +312,86 @@ When I have played one or more games, I want to see how I rank against other
 players, so that I feel a reason to come back and improve my record, and I can
 show others my standing. (Supporting job — motivation through standing.) **[SECONDARY]**
 
-**Done condition:** The title screen shows a leaderboard of win/draw/loss
-standings; after a completed game the board updates within 10 seconds; it loads
-within 2 seconds (p95). No account required — anonymous players tracked by
-session.
+**Done condition:** The title screen shows a shared leaderboard of win/draw/loss
+standings keyed by player-entered name (arcade model: name collisions accepted);
+after a completed game the board updates within 10 seconds; it loads within 2
+seconds (p95). No account required — players identify by a name they enter
+before play.
 
 **Slices:**
 
 | Slice | Status | Delivered | Outcome |
 |-------|--------|-----------|---------|
-| s009 — record game result (backend) | **in-planning** | — | — |
-| s010 — read endpoint + title-screen display | forecast | — | — |
-| s011 — latency validation (done-condition proof) | forecast | — | — |
+| s009 — arcade-scoreboard | **in-planning** | — | — |
+| s010 — latency done-condition proof | forecast | — | — |
 
-**C5 status: in-progress** — s009 opened 2026-06-08. Done condition requires s011 (latency proof).
+**C5 status: in-progress** — s009 revised 2026-06-08 (human redirect: arcade
+name-based model). Done condition requires s010 (latency proof).
 
-### s009 — record game result to leaderboard (backend) [IN PLANNING — SEL-S009]
+### s009 — arcade scoreboard [IN PLANNING — SEL-S009-REVISE]
 
-**Killick note:** Weak/internal slice — no user-visible outcome. Justified as the
-write-path de-risk half before s010 (read + UI) is built on top. See
-slices/s009-leaderboard-record/slice.md for the full rationale.
+**Killick test: STRONG.** A player enters a name, plays a game, and their result
+appears under that name on a shared board readable in another browser. Genuine
+arcade outcome — impossible before this slice.
 
-**Player identity decision:** client-generated `oxo_player_id` UUID persisted in
-`localStorage`; sent with `POST /api/games` and WS `join`; stored as
-`hostPlayerId`/`guestPlayerId` on the `Games` item. Stable within-browser;
-not cross-device (C6 handles cross-device identity). Connection-scoped was
-rejected as near-useless for standing; deferred-to-C6 was rejected as it
-makes C5's done condition unreachable without migration.
+**Human redirect 2026-06-08:** Original s009 (localStorage UUID, backend-only,
+weak Killick) withdrawn. Replaced with arcade model: name-as-key, name collision
+accepted, board shared and backend-authoritative. See
+slices/s009-arcade-scoreboard/slice.md for full rationale.
+
+**Name-as-key model:** Players enter a name (max 10 chars, default "AAA") before
+creating/joining a game. The name — not a UUID — is the Leaderboard PK. Two
+players can share a name; their tallies accumulate on the same row. This is the
+arcade model, not a bug.
+
+**Name-entry UX:** Captured at game creation/join (before play), stored in
+`sessionStorage` for in-tab pre-fill. Sent as `playerName` with `POST /api/games`
+and WS `join`. Backend writes `hostName`/`guestName` to `Games` item; reads them
+at game-over to write the tally. UI-bearing slice (ui-designer runs at structure
+time).
 
 **Mechanism direction:** DynamoDB Stream on `Games` → `oxo-board-fn` (preferred,
 decoupled from hot path); inline Lambda invoke as fallback. Architect decides.
 
-**Scope:** When a game reaches `won`/`drawn`, a tally is written to a new
-`Leaderboard` DynamoDB table keyed by `oxo_player_id`. Exactly one tally per
-completed game; idempotent on replay. Abandoned games produce no tally. No
-change to player-visible game flow.
+**Scope:** Name entry UI + `playerName` on wire; `hostName`/`guestName` on Games
+item; `Leaderboard` DynamoDB table (PK: playerName); `oxo-board-fn` Lambda writing
+tallies on `won`/`drawn`; `GET /api/leaderboard` endpoint; title-screen leaderboard
+display. All in one slice — delivering the complete arcade moment.
 
-**Success measures:** SM-1 (one tally per game), SM-2 (correct winner attribution),
-SM-3 (idempotent on replay), SM-4 (game-over relay latency unchanged), SM-5
-(abandoned games produce no tally), SM-6 (playerIds stored in Games item).
+**Success measures:** SM-1 (name on shared board, cross-browser within 10 s — the
+primary customer-visible measure); SM-2 (collision accepted — "AAA" row accumulates
+both players' tallies); SM-3 (blank default "AAA"); SM-4 (no double-count on
+replay); SM-5 (abandoned games produce no tally); SM-6 (no game-over regression);
+SM-7 (board loads within 2 s p95); SM-8 (name pre-fills from sessionStorage).
 
-**Not in scope:** read endpoint, UI display, latency SLA proof, display names,
-cross-device identity, historical backfill.
+**Not in scope:** name claiming/auth, cross-device persistence, pagination,
+game history, in-game name display to opponent, latency SLA proof (s010),
+abandon/forfeit tallies, historical backfill, C6 (absorbed/closed).
 
-### s010 — leaderboard read endpoint + title-screen display
-**Scope:** `GET /api/leaderboard` returns the top-N standings. The title screen
-fetches and renders this list on load. Cached at CloudFront with a short TTL (≤10s)
-to meet the update SLA without hammering DynamoDB.
-
-### s011 — leaderboard update latency validation
-**Scope:** Playwright smoke asserts that after a completed game the leaderboard
-reflects the result within 10 seconds. This is the done-condition proof for C5.
+### s010 — leaderboard update latency done-condition proof (forecast)
+**Scope:** Playwright smoke asserts that after a completed game the title-screen
+leaderboard reflects the result within 10 seconds. This is the C5 done-condition
+proof. Thin by design — may fold into s009 ACs at the architect's discretion; if
+so, s010 is eliminated at that slice-next.
 
 ---
 
-## C6 — Player identity (lightweight)
+## C6 — Player identity (lightweight) — ABSORBED / CLOSED
 
-**Job served:**
-When I have played games, I want my display name to appear on the leaderboard and
-in the game, so that the social dimension of standing feels personal rather than
-anonymous. (Supporting job — motivation through standing, social dimension.) **[SECONDARY]**
+**Status: absorbed into s009 (human redirect 2026-06-08).**
 
-**Done condition:** A player can enter a display name before or at game creation;
-the name persists for the session; it appears on the leaderboard and is visible to
-the opponent in-game.
+The arcade name model (name-as-key, entered at game start, displayed on shared
+board) delivers the core value of C6 as part of s009. No separate C6 chunk is
+needed or forecast.
 
-**Slices (forecast):**
+**What was absorbed:**
+- s012 (display-name entry + session persistence) — fully delivered in s009.
+- s013 (display name shown to opponent in-game) — deferred to optional future
+  slice; no current job demand.
 
-### s012 — display-name entry + session persistence
-**Scope:** A name-entry field appears before game creation (not a mandatory
-gate — a default anonymous name is used if skipped). The name is stored in
-`sessionStorage` and sent with `POST /api/games` and the WebSocket join message.
-No authentication, no passwords, no persistent accounts.
-
-### s013 — display name shown to opponent + on leaderboard
-**Scope:** Both players see each other's display name on the game screen (sent
-via the `game-ready` WebSocket event). The leaderboard shows display names
-instead of anonymous identifiers.
+**If ever needed:** Cross-device name claiming or real accounts would be a new
+chunk (C8+) driven by an explicit future user need. It is not on the current
+roadmap.
 
 ---
 

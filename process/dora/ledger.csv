@@ -540,3 +540,6 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-08T06:09:42Z,oxo-online,14,s009-leaderboard-record,product,task_start,,na,S009-SLICE,slice-next: propose s009 record-result ingestion slice + C5 chunk-plan
 2026-06-08T06:10:33Z,oxo-online,1,s009,product,task_start,,na,S009-SLICE,proposing s009 leaderboard record-result slice
 2026-06-08T06:12:41Z,oxo-online,1,s009,product,task_end,,success,S009-SLICE,s009 slice.md written; chunk-plan C4 complete / C5 in-progress updated
+2026-06-08T06:22:26Z,oxo-online,14,s009-leaderboard-record,product,task_start,,na,S009-REVISE,revise per arcade name-based identity redirect
+2026-06-08T06:23:15Z,oxo-online,1,s009,product,task_start,,na,S009-REVISE,Revise s009 per human redirect: arcade name-based shared scoreboard
+2026-06-08T06:27:38Z,oxo-online,1,s009,product,task_end,420,success,S009-REVISE,"s009 revised to arcade-scoreboard: name-as-key, shared board, UI-bearing, strong Killick; C6 absorbed/closed"

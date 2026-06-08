@@ -561,3 +561,5 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-08T06:55:56Z,oxo-online,14,DEFECT-S002-001,engineer,recovery,,rolled_forward,cd2edaf,"DEFECT-S002-001 closed: .board display:grid 3x3; PROD re-check 3 rows (y=79,167,255) x 3 cols (x=512,600,688), 80x80 cells; line symptom gone"
 2026-06-08T06:55:56Z,oxo-online,14,DEFECT-S002-001,engineer,task_end,595,success,DEFECT-S002-001,fix landed cd2edaf; geometry assertion red->green; all app suites + test-local green; prod 3x3 verified
 2026-06-08T07:00:53Z,oxo-online,14,s009-arcade-scoreboard,product,task_end,,success,S009-UC-ACC,
+2026-06-08T07:08:36Z,oxo-online,14,s009-arcade-scoreboard,cicd,task_start,,na,S009-CAP,board-fn deploy-role grant + event-source-mapping + Leaderboard allowlist + §19 prereqs
+2026-06-08T07:10:44Z,oxo-online,14,s009-arcade-scoreboard,cicd,task_end,,success,S009-CAP,"s009 §19: no new oxo-deploy grant needed (board-fn deploys via CDK infra pipeline, not hot-swap); Stream enablement = non-destructive update confirmed; allowlist already covers; zero orphan flags; pipelines green"

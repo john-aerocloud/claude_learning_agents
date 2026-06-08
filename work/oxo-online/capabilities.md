@@ -950,3 +950,188 @@ rollback state.
 from `OxoOnlineWafUsEast1` returns the rate rule to applying to all IPs (the
 pre-s007 state). No app/data change. CI runs against the rate-rule-full surface
 until the IP set is re-provisioned.
+
+---
+
+## Slice s009 — arcade scoreboard (iteration 14, opens C5)
+
+### §19 pre-flight verdict
+
+**No new pre-push step required before the engineer's UC2 push.**
+
+All five checks confirmed:
+
+**1. Deploy-role grant — NO new grant needed.**
+
+`oxo-board-fn` code is deployed exclusively via CDK `fromAsset()` through the
+infra pipeline (OI-24 pattern — Lambda hot-swap was removed from the app pipeline
+at s005-h2; see deploy-oxo-online.yml lines 34-41). The `oxo-deploy` OIDC role's
+`LambdaCodeDeploy` statement currently covers `oxo-game-fn` and `oxo-ws-fn` only,
+and that statement does NOT need extending for `oxo-board-fn` because the app
+pipeline never calls `UpdateFunctionCode` on any Lambda.
+
+The CDK bootstrap execution role (AdministratorAccess) creates:
+- The `Leaderboard` DynamoDB table (NEW_PITR).
+- The DynamoDB Stream on `Games` (StreamSpecification enablement on existing table).
+- The event-source mapping (`oxo-board-fn` ESM on the Games stream).
+- The `oxo-board-fn` Lambda and its least-privilege execution role.
+- The `GET /api/leaderboard` route on the existing HTTP API.
+- The `dynamodb:Scan` grant on `Leaderboard` for `oxo-game-fn`.
+- The 5s CloudFront cache behaviour for `/api/leaderboard`.
+
+None of these require the `oxo-infra-deploy` OIDC role to have any grant beyond
+the existing `CdkBootstrapRoleAssume` (assume `cdk-*-deploy-role-*` + publishing
+roles). The bootstrap exec role is AdministratorAccess and handles all of this.
+
+Delta §5 also notes `oxo-deploy += scoped UpdateFunctionCode/GetFunction on
+board-fn ARN` — but since the app pipeline never hot-swaps any Lambda (OI-24),
+this grant is UNNEEDED. The engineer MUST NOT add it; the OIDC stack is already
+correct.
+
+**Conclusion: NO `make deploy-oidc` step before UC2 push. Pure CDK deploy.**
+
+**2. Stream enablement on Games — NON-DESTRUCTIVE UPDATE (no data loss).**
+
+The current `GamesTable` CDK construct (game-stack.ts line 54) has no
+`stream` property — DynamoDB Streams is currently DISABLED on the Games table.
+Enabling `StreamSpecification` (`stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES`)
+on an existing DynamoDB table is a CloudFormation in-place UPDATE — not a
+table replacement. DynamoDB supports enabling/changing stream settings on live
+tables via the `UpdateTable` API, which CloudFormation calls. No item is
+affected; no data is lost. The table ARN, partition key, existing items,
+TTL, GSIs, and `RemovalPolicy.RETAIN` are all untouched.
+
+This is confirmed by the CDK/CloudFormation resource model: `AWS::DynamoDB::Table`
+`StreamSpecification` is a mutable property; CloudFormation can UPDATE it
+without replacement. (A replacement would be triggered by changes to the
+`KeySchema` or `TableName` — neither changes here.)
+
+**Verdict: SAFE. The engineer enables the stream; no live game data is at risk.**
+
+The engineer must add to the `GamesTable` construct:
+```typescript
+stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
+```
+This triggers a CloudFormation UPDATE (not REPLACE) on the Games table resource.
+
+**3. Allowlist — already fully covered.**
+
+| Tester action | Pattern | Status |
+|---|---|---|
+| `aws dynamodb scan` on Leaderboard | `Bash(aws dynamodb scan *)` | COVERED (added s005-h3) |
+| `aws dynamodb get-item` on Leaderboard | `Bash(aws dynamodb get-item *)` | COVERED |
+| `aws dynamodb describe-table` on Leaderboard | `Bash(aws dynamodb describe-table *)` | COVERED |
+| `curl GET /api/leaderboard` via CloudFront | `Bash(curl https://d3pf3kcvzpau1x.cloudfront.net*)` | COVERED — the glob `*` after the hostname matches any path including `/api/leaderboard` |
+
+No new allowlist entries needed.
+
+**4. Orphan-flag check (§40) — ZERO orphans.**
+
+Confirmed by grep of production Lambda source and SPA source:
+- `H2_ENFORCE`: factored out at `45b0aa4` (s005-h2). The only remaining
+  reference in `game-stack.ts` is a comment documenting the removal. Zero active
+  code references.
+- `uc4Enabled`: factored out at s006. The `OnlineBoard.tsx` comment at line
+  references the removal explicitly ("was factored out at slice delivery").
+  Zero active flag code.
+- No UC flags introduced in s008 (no feature flags in s008 scope).
+- `UC2`/`UC4` references in source files are section annotations in comments
+  and JSDoc, not runtime flag checks.
+
+**Zero active UC flags in any production code path going into s009.**
+
+s009 does NOT need a new UC flag — `oxo-board-fn`, `Leaderboard`, the Stream,
+and the `/api/leaderboard` route are all unconditionally shipped. No phased rollout.
+
+**5. Pipeline state — GREEN.**
+
+App pipeline (deploy-oxo-online.yml): run 27120930662 — SUCCESS (DEFECT-S002-001
+board-geometry fix, committed `cd2edaf`). The sha-gate smoke (OI-40 dynamic-sha-gate
+fix) was applied and the app pipeline is confirmed healthy.
+
+Infra pipeline (infra-oxo-online.yml): run 27105854184 — SUCCESS (uniqueness-probe
+make target, s005-h3 UC2/UC3 validation).
+
+Both pipelines green at HEAD.
+
+### What s009 adds to the deploy path
+
+```
+push to main (work/oxo-online/src/infra/** or src/lambda/**)
+  → infra-oxo-online.yml:
+      npm install (infra) + npm ci (lambda) + build both
+      OIDC assume oxo-infra-deploy
+      cdk deploy OxoOnlineWafUsEast1   (no change)
+      cdk deploy OxoGameProd           ← adds: Games Stream enabled,
+                                           Leaderboard table (PITR),
+                                           oxo-board-fn Lambda + ESM,
+                                           GET /api/leaderboard route,
+                                           Scan grant on oxo-game-fn,
+                                           5s CF cache behaviour for /api/leaderboard
+      cdk deploy OxoOnlineProd         ← adds: /api/leaderboard 5s cache behaviour
+```
+
+App pipeline (deploy-oxo-online.yml): SPA changes (name-entry field, leaderboard
+panel) trigger the app pipeline. No new deploy steps; SPA build + S3 sync + CF
+invalidation + sha-gate smoke covers it.
+
+### Stack ordering
+
+All new s009 resources are inside `OxoGameProd`. No new cross-stack export (the
+`/api/leaderboard` route lives in the same HTTP API already exported). The
+existing three-stack sequence is sufficient and unchanged.
+
+The 5s CloudFront cache behaviour for `/api/leaderboard` lives in `OxoOnlineProd`
+(the distribution stack). The `HttpApiEndpoint` export from `OxoGameProd` is
+already consumed by `OxoOnlineProd` for the `/api/*` origin — the leaderboard
+behaviour uses the same origin. No new CfnOutput cross-stack reference is
+introduced.
+
+### Rollback assets — s009
+
+**Leaderboard table:** `RemovalPolicy.RETAIN` (durable table — first non-TTL
+table; must never auto-drop). CDK rollback cannot delete it. Forward-fix is the
+only path; the table accumulates correctly from any version of `oxo-board-fn`.
+
+**DynamoDB Stream on Games:** disabling the stream (removing the `stream:`
+property) is a non-destructive UPDATE reversing the same non-destructive UPDATE
+that enabled it. No data loss in either direction. The event-source mapping is
+removed on rollback; `oxo-board-fn` stops receiving events.
+
+**`oxo-board-fn`:** roll forward preferred. CDK rollback removes the function.
+Leaderboard writes stop; the table retains its prior state (PITR recoverable).
+
+**GET /api/leaderboard:** removing the route from the HTTP API is a non-destructive
+UPDATE. The SPA renders an empty board on 404 (graceful degrade).
+
+**5s CF cache behaviour:** removing it from OxoOnlineProd falls back to the
+default CachingDisabled behaviour for `/api/leaderboard` — requests pass through
+unthrottled. Not a data-loss risk.
+
+### New GitHub Actions variables/secrets required (s009)
+
+None. All new resources deploy under existing `OXO_ONLINE_INFRA_DEPLOY_ROLE_ARN`
+via CDK bootstrap exec role (AdministratorAccess). No new GH secrets or variables.
+
+### §19 pre-flight checklist — s009
+
+| Check | Result |
+|-------|--------|
+| No new `make deploy-oidc` step before UC2 push | PASS — confirmed; all new resources under bootstrap exec role AdministratorAccess |
+| Stream enablement on Games = non-destructive UPDATE (not REPLACE) | PASS — StreamSpecification is a mutable CFN property; no KeySchema change |
+| No new OIDC role grants needed | PASS — `oxo-board-fn` code deploys via infra pipeline CDK fromAsset (OI-24); app pipeline never calls UpdateFunctionCode |
+| Allowlist covers all tester patterns | PASS — scan/get-item/describe-table/curl CF glob already present |
+| Zero orphan UC flags | PASS — H2_ENFORCE and uc4Enabled both confirmed factored out |
+| Stack deploy order unchanged (WAF → OxoGameProd → OxoOnlineProd) | PASS — all s009 resources inside OxoGameProd; 5s CF behaviour inside OxoOnlineProd; no new cross-stack CfnOutput |
+| No new GH secrets or variables | PASS |
+| `GITHUB_` prefix env vars absent | PASS — no new env vars |
+| `environment: production` gate absent | PASS — unchanged |
+
+### Capability note for engineer (UC2)
+
+The engineer must add `stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES` to
+the `GamesTable` construct in `game-stack.ts` before creating the event-source
+mapping. The stream ARN used by the `oxo-board-fn` ESM is
+`gamesTable.tableStreamArn` — available immediately after the property is set
+(it is a CloudFormation `Fn::GetAtt` reference, resolved at deploy time). No
+separate stack step; no pre-push manual action.

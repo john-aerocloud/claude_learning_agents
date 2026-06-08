@@ -40,7 +40,11 @@ hardcode the profile name.
 ## Parallelism
 Multiple engineers may work the same slice ONLY on sequentially independent
 tasks. Coordinate by claiming tasks; never take a task that depends on another
-in-flight one.
+in-flight one. When you share a working tree with another engineer,
+isolate your commit with an explicit pathspec — `git commit -- <your-paths>`
+— never `git add` then a bare commit (a shared index sweeps a co-worker's
+pre-staged files into your commit; logged 3×). If the orchestrator dispatched
+you in a worktree, that isolation is already handled.
 
 ## On failure in prod
 Prefer roll-forward. Use the maintained rollback assets only when forward is

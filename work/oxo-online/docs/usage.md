@@ -6,16 +6,26 @@ oxo-online is a noughts and crosses (tic-tac-toe) game that runs in a web
 browser. You can play locally against another person on the same device, play
 solo against an unbeatable computer opponent, or play a complete online game
 against a friend in a separate browser in real time. The full online flow is
-live: the host creates a game and clicks "Copy link" to get a URL they can send
-to a friend; the friend opens the URL and joins in one click; moves relay between
-browsers via a server-authoritative Lambda; the server detects wins and draws;
-both players see the result simultaneously; and if either player disconnects
-mid-game, the survivor is notified and returned to the mode selector within 10
-seconds. No accounts are required.
+live: the host enters an arcade name (optional — defaults to "AAA"), creates a
+game and shares it using either "Copy code" (the 6 characters, for a friend who
+types) or "Copy link" (the /join/ URL, for one-click join); the friend opens the
+URL and joins in one click; moves relay between browsers via a server-authoritative
+Lambda; the server detects wins and draws; both players see the result
+simultaneously; and if either player disconnects mid-game, the survivor is
+notified and returned to the mode selector within 10 seconds. When a game ends
+the result is recorded on a **shared arcade leaderboard**, visible to all players:
+rank, name, wins, draws, and losses. Player B can see Player A's scores within
+approximately 1.2 seconds of game-over (SLA: 10 seconds). No accounts are
+required.
+
+**Arcade name model:** names are not unique or authenticated. Two players can
+both call themselves "AAA". Scores accumulate on a single shared row per name —
+intentional arcade behaviour. The name you last used is pre-filled on your next
+visit (sessionStorage).
 
 **Not yet available:** reconnect after reload (a player who reloads their tab
 loses the session and must start a new game — deferred until player identity
-ships), player accounts, and score tracking across sessions.
+ships) and player accounts.
 
 ---
 

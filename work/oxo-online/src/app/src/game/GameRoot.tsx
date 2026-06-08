@@ -5,6 +5,9 @@ import { Board } from './Board';
 import { Status } from './Status';
 import { JoinScreen } from './JoinScreen';
 import { OnlineBoard } from './OnlineBoard';
+import { NameField } from './NameField';
+import { normaliseName, DEFAULT_NAME } from './name';
+import { isFlagEnabled } from './flags';
 import {
   createRealSocketFactory,
   type GameSocket,
@@ -40,6 +43,8 @@ type OnlinePhase =
   | 'error';
 
 const ONLINE_ERROR = 'Could not start online game — please try again';
+// s009 UC1 — sessionStorage key the name field round-trips through (SM-8/T-LB-12).
+const NAME_STORAGE_KEY = 'oxo.playerName';
 // s008 UC1 — how long the copy control shows "Copied!" before reverting (~2s).
 const COPIED_REVERT_MS = 2000;
 const COPY_LINK_LABEL = 'Copy link';
@@ -75,6 +80,31 @@ interface GameRootProps {
 export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameRootProps = {}) {
   const [state, setState] = useState(initialState);
   const [mode, setMode] = useState<Mode>('two-player');
+  // s009 UC1 (flag uc1NameEnabled). The "Your name" arcade tag, pre-filled from
+  // sessionStorage (else "AAA"). The field NEVER gates play — the default makes
+  // it ignorable (click-path BINDING). It is normalised at send time (the SAME
+  // pinned transform the server re-applies authoritatively) and threaded into
+  // POST /api/games (host) + the WS join frame (guest). When the flag is OFF the
+  // field is not rendered and neither send carries a name (prod-unchanged).
+  const uc1NameEnabled = isFlagEnabled('uc1NameEnabled');
+  const [playerName, setPlayerName] = useState<string>(
+    () =>
+      (typeof sessionStorage !== 'undefined' &&
+        sessionStorage.getItem(NAME_STORAGE_KEY)) ||
+      DEFAULT_NAME,
+  );
+
+  // Persist the normalised name and return it (called on a successful create/
+  // join so the next game in this tab pre-fills it — SM-8/T-LB-12).
+  const persistName = (): string => {
+    const normalised = normaliseName(playerName);
+    try {
+      sessionStorage.setItem(NAME_STORAGE_KEY, normalised);
+    } catch {
+      // sessionStorage unavailable (private mode) — name is non-essential.
+    }
+    return normalised;
+  };
   // s008 UC2: a deep-link mounts straight into the `joining` phase so the
   // pre-filled JoinScreen is shown immediately; otherwise the local game `idle`.
   const [onlinePhase, setOnlinePhase] = useState<OnlinePhase>(
@@ -207,10 +237,17 @@ export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameR
     setOnlinePhase('creating');
     // Spinner only appears for waits longer than 500ms (F3).
     spinnerTimer.current = setTimeout(() => setShowSpinner(true), SPINNER_DELAY_MS);
+    // s009 UC1: when the name flag is ON, normalise + persist the name and send
+    // it in the POST body so `oxo-game-fn` writes hostName. Flag OFF → no body
+    // (unchanged contract; server defaults to "AAA").
+    const createName = uc1NameEnabled ? persistName() : null;
     try {
       const res = await fetch('/api/games', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
+        ...(createName !== null
+          ? { body: JSON.stringify({ playerName: createName }) }
+          : {}),
       });
       if (!res.ok) throw new Error(`status ${res.status}`);
       const body = (await res.json()) as {
@@ -304,6 +341,13 @@ export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameR
 
   return (
     <main className="game" aria-label="oxo game">
+      {uc1NameEnabled && onlinePhase === 'idle' && (
+        <NameField
+          value={playerName}
+          onChange={setPlayerName}
+          disabled={onlinePhase !== 'idle'}
+        />
+      )}
       <div className="mode-selector" role="group" aria-label="game mode">
         <button
           type="button"
@@ -371,6 +415,12 @@ export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameR
           connect={socketFactory}
           onGameReady={handleGameReady}
           initialCode={initialJoinCode}
+          // s009 UC1: thread the normalised guest name into the WS join frame
+          // (flag ON only). normaliseName is pure (no side effect at render);
+          // persistence happens when the join is actually submitted (onJoin).
+          // Flag OFF → undefined (unchanged frame; server defaults "AAA").
+          playerName={uc1NameEnabled ? normaliseName(playerName) : undefined}
+          onJoin={uc1NameEnabled ? persistName : undefined}
         />
       )}
       {onlinePhase === 'playing-online' && (

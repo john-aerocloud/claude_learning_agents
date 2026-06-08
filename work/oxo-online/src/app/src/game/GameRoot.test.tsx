@@ -902,3 +902,141 @@ describe('GameRoot — copy-link control on the waiting screen (s008 UC1, T3/S3/
     expect(screen.getByTestId('game-code')).toHaveTextContent('ABC234');
   });
 });
+
+// s009 UC1 — name entry (both parties). FLAG ON (uc1NameEnabled). The NameField
+// sits ABOVE the mode buttons in the idle view, pre-filled from sessionStorage
+// (else "AAA"), and is NEVER a gate — "Play Online"/"Join a game" stay enabled
+// with an empty field (click-path BINDING). On create the normalised name rides
+// POST /api/games {playerName}; on join it rides the WS join frame.
+// @covers spa-name-field spa-name-wire
+describe('GameRoot — UC1 name entry (flag ON, AC1.1/1.2/1.6, A11Y-1/3)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete (window as unknown as { OXO_CONFIG?: unknown }).OXO_CONFIG;
+    sessionStorage.clear();
+  });
+
+  function flagOn() {
+    (window as unknown as { OXO_CONFIG: Record<string, unknown> }).OXO_CONFIG = {
+      uc1NameEnabled: true,
+    };
+  }
+
+  it('AC1.1 — renders the "Your name" field on the idle view, pre-filled "AAA" when no session name', () => {
+    flagOn();
+    render(<GameRoot />);
+    const input = screen.getByRole('textbox', { name: 'Your name' });
+    expect(input).toBeInTheDocument();
+    expect(input).toHaveValue('AAA');
+  });
+
+  it('AC1.1 — pre-fills from sessionStorage when a prior name exists', () => {
+    flagOn();
+    sessionStorage.setItem('oxo.playerName', 'ZIP');
+    render(<GameRoot />);
+    expect(screen.getByRole('textbox', { name: 'Your name' })).toHaveValue('ZIP');
+  });
+
+  it('AC1.1 — the field renders ABOVE the mode buttons (focus/DOM order, A11Y-3)', () => {
+    flagOn();
+    render(<GameRoot />);
+    const input = screen.getByTestId('name-input');
+    const playOnline = screen.getByRole('button', { name: /play online/i });
+    // The name input precedes the Play Online button in DOM order.
+    expect(
+      input.compareDocumentPosition(playOnline) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('AC1.2 — Play Online / Join a game are ENABLED with an empty name (non-gating)', async () => {
+    flagOn();
+    render(<GameRoot />);
+    const input = screen.getByTestId('name-input');
+    await userEvent.clear(input);
+    expect(screen.getByRole('button', { name: /play online/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /join a game/i })).toBeEnabled();
+  });
+
+  it('the field is hidden when the flag is OFF (prod-unchanged)', () => {
+    render(<GameRoot />);
+    expect(screen.queryByRole('textbox', { name: 'Your name' })).not.toBeInTheDocument();
+  });
+});
+
+describe('GameRoot — UC1 name wire into create + join (flag ON, AC1.3/1.4/1.6, T-LB-2/12)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete (window as unknown as { OXO_CONFIG?: unknown }).OXO_CONFIG;
+    sessionStorage.clear();
+  });
+
+  function flagOn() {
+    (window as unknown as { OXO_CONFIG: Record<string, unknown> }).OXO_CONFIG = {
+      uc1NameEnabled: true,
+    };
+  }
+
+  it('AC1.3 — POST /api/games carries the normalised playerName (host)', async () => {
+    flagOn();
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ gameId: 'g-1', code: 'ABC234' }), { status: 201 }),
+    );
+    render(<GameRoot />);
+    const input = screen.getByTestId('name-input');
+    await userEvent.clear(input);
+    await userEvent.type(input, 'ace');
+    await userEvent.click(screen.getByRole('button', { name: /play online/i }));
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(body).toEqual({ playerName: 'ace' });
+  });
+
+  it('AC1.3 — an empty name posts "AAA" (default, no gate)', async () => {
+    flagOn();
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ gameId: 'g-1', code: 'ABC234' }), { status: 201 }),
+    );
+    render(<GameRoot />);
+    await userEvent.clear(screen.getByTestId('name-input'));
+    await userEvent.click(screen.getByRole('button', { name: /play online/i }));
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(body).toEqual({ playerName: 'AAA' });
+  });
+
+  it('AC1.6/T-LB-12 — a successful create persists the name to sessionStorage', async () => {
+    flagOn();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ gameId: 'g-1', code: 'ABC234' }), { status: 201 }),
+    );
+    render(<GameRoot />);
+    await userEvent.clear(screen.getByTestId('name-input'));
+    await userEvent.type(screen.getByTestId('name-input'), 'BEE');
+    await userEvent.click(screen.getByRole('button', { name: /play online/i }));
+    await waitFor(() => expect(sessionStorage.getItem('oxo.playerName')).toBe('BEE'));
+  });
+
+  it('AC1.5 — the WS join frame carries the normalised playerName (guest)', async () => {
+    flagOn();
+    const cap = captureFactory();
+    render(<GameRoot socketFactory={cap.factory} />);
+    await userEvent.clear(screen.getByTestId('name-input'));
+    await userEvent.type(screen.getByTestId('name-input'), 'gus');
+    await userEvent.click(screen.getByRole('button', { name: /join a game/i }));
+    await userEvent.type(screen.getByLabelText(/game code/i), 'ABC234');
+    await userEvent.click(screen.getByRole('button', { name: /^join$/i }));
+    expect(cap.sent).toContainEqual({ action: 'join', code: 'ABC234', playerName: 'gus' });
+  });
+
+  it('flag OFF — POST body carries NO playerName (prod-unchanged contract)', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ gameId: 'g-1', code: 'ABC234' }), { status: 201 }),
+    );
+    render(<GameRoot />);
+    await userEvent.click(screen.getByRole('button', { name: /play online/i }));
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.body).toBeUndefined();
+  });
+});

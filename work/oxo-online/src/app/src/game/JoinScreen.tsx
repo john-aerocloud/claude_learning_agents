@@ -79,6 +79,22 @@ interface JoinScreenProps {
    * (no spurious pre-fill, AC3.1).
    */
   initialCode?: string;
+  /**
+   * s009 UC1 — the guest's normalised player name (from GameRoot's NameField).
+   * When present it is added to the WS `join` frame so `oxo-ws-fn` writes
+   * `guestName` onto the Games item in the existing waiting→active UpdateItem.
+   * Undefined when the name flag is OFF — the frame then stays the unchanged
+   * `{action,code}` and the server defaults the name to "AAA" (no breaking
+   * change for old clients).
+   */
+  playerName?: string;
+  /**
+   * s009 UC1 — called when the guest actually submits a join, so GameRoot can
+   * persist the guest's name to sessionStorage (SM-8). Kept separate from
+   * `playerName` so the value threaded into the frame is pure (no render-time
+   * side effect).
+   */
+  onJoin?: () => void;
 }
 
 /**
@@ -87,7 +103,13 @@ interface JoinScreenProps {
  * connecting indicator while pending. The code is retained on close so the
  * player can correct and retry (F3).
  */
-export function JoinScreen({ connect, onGameReady, initialCode }: JoinScreenProps) {
+export function JoinScreen({
+  connect,
+  onGameReady,
+  initialCode,
+  playerName,
+  onJoin,
+}: JoinScreenProps) {
   // s008 UC2: seed the code from the deep-link URL param (upper-cased to match
   // the manual-entry input normalisation). Manual entry passes no initialCode →
   // empty input (AC3.1, no spurious pre-fill).
@@ -105,6 +127,7 @@ export function JoinScreen({ connect, onGameReady, initialCode }: JoinScreenProp
     if (connecting) return;
     setConnecting(true);
     setError(null);
+    onJoin?.();
     clearTimeout(graceTimer.current);
     // Track whether the server already reported a specific error (Bug B). The
     // subsequent DELETE-driven close must not overwrite that specific message.
@@ -171,7 +194,13 @@ export function JoinScreen({ connect, onGameReady, initialCode }: JoinScreenProp
       },
     });
     socketRef.current = socket;
-    socket.send({ action: 'join', code });
+    // s009 UC1: include playerName only when GameRoot supplied one (flag ON);
+    // otherwise the frame is the unchanged {action,code} (old-client contract).
+    socket.send(
+      playerName !== undefined
+        ? { action: 'join', code, playerName }
+        : { action: 'join', code },
+    );
   };
 
   return (

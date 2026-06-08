@@ -566,3 +566,6 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-08T07:13:40Z,oxo-online,14,s009-arcade-scoreboard,engineer,task_start,,na,S009-ROUTE,thin route 65 AC-ids by UC; impacted-tests scope (EXP-013); §30 Stream skeleton; serial GameRoot seam
 2026-06-08T07:17:45Z,oxo-online,14,s009-arcade-scoreboard,engineer,task_start,,na,S009-ROUTE,"Lay thin route for s009 arcade-scoreboard (waves, stream skeleton, serial GameRoot seam, copy-defect)"
 2026-06-08T07:17:45Z,oxo-online,14,s009-arcade-scoreboard,engineer,task_end,360,success,S009-ROUTE,route.md written: UC1(7)/UC2(7)/UC3(5)/UC4(2) steps + UC5 handoff; §30 board-stream-skeleton Probe A+B gate; kebab class-deps node ids for EXP-013
+2026-06-08T07:18:37Z,oxo-online,14,s009-arcade-scoreboard,engineer,task_start,,na,S009-BACKEND,UC2 Leaderboard+Stream+board-fn (idempotent CAS) + name-writes + read route + §30 skeleton
+2026-06-08T07:18:37Z,oxo-online,14,s009-arcade-scoreboard,engineer,task_start,,na,S009-SPA,UC1 name-entry → UC3 leaderboard display → UC4 two copy controls (serial GameRoot, flags)
+2026-06-08T07:20:47Z,oxo-online,14,s009-arcade-scoreboard,engineer,task_start,,na,S009-SPA,UC1 NameField+wire → UC3 Leaderboard+client → UC4 two copy controls; flags uc1/uc3/uc4 default OFF; serial GameRoot

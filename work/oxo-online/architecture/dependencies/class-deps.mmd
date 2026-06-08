@@ -196,6 +196,22 @@ flowchart TD
   %% gamesCreateHandler) are now delivered/stable. SM-2 50-concurrent distinct=50/50 p95=246ms.
   classDef s005h3changed fill:#e8f4e8,stroke:#2e7d32,color:#000;
 
+  %% ==== s009 arcade-scoreboard (SPA: UC1 name + UC3 leaderboard + UC4 copy) ====
+  %% classDef s009changed marks THIS slice's new SPA seams (cleared at delivery,
+  %% after the tester consumes them). All three SPA UCs land in GameRoot behind
+  %% flags default OFF (uc1NameEnabled / uc3LeaderboardEnabled / uc4TwoCopyEnabled).
+  %% --- UC1 name entry ---
+  spaNameField["spa-name-field<br/>src/app/src/game/NameField.tsx (UC1) — 'Your name' input<br/>idle view, above mode buttons; controlled, non-gating; testid name-input + role textbox"]:::s009changed
+  spaNameWire["spa-name-wire<br/>src/app/src/game/GameRoot.tsx (UC1) — playerName state + sessionStorage round-trip<br/>normaliseName → POST /api/games {playerName} (host) + JoinScreen→WS join frame (guest)"]:::s009changed
+  domainNameNormalise["domain-name-normalise<br/>src/app/src/game/name.ts — pure normaliser (SPA arm)<br/>charset-strip /[^A-Za-z0-9 ._-]/g → trim → ≤10 → blank→AAA (write-side XSS bound)"]:::s009changed
+  %% UC1 edges (ACTUAL runtime path traced): NameField is a controlled child of
+  %% GameRoot; the wire normalises at send time and forwards into the existing
+  %% create fetch + the existing JoinScreen submit (no new transport edge).
+  spaNameField -->|"value/onChange (controlled)"| spaNameWire
+  spaNameWire -->|"normaliseName at send time"| domainNameNormalise
+  spaNameWire -->|"playerName + onJoin into existing submit"| spaJoinScreen
+  classDef s009changed fill:#fff3e0,stroke:#e65100,color:#000;
+
   %% s006 changed marks CLEARED (2026-06-07 — tester consumed, UC6 prod validation PASS).
   %% All nodes were new in this first-edition; all are now delivered/stable.
   classDef changed fill:#e8f4e8,stroke:#2e7d32,color:#000;

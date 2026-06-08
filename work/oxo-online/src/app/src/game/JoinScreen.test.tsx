@@ -36,6 +36,27 @@ describe('JoinScreen — code input + submit + connecting indicator (B1, F3, F6)
     expect(m.sent).toContainEqual({ action: 'join', code: 'ABC234' });
   });
 
+  // s009 UC1 (AC1.5) — when GameRoot supplies a playerName, the guest's join
+  // frame carries it so the server writes guestName onto the Games item. With
+  // no playerName prop (flag OFF) the frame is the unchanged {action,code}.
+  // @covers spa-name-wire
+  it('includes playerName in the join frame when supplied (guest name wire)', async () => {
+    const m = mockFactory();
+    render(<JoinScreen connect={m.factory} playerName="BEE" />);
+    await userEvent.type(screen.getByLabelText(/game code/i), 'ABC234');
+    await userEvent.click(screen.getByRole('button', { name: /join/i }));
+    expect(m.sent).toContainEqual({ action: 'join', code: 'ABC234', playerName: 'BEE' });
+  });
+
+  it('omits playerName from the join frame when no playerName prop (flag OFF)', async () => {
+    const m = mockFactory();
+    render(<JoinScreen connect={m.factory} />);
+    await userEvent.type(screen.getByLabelText(/game code/i), 'ABC234');
+    await userEvent.click(screen.getByRole('button', { name: /join/i }));
+    expect(m.sent).toContainEqual({ action: 'join', code: 'ABC234' });
+    expect(m.sent[0]).not.toHaveProperty('playerName');
+  });
+
   it('passes the entered code as the connect credential (UC4/AC4.1, T8)', async () => {
     const m = mockFactory();
     render(<JoinScreen connect={m.factory} />);

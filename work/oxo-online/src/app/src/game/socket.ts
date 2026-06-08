@@ -89,7 +89,11 @@ export type ServerMessage =
 
 /** A client-to-server action frame. */
 export type ClientFrame =
-  | { action: 'join'; code: string }
+  // s009 UC1: the guest's join frame optionally carries the normalised
+  // playerName so `oxo-ws-fn` writes guestName onto the Games item in the
+  // existing waiting→active UpdateItem (additive; omitted when the name flag is
+  // OFF, keeping the old-client contract — server defaults to "AAA").
+  | { action: 'join'; code: string; playerName?: string }
   | { action: 'register'; gameId: string }
   // GATE-AMEND (s006): the move frame carries gameId as a non-trusted lookup key
   // (the server uses it ONLY as the GetItem key; identity stays connectionId).

@@ -633,3 +633,4 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-08T12:48:35Z,oxo-online,16,s014-chat-send,tester,validation_run,,fail,d2f7c0a:smoke,tests/smoke FAILED via make smoke
 2026-06-08T12:48:56Z,oxo-online,16,s014-chat-send,tester,validation_run,,fail,d2f7c0a:smoke,tests/smoke FAILED via make smoke
 2026-06-08T12:50:06Z,oxo-online,16,s014-chat-send,tester,validation_run,,success,d2f7c0a:smoke,s014 UC3 smoke 84/84 PASS; chat cross-instance 199ms; XSS text; GoneException no-crash; WCAG structural; LAYOUT geometry; CSP unchanged; regression green. DEPLOY_SHA=91b1365 (SPA sha).
+2026-06-08T12:53:46Z,oxo-online,16,s014-chat-send,tester,task_end,,success,86d36a3,"s014 UC3 PASS — 84/84 smoke, chat latency=199ms, XSS text, GoneException, WCAG structural, LAYOUT geometry, CSP unchanged, regression green. C7 first slice delivered. EXP-013: 25 changed nodes (clean list, OI-42 confirmed fixed)."

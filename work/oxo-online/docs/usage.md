@@ -264,6 +264,14 @@ Either player returns to the idle/title screen
   try again." — ask the host to create a new game.
 - **Names are not unique.** Two players can share the same name; their results
   accumulate on one leaderboard row. There are no accounts or passwords.
+- **Chat has no history and no persistence.** Messages exist only in the browser
+  for the duration of the active game. Reloading or disconnecting loses all chat.
+- **Chat names are not authenticated.** The sender label ("You" / "Opponent") is
+  derived from the connection binding, not from the player's arcade name. There is
+  no way to verify who typed a message beyond the connection identity.
+- **Chat latency proof is informal (s014).** The ~1 second delivery claim is
+  based on a single 199ms measurement during validation. Formal p95 Playwright
+  latency assertions are deferred to s015.
 
 ---
 

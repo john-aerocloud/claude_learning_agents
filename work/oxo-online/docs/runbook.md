@@ -1,7 +1,7 @@
 # oxo-online — Support Runbook
 
 Audience: on-call engineers and support team.
-Last updated: slice s009-arcade-scoreboard (iteration 14, validated 2026-06-08).
+Last updated: slice s014-chat-send (iteration 16, validated 2026-06-08).
 
 ---
 
@@ -243,6 +243,7 @@ Browser
           register   -> oxo-ws-fn
           join       -> oxo-ws-fn (extends Games item: board="---------", currentTurn="X", version=0, moveCount=0)
           move       -> oxo-ws-fn move-handler (server-authoritative; see move flow below)
+          chat       -> oxo-ws-fn chat-handler (relay+echo; NO DynamoDB write; see chat flow below)
           $disconnect -> oxo-ws-fn disconnect-handler (real; abandon+notify+clean; see disconnect flow below)
 ```
 
@@ -310,6 +311,45 @@ Idle timeout path: APIGW closes a connection idle for ≥10 minutes, firing the
 same $disconnect event → identical handler execution, same log shape.
 ```
 
+### Chat flow (s014 — relay + echo, NO DynamoDB write)
+
+```
+Browser A (sender)
+  | WS frame: { action:'chat', gameId, text }
+  v
+API Gateway route: 'chat'
+  v
+oxo-ws-fn chat-handler
+  1. Parse body; reject malformed (chat_rejected, category:data, 0 writes, 0 posts)
+  2. Read connectionId from event.requestContext (server-derived, never from client)
+  3. GetItem(Games, body.gameId) → load hostConnectionId, guestConnectionId
+     If absent: chat_rejected (game-not-found), 0 writes, 0 posts
+  4. Derive senderRole: connectionId==hostConnectionId→'host', ==guestConnectionId→'guest'
+     If neither: chat_rejected (not-a-player), 0 writes, 0 posts (cross-game prevention)
+  5. normaliseChatText(frame.text): trim, strip <>&"' and ASCII control chars, cap 200 chars
+     If empty after normalisation: chat_rejected (empty-text), 0 writes, 0 posts
+  6. log chat_relayed (category:ok, gameId, senderRole)
+  7. PostToConnection(opponentConnectionId, {action:'chat-message', sender:senderRole, text})
+     — relay to opponent (1 POST)
+  8. PostToConnection(senderConnectionId, {action:'chat-message', sender:senderRole, text})
+     — echo to sender (1 POST)
+     GoneException on either post: caught, logged chat_post_failed (category:external,
+     subcategory:availability), NOT retried, does NOT block the other post
+
+Accepted message: 1 GetItem (no write) + 2 POSTs
+Rejected message: 1 GetItem (no write) + 0 POSTs
+Gone opponent (AC3.5): posts swallowed best-effort; sender's screen unaffected
+
+NO DynamoDB write of any kind on the chat path (no Games update, no Connections update,
+no leaderboard write). Chat is in-memory only — no persistence, no backup requirement,
+no scoring path.
+
+XSS controls (defence-in-depth):
+  PRIMARY:   React text-render on the recipient client (text node, not innerHTML)
+  SECONDARY: Server normaliseChatText strips <>&"' before relay
+  Both confirmed active in production validation (s014 AC3.4 / T-CHAT-3).
+```
+
 <br>
 
 **Exemption mechanism (CI runner — s007a):**
@@ -335,10 +375,10 @@ The exemption:
 |----------|-----------|-------|
 | CloudFront distribution | d3pf3kcvzpau1x | SPA + /api/* + /config.js |
 | HTTP API (API Gateway) | via `OxoGameProd-HttpApiEndpoint` output | POST /api/games -> oxo-game-fn; response now includes wsToken |
-| WebSocket API (API Gateway) | ylbzjuo8lf, stage: prod | 5 routes ($connect/register/join/move/$disconnect — all real from s007); direct WSS; no CloudFront proxy |
+| WebSocket API (API Gateway) | ylbzjuo8lf, stage: prod | 6 routes ($connect/register/join/move/chat/$disconnect — all real from s014); direct WSS; no CloudFront proxy |
 | Lambda — game | oxo-game-fn | Create-game handler; mints wsToken; DynamoDB PutItem on Games |
 | Lambda — ws authorizer | oxo-ws-auth-fn | REQUEST authorizer on $connect; verifies wsToken/code; per-IP budget; structured logs with buildSha |
-| Lambda — ws | oxo-ws-fn | connect/register/join/move/$disconnect; DynamoDB r/w Games+Connections; ManageConnections; GetItem Connections (disconnect path) |
+| Lambda — ws | oxo-ws-fn | connect/register/join/move/chat/$disconnect; DynamoDB r/w Games+Connections; ManageConnections; GetItem Connections (disconnect path); chat route adds NO new DynamoDB write grant — uses existing GetItem(Games) + ManageConnections |
 | DynamoDB — games | oxo-games | PK: gameId; GSI: code-index (PK: code); 24h TTL; SSE enabled; on-demand. Active-game items carry: board (9-char string), currentTurn (X\|O), version (N, CAS), moveCount (N), winner (X\|O, terminal only), status (waiting\|active\|won\|drawn\|abandoned) |
 | DynamoDB — connections | oxo-connections | PK: connectionId; 2h TTL; SSE enabled; on-demand |
 | DynamoDB — connect attempts | oxo-connect-attempts | PK: sourceIp; count (N); ttl (~5min TTL); SSE enabled; on-demand; used by authorizer for per-IP budget |
@@ -468,6 +508,11 @@ aws dynamodb query \
 aws apigatewayv2 get-routes \
   --api-id ylbzjuo8lf \
   --query 'Items[?RouteKey==`$disconnect`].{RouteKey:RouteKey,RouteId:RouteId,Target:Target}'
+
+# Confirm chat route exists on the WS API (s014+ — must be present)
+aws apigatewayv2 get-routes \
+  --api-id ylbzjuo8lf \
+  --query 'Items[?RouteKey==`chat`].{RouteKey:RouteKey,RouteId:RouteId,Target:Target}'
 ```
 
 Validation run results are recorded in `process/dora/ledger.csv`
@@ -579,6 +624,34 @@ including disconnect. This is a known gap (F1). Use `LastModified` from
 | `move_relay_gone` | WARN | `external` | `availability` | GoneException on a relay PostToConnection; other connection still notified | Connection dropped; best-effort relay; not a defect |
 | `move_store_failed` | ERROR | `external-dependency` | — | UpdateItem on Games failed after SDK retries (DDB 5xx/throttle) | Dependency; check AWS Health |
 | `disconnect-notify` | INFO | — | — | Structured log emitted on every $disconnect. Fields: `gameId`, `posted` (0 or 1 — whether opponent-disconnected was sent), `gone` (0 or 1 — whether GoneException was swallowed), `buildSha` (currently "unknown" — see §1 F1 caveat). `posted:1 gone:0` = survivor notified clean. `posted:1 gone:1` = both connections gone. `posted:0` = game was not active (terminal/waiting/abandoned). | Expected at info level on every disconnect; not an error |
+| `chat_rejected` | WARN | `data` | — | Chat message rejected by server. Fields: `buildSha`, `connectionId`, `reason` (malformed-frame / missing-game-id / game-not-found / not-a-player / empty-text). 0 writes, 0 posts on any rejection. | Caller (4xx-class — no state change). Isolated incident is a client bug or probe; sustained pattern may indicate a replay/flood attempt. |
+| `chat_relayed` | INFO | `ok` | — | Chat message accepted and relayed. Fields: `buildSha`, `gameId`, `senderRole` (host/guest). Emitted before the two PostToConnection calls. | Success path; informational. |
+| `chat_post_failed` | WARN | `external` | `availability` | GoneException (410) or transient error on a PostToConnection during chat relay or echo. Fields: `buildSha`, `connectionId`, `errorName`. The other post proceeds regardless; no retry. | Connection already closed (race with disconnect). Best-effort — expected when a player disconnects mid-game. Not a defect. |
+
+### §5c failure classification (chat path — s014)
+
+| Failure category | `category` log value | Whose problem | First response |
+|-----------------|---------------------|---------------|----------------|
+| Malformed frame / missing gameId | `data` (4xx-class) | Caller (SPA bug or probe) | Check SPA version (§1). No state change; no DynamoDB write. |
+| game-not-found (GetItem miss) | `data` (4xx-class) | Caller (stale gameId or probe) | Check SPA version. The game may have TTL-expired. No state change. |
+| not-a-player (connectionId not bound to game) | `data` (4xx-class) | Caller (cross-game probe or SPA bug) | No relay occurred; no DynamoDB write. Probe pattern if systematic. |
+| empty-text (text empty after normalise) | `data` (4xx-class) | Caller (blank message or all-stripped chars) | Client-side validation should prevent this; if frequent, SPA bug. |
+| GoneException on relay/echo PostToConnection | `external`, `availability` | Connection dropped (race with disconnect) | Best-effort — normal during disconnect race. `chat_post_failed` log. No action unless rate is very high. |
+| GetItem(Games) failure (DDB 5xx/throttle) | `external-dependency` | AWS dependency | Check AWS Health Dashboard. The chat message is silently dropped (no write, chat is ephemeral). |
+| Lambda-level exception (unhandled throw) | `internal` | Our code defect | Check CloudWatch logs for Node.js stack trace; raise defect task. |
+
+**Important:** the chat path has NO DynamoDB write on any code path (accepted or rejected). A chat failure never corrupts game state. There is nothing to roll back and no scoring impact.
+
+### CloudWatch Logs Insights — chat events (last 1 hour)
+
+```
+fields @timestamp, event, category, buildSha, gameId, senderRole, reason, connectionId
+| filter event in ["chat_rejected", "chat_relayed", "chat_post_failed"]
+| sort @timestamp desc
+| limit 50
+```
+
+Run against log group `/aws/lambda/oxo-ws-fn`.
 
 **oxo-game-fn code-reservation events (s005-h3)** — The code-reservation path
 now emits structured JSON lines to `/aws/lambda/oxo-game-fn`. Every line carries
@@ -1166,6 +1239,51 @@ aws dynamodb query \
 - **Do NOT manually delete an EXEMPT# item** during an active CI run — doing so
   will cause that run's smoke suite to fail with per-IP rate denies.
 
+### Chat messages not appearing on opponent's screen (s014+)
+
+A player reports typing a message but the opponent does not see it.
+
+1. **Check ws-fn build identity (§1).** The `chat` route requires s014 Lambda code.
+   Confirm `LastModified` on `oxo-ws-fn` matches the s014 infra pipeline deploy time
+   (note: `buildSha="unknown"` is still expected — see §1 F1):
+   ```bash
+   aws lambda get-function --function-name oxo-ws-fn \
+     --query 'Configuration.{LastModified:LastModified,CodeSize:CodeSize}'
+   ```
+
+2. **Confirm the `chat` route exists on the WS API:**
+   ```bash
+   aws apigatewayv2 get-routes \
+     --api-id ylbzjuo8lf \
+     --query 'Items[?RouteKey==`chat`]'
+   ```
+   If the `chat` route is absent, the infra pipeline did not deploy the s014
+   CDK change. Re-run the infra pipeline.
+
+3. **Check for `chat_rejected` or `chat_post_failed` events in ws-fn logs:**
+   ```
+   fields @timestamp, event, category, buildSha, gameId, senderRole, reason, connectionId
+   | filter event in ["chat_rejected", "chat_relayed", "chat_post_failed"]
+   | sort @timestamp desc
+   | limit 50
+   ```
+   Run against `/aws/lambda/oxo-ws-fn`.
+   - `chat_relayed` present but opponent did not see it → relay succeeded; issue is in the SPA
+     (opponent's React component). Check opponent's SPA build SHA.
+   - `chat_post_failed` with `errorName` containing `Gone` → opponent's connection dropped
+     (race with disconnect). Best-effort — not a defect.
+   - `chat_rejected` with `reason=not-a-player` → sender's connectionId is not bound to the
+     game in DynamoDB; possible session mismatch. Check SPA version.
+   - No log events → the WS frame did not reach the `chat` route; check the SPA send code
+     and that the `action` field is exactly `'chat'`.
+
+4. **Confirm CSP allows the WS connection.** Chat uses the same WS connection as moves —
+   if moves work, CSP is not the issue. If both chat and moves are broken, check §6
+   "Players cannot pair" playbook.
+
+**Note:** chat has no persistence and no DynamoDB writes. A delivery failure loses only
+that one in-memory message. There is nothing to recover and no state to roll back.
+
 ### POST /api/games returning 5xx
 
 Client receives HTTP 500 `{"error":"Could not create game"}`. Possible causes:
@@ -1232,6 +1350,13 @@ npx cdk deploy OxoGameProd --rollback --require-approval never
 The `Connections` table uses `RemovalPolicy.DESTROY` (ephemeral data).
 The `Games` table uses `RemovalPolicy.RETAIN`.
 The `Leaderboard` table uses `RemovalPolicy.RETAIN` (durable standings; PITR enabled for point-in-time recovery).
+
+**Chat path rollback:** the chat handler is a single route in `oxo-ws-fn`. Chat has
+NO DynamoDB writes and NO separate Lambda; disabling or removing the `chat` route
+from the WS API does not affect game play, moves, or leaderboard scoring.
+To disable chat without a full redeploy: remove the `chat` route from the
+API Gateway WS API and push a CDK change. The `chat` route is off the move
+hot path — it cannot cause game-state corruption.
 
 **Leaderboard scoring path rollback:** `oxo-board-fn` is off the game hot path.
 Disabling or removing it does not affect game play. To disable stream scoring:
@@ -1414,6 +1539,9 @@ To remove the WAF ACL:
 | OI-S009-a | Leaderboard names are not authenticated — anyone can use any name; two players sharing a name share one row | Intentional arcade model. No mitigation planned until player-identity slice. |
 | OI-S009-b | GET /api/leaderboard has no CloudWatch alarm; a sustained Scan failure would silently serve empty leaderboard to all players | Observable via `leaderboard_read_failed` log events (see §4b). No alarm configured (OI-18 tracking). |
 | OI-S009-c | scoredGames SS grows unboundedly on high-volume names — no compaction | At hobby volume a single name row's SS is negligible. Monitor item size if a name accumulates thousands of games. |
+| OI-S014-a | Chat latency p95 not formally measured — informal single-sample 199ms (s014). Formal Playwright p95 latency assertion deferred to s015. | At measured 199ms the ~1s SLA is very likely met; no action needed before s015. |
+| OI-S014-b | Cross-game injection enforcement test not run in production (T-CHAT-2 waived to unit tests in s014). | Server-side connectionId binding logic is correct (unit tests AC1.3/1.4). Production-level enforcement test is s015 scope. |
+| OI-S014-c | No CloudWatch alarm on `chat_rejected` rate — a sustained flood of rejected frames is log-observable only. | Observable via Logs Insights query in §5c. Add alarm when OI-18 is addressed. |
 
 Gaps are tracked in the project open-items register. Do not treat open items as
 alerts requiring immediate action unless noted otherwise; they are planned

@@ -2,40 +2,44 @@
 
 ## What is this?
 
-oxo-online is a noughts and crosses (tic-tac-toe) game that runs in a web
-browser. You can play locally against another person on the same device, play
-solo against an unbeatable computer opponent, or play a complete online game
-against a friend in a separate browser in real time. The full online flow is
-live: the host enters an arcade name (optional — defaults to "AAA"), creates a
-game and shares it using either "Copy code" (the 6 characters, for a friend who
-types) or "Copy link" (the /join/ URL, for one-click join); the friend opens the
-URL and joins in one click; moves relay between browsers via a server-authoritative
-Lambda; the server detects wins and draws; both players see the result
-simultaneously; and if either player disconnects mid-game, the survivor is
-notified and returned to the mode selector within 10 seconds. During an active
-online game, each player has a **chat box** below the board — type a message and
-press Enter (or click Send) and the opponent sees it within approximately 1 second,
+oxo-online is a feature-complete noughts and crosses (tic-tac-toe) game that
+runs in a web browser, live at https://d3pf3kcvzpau1x.cloudfront.net. No
+accounts or installation are required. The full C1–C7 roadmap has shipped.
+
+You can play locally against another person on the same device, play solo against
+an unbeatable computer opponent, or play a complete online game against a friend
+in a separate browser in real time. The full online flow is live: the host enters
+an arcade name (optional — defaults to "AAA"), creates a game and shares it using
+either "Copy code" (the 6 characters, for a friend who types) or "Copy link" (the
+/join/ URL, for one-click join); the friend opens the URL and joins in one click;
+moves relay between browsers via a server-authoritative Lambda; the server detects
+wins and draws; both players see the result simultaneously; and if either player
+disconnects mid-game, the survivor is notified and returned to the mode selector
+within 10 seconds. During an active online game, each player has a **chat box**
+below the board — type a message and press Enter (or click Send) and the opponent
+sees it within approximately 1 second (p95 196 ms in production validation),
 labelled "Opponent"; your own message is echoed back labelled "You". When a game
 ends the result is recorded on a **shared arcade leaderboard**, visible to all
 players: rank, name, wins, draws, and losses. Player B can see Player A's scores
-within approximately 1.2 seconds of game-over (SLA: 10 seconds). No accounts are
-required.
+within approximately 1.2 seconds of game-over (SLA: 10 seconds).
 
 **Arcade name model:** names are not unique or authenticated. Two players can
 both call themselves "AAA". Scores accumulate on a single shared row per name —
 intentional arcade behaviour. The name you last used is pre-filled on your next
 visit (sessionStorage).
 
-**Chat model:** messages are in-memory only — they vanish when the game ends or a
-player disconnects. There is no message history. Names and messages are not
-authenticated; anyone can type anything. The chat box is only visible during an
-active online game (absent on idle and waiting screens). Messages are limited to
-200 characters.
+**Chat model:** your in-game chat is private to the two players in your game — a
+player in any other game can never see your messages (proven adversarially in
+production, including forged-gameId rejection). Messages are in-memory only —
+they vanish when the game ends or a player disconnects, and the chat input
+disappears from the screen at game-over. There is no message history. Names and
+messages are not authenticated; anyone can type anything. The chat box is only
+visible during an active online game (absent on idle and waiting screens).
+Messages are limited to 200 characters.
 
-**Not yet available:** reconnect after reload (a player who reloads their tab
-loses the session and must start a new game — deferred until player identity
-ships), player accounts, and formal chat p95 latency proof + cross-game enforcement
-test (deferred to s015, C7 done-condition).
+**Known limitation — no reconnect after reload:** a player who reloads the page
+loses the session and must start a new game. Reconnection requires player identity
+(unscheduled).
 
 ---
 
@@ -186,14 +190,19 @@ A chat panel appears below the board while the game is active.
 1. Type a message in the "Chat message" text field.
 2. Press **Enter** or click **Send** to send. Your message appears labelled
    "You"; your opponent sees the same message labelled "Opponent" within
-   approximately 1 second.
+   approximately 1 second (p95 196 ms measured in production).
 3. Messages are limited to 200 characters. Leading/trailing whitespace and
    the characters `< > & " '` are stripped by the server before relay.
-4. **Messages are not saved.** When the game ends or either player disconnects,
-   the chat history vanishes. There is no history across games.
-5. Sending a message after your opponent has disconnected does not cause any
+4. **Your chat is private to your game.** Only the two players in your game
+   can see your messages. A player in any other game — on the same server, at
+   the same time — receives zero chat frames from your game. This is enforced
+   server-side and proven adversarially in production.
+5. **Messages are not saved.** When the game ends, the chat input disappears
+   from both screens and the chat history vanishes. There is no history across
+   games.
+6. Sending a message after your opponent has disconnected does not cause any
    error; the message is silently discarded server-side.
-6. The chat box is absent on the idle and waiting-for-opponent screens — it
+7. The chat box is absent on the idle and waiting-for-opponent screens — it
    only appears during an active game.
 
 ---
@@ -266,12 +275,10 @@ Either player returns to the idle/title screen
   accumulate on one leaderboard row. There are no accounts or passwords.
 - **Chat has no history and no persistence.** Messages exist only in the browser
   for the duration of the active game. Reloading or disconnecting loses all chat.
-- **Chat names are not authenticated.** The sender label ("You" / "Opponent") is
-  derived from the connection binding, not from the player's arcade name. There is
-  no way to verify who typed a message beyond the connection identity.
-- **Chat latency proof is informal (s014).** The ~1 second delivery claim is
-  based on a single 199ms measurement during validation. Formal p95 Playwright
-  latency assertions are deferred to s015.
+- **Chat sender labels are not tied to arcade names.** The "You" / "Opponent"
+  labels are derived from the server-side connection binding, not the player's
+  arcade name. There is no way to verify who typed a message beyond the connection
+  identity.
 
 ---
 

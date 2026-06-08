@@ -1,7 +1,7 @@
 # oxo-online — Support Runbook
 
 Audience: on-call engineers and support team.
-Last updated: slice s014-chat-send (iteration 16, validated 2026-06-08).
+Last updated: slice s015-chat-scope-done (iteration 18, validated 2026-06-08).
 
 ---
 
@@ -1539,9 +1539,10 @@ To remove the WAF ACL:
 | OI-S009-a | Leaderboard names are not authenticated — anyone can use any name; two players sharing a name share one row | Intentional arcade model. No mitigation planned until player-identity slice. |
 | OI-S009-b | GET /api/leaderboard has no CloudWatch alarm; a sustained Scan failure would silently serve empty leaderboard to all players | Observable via `leaderboard_read_failed` log events (see §4b). No alarm configured (OI-18 tracking). |
 | OI-S009-c | scoredGames SS grows unboundedly on high-volume names — no compaction | At hobby volume a single name row's SS is negligible. Monitor item size if a name accumulates thousands of games. |
-| OI-S014-a | Chat latency p95 not formally measured — informal single-sample 199ms (s014). Formal Playwright p95 latency assertion deferred to s015. | At measured 199ms the ~1s SLA is very likely met; no action needed before s015. |
-| OI-S014-b | Cross-game injection enforcement test not run in production (T-CHAT-2 waived to unit tests in s014). | Server-side connectionId binding logic is correct (unit tests AC1.3/1.4). Production-level enforcement test is s015 scope. |
+| OI-S014-a | CLOSED (s015). Chat p95 formally measured in production: p95 196 ms across >=5 sends, well within 1000 ms SLA. Standing Playwright guard committed (AC1.3 / T-P95-1). | n/a — closed |
+| OI-S014-b | CLOSED (s015). Cross-game isolation proven in production (AC1.1 S-SCOPE-1, AC1.2 forged-gameId). Standing Playwright guard committed. C3 receives zero chat-message frames; forged-gameId rejected, zero PostToConnection calls. | n/a — closed |
 | OI-S014-c | No CloudWatch alarm on `chat_rejected` rate — a sustained flood of rejected frames is log-observable only. | Observable via Logs Insights query in §5c. Add alarm when OI-18 is addressed. |
+| OI-S015-a | s015 adds no new operational surface. Three standing prod guards added (chat-isolation / forged-gameId / p95 / game-over render gate — AC1.1–AC1.5). These are test guards, not new Lambda routes or DynamoDB tables. | No new resources to monitor. Chat operational surface unchanged from s014. |
 
 Gaps are tracked in the project open-items register. Do not treat open items as
 alerts requiring immediate action unless noted otherwise; they are planned

@@ -645,3 +645,9 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-08T14:27:02Z,oxo-online,17,IMP-009-faster-validation,orchestrator,gate,,success,RETRO-IMP009,IMP-009 delivered; EXP-019 active-score-pending; OI-45 addressed
 2026-06-08T16:04:38Z,oxo-online,18,s015-chat-scope-done,product,task_start,,na,S015-SLICE,assess: thin s015 scope-guard+done-condition vs C7-already-done by s014
 2026-06-08T16:05:48Z,oxo-online,17,s015,product,task_end,,success,S015-SLICE,s015 thin slice defined: prod cross-game isolation guard (T-CHAT-2) + formal 1s p95 latency assertion + game-over chat-input state — C7 done-condition proof
+2026-06-08T16:15:36Z,oxo-online,18,s015-chat-scope-done,orchestrator,gate,,success,GATE-2-S015,slice accepted + standing approval
+2026-06-08T16:15:36Z,oxo-online,18,s015-chat-scope-done,solution-architect,task_start,,na,S015-DELTA,arch-lite: scope-isolation S-case guard on existing connectionId boundary + security conclusion
+2026-06-08T16:16:29Z,oxo-online,18,s015-chat-scope-done,ui-designer,task_start,,na,S015-UI,STRUCTURE-mode gate: chat-scope-done closeout
+2026-06-08T16:16:33Z,oxo-online,18,s015-chat-scope-done,ui-designer,task_end,,na,S015-UI,NO-OP: no new/changed surface. Chat-input-absent-on-game-over is existing s014 behaviour (panel renders only when result===undefined); SM-3 (absent OR disabled) already satisfied by absent state. Tester pins it; no design choice introduced.
+2026-06-08T16:16:53Z,oxo-online,18,s015-chat-scope-done,solution-architect,task_start,,na,S015-DELTA,arch-lite delta: chat scope-isolation guard + p95 + game-over (C7 close)
+2026-06-08T16:18:12Z,oxo-online,18,s015-chat-scope-done,solution-architect,task_end,,success,S015-DELTA,arch-lite §9a auto-accept: cross-game isolation existing by-construction property; p95 + game-over guards; no data-flow change

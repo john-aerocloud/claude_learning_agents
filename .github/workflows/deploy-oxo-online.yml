@@ -258,12 +258,10 @@ jobs:
             WSS_URL=""
           fi
           # config.js carries ONLY the WS url — every SPA feature flag has been
-          # factored out at its slice's delivery (§40 code-then-config):
-          #   - s006 uc4Enabled            (server-authoritative move relay)
-          #   - s009 uc1NameEnabled        (name entry)
-          #   - s009 uc3LeaderboardEnabled (leaderboard panel)
-          #   - s009 uc4TwoCopyEnabled     (two copy controls)
-          # All four are now the UNCONDITIONAL SPA behaviour; no flag entry here.
+          # factored out at its slice's delivery (§40 code-then-config).
+          # s006 removed the move-relay flag; s009 removed the remaining three
+          # name/leaderboard/two-copy flags. All are now unconditional SPA
+          # behaviour; no flag entry belongs here.
           printf 'window.OXO_CONFIG=%s;\n' "{\"wsUrl\":\"${WSS_URL}\"}" > /tmp/config.js
           aws s3 cp /tmp/config.js s3://${{ vars.OXO_ONLINE_S3_BUCKET }}/config.js \
             --region ${{ env.AWS_REGION }} \

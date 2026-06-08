@@ -642,3 +642,4 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-08T14:16:55Z,oxo-online,17,IMP-009-faster-validation,cicd,task_end,,success,IMP009-L1,both-layer exemption confirmed; workers:4 set in playwright.config.ts; EXP-009 serial workaround retired
 2026-06-08T14:19:04Z,oxo-online,17,IMP-009-faster-validation,tester,task_start,,na,IMP009-L2,make validate-impacted = impacted specs ∪ regression-core; full validate stays as backstop; define always-run core + coverage guard
 2026-06-08T14:24:30Z,oxo-online,0,IMP-009-L2,tester,task_end,,success,IMP009-L2,IMP-009 L2: validate-impacted target + regression-core (6 specs) + coverage guard + stale-comment fix. 84->43 tests (49%) for s014 window.
+2026-06-08T14:27:02Z,oxo-online,17,IMP-009-faster-validation,orchestrator,gate,,success,RETRO-IMP009,IMP-009 delivered; EXP-019 active-score-pending; OI-45 addressed

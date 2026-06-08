@@ -125,6 +125,29 @@ test.describe('UC2 local stand-up — in-game chat (real browser)', () => {
     }
   });
 
+  // POLISH (s014, ui-designer, iter 16) — the Send control must read as the
+  // project's STANDARD button. s009 converged every action button onto the
+  // outline idiom (.play-options/.copy-controls: transparent fill + currentColor
+  // hairline). The Send button shipped as a one-off filled-accent button — the
+  // exact one-off s009 converged away from. Pin the outline idiom so the chat
+  // affordance stays consistent with the design system, not a parallel style.
+  test('Send button uses the project outline-button idiom (transparent fill)', async ({ browser }) => {
+    const hostCtx = await browser.newContext();
+    const host = await hostCtx.newPage();
+    try {
+      await openHost(host);
+      const send = host.getByTestId('chat-send-btn');
+      await expect(send).toBeVisible({ timeout: 10_000 });
+      const bg = await send.evaluate(
+        (el) => getComputedStyle(el).backgroundColor,
+      );
+      // Outline idiom = transparent fill (rgba alpha 0), like the other buttons.
+      expect(bg).toMatch(/rgba?\([^)]*,\s*0\s*\)|transparent/);
+    } finally {
+      await hostCtx.close();
+    }
+  });
+
   // LAYOUT-S014-1 — chat panel sits BELOW the board; messages stack vertically.
   test('LAYOUT-S014-1 — chat panel is below the board; messages stack vertically', async ({ browser }) => {
     const hostCtx = await browser.newContext();

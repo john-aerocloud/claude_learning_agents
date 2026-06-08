@@ -98,6 +98,20 @@ message-appear transition uses `--motion-fast` wrapped in the
 `prefers-reduced-motion` path. Sender distinction is LABEL TEXT, never colour
 alone (1.4.1) — so no "self vs other" colour pair is needed or defined.
 
+> POLISH (s014, ui-designer, iter 16): the Send button shipped functionally as a
+> filled-accent button (`background: var(--accent); color: #fff`) — a one-off
+> against the project's button idiom. s009 converged every action button onto the
+> **outline idiom** (`background: transparent; border: 1px solid currentColor;
+> accent on hover`, per `.play-options`/`.copy-controls`). The Send button was
+> converged onto that same idiom so chat reads as the standard button, not a
+> parallel filled style. WCAG-S014-9 contrast is unchanged — the label is `--text`
+> on the page surface (≥4.5:1, verified s009), no longer white-on-accent. Pinned
+> by `tests/local/chat.local.spec.ts` (computed `background-color` is transparent).
+> No behaviour/markup/selector/data-testid changed. The rest of the chat surface
+> (tokenized spacing/type/colour, focus rings, empty state, reduced-motion,
+> overflow scroll, vertical-stack geometry) was already consistent — no other
+> polish edit was needed.
+
 ## Migration backlog (existing off-token values — NOT fixed this slice)
 
 - `index.css` uses raw `rem` literals and UA default text colour. Converging

@@ -384,6 +384,12 @@ body {
   border-color: var(--accent);
 }
 
+/* POLISH (s014, iter 16): the Send button reads as the project's STANDARD
+ * button — the same outline idiom s009 converged .play-options/.copy-controls
+ * onto (transparent fill + currentColor hairline, accent on hover), so chat is
+ * not a parallel filled-accent one-off. WCAG-S014-9 contrast is met by the
+ * label text on the page surface (--text ≥ 4.5:1, verified s009), not a
+ * white-on-accent pairing. */
 .chat-send-btn {
   flex: 0 0 auto;
   /* WCAG-S014-4: ≥ 24×24 CSS px target. */
@@ -392,16 +398,15 @@ body {
   padding: var(--space-2) var(--space-4);
   font-size: var(--text-md);
   border-radius: var(--radius-sm);
-  /* WCAG-S014-9: text-on-accent ≥ 4.5:1 — white on --accent in both schemes. */
-  border: 1px solid var(--accent);
-  background: var(--accent);
-  color: #ffffff;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
   cursor: pointer;
-  transition: opacity var(--motion-fast);
+  transition: border-color var(--motion-fast);
 }
 
 .chat-send-btn:hover {
-  opacity: 0.9;
+  border-color: var(--accent);
 }
 
 .chat-send-btn:focus-visible {

@@ -537,3 +537,6 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-07T23:52:38Z,oxo-online,13,IMP-007-impacted-tests,engineer,task_end,253,pass,IMP007-ADOPT,Kebab-aligned 14 class-deps node-ids to their @covers tags (v37 §12a.5); false-uncovered now resolve to specs; tester.md plan-step wired to make impacted-tests; test-tools 9/9 green
 2026-06-07T23:54:23Z,oxo-online,13,IMP-007-impacted-tests,orchestrator,gate,,success,IMP-007-DELIVERED,tool delivered + adopted; auto-retro
 2026-06-07T23:54:58Z,oxo-online,13,IMP-007-impacted-tests,orchestrator,gate,,success,RETRO-IMP007,EXP-013/014 registered, OI-42, payoff scores over C5
+2026-06-08T06:09:42Z,oxo-online,14,s009-leaderboard-record,product,task_start,,na,S009-SLICE,slice-next: propose s009 record-result ingestion slice + C5 chunk-plan
+2026-06-08T06:10:33Z,oxo-online,1,s009,product,task_start,,na,S009-SLICE,proposing s009 leaderboard record-result slice
+2026-06-08T06:12:41Z,oxo-online,1,s009,product,task_end,,success,S009-SLICE,s009 slice.md written; chunk-plan C4 complete / C5 in-progress updated

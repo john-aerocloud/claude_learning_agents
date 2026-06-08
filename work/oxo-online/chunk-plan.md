@@ -18,8 +18,8 @@ and marks actuals when a slice is delivered.
 | C1 | Deployable shell | delivered | 1 (s001) | 0 | — |
 | C2 | Local two-player game | delivered | 1 (s002) | 0 | — |
 | C3 | Single-player vs AI | delivered | 1 (s003) | 0 | — |
-| C4 | Online two-player match | **complete** | 8 (s004, s005-h1, s005, s005-h2, s006, s007, s008, s005-h3) | 0 | — |
-| C5 | Leaderboard | not started | 0 | 3 (s009–s011) | s009 record-game-result |
+| C4 | Online two-player match | **complete** | 7 (s004, s005-h1, s005, s005-h2, s006, s007, s008) + s005-h3 (in-planning) | 0 | — |
+| C5 | Leaderboard | **in-progress** | 0 | 3 (s009–s011) | s009 record-game-result |
 | C6 | Player identity (lightweight) | not started | 0 | 2 (s012–s013) | s012 display-name-entry |
 | C7 | In-game chat | not started | 0 | 2 (s014–s015) | s014 in-game-message-send |
 
@@ -317,13 +317,43 @@ standings; after a completed game the board updates within 10 seconds; it loads
 within 2 seconds (p95). No account required — anonymous players tracked by
 session.
 
-**Slices (forecast):**
+**Slices:**
 
-### s009 — record game result to leaderboard (backend)
-**Scope:** When a `game-over` event is written to `Games`, a Lambda (or DynamoDB
-Stream handler) writes a win/draw/loss tally to a `Leaderboard` DynamoDB table
-keyed by player identifier (initially connection-scoped; anonymous). This is the
-data ingestion half only — no UI.
+| Slice | Status | Delivered | Outcome |
+|-------|--------|-----------|---------|
+| s009 — record game result (backend) | **in-planning** | — | — |
+| s010 — read endpoint + title-screen display | forecast | — | — |
+| s011 — latency validation (done-condition proof) | forecast | — | — |
+
+**C5 status: in-progress** — s009 opened 2026-06-08. Done condition requires s011 (latency proof).
+
+### s009 — record game result to leaderboard (backend) [IN PLANNING — SEL-S009]
+
+**Killick note:** Weak/internal slice — no user-visible outcome. Justified as the
+write-path de-risk half before s010 (read + UI) is built on top. See
+slices/s009-leaderboard-record/slice.md for the full rationale.
+
+**Player identity decision:** client-generated `oxo_player_id` UUID persisted in
+`localStorage`; sent with `POST /api/games` and WS `join`; stored as
+`hostPlayerId`/`guestPlayerId` on the `Games` item. Stable within-browser;
+not cross-device (C6 handles cross-device identity). Connection-scoped was
+rejected as near-useless for standing; deferred-to-C6 was rejected as it
+makes C5's done condition unreachable without migration.
+
+**Mechanism direction:** DynamoDB Stream on `Games` → `oxo-board-fn` (preferred,
+decoupled from hot path); inline Lambda invoke as fallback. Architect decides.
+
+**Scope:** When a game reaches `won`/`drawn`, a tally is written to a new
+`Leaderboard` DynamoDB table keyed by `oxo_player_id`. Exactly one tally per
+completed game; idempotent on replay. Abandoned games produce no tally. No
+change to player-visible game flow.
+
+**Success measures:** SM-1 (one tally per game), SM-2 (correct winner attribution),
+SM-3 (idempotent on replay), SM-4 (game-over relay latency unchanged), SM-5
+(abandoned games produce no tally), SM-6 (playerIds stored in Games item).
+
+**Not in scope:** read endpoint, UI display, latency SLA proof, display names,
+cross-device identity, historical backfill.
 
 ### s010 — leaderboard read endpoint + title-screen display
 **Scope:** `GET /api/leaderboard` returns the top-N standings. The title screen

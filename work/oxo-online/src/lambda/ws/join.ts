@@ -6,6 +6,7 @@ import {
 import type { APIGatewayProxyWebsocketEventV2 } from 'aws-lambda';
 import { ddb, CONNECTION_TTL_SECONDS } from './ddb';
 import { close, type WsResult } from './ws-result';
+import { normaliseName } from './name';
 
 /**
  * Post a server frame to a single WebSocket connection via the @connections
@@ -48,8 +49,16 @@ export async function handleJoin(
   event: APIGatewayProxyWebsocketEventV2,
 ): Promise<WsResult> {
   try {
-    const body = JSON.parse(event.body ?? '{}') as { code?: string };
+    const body = JSON.parse(event.body ?? '{}') as {
+      code?: string;
+      playerName?: unknown;
+    };
     const code = body.code;
+    // s009 UC1-backend (R1.6): the guest's name rides the EXISTING conditional
+    // waiting->active join write. Normalised server-side (trim/<=10/charset-strip
+    // — the write-side half of the stored-XSS control, §8) before storage.
+    // Optional+additive: an old client that omits it stores "AAA" (SM-3).
+    const guestName = normaliseName(body.playerName);
 
     // Look up the game by its join code via the code-index GSI.
     const result = await ddb.send(
@@ -93,7 +102,8 @@ export async function handleJoin(
           // already-active game.
           UpdateExpression:
             'SET guestConnectionId = :cid, #status = :active, ' +
-            'board = :empty, currentTurn = :X, version = :zero, moveCount = :zero',
+            'board = :empty, currentTurn = :X, version = :zero, moveCount = :zero, ' +
+            'guestName = :gn',
           ConditionExpression:
             '#status = :waiting AND attribute_not_exists(guestConnectionId)',
           ExpressionAttributeNames: { '#status': 'status' },
@@ -104,6 +114,8 @@ export async function handleJoin(
             ':empty': '---------',
             ':X': 'X',
             ':zero': 0,
+            // s009 UC1-backend: guest's normalised name, same-item additive.
+            ':gn': guestName,
           },
         }),
       );

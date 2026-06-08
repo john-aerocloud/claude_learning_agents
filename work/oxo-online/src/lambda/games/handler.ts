@@ -11,6 +11,7 @@ import type { SecretSource } from '../token/ports';
 import { createSsmSecretSource } from '../token/adapters/ssm-secret-source';
 import { CodeCollision, type CodeReservationPort } from './codes/ports';
 import { DdbCodeReservation } from './codes/ddb-code-reservation';
+import { normaliseName } from './name';
 
 const TTL_SECONDS = 24 * 60 * 60; // 24h — abandoned waiting games self-delete.
 
@@ -72,12 +73,26 @@ export function createHandler(deps: HandlerDeps) {
   const log: LogFn = deps.log ?? ((line) => console.log(JSON.stringify(line)));
 
   return async function handler(
-    _event: APIGatewayProxyEventV2,
+    event: APIGatewayProxyEventV2,
   ): Promise<APIGatewayProxyResultV2> {
     const tableName = process.env.TABLE_NAME;
 
     const gameId = randomUUID();
     const nowSeconds = Math.floor(Date.now() / 1000);
+
+    // s009 UC1-backend (R1.5): the host's name rides the EXISTING create PutItem.
+    // playerName is OPTIONAL+additive (old clients omit it -> "AAA"). It is
+    // normalised SERVER-SIDE here (trim/<=10/charset-strip — the write-side half
+    // of the stored-XSS control, §8) before it ever reaches the durable item.
+    // A malformed body is tolerated: a missing/garbage playerName -> "AAA".
+    let playerName: unknown;
+    try {
+      playerName = (JSON.parse(event.body ?? '{}') as { playerName?: unknown })
+        .playerName;
+    } catch {
+      playerName = undefined;
+    }
+    const hostName = normaliseName(playerName);
 
     // ---------------------------------------------------------------------
     // s005-h3: reserve a unique code at the storage layer BEFORE writing the
@@ -131,6 +146,10 @@ export function createHandler(deps: HandlerDeps) {
       status: 'waiting' as const,
       createdAt: new Date().toISOString(),
       ttl: nowSeconds + TTL_SECONDS,
+      // s009 UC1-backend: the host's normalised name. Read off the Games item at
+      // game-over by the stream tally writer (it must be on the item BEFORE the
+      // active→won/drawn CAS fires — the only race-free point, delta §2).
+      hostName,
     };
 
     try {

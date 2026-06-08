@@ -170,6 +170,36 @@ describe('join — happy path: activate + game-ready both sides (C1; F1, F2, F5,
     expect(JSON.stringify(update)).not.toContain('SPOOF');
   });
 
+  // s009 UC1-backend (R1.6) — guestName onto the SAME atomic activate write.
+  // @covers wsfn
+  // @covers domain-name-normalise
+  it('writes guestName (normalised) in the SAME activate UpdateItem (T-LB-2, AC1.8)', async () => {
+    await handleJoin(joinEvent('GUEST-CONN', { action: 'join', code: 'ABC123', playerName: 'BEE' }));
+    const update = ddbMock.commandCalls(UpdateCommand)[0].args[0].input;
+    // guestName rides the SAME conditional waiting->active write (same-item
+    // additive, not a new item; no new IAM grant — existing Games UpdateItem).
+    expect(update.UpdateExpression).toContain('guestName = :gn');
+    expect(update.ExpressionAttributeValues?.[':gn']).toBe('BEE');
+    // The no-hijack guard is unchanged (guestName must not weaken it).
+    expect(update.ConditionExpression).toContain('attribute_not_exists(guestConnectionId)');
+  });
+
+  it('omitted playerName -> guestName="AAA" (SM-3 default on the guest path)', async () => {
+    await handleJoin(joinEvent('GUEST-CONN', { action: 'join', code: 'ABC123' }));
+    const update = ddbMock.commandCalls(UpdateCommand)[0].args[0].input;
+    expect(update.ExpressionAttributeValues?.[':gn']).toBe('AAA');
+  });
+
+  it('normalises the guest name server-side: markup stripped before storage (write-side XSS)', async () => {
+    await handleJoin(
+      joinEvent('GUEST-CONN', { action: 'join', code: 'ABC123', playerName: '<script>x' }),
+    );
+    const update = ddbMock.commandCalls(UpdateCommand)[0].args[0].input;
+    const stored = update.ExpressionAttributeValues?.[':gn'] as string;
+    for (const ch of ['<', '>', '&', '"', "'"]) expect(stored).not.toContain(ch);
+    expect(stored.length).toBeLessThanOrEqual(10);
+  });
+
   // R2.5 / AC2.5 / T6 — join-time board init (HARD EDGE #3). The SAME atomic
   // waiting→active conditional write also initialises the play fields, so the
   // first move finds an initialised item (board="---------", currentTurn="X",

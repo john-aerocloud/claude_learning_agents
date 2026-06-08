@@ -314,6 +314,61 @@ describe('handler — UC2: a non-collision reservation error is a straight 5xx (
   });
 });
 
+// ===========================================================================
+// s009 UC1-backend (R1.5) — hostName onto the Games create PutItem.
+// @covers gamesCreateHandler, domain-name-normalise (server-side arm)
+// ===========================================================================
+describe('handler — s009 R1.5: hostName onto Games (T-LB-2, AC1.7)', () => {
+  it('POST {playerName:"ACE"} stores hostName="ACE" on the created item', async () => {
+    const res = await testHandler(makeEvent({ playerName: 'ACE' }));
+    expect(res.statusCode).toBe(201);
+    const item = ddbMock.commandCalls(PutCommand)[0].args[0].input.Item as Record<
+      string,
+      unknown
+    >;
+    expect(item.hostName).toBe('ACE');
+  });
+
+  it('omitted playerName -> hostName="AAA" (SM-3 default)', async () => {
+    const res = await testHandler(makeEvent());
+    expect(res.statusCode).toBe(201);
+    const item = ddbMock.commandCalls(PutCommand)[0].args[0].input.Item as Record<
+      string,
+      unknown
+    >;
+    expect(item.hostName).toBe('AAA');
+  });
+
+  it('blank playerName -> hostName="AAA"', async () => {
+    await testHandler(makeEvent({ playerName: '   ' }));
+    const item = ddbMock.commandCalls(PutCommand)[0].args[0].input.Item as Record<
+      string,
+      unknown
+    >;
+    expect(item.hostName).toBe('AAA');
+  });
+
+  it('normalises server-side: a markup name is stripped + truncated before storage (write-side XSS, T-LB-2)', async () => {
+    await testHandler(makeEvent({ playerName: '<img src=x onerror=alert(1)>' }));
+    const item = ddbMock.commandCalls(PutCommand)[0].args[0].input.Item as Record<
+      string,
+      unknown
+    >;
+    const stored = item.hostName as string;
+    for (const ch of ['<', '>', '&', '"', "'"]) expect(stored).not.toContain(ch);
+    expect(stored.length).toBeLessThanOrEqual(10);
+  });
+
+  it('does NOT regress the contract: 201 body still {gameId, code, wsToken} (no playerName echo)', async () => {
+    const res = await testHandler(makeEvent({ playerName: 'ACE' }));
+    const body = JSON.parse(res.body as string);
+    expect(body.gameId).toBeDefined();
+    expect(body.code).toBeDefined();
+    expect(body.wsToken).toBeDefined();
+    expect(body.playerName).toBeUndefined();
+  });
+});
+
 describe('handler — UC2: reserve happens BEFORE the Games PutItem (order)', () => {
   it('calls reserve(code, gameId) with the SAME code that the Games item carries', async () => {
     const seen: Array<{ code: string; gameId: string }> = [];

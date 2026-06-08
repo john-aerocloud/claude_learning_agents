@@ -1,0 +1,25 @@
+%% UI change-impact map — oxo-online
+%% Nodes: design-system components.  Edges: "used by" -> the surface/route.
+%% Seeded at s009 (ui-designer, iter 14). Nodes/edges added or changed by the
+%% current slice carry classDef `changed` — the tester consumes these marks for
+%% the UI test plan; the ui-designer clears them at slice delivery.
+graph LR
+  %% --- surfaces ---
+  idleView["GameRoot /idle view (mode-selector landing)"]
+  joining["JoinScreen (joining phase)"]
+  playing["OnlineBoard (playing-online)"]
+
+  %% --- existing components ---
+  ModeSelector --> idleView
+  Status --> idleView
+  Board --> idleView
+  JoinScreenC --> joining
+  OnlineBoard --> playing
+
+  %% --- s009 NEW components ---
+  NameField["NameField (NEW)"] --> idleView
+  Leaderboard["Leaderboard (NEW)"] --> idleView
+  LeaderboardRow["LeaderboardRow (NEW)"] --> Leaderboard
+
+  classDef changed fill:#fde68a,stroke:#b45309,stroke-width:2px;
+  class NameField,Leaderboard,LeaderboardRow changed;

@@ -543,3 +543,9 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-08T06:22:26Z,oxo-online,14,s009-leaderboard-record,product,task_start,,na,S009-REVISE,revise per arcade name-based identity redirect
 2026-06-08T06:23:15Z,oxo-online,1,s009,product,task_start,,na,S009-REVISE,Revise s009 per human redirect: arcade name-based shared scoreboard
 2026-06-08T06:27:38Z,oxo-online,1,s009,product,task_end,420,success,S009-REVISE,"s009 revised to arcade-scoreboard: name-as-key, shared board, UI-bearing, strong Killick; C6 absorbed/closed"
+2026-06-08T06:32:42Z,oxo-online,14,s009-arcade-scoreboard,orchestrator,gate,,success,GATE-2-S009,revised slice accepted + standing approval
+2026-06-08T06:32:42Z,oxo-online,14,s009-arcade-scoreboard,solution-architect,task_start,,na,S009-DELTA,arch delta: Leaderboard table + Stream/board-fn + name attrs + read endpoint + security
+2026-06-08T06:32:42Z,oxo-online,14,s009-arcade-scoreboard,ui-designer,task_start,,na,S009-UI-STRUCT,ui-designer structure mode: nav/IA/components/click-budget/WCAG for name-entry + scoreboard
+2026-06-08T06:33:58Z,oxo-online,14,s009,solution-architect,task_start,,na,S009-DELTA,arch delta: arcade scoreboard — Leaderboard + Stream idempotency + name propagation + read path
+2026-06-08T06:34:35Z,oxo-online,14,s009-arcade-scoreboard,ui-designer,task_start,,na,S009-UI-STRUCT,"STRUCTURE mode: name-entry + leaderboard IA, components, selectors, WCAG; first project design system seed"
+2026-06-08T06:37:03Z,oxo-online,14,s009-arcade-scoreboard,ui-designer,task_end,540,success,S009-UI-STRUCT,"STRUCTURE done: idle-view IA (name-entry above mode buttons, leaderboard below), 0-click leaderboard, name not a gate; NameField/Leaderboard/LeaderboardRow; 7 testids; 12 WCAG conditions; first design-system seed + component-map seeded"

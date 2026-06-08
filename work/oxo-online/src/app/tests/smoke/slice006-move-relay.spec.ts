@@ -20,8 +20,11 @@ import { test, expect, type Page } from '@playwright/test';
  * Retire when: move relay removed; game mechanics overhauled; s007 rewrites WS flow.
  * Surface: live production via Playwright Chromium browser (real network, real wss).
  *
- * BUDGET-AWARE (EXP-009): workers:1 in playwright.config.ts keeps per-IP WS connections
- * serialised. Tests consuming WS connections are ordered: identity → F5/T5 (1 WS) →
+ * BUDGET-AWARE (IMP-009 L1): both WAF + WS authorizer layers are now exempt for the
+ * runner IP during smoke-ci (waf-runner-ip.js add/remove cycle covers both layers).
+ * Parallel workers (workers:4) are safe; the prior EXP-009 serial workaround is
+ * obsolete. The ordering note below is informative (connection budget), not a config
+ * constraint. Tests consuming WS connections: identity → F5/T5 (1 WS) →
  * F1/T1/T2/T3 (2 WSs, full game) → F2 (2 WSs, full draw) → F3/S2 (2 WSs) →
  * F4/T4 (2 WSs, post-game-over lock) → S1a/S1b (1-2 WSs).
  *

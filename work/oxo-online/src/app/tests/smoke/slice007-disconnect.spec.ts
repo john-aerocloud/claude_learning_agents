@@ -35,10 +35,12 @@ import { execFileSync } from 'node:child_process';
  * and compares to the sha under test (e078ea4b74... = HEAD at s007 deploy).
  * Mismatch = DISTRIBUTION condition, not behavioural failure.
  *
- * BUDGET-AWARE (EXP-009): tests run workers:1 (skeleton config). Each test that
- * pairs two browsers consumes 2 WS connections from the per-IP budget. The suite
- * is designed to run under make smoke-ci / make waf-runner-ip-add so the CI runner
- * IP is exempt from the WAF rate rule for the duration of the run.
+ * BUDGET-AWARE (IMP-009 L1): both WAF + WS authorizer layers are now exempt for the
+ * runner IP during smoke-ci (waf-runner-ip.js add/remove covers both layers). Parallel
+ * workers (workers:4) are safe; the prior EXP-009 workers:1 serial workaround is
+ * obsolete. Each test that pairs two browsers consumes 2 WS connections; at 4 parallel
+ * workers peak simultaneous connections = 8, well under the 20/5-min hard limit even
+ * in the un-exempted case. Run via make smoke-ci for full exemption-add → run → remove.
  *
  * LOG_QUERY_START_EPOCH env var: set to unix epoch seconds just before this suite
  * starts, so the validation spec's Logs Insights queries cover the right window.

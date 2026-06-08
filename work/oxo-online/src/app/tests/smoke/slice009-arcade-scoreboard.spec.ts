@@ -41,7 +41,8 @@ import { execFileSync } from 'node:child_process';
  * BUDGET-AWARE (EXP-009, two rate-limiting layers):
  *   1. CloudFront WAF: 100/5-min per IP. Exemption via make waf-runner-ip-add.
  *   2. WS $connect authorizer: per-IP ConnectAttempts counter. Same exemption.
- *   WS-consuming tests serialised (workers:1 config); run last to protect budget.
+ *   Both layers exempt during smoke-ci (waf-runner-ip.js covers WAF + authorizer).
+ *   Parallel workers (workers:4) are safe (IMP-009 L1); prior serial workaround obsolete.
  *   Use `make smoke-ci` for full exemption-add → smoke → exemption-remove cycle.
  *
  * STABLE SELECTORS (process v12 §23):

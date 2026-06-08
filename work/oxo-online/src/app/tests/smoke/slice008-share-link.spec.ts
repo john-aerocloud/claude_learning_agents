@@ -31,8 +31,9 @@ import { test, expect, type Page } from '@playwright/test';
  * BUDGET-AWARE (EXP-009, two rate-limiting layers):
  *   1. CloudFront WAF: 100/5-min per IP (sliding 300s window). Exemption via waf-runner-ip-add.
  *   2. WS $connect authorizer: per-IP ConnectAttempts DDB counter. Same exemption covers both.
- *   Tests serialised (skeleton config workers:1). WS-consuming tests (AC2.5, AC3.4) run LAST.
- *   Use `make smoke-ci` for the full exemption-add → smoke → exemption-remove cycle.
+ *   Both layers exempt during smoke-ci (waf-runner-ip.js covers WAF + authorizer).
+ *   Parallel workers (workers:4) are safe (IMP-009 L1); prior serial workaround obsolete.
+ *   WS-consuming tests (AC2.5, AC3.4) may now run in parallel. Use `make smoke-ci`.
  *
  * BROWSER-TRANSPORT (process v27):
  *   AC2.5 and AC3.4 FAIL if:

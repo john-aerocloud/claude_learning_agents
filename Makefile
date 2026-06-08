@@ -210,6 +210,46 @@ smoke-ci:
 	  make waf-runner-ip-add CIDR=$$RUNNER_IP $(if $(AWS_PROFILE),AWS_PROFILE=$(AWS_PROFILE),) && \
 	  make smoke ITER=$(ITER) SLICE=$(SLICE) $(if $(PROD_URL),PROD_URL=$(PROD_URL),)
 
+# --- IMP-009 L2: validate-impacted — impacted ∪ regression-core (OI-45) -------
+# Per-slice FAST PATH: run only the specs whose covered nodes changed in the
+# SINCE window (from make impacted-tests) UNION the committed REGRESSION CORE.
+# The full make smoke / make validate remain UNCHANGED as the periodic backstop.
+#
+# COVERAGE GUARD (process §17, IMP-009 §3):
+#   - The regression core ALWAYS runs (a break in a core user journey cannot
+#     be skipped regardless of what changed).
+#   - Any uncovered-changed-node in impacted-tests output STILL forces a spec
+#     or explicit waiver (existing §12a rule — unchanged).
+#   - The skipped specs are LOGGED in the script output (never silent coverage
+#     narrowing). Run make smoke at chunk delivery as the periodic full backstop.
+#
+# make validate-impacted SINCE=<sha> ITER=<n> SLICE=<id> [PROJECT=…] [PROD_URL=…]
+validate-impacted:
+	$(if $(PROD_URL),PROD_URL=$(PROD_URL) ,)node work/$(PROJECT)/scripts/validate-impacted.js \
+	  --since $(SINCE) --project $(PROJECT) \
+	  $(if $(PROD_URL),--prod-url $(PROD_URL),) && \
+	$(DORA) record --project $(PROJECT) --iteration $(ITER) --slice $(SLICE) \
+	  --agent tester --event validation_run \
+	  --ref "$$(git rev-parse --short HEAD):validate-impacted" --outcome success \
+	  --note "impacted+core smoke green (SINCE=$(SINCE)) via make validate-impacted" || \
+	( $(DORA) record --project $(PROJECT) --iteration $(ITER) --slice $(SLICE) \
+	  --agent tester --event validation_run \
+	  --ref "$$(git rev-parse --short HEAD):validate-impacted" --outcome fail \
+	  --note "impacted+core smoke FAILED (SINCE=$(SINCE)) via make validate-impacted" ; exit 1 )
+
+# validate-impacted-ci: runner-IP exemption + validate-impacted + always remove.
+# Mirrors smoke-ci for the impacted+core fast path. Use in CI / when the runner
+# IP is NOT already exempt from WAF + WS authorizer rate limits.
+#
+# make validate-impacted-ci SINCE=<sha> ITER=<n> SLICE=<id> [PROD_URL=…] [AWS_PROFILE=dev-int]
+validate-impacted-ci:
+	@RUNNER_IP=$$(curl -s https://checkip.amazonaws.com)/32 && \
+	  echo "Runner CIDR: $$RUNNER_IP" && \
+	  trap "make waf-runner-ip-remove CIDR=$$RUNNER_IP $(if $(AWS_PROFILE),AWS_PROFILE=$(AWS_PROFILE),)" EXIT && \
+	  make waf-runner-ip-add CIDR=$$RUNNER_IP $(if $(AWS_PROFILE),AWS_PROFILE=$(AWS_PROFILE),) && \
+	  make validate-impacted SINCE=$(SINCE) ITER=$(ITER) SLICE=$(SLICE) \
+	    $(if $(PROD_URL),PROD_URL=$(PROD_URL),)
+
 # Synth all stacks with the project-pinned CDK (not a global npx install).
 # STACKS optional: make synth-infra STACKS="OxoGameProd"
 # githubOrg/githubRepo go as -c context flags per process §19 (GITHUB_ env prefix is reserved).
@@ -280,4 +320,4 @@ board-stream-skeleton:
 	  --ref "$$(git rev-parse --short HEAD):board-stream-skeleton" --outcome fail \
 	  --note "§30 DynamoDB Stream skeleton FAILED vs prod (T-LB-10)" ; exit 1 )
 
-.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton
+.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton

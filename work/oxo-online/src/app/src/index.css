@@ -52,6 +52,35 @@ body {
   cursor: not-allowed;
 }
 
+/*
+ * DEFECT-S002-001 (EXP-016): the board MUST be a 3×3 SQUARE grid, not a line.
+ * Pinned by tests/smoke/board-geometry.spec.ts (bounding-box geometry).
+ */
+.board {
+  display: grid;
+  grid-template-columns: repeat(3, 5rem);
+  grid-template-rows: repeat(3, 5rem);
+  gap: 0.5rem;
+  justify-content: center;
+  margin: 1.5rem auto;
+}
+
+.cell {
+  width: 5rem;
+  height: 5rem;
+  font-size: 2.5rem;
+  line-height: 1;
+  border: 1px solid currentColor;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.cell:disabled {
+  cursor: not-allowed;
+}
+
 .leaderboard {
   border-top: 1px solid rgba(128, 128, 128, 0.3);
   padding-top: 1.5rem;

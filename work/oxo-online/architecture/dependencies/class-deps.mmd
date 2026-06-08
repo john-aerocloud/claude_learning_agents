@@ -153,6 +153,20 @@ flowchart TD
   %% spaJoinRoute and spaCopyLink are now delivered/stable.
   classDef s008changed fill:#e8f4e8,stroke:#2e7d32,color:#000;
 
+  %% ==== DEFECT-S002-001 (EXP-016 visual geometry) — appended; classDef defectS002changed ====
+  %% The board RENDER seam was never a node: Board.tsx emits <div class="board"
+  %% role="grid"> of 9 Cells, but its 3×3 GEOMETRY lived only in index.css — and
+  %% there was NO `.board` grid rule, so the nine cells fell into flow as a line.
+  %% This commit adds the missing `.board { display:grid; grid-template-columns:
+  %% repeat(3,…) }` + square `.cell` sizing. The geometry is a real dependency of
+  %% the render output on the stylesheet; pinned by tests/smoke/board-geometry.spec
+  %% (bounding-box 3-rows×3-cols, @covers board-grid). Marked changed for the tester.
+  board-grid["board-grid<br/>src/app/src/game/Board.tsx + index.css `.board`<br/>RENDER seam: 9 Cells laid out as a 3×3 SQUARE grid (display:grid).<br/>Geometry pinned by tests/smoke/board-geometry.spec.ts (EXP-016)"]:::defectS002changed
+  board-grid -->|3×3 layout via .board grid CSS| board-css-geometry["board-css-geometry<br/>index.css — .board display:grid repeat(3,5rem) + .cell 5rem square"]:::defectS002changed
+  %% (no explicit linkStyle: absolute edge indices renumber on insert; the
+  %%  classDef defectS002changed node marks carry this slice's change for the tester.)
+  classDef defectS002changed fill:#fde8e8,stroke:#c62828,color:#000;
+
   %% ==== s005-h3 code-uniqueness (delta 009, OI-3) — appended; classDef s005h3changed ====
   %% NEW hexagonal seam on the CREATE path. Before this slice handler.ts wrote
   %% Games via a module-global `ddb` client with NO port (concept leakage). This

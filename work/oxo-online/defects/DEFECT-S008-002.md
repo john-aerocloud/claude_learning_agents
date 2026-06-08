@@ -12,3 +12,6 @@
 
 ## Product ruling (human, 2026-06-08)
 TWO controls: "Copy code" (copies the 6 chars — for a joiner who will TYPE it) AND "Copy link" (copies /join/<code> — for one-click join). Serves both receiving-party paths explicitly (the §12b multi-party model). FOLDED INTO s009 build (same create/waiting screens as name-entry); added as an s009 acceptance case. Closes via s009 delivery.
+
+## CLOSED 2026-06-08 (sha 1c49c28, via s009)
+Two copy controls live in prod: copy-code-btn copies the 6-char code, copy-link-btn copies the /join URL (D1-5 pass, confirmed via navigator.clipboard.readText). Gap-closing experiment EXP-015 (multi-party modelling) exercised by s009's §12b sync-point table — scored at the s009 retro.

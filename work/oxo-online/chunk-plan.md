@@ -18,10 +18,10 @@ and marks actuals when a slice is delivered.
 | C1 | Deployable shell | delivered | 1 (s001) | 0 | — |
 | C2 | Local two-player game | delivered | 1 (s002) | 0 | — |
 | C3 | Single-player vs AI | delivered | 1 (s003) | 0 | — |
-| C4 | Online two-player match | **complete** | 7 (s004, s005-h1, s005, s005-h2, s006, s007, s008) + s005-h3 (in-planning) | 0 | — |
-| C5 | Leaderboard | **complete** | 1 (s009) | 0 | — |
+| C4 | Online two-player match | **complete** | 8 (s004, s005-h1, s005, s005-h2, s006, s007, s008, s005-h3) | 0 | — |
+| C5 | Leaderboard | **complete** | 1 (s009); s010 dissolved | 0 | — |
 | C6 | Player identity (lightweight) | **absorbed** | 0 | 0 (absorbed into s009) | — |
-| C7 | In-game chat | not started | 0 | 2 (s014–s015) | s014 in-game-message-send |
+| C7 | In-game chat | **in-progress** | 0 | 1 (s015) | s015 scope-enforcement + 1s latency proof |
 
 ---
 
@@ -114,11 +114,11 @@ shown to both players; disconnection is handled gracefully. No accounts required
 | s006 — move relay + server-authoritative play | delivered | 2026-06-07 | Server-authoritative move relay live; 16/16 prod ACs; p95 move latency 308ms; zero board divergence; S1a forged-gameId rejected; win/draw detection server-side; full game playable between two browsers |
 | s007 — disconnect & timeout handling | delivered | 2026-06-07 | $disconnect Lambda live; 17/17 ACs pass; Games status=abandoned on disconnect; survivor notified within 10s and returned to mode selector without reload; Connections row deleted; IMP-008 WAF runner-IP exclusion delivered |
 | s008 — share-link UX | delivered | 2026-06-07 | Deep-link URL (`/join/<code>`) live; Copy-link control on waiting screen; SM-5 (C4 done-condition proof): two players via share link, full game under 5 min |
-| s005-h3 — guaranteed code uniqueness | in-planning | — | Closes OI-3; final C4-adjacent hardening residual |
+| s005-h3 — guaranteed code uniqueness | **delivered** | 2026-06-07 | Closes OI-3; storage-layer CAS (Codes table conditional PutItem); 10/10 ACs; p95 246ms; IAM exactly +PutItem; 4th consecutive zero-prod-defect slice |
 
-**C4 done condition: MET.** Proven by s008 SM-5 (two players, different browsers, via share link, intent→result under 5 min). All elements in place: game play (s006), disconnect (s007), frictionless share (s008). s005-h3 is the final correctness-hardening residual on the C4 surface — it does not re-open C4's done-condition.
+**C4 done condition: MET.** Proven by s008 SM-5 (two players, different browsers, via share link, intent→result under 5 min). All elements in place: game play (s006), disconnect (s007), frictionless share (s008), code uniqueness (s005-h3). All 8 slices delivered.
 
-**Remaining forecast:** none — C4 is complete. s005-h3 (in-planning) closes the last integrity risk on the live C4 surface before C5 opens.
+**Remaining forecast:** none — C4 is complete. All hardening residuals closed (s005-h1 WAF, s005-h2 connect auth, s005-h3 code uniqueness). OI-3 closed.
 
 ### s005 — join-by-code + WebSocket connect [DELIVERED 2026-06-06]
 **Scope:** A second player enters the 6-char code on a new join screen; both
@@ -372,17 +372,36 @@ banter.) **[SECONDARY]**
 text messages; messages appear within 1 second (p95); chat is scoped to the game
 session and messages do not persist after the game ends.
 
-**Slices (forecast):**
+**Slices:**
 
-### s014 — in-game message send + relay
-**Scope:** A text input and send button appear on the game screen. Sending a
-message dispatches it via WebSocket; the Lambda relays it to the other connection;
-it appears in a message list on both screens within 1 second. Messages are
-in-memory only (not written to DynamoDB) — they vanish when the WebSocket
-connections close.
+| Slice | Status | Delivered | Outcome |
+|-------|--------|-----------|---------|
+| s014 — in-game message send + relay | **in-planning** | — | Chat input + send button on active-game screen; `{action:'chat'}` WS dispatch; `oxo-ws-fn` relay to opponent + echo to sender; in-memory only; disconnected-opponent GoneException drop |
 
-### s015 — chat scope enforcement + done-condition proof
-**Scope:** Confirm that messages are visible only to the two players in the game
-(no broadcast to other connections); that no messages survive a page reload or
-game-over; and that the chat input is disabled after game-over. Playwright smoke
-covers the 1-second latency assertion as the C7 done-condition proof.
+**Remaining forecast:**
+
+### s015 — chat scope enforcement + done-condition proof (forecast)
+**Scope:** Confirm messages are visible only to the two players in the game
+(no cross-game relay); that no messages survive a page reload or WS close;
+that the chat input is absent/disabled after `game-over`. Playwright smoke
+covers the 1-second p95 latency assertion as the C7 done-condition proof.
+This is the closing slice for C7 and the project's last forecast chunk.
+
+### s014 — in-game message send + relay [IN-PLANNING — SEL-S014]
+
+**Scope:** Chat input (`data-testid="chat-input"`) and Send button
+(`data-testid="chat-send-btn"`) on the active-game screen. Sending dispatches
+`{action:'chat', gameId, text}` via WS; the Lambda derives sender identity
+server-side from `connectionId` (not client-claimed), looks up the opponent's
+`connectionId` from `Games`, relays `{action:'chat-message', sender, text}` to
+the opponent, and echoes the same frame to the sender. Both screens append the
+message to an in-memory list. No DynamoDB write. GoneException from
+`PostToConnection` caught and dropped silently (best-effort). Max 200-char
+text; server-side `<>&"'` strip; React text interpolation (no XSS).
+
+**Killick test:** Either player can type a word mid-game and the other sees
+it within ~1 second — a social act the product could not enable before.
+
+**What is NOT in scope:** persistence, history, the 1s latency done-condition
+proof (s015), chat outside an active game, typing indicators, read receipts,
+emoji pickers, profanity moderation.

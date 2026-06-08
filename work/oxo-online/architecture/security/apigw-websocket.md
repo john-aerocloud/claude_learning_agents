@@ -440,3 +440,109 @@ two roles, never in plaintext env or logs.
 **Conclusion:** the design is accepted for build. The two carried risks are
 deliberate, bounded, and named (not missed). No new region, no new deploy-role
 grant, no manual deploy step.
+
+---
+
+## s014 subset (in-game chat: send + relay) — built scope (delta 011)
+
+s014 adds ONE route (`chat`) on the existing WS API to the existing `oxo-ws-fn`.
+**No new public surface, principal, table, API, region, persistence, or IAM
+grant.** The one material new exposure is user free-text crossing to another
+browser (XSS) — same controlled class as s009 names. These checkable statements
+become policy tests:
+
+### Route surface
+- [ ] Exactly **six** route keys are synthesised: `$connect`/`$disconnect`/
+      `register`/`join`/`move`/`chat`. Still **no `$default`** catch-all.
+- [ ] The `chat` route integrates the **existing** `oxo-ws-fn` (AWS_PROXY) — no
+      new function, no new authorizer; `chat` is post-`$connect` (the `$connect`
+      authorizer does NOT run per message).
+
+### Cross-game message injection — connectionId IS the identity (core control)
+The chat body is `{ action:'chat', gameId, text }` where **`gameId` is a
+NON-TRUSTED LOOKUP KEY, not an identity/role claim** (same rule as the s006 move
+frame). Identity is the sender's OWN platform-set `connectionId`, never read from
+the body.
+- [ ] A `chat` frame is relayed ONLY when `event.requestContext.connectionId`
+      equals the `hostConnectionId` **or** `guestConnectionId` of the `Games` item
+      named by the body `gameId`. A frame whose REAL connectionId matches NEITHER
+      bound connection of that game (forged/foreign/non-existent `gameId`,
+      spectator, stale conn) is **rejected with zero relay POSTs and zero writes**.
+- [ ] `senderRole` (`host`/`guest`) is derived **server-side** from the
+      connectionId↔stored-binding match — NEVER from any client `role`/`sender`/
+      `connectionId`/`gameId` field. **No cross-game injection path.**
+
+### XSS — render-as-text (the material new exposure; same class as s009 name)
+Chat `text` is user-controlled, unauthenticated, rendered in the opponent's
+browser. Defence-in-depth, render-side is THE control:
+- [ ] The SPA renders every `chat-message.text` via React child interpolation
+      (`{msg.text}`), which HTML-escapes by default — `<img src=x onerror=...>`
+      renders as literal text (no script, no resource load).
+- [ ] **No `dangerouslySetInnerHTML` / `innerHTML` / raw-HTML sink on chat text**
+      — code-policy pin (grep/lint-able), alongside the s009 leaderboard-name pin.
+- [ ] Server-side bound at the relay boundary (depth + abuse cap, not the primary
+      control): trim; reject empty-after-trim; cap **200 chars**; strip/encode
+      `< > & " '` and control chars before relay.
+- [ ] CSP is **unchanged** — chat text is DOM text, not script/style/connect; no
+      new directive or origin.
+
+### In-memory — no persistence
+- [ ] The `chat` path performs **zero** DynamoDB writes (no `Games`, no
+      `Leaderboard`, no new table) and reads only the already-granted
+      `GetItem(Games, gameId)`. Chat lives in client React state only and vanishes
+      on WS close / reload — by design.
+
+### Relay amplification — bounded fan-out, best-effort
+- [ ] An accepted `chat` triggers **exactly 2** `@connections` POSTs (relay to the
+      opponent's connectionId + echo to the sender's). Never a broadcast.
+- [ ] A rejected `chat` (no connectionId match / empty text) triggers **0** POSTs.
+- [ ] A relay/echo POST returning **410 Gone** (dead opponent, or a race before
+      `$disconnect`) is **swallowed + logged with NO retry**; the sender's handler
+      completes normally (echo attempted independently), no crash, no error frame,
+      sender's WS stays open.
+
+### IAM — no grant added (assert the negative)
+- [ ] `oxo-ws-fn`'s policy is the s007 grant set **verbatim** — `chat` adds **zero**
+      permissions. `GetItem` on `Games` (s006) and `execute-api:ManageConnections`
+      on **this WS API ARN only** (s005) already cover the read + the two relay
+      POSTs. No new action, no `*`, no new table grant.
+
+### Data classification (unchanged class)
+- [ ] The `chat-message` frame carries `{ action, sender:'host'|'guest', text }`
+      — no opponent connection detail, no PII beyond the user's own typed text.
+
+### Out of scope for s014 (do NOT assert as built)
+- 1s-latency p95 + full two-browser e2e + scope-enforcement Playwright (s015).
+- Persistence / chat history (never — in-memory by design).
+- Profanity / abuse moderation (acknowledged out of scope, OR-S014-a).
+
+---
+
+## s014 security conclusion (gated review)
+
+**Is there new attack surface / data flow / trust boundary? A new DATA FLOW (the
+`chat`-triggered 1-relay-to-opponent + 1-echo-to-sender over the existing
+`@connections` gate, carrying user free-text) — YES; a new public surface,
+principal, table, API, region, persistence, or IAM grant — NO; the one material
+new exposure is user free-text crossing to another browser, the SAME
+stored/reflected-XSS class already shipped and controlled in s009 (leaderboard
+names), controlled here by the identical defence-in-depth — React text-render as
+THE primary control with a `dangerouslySetInnerHTML`/raw-HTML-sink code-policy
+pin, plus a server-side 200-char + `<>&"'` + control-char bound at the relay
+boundary as depth/abuse cap, behind the UNCHANGED CSP; the authorization edge is
+unchanged from GATE-3-S006 (platform-set `connectionId` is the identity, `gameId`
+is a non-trusted lookup key, a forged/foreign `gameId` → reject, no relay, so NO
+cross-game message-injection path), and the relay grant is the s005
+`ManageConnections` on this WS API ARN only, unwidened; therefore the architect
+ACCEPTS the design for build under §9a auto-accept and does NOT flag it for human
+eyes — the XSS surface is the controlled class already approved in s009, not a
+new attack surface.** §9a: **AUTO-ACCEPT, no human flag.**
+
+**Carried open risks (accepted, named):**
+- **OR-S014-a — unmoderated free-text abuse:** inherent to the unauthenticated
+  model; blast radius bounded to the two players of one game; moderation out of
+  scope. Acknowledged (LOW).
+- **OR-S014-b — best-effort, no-retry relay/echo:** a dropped chat message is not
+  re-pushed (s006/s007 posture); chat is non-authoritative in-memory state, miss
+  is harmless; recovery = re-send.
+- Inherited: OR-H2-b, OR-S006-a, OR-S006-b (as re-worded at s007).

@@ -1,6 +1,12 @@
-%% oxo-online runtime data-flow — s009 (delta 010) edition (process §12a)
+%% oxo-online runtime data-flow — s014 (delta 011) edition (process §12a)
 %% Platform GATES are explicit nodes. Non-obvious platform semantics are named ON the node.
-%% This file is the TESTER's planning input. classDef changed marks THIS slice's (s009) delta.
+%% This file is the TESTER's planning input. classDef changed marks THIS slice's (s014) delta.
+%% s014 (delta 011, C7): IN-GAME CHAT send + relay. NO new node/gate/principal/store/grant.
+%% ONE new WS route `chat` on the existing WS API -> existing oxo-ws-fn; relay 2 @connections POSTs
+%% (opponent + echo); IN-MEMORY only (no write); connectionId-identity (no cross-game injection);
+%% XSS controlled by React text-render + no-dangerouslySetInnerHTML pin (same class as s009 name).
+%% CHANGED (annotation-only): wsfn (+chat route), relay (+2-POST chat fan-out), games (read-only authz).
+%% See the s014 CHANGED block near the bottom. Prior-slice marks are CLEARED in-file (tester-consumed).
 %% Granularity: module / gate level (coarse). Built scope only (deferred items are NOT drawn).
 %% s009 (delta 010, C5): ARCADE SCOREBOARD — first DURABLE store + first DynamoDB STREAM.
 %% NEW nodes: leaderboard (durable, NO TTL, PITR), board-fn (stream consumer). NEW gate node:
@@ -101,6 +107,22 @@ flowchart TD
   httpapi -.->|"AWS_PROXY invoke read route (s009 NEW)"| gamefn
   gamefn -.->|"Scan Leaderboard top-20 (wins desc, losses asc, name asc) + buildSha in body; Scan-only grant (s009 NEW)"| leaderboard
 
+  %% ---- s014 (delta 011) NEW data flow: in-game chat send + relay (CHANGED, dotted) ----
+  %% ONE new WS route `chat` on the EXISTING WS API -> EXISTING oxo-ws-fn (route count 5->6, still no $default).
+  %% Trust model IDENTICAL to s006 move: connectionId IS the identity (platform-set, unspoofable);
+  %% gameId is a NON-TRUSTED LOOKUP KEY (selects the Games item to authorize against, grants nothing).
+  %% Match connectionId vs stored host/guestConnectionId -> senderRole; match NEITHER -> reject, NO relay
+  %% (no cross-game message injection). NO Games/Leaderboard/any write — chat is IN-MEMORY (client React state) only.
+  %% Relay = EXACTLY 2 @connections POSTs (relay to opponent + echo to sender); GoneException(410) -> swallow,
+  %% NO retry, no crash (best-effort, dead opponent). NO new IAM (GetItem Games + ManageConnections already granted).
+  %% XSS (the one material new exposure, same class as s009 name): primary control is SPA React text-render
+  %% (escaped, no dangerouslySetInnerHTML — code-policy pin); server bound (trim/≤200/strip <>&"'+ctrl) is depth.
+  %% CSP UNCHANGED. NO new node, NO new gate — reuses wsfn (compute) + relay (gate). Edges below are dotted/changed.
+  player -.->|"WS msg action=chat, gameId(NON-TRUSTED lookup key), text(user free-text) (s014 NEW)"| wsfn
+  wsfn -.->|"GetItem(Games, body.gameId) (already-granted read); match connectionId vs host/guestConnectionId -> senderRole, else reject (s014 NEW)"| games
+  wsfn -.->|"normalise text (trim/reject-empty/≤200/strip <>&\"'+ctrl); relay {action:chat-message, sender:senderRole, text} = EXACTLY 2 POSTs (opponent + echo to sender); 410=swallow no-retry; NO write (s014 NEW)"| relay
+  relay -.->|"chat-message frame -> rendered as ESCAPED TEXT in browser (React interpol, NO dangerouslySetInnerHTML — XSS pin) (s014 NEW)"| player
+
   %% ---- classDef ----
   classDef actor fill:#eef,stroke:#446,color:#000;
   classDef gate fill:#ffe9c7,stroke:#b5651d,color:#000,stroke-width:2px;
@@ -153,6 +175,22 @@ flowchart TD
   %% Tester pins: SM-4 idempotency (T-LB-3 replay byte-identical), SM-5 abandoned->no tally (filter),
   %%   SM-2 collision (one row), stored-XSS (T-LB-8 escaped text + no dangerouslySetInnerHTML),
   %%   IAM no-widening (T-LB-9), §30 skeleton Probe A+B (T-LB-10).
+  %% ---- s014 (delta 011) CHANGED marks (tester plans from these — node id === @covers tag) ----
+  %% NO new node, NO new gate, NO new edge to a new principal/store. Chat reuses wsfn + relay + games(read).
+  %% CHANGED nodes (annotation only — chat route ADDED, no new resource):
+  %%   wsfn  (route count 5->6: +chat; chat handler = GetItem Games + connectionId-match authz + normalise + 2-POST relay; NO write)
+  %%   relay (gains the chat 2-POST fan-out: relay-to-opponent + echo-to-sender; GoneException swallow, no retry)
+  %%   games (READ-ONLY on chat path — GetItem authz; NO write, NO schema change; annotation only)
+  %% NEW edges (dotted): player->wsfn (chat frame), wsfn->games (authz read), wsfn->relay (2-POST), relay->player (escaped-text render).
+  %% Tester pins (delta 011 §8): T-CHAT-1 route=6/no-$default; T-CHAT-2 connectionId-identity/no-cross-game-injection;
+  %%   T-CHAT-3 XSS render-as-text (textContent===raw + no dangerouslySetInnerHTML pin); T-CHAT-4 server bound ≤200/strip;
+  %%   T-CHAT-5 no-new-IAM (oxo-ws-fn s007 set verbatim); T-CHAT-6 in-memory/no-persist (zero writes);
+  %%   T-CHAT-7 GoneException best-effort (410 swallow, no crash, no retry); T-CHAT-8 bounded fan-out (accepted=2, rejected=0);
+  %%   T-CHAT-9 CSP unchanged. s015 closes C7 (1s p95 + two-browser e2e + scope-enforcement).
+  %% NOTE FOR TESTER (v39/OI-42): at delivery these s014 marks are REMOVED (not recoloured) — the class line below
+  %%   is the ACTIVE planning mark; on UC-S014 prod-validation PASS it is deleted and the dotted edges become stable.
+  class wsfn,relay,games changed;
+
   %% s009 changed marks CLEARED (2026-06-08 — tester consumed, UC5 in-prod validation PASS, C5 MET)
   %% leaderboard: first durable store (PITR, no TTL, scoredGames idempotency) — delivered/stable.
   %% boardfn: stream consumer, idempotent ConditionalCheckFailed-swallow — delivered/stable.

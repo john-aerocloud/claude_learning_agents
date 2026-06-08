@@ -19,7 +19,7 @@ is recorded; later chunks revise this when value is re-sliced.
 | **[C4]** | Online match — first stateful backend + realtime | s004 create ✓; s005 join/WS ✓; s005-h2 connect-auth ✓; s006 move relay + server-authoritative win/draw ✓; s007 $disconnect abandon+notify ✓; s008 share-link deep-route ✓ COMPLETES C4; **s005-h3 code-uniqueness (Codes reservation table, OI-3) — current, FINAL C4 hardening residual** |
 | **[C5]** | Leaderboard — first durable persistence + first DynamoDB Stream | **current** — s009 arcade-scoreboard (name entry + Stream-driven tally + shared read board) in planning; s010 = ≤10s latency Playwright smoke (done-condition proof, may fold into s009) |
 | **[C6]** | Player identity — session/display name | **REMOVED from plan** — absorbed by the s009 arcade name-as-key model (display names delivered in s009; no committed cross-device-identity job). See slice.md C5/C6 reshape note. |
-| **[C7]** | In-game chat — reuses C4 realtime transport | not started |
+| **[C7]** | In-game chat — reuses C4 realtime transport | **current** — s014 chat send+relay (delta 011): ONE new `chat` WS route on the existing `oxo-ws-fn`, relay+echo, in-memory only, no new infra/IAM, XSS render-as-text pin. In planning. s015 closes C7 (1s p95 + two-browser e2e + scope-enforcement). |
 
 Minimum-to-deliver-value rule: nothing tagged later than the active chunk is
 built. Chunks 1–3 ship with **no application backend at all**.
@@ -106,10 +106,10 @@ C4Container
     Container(s3, "S3 web bucket", "Static hosting", "[built s001] React SPA; private, OAC only. s005 adds runtime wsUrl config artifact.")
 
     Container(httpapi, "API Gateway (HTTP)", "HTTPS", "[built s004] POST /games (create). NO stage WebACL (CF WAF covers /api/*).")
-    Container(wsapi, "API Gateway (WebSocket)", "WSS", "[s005] prod stage; routes $connect/$disconnect/register/join. [s006] +move route (5 keys, no $default). [s007] $disconnect stub -> REAL (abandon+notify+clean up); route count unchanged. [s005-h2] $connect has a REQUEST Lambda authorizer (NO result cache — strike 4). NO WAF (WAFv2 cannot assoc. API GW v2 — GATE-AMEND-H1-A); flood control = stage throttle 20/40 + reserved-concurrency + per-IP authorizer budget.")
+    Container(wsapi, "API Gateway (WebSocket)", "WSS", "[s005] prod stage; routes $connect/$disconnect/register/join. [s006] +move route (5 keys, no $default). [s007] $disconnect stub -> REAL (abandon+notify+clean up); route count unchanged. [s014] +chat route (6 keys, still no $default; relay+echo, in-memory, no new IAM). [s005-h2] $connect has a REQUEST Lambda authorizer (NO result cache — strike 4). NO WAF (WAFv2 cannot assoc. API GW v2 — GATE-AMEND-H1-A); flood control = stage throttle 20/40 + reserved-concurrency + per-IP authorizer budget.")
 
     Container(gamefn, "oxo-game-fn", "Lambda Node20", "[built s004] create-game; PutItem on Games. [s005-h2] also mints host wsToken (HMAC); reads shared secret. [s005-h3] RESERVES code via conditional PutItem on Codes (attribute_not_exists) BEFORE Games write; collision => fresh-code retry (<=5) then 5xx WE own (never a wrong code). Client contract {gameId,code,wsToken} unchanged.")
-    Container(wsfn, "oxo-ws-fn", "Lambda Node20", "[s005] $connect/register/join; conditional join write + game-ready fan-out. [s006] +move route: validates turn/legality/status by connectionId binding, atomic conditional UpdateItem with version CAS, server-side win/draw, board-update/game-over relay to the 2 bound conns. [s007] $disconnect REAL: GetItem(Connections, OWN connId)->gameId; conditional UpdateItem status active->abandoned (won/drawn guard); 1 survivor notify (0 on terminal/waiting); delete row. +ONE IAM grant: GetItem on Connections only (else s006 set).")
+    Container(wsfn, "oxo-ws-fn", "Lambda Node20", "[s005] $connect/register/join; conditional join write + game-ready fan-out. [s006] +move route: validates turn/legality/status by connectionId binding, atomic conditional UpdateItem with version CAS, server-side win/draw, board-update/game-over relay to the 2 bound conns. [s007] $disconnect REAL: GetItem(Connections, OWN connId)->gameId; conditional UpdateItem status active->abandoned (won/drawn guard); 1 survivor notify (0 on terminal/waiting); delete row. +ONE IAM grant: GetItem on Connections only (else s006 set). [s014] +chat route: GetItem(Games, gameId) authz by connectionId match -> senderRole (no cross-game injection); normalise text (trim/≤200/strip <>&\"'); relay {chat-message} = EXACTLY 2 POSTs (opponent + echo); GoneException swallow no-retry; NO write (in-memory); NO new IAM (reuses GetItem Games + ManageConnections).")
     Container(wsauthfn, "oxo-ws-auth-fn", "Lambda Node20", "[s005-h2] $connect REQUEST authorizer: verify host wsToken / lookup guest code; per-IP budget; Allow/Deny IAM policy. NO ManageConnections, NO Games write.")
 
     ContainerDb(ddb_game, "DynamoDB: Games", "NoSQL", "[built s004] +code GSI & host/guest connId attrs (s005). [s006] +board(9-char)/currentTurn/winner/version(opt-lock CAS)/moveCount attrs. [s009] +hostName/guestName attrs (server-normalised ≤10/charset/AAA-default) + STREAM enabled (NEW_AND_OLD_IMAGES; consumed by oxo-board-fn). TTL 24h, SSE, on-demand.")
@@ -308,6 +308,38 @@ authorizer built (s005-h2); move relay + server-authoritative win/draw built
   `architecture/security/cloudfront-distribution.md` (s009),
   `architecture/security/dynamodb-games.md` (s009 stream + name attrs).
 
+**Key s014 (in-game chat send + relay — C7 opens) architectural facts:**
+- **ONE new WS route `chat`** on the EXISTING WS API → the EXISTING `oxo-ws-fn`
+  (route count **5→6**; still no `$default`). **No new function, no new table, no
+  new API, no new principal, no new region, no new deploy-role grant, and NO new
+  IAM grant** — chat reuses `GetItem` on `Games` (s006) + `execute-api:ManageConnections`
+  on this WS API ARN only (s005). The thinnest possible delta. No new platform
+  mechanism (PostToConnection is the s006 relay) → no §30 walking-skeleton probe.
+- **In-memory only — NO persistence.** The `chat` path performs ZERO DynamoDB
+  writes (no `Games`/`Leaderboard`/new table); it reads only the already-granted
+  `GetItem(Games, gameId)` to authorize. The message lives in client React state
+  and vanishes on WS close / reload. By design.
+- **connectionId IS the identity (no cross-game injection):** `gameId` is a
+  NON-TRUSTED lookup key (same rule as the s006 move frame); `senderRole` is
+  derived server-side by matching the platform-set `connectionId` against the
+  stored `host/guestConnectionId`; a frame matching NEITHER bound connection →
+  reject, zero relay POSTs, zero writes.
+- **Bounded best-effort relay:** an accepted `chat` = EXACTLY 2 `@connections`
+  POSTs (relay to opponent + echo to sender); a rejected one = 0. `GoneException`
+  (410, dead opponent) → swallow, NO retry, no crash, no error frame; sender's WS
+  stays open. Never a broadcast.
+- **XSS control (the one material new exposure — same class as the s009 name):**
+  user free-text crossing to the opponent's browser. Primary control = SPA React
+  text-render (escaped) with a **no-`dangerouslySetInnerHTML`/raw-HTML-sink
+  code-policy pin** (alongside the s009 leaderboard-name pin); depth/abuse cap =
+  server-side trim/≤200-char/strip `<>&"'`+control-chars at the relay boundary.
+  **CSP unchanged.** **Security review §9a AUTO-ACCEPT** (no human flag — the XSS
+  surface is the controlled class already approved in s009, not a new surface).
+- s015 closes C7 (1s p95 + two-browser e2e + scope-enforcement Playwright). All
+  eu-west-2; no region exception. See `architecture/deltas/011-chat-send.md`,
+  `architecture/security/apigw-websocket.md` (s014 subset + conclusion),
+  `architecture/dependencies/data-flow.mmd` (s014 marks).
+
 **Key s005 architectural facts:**
 - The WebSocket API is in the **same `OxoGameProd` stack** as the HTTP API +
   `Games` table (one game-backend deployable; no new cross-stack data-plane
@@ -478,6 +510,13 @@ functions. s007 reuses these ports for the `$disconnect` decision logic (a pure
 `(disconnectingConnId, gameItem) → {abandon, survivorId, notify}` function over
 the `Games` store port + relay port) and **extends the Connections store port**
 with `getConnection(connectionId)` — still one deployable, still locally standable.
+**s014 chat** also reuses these ports — a pure
+`(connectionId, gameItem, rawText) → {senderRole | reject, normalisedText, relayTargets}`
+function over the `Games` store port (read-only) + relay port; chat and move have
+NOT diverged enough to split (chat is read-only + relay, no write), so it stays
+one deployable. The **local WS adapter must add a `chat`-route case** (relay to
+the other local connection + echo) so the two-browser chat path stands up locally
+(delta 011 §5).
 
 ## Runtime data-flow (process §12a)
 
@@ -493,5 +532,11 @@ rides existing writes), `cfwaf` (5s-TTL leaderboard behaviour) and `games`
 (Stream enabled + name attrs); adds the dotted edges games→games-stream→boardfn
 →leaderboard (idempotent CAS) and the GET /api/leaderboard read path
 (player→cfwaf→httpapi→gamefn→leaderboard Scan). Node ids are kebab and === the
-`@covers` tag the engineer uses (v37 §12a.5). Prior (s007/s008/s005-h3) marks are
-CLEARED in the file (tester-consumed, prod-validated).
+`@covers` tag the engineer uses (v37 §12a.5). Prior (s007/s008/s005-h3/s009)
+marks are CLEARED in the file (tester-consumed, prod-validated). **s014 (delta
+011)** is the CURRENT marking slice: no new node/gate/principal/store — it marks
+`wsfn` (+chat route), `relay` (+chat 2-POST fan-out: opponent + echo) and `games`
+(read-only authz) `changed`, and adds the dotted edges player→wsfn (chat frame),
+wsfn→games (authz read), wsfn→relay (2-POST best-effort), relay→player (escaped-
+text render / XSS pin). Per v39/OI-42 these marks are REMOVED-not-recoloured at
+delivery (tester noted in-file).

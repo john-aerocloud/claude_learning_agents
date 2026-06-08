@@ -1,7 +1,7 @@
 # oxo-online — Support Runbook
 
 Audience: on-call engineers and support team.
-Last updated: slice s005-h3-code-uniqueness (iteration 12, validated 2026-06-07).
+Last updated: slice s009-arcade-scoreboard (iteration 14, validated 2026-06-08).
 
 ---
 
@@ -135,7 +135,9 @@ Lambda was not updated — check the infra pipeline run for the latest push to
 
 From s005-h3 onward, `oxo-game-fn` emits `buildSha` on every code-reservation
 log event (`code_reservation_collision`, `code_reservation_write_failed`,
-`code_create_failed`). To verify the correct version is handling create-game:
+`code_create_failed`). From s009 onward, `oxo-game-fn` also emits `buildSha` in
+the `leaderboard_read_failed` event. To verify the correct version is handling
+create-game or leaderboard reads:
 
 ```bash
 aws logs filter-log-events \
@@ -146,8 +148,32 @@ aws logs filter-log-events \
 ```
 
 The `buildSha` value must match the expected deploy SHA. If no events are
-returned (no code-reservation events in the window), fall back to
-`aws lambda get-function` `LastModified` (see "Lambda code state" above).
+returned (no code-reservation or leaderboard-read-failed events in the window),
+fall back to `aws lambda get-function` `LastModified` (see "Lambda code state"
+above).
+
+### board-fn build identity (oxo-board-fn — stream scoring, s009)
+
+From s009 onward, `oxo-board-fn` emits `buildSha` on **every invocation** via
+the `board_tally` log event (one per stream record). This is the canonical
+version identity for the DynamoDB Stream → leaderboard scoring path.
+
+```bash
+aws logs filter-log-events \
+  --log-group-name /aws/lambda/oxo-board-fn \
+  --filter-pattern '{ $.buildSha = "*" }' \
+  --limit 5 \
+  --query 'events[*].message'
+```
+
+The `buildSha` value must match the expected deploy SHA. If the log group is
+absent, `oxo-board-fn` has not been deployed — check the infra pipeline run.
+
+```bash
+# Check board-fn Lambda code state
+aws lambda get-function --function-name oxo-board-fn \
+  --query 'Configuration.{Runtime:Runtime,LastModified:LastModified,CodeSize:CodeSize}'
+```
 
 ### Stack outputs (updated for s005-h2)
 
@@ -188,9 +214,22 @@ Browser
   |               |-- /join/<code>  --> S3 (SPA fallback: CF 403/404→200+index.html)
   |               |                     React Router handles /join/:code client-side;
   |               |                     no new CloudFront behaviour added in s008.
-  |               `-- /api/*        --> HTTP API (CachingDisabled)
-  |                                     POST /api/games -> oxo-game-fn
-  |                                       response: {gameId, code, wsToken}
+  |               |-- /api/games    --> HTTP API (CachingDisabled)
+  |               |                     POST /api/games -> oxo-game-fn
+  |               |                       response: {gameId, code, wsToken}
+  |               `-- /api/leaderboard --> HTTP API (CF TTL 5s min/default/max)
+  |                                     GET /api/leaderboard -> oxo-game-fn
+  |                                       response: {entries:[{name,wins,draws,losses}], buildSha}
+  |                                       (top-20; sort: wins desc / losses asc / name asc)
+  |
+  |           Scoring path (off hot path — never affects play latency):
+  |           oxo-games DynamoDB Stream (MODIFY: active→won or active→drawn)
+  |             --> oxo-board-fn (DynamoDB Stream Lambda event-source mapping)
+  |                   filter: eventName=MODIFY AND NEW.status ∈ {won,drawn} AND OLD.status=active
+  |                   reads OldImage+NewImage from the record (NO Games table read)
+  |                   domain tally -> conditional UpdateItem on oxo-leaderboard
+  |                   ConditionExpression: NOT contains(scoredGames, :gameId)
+  |                   ConditionalCheckFailed → AlreadyScored (idempotent, swallowed)
   |
   `-- WSS direct (not via CloudFront, NO WAF)
         wss://ylbzjuo8lf.execute-api.eu-west-2.amazonaws.com/prod
@@ -304,6 +343,8 @@ The exemption:
 | DynamoDB — connections | oxo-connections | PK: connectionId; 2h TTL; SSE enabled; on-demand |
 | DynamoDB — connect attempts | oxo-connect-attempts | PK: sourceIp; count (N); ttl (~5min TTL); SSE enabled; on-demand; used by authorizer for per-IP budget |
 | DynamoDB — code reservations | oxo-codes | PK: code; gameId; ttl (24h TTL); SSE enabled; on-demand; write-gate only (PutItem, no Query/Get/Scan/Delete) — reserve-before-write uniqueness gate (s005-h3) |
+| DynamoDB — leaderboard | oxo-leaderboard | PK: playerName (S); wins (N), draws (N), losses (N), scoredGames (SS — idempotency marker); PITR ENABLED; TTL DISABLED (standings accumulate forever); PAY_PER_REQUEST; SSE enabled. First durable store — no data loss on corruption. |
+| Lambda — board (stream scorer) | oxo-board-fn | DynamoDB Stream consumer on oxo-games; reads OldImage+NewImage from record; drives conditional UpdateItem on oxo-leaderboard; structured logs with buildSha on every invocation |
 | WAFv2 WebACL — global | oxo-online-cf-global (us-east-1) | CLOUDFRONT scope; associated to d3pf3kcvzpau1x; rate rule 100/300s/IP with NOT(oxo-test-runner-ips) scope-down (Block=429); IP-rep managed group |
 | WAFv2 IP set — runner | oxo-test-runner-ips (us-east-1) | CLOUDFRONT scope; entries written/removed per CI run (1h TTL + drain Lambda); waives only the rate Deny for runner IP |
 | Lambda — exemption drain | (CDK-managed, not a named output) | Periodically reaps any EXEMPT#* items from oxo-connect-attempts that were not cleaned up by the runner trap |
@@ -312,12 +353,13 @@ The exemption:
 | Log group — game fn | /aws/lambda/oxo-game-fn | Structured JSON for code-reservation events (code_reservation_collision, code_reservation_write_failed, code_create_failed); all carry buildSha. Other paths: Lambda platform lines + unhandled exceptions only (OI-18 partially closed) |
 | Log group — ws authorizer | /aws/lambda/oxo-ws-auth-fn | Structured JSON; buildSha on every Allow/Deny; see §4a |
 | Log group — ws fn | /aws/lambda/oxo-ws-fn | Structured JSON events (see §4) |
+| Log group — board fn | /aws/lambda/oxo-board-fn | Structured JSON; buildSha on every record (board_tally); leaderboard_recorded on success; already_scored on idempotent replay; leaderboard_write_failed on store error (see §4b) |
 
 ### Pipelines
 
 | Pipeline | Triggers on | Deploys |
 |----------|-------------|---------|
-| infra-oxo-online.yml | `src/infra/**` or `src/lambda/**` push to main | CDK OxoGameProd -> OxoOnlineProd; ALL lambda code via CDK fromAsset; writes config.js |
+| infra-oxo-online.yml | `src/infra/**` or `src/lambda/**` push to main | CDK OxoGameProd -> OxoOnlineProd; ALL lambda code via CDK fromAsset; writes config.js. Deploys oxo-board-fn + oxo-leaderboard DynamoDB table + DynamoDB Stream event-source mapping. |
 | deploy-oxo-online.yml | `src/app/**` push to main | SPA to S3; CF invalidation (waits); writes config.js |
 | Manual (once) | n/a | `make -C work/oxo-online/src/infra deploy-oidc` deploys OxoOnlineOidcStack |
 
@@ -329,6 +371,12 @@ The deploy pipeline does not touch Lambda code (OI-24 resolved).
 ## 3. Verification commands
 
 ```bash
+# board-stream-skeleton probe — operator's health check for the scoring path (s009+)
+# Probe A: one real game-over → winner wins+1, loser losses+1, scoredGames contains gameId.
+# Probe B: replay same record → BYTE-IDENTICAL rows (no increment), ConditionalCheckFailed in logs.
+# This is the first-response probe for any leaderboard scoring issue.
+make board-stream-skeleton PROD_URL=https://d3pf3kcvzpau1x.cloudfront.net
+
 # join-skeleton probe — operator's health check for the share-link deep-link path (s008+)
 # Opens /join/<real-code> in a fresh tab; SPA must boot (HTTP 200) with code pre-filled.
 # No new infra: relies on the existing CloudFront 403/404→index.html SPA fallback.
@@ -387,6 +435,21 @@ aws dynamodb describe-table --table-name oxo-connect-attempts \
 # Code-reservations table (uniqueness gate — new in s005-h3)
 aws dynamodb describe-table --table-name oxo-codes \
   --query 'Table.{BillingMode:BillingModeSummary.BillingMode,SSEStatus:SSEDescription.Status,ItemCount:ItemCount}'
+
+# Leaderboard table (new in s009)
+aws dynamodb describe-table --table-name oxo-leaderboard \
+  --query 'Table.{BillingMode:BillingModeSummary.BillingMode,SSEStatus:SSEDescription.Status,ItemCount:ItemCount,PITREnabled:PointInTimeRecoveryDescription.PointInTimeRecoveryStatus}'
+
+# Confirm PITR enabled on leaderboard (required — first durable store)
+aws dynamodb describe-continuous-backups --table-name oxo-leaderboard \
+  --query 'ContinuousBackupsDescription.PointInTimeRecoveryDescription.PointInTimeRecoveryStatus'
+
+# Confirm TTL is DISABLED on leaderboard (standings must not expire)
+aws dynamodb describe-time-to-live --table-name oxo-leaderboard \
+  --query 'TimeToLiveDescription.TimeToLiveStatus'
+
+# Probe the leaderboard read path (spot-check shape + buildSha)
+curl -s https://d3pf3kcvzpau1x.cloudfront.net/api/leaderboard | python3 -m json.tool
 
 # Confirm TTL is enabled on the connect-attempts table
 aws dynamodb describe-time-to-live --table-name oxo-connect-attempts \
@@ -585,6 +648,73 @@ post — raise a defect task immediately.
 
 ---
 
+## 4b. Structured log events — oxo-board-fn (stream scorer, s009)
+
+Log group: `/aws/lambda/oxo-board-fn`
+
+`oxo-board-fn` consumes DynamoDB Stream records from `oxo-games`. It emits
+structured JSON on every record, including on the idempotency and error paths.
+**Always check `buildSha` first** (see §1 "board-fn build identity").
+
+### Log events
+
+| `event` value | Severity | `category` | Meaning | Whose problem |
+|---------------|----------|------------|---------|---------------|
+| `board_tally` | INFO | — | Emitted on every stream record. Fields: `buildSha`, `gameId`, `oldStatus`, `newStatus`, `ops` (count of tally operations — 0 means no scoring action). `ops=0` on a non-terminal or already-filtered record is expected and not an error. | n/a — informational |
+| `leaderboard_recorded` | INFO | — | One tally write succeeded. Fields: `buildSha`, `gameId`, `name`, `field` (wins/draws/losses), `action=increment`. | n/a — success |
+| `already_scored` | INFO | `idempotent-replay` | `ConditionalCheckFailed` on `NOT contains(scoredGames, :gameId)` — this game was already tallied for this name. The handler swallows it: no increment, no batch failure, no retry. This is NORMAL under at-least-once stream delivery. | Not a defect. Expected behaviour. |
+| `leaderboard_write_failed` | ERROR | `INTERNAL` or `EXTERNAL_DEPENDENCY` | UpdateItem on `oxo-leaderboard` failed after SDK backoff. `INTERNAL` = DynamoDB 4xx (our request shape is wrong — a defect). `EXTERNAL_DEPENDENCY` = DynamoDB 5xx/timeout (AWS availability). The batch item is reported as a failure so the platform retries. | `INTERNAL`: raise defect task. `EXTERNAL_DEPENDENCY`: check AWS Health Dashboard for DynamoDB eu-west-2. |
+
+### Failure classification (board-fn)
+
+| Failure category | `category` log value | Whose problem | First response |
+|-----------------|---------------------|---------------|----------------|
+| Idempotent replay (`ConditionalCheckFailed` on `scoredGames`) | `idempotent-replay` | Not a problem — expected under at-least-once delivery | No action. `already_scored` log at INFO level confirms correct behaviour. |
+| DynamoDB 4xx on UpdateItem (bad request shape) | `INTERNAL` | Our code defect | Raise defect task. Check the UpdateItem expression in `ddb-leaderboard-store.ts`. |
+| DynamoDB 5xx / timeout (SDK backoff exhausted) | `EXTERNAL_DEPENDENCY` | AWS dependency | Check AWS Health Dashboard for DynamoDB eu-west-2. The platform will retry the batch item. |
+| Lambda-level exception (unhandled throw) | `internal` | Our code defect | Check `/aws/lambda/oxo-board-fn` logs for Node.js stack traces; raise defect task. |
+
+### CloudWatch Logs Insights — board-fn tally events (last 1 hour)
+
+```
+fields @timestamp, buildSha, gameId, oldStatus, newStatus, ops
+| filter event = "board_tally"
+| sort @timestamp desc
+| limit 50
+```
+
+Run against log group `/aws/lambda/oxo-board-fn`.
+
+### CloudWatch Logs Insights — board-fn errors (last 1 hour)
+
+```
+fields @timestamp, buildSha, event, category, gameId, name, field, error
+| filter event = "leaderboard_write_failed"
+| sort @timestamp desc
+| limit 50
+```
+
+Run against log group `/aws/lambda/oxo-board-fn`.
+
+### GET /api/leaderboard — game-fn read path failure
+
+Log group: `/aws/lambda/oxo-game-fn`
+
+| `event` value | `category` | Whose problem | Meaning | First response |
+|---------------|------------|---------------|---------|----------------|
+| `leaderboard_read_failed` | `internal-service` | Our defect or DynamoDB availability | The `Scan` on `oxo-leaderboard` failed after SDK backoff. The endpoint returns HTTP 500 `{"error":"Could not load leaderboard"}`. The SPA renders an empty leaderboard on failure (no aggressive retry). | Check `/aws/lambda/oxo-game-fn` for the `error` field value. If `ResourceNotFoundException` check the table exists. If 5xx check AWS Health. |
+
+```
+fields @timestamp, buildSha, event, category, op, error
+| filter event = "leaderboard_read_failed"
+| sort @timestamp desc
+| limit 20
+```
+
+Run against log group `/aws/lambda/oxo-game-fn`.
+
+---
+
 ## 5. Error contract (what clients see)
 
 ### HTTP (POST /api/games)
@@ -664,6 +794,76 @@ A player reports the board froze and they never saw "Your opponent disconnected.
      --api-id ylbzjuo8lf \
      --query 'Items[?RouteKey==`$disconnect`]'
    ```
+
+### Leaderboard score not appearing after a game ends (s009+)
+
+A player reports their score did not appear (or is stale) on the leaderboard after their game ended.
+
+1. **Check the leaderboard read path first.** Confirm the endpoint is live and
+   returning correct shape:
+   ```bash
+   curl -s https://d3pf3kcvzpau1x.cloudfront.net/api/leaderboard | python3 -m json.tool
+   ```
+   Expected: `{"entries": [...], "buildSha": "<sha>"}`. If HTTP 500 with
+   `"Could not load leaderboard"`, the Scan on `oxo-leaderboard` failed —
+   check `/aws/lambda/oxo-game-fn` for `leaderboard_read_failed` events (see §4b).
+
+2. **Check CloudFront caching.** The `/api/leaderboard` route has a 5-second
+   CloudFront TTL. A score from a game that just ended may not be visible for up
+   to 5 seconds. If the player waited more than 10 seconds after game-over and
+   still sees nothing, proceed to step 3.
+
+3. **Check board-fn build identity** (§1 "board-fn build identity"):
+   ```bash
+   aws logs filter-log-events \
+     --log-group-name /aws/lambda/oxo-board-fn \
+     --filter-pattern '{ $.buildSha = "*" }' \
+     --limit 5 \
+     --query 'events[*].message'
+   ```
+   If the log group is absent or `buildSha` does not match the expected deploy
+   SHA, `oxo-board-fn` was not deployed or is stale — check the infra pipeline.
+
+4. **Run the board-stream-skeleton probe.** This is the operator health-check
+   for the complete scoring path (Probe A + Probe B):
+   ```bash
+   make board-stream-skeleton PROD_URL=https://d3pf3kcvzpau1x.cloudfront.net
+   ```
+   If Probe A fails, the stream path is broken. If Probe B fails, idempotency
+   is broken — raise a defect task immediately.
+
+5. **Check board-fn for tally events for the specific game:**
+   ```
+   fields @timestamp, event, gameId, name, field, category, error
+   | filter gameId = "<GAME_ID>"
+   | sort @timestamp desc
+   | limit 20
+   ```
+   Run against `/aws/lambda/oxo-board-fn`.
+   - `leaderboard_recorded` present: write succeeded. If the leaderboard read
+     still shows no change, check whether the name matches exactly (names are
+     case-sensitive; the default is "AAA").
+   - `already_scored` present: the game was already tallied (idempotent replay —
+     correct behaviour).
+   - `leaderboard_write_failed` present with `category=EXTERNAL_DEPENDENCY`:
+     DynamoDB availability issue — check AWS Health Dashboard.
+   - No events at all for the gameId: the stream event may not have fired (game
+     did not reach `won` or `drawn` status). Check the Games item:
+     ```bash
+     aws dynamodb get-item \
+       --table-name oxo-games \
+       --key '{"gameId":{"S":"<GAME_ID>"}}'
+     ```
+     If `status` is `abandoned` or `active`, no tally is expected (by design).
+
+6. **Check the event-source mapping filter.** The ESM filter screens to
+   `eventName=MODIFY AND NEW.status ∈ {won,drawn} AND OLD.status=active`. If the
+   filter is misconfigured, terminal games are silently dropped:
+   ```bash
+   aws lambda list-event-source-mappings --function-name oxo-board-fn \
+     --query 'EventSourceMappings[*].{State:State,FilterCriteria:FilterCriteria}'
+   ```
+   Expected state: `Enabled`. Filter criteria must include the above conditions.
 
 ### Players cannot pair (both reach board together — F1/SM1 broken)
 
@@ -1031,6 +1231,16 @@ npx cdk deploy OxoGameProd --rollback --require-approval never
 
 The `Connections` table uses `RemovalPolicy.DESTROY` (ephemeral data).
 The `Games` table uses `RemovalPolicy.RETAIN`.
+The `Leaderboard` table uses `RemovalPolicy.RETAIN` (durable standings; PITR enabled for point-in-time recovery).
+
+**Leaderboard scoring path rollback:** `oxo-board-fn` is off the game hot path.
+Disabling or removing it does not affect game play. To disable stream scoring:
+1. Remove the event-source mapping from the CDK definition and push — the
+   infra pipeline deletes the ESM. Games continue to play; no new scores are
+   written.
+2. The `oxo-leaderboard` table data is preserved (PITR enabled). Scores already
+   recorded are not affected.
+3. To re-enable, restore the ESM in CDK and push.
 
 ---
 
@@ -1201,6 +1411,9 @@ To remove the WAF ACL:
 | OR-S007-a | Connections:GetItem is a real (if minimal) grant widening — disconnect path reads Connections | Bounded to a single PK read of the disconnecting connection's own row (no Query/Scan). |
 | OR-S007-b | Survivor notify is best-effort, single attempt — a survivor on a flaky link who misses the one opponent-disconnected post is not re-notified | Their own $disconnect/2h TTL or a manual reload recovers them. No retry storm (S4). |
 | F1 (open s007) | oxo-ws-fn logs buildSha="unknown" — BUILD_SHA injection not applied to ws-fn | Cannot confirm ws-fn version from log buildSha field; use LastModified from aws lambda get-function instead (see §1). |
+| OI-S009-a | Leaderboard names are not authenticated — anyone can use any name; two players sharing a name share one row | Intentional arcade model. No mitigation planned until player-identity slice. |
+| OI-S009-b | GET /api/leaderboard has no CloudWatch alarm; a sustained Scan failure would silently serve empty leaderboard to all players | Observable via `leaderboard_read_failed` log events (see §4b). No alarm configured (OI-18 tracking). |
+| OI-S009-c | scoredGames SS grows unboundedly on high-volume names — no compaction | At hobby volume a single name row's SS is negligible. Monitor item size if a name accumulates thousands of games. |
 
 Gaps are tracked in the project open-items register. Do not treat open items as
 alerts requiring immediate action unless noted otherwise; they are planned

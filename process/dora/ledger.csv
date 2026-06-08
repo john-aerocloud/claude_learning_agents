@@ -594,3 +594,4 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-08T09:00:59Z,oxo-online,14,s009-arcade-scoreboard,orchestrator,gate,,success,SLICE-S009-DELIVERED,delivered; C5 open; DEFECT-S008-002 closed; documenter+retro
 2026-06-08T09:02:47Z,oxo-online,14,s009-arcade-scoreboard,documenter,task_start,,na,,docs: usage.md + runbook.md for s009 arcade scoreboard
 2026-06-08T09:03:15Z,oxo-online,14,s009-arcade-scoreboard,orchestrator,gate,,success,RETRO-S009,v39; 4 experiments scored (EXP-017 validated); OI-42 forward; commit-isolation rule
+2026-06-08T09:06:53Z,oxo-online,14,s009-arcade-scoreboard,documenter,task_end,,success,,usage.md + runbook.md updated for s009 arcade scoreboard

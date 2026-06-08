@@ -77,18 +77,33 @@ The same rules apply, with these differences:
 
 ---
 
+## Play Online — setting your name
+
+Before or after clicking Play Online you will see a **"Your name"** text field
+pre-filled with "AAA" (or your last-used name from sessionStorage). You can
+change it to anything you like, or leave it as is — there is no gate. The name
+you enter is what appears on the shared leaderboard after your game ends.
+
+Names are not unique. Two players can both use "AAA" — their results accumulate
+on the same leaderboard row (arcade model).
+
+---
+
 ## Play Online — starting a game (host)
 
 1. Click **Play Online** on the mode selector.
 2. A loading spinner appears while the game is created on the server.
 3. Within 3 seconds a "waiting for opponent" screen appears with a prominent
-   **6-character game code** and a **"Copy link"** button. Each code is
+   **6-character game code** and **two copy buttons**. Each code is
    storage-guaranteed unique — two simultaneous games can never share a code,
    so a friend's link always reaches the right game.
-4. Click **Copy link**. The URL `https://d3pf3kcvzpau1x.cloudfront.net/join/<code>`
-   is placed on your clipboard.
-5. Send the link to your friend by any means (message, email, etc.).
-6. Wait. When your friend joins, both screens automatically transition to the
+4. Share with your friend using one of these controls:
+   - **Copy code** — copies the 6-character code to your clipboard (e.g.
+     `5R2R4U`). Useful if your friend will type it into the join screen.
+   - **Copy link** — copies the full URL
+     `https://d3pf3kcvzpau1x.cloudfront.net/join/<code>` to your clipboard.
+     Your friend opens this link and joins in one click.
+5. Wait. When your friend joins, both screens automatically transition to the
    game board.
 
 **Authentication is handled automatically.** When you click Play Online, the
@@ -157,14 +172,17 @@ Once both players are on the board:
 ## Example session — Play Online via share link (full game, ~2.3 s total)
 
 ```
+Host types "ACE" in the "Your name" field (optional; default is "AAA")
+
 Host clicks "Play Online"
   → spinner briefly
   → "Waiting for opponent"
      Game code: 5R2R4U
-     [Copy link] button
+     [Copy code] button  [Copy link] button
 
 Host clicks "Copy link"
   → clipboard: https://d3pf3kcvzpau1x.cloudfront.net/join/5R2R4U
+  (or clicks "Copy code" → clipboard: 5R2R4U, for a friend who will type it)
 
 Host sends that URL to friend
 
@@ -188,6 +206,13 @@ Guest clicks square 3
 
 Final move completes a row
   → both screens: "X wins" — board locked
+
+Either player returns to the idle/title screen
+  → shared leaderboard appears under the mode selector
+     #  Name  W  D  L
+     1  ACE   2  0  1
+     …
+  (ACE's win from this game is visible within ~1.2 s of game-over)
 ```
 
 ---
@@ -203,6 +228,8 @@ Final move completes a row
   WebSocket connections after 2 hours. There is no UI countdown or notification.
   A share link for an expired game shows "Game not found. Check the code and
   try again." — ask the host to create a new game.
+- **Names are not unique.** Two players can share the same name; their results
+  accumulate on one leaderboard row. There are no accounts or passwords.
 
 ---
 
@@ -289,10 +316,21 @@ npm --prefix work/oxo-online/src/app install
 npm --prefix work/oxo-online/src/app run test:smoke
 ```
 
+### Walking-skeleton probe for the scoring path (production — requires deployed stack)
+
+Drive a complete game through the stream scoring path (Probe A: one game-over →
+exactly one leaderboard increment; Probe B: replay → no double-count). This is
+the operator health-check for the DynamoDB Stream → oxo-board-fn → leaderboard
+path:
+
+```bash
+make board-stream-skeleton PROD_URL=https://d3pf3kcvzpau1x.cloudfront.net
+```
+
 ### Validation tests (requires AWS credentials + live stack)
 
 ```bash
-make validate ITER=11 SLICE=s008-share-link
+make validate ITER=14 SLICE=s009-arcade-scoreboard
 ```
 
 ---
@@ -341,5 +379,11 @@ make -C work/oxo-online/src/infra deploy-oidc
   temporarily blocked. The block self-clears automatically. This is most likely
   to affect automated test suites or scripts; it is unlikely to affect normal
   play.
+- **Leaderboard names are not authenticated.** Anyone can enter any name. Two
+  players sharing a name share one leaderboard row. This is intentional arcade
+  behaviour, not a bug.
+- **Leaderboard has a 5-second CloudFront cache.** A score from a game that just
+  ended may take up to 5 seconds to appear (measured at 1.2 s in production
+  validation; SLA is 10 s).
 - Mobile layout is functional but not optimised for small screens.
-- There is no undo, no move history, and no score tally across sessions.
+- There is no undo and no move history.

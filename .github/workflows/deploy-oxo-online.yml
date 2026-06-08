@@ -318,8 +318,11 @@ jobs:
         # OI-25: DEPLOY_SHA passed so shell.spec.ts can gate on
         # served meta[name="build-sha"] == deployed sha BEFORE behavioural
         # assertions (§39-correct CDN timing check; not sleep/wait).
-        # OI-32: workers:1 in playwright.config.ts serialises tests to stay
-        # within the 20-connects/5-min WAF WS rate limit.
+        # IMP-009 L1 (OI-45): both WAF rate rule (IMP-008 IP-set) and
+        # authorizer per-IP budget (s007a EXEMPT# item) are now exempt for this
+        # runner IP (the Add step above writes both layers). workers:4 in
+        # playwright.config.ts runs specs in parallel — the EXP-009 serial
+        # workaround is obsolete for an exempt runner IP.
         working-directory: work/oxo-online/src/app
         run: npx playwright test --config=playwright.config.ts tests/smoke/
         env:

@@ -12,27 +12,33 @@ import { defineConfig, devices } from '@playwright/test';
  * behavioural assertions. This ensures CDN propagation is complete (§39-correct;
  * not sleep/wait). If DEPLOY_SHA is absent the gate is skipped (local dev).
  *
- * OI-32 (EXP-009) — PARTIAL: the smoke suite includes WS tests that open 2–3
- * WebSocket connections each. The $connect authorizer (s005-h2) tracks per-IP
- * rolling connection counts (ConnectAttempts DDB, 5-min TTL). Empirical finding
- * (s006-cap, 2026-06-07): reducing to workers:1 causes per-IP WS counter
- * exhaustion across sequential tests, causing cascading 30s timeouts on WS
- * pairing tests (F6, F7). The previous parallel default (2 CPUs → 1 worker in
- * CI, all 43 tests in 34s) was PASSING 41/42 with the authorizer counter
- * staying within bounds. The true OI-32 fix requires the engineer to raise the
- * per-IP authorizer limit for CI runner IPs, or the tester to add inter-test
- * cool-down delays in WS specs. Tracked as OI-32-FOLLOW-UP.
- *
- * retries:2 restored: without retries, the F3/T4 pre-existing defect (message
- * mismatch) fails fast but reveals the cascade differently. With retries:2, the
- * failing retry opens an extra WS connection and can hit the authorizer counter
- * limit sooner — see EXP-009 notes. This is a known trade-off; the underlying
- * fix is the authorizer per-IP limit or test isolation.
+ * IMP-009 L1 (OI-45) — PARALLEL WORKERS ENABLED: the two rate-limiting layers
+ * that previously forced serialisation (EXP-009) are now both exempted for the
+ * CI runner IP during any smoke run that goes through the add/remove cycle:
+ *   Layer 1: CloudFront WAF rate rule — bypassed via the oxo-test-runner-ips
+ *            IP-set exclusion (IMP-008, waf-runner-ip.js add/remove).
+ *   Layer 2: $connect authorizer per-IP budget (20/5-min, oxo-connect-attempts
+ *            table) — bypassed via EXEMPT#<ip> DDB item (s007a, same script).
+ * With both layers exempt during smoke-ci, parallel workers no longer exhaust
+ * any rate budget. workers:4 gives genuine parallelism on the ubuntu-latest
+ * runner (2 vCPU) — Playwright schedules up to 4 tests concurrently. At 4
+ * parallel WS specs (each opening ≤2 connections), peak simultaneous connections
+ * = 8, well under the 20/5-min hard limit even in the un-exempted case.
+ * retries:2 kept: transient network flakes on prod are real; retries guard them
+ * without masking genuine failures (the exemption means retries no longer push
+ * the runner over the WS budget).
  */
 const prodUrl = process.env.PROD_URL;
 
 export default defineConfig({
   testDir: './tests/smoke',
+  // IMP-009 L1: both WAF + authorizer layers are now exempt for the runner IP
+  // during smoke-ci (waf-runner-ip.js add/remove cycle). Serialisation was the
+  // EXP-009 workaround; with both layers exempt it is an obsolete constraint.
+  // workers:4 — 4 concurrent workers on ubuntu-latest (2 vCPU). This gives
+  // genuine parallel execution; peak 8 simultaneous WS connects is safe even
+  // without exemption (limit is 20/5-min). The exemption makes retries safe too.
+  workers: process.env.CI ? 4 : undefined,
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,

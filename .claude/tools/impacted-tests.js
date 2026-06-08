@@ -19,16 +19,29 @@
  *
  * WHAT IT DOES (done-condition, IMP-007)
  *   1. Determines the set of CHANGED/added/removed mermaid node ids in
- *      work/<project>/architecture/dependencies/*.mmd, from BOTH:
- *        - `git diff <since>..working-tree` on those files (added/removed node
- *          declarations on +/- lines), AND
- *        - nodes still carrying a `changed`-class mark in the WORKING TREE
- *          (`:::...changed...` inline, or `class A,B,C <...changed...>;`).
+ *      work/<project>/architecture/dependencies/*.mmd. The changed-set is
+ *      SOURCED FROM THE DIFF (OI-42 fix), as the UNION of:
+ *        - the COMMITTED window diff `git diff <since>..HEAD` on those files, AND
+ *        - the UNCOMMITTED working-tree diff `git diff` (no revs) on those files.
+ *      From the ADDED (+) / REMOVED (-) lines of those diffs we pull node ids
+ *      that actually MOVED in the window: a node declaration (`id[...]`), a node
+ *      newly given a `changed`-class mark inline (`id...:::sNNNchanged`), a node
+ *      named in a `class A,B,C <...changed...>;` statement, and the endpoints of
+ *      an added/removed edge (`a -->|...| b`).
  *      (The mark forms have varied across slices — `:::changed`,
  *       `:::s005h3changed`, `:::s007aChanged`, `class wsfn,conn,games changed;`
  *       — so the rule is: any class name CONTAINING "changed" (case-insensitive)
  *       is a change mark; `:::stable`/`:::delivered`/`:::store`/`:::gate`/
  *       `:::actor`/`:::compute`/`:::secret` are NOT.)
+ *
+ *      WHY DIFF-SOURCED, NOT A FULL-FILE SCAN (OI-42, proven on s009):
+ *      classDef marks are CLEARED at delivery by RECOLOURING the classDef (green)
+ *      while the class NAME still contains "changed" forever. A full working-tree
+ *      scan for any "changed"-named class therefore re-reports every prior slice's
+ *      long-delivered nodes regardless of the SINCE window (s009 over-reported
+ *      ~half its 79 nodes as stale prior-slice marks). A stale mark committed N
+ *      slices ago appears in NEITHER diff, so a diff-sourced set drops it; only
+ *      marks/edges/decls that moved IN the window survive.
  *   2. Greps committed specs (tests/validation, tests/smoke, tests/skeleton, and
  *      unit suites anywhere under src/**) for `@covers <node-id>[, <node-id>...]`
  *      tags and builds node-id -> {spec files} map.
@@ -91,10 +104,16 @@ function extractMarkedNodes(text) {
   return [...out];
 }
 
+// Edge endpoints on a line: `a -->|"label"| b`, `a -.->|x| b`, `a --- b`, etc.
+// Captures the leading source id and the trailing target id around an arrow.
+const EDGE_RE = /([A-Za-z0-9_-]+)\s*(?:--+>?|-\.->|==+>|--+)\s*(?:\|[^|]*\|\s*)?([A-Za-z0-9_-]+)/;
+
 /**
- * Node ids declared on added (+) or removed (-) lines of a unified git diff.
- * (classDef/class/linkStyle lines do not match NODE_DECL_RE's shape bracket,
- * except `class X ...` — but those have no shape bracket, so they are excluded.)
+ * Node ids that ACTUALLY MOVED on the added (+) or removed (-) lines of a unified
+ * git diff (OI-42: this is the sole source of the changed-set, so it must catch
+ * every way a node enters/changes in-window — declaration, inline change-mark,
+ * `class A,B changed;` statement, and edge endpoints — but NOT recolour-only
+ * `classDef` lines, which carry no node id).
  */
 function extractNodesFromDiffLines(diffText) {
   const out = new Set();
@@ -102,10 +121,39 @@ function extractNodesFromDiffLines(diffText) {
     if (line[0] !== '+' && line[0] !== '-') continue;
     if (line.startsWith('+++') || line.startsWith('---')) continue;
     const body = line.slice(1);
-    // skip pure directive lines
-    if (/^\s*(classDef|linkStyle|class|subgraph|flowchart|graph|%%)/.test(body)) continue;
-    const dm = body.match(/^\s*([A-Za-z0-9_-]+)\s*[[({]/);
+    // comments and pure type/layout directives carry no node id of interest.
+    if (/^\s*(%%|classDef|linkStyle|subgraph|flowchart|graph|end\b|direction\b)/.test(body)) continue;
+
+    // (1) `class A,B,C <...changed...>;` statement — only when the class is a
+    //     change mark (a `class A,B stable;` line is not a change).
+    CLASS_STMT_RE.lastIndex = 0;
+    let cm = CLASS_STMT_RE.exec(body);
+    if (cm && /^\s*class\s/.test(body)) {
+      if (isChangedClass(cm[2])) {
+        for (const id of cm[1].split(',')) {
+          const t = id.trim();
+          if (t) out.add(t);
+        }
+      }
+      continue; // a `class ...;` statement is not a decl/edge line
+    }
+
+    // (2) node declaration: `id["label"]...` / `id(...)` / `id{...}`
+    const dm = body.match(NODE_DECL_RE);
     if (dm) out.add(dm[1]);
+
+    // (3) inline change-marks anywhere on the line: `id...:::sNNNchanged`. Catches
+    //     a node re-marked changed in-window even when re-declared with a shape
+    //     bracket (dm above) OR when only the mark is added.
+    INLINE_MARK_RE.lastIndex = 0;
+    let im;
+    while ((im = INLINE_MARK_RE.exec(body)) !== null) {
+      if (isChangedClass(im[2])) out.add(im[1]);
+    }
+
+    // (4) edge endpoints: an added/removed edge means both endpoints moved.
+    const em = body.match(EDGE_RE);
+    if (em) { out.add(em[1]); out.add(em[2]); }
   }
   return [...out];
 }
@@ -142,13 +190,18 @@ function depFiles(root, project) {
   return { dir, files };
 }
 
-function gitDiff(root, since, files) {
+// Unified diff text for the given files. `revs` is the leading git-diff revision
+// args: ['<since>..HEAD'] for the committed window, or [] for the uncommitted
+// working-tree diff. Both feed the SAME line extractor; their union is the set of
+// nodes that moved in-window (OI-42: diff-sourced, not a full-file class scan).
+function gitDiff(root, revs, files) {
   const rel = files.map((f) => path.relative(root, f));
   try {
-    return execFileSync('git', ['-C', root, 'diff', since, '--', ...rel],
+    return execFileSync('git', ['-C', root, 'diff', ...revs, '--', ...rel],
       { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   } catch (e) {
-    throw new Error(`git diff failed (is "${since}" a valid sha?): ${e.message}`);
+    const what = revs.length ? `(is "${revs.join(' ')}" a valid range?)` : '(working tree)';
+    throw new Error(`git diff failed ${what}: ${e.message}`);
   }
 }
 
@@ -200,15 +253,17 @@ function buildCoversIndex(specFiles) {
 function run({ root, project, since }) {
   const { files } = depFiles(root, project);
 
-  // 1. changed nodes = diff additions/removals UNION working-tree changed marks
+  // 1. changed nodes = nodes that MOVED in the window, sourced from the diff
+  //    (OI-42): the committed window diff <since>..HEAD UNION the uncommitted
+  //    working-tree diff. NOT a full-file `changed`-class scan — that re-reports
+  //    long-delivered prior-slice marks (recoloured-but-still-named-"changed")
+  //    that are in neither diff, which is exactly the s009 over-report.
   const changed = new Set();
   if (files.length) {
-    const diff = gitDiff(root, since, files);
-    for (const id of extractNodesFromDiffLines(diff)) changed.add(id);
-    for (const f of files) {
-      const text = fs.readFileSync(f, 'utf8');
-      for (const id of extractMarkedNodes(text)) changed.add(id);
-    }
+    const committedDiff = gitDiff(root, [`${since}..HEAD`], files);
+    for (const id of extractNodesFromDiffLines(committedDiff)) changed.add(id);
+    const workingDiff = gitDiff(root, [], files);
+    for (const id of extractNodesFromDiffLines(workingDiff)) changed.add(id);
   }
   const changedNodes = [...changed].sort();
 

@@ -17,8 +17,12 @@ to know the public surface. Then the change-impact model in
 Before exercising anything, derive your scope mechanically from the dependency
 model — the changed nodes/edges ARE your scope:
 1. Run `make impacted-tests SINCE=<last-validated-sha> PROJECT=<project>`. It
-   diffs `work/<project>/architecture/dependencies/*.mmd` (added/removed nodes
-   plus working-tree `classDef changed` marks) against the committed `@covers
+   diffs `work/<project>/architecture/dependencies/*.mmd` over the SINCE window
+   (committed `<since>..HEAD` diff UNION the uncommitted working-tree diff) and
+   reports only nodes that MOVED in that window — declarations, edges, and
+   `changed`-class marks ADDED in-window (OI-42: it no longer full-file-scans for
+   any "changed"-named class, so stale recoloured prior-slice marks do not leak).
+   It matches those changed nodes against the committed `@covers
    <node-id>` tags and emits two lists that ARE your **test plan** tick-off:
    **IMPACTED SPECS** (changed node → covering spec) and **UNCOVERED CHANGED
    NODES** (changed node with no covering spec). Capture them as

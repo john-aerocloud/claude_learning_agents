@@ -651,3 +651,7 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note
 2026-06-08T16:16:33Z,oxo-online,18,s015-chat-scope-done,ui-designer,task_end,,na,S015-UI,NO-OP: no new/changed surface. Chat-input-absent-on-game-over is existing s014 behaviour (panel renders only when result===undefined); SM-3 (absent OR disabled) already satisfied by absent state. Tester pins it; no design choice introduced.
 2026-06-08T16:16:53Z,oxo-online,18,s015-chat-scope-done,solution-architect,task_start,,na,S015-DELTA,arch-lite delta: chat scope-isolation guard + p95 + game-over (C7 close)
 2026-06-08T16:18:12Z,oxo-online,18,s015-chat-scope-done,solution-architect,task_end,,success,S015-DELTA,arch-lite §9a auto-accept: cross-game isolation existing by-construction property; p95 + game-over guards; no data-flow change
+2026-06-08T16:19:14Z,oxo-online,18,s015-chat-scope-done,orchestrator,gate,,success,GATE-3-S015,arch-lite+ui auto-accepted §9a
+2026-06-08T16:19:14Z,oxo-online,18,s015-chat-scope-done,product,task_start,,na,S015-UC-ACC,assemble use-cases + acceptance (S-SCOPE-1 isolation, T-P95-1, T-GAMEOVER-1, S-regression)
+2026-06-08T16:20:00Z,oxo-online,18,s015-chat-scope-done,product,task_start,,na,S015-UC-ACC,
+2026-06-08T16:22:15Z,oxo-online,18,s015-chat-scope-done,product,task_end,,success,S015-UC-ACC,

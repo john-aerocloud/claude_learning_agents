@@ -158,6 +158,29 @@ body {
   border-left: 3px solid #1a73e8;
 }
 
+/* ===== s009 UC4 two copy controls (DEFECT-S008-002) ======================== */
+.copy-controls {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.copy-controls button {
+  min-height: 2.5rem;
+  padding: 0.5rem 0.9rem;
+  border-radius: 0.5rem;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.copy-controls button:focus-visible {
+  outline: 2px solid #1a73e8;
+  outline-offset: 2px;
+}
+
 .leaderboard-error {
   color: #b00020;
 }

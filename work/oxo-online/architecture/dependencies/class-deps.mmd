@@ -217,6 +217,13 @@ flowchart TD
   %% client, then renders the table component; the table imports only the entry type.
   spaNameWire -->|"fetchLeaderboard on idle mount/return"| spaLeaderboardClient
   spaNameWire -->|"renders panel below board (idle)"| spaLeaderboard
+  %% --- UC4 two copy controls (DEFECT-S008-002) ---
+  %% Redirect/extend from the delivered spaCopyLink node: the single waiting-screen
+  %% copy-link splits into TWO controls — copy-code (6-char code) + copy-link
+  %% (/join/:code URL) — serving the guest's two receiving paths (type / click).
+  spaCopyControls["spa-copy-controls<br/>src/app/src/game/GameRoot.tsx (UC4) — waiting-screen copy-code + copy-link<br/>copy-code-btn → 6-char code; copy-link-btn → origin+/join/+code; 2s Copied! (flag uc4TwoCopyEnabled)"]:::s009changed
+  spaCopyLink -->|"splits into two controls (flag ON replaces single copy-link)"| spaCopyControls
+  spaCopyControls -->|"copy-link URL mirrors /join/:code route form"| spaJoinRoute
   %% --- UC2 board (FIRST DynamoDB Stream consumer) + UC3-backend read (ENGINEER-BACKEND) ---
   %% ACTUAL runtime path traced: Games status CAS (active→won/drawn, s006 move
   %% handler) → DynamoDB Stream (NEW_AND_OLD_IMAGES) → event-source-mapping FILTER

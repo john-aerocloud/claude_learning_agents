@@ -13,18 +13,45 @@ import react from '@vitejs/plugin-react';
 
 const LOCAL_WS_PORT = Number(process.env.LOCAL_WS_PORT ?? 8787);
 
-/** Serve a local /config.js (local WS url + uc4Enabled ON) and a stub create API. */
+/** Serve a local /config.js (local WS url + the s009 flags ON) and stub APIs. */
 function localBackend(): Plugin {
   const configBody = `window.OXO_CONFIG = ${JSON.stringify({
     wsUrl: `ws://localhost:${LOCAL_WS_PORT}`,
     uc4Enabled: true,
+    // s009 — develop the name field, leaderboard panel, and two copy controls
+    // WITH a real browser locally (the §"local stand-up" discipline). In prod
+    // these default OFF until the orchestrator flips them after the backend lands.
+    uc1NameEnabled: true,
+    uc3LeaderboardEnabled: true,
+    uc4TwoCopyEnabled: true,
   })};`;
+  // s009 UC3 — a small fixed leaderboard fixture so the panel renders populated
+  // locally (the real GET /api/leaderboard is the backend engineer's surface).
+  const leaderboardBody = JSON.stringify({
+    entries: [
+      { name: 'ACE', wins: 3, draws: 1, losses: 0 },
+      { name: 'BEE', wins: 1, draws: 0, losses: 2 },
+    ],
+    buildSha: 'local',
+  });
   return {
     name: 'oxo-local-backend',
     configureServer(server) {
       server.middlewares.use('/config.js', (_req, res) => {
         res.setHeader('Content-Type', 'application/javascript');
         res.end(configBody);
+      });
+      // s009 UC3 — local stub of GET /api/leaderboard so the idle-view panel
+      // renders populated without the deployed backend.
+      server.middlewares.use('/api/leaderboard', (req, res) => {
+        if (req.method !== 'GET') {
+          res.statusCode = 405;
+          res.end();
+          return;
+        }
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(leaderboardBody);
       });
       // Local stub of POST /api/games so the HOST flow ("Play Online") reaches
       // the waiting screen and opens the socket (the local WS server binds the

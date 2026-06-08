@@ -50,6 +50,7 @@ const NAME_STORAGE_KEY = 'oxo.playerName';
 // s008 UC1 — how long the copy control shows "Copied!" before reverting (~2s).
 const COPIED_REVERT_MS = 2000;
 const COPY_LINK_LABEL = 'Copy link';
+const COPY_CODE_LABEL = 'Copy code';
 const COPIED_LABEL = 'Copied!';
 // s007 UC3 / AC3.1 — exact pinned survivor message text. The tester's
 // two-browser smoke keys off this exact string; do not reword without updating
@@ -126,6 +127,14 @@ export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameR
   // s008 UC1 — true for ~2s after a successful copy so the control shows "Copied!".
   const [copied, setCopied] = useState(false);
   const copiedTimer = useRef<ReturnType<typeof setTimeout>>();
+  // s009 UC4 (flag uc4TwoCopyEnabled). The waiting screen splits the single
+  // s008 copy-link into TWO controls — "Copy code" (the 6-char code, for a guest
+  // who TYPES it) and "Copy link" (the /join/:code URL, for a guest who CLICKS
+  // it). DEFECT-S008-002: only the link affordance existed, so the type path had
+  // no control. `copiedControl` tracks which button last copied (for its 2s
+  // "Copied!" feedback); flag OFF keeps the single s008 control (prod-unchanged).
+  const uc4TwoCopyEnabled = isFlagEnabled('uc4TwoCopyEnabled');
+  const [copiedControl, setCopiedControl] = useState<'code' | 'link' | null>(null);
   const [gameCode, setGameCode] = useState<string | null>(null);
   const [gameId, setGameId] = useState<string | null>(null);
   // The host's $connect credential, minted by POST /api/games. A degraded mint
@@ -240,6 +249,28 @@ export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameR
       // Clipboard unavailable/denied — non-blocking; the code remains visible.
       setCopied(false);
     }
+  };
+
+  // s009 UC4 — copy EXACTLY `text` to the clipboard and flag `control` as copied
+  // for ~2s. Shared by both waiting-screen controls so each copies the correct
+  // thing (code vs URL) with identical feedback. On rejection (denied / insecure
+  // context) the code stays visible for manual copy (no retry — local browser API).
+  const copyToClipboard = async (control: 'code' | 'link', text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedControl(control);
+      clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(() => setCopiedControl(null), COPIED_REVERT_MS);
+    } catch {
+      setCopiedControl(null);
+    }
+  };
+
+  const copyCode = () => {
+    if (gameCode) void copyToClipboard('code', gameCode);
+  };
+  const copyLink = () => {
+    if (gameCode) void copyToClipboard('link', `${window.location.origin}/join/${gameCode}`);
   };
 
   // Clear the "Copied!" revert timer if the component unmounts mid-window.
@@ -424,15 +455,38 @@ export function GameRoot({ socketFactory = realFactory, initialJoinCode }: GameR
         <section className="online-waiting" aria-label="waiting for opponent">
           <p>Waiting for opponent</p>
           <p className="game-code" data-testid="game-code">{gameCode}</p>
-          <button
-            type="button"
-            className="copy-link"
-            data-testid="copy-link"
-            aria-label="copy game link"
-            onClick={copyShareLink}
-          >
-            {copied ? COPIED_LABEL : COPY_LINK_LABEL}
-          </button>
+          {uc4TwoCopyEnabled ? (
+            // s009 UC4 — two distinct affordances for the guest's two join paths
+            // (type the code / click the link). DEFECT-S008-002 closure.
+            <div className="copy-controls">
+              <button
+                type="button"
+                className="copy-code"
+                data-testid="copy-code-btn"
+                onClick={copyCode}
+              >
+                {copiedControl === 'code' ? COPIED_LABEL : COPY_CODE_LABEL}
+              </button>
+              <button
+                type="button"
+                className="copy-link"
+                data-testid="copy-link-btn"
+                onClick={copyLink}
+              >
+                {copiedControl === 'link' ? COPIED_LABEL : COPY_LINK_LABEL}
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="copy-link"
+              data-testid="copy-link"
+              aria-label="copy game link"
+              onClick={copyShareLink}
+            >
+              {copied ? COPIED_LABEL : COPY_LINK_LABEL}
+            </button>
+          )}
           <p
             className="online-connecting"
             role="status"

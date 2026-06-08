@@ -903,6 +903,103 @@ describe('GameRoot — copy-link control on the waiting screen (s008 UC1, T3/S3/
   });
 });
 
+// s009 UC4 — TWO copy controls on the waiting screen (DEFECT-S008-002 closure).
+// FLAG ON (uc4TwoCopyEnabled): the single s008 copy-link is replaced by
+// "Copy code" (copies the 6-char code) + "Copy link" (copies the /join/:code
+// URL), each with a brief "Copied!" feedback; the code stays visible. Flag OFF
+// keeps the single s008 control (prod-unchanged) — covered by the s008 suite.
+// @covers spa-copy-controls
+describe('GameRoot — UC4 two copy controls (flag ON, AC4.1/2/3/4, D1-5, A11Y-2)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete (window as unknown as { OXO_CONFIG?: unknown }).OXO_CONFIG;
+  });
+
+  function flagOn() {
+    (window as unknown as { OXO_CONFIG: Record<string, unknown> }).OXO_CONFIG = {
+      uc4TwoCopyEnabled: true,
+    };
+  }
+
+  async function reachWaiting(code: string) {
+    const cap = captureFactory();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ gameId: 'g-1', code }), { status: 201 }),
+    );
+    render(<GameRoot socketFactory={cap.factory} />);
+    await userEvent.click(screen.getByRole('button', { name: /play online/i }));
+    await waitFor(() =>
+      expect(screen.getByText(/waiting for opponent/i)).toBeInTheDocument(),
+    );
+    return cap;
+  }
+
+  function stubClipboard() {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(globalThis.navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    return writeText;
+  }
+
+  it('AC4.1/D1 — the waiting screen shows BOTH "Copy code" and "Copy link" controls', async () => {
+    flagOn();
+    await reachWaiting('ABC234');
+    expect(screen.getByTestId('copy-code-btn')).toHaveAccessibleName(/copy code/i);
+    expect(screen.getByTestId('copy-link-btn')).toHaveAccessibleName(/copy link/i);
+    // The single s008 control is replaced (no longer present under flag ON).
+    expect(screen.queryByTestId('copy-link')).not.toBeInTheDocument();
+  });
+
+  it('AC4.2/D2 — "Copy code" copies the 6-char code, NOT the URL', async () => {
+    flagOn();
+    const writeText = stubClipboard();
+    await reachWaiting('ABC234');
+    await userEvent.click(screen.getByTestId('copy-code-btn'));
+    expect(writeText).toHaveBeenCalledWith('ABC234');
+    const copied = writeText.mock.calls[0][0] as string;
+    expect(copied).not.toContain('/join/');
+    expect(copied).not.toContain('http');
+  });
+
+  it('AC4.3/D3 — "Copy link" copies origin + "/join/" + code, NOT the bare code', async () => {
+    flagOn();
+    const writeText = stubClipboard();
+    await reachWaiting('ABC234');
+    await userEvent.click(screen.getByTestId('copy-link-btn'));
+    expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/join/ABC234`);
+  });
+
+  it('AC4.4/D4 — each control shows a "Copied!" confirmation after a write', async () => {
+    flagOn();
+    stubClipboard();
+    await reachWaiting('ABC234');
+    await userEvent.click(screen.getByTestId('copy-code-btn'));
+    await waitFor(() =>
+      expect(screen.getByTestId('copy-code-btn')).toHaveTextContent(/copied/i),
+    );
+    await userEvent.click(screen.getByTestId('copy-link-btn'));
+    await waitFor(() =>
+      expect(screen.getByTestId('copy-link-btn')).toHaveTextContent(/copied/i),
+    );
+  });
+
+  it('the 6-char code stays visible after either copy', async () => {
+    flagOn();
+    stubClipboard();
+    await reachWaiting('ABC234');
+    await userEvent.click(screen.getByTestId('copy-code-btn'));
+    expect(screen.getByTestId('game-code')).toHaveTextContent('ABC234');
+  });
+
+  it('flag OFF — the single s008 "copy-link" control is shown (prod-unchanged)', async () => {
+    await reachWaiting('ABC234');
+    expect(screen.getByTestId('copy-link')).toBeInTheDocument();
+    expect(screen.queryByTestId('copy-code-btn')).not.toBeInTheDocument();
+  });
+});
+
 // s009 UC1 — name entry (both parties). FLAG ON (uc1NameEnabled). The NameField
 // sits ABOVE the mode buttons in the idle view, pre-filled from sessionStorage
 // (else "AAA"), and is NEVER a gate — "Play Online"/"Join a game" stay enabled

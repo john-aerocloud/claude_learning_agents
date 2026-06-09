@@ -21,6 +21,7 @@ import { createItemsQueuesRouter } from './routes/items-queues.js';
 import { createDoraRouter } from './routes/dora.js';
 import { createSlicesRouter } from './routes/slices.js';
 import { createEventsRouter } from './routes/events.js';
+import { createStageFlowRouter } from './routes/stageFlow.js';
 
 /**
  * Build the fully-composed read-layer app plus the watcher backing /api/events.
@@ -40,6 +41,7 @@ export function buildServerApp(opts = {}) {
     createDoraRouter({ repoRoot }), // UC3
     createSlicesRouter({ repoRoot }), // UC4
     createEventsRouter({ watcher }), // UC5
+    createStageFlowRouter({ repoRoot }), // UC-S004-1 (stage-flow aggregation)
   ];
 
   const app = createApp({ repoRoot, extraRouters, allowedOrigin: opts.allowedOrigin });

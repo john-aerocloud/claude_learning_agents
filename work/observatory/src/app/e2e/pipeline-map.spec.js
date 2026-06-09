@@ -1,4 +1,5 @@
 // @covers PipelineMap
+// @covers BufferStateIndicator
 // UC-S002-3 browser specs — a REAL browser (Playwright/chromium) driving the
 // FULL path: SPA on :5173 → SPA client → read layer on :3001 (fixture repo).
 // This is the surface the operator SEES; the live drive proves what jsdom
@@ -101,6 +102,44 @@ test('@a11y A11Y-9 — each focusable QueueBox is at least 24×24px (WCAG 2.2 §
     expect(bb.width).toBeGreaterThanOrEqual(24);
     expect(bb.height).toBeGreaterThanOrEqual(24);
   }
+});
+
+// ── UC-S002-4: buffer-state badge in a REAL browser ───────────────────────────
+// The fixture's Ready box is starving (ready.csv = 1 item, policy min_items = 3).
+// These prove the live end-to-end A11Y-5 contract that jsdom cannot: the badge
+// actually renders ON the right box, with VISIBLE text (not colour-only), and
+// its geometry is contained inside the owning box (GEO-3).
+
+test('@a11y A11Y-5 — the starving Ready box shows a state-badge with VISIBLE "starving" text (not colour-only)', async ({
+  page,
+}) => {
+  const ready = page.getByTestId('queue-ready');
+  const badge = ready.getByTestId('state-badge');
+  await expect(badge).toBeVisible();
+  // visible text is the authoritative cue — assert text, never colour
+  await expect(badge).toContainText(/starving/i);
+  // the icon is decorative (aria-hidden); meaning rides on text + accessible name
+  const iconHidden = await badge
+    .locator('[aria-hidden="true"]')
+    .first()
+    .getAttribute('aria-hidden');
+  expect(iconHidden).toBe('true');
+});
+
+test('@a11y A11Y-5 — an ok box (deploy) shows NO state-badge', async ({ page }) => {
+  await expect(page.getByTestId('queue-deploy').getByTestId('state-badge')).toHaveCount(0);
+});
+
+test('GEO-3 — the state-badge bounding box is contained within its owning Ready box', async ({
+  page,
+}) => {
+  const box = await page.getByTestId('queue-ready').boundingBox();
+  const badge = await page.getByTestId('queue-ready').getByTestId('state-badge').boundingBox();
+  expect(box && badge).toBeTruthy();
+  expect(badge.x).toBeGreaterThanOrEqual(box.x);
+  expect(badge.y).toBeGreaterThanOrEqual(box.y);
+  expect(badge.x + badge.width).toBeLessThanOrEqual(box.x + box.width + 0.5);
+  expect(badge.y + badge.height).toBeLessThanOrEqual(box.y + box.height + 0.5);
 });
 
 test('no console errors on initial load (UC1 AC1.2 still holds with the map mounted)', async ({

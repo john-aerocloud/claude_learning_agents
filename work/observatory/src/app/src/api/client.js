@@ -1,0 +1,98 @@
+// Observatory API client — the shared SEAM that UC-S002-2..6 import.
+//
+// HEXAGONAL ROLE: this is the SPA-side ADAPTER over the CHK-1 read layer's HTTP
+// API. It is the ONLY module that knows the :3001 base URL, the endpoint paths,
+// and the JSON envelope shapes ({active}, {content}, raw arrays). The domain
+// (UC2 state layer, UC5 parser) and the render layer (UC3 PipelineMap) consume
+// these plain helpers and never touch fetch/URLs — so endpoint shape changes
+// land here, in one place, behind a stable export surface.
+//
+// FAIL-SOFT (AC1.6): every GET returns its parsed value or `null` on ANY
+// failure — network error, non-2xx status, or unparseable body. The read layer
+// is one WE OWN and runs locally; a transient miss must degrade the SPA to a
+// graceful empty/last-known state, never an unhandled rejection or a blank page.
+// A null here is a data-absence signal the caller handles (UC2 maps it to
+// length 0 / status 'ok'); it is NOT swallowing a real defect — the read layer's
+// own tests pin its correctness, and the SSE channel re-drives state on recovery.
+//
+// STABLE EXPORT SURFACE (so UC2-6 attach without editing each other):
+//   API_BASE                          — the read-layer origin (:3001)
+//   getActive()            -> Promise<string|null>            (active project id)
+//   getProjects()          -> Promise<Array|null>             (project registry)
+//   getQueues(project, q)  -> Promise<QueueRecord[]|null>     (q: intake|ready|deploy|rework)
+//   getPolicy(project)     -> Promise<PolicyRecord[]|null>    (the policy queue CSV)
+//   getBaseline()          -> Promise<string|null>            (raw baseline.md)
+//   subscribeEvents(onChange) -> () => void                   (SSE; returns unsubscribe)
+// AC-named aliases (acceptance.md AC1.3-1.5): fetchQueues, fetchPolicy, fetchBaseline.
+
+export const API_BASE = 'http://localhost:3001';
+
+/** GET a JSON endpoint; null on any network/HTTP/parse failure (fail soft). */
+async function getJson(path) {
+  try {
+    const res = await fetch(`${API_BASE}${path}`);
+    if (!res || !res.ok) return null;
+    return await res.json();
+  } catch {
+    return null; // network error / parse error → null; never throws to caller
+  }
+}
+
+/** GET /api/active → active project id, or null when none / unreachable. */
+export async function getActive() {
+  const body = await getJson('/api/active');
+  return body && typeof body === 'object' ? (body.active ?? null) : null;
+}
+
+/** GET /api/projects → project registry array, or null when unreachable. */
+export async function getProjects() {
+  return getJson('/api/projects');
+}
+
+/**
+ * GET /api/projects/:id/queues/:queue → QueueRecord[] (raw §4 string records),
+ * or null when missing/unreachable. Path segments are URL-encoded.
+ * @param {string} project
+ * @param {'intake'|'ready'|'deploy'|'rework'|'policy'} queue
+ */
+export async function getQueues(project, queue) {
+  return getJson(`/api/projects/${encodeURIComponent(project)}/queues/${encodeURIComponent(queue)}`);
+}
+
+/** GET the policy CSV for a project → PolicyRecord[] or null. */
+export async function getPolicy(project) {
+  return getQueues(project, 'policy');
+}
+
+/** GET /api/dora/baseline → the RAW baseline.md string, or null when absent. */
+export async function getBaseline() {
+  const body = await getJson('/api/dora/baseline');
+  return body && typeof body === 'object' ? (body.content ?? null) : null;
+}
+
+/**
+ * Open the SSE channel (GET /api/events) and forward each `change` frame to
+ * `onChange({ type, path })`. Returns an unsubscribe that closes the
+ * EventSource. EventSource reconnects natively on drop; an unparseable frame is
+ * ignored (never throws). UC6 builds path-filtering + re-fetch on top of this.
+ * @param {(evt: { type: string, path: string }) => void} onChange
+ * @returns {() => void} unsubscribe
+ */
+export function subscribeEvents(onChange) {
+  const source = new EventSource(`${API_BASE}/api/events`);
+  source.addEventListener('message', (e) => {
+    let evt;
+    try {
+      evt = JSON.parse(e.data);
+    } catch {
+      return; // ignore heartbeats / malformed frames
+    }
+    onChange(evt);
+  });
+  return () => source.close();
+}
+
+// AC-named aliases (acceptance.md AC1.3-AC1.5 reference these names directly).
+export const fetchQueues = getQueues;
+export const fetchPolicy = getPolicy;
+export const fetchBaseline = getBaseline;

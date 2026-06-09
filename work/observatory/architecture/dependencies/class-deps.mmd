@@ -1,13 +1,12 @@
 %%{ init: { "theme": "default" } }%%
-%% Module/port/adapter seam graph for s001 read layer (engineer-owned, §IMP-007).
-%% Nodes are seams (modules / ports / adapters), NOT every class. Edges are the
-%% ACTUAL runtime routing/import paths on trunk. Marked nodes (:::s001changed)
-%% are the tester's test-plan input for this slice; cleared at slice delivery.
+%% Module/port/adapter seam graph. s001 read layer DELIVERED (2026-06-09) — all
+%% nodes stable. Nodes are seams (modules / ports / adapters), NOT every class.
+%% Edges are the ACTUAL runtime routing/import paths on trunk.
 graph TD
     %% --- Composition seam (UC6 owns; mounts every router via extraRouters) ---
-    APP["app.js — createApp({repoRoot, extraRouters, allowedOrigin})<br/>CORS (localhost:5173 only) + app-level read-only guard (405)<br/>mounts UC1 + extraRouters under /api"]:::s001changed
-    COMPOSE["compose.js — buildServerApp({repoRoot})<br/>UC6 composition root: builds watcher + UC1-UC5 routers<br/>returns {app, watcher}"]:::s001changed
-    SERVER["server.js — bootstrap<br/>(UC6: uses buildServerApp; owns watcher.stop()+server.close() on SIGTERM/SIGINT)"]:::s001changed
+    APP["app.js — createApp({repoRoot, extraRouters, allowedOrigin})<br/>CORS (localhost:5173 only) + app-level read-only guard (405)<br/>mounts UC1 + extraRouters under /api"]:::stable
+    COMPOSE["compose.js — buildServerApp({repoRoot})<br/>UC6 composition root: builds watcher + UC1-UC5 routers<br/>returns {app, watcher}"]:::stable
+    SERVER["server.js — bootstrap<br/>(UC6: uses buildServerApp; owns watcher.stop()+server.close() on SIGTERM/SIGINT)"]:::stable
     REPOROOT["repoRoot.js — resolveRepoRoot()"]:::stable
 
     %% --- UC1-UC4 adapters + parsers (on trunk, stable for this UC) ---
@@ -52,6 +51,21 @@ graph TD
     APP -->|mounts extraRouters incl. events| R_EVENTS
     R_EVENTS -->|subscribes to port| WATCH
 
+    %% --- s002 SPA seam (CHK-2). S2-UC1 scaffold: app shell + API client adapter.
+    %% The SPA half talks to the read layer ONLY through the HTTP API (the boundary
+    %% is the network, not an import) — so SPA_CLIENT depends on the deployed :3001
+    %% surface (R_PROJ/R_ITEMS/R_DORA/R_EVENTS routes), drawn as a runtime call edge.
+    %% S2-UC2..6 attach to SPA_MAIN/SPA_CLIENT, not to each other. ---
+    SPA_CLIENT["src/app/src/api/client.js — SPA API ADAPTER (S2-UC1)<br/>only module knowing :3001 base URL + endpoint shapes<br/>getActive/getProjects/getQueues/getPolicy/getBaseline/subscribeEvents<br/>fail-soft: null on net/HTTP/parse error"]:::s002changed
+    SPA_APP["src/app/src/App.jsx — app shell (S2-UC1)<br/>banner + main landmark = composition slot + build-sha stamp"]:::s002changed
+    SPA_MAIN["src/app/src/main.jsx — Preact entry (S2-UC1)<br/>WIRING SEAM: mounts App; UC3 mounts PipelineMap as App child here"]:::s002changed
+
+    SPA_MAIN -->|renders| SPA_APP
+    SPA_CLIENT -.->|HTTP GET :3001/api/active,/projects| R_PROJ
+    SPA_CLIENT -.->|HTTP GET :3001/api/projects/:id/queues/:q| R_ITEMS
+    SPA_CLIENT -.->|HTTP GET :3001/api/dora/baseline| R_DORA
+    SPA_CLIENT -.->|EventSource :3001/api/events| R_EVENTS
+
     classDef stable fill:#eee,stroke:#999,color:#000
-    classDef s001changed fill:#ffe599,stroke:#b7950b,color:#000
     classDef delivered fill:#d5f5e3,stroke:#1e8449,color:#000
+    classDef s002changed fill:#3a2233,stroke:#d96c8f,stroke-width:2px,color:#fff

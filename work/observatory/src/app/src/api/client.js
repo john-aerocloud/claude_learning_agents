@@ -84,6 +84,19 @@ export async function getFlow(project) {
 }
 
 /**
+ * GET /api/projects/:id/stage-flow → the value-stream array (UC-S004-1), one
+ * object per canonical stage in flow order. Unlike getBaseline/getFlow, this
+ * endpoint returns the ARRAY DIRECTLY (no {content} envelope) — match the
+ * UC-S004-1 route shape. Fails soft to null on any network/HTTP/parse error
+ * (the caller maps null → all-zeros skeleton). Project segment is URL-encoded.
+ * @param {string} project
+ * @returns {Promise<Array|null>}
+ */
+export async function getStageFlow(project) {
+  return getJson(`/api/projects/${encodeURIComponent(project)}/stage-flow`);
+}
+
+/**
  * Open the SSE channel (GET /api/events) and forward each `change` frame to
  * `onChange({ type, path })`. Returns an unsubscribe that closes the
  * EventSource. EventSource reconnects natively on drop; an unparseable frame is

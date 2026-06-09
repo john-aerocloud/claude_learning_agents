@@ -12,6 +12,7 @@ import {
   getPolicy,
   getBaseline,
   getFlow,
+  getStageFlow,
   fetchQueues,
   fetchPolicy,
   fetchBaseline,
@@ -69,6 +70,29 @@ describe('api/client URL construction + parsing', () => {
     const rows = await getQueues('observatory', 'ready');
     expect(f).toHaveBeenCalledWith('http://localhost:3001/api/projects/observatory/queues/ready');
     expect(rows).toEqual(fixture);
+  });
+
+  it('getStageFlow(project) builds /api/projects/:id/stage-flow and returns the RAW array (no {content} envelope) (UC-S004-1/2)', async () => {
+    const fixture = [
+      { stage: 'engineer', label: 'Build / TDD', throughput: 7, dwell_median_s: 357, wip: 4, rework: 0, source_rows: ['r:1'] },
+    ];
+    const f = mockFetchJson(fixture);
+    vi.stubGlobal('fetch', f);
+    const rows = await getStageFlow('observatory');
+    expect(f).toHaveBeenCalledWith('http://localhost:3001/api/projects/observatory/stage-flow');
+    expect(rows).toEqual(fixture);
+  });
+
+  it('getStageFlow encodes the project segment', async () => {
+    const f = mockFetchJson([]);
+    vi.stubGlobal('fetch', f);
+    await getStageFlow('a/b');
+    expect(f).toHaveBeenCalledWith('http://localhost:3001/api/projects/a%2Fb/stage-flow');
+  });
+
+  it('getStageFlow fails soft to null on a network/HTTP error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('boom')));
+    expect(await getStageFlow('observatory')).toBeNull();
   });
 
   it('getQueues encodes path segments (defends against malformed project ids)', async () => {

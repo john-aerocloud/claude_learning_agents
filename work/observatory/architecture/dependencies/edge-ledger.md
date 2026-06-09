@@ -16,6 +16,11 @@ Two error classes are tracked here; the goal is to drive both toward zero.
 | UC1 →(scaffold)→ UC4 | same scaffold seam as above | orchestrator §F7 pre-build flag / flow-manager 2026-06-09 | Same rationale as UC1→UC2 scaffold edge |
 | UC1 →(scaffold)→ UC5 | same scaffold seam as above | orchestrator §F7 pre-build flag / flow-manager 2026-06-09 | Same rationale as UC1→UC2 scaffold edge |
 
+## Realised composition edges (UC6 build)
+| edge (from → to) | seam | realised by | note |
+|------------------|------|-------------|------|
+| UC6 → UC1..UC5 | `src/server/compose.js` (NOT `index.ts`) | engineer/UC-S001-6 2026-06-09 | The declared `index.ts` mount point was realised as `compose.js` (`buildServerApp`) called by `server.js`. compose.js constructs the watcher + UC2-UC5 routers and passes them via createApp's `extraRouters`; UC1 is mounted inside createApp (not double-mounted). CORS + read-only guard live in `app.js` so they apply to every router. Declared `index.ts` edges in the table above are satisfied by this seam. |
+
 ## Hidden edges discovered (false independence — a collision happened)
 | date | items | shared seam | edge added | collision ledger ref |
 |------|-------|-------------|-----------|----------------------|

@@ -5,8 +5,9 @@
 %% are the tester's test-plan input for this slice; cleared at slice delivery.
 graph TD
     %% --- Composition seam (UC6 owns; mounts every router via extraRouters) ---
-    APP["app.js — createApp({repoRoot, extraRouters})<br/>mounts /api routers (read-only)"]:::stable
-    SERVER["server.js — bootstrap<br/>(UC6 wires extraRouters + watcher lifecycle)"]:::stable
+    APP["app.js — createApp({repoRoot, extraRouters, allowedOrigin})<br/>CORS (localhost:5173 only) + app-level read-only guard (405)<br/>mounts UC1 + extraRouters under /api"]:::s001changed
+    COMPOSE["compose.js — buildServerApp({repoRoot})<br/>UC6 composition root: builds watcher + UC1-UC5 routers<br/>returns {app, watcher}"]:::s001changed
+    SERVER["server.js — bootstrap<br/>(UC6: uses buildServerApp; owns watcher.stop()+server.close() on SIGTERM/SIGINT)"]:::s001changed
     REPOROOT["repoRoot.js — resolveRepoRoot()"]:::stable
 
     %% --- UC1-UC4 adapters + parsers (on trunk, stable for this UC) ---
@@ -18,9 +19,9 @@ graph TD
     P_CSV["parsers/csv.js"]:::stable
     P_FILE["parsers/file-reader.js"]:::stable
 
-    %% --- UC5 file-watch live-refresh (THIS UC) ---
-    WATCH["watcher.js — file-watch ADAPTER<br/>port: subscribe(fn)->unsub / ready() / stop()<br/>(chokidar isolated here)"]:::s001changed
-    R_EVENTS["routes/events.js — SSE adapter<br/>GET /api/events (injected watcher port)"]:::s001changed
+    %% --- UC5 file-watch live-refresh ---
+    WATCH["watcher.js — file-watch ADAPTER<br/>port: subscribe(fn)->unsub / ready() / stop()<br/>(chokidar isolated here)"]:::stable
+    R_EVENTS["routes/events.js — SSE adapter<br/>GET /api/events (injected watcher port)"]:::stable
 
     %% Composition edges (adapters depend on domain; never reverse)
     APP --> R_PROJ
@@ -30,15 +31,27 @@ graph TD
     R_DORA --> P_FILE
     R_SLICE --> P_FILE
 
-    %% UC5 actual routing path:
-    %% server.js (UC6) constructs the watcher, injects it into the events router,
-    %% and passes the router via extraRouters into createApp. The SSE adapter
-    %% forwards domain {type:'change',path} events from the watcher port to the
-    %% client stream. The events router imports NO chokidar — only the port.
-    R_EVENTS -->|subscribes to port| WATCH
-    SERVER -->|constructs + owns stop| WATCH
-    SERVER -->|injects router via extraRouters| R_EVENTS
+    %% UC6 ACTUAL runtime routing path (realised this UC):
+    %% server.js calls buildServerApp (compose.js). compose.js constructs the
+    %% watcher, builds the UC2-UC5 routers, and passes them via extraRouters into
+    %% createApp; createApp mounts UC1 + every extraRouter under /api and applies
+    %% CORS + the read-only guard. server.js owns the watcher's stop() and the
+    %% http server.close() on SIGTERM/SIGINT. The events router subscribes to the
+    %% watcher port and imports NO chokidar.
+    SERVER -->|buildServerApp| COMPOSE
+    COMPOSE -->|createApp with extraRouters| APP
+    COMPOSE -->|constructs| WATCH
+    COMPOSE -->|builds UC2 router| R_ITEMS
+    COMPOSE -->|builds UC3 router| R_DORA
+    COMPOSE -->|builds UC4 router| R_SLICE
+    COMPOSE -->|builds UC5 router, injects watcher port| R_EVENTS
+    SERVER -->|owns watcher.stop on shutdown| WATCH
+    APP -->|mounts extraRouters incl. UC2-UC5| R_ITEMS
+    APP -->|mounts extraRouters| R_DORA
+    APP -->|mounts extraRouters| R_SLICE
     APP -->|mounts extraRouters incl. events| R_EVENTS
+    R_EVENTS -->|subscribes to port| WATCH
 
     classDef stable fill:#eee,stroke:#999,color:#000
     classDef s001changed fill:#ffe599,stroke:#b7950b,color:#000
+    classDef delivered fill:#d5f5e3,stroke:#1e8449,color:#000

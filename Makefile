@@ -37,7 +37,9 @@ dora-record:
 	  $(if $(DURATION),--duration $(DURATION),) \
 	  $(if $(OUTCOME),--outcome $(OUTCOME),) \
 	  $(if $(REF),--ref "$(REF)",) \
-	  $(if $(NOTE),--note "$(NOTE)",)
+	  $(if $(NOTE),--note "$(NOTE)",) \
+	  $(if $(ITEM_ID),--item-id $(ITEM_ID),) \
+	  $(if $(QUEUE),--queue $(QUEUE),)
 
 dora-compute:
 	$(DORA) compute
@@ -119,6 +121,14 @@ test-app:
 
 lint-app:
 	npm --prefix $(APP) run lint
+
+# --- UI accessibility scan (ui-designer; design-ops, root Makefile only) -------
+# Runs the axe/Playwright a11y + geometry specs (WCAG 2.2 AA contrast +
+# visual-structural GEO assertions, ui-design.md §4) over the observatory SPA.
+# The Playwright suite tags these specs @a11y; this target greps to them.
+#   make a11y-observatory
+a11y-observatory:
+	npm --prefix work/observatory/src/app run test:a11y
 
 build-app:
 	npm --prefix $(APP) run build
@@ -320,4 +330,29 @@ board-stream-skeleton:
 	  --ref "$$(git rev-parse --short HEAD):board-stream-skeleton" --outcome fail \
 	  --note "§30 DynamoDB Stream skeleton FAILED vs prod (T-LB-10)" ; exit 1 )
 
-.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton
+# --- Observatory validation entrypoints (CHK-2) --------------------------------
+# test-observatory: server Vitest + SPA Vitest unit/component tests (no browser).
+# browser-observatory: Playwright map-render + keyboard-nav specs (local).
+# Both targets bypass the APP/validate machinery (observatory is local-only; no
+# cloud deploy gate, no test:validation suite).
+test-observatory:
+	npm --prefix work/observatory run test:ci && \
+	npm --prefix work/observatory/src/app run test:ci
+
+browser-observatory:
+	npm --prefix work/observatory/src/app run test:browser
+
+.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory a11y-observatory
+
+# make dora-flow PROJECT=oxo-online  -> rewrites work/<project>/dora/flow.md
+# (per-project queues + time thieves + parallelism efficiency). v40 pull-flow view.
+.PHONY: dora-flow flow-status
+dora-flow:
+	$(DORA) flow --project $(PROJECT)
+
+# make flow-status PROJECT=oxo-online  -> refresh + print the flow view and queue depths
+flow-status:
+	$(DORA) flow --project $(PROJECT)
+	@echo '--- queues (depth = rows) ---'
+	@for q in intake ready deploy rework; do n=$$(($$(wc -l < work/$(PROJECT)/queues/$$q.csv 2>/dev/null || echo 1)-1)); echo "$$q: $$n"; done
+	@cat work/$(PROJECT)/dora/flow.md

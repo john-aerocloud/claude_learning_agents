@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "vitest",
     "test:ci": "vitest run",
-    "test:browser": "playwright test"
+    "test:browser": "playwright test",
+    "test:a11y": "playwright test --grep @a11y"
   },
   "dependencies": {
     "preact": "^10.23.2",

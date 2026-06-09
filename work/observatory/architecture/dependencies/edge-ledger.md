@@ -39,6 +39,12 @@ Two error classes are tracked here; the goal is to drive both toward zero.
 |------------------|------|-------------|------|
 | S2-UC1 SPA client → CHK-1 read layer (:3001) | `src/app/src/api/client.js` → `routes/{projects,items-queues,dora,events}.js` over HTTP | engineer/S2-UC1 2026-06-09 | The SPA↔server boundary is the NETWORK, not an import. `client.js` is the single SPA-side adapter that knows the `:3001` base URL + endpoint shapes; it calls GET `/api/active`, `/api/projects`, `/api/projects/:id/queues/:q`, `/api/dora/baseline`, and opens an EventSource on `/api/events`. UC2-UC6 import this client, never fetch directly. Drawn as a dashed runtime call edge in `class-deps.mmd` (SPA_CLIENT ⇢ R_PROJ/R_ITEMS/R_DORA/R_EVENTS). Fail-soft contract: any net/HTTP/parse failure → `null`. |
 
+## Realised SPA render edges (S2-UC3 build)
+| edge (from → to) | seam | realised by | note |
+|------------------|------|-------------|------|
+| S2-UC3 render → S2-UC2 state | `MapContainer.jsx` imports `state/queues.js` (`initQueueState`) | engineer/S2-UC3 2026-06-09 | The declared `S2-UC2 → S2-UC3` logic edge was realised via a thin `MapContainer` seam: `main.jsx` mounts `<MapContainer/>` as the App child (its one allowed edit), `MapContainer` calls `initQueueState()` on mount and hands the `QueueState[]` to the **pure** `PipelineMap`. PipelineMap is a pure fn of props — touches no fetch/state — so UC4 (badge on `data-status`) and UC5 (constraint prop) extend it without re-touching the data path. Tokens stylesheet seeded at `styles/tokens.css` (design-system.md source-of-truth). |
+| S2-UC3 browser path → CHK-1 read layer (:3001) | `playwright.config.js webServer` boots `npm run server` (OBSERVATORY_REPO_ROOT=e2e/fixtures/repo) + `npm run dev`; real chromium drives :5173 → client → :3001 | engineer/S2-UC3 2026-06-09 | The render is proven END-TO-END through a REAL browser against the full deployed path (not a node probe) — GEO-1/GEO-2 geometry + A11Y region/group-name/tab-order/focus specs. Read layer pointed at a committed deterministic fixture repo so counts never flap. |
+
 ## Hidden edges discovered (false independence — a collision happened)
 | date | items | shared seam | edge added | collision ledger ref |
 |------|-------|-------------|-----------|----------------------|

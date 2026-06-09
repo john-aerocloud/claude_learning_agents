@@ -58,9 +58,27 @@ graph TD
     %% S2-UC2..6 attach to SPA_MAIN/SPA_CLIENT, not to each other. ---
     SPA_CLIENT["src/app/src/api/client.js — SPA API ADAPTER (S2-UC1)<br/>only module knowing :3001 base URL + endpoint shapes<br/>getActive/getProjects/getQueues/getPolicy/getBaseline/subscribeEvents<br/>fail-soft: null on net/HTTP/parse error"]:::s002changed
     SPA_APP["src/app/src/App.jsx — app shell (S2-UC1)<br/>banner + main landmark = composition slot + build-sha stamp"]:::s002changed
-    SPA_MAIN["src/app/src/main.jsx — Preact entry (S2-UC1)<br/>WIRING SEAM: mounts App; UC3 mounts PipelineMap as App child here"]:::s002changed
+    SPA_MAIN["src/app/src/main.jsx — Preact entry (S2-UC1)<br/>WIRING SEAM: mounts App; UC3 mounts MapContainer as App child here"]:::s002changed
+
+    %% --- S2-UC2 state layer (domain) + S2-UC3 render (REALISED this UC) ---
+    %% main.jsx mounts MapContainer as the App child (its one allowed edit to the
+    %% seam). MapContainer loads the QueueState[] from the UC2 state layer and
+    %% hands it to the pure PipelineMap render. PipelineMap touches NO fetch — it
+    %% is a pure function of QueueState[] (data-status exposed as the UC4 badge
+    %% hook). Tokens stylesheet seeded (design-system.md). UC2's state layer
+    %% depends on SPA_CLIENT (the API adapter), never the reverse.
+    SPA_STATE["src/app/src/state/queues.js — queue state layer (S2-UC2, domain)<br/>initQueueState() -> QueueState[] {name,length,min,wip,status}"]:::stable
+    SPA_CONTAINER["src/app/src/components/MapContainer.jsx — data→render container (S2-UC3)<br/>loads initQueueState() on mount; fail-soft → empty state"]:::s002changed
+    SPA_PIPELINE["src/app/src/components/PipelineMap.jsx (+ QueueBox, FlowArrow) — render (S2-UC3)<br/>pure fn of QueueState[]; region 'Pipeline map'; forward row + rework loop<br/>data-status hook for UC4; aria-hidden SVG arrows"]:::s002changed
+    SPA_TOKENS["src/app/src/styles/tokens.css — design tokens (S2-UC3 seed)"]:::s002changed
 
     SPA_MAIN -->|renders| SPA_APP
+    SPA_MAIN -->|mounts as App child| SPA_CONTAINER
+    SPA_MAIN -->|imports| SPA_TOKENS
+    SPA_CONTAINER -->|loads QueueState[]| SPA_STATE
+    SPA_CONTAINER -->|renders| SPA_PIPELINE
+    SPA_PIPELINE -->|@import| SPA_TOKENS
+    SPA_STATE -->|getActive/getQueues/getPolicy| SPA_CLIENT
     SPA_CLIENT -.->|HTTP GET :3001/api/active,/projects| R_PROJ
     SPA_CLIENT -.->|HTTP GET :3001/api/projects/:id/queues/:q| R_ITEMS
     SPA_CLIENT -.->|HTTP GET :3001/api/dora/baseline| R_DORA

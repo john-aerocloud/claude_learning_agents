@@ -1,0 +1,4 @@
+queue,param,value
+ready,min_items,3
+intake,wip_limit,10
+deploy,wip_limit,4

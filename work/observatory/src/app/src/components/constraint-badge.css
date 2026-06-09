@@ -1,0 +1,42 @@
+/* UC-S002-5 constraint corner ribbon. DISTINCT VISUAL CHANNEL from the
+ * BufferStateIndicator (A11Y-7): the constraint is a top-right CORNER RIBBON
+ * (absolutely positioned), while the state-badge is an in-flow badge — so the
+ * two co-occur on one box without masking. The cue is carried by icon + TEXT
+ * (authoritative); colour (--c-constraint border) is the THIRD, REDUNDANT cue
+ * reading >= 3:1 vs surface as a non-text UI signal (WCAG 1.4.11 / A11Y-8).
+ *
+ * GEO-3: the ribbon is positioned INSIDE its owning box (top/right offsets and
+ * a width that keeps its bounding box within the box) — the badge sits on the
+ * right box, never spilling outside it. (Requires .queue-box position: relative,
+ * set in pipeline-map.css.) */
+
+@import '../styles/tokens.css';
+
+.constraint-badge {
+  position: absolute;
+  top: var(--sp-2);
+  right: var(--sp-2);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-badge);
+  border: 1px solid var(--c-constraint-bd); /* >= 3:1 vs surface (A11Y-8) */
+  background: var(--c-surface-raised);
+  color: var(--c-text); /* label text >= 4.5:1 — authoritative cue, high contrast */
+  font-size: var(--fs-meta);
+  font-weight: var(--fw-meta);
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none; /* read-only marker; never intercepts focus/clicks */
+}
+
+.constraint-badge__icon {
+  color: var(--c-constraint); /* redundant colour on the shape cue */
+  font-weight: 700;
+  line-height: 1;
+}
+
+.constraint-badge__label {
+  white-space: nowrap;
+}

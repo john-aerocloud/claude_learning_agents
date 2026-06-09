@@ -1,0 +1,26 @@
+%%{ init: { "theme": "default" } }%%
+graph TD
+    UC1["UC1 — project registry<br/>GET /api/projects, /api/active"]:::changed
+    UC2["UC2 — CSV parsers<br/>items + queues"]:::changed
+    UC3["UC3 — DORA/flow pass-through<br/>baseline.md, flow.md, .mmd"]:::changed
+    UC4["UC4 — slice-artifact pass-through<br/>GET /api/projects/:id/slices/:slug/:artifact"]:::changed
+    UC5["UC5 — SSE file-watch<br/>GET /api/events"]:::changed
+    UC6["UC6 — server scaffold<br/>Express + CORS + read-only + start:check"]:::changed
+
+    UC1 --> UC6
+    UC2 --> UC6
+    UC3 --> UC6
+    UC4 --> UC6
+    UC5 --> UC6
+
+    %% Scaffold scheduling edges (§39 — caught pre-build, not a collision)
+    %% UC1 establishes package.json, src/server/ bootstrap, vitest.config, base Express app.
+    %% UC2-5 all require that scaffold to exist before they can lay their route handlers.
+    %% These are scheduling serialisation edges, not logic dependencies.
+    UC1 -->|scaffold| UC2:::scaffoldEdge
+    UC1 -->|scaffold| UC3:::scaffoldEdge
+    UC1 -->|scaffold| UC4:::scaffoldEdge
+    UC1 -->|scaffold| UC5:::scaffoldEdge
+
+    classDef changed fill:#ffe599,stroke:#b7950b,color:#000
+    classDef scaffoldEdge fill:#d9ead3,stroke:#38761d,color:#000

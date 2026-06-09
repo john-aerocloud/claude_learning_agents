@@ -123,4 +123,44 @@ describe('PipelineMap render (UC-S002-3)', () => {
     expect(arrows.length).toBeGreaterThan(0);
     arrows.forEach((a) => expect(a).toHaveAttribute('aria-hidden', 'true'));
   });
+
+  // ── UC-S002-4: BufferStateIndicator mounted into QueueBox ──────────────────
+  // AC4.1 / AC4.2 / AC4.3 + A11Y-5: the badge appears ON the affected box with
+  // visible text + aria-hidden icon (not colour-only); the ok box has no badge.
+
+  it('mounts a state-badge with "starving" text + aria-hidden ▽ on a starving box (AC4.1 / A11Y-5)', () => {
+    render(<PipelineMap queues={fixture} />);
+    const ready = screen.getByTestId('queue-ready');
+    const badge = within(ready).getByTestId('state-badge');
+    expect(badge).toHaveTextContent(/starving/i);
+    const icon = badge.querySelector('[aria-hidden="true"]');
+    expect(icon).not.toBeNull();
+    expect(icon.textContent).toContain('▽');
+  });
+
+  it('mounts a state-badge with "over-WIP" text + aria-hidden △ on an over-wip box (AC4.2 / A11Y-5)', () => {
+    render(
+      <PipelineMap
+        queues={[
+          { name: 'intake', length: 10, min_items: undefined, wip_limit: 10, status: 'over-wip' },
+          { name: 'ready', length: 5, status: 'ok' },
+          { name: 'deploy', length: 0, status: 'ok' },
+          { name: 'rework', length: 0, status: 'ok' },
+        ]}
+      />,
+    );
+    const intake = screen.getByTestId('queue-intake');
+    const badge = within(intake).getByTestId('state-badge');
+    expect(badge).toHaveTextContent(/over-?wip/i);
+    const icon = badge.querySelector('[aria-hidden="true"]');
+    expect(icon).not.toBeNull();
+    expect(icon.textContent).toContain('△');
+  });
+
+  it('renders NO state-badge on an ok box (AC4.3 / A11Y-5)', () => {
+    render(<PipelineMap queues={fixture} />);
+    // deploy and intake are ok in the fixture
+    expect(within(screen.getByTestId('queue-deploy')).queryByTestId('state-badge')).toBeNull();
+    expect(within(screen.getByTestId('queue-intake')).queryByTestId('state-badge')).toBeNull();
+  });
 });

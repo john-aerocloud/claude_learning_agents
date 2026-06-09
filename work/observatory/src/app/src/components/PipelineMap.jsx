@@ -14,13 +14,15 @@
 // box carrying name + live count + buffer meta, and an accessible name that
 // announces the count (and the state word when not ok) — A11Y-2.
 //
-// SCOPE BOUNDARY (this UC renders the data + the data-status hook ONLY):
-//   - data-status="ok|starving|over-wip" is exposed on every box so UC4 attaches
-//     the BufferStateIndicator badge without re-touching this layout.
-//   - data-constraint + ConstraintBadge are UC5; SSE live refresh is UC6.
-// This file renders neither badge — it leaves the attachment points.
+// SCOPE BOUNDARY:
+//   - UC-S002-3 exposed data-status="ok|starving|over-wip" on every box.
+//   - UC-S002-4 now mounts <BufferStateIndicator status={queue.status}/> inside
+//     QueueBox — the starving/over-WIP badge (renders nothing when ok).
+//   - STILL OPEN: data-constraint + ConstraintBadge are UC5 (the data-constraint
+//     hook is seeded "false" here for UC5 to flip); SSE live refresh is UC6.
 
 import './pipeline-map.css';
+import { BufferStateIndicator } from './BufferStateIndicator.jsx';
 
 const FORWARD = ['intake', 'ready', 'deploy'];
 
@@ -49,9 +51,11 @@ function bufferMeta(queue) {
 }
 
 /**
- * One queue box: name + live count + buffer meta. role=group, focusable
- * (tabindex 0), NOT clickable (read-only; drill-down is CHK-4). data-status is
- * the hook UC4's badge attaches to; data-constraint is seeded false for UC5.
+ * One queue box: name + live count + buffer meta + the buffer-state badge.
+ * role=group, focusable (tabindex 0), NOT clickable (read-only; drill-down is
+ * CHK-4). data-status drives both the badge and its redundant colour token.
+ * UC-S002-4 mounts BufferStateIndicator here (renders nothing when ok). The
+ * data-constraint="false" seed + ConstraintBadge attachment point stay for UC5.
  */
 function QueueBox({ queue }) {
   const meta = bufferMeta(queue);
@@ -74,6 +78,7 @@ function QueueBox({ queue }) {
           {meta}
         </span>
       ) : null}
+      <BufferStateIndicator status={queue.status} />
     </div>
   );
 }

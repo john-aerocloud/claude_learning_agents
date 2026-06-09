@@ -1,0 +1,44 @@
+%%{ init: { "theme": "default" } }%%
+%% Module/port/adapter seam graph for s001 read layer (engineer-owned, §IMP-007).
+%% Nodes are seams (modules / ports / adapters), NOT every class. Edges are the
+%% ACTUAL runtime routing/import paths on trunk. Marked nodes (:::s001changed)
+%% are the tester's test-plan input for this slice; cleared at slice delivery.
+graph TD
+    %% --- Composition seam (UC6 owns; mounts every router via extraRouters) ---
+    APP["app.js — createApp({repoRoot, extraRouters})<br/>mounts /api routers (read-only)"]:::stable
+    SERVER["server.js — bootstrap<br/>(UC6 wires extraRouters + watcher lifecycle)"]:::stable
+    REPOROOT["repoRoot.js — resolveRepoRoot()"]:::stable
+
+    %% --- UC1-UC4 adapters + parsers (on trunk, stable for this UC) ---
+    R_PROJ["routes/projects.js (UC1 adapter)"]:::stable
+    R_ITEMS["routes/items-queues.js (UC2 adapter)"]:::stable
+    R_DORA["routes/dora.js (UC3 adapter)"]:::stable
+    R_SLICE["routes/slices.js (UC4 adapter)"]:::stable
+    P_PROJ["parsers/project-registry.js"]:::stable
+    P_CSV["parsers/csv.js"]:::stable
+    P_FILE["parsers/file-reader.js"]:::stable
+
+    %% --- UC5 file-watch live-refresh (THIS UC) ---
+    WATCH["watcher.js — file-watch ADAPTER<br/>port: subscribe(fn)->unsub / ready() / stop()<br/>(chokidar isolated here)"]:::s001changed
+    R_EVENTS["routes/events.js — SSE adapter<br/>GET /api/events (injected watcher port)"]:::s001changed
+
+    %% Composition edges (adapters depend on domain; never reverse)
+    APP --> R_PROJ
+    APP --> REPOROOT
+    R_PROJ --> P_PROJ
+    R_ITEMS --> P_CSV
+    R_DORA --> P_FILE
+    R_SLICE --> P_FILE
+
+    %% UC5 actual routing path:
+    %% server.js (UC6) constructs the watcher, injects it into the events router,
+    %% and passes the router via extraRouters into createApp. The SSE adapter
+    %% forwards domain {type:'change',path} events from the watcher port to the
+    %% client stream. The events router imports NO chokidar — only the port.
+    R_EVENTS -->|subscribes to port| WATCH
+    SERVER -->|constructs + owns stop| WATCH
+    SERVER -->|injects router via extraRouters| R_EVENTS
+    APP -->|mounts extraRouters incl. events| R_EVENTS
+
+    classDef stable fill:#eee,stroke:#999,color:#000
+    classDef s001changed fill:#ffe599,stroke:#b7950b,color:#000

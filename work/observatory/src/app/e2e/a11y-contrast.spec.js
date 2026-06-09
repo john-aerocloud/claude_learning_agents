@@ -17,6 +17,10 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByTestId('queue-intake')).toBeVisible();
   // ensure the new state-badge (starving Ready) is rendered before the scan
   await expect(page.getByTestId('queue-ready').getByTestId('state-badge')).toBeVisible();
+  // UC-S002-5: the fixture baseline names "ready" the constraint, so the
+  // constraint-badge (new --c-constraint / --c-constraint-bd tokens) is also on
+  // screen and in scope of the contrast scan.
+  await expect(page.getByTestId('queue-ready').getByTestId('constraint-badge')).toBeVisible();
 });
 
 test('@a11y A11Y-8 — axe reports zero colour-contrast violations on the rendered map (incl. new state-badge tokens)', async ({

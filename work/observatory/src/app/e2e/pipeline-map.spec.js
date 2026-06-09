@@ -1,5 +1,7 @@
 // @covers PipelineMap
 // @covers BufferStateIndicator
+// @covers ConstraintBadge
+// @covers parseConstraint
 // UC-S002-3 browser specs — a REAL browser (Playwright/chromium) driving the
 // FULL path: SPA on :5173 → SPA client → read layer on :3001 (fixture repo).
 // This is the surface the operator SEES; the live drive proves what jsdom
@@ -138,6 +140,74 @@ test('GEO-3 — the state-badge bounding box is contained within its owning Read
   expect(box && badge).toBeTruthy();
   expect(badge.x).toBeGreaterThanOrEqual(box.x);
   expect(badge.y).toBeGreaterThanOrEqual(box.y);
+  expect(badge.x + badge.width).toBeLessThanOrEqual(box.x + box.width + 0.5);
+  expect(badge.y + badge.height).toBeLessThanOrEqual(box.y + box.height + 0.5);
+});
+
+// ── UC-S002-5: ToC constraint highlight in a REAL browser ─────────────────────
+// The fixture baseline.md (e2e/fixtures/repo/process/dora/baseline.md) names
+// "ready" as the constraint, so the live Ready box is BOTH the constraint AND
+// starving (ready.csv = 1 item, policy min_items = 3). These prove the live
+// end-to-end A11Y-6/A11Y-7 contract jsdom cannot: the constraint ribbon actually
+// renders ON the right box with VISIBLE text, co-occurs with the state-badge
+// without masking, and its geometry is contained inside the owning box (GEO-3).
+
+test('@a11y A11Y-6 — the constraint Ready box shows a constraint-badge with VISIBLE "constraint" text (AC5.7)', async ({
+  page,
+}) => {
+  const ready = page.getByTestId('queue-ready');
+  await expect(ready).toHaveAttribute('data-constraint', 'true');
+  const badge = ready.getByTestId('constraint-badge');
+  await expect(badge).toBeVisible();
+  await expect(badge).toContainText(/constraint/i); // authoritative cue is text, not colour
+  const iconHidden = await badge.locator('[aria-hidden="true"]').first().getAttribute('aria-hidden');
+  expect(iconHidden).toBe('true');
+});
+
+test('@a11y A11Y-6 — non-constraint boxes have data-constraint="false" and no badge (AC5.6 path)', async ({
+  page,
+}) => {
+  for (const name of ['intake', 'deploy', 'rework']) {
+    const box = page.getByTestId(`queue-${name}`);
+    await expect(box).toHaveAttribute('data-constraint', 'false');
+    await expect(box.getByTestId('constraint-badge')).toHaveCount(0);
+  }
+});
+
+test('@a11y A11Y-7 — the Ready box shows BOTH the state-badge and the constraint-badge (co-occurrence, no masking)', async ({
+  page,
+}) => {
+  const ready = page.getByTestId('queue-ready');
+  await expect(ready.getByTestId('state-badge')).toBeVisible();
+  await expect(ready.getByTestId('constraint-badge')).toBeVisible();
+  await expect(ready.getByTestId('state-badge')).toContainText(/starving/i);
+  await expect(ready.getByTestId('constraint-badge')).toContainText(/constraint/i);
+  // distinct elements occupying distinct space → neither masks the other
+  const stateBox = await ready.getByTestId('state-badge').boundingBox();
+  const conBox = await ready.getByTestId('constraint-badge').boundingBox();
+  expect(stateBox && conBox).toBeTruthy();
+  const overlapArea =
+    Math.max(0, Math.min(stateBox.x + stateBox.width, conBox.x + conBox.width) - Math.max(stateBox.x, conBox.x)) *
+    Math.max(0, Math.min(stateBox.y + stateBox.height, conBox.y + conBox.height) - Math.max(stateBox.y, conBox.y));
+  expect(overlapArea).toBe(0); // the two cues never overlap (distinct visual channels)
+});
+
+test('@a11y A11Y-7 — the Ready accessible name carries count, state AND constraint', async ({
+  page,
+}) => {
+  await expect(
+    page.getByRole('group', { name: /ready queue, 1 item.*starving.*constraint/i }),
+  ).toBeVisible();
+});
+
+test('GEO-3 — the constraint-badge bounding box is contained within its owning Ready box', async ({
+  page,
+}) => {
+  const box = await page.getByTestId('queue-ready').boundingBox();
+  const badge = await page.getByTestId('queue-ready').getByTestId('constraint-badge').boundingBox();
+  expect(box && badge).toBeTruthy();
+  expect(badge.x).toBeGreaterThanOrEqual(box.x - 0.5);
+  expect(badge.y).toBeGreaterThanOrEqual(box.y - 0.5);
   expect(badge.x + badge.width).toBeLessThanOrEqual(box.x + box.width + 0.5);
   expect(badge.y + badge.height).toBeLessThanOrEqual(box.y + box.height + 0.5);
 });

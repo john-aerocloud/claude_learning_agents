@@ -1,0 +1,48 @@
+/* UC-S002-4 buffer-state badge. The state is carried by icon + TEXT (the
+ * authoritative cues in the markup); colour here is the THIRD, REDUNDANT cue —
+ * never the sole signal (A11Y-5). The badge text uses --c-text (≥ 4.5:1 on the
+ * badge surface, A11Y-8 text contrast); the per-state colour drives the icon +
+ * a left border that reads ≥ 3:1 vs surface as a non-text UI cue (WCAG 1.4.11 /
+ * A11Y-8). */
+
+@import '../styles/tokens.css';
+
+.state-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  align-self: flex-start;
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-badge);
+  border-left: 3px solid var(--c-border); /* default; per-state colour below */
+  background: var(--c-surface-raised);
+  font-size: var(--fs-meta);
+  font-weight: var(--fw-meta);
+  color: var(--c-text); /* label text ≥ 4.5:1 — authoritative cue, high contrast */
+  line-height: 1.2;
+}
+
+.state-badge__icon {
+  font-weight: 700;
+  line-height: 1;
+}
+
+.state-badge__label {
+  white-space: nowrap;
+}
+
+/* Redundant colour cue (one of three). starving ▽ blue / over-WIP △ amber —
+ * border ≥ 3:1 vs --c-surface (A11Y-8 non-text contrast). */
+.state-badge[data-status='starving'] {
+  border-left-color: var(--c-state-starving-bd);
+}
+.state-badge[data-status='starving'] .state-badge__icon {
+  color: var(--c-state-starving);
+}
+
+.state-badge[data-status='over-wip'] {
+  border-left-color: var(--c-state-over-bd);
+}
+.state-badge[data-status='over-wip'] .state-badge__icon {
+  color: var(--c-state-over);
+}

@@ -68,7 +68,7 @@ graph TD
     %% hook). Tokens stylesheet seeded (design-system.md). UC2's state layer
     %% depends on SPA_CLIENT (the API adapter), never the reverse.
     SPA_STATE["src/app/src/state/queues.js — queue state layer (S2-UC2, domain)<br/>initQueueState() -> QueueState[] {name,length,min,wip,status}"]:::stable
-    SPA_CONTAINER["src/app/src/components/MapContainer.jsx — data→render container (S2-UC3/5)<br/>loads initQueueState() + constraint (getBaseline→parse→match) on mount<br/>passes queues + constraintQueue to PipelineMap; fail-soft → empty/no-highlight"]:::s002changed
+    SPA_CONTAINER["src/app/src/components/MapContainer.jsx — data→render container (S2-UC3/5/6)<br/>loads initQueueState() + constraint (getBaseline→parse→match) on mount<br/>UC6: subscribeEvents → debounced re-load of BOTH loaders on relevant change frame<br/>(queue/policy CSV or baseline.md); unsubscribe on unmount; LiveStatusDot state<br/>passes queues + constraintQueue to PipelineMap; fail-soft → empty/no-highlight"]:::s002changed
     SPA_PIPELINE["src/app/src/components/PipelineMap.jsx (+ QueueBox, FlowArrow) — render (S2-UC3/4/5)<br/>pure fn of QueueState[] + constraintQueue; region 'Pipeline map'; forward row + rework loop<br/>data-status hook (UC4 badge); data-constraint flip + ConstraintBadge on matched box (UC5); aria-hidden SVG arrows"]:::s002changed
     SPA_TOKENS["src/app/src/styles/tokens.css — design tokens (S2-UC3 seed)"]:::s002changed
 
@@ -90,6 +90,14 @@ graph TD
     SPA_PARSER["src/app/src/parsers/baseline.js — ToC constraint parser (S2-UC5, domain)<br/>parseConstraint(raw)->name|null; matchConstraintQueue(name)->queue|null<br/>non-queue constraint (agent) → null; fail-soft, no throw"]:::s002changed
     SPA_CONSTRAINT["src/app/src/components/ConstraintBadge.jsx — constraint corner ribbon (S2-UC5)<br/>pure fn of present; data-testid='constraint-badge'; ◆ aria-hidden + 'constraint' text<br/>distinct visual channel from state-badge (A11Y-6/7); --c-constraint token"]:::s002changed
 
+    %% --- S2-UC6 SSE live refresh (REALISED this UC) ---
+    %% MapContainer subscribes to the SSE change channel (SPA_CLIENT.subscribeEvents
+    %% over EventSource → R_EVENTS) on mount; a relevant change frame (queue/policy
+    %% CSV or baseline.md) debounce-coalesces into ONE re-run of both loaders, so
+    %% counts/badges/constraint refresh live <~1s with no reload. Unsubscribe on
+    %% unmount (no leak). LiveStatusDot is a pure indicator of the connection state.
+    SPA_LIVEDOT["src/app/src/components/LiveStatusDot.jsx — SSE live indicator (S2-UC6)<br/>pure fn of state (connected|reconnecting); data-testid='live-status'<br/>role=status aria-live=polite; ● aria-hidden + visible text (non-colour cue); A11Y-10 reduced-motion"]:::s002changed
+
     SPA_MAIN -->|renders| SPA_APP
     SPA_MAIN -->|mounts as App child| SPA_CONTAINER
     SPA_MAIN -->|imports| SPA_TOKENS
@@ -97,6 +105,9 @@ graph TD
     SPA_CONTAINER -->|loads + matches constraint| SPA_PARSER
     SPA_CONTAINER -->|getBaseline for constraint| SPA_CLIENT
     SPA_CONTAINER -->|renders| SPA_PIPELINE
+    SPA_CONTAINER -->|subscribeEvents → debounced re-load| SPA_CLIENT
+    SPA_CONTAINER -->|renders connection indicator| SPA_LIVEDOT
+    SPA_LIVEDOT -->|@import| SPA_TOKENS
     SPA_PIPELINE -->|mounts badge in QueueBox| SPA_BADGE
     SPA_PIPELINE -->|mounts ribbon on matched box| SPA_CONSTRAINT
     SPA_CONSTRAINT -->|@import| SPA_TOKENS

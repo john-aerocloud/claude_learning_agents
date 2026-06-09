@@ -11,5 +11,15 @@
 // alone; the map child arrives with UC3.
 import { render } from 'preact';
 import { App } from './App.jsx';
+import { MapContainer } from './components/MapContainer.jsx';
+import './styles/tokens.css';
 
-render(<App />, document.getElementById('app'));
+// UC3 mounts the pipeline map as the App child here (the one allowed edit to
+// this seam). MapContainer loads the UC2 QueueState[] and renders PipelineMap;
+// App renders it inside the <main> landmark without being edited.
+render(
+  <App>
+    <MapContainer />
+  </App>,
+  document.getElementById('app'),
+);

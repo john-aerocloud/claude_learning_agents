@@ -1,0 +1,58 @@
+/* Observatory design tokens — single source of truth (design/design-system.md).
+ * Seeded by s002 (first visual surface); extend ADDITIVELY per slice. The state
+ * encoding is deliberately redundant (icon + text + colour); these custom
+ * properties carry only the colour channel — the icon and text live in markup. */
+:root {
+  /* base colour */
+  --c-bg: #0f1115;
+  --c-surface: #1a1d24;
+  --c-surface-raised: #222630;
+  --c-border: #3a404c;
+  --c-text: #e8eaed;
+  --c-text-dim: #a6adbb;
+  --c-focus: #5aa9ff;
+
+  /* queue-state colour (one of three cues; never the sole signal) */
+  --c-state-ok: #3aa66f;
+  --c-state-starving: #4ea3e0;
+  --c-state-over: #e0a23a;
+  --c-constraint: #d96c8f;
+  --c-state-starving-bd: #4ea3e0;
+  --c-state-over-bd: #e0a23a;
+  --c-constraint-bd: #d96c8f;
+
+  /* type scale */
+  --fs-count: 2rem;
+  --fw-count: 700;
+  --fs-label: 0.95rem;
+  --fw-label: 600;
+  --fs-meta: 0.8rem;
+  --fw-meta: 500;
+  --ff-base: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  /* spacing (4px base) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  /* radii / elevation / motion */
+  --radius-box: 10px;
+  --radius-badge: 6px;
+  --elev-box: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --focus-ring: 0 0 0 3px var(--c-focus);
+  --dur-fast: 120ms;
+
+  /* target size floor (WCAG 2.2 §2.5.8) */
+  --target-min: 24px;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--c-bg);
+  color: var(--c-text);
+  font-family: var(--ff-base);
+}

@@ -43,4 +43,42 @@ describe('MapContainer (UC-S002-3 data→render wiring)', () => {
     // degraded to the empty state, not a blank page or thrown error
     expect(screen.getByText(/no active project/i)).toBeInTheDocument();
   });
+
+  // ── UC-S002-5: container also loads + matches the ToC constraint ─────────────
+  it('loads the constraint queue and highlights the matched box (UC-S002-5)', async () => {
+    const load = vi.fn().mockResolvedValue(sample);
+    const loadConstraint = vi.fn().mockResolvedValue('ready'); // already matched to a queue
+    render(<MapContainer load={load} loadConstraint={loadConstraint} />);
+    await waitFor(() =>
+      expect(screen.getByTestId('queue-ready')).toHaveAttribute('data-constraint', 'true'),
+    );
+    expect(loadConstraint).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByTestId('queue-ready').querySelector('[data-testid="constraint-badge"]'),
+    ).not.toBeNull();
+    // no other box is marked
+    expect(screen.getByTestId('queue-intake')).toHaveAttribute('data-constraint', 'false');
+  });
+
+  it('highlights NO box when the constraint is not a queue / absent (loadConstraint → null)', async () => {
+    const load = vi.fn().mockResolvedValue(sample);
+    const loadConstraint = vi.fn().mockResolvedValue(null); // e.g. live baseline names "tester"
+    render(<MapContainer load={load} loadConstraint={loadConstraint} />);
+    await waitFor(() =>
+      expect(screen.getByTestId('queue-ready')).toBeInTheDocument(),
+    );
+    for (const name of ['intake', 'ready', 'deploy', 'rework']) {
+      expect(screen.getByTestId(`queue-${name}`)).toHaveAttribute('data-constraint', 'false');
+    }
+  });
+
+  it('does not crash if the constraint loader rejects (fail-soft → no highlight)', async () => {
+    const load = vi.fn().mockResolvedValue(sample);
+    const loadConstraint = vi.fn().mockRejectedValue(new Error('baseline down'));
+    render(<MapContainer load={load} loadConstraint={loadConstraint} />);
+    await waitFor(() =>
+      expect(screen.getByTestId('queue-ready')).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId('queue-ready')).toHaveAttribute('data-constraint', 'false');
+  });
 });

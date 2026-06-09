@@ -16,13 +16,22 @@
 //
 // SCOPE BOUNDARY:
 //   - UC-S002-3 exposed data-status="ok|starving|over-wip" on every box.
-//   - UC-S002-4 now mounts <BufferStateIndicator status={queue.status}/> inside
+//   - UC-S002-4 mounts <BufferStateIndicator status={queue.status}/> inside
 //     QueueBox — the starving/over-WIP badge (renders nothing when ok).
-//   - STILL OPEN: data-constraint + ConstraintBadge are UC5 (the data-constraint
-//     hook is seeded "false" here for UC5 to flip); SSE live refresh is UC6.
+//   - UC-S002-5 now flips data-constraint + mounts <ConstraintBadge> on the box
+//     matched as the ToC constraint (constraintQueue prop), and folds the
+//     constraint into the box accessible name. The matching is done UPSTREAM
+//     (parsers/baseline.js matchConstraintQueue) — constraintQueue is already
+//     the matched queue name or null, so a non-queue constraint (the live
+//     baseline names an agent, "tester") arrives here as null and highlights
+//     nothing. The two badges occupy DISTINCT visual channels (corner ribbon vs
+//     in-flow badge) so they co-occur without masking (A11Y-7).
+//   - STILL OPEN: SSE live refresh (UC6) re-drives constraintQueue on a
+//     baseline.md change so the highlight stays correct as the constraint moves.
 
 import './pipeline-map.css';
 import { BufferStateIndicator } from './BufferStateIndicator.jsx';
+import { ConstraintBadge } from './ConstraintBadge.jsx';
 
 const FORWARD = ['intake', 'ready', 'deploy'];
 
@@ -33,12 +42,15 @@ const LABELS = {
   rework: 'Rework',
 };
 
-/** Human accessible name carrying count + state (A11Y-2). */
-function accessibleName(queue) {
+/** Human accessible name carrying count + state + constraint (A11Y-2 / A11Y-6). */
+function accessibleName(queue, isConstraint = false) {
   const noun = queue.length === 1 ? 'item' : 'items';
   let name = `${LABELS[queue.name]} queue, ${queue.length} ${noun}`;
   if (queue.status === 'starving') name += ', starving';
   else if (queue.status === 'over-wip') name += ', over-WIP';
+  // the constraint is announced LAST so it never masks the count/state words;
+  // co-occurs with the state word for a constraint+starving box (A11Y-7).
+  if (isConstraint) name += ', constraint';
   return name;
 }
 
@@ -57,17 +69,17 @@ function bufferMeta(queue) {
  * UC-S002-4 mounts BufferStateIndicator here (renders nothing when ok). The
  * data-constraint="false" seed + ConstraintBadge attachment point stay for UC5.
  */
-function QueueBox({ queue }) {
+function QueueBox({ queue, isConstraint = false }) {
   const meta = bufferMeta(queue);
   return (
     <div
       class="queue-box"
       data-testid={`queue-${queue.name}`}
       role="group"
-      aria-label={accessibleName(queue)}
+      aria-label={accessibleName(queue, isConstraint)}
       tabindex="0"
       data-status={queue.status}
-      data-constraint="false"
+      data-constraint={isConstraint ? 'true' : 'false'}
     >
       <span class="queue-name">{LABELS[queue.name]}</span>
       <span class="queue-count" data-testid="queue-count">
@@ -79,6 +91,7 @@ function QueueBox({ queue }) {
         </span>
       ) : null}
       <BufferStateIndicator status={queue.status} />
+      <ConstraintBadge present={isConstraint} />
     </div>
   );
 }
@@ -113,10 +126,13 @@ function FlowArrow({ from, to, kind = 'forward' }) {
  * array renders the graceful empty state (no active project) — never a blank or
  * a crash (AC3.4).
  */
-export function PipelineMap({ queues = [] }) {
+export function PipelineMap({ queues = [], constraintQueue = null }) {
   const byName = Object.fromEntries(queues.map((q) => [q.name, q]));
   const forward = FORWARD.map((n) => byName[n]).filter(Boolean);
   const rework = byName.rework;
+  // constraintQueue is the already-MATCHED queue name (or null); a box is the
+  // constraint iff its name equals it.
+  const isConstraint = (name) => constraintQueue != null && name === constraintQueue;
 
   return (
     <section
@@ -134,7 +150,7 @@ export function PipelineMap({ queues = [] }) {
           <div class="forward-row" data-testid="forward-row">
             {forward.map((q, i) => (
               <>
-                <QueueBox queue={q} />
+                <QueueBox queue={q} isConstraint={isConstraint(q.name)} />
                 {i < forward.length - 1 ? (
                   <FlowArrow from={q.name} to={forward[i + 1].name} kind="forward" />
                 ) : null}
@@ -144,7 +160,7 @@ export function PipelineMap({ queues = [] }) {
           {rework ? (
             <div class="return-loop" data-testid="return-loop">
               <FlowArrow from="deploy" to="rework" kind="rework" />
-              <QueueBox queue={rework} />
+              <QueueBox queue={rework} isConstraint={isConstraint('rework')} />
             </div>
           ) : null}
         </>

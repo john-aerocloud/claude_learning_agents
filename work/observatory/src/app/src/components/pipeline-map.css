@@ -33,9 +33,12 @@
 }
 
 .queue-box {
+  position: relative; /* containing block for the constraint corner ribbon (GEO-3) */
   display: flex;
   flex-direction: column;
   gap: var(--sp-1);
+  /* room at the top-right so the corner ribbon never overlaps the name/count */
+  padding-top: var(--sp-6);
   min-width: 140px;
   min-height: var(--target-min); /* WCAG 2.2 §2.5.8 floor (far exceeded) */
   padding: var(--sp-4);

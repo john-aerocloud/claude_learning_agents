@@ -163,4 +163,66 @@ describe('PipelineMap render (UC-S002-3)', () => {
     expect(within(screen.getByTestId('queue-deploy')).queryByTestId('state-badge')).toBeNull();
     expect(within(screen.getByTestId('queue-intake')).queryByTestId('state-badge')).toBeNull();
   });
+
+  // ── UC-S002-5: ConstraintBadge + data-constraint flip on the matching box ────
+  // AC5.5 / AC5.6 + A11Y-6 / A11Y-7. constraintQueue is the MATCHED queue name
+  // (or null) — the parser/match step decided it isn't a queue ⇒ null ⇒ no box.
+
+  it('flips data-constraint="true" and mounts the constraint-badge on the named box (AC5.5 / A11Y-6)', () => {
+    render(<PipelineMap queues={fixture} constraintQueue="ready" />);
+    const ready = screen.getByTestId('queue-ready');
+    expect(ready).toHaveAttribute('data-constraint', 'true');
+    const badge = within(ready).getByTestId('constraint-badge');
+    expect(badge).toHaveTextContent(/constraint/i);
+    const icon = badge.querySelector('[aria-hidden="true"]');
+    expect(icon).not.toBeNull();
+    expect(icon.textContent).toContain('◆');
+  });
+
+  it('leaves all other boxes data-constraint="false" with no constraint-badge (AC5.5 / A11Y-6)', () => {
+    render(<PipelineMap queues={fixture} constraintQueue="ready" />);
+    for (const name of ['intake', 'deploy', 'rework']) {
+      const box = screen.getByTestId(`queue-${name}`);
+      expect(box).toHaveAttribute('data-constraint', 'false');
+      expect(within(box).queryByTestId('constraint-badge')).toBeNull();
+    }
+  });
+
+  it('marks NO box when constraintQueue is null (AC5.6) — the non-queue / absent case', () => {
+    render(<PipelineMap queues={fixture} constraintQueue={null} />);
+    for (const name of ['intake', 'ready', 'deploy', 'rework']) {
+      const box = screen.getByTestId(`queue-${name}`);
+      expect(box).toHaveAttribute('data-constraint', 'false');
+      expect(within(box).queryByTestId('constraint-badge')).toBeNull();
+    }
+  });
+
+  it('defaults to no constraint when constraintQueue prop is omitted', () => {
+    render(<PipelineMap queues={fixture} />);
+    expect(screen.getByTestId('queue-ready')).toHaveAttribute('data-constraint', 'false');
+    expect(within(screen.getByTestId('queue-ready')).queryByTestId('constraint-badge')).toBeNull();
+  });
+
+  it('shows BOTH the state-badge and the constraint-badge on a box that is constraint AND starving, without masking (A11Y-7)', () => {
+    // fixture Ready is starving; make it the constraint too → both badges present
+    render(<PipelineMap queues={fixture} constraintQueue="ready" />);
+    const ready = screen.getByTestId('queue-ready');
+    const stateBadge = within(ready).getByTestId('state-badge');
+    const constraintBadge = within(ready).getByTestId('constraint-badge');
+    // both present, distinct elements (distinct testids, neither contains the other)
+    expect(stateBadge).toBeInTheDocument();
+    expect(constraintBadge).toBeInTheDocument();
+    expect(stateBadge.contains(constraintBadge)).toBe(false);
+    expect(constraintBadge.contains(stateBadge)).toBe(false);
+    expect(stateBadge).toHaveTextContent(/starving/i);
+    expect(constraintBadge).toHaveTextContent(/constraint/i);
+  });
+
+  it('adds the constraint to the box accessible name so screen readers announce it (A11Y-6)', () => {
+    render(<PipelineMap queues={fixture} constraintQueue="ready" />);
+    // Ready: starving + constraint — name carries count, state AND constraint
+    expect(
+      screen.getByRole('group', { name: /ready queue, 1 item.*starving.*constraint/i }),
+    ).toBeInTheDocument();
+  });
 });

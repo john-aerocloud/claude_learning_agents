@@ -68,8 +68,8 @@ graph TD
     %% hook). Tokens stylesheet seeded (design-system.md). UC2's state layer
     %% depends on SPA_CLIENT (the API adapter), never the reverse.
     SPA_STATE["src/app/src/state/queues.js — queue state layer (S2-UC2, domain)<br/>initQueueState() -> QueueState[] {name,length,min,wip,status}"]:::stable
-    SPA_CONTAINER["src/app/src/components/MapContainer.jsx — data→render container (S2-UC3)<br/>loads initQueueState() on mount; fail-soft → empty state"]:::s002changed
-    SPA_PIPELINE["src/app/src/components/PipelineMap.jsx (+ QueueBox, FlowArrow) — render (S2-UC3)<br/>pure fn of QueueState[]; region 'Pipeline map'; forward row + rework loop<br/>data-status hook for UC4; data-constraint='false' seed for UC5; aria-hidden SVG arrows"]:::s002changed
+    SPA_CONTAINER["src/app/src/components/MapContainer.jsx — data→render container (S2-UC3/5)<br/>loads initQueueState() + constraint (getBaseline→parse→match) on mount<br/>passes queues + constraintQueue to PipelineMap; fail-soft → empty/no-highlight"]:::s002changed
+    SPA_PIPELINE["src/app/src/components/PipelineMap.jsx (+ QueueBox, FlowArrow) — render (S2-UC3/4/5)<br/>pure fn of QueueState[] + constraintQueue; region 'Pipeline map'; forward row + rework loop<br/>data-status hook (UC4 badge); data-constraint flip + ConstraintBadge on matched box (UC5); aria-hidden SVG arrows"]:::s002changed
     SPA_TOKENS["src/app/src/styles/tokens.css — design tokens (S2-UC3 seed)"]:::s002changed
 
     %% --- S2-UC4 buffer-state badge (REALISED this UC) ---
@@ -79,12 +79,28 @@ graph TD
     %% the domain status value; touches no fetch/CSV. Imports its own stylesheet.
     SPA_BADGE["src/app/src/components/BufferStateIndicator.jsx — buffer-state badge (S2-UC4)<br/>pure fn of status; data-testid='state-badge'; ▽/△ aria-hidden icon + visible text<br/>redundant --c-state-* colour token (A11Y-5); ok → null"]:::s002changed
 
+    %% --- S2-UC5 ToC constraint highlight (REALISED this UC) ---
+    %% baseline.js (domain parser) extracts the constraint NAME from the raw
+    %% baseline.md string (handed over by SPA_CLIENT.getBaseline) and maps it to a
+    %% QUEUE name via matchConstraintQueue — null when the constraint is not a
+    %% queue (the live baseline names an AGENT, "tester", → null → no highlight).
+    %% PipelineMap consumes constraintQueue and flips data-constraint + mounts
+    %% ConstraintBadge (◆+text corner ribbon, A11Y-6) on the matched box; distinct
+    %% visual channel from SPA_BADGE so they co-occur without masking (A11Y-7).
+    SPA_PARSER["src/app/src/parsers/baseline.js — ToC constraint parser (S2-UC5, domain)<br/>parseConstraint(raw)->name|null; matchConstraintQueue(name)->queue|null<br/>non-queue constraint (agent) → null; fail-soft, no throw"]:::s002changed
+    SPA_CONSTRAINT["src/app/src/components/ConstraintBadge.jsx — constraint corner ribbon (S2-UC5)<br/>pure fn of present; data-testid='constraint-badge'; ◆ aria-hidden + 'constraint' text<br/>distinct visual channel from state-badge (A11Y-6/7); --c-constraint token"]:::s002changed
+
     SPA_MAIN -->|renders| SPA_APP
     SPA_MAIN -->|mounts as App child| SPA_CONTAINER
     SPA_MAIN -->|imports| SPA_TOKENS
     SPA_CONTAINER -->|loads QueueState[]| SPA_STATE
+    SPA_CONTAINER -->|loads + matches constraint| SPA_PARSER
+    SPA_CONTAINER -->|getBaseline for constraint| SPA_CLIENT
     SPA_CONTAINER -->|renders| SPA_PIPELINE
     SPA_PIPELINE -->|mounts badge in QueueBox| SPA_BADGE
+    SPA_PIPELINE -->|mounts ribbon on matched box| SPA_CONSTRAINT
+    SPA_CONSTRAINT -->|@import| SPA_TOKENS
+    SPA_PARSER -->|parses raw baseline.md from| SPA_CLIENT
     SPA_BADGE -->|@import| SPA_TOKENS
     SPA_PIPELINE -->|@import| SPA_TOKENS
     SPA_STATE -->|getActive/getQueues/getPolicy| SPA_CLIENT

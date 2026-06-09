@@ -22,8 +22,9 @@
 //   getQueues(project, q)  -> Promise<QueueRecord[]|null>     (q: intake|ready|deploy|rework)
 //   getPolicy(project)     -> Promise<PolicyRecord[]|null>    (the policy queue CSV)
 //   getBaseline()          -> Promise<string|null>            (raw baseline.md)
+//   getFlow(project)       -> Promise<string|null>            (raw flow.md; UC-S003-1)
 //   subscribeEvents(onChange) -> () => void                   (SSE; returns unsubscribe)
-// AC-named aliases (acceptance.md AC1.3-1.5): fetchQueues, fetchPolicy, fetchBaseline.
+// AC-named aliases (acceptance.md AC1.3-1.5): fetchQueues, fetchPolicy, fetchBaseline, fetchFlow.
 
 export const API_BASE = 'http://localhost:3001';
 
@@ -71,6 +72,18 @@ export async function getBaseline() {
 }
 
 /**
+ * GET /api/projects/:id/dora/flow → the RAW flow.md string, or null when absent
+ * (UC-S003-1). Same fail-soft + {content} envelope contract as getBaseline; the
+ * project segment is URL-encoded. UC-S003-1's parseFlow() consumes this string;
+ * UC4 (TimeThiefView) renders it; UC6 re-fetches it on an SSE flow.md change.
+ * @param {string} project
+ */
+export async function getFlow(project) {
+  const body = await getJson(`/api/projects/${encodeURIComponent(project)}/dora/flow`);
+  return body && typeof body === 'object' ? (body.content ?? null) : null;
+}
+
+/**
  * Open the SSE channel (GET /api/events) and forward each `change` frame to
  * `onChange({ type, path })`. Returns an unsubscribe that closes the
  * EventSource. EventSource reconnects natively on drop; an unparseable frame is
@@ -96,3 +109,4 @@ export function subscribeEvents(onChange) {
 export const fetchQueues = getQueues;
 export const fetchPolicy = getPolicy;
 export const fetchBaseline = getBaseline;
+export const fetchFlow = getFlow;

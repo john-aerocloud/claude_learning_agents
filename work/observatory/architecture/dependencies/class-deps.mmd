@@ -56,9 +56,9 @@ graph TD
     %% is the network, not an import) — so SPA_CLIENT depends on the deployed :3001
     %% surface (R_PROJ/R_ITEMS/R_DORA/R_EVENTS routes), drawn as a runtime call edge.
     %% S2-UC2..6 attach to SPA_MAIN/SPA_CLIENT, not to each other. ---
-    SPA_CLIENT["src/app/src/api/client.js — SPA API ADAPTER (S2-UC1)<br/>only module knowing :3001 base URL + endpoint shapes<br/>getActive/getProjects/getQueues/getPolicy/getBaseline/subscribeEvents<br/>fail-soft: null on net/HTTP/parse error"]:::s002changed
-    SPA_APP["src/app/src/App.jsx — app shell (S2-UC1)<br/>banner + main landmark = composition slot + build-sha stamp"]:::s002changed
-    SPA_MAIN["src/app/src/main.jsx — Preact entry (S2-UC1)<br/>WIRING SEAM: mounts App; UC3 mounts MapContainer as App child here"]:::s002changed
+    SPA_CLIENT["src/app/src/api/client.js — SPA API ADAPTER (S2-UC1; +getFlow s003-UC1)<br/>only module knowing :3001 base URL + endpoint shapes<br/>getActive/getProjects/getQueues/getPolicy/getBaseline/getFlow/subscribeEvents<br/>fail-soft: null on net/HTTP/parse error"]:::s003changed
+    SPA_APP["src/app/src/App.jsx — app shell (S2-UC1)<br/>banner + main landmark = composition slot + build-sha stamp"]:::delivered
+    SPA_MAIN["src/app/src/main.jsx — Preact entry (S2-UC1)<br/>WIRING SEAM: mounts App; UC3 mounts MapContainer as App child here"]:::delivered
 
     %% --- S2-UC2 state layer (domain) + S2-UC3 render (REALISED this UC) ---
     %% main.jsx mounts MapContainer as the App child (its one allowed edit to the
@@ -68,16 +68,16 @@ graph TD
     %% hook). Tokens stylesheet seeded (design-system.md). UC2's state layer
     %% depends on SPA_CLIENT (the API adapter), never the reverse.
     SPA_STATE["src/app/src/state/queues.js — queue state layer (S2-UC2, domain)<br/>initQueueState() -> QueueState[] {name,length,min,wip,status}"]:::stable
-    SPA_CONTAINER["src/app/src/components/MapContainer.jsx — data→render container (S2-UC3/5/6)<br/>loads initQueueState() + constraint (getBaseline→parse→match) on mount<br/>UC6: subscribeEvents → debounced re-load of BOTH loaders on relevant change frame<br/>(queue/policy CSV or baseline.md); unsubscribe on unmount; LiveStatusDot state<br/>passes queues + constraintQueue to PipelineMap; fail-soft → empty/no-highlight"]:::s002changed
-    SPA_PIPELINE["src/app/src/components/PipelineMap.jsx (+ QueueBox, FlowArrow) — render (S2-UC3/4/5)<br/>pure fn of QueueState[] + constraintQueue; region 'Pipeline map'; forward row + rework loop<br/>data-status hook (UC4 badge); data-constraint flip + ConstraintBadge on matched box (UC5); aria-hidden SVG arrows"]:::s002changed
-    SPA_TOKENS["src/app/src/styles/tokens.css — design tokens (S2-UC3 seed)"]:::s002changed
+    SPA_CONTAINER["src/app/src/components/MapContainer.jsx — data→render container (S2-UC3/5/6)<br/>loads initQueueState() + constraint (getBaseline→parse→match) on mount<br/>UC6: subscribeEvents → debounced re-load of BOTH loaders on relevant change frame<br/>(queue/policy CSV or baseline.md); unsubscribe on unmount; LiveStatusDot state<br/>passes queues + constraintQueue to PipelineMap; fail-soft → empty/no-highlight"]:::delivered
+    SPA_PIPELINE["src/app/src/components/PipelineMap.jsx (+ QueueBox, FlowArrow) — render (S2-UC3/4/5)<br/>pure fn of QueueState[] + constraintQueue; region 'Pipeline map'; forward row + rework loop<br/>data-status hook (UC4 badge); data-constraint flip + ConstraintBadge on matched box (UC5); aria-hidden SVG arrows"]:::delivered
+    SPA_TOKENS["src/app/src/styles/tokens.css — design tokens (S2-UC3 seed)"]:::delivered
 
     %% --- S2-UC4 buffer-state badge (REALISED this UC) ---
     %% QueueBox now mounts BufferStateIndicator(status); it renders the starving
     %% (▽+text) / over-WIP (△+text) badge or NOTHING when ok. A11Y-5 redundant
     %% cue (icon + visible text + colour token, never colour-only). Pure fn of
     %% the domain status value; touches no fetch/CSV. Imports its own stylesheet.
-    SPA_BADGE["src/app/src/components/BufferStateIndicator.jsx — buffer-state badge (S2-UC4)<br/>pure fn of status; data-testid='state-badge'; ▽/△ aria-hidden icon + visible text<br/>redundant --c-state-* colour token (A11Y-5); ok → null"]:::s002changed
+    SPA_BADGE["src/app/src/components/BufferStateIndicator.jsx — buffer-state badge (S2-UC4)<br/>pure fn of status; data-testid='state-badge'; ▽/△ aria-hidden icon + visible text<br/>redundant --c-state-* colour token (A11Y-5); ok → null"]:::delivered
 
     %% --- S2-UC5 ToC constraint highlight (REALISED this UC) ---
     %% baseline.js (domain parser) extracts the constraint NAME from the raw
@@ -87,8 +87,17 @@ graph TD
     %% PipelineMap consumes constraintQueue and flips data-constraint + mounts
     %% ConstraintBadge (◆+text corner ribbon, A11Y-6) on the matched box; distinct
     %% visual channel from SPA_BADGE so they co-occur without masking (A11Y-7).
-    SPA_PARSER["src/app/src/parsers/baseline.js — ToC constraint parser (S2-UC5, domain)<br/>parseConstraint(raw)->name|null; matchConstraintQueue(name)->queue|null<br/>non-queue constraint (agent) → null; fail-soft, no throw"]:::s002changed
-    SPA_CONSTRAINT["src/app/src/components/ConstraintBadge.jsx — constraint corner ribbon (S2-UC5)<br/>pure fn of present; data-testid='constraint-badge'; ◆ aria-hidden + 'constraint' text<br/>distinct visual channel from state-badge (A11Y-6/7); --c-constraint token"]:::s002changed
+    SPA_PARSER["src/app/src/parsers/baseline.js — ToC constraint + DORA parser (S2-UC5; +parseBaseline s003-UC1, domain)<br/>parseConstraint/matchConstraintQueue (S2-UC5) + parseBaseline(raw)->{metrics,agentTimes,constraint,sourceRef} (s003-UC1)<br/>four-metric + 9 per-agent rows; raw-string fidelity (§8); fail-soft, no throw"]:::s003changed
+    SPA_CONSTRAINT["src/app/src/components/ConstraintBadge.jsx — constraint corner ribbon (S2-UC5)<br/>pure fn of present; data-testid='constraint-badge'; ◆ aria-hidden + 'constraint' text<br/>distinct visual channel from state-badge (A11Y-6/7); --c-constraint token"]:::delivered
+
+    %% --- s003-UC1 DORA/flow parse seam (REALISED this UC; shared seam for UC2/3/4) ---
+    %% parseBaseline (in SPA_PARSER) + parseFlow (SPA_FLOWPARSER, new) turn the raw
+    %% baseline.md / flow.md strings from SPA_CLIENT into typed records the render
+    %% UCs (UC2 DoraPanel, UC3 StageCards, UC4 TimeThiefView — not yet built) bind
+    %% to. Both compose the shared SPA_MDTABLE GFM-table cell extractor. Pure
+    %% domain; raw-string fidelity (§8); fail-soft → empty arrays / nulls, no throw.
+    SPA_MDTABLE["src/app/src/parsers/markdown-table.js — GFM table cell extractor (s003-UC1, domain)<br/>tableRows(raw)->string[][]; trims cells only (interior verbatim); skips separator rows<br/>column-agnostic (callers identify table by cell shape); fail-soft → []"]:::s003changed
+    SPA_FLOWPARSER["src/app/src/parsers/flow.js — flow.md time-thief + queue parser (s003-UC1, domain)<br/>parseFlow(raw)->{timeThieves,queues,sourceRef}; raw-string fidelity (§8 F3)<br/>picks tables by header cell; fail-soft → empty arrays, no throw"]:::s003changed
 
     %% --- S2-UC6 SSE live refresh (REALISED this UC) ---
     %% MapContainer subscribes to the SSE change channel (SPA_CLIENT.subscribeEvents
@@ -96,7 +105,7 @@ graph TD
     %% CSV or baseline.md) debounce-coalesces into ONE re-run of both loaders, so
     %% counts/badges/constraint refresh live <~1s with no reload. Unsubscribe on
     %% unmount (no leak). LiveStatusDot is a pure indicator of the connection state.
-    SPA_LIVEDOT["src/app/src/components/LiveStatusDot.jsx — SSE live indicator (S2-UC6)<br/>pure fn of state (connected|reconnecting); data-testid='live-status'<br/>role=status aria-live=polite; ● aria-hidden + visible text (non-colour cue); A11Y-10 reduced-motion"]:::s002changed
+    SPA_LIVEDOT["src/app/src/components/LiveStatusDot.jsx — SSE live indicator (S2-UC6)<br/>pure fn of state (connected|reconnecting); data-testid='live-status'<br/>role=status aria-live=polite; ● aria-hidden + visible text (non-colour cue); A11Y-10 reduced-motion"]:::delivered
 
     SPA_MAIN -->|renders| SPA_APP
     SPA_MAIN -->|mounts as App child| SPA_CONTAINER
@@ -112,14 +121,18 @@ graph TD
     SPA_PIPELINE -->|mounts ribbon on matched box| SPA_CONSTRAINT
     SPA_CONSTRAINT -->|@import| SPA_TOKENS
     SPA_PARSER -->|parses raw baseline.md from| SPA_CLIENT
+    SPA_PARSER -->|parseBaseline uses tableRows| SPA_MDTABLE
+    SPA_FLOWPARSER -->|parseFlow uses tableRows| SPA_MDTABLE
+    SPA_FLOWPARSER -.->|consumes raw flow.md from getFlow| SPA_CLIENT
     SPA_BADGE -->|@import| SPA_TOKENS
     SPA_PIPELINE -->|@import| SPA_TOKENS
     SPA_STATE -->|getActive/getQueues/getPolicy| SPA_CLIENT
     SPA_CLIENT -.->|HTTP GET :3001/api/active,/projects| R_PROJ
     SPA_CLIENT -.->|HTTP GET :3001/api/projects/:id/queues/:q| R_ITEMS
     SPA_CLIENT -.->|HTTP GET :3001/api/dora/baseline| R_DORA
+    SPA_CLIENT -.->|HTTP GET :3001/api/projects/:id/dora/flow (getFlow, s003-UC1)| R_DORA
     SPA_CLIENT -.->|EventSource :3001/api/events| R_EVENTS
 
     classDef stable fill:#eee,stroke:#999,color:#000
     classDef delivered fill:#d5f5e3,stroke:#1e8449,color:#000
-    classDef s002changed fill:#3a2233,stroke:#d96c8f,stroke-width:2px,color:#fff
+    classDef s003changed fill:#fdebd0,stroke:#ca6f1e,color:#000

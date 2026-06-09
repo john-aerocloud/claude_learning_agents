@@ -11,9 +11,11 @@ import {
   getQueues,
   getPolicy,
   getBaseline,
+  getFlow,
   fetchQueues,
   fetchPolicy,
   fetchBaseline,
+  fetchFlow,
   subscribeEvents,
 } from '../client.js';
 
@@ -99,10 +101,32 @@ describe('api/client URL construction + parsing', () => {
     expect(await getBaseline()).toBeNull();
   });
 
-  it('AC-named aliases fetchQueues/fetchPolicy/fetchBaseline exist and match the seam helpers', async () => {
+  it('getFlow(project) GETs /api/projects/:id/dora/flow and returns raw content (UC-S003-1)', async () => {
+    const raw = '# Flow view — observatory\n\n## Time thieves\n';
+    const f = mockFetchJson({ content: raw });
+    vi.stubGlobal('fetch', f);
+    const content = await getFlow('observatory');
+    expect(f).toHaveBeenCalledWith('http://localhost:3001/api/projects/observatory/dora/flow');
+    expect(content).toBe(raw);
+  });
+
+  it('getFlow() encodes the project segment', async () => {
+    const f = mockFetchJson({ content: null });
+    vi.stubGlobal('fetch', f);
+    await getFlow('a/b');
+    expect(f).toHaveBeenCalledWith('http://localhost:3001/api/projects/a%2Fb/dora/flow');
+  });
+
+  it('getFlow() returns null when content is null (missing flow.md)', async () => {
+    vi.stubGlobal('fetch', mockFetchJson({ content: null }));
+    expect(await getFlow('observatory')).toBeNull();
+  });
+
+  it('AC-named aliases fetchQueues/fetchPolicy/fetchBaseline/fetchFlow exist and match the seam helpers', async () => {
     expect(fetchQueues).toBe(getQueues);
     expect(fetchPolicy).toBe(getPolicy);
     expect(fetchBaseline).toBe(getBaseline);
+    expect(fetchFlow).toBe(getFlow);
   });
 });
 
@@ -122,6 +146,11 @@ describe('api/client fail-soft (AC1.6)', () => {
   it('getBaseline returns null when fetch throws', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
     await expect(getBaseline()).resolves.toBeNull();
+  });
+
+  it('getFlow returns null when fetch throws', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+    await expect(getFlow('observatory')).resolves.toBeNull();
   });
 
   it('a non-ok HTTP status (5xx) resolves to null rather than throwing (fail soft)', async () => {

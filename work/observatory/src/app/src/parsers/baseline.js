@@ -21,6 +21,8 @@
 // labelled chip (without highlighting a box) is left to a later UC — this slice
 // owns the queue-highlight contract only.
 
+import { tableRows } from './markdown-table.js';
+
 const QUEUE_NAMES = ['intake', 'ready', 'deploy', 'rework'];
 
 // Matches a constraint line in any of the accepted forms (case-insensitive),
@@ -72,4 +74,93 @@ function cleanName(value) {
   v = v.replace(/[*_`]+/g, '');
   v = v.trim().toLowerCase();
   return v.length > 0 ? v : null;
+}
+
+// ---------------------------------------------------------------------------
+// UC-S003-1 — baseline.md four-metric + per-agent task-time parser.
+//
+// HEXAGONAL ROLE: pure domain logic, like parseConstraint above. parseBaseline
+// takes the RAW baseline.md string from the SPA API adapter (getBaseline()) and
+// returns a typed BaselineParsed record the render UCs (UC2 DoraPanel, UC3
+// StageCards) consume — they never touch raw markdown. It COMPOSES parseConstraint
+// (no duplication) for the constraint field.
+//
+// FIDELITY (§8 F1-F4): every value comes through EXACTLY as written in the source
+// table cell — no rounding, no number coercion, no reformatting. The render UCs
+// assert string-equality against the source, so we hand back raw cell strings.
+// FAIL SOFT (§8 R1/R3): null / non-string / absent-table → metrics all null and
+// agentTimes []; this never throws.
+// ---------------------------------------------------------------------------
+
+export const BASELINE_SOURCE_REF = 'process/dora/baseline.md';
+
+// Map each four-key-metric row to its output key by the metric-name prefix in the
+// `## Four key metrics` table (the leading "Metric" cell, lowercased).
+const METRIC_KEY_BY_PREFIX = [
+  ['gross lead time', 'grossLeadTimeMedian'],
+  ['deployment frequency', 'deployFrequency'],
+  ['change failure rate', 'changeFailureRate'],
+  ['mttr', 'mttr'],
+];
+
+function emptyMetrics() {
+  return {
+    grossLeadTimeMedian: null,
+    deployFrequency: null,
+    changeFailureRate: null,
+    mttr: null,
+  };
+}
+
+/**
+ * Parse a raw baseline.md string into a typed record.
+ * @param {string|null|undefined} raw
+ * @returns {{
+ *   metrics: {
+ *     grossLeadTimeMedian: {value: string, window: string}|null,
+ *     deployFrequency: {value: string, window: string}|null,
+ *     changeFailureRate: {value: string, window: string}|null,
+ *     mttr: {value: string, window: string}|null,
+ *   },
+ *   agentTimes: Array<{agent: string, n: number, modal: string, median: string, mean: string}>,
+ *   constraint: string|null,
+ *   sourceRef: string,
+ * }}
+ */
+export function parseBaseline(raw) {
+  const result = {
+    metrics: emptyMetrics(),
+    agentTimes: [],
+    constraint: parseConstraint(raw),
+    sourceRef: BASELINE_SOURCE_REF,
+  };
+  if (typeof raw !== 'string') return result;
+
+  // Four key metrics: rows are | Metric | Value | Window |.
+  for (const cells of tableRows(raw)) {
+    if (cells.length < 3) continue;
+    const prefix = cells[0].toLowerCase();
+    const match = METRIC_KEY_BY_PREFIX.find(([p]) => prefix.startsWith(p));
+    if (match && result.metrics[match[1]] === null) {
+      result.metrics[match[1]] = { value: cells[1], window: cells[2] };
+    }
+  }
+
+  // Per-agent task completion: rows are | Agent | n | modal | median | mean |.
+  // We recognise the agent rows by the 5-column shape with a numeric n cell,
+  // skipping the metric table (3 cols) and any header/separator rows.
+  for (const cells of tableRows(raw)) {
+    if (cells.length < 5) continue;
+    const n = Number(cells[1]);
+    if (cells[0].toLowerCase() === 'agent' || Number.isNaN(n)) continue;
+    result.agentTimes.push({
+      agent: cells[0],
+      n,
+      modal: cells[2],
+      median: cells[3],
+      mean: cells[4],
+    });
+  }
+
+  return result;
 }

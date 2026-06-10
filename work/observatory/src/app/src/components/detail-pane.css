@@ -1,0 +1,176 @@
+/* UC-S005-3 — DetailPane styling.
+ *
+ * The pane is a NON-MODAL region anchored to the RIGHT side of the main column,
+ * overlaying the value-stream map but NEVER the tree rail (GEO-S005-3: the
+ * pane's left edge sits past the rail because the pane lives inside
+ * .observatory-main-col, which is already to the right of the rail). It is a
+ * sticky right-anchored panel — the map stays visible/scrollable beside it.
+ *
+ * Token-based; reuses the s002/s003/s004 design system (surface, border, focus
+ * ring, spacing). Reduced-motion: no transitions (A11Y-S005-9). */
+
+.detail-pane {
+  position: sticky;
+  top: var(--sp-4);
+  align-self: flex-start;
+  width: min(440px, 42vw);
+  max-height: calc(100vh - 2 * var(--sp-4));
+  overflow: auto;
+  margin-left: auto; /* anchor right within the main column */
+  background: var(--c-surface-raised);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-box);
+  padding: var(--sp-4);
+  color: var(--c-text);
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.35);
+}
+
+.detail-pane__crumb {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: 0.85rem;
+  color: var(--c-text-dim);
+  margin-bottom: var(--sp-3);
+}
+
+.detail-pane__crumb-root {
+  background: none;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-badge);
+  color: var(--c-source-link);
+  padding: 4px 8px;
+  min-height: var(--target-min);
+  cursor: pointer;
+}
+
+.detail-pane__crumb-current {
+  color: var(--c-text);
+  font-weight: 600;
+}
+
+.detail-pane__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  border-bottom: 1px solid var(--c-border);
+  padding-bottom: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+
+.detail-pane__h {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.detail-pane__h:focus-visible,
+.detail-pane__h:focus {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-badge);
+}
+
+.detail-pane__close {
+  background: none;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-badge);
+  color: var(--c-text);
+  font-size: 1.2rem;
+  line-height: 1;
+  min-width: var(--target-min);
+  min-height: var(--target-min);
+  cursor: pointer;
+}
+
+.detail-pane__identity {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--sp-2) var(--sp-4);
+  margin: 0 0 var(--sp-4);
+}
+
+.detail-pane__identity > div {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: baseline;
+}
+
+.detail-pane__identity dt {
+  color: var(--c-text-dim);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.detail-pane__identity dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.detail-pane__job {
+  grid-column: 1 / -1;
+}
+
+.detail-pane__artifact-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+
+.artifact-tab {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-badge);
+  color: var(--c-text-dim);
+  padding: 4px 8px;
+  min-height: var(--target-min);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.artifact-tab--active {
+  color: var(--c-text);
+  border-color: var(--c-source-link);
+}
+
+.detail-pane__artifact {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-badge);
+  padding: var(--sp-3);
+  margin-bottom: var(--sp-4);
+}
+
+.detail-pane__raw {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  color: var(--c-text);
+  max-height: 40vh;
+  overflow: auto;
+}
+
+.detail-pane__placeholder {
+  margin: 0;
+  color: var(--c-text-dim);
+  font-style: italic;
+}
+
+.detail-pane__placeholder--muted {
+  opacity: 0.8;
+}
+
+.detail-pane__history-slot {
+  border-top: 1px dashed var(--c-border);
+  padding-top: var(--sp-3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .detail-pane {
+    transition: none;
+  }
+}

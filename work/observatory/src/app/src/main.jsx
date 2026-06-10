@@ -11,8 +11,7 @@
 // alone; the map child arrives with UC3.
 import { render } from 'preact';
 import { App } from './App.jsx';
-import { VsmContainer } from './components/VsmContainer.jsx';
-import { WorkItemTreeContainer } from './components/WorkItemTreeContainer.jsx';
+import { ObservatoryView } from './components/ObservatoryView.jsx';
 import './styles/tokens.css';
 import './styles/layout.css';
 
@@ -25,20 +24,15 @@ import './styles/layout.css';
 // 0,0,0,0 while work was actively happening (DEFECT-001). MapContainer /
 // PipelineMap remain in the tree (their unit tests still pass) but are no longer
 // mounted; the value-stream map is the surface the operator sees.
-// CHK-4 / UC-S005-2: the work-item tree mounts as a LEFT-RAIL landmark beside
-// the value-stream map (ui-design.md §1). The rail and the map sit in a flex
-// layout so the tree is the "item level" navigator and the map remains the
-// "pipeline level" primary surface — the value-stream map is NOT re-laid-out,
-// only placed beside the rail. The DetailPane (UC-S005-3) will overlay the map
-// column later; this slice mounts only the tree.
+// CHK-4 / UC-S005-2/3: ObservatoryView is the single composition that mounts the
+// work-item tree rail (left landmark) beside the value-stream map (the unchanged
+// "pipeline level" primary surface) AND the drill-down detail pane (UC-S005-3),
+// anchored to the right of the main column. Clicking a tree node opens the pane
+// for that item's slice artifact; "Back to map"/×/Esc zooms back out. The
+// value-stream map is NOT re-laid-out — only placed beside the rail.
 render(
   <App>
-    <div class="observatory-layout">
-      <WorkItemTreeContainer />
-      <div class="observatory-main-col">
-        <VsmContainer />
-      </div>
-    </div>
+    <ObservatoryView />
   </App>,
   document.getElementById('app'),
 );

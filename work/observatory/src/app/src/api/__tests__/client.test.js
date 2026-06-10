@@ -14,6 +14,8 @@ import {
   getFlow,
   getStageFlow,
   getItems,
+  getSlices,
+  getSliceArtifact,
   fetchQueues,
   fetchPolicy,
   fetchBaseline,
@@ -105,6 +107,47 @@ describe('api/client URL construction + parsing', () => {
     const rows = await getItems('observatory');
     expect(f).toHaveBeenCalledWith('/api/projects/observatory/items');
     expect(rows).toEqual(fixture);
+  });
+
+  // --- UC-S005-3 slice-artifact helpers ---
+
+  it('getSlices(project) GETs /api/projects/:id/slices and returns the slug array (UC-S005-3)', async () => {
+    const slugs = ['s001-read-layer', 's005-workitem-tree'];
+    const f = mockFetchJson(slugs);
+    vi.stubGlobal('fetch', f);
+    const rows = await getSlices('observatory');
+    expect(f).toHaveBeenCalledWith('/api/projects/observatory/slices');
+    expect(rows).toEqual(slugs);
+  });
+
+  it('getSlices fails soft to null on a network error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('boom')));
+    expect(await getSlices('observatory')).toBeNull();
+  });
+
+  it('getSliceArtifact builds /slices/:slug/:artifact and UNWRAPS the {content} envelope (UC-S005-3)', async () => {
+    const f = mockFetchJson({ content: '# slice.md\nbody' });
+    vi.stubGlobal('fetch', f);
+    const text = await getSliceArtifact('observatory', 's001-read-layer', 'slice.md');
+    expect(f).toHaveBeenCalledWith('/api/projects/observatory/slices/s001-read-layer/slice.md');
+    expect(text).toBe('# slice.md\nbody');
+  });
+
+  it('getSliceArtifact returns null when the server reports content:null (absent artifact — AC-S005-3-4)', async () => {
+    vi.stubGlobal('fetch', mockFetchJson({ content: null }));
+    expect(await getSliceArtifact('observatory', 's001-read-layer', 'result.md')).toBeNull();
+  });
+
+  it('getSliceArtifact encodes path segments', async () => {
+    const f = mockFetchJson({ content: 'x' });
+    vi.stubGlobal('fetch', f);
+    await getSliceArtifact('a/b', 's 1', 'slice.md');
+    expect(f).toHaveBeenCalledWith('/api/projects/a%2Fb/slices/s%201/slice.md');
+  });
+
+  it('getSliceArtifact fails soft to null on a network error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('boom')));
+    expect(await getSliceArtifact('observatory', 's001-read-layer', 'slice.md')).toBeNull();
   });
 
   it('getItems encodes the project segment', async () => {

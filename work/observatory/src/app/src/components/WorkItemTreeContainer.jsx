@@ -50,12 +50,26 @@ function allBranchIds(forest) {
 /**
  * @param {object} [props]
  * @param {() => Promise<Array|null>} [props.loadItems] - items loader (injectable for tests)
+ * @param {string|null} [props.selectedId] - CONTROLLED selection (UC-S005-3 lifts it)
+ * @param {(id:string)=>void} [props.onSelect] - CONTROLLED select handler
+ * @param {(items:Array)=>void} [props.onItemsLoaded] - report the loaded item rows up
  */
-export function WorkItemTreeContainer({ loadItems = loadActiveItems }) {
+export function WorkItemTreeContainer({
+  loadItems = loadActiveItems,
+  selectedId: controlledSelectedId,
+  onSelect: controlledOnSelect,
+  onItemsLoaded,
+}) {
   const [items, setItems] = useState(null);
   const [expanded, setExpanded] = useState(new Set());
-  const [selectedId, setSelectedId] = useState(null);
+  const [internalSelectedId, setInternalSelectedId] = useState(null);
   const [didInitExpand, setDidInitExpand] = useState(false);
+
+  // Selection is CONTROLLED when the parent passes onSelect (UC-S005-3 lifts the
+  // selected item into the detail pane); otherwise the container owns it (the
+  // UC-S005-2 standalone behaviour — just marks aria-selected).
+  const isControlled = typeof controlledOnSelect === 'function';
+  const selectedId = isControlled ? (controlledSelectedId ?? null) : internalSelectedId;
 
   // Initial one-shot load on mount; default-expand every branch once.
   useEffect(() => {
@@ -66,6 +80,7 @@ export function WorkItemTreeContainer({ loadItems = loadActiveItems }) {
         if (!active) return;
         const arr = Array.isArray(next) ? next : null;
         setItems(arr);
+        if (arr && onItemsLoaded) onItemsLoaded(arr);
         if (arr && !didInitExpand) {
           setExpanded(allBranchIds(buildTree(arr)));
           setDidInitExpand(true);
@@ -84,7 +99,7 @@ export function WorkItemTreeContainer({ loadItems = loadActiveItems }) {
     });
   };
 
-  const onSelect = (id) => setSelectedId(id);
+  const onSelect = (id) => (isControlled ? controlledOnSelect(id) : setInternalSelectedId(id));
 
   return (
     <WorkItemTree

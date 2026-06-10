@@ -16,6 +16,12 @@ import { dirname, resolve } from 'node:path';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_REPO = resolve(HERE, 'e2e', 'fixtures', 'repo');
 
+// EPHEMERAL-PORT SUPPORT (UC-S005-3): default is :5173 (the single dev topology).
+// Set OBSERVATORY_E2E_PORT to run the spec server on a different port WITHOUT
+// touching an operator's running :5173 — Playwright then launches its own Vite
+// on that port (against the fixture repo) and tears it down after the run.
+const E2E_PORT = Number(process.env.OBSERVATORY_E2E_PORT || 5173);
+
 export default defineConfig({
   testDir: 'e2e',
   fullyParallel: true,
@@ -23,7 +29,7 @@ export default defineConfig({
   retries: 0,
   reporter: 'list',
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: `http://localhost:${E2E_PORT}`,
     trace: 'on-first-retry',
   },
   projects: [
@@ -34,12 +40,13 @@ export default defineConfig({
   ],
   webServer: [
     {
-      // Single Vite server: SPA + API on :5173.
+      // Single Vite server: SPA + API on E2E_PORT (default :5173).
       // Uses the fixture repo for deterministic counts.
-      command: 'npm run dev',
+      command: `npm run dev -- --port ${E2E_PORT} --strictPort`,
       cwd: HERE,
-      port: 5173,
-      reuseExistingServer: !process.env.CI,
+      port: E2E_PORT,
+      // When running on a non-default port we ALWAYS start our own (never reuse).
+      reuseExistingServer: E2E_PORT === 5173 && !process.env.CI,
       timeout: 60_000,
       env: { OBSERVATORY_REPO_ROOT: FIXTURE_REPO },
     },

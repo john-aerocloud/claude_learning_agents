@@ -118,6 +118,37 @@ export async function getItems(project) {
 }
 
 /**
+ * GET /api/projects/:id/slices → string[] of slice directory names (slugs), or
+ * null when missing/unreachable. Returns the ARRAY DIRECTLY (no envelope), like
+ * /items. UC-S005-3's detail pane uses the slug list to resolve which slice dir
+ * backs the selected work item (itemDetail.deriveSliceSlug). Fail-soft to null.
+ * @param {string} project
+ * @returns {Promise<string[]|null>}
+ */
+export async function getSlices(project) {
+  return getJson(`/api/projects/${encodeURIComponent(project)}/slices`);
+}
+
+/**
+ * GET /api/projects/:id/slices/:slug/:artifact → the RAW artifact text, or null
+ * when absent/unreachable. The route wraps the body in a {content} envelope
+ * (content:null when the file is missing — AC-S005-3-4), so this helper UNWRAPS
+ * it to the raw string (or null). UC-S005-3 shows this text raw (a <pre> slot);
+ * UC-S005-4 will swap the slot for the markdown/mmd renderer. All segments are
+ * URL-encoded. Fail-soft to null on any network/HTTP/parse error.
+ * @param {string} project
+ * @param {string} slug
+ * @param {string} artifact  - e.g. 'slice.md'
+ * @returns {Promise<string|null>}
+ */
+export async function getSliceArtifact(project, slug, artifact) {
+  const body = await getJson(
+    `/api/projects/${encodeURIComponent(project)}/slices/${encodeURIComponent(slug)}/${encodeURIComponent(artifact)}`,
+  );
+  return body && typeof body === 'object' ? (body.content ?? null) : null;
+}
+
+/**
  * Open the SSE channel (GET /api/events) and forward each `change` frame to
  * `onChange({ type, path })`. Returns an unsubscribe that closes the
  * EventSource. EventSource reconnects natively on drop; an unparseable frame is

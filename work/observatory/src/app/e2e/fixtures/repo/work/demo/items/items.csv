@@ -3,5 +3,6 @@ REQ-DEMO,requirement,,CHK-1|CHK-4,Demo requirement for the work-item tree e2e,ac
 CHK-1,chunk,REQ-DEMO,UC-D1-1|UC-D1-2,First demo chunk - read layer,done,HIGH,M,HIGH/M,2026-06-10T00:00:00Z,2026-06-10T01:00:00Z,
 UC-D1-1,use-case,CHK-1,,Demo use case one,done,HIGH,2,1.50,2026-06-10T00:00:00Z,2026-06-10T01:00:00Z,
 UC-D1-2,use-case,CHK-1,,Demo use case two,done,MED,2,1.00,2026-06-10T00:00:00Z,2026-06-10T01:00:00Z,
-CHK-4,chunk,REQ-DEMO,UC-D4-1,Fourth demo chunk - tree and zoom,in-progress,HIGH,M,HIGH/M,2026-06-10T00:00:00Z,,
+CHK-4,chunk,REQ-DEMO,UC-S004-1|UC-D4-1,Fourth demo chunk - tree and zoom,in-progress,HIGH,M,HIGH/M,2026-06-10T00:00:00Z,,
+UC-S004-1,use-case,CHK-4,,Demo slice-backed use case (derives slug s004),ready,HIGH,3,1.00,2026-06-10T00:00:00Z,,
 UC-D4-1,use-case,CHK-4,,Demo work-item tree render,ready,HIGH,3,1.00,2026-06-10T00:00:00Z,,

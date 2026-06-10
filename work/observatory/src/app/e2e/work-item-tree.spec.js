@@ -11,8 +11,12 @@
 // keyboard focus movement through the roving-tabindex tree, AND that mounting
 // the tree rail did NOT break the value-stream map (it stays visible).
 //
-// Fixture (e2e/fixtures/repo/work/demo/items/items.csv): 6 nodes —
-//   REQ-DEMO → CHK-1(done) → [UC-D1-1, UC-D1-2], CHK-4(in-progress) → UC-D4-1.
+// Fixture (e2e/fixtures/repo/work/demo/items/items.csv): 7 nodes —
+//   REQ-DEMO → CHK-1(done) → [UC-D1-1, UC-D1-2],
+//              CHK-4(in-progress) → [UC-S004-1, UC-D4-1].
+// UC-S004-1 is slice-backed (slug s004-value-stream-map) for the UC-S005-3
+// detail-pane spec; it does not change the REQ→CHK-1→UC-D1-1 path the geometry
+// and keyboard cases below walk.
 import { test, expect } from '@playwright/test';
 
 test.beforeEach(async ({ page }) => {
@@ -22,11 +26,11 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator('[data-item-id="REQ-DEMO"]')).toBeVisible();
 });
 
-test('renders the real REQ→CHK→UC tree from the fixture items.csv (6 nodes, AC-S005-2-1/2)', async ({
+test('renders the real REQ→CHK→UC tree from the fixture items.csv (7 nodes, AC-S005-2-1/2)', async ({
   page,
 }) => {
-  // All branches expanded by default → all 6 nodes present.
-  await expect(page.getByTestId('tree-node')).toHaveCount(6);
+  // All branches expanded by default → all 7 nodes present.
+  await expect(page.getByTestId('tree-node')).toHaveCount(7);
   await expect(page.locator('[data-item-id="CHK-1"]')).toBeVisible();
   await expect(page.locator('[data-item-id="UC-D1-1"]')).toBeVisible();
   await expect(page.locator('[data-item-id="CHK-4"]')).toBeVisible();
@@ -64,7 +68,7 @@ test('every node carries a non-empty data-space + a space-tag with visible text 
 }) => {
   const nodes = page.getByTestId('tree-node');
   const count = await nodes.count();
-  expect(count).toBe(6);
+  expect(count).toBe(7);
   for (let i = 0; i < count; i++) {
     const space = await nodes.nth(i).getAttribute('data-space');
     expect(space).toBeTruthy();

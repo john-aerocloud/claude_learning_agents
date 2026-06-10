@@ -28,6 +28,9 @@ Two error classes are tracked here; the goal is to drive both toward zero.
 | S2-UC3 → S2-UC6 | `src/app/components/PipelineMap.ts` (SSE refresh re-renders the map UC3 owns) | product/s002 use-cases.md | UC6 triggers re-render of the pipeline map UC3 owns |
 | S2-UC4 → S2-UC6 | `src/app/components/PipelineMap.ts` (UC4 indicators must re-render on live update) | product/s002 use-cases.md | UC6 must trigger flag re-render; UC4 must exist first |
 | S2-UC5 → S2-UC6 | `src/app/state/constraint.ts` (baseline re-fetch on `change` event for baseline.md) | product/s002 use-cases.md | UC6 triggers constraint re-evaluation; UC5 must define that path first |
+| UC-S005-2 → UC-S005-3 | `src/app/src/components/WorkItemTreeContainer.jsx` (`onSelect`/`selectedId`/`onItemsLoaded` controlled-selection props) + `DetailPane.jsx` shared seam | engineer/s005 UC-S005-3 build 2026-06-10 | **Logic edge:** UC-S005-3 lifts the tree's selection into `ObservatoryView` and feeds the resolved record to the detail pane. Tree (UC-S005-2) must render + expose `onSelect` first. Satisfied — tree was delivered before this build. |
+| UC-S005-3 → UC-S005-4 | `src/app/src/components/DetailPane.jsx` (`data-testid="artifact-view"` slot — UC-S005-4 swaps the raw `<pre>` for ArtifactView) | engineer/s005 | DetailPane shell + artifact-view slot must exist before the markdown/mmd renderer composes in. Slot left clearly marked. |
+| UC-S005-3 → UC-S005-5 | `src/app/src/components/DetailPane.jsx` (`data-testid="item-history-slot"` labelled empty region — UC-S005-5 mounts ItemHistoryPanel) | engineer/s005 | DetailPane shell + history slot must exist before the history panel composes in. Slot left clearly marked. |
 
 ## Realised composition edges (UC6 build)
 | edge (from → to) | seam | realised by | note |

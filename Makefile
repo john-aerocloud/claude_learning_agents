@@ -342,7 +342,14 @@ test-observatory:
 browser-observatory:
 	npm --prefix work/observatory/src/app run test:browser
 
-.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory a11y-observatory
+# browser-observatory-ephemeral: run the Playwright browser specs against an
+# EPHEMERAL Vite server on :5199 (against the committed fixture repo), so the run
+# never touches an operator's running :5173. Playwright starts AND tears down the
+# :5199 server itself (OBSERVATORY_E2E_PORT + CI force a non-reused own-server).
+browser-observatory-ephemeral:
+	OBSERVATORY_E2E_PORT=5199 CI=1 npm --prefix work/observatory/src/app run test:browser
+
+.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral a11y-observatory
 
 # make dora-flow PROJECT=oxo-online  -> rewrites work/<project>/dora/flow.md
 # (per-project queues + time thieves + parallelism efficiency). v40 pull-flow view.

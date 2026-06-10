@@ -41,4 +41,28 @@ describe('WorkItemTreeContainer (UC-S005-2)', () => {
     render(<WorkItemTreeContainer loadItems={loadItems} />);
     await waitFor(() => expect(screen.getByTestId('work-item-tree')).toHaveTextContent(/no work items/i));
   });
+
+  // UC-S005-3 — controlled selection + onItemsLoaded so a parent composition can
+  // lift the selected item record into the detail pane.
+  it('uses controlled selectedId/onSelect when provided and reports loaded items', async () => {
+    const loadItems = vi.fn().mockResolvedValue(ITEMS);
+    const onSelect = vi.fn();
+    const onItemsLoaded = vi.fn();
+    render(
+      <WorkItemTreeContainer
+        loadItems={loadItems}
+        selectedId="CHK-1"
+        onSelect={onSelect}
+        onItemsLoaded={onItemsLoaded}
+      />,
+    );
+    await waitFor(() => expect(screen.getAllByTestId('tree-node')).toHaveLength(3));
+    // controlled selection is reflected as aria-selected on the controlled node
+    expect(document.querySelector('[data-item-id="CHK-1"]').getAttribute('aria-selected')).toBe('true');
+    // clicking a node calls the controlled onSelect (parent owns selection)
+    fireEvent.click(document.querySelector('[data-item-id="UC-1"] > .tree-node__row'));
+    expect(onSelect).toHaveBeenCalledWith('UC-1');
+    // loaded items are reported up so the parent can resolve the selected record
+    await waitFor(() => expect(onItemsLoaded).toHaveBeenCalledWith(ITEMS));
+  });
 });

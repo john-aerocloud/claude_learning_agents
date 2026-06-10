@@ -146,7 +146,6 @@ graph TD
     SPA_TREENODE["src/app/src/components/TreeNode.jsx — treeitem render (UC-S005-2)<br/>state/value-cost badges (text-authoritative, A11Y-S005-6/7); GEO-S005-1 depth padding-left; aria-level/selected"]:::s005changed
     SPA_SPACETAG["src/app/src/components/SpaceTagBadge.jsx — /work-vs-/process badge (UC-S005-2)<br/>§8 three-cue: text + ▤/⚙ icon (aria-hidden) + colour-band class; non-colour-redundant"]:::s005changed
 
-    SPA_MAIN -->|mounts tree rail beside map| SPA_TREECTR
     SPA_TREECTR -->|getActive/getItems| SPA_CLIENT
     SPA_TREECTR -->|buildTree forest| SPA_TREEBUILD
     SPA_TREECTR -->|renders| SPA_TREE
@@ -156,6 +155,33 @@ graph TD
     SPA_TREENODE -->|mounts space badge| SPA_SPACETAG
     SPA_TREE -->|@import| SPA_TOKENS
     SPA_CLIENT -.->|HTTP GET :3001/api/projects/:id/items (getItems)| R_ITEMS
+
+    %% --- s005 CHK-4 / UC-S005-3 detail pane (drill-down shell + artifact render) ---
+    %% ObservatoryView is the ONE composition: it lifts the tree's selectedId + the
+    %% loaded ItemRecord[] (controlled selection via WorkItemTreeContainer's new
+    %% onSelect/selectedId/onItemsLoaded props) and feeds the resolved record to the
+    %% DetailPaneContainer beside the (unchanged) value-stream map. The pane fetches
+    %% slice artifacts ONLY through SPA_CLIENT.getSlices/getSliceArtifact over the
+    %% existing /slices routes (R_SLICES). itemDetail is the pure slug-derivation
+    %% DOMAIN. DetailPane renders raw artifact text in a <pre> (UC-S005-4 swaps in
+    %% ArtifactView; UC-S005-5 mounts ItemHistoryPanel into the labelled slot).
+    SPA_OBSVIEW["src/app/src/components/ObservatoryView.jsx — composition (UC-S005-3)<br/>lifts selectedId + items; resolves selected record; mounts tree rail + VSM + detail pane; open-on-click / Back-to-map"]:::s005changed
+    SPA_ITEMDETAIL["src/app/src/state/itemDetail.js — detail DOMAIN (UC-S005-3)<br/>deriveSliceSlug(item, slugs) (sNNN→slice dir), defaultArtifactName, paneLabel; no fetch/DOM; pure"]:::s005changed
+    SPA_PANECTR["src/app/src/components/DetailPaneContainer.jsx — data→render container (UC-S005-3)<br/>getSlices once + getSliceArtifact on select; deriveSliceSlug; non-slice→placeholder; close returns focus to value-stream-map"]:::s005changed
+    SPA_PANE["src/app/src/components/DetailPane.jsx — non-modal labelled region (UC-S005-3)<br/>role=region aria-label Item detail:id; identity dl + breadcrumb + raw <pre> artifact slot + history slot; managed focus; Esc/×/Back-to-map=onClose"]:::s005changed
+    SPA_VSMCTR["src/app/src/components/VsmContainer.jsx — value-stream map container (s004; unchanged, placed beside the rail)"]:::stable
+
+    SPA_MAIN -->|mounts observatory view| SPA_OBSVIEW
+    SPA_OBSVIEW -->|controlled selectedId/onSelect/onItemsLoaded| SPA_TREECTR
+    SPA_OBSVIEW -->|mounts beside tree (unchanged)| SPA_VSMCTR
+    SPA_OBSVIEW -->|getActive| SPA_CLIENT
+    SPA_OBSVIEW -->|selected record| SPA_PANECTR
+    SPA_PANECTR -->|getSlices/getSliceArtifact| SPA_CLIENT
+    SPA_PANECTR -->|deriveSliceSlug/defaultArtifactName| SPA_ITEMDETAIL
+    SPA_PANECTR -->|renders| SPA_PANE
+    SPA_PANE -->|paneLabel| SPA_ITEMDETAIL
+    SPA_PANE -->|@import| SPA_TOKENS
+    SPA_CLIENT -.->|HTTP GET /api/projects/:id/slices + /slices/:slug/:artifact (getSlices/getSliceArtifact)| R_SLICE
 
     classDef stable fill:#eee,stroke:#999,color:#000
     classDef delivered fill:#d5f5e3,stroke:#1e8449,color:#000

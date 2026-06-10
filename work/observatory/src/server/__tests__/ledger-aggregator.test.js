@@ -241,11 +241,10 @@ describe('aggregateStageFlow — REAL ledger (real-data gate, not a fixture)', (
   it('returns non-empty plausible build throughput for observatory (>= UCs delivered)', () => {
     const out = aggregateStageFlow(realLedger, 'observatory');
     const eng = byStage(out, 'engineer');
-    // Hand-count of engineer task_start rows for observatory = 7 at authoring time
-    // (grep ',observatory,' | ',engineer,task_start,'). The tolerant parser must
-    // recover all of them despite malformed/unbalanced-quote rows in the ledger.
-    expect(eng.throughput).toBe(7);
-    expect(eng.throughput).toBeGreaterThanOrEqual(6); // >= S001 UCs delivered (plausibility)
+    // Hand-count of engineer task_start rows for observatory grows as slices are
+    // delivered; assert >= 8 (current count at time of writing). The tolerant
+    // parser must recover all rows despite malformed/unbalanced-quote rows.
+    expect(eng.throughput).toBeGreaterThanOrEqual(8); // >= CHK-3 UCs delivered (plausibility)
     expect(eng.source_rows.length).toBeGreaterThan(0);
   });
 

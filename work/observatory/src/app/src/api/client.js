@@ -1,11 +1,15 @@
 // Observatory API client — the shared SEAM that UC-S002-2..6 import.
 //
 // HEXAGONAL ROLE: this is the SPA-side ADAPTER over the CHK-1 read layer's HTTP
-// API. It is the ONLY module that knows the :3001 base URL, the endpoint paths,
+// API. It is the ONLY module that knows the API base URL, the endpoint paths,
 // and the JSON envelope shapes ({active}, {content}, raw arrays). The domain
 // (UC2 state layer, UC5 parser) and the render layer (UC3 PipelineMap) consume
 // these plain helpers and never touch fetch/URLs — so endpoint shape changes
 // land here, in one place, behind a stable export surface.
+//
+// TOPOLOGY: the SPA and the read layer are served by the SAME Express server on
+// :3001. API_BASE is therefore empty string (relative URLs) — requests go to
+// the same origin as the page, with no cross-origin fetch. No CORS needed.
 //
 // FAIL-SOFT (AC1.6): every GET returns its parsed value or `null` on ANY
 // failure — network error, non-2xx status, or unparseable body. The read layer
@@ -16,7 +20,7 @@
 // own tests pin its correctness, and the SSE channel re-drives state on recovery.
 //
 // STABLE EXPORT SURFACE (so UC2-6 attach without editing each other):
-//   API_BASE                          — the read-layer origin (:3001)
+//   API_BASE                          — '' (relative, same-origin server)
 //   getActive()            -> Promise<string|null>            (active project id)
 //   getProjects()          -> Promise<Array|null>             (project registry)
 //   getQueues(project, q)  -> Promise<QueueRecord[]|null>     (q: intake|ready|deploy|rework)
@@ -26,7 +30,8 @@
 //   subscribeEvents(onChange) -> () => void                   (SSE; returns unsubscribe)
 // AC-named aliases (acceptance.md AC1.3-1.5): fetchQueues, fetchPolicy, fetchBaseline, fetchFlow.
 
-export const API_BASE = 'http://localhost:3001';
+// Relative base — SPA and API share one origin; no hardcoded port.
+export const API_BASE = '';
 
 /** GET a JSON endpoint; null on any network/HTTP/parse failure (fail soft). */
 async function getJson(path) {

@@ -143,23 +143,23 @@ describe('UC6 — composed read-layer server: every router mounted under one app
     });
   });
 
-  // --- CORS (AC6.4, AC6.5 / T-READ-11): only http://localhost:5173 ---
+  // --- Same-origin: no CORS headers needed (API and SPA share one server) ---
+  // TOPOLOGY CHANGE: the SPA and API are served from the SAME origin (one Express
+  // server on :3001 handles both /api/* and the Vite-transformed SPA). CORS is
+  // therefore deleted — same-origin requests never need ACAO headers. This test
+  // asserts that the composed server emits NO Access-Control-Allow-Origin header
+  // regardless of the Origin sent, proving no CORS layer is active.
 
-  it('AC6.4: Origin http://localhost:5173 → ACAO echoes that origin', async () => {
-    const res = await request(app).get('/api/projects').set('Origin', 'http://localhost:5173');
+  it('same-origin: /api/projects returns 200 with NO ACAO header (CORS deleted — same origin)', async () => {
+    const res = await request(app).get('/api/projects').set('Origin', 'http://localhost:3001');
     expect(res.status).toBe(200);
-    expect(res.headers['access-control-allow-origin']).toBe('http://localhost:5173');
-  });
-
-  it('AC6.5: a disallowed origin → NO Access-Control-Allow-Origin header', async () => {
-    const res = await request(app).get('/api/projects').set('Origin', 'http://evil.example.com');
-    expect(res.status).toBe(200); // request still served; just no CORS grant
     expect(res.headers['access-control-allow-origin']).toBeUndefined();
   });
 
-  it('AC6.5: not a wildcard ACAO even for the allowed origin', async () => {
+  it('same-origin: no ACAO header even for a foreign origin (no CORS layer running)', async () => {
     const res = await request(app).get('/api/projects').set('Origin', 'http://localhost:5173');
-    expect(res.headers['access-control-allow-origin']).not.toBe('*');
+    expect(res.status).toBe(200);
+    expect(res.headers['access-control-allow-origin']).toBeUndefined();
   });
 
   // --- App-level read-only guard (AC6.2, AC6.3 / F7, T-READ-10) ---

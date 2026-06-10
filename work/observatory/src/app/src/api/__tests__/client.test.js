@@ -37,15 +37,15 @@ describe('api/client URL construction + parsing', () => {
     vi.restoreAllMocks();
   });
 
-  it('API_BASE points at the :3001 read layer', () => {
-    expect(API_BASE).toBe('http://localhost:3001');
+  it('API_BASE is empty string — same-origin relative URLs (SPA and API share one server)', () => {
+    expect(API_BASE).toBe('');
   });
 
   it('getActive() GETs /api/active and returns the active id (AC: active project)', async () => {
     const f = mockFetchJson({ active: 'observatory' });
     vi.stubGlobal('fetch', f);
     const active = await getActive();
-    expect(f).toHaveBeenCalledWith('http://localhost:3001/api/active');
+    expect(f).toHaveBeenCalledWith('/api/active');
     expect(active).toBe('observatory');
   });
 
@@ -59,7 +59,7 @@ describe('api/client URL construction + parsing', () => {
     const f = mockFetchJson(rows);
     vi.stubGlobal('fetch', f);
     const projects = await getProjects();
-    expect(f).toHaveBeenCalledWith('http://localhost:3001/api/projects');
+    expect(f).toHaveBeenCalledWith('/api/projects');
     expect(projects).toEqual(rows);
   });
 
@@ -68,7 +68,7 @@ describe('api/client URL construction + parsing', () => {
     const f = mockFetchJson(fixture);
     vi.stubGlobal('fetch', f);
     const rows = await getQueues('observatory', 'ready');
-    expect(f).toHaveBeenCalledWith('http://localhost:3001/api/projects/observatory/queues/ready');
+    expect(f).toHaveBeenCalledWith('/api/projects/observatory/queues/ready');
     expect(rows).toEqual(fixture);
   });
 
@@ -79,7 +79,7 @@ describe('api/client URL construction + parsing', () => {
     const f = mockFetchJson(fixture);
     vi.stubGlobal('fetch', f);
     const rows = await getStageFlow('observatory');
-    expect(f).toHaveBeenCalledWith('http://localhost:3001/api/projects/observatory/stage-flow');
+    expect(f).toHaveBeenCalledWith('/api/projects/observatory/stage-flow');
     expect(rows).toEqual(fixture);
   });
 
@@ -87,7 +87,7 @@ describe('api/client URL construction + parsing', () => {
     const f = mockFetchJson([]);
     vi.stubGlobal('fetch', f);
     await getStageFlow('a/b');
-    expect(f).toHaveBeenCalledWith('http://localhost:3001/api/projects/a%2Fb/stage-flow');
+    expect(f).toHaveBeenCalledWith('/api/projects/a%2Fb/stage-flow');
   });
 
   it('getStageFlow fails soft to null on a network/HTTP error', async () => {
@@ -99,7 +99,7 @@ describe('api/client URL construction + parsing', () => {
     const f = mockFetchJson([]);
     vi.stubGlobal('fetch', f);
     await getQueues('a/b', 'ready');
-    expect(f).toHaveBeenCalledWith('http://localhost:3001/api/projects/a%2Fb/queues/ready');
+    expect(f).toHaveBeenCalledWith('/api/projects/a%2Fb/queues/ready');
   });
 
   it('getPolicy(project) builds the policy queue URL and returns PolicyRecord[] (AC1.4)', async () => {
@@ -107,7 +107,7 @@ describe('api/client URL construction + parsing', () => {
     const f = mockFetchJson(fixture);
     vi.stubGlobal('fetch', f);
     const rows = await getPolicy('observatory');
-    expect(f).toHaveBeenCalledWith('http://localhost:3001/api/projects/observatory/queues/policy');
+    expect(f).toHaveBeenCalledWith('/api/projects/observatory/queues/policy');
     expect(rows).toEqual(fixture);
   });
 
@@ -116,7 +116,7 @@ describe('api/client URL construction + parsing', () => {
     const f = mockFetchJson({ content: raw });
     vi.stubGlobal('fetch', f);
     const content = await getBaseline();
-    expect(f).toHaveBeenCalledWith('http://localhost:3001/api/dora/baseline');
+    expect(f).toHaveBeenCalledWith('/api/dora/baseline');
     expect(content).toBe(raw);
   });
 
@@ -130,7 +130,7 @@ describe('api/client URL construction + parsing', () => {
     const f = mockFetchJson({ content: raw });
     vi.stubGlobal('fetch', f);
     const content = await getFlow('observatory');
-    expect(f).toHaveBeenCalledWith('http://localhost:3001/api/projects/observatory/dora/flow');
+    expect(f).toHaveBeenCalledWith('/api/projects/observatory/dora/flow');
     expect(content).toBe(raw);
   });
 
@@ -138,7 +138,7 @@ describe('api/client URL construction + parsing', () => {
     const f = mockFetchJson({ content: null });
     vi.stubGlobal('fetch', f);
     await getFlow('a/b');
-    expect(f).toHaveBeenCalledWith('http://localhost:3001/api/projects/a%2Fb/dora/flow');
+    expect(f).toHaveBeenCalledWith('/api/projects/a%2Fb/dora/flow');
   });
 
   it('getFlow() returns null when content is null (missing flow.md)', async () => {
@@ -201,7 +201,7 @@ describe('api/client subscribeEvents seam', () => {
     const onChange = vi.fn();
     const unsubscribe = subscribeEvents(onChange);
 
-    expect(FakeES).toHaveBeenCalledWith('http://localhost:3001/api/events');
+    expect(FakeES).toHaveBeenCalledWith('/api/events');
     // simulate a server change frame
     handlers.message({ data: JSON.stringify({ type: 'change', path: 'work/observatory/queues/ready.csv' }) });
     expect(onChange).toHaveBeenCalledWith({ type: 'change', path: 'work/observatory/queues/ready.csv' });

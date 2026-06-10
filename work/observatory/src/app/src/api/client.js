@@ -118,6 +118,22 @@ export async function getItems(project) {
 }
 
 /**
+ * GET /api/projects/:id/ledger?item_id=<id> → LedgerRow[] for the item, newest-
+ * first (UC-S005-1 endpoint), or null when unreachable. Returns the ARRAY
+ * DIRECTLY (no envelope), like /items. Unknown/absent item_id → [] from the
+ * server (never 4xx/5xx). UC-S005-5's ItemHistoryPanel renders these rows as
+ * readable history lines. Both segments are URL-encoded. Fail-soft to null.
+ * @param {string} project
+ * @param {string} itemId
+ * @returns {Promise<Array|null>}
+ */
+export async function getItemLedger(project, itemId) {
+  return getJson(
+    `/api/projects/${encodeURIComponent(project)}/ledger?item_id=${encodeURIComponent(itemId)}`,
+  );
+}
+
+/**
  * GET /api/projects/:id/slices → string[] of slice directory names (slugs), or
  * null when missing/unreachable. Returns the ARRAY DIRECTLY (no envelope), like
  * /items. UC-S005-3's detail pane uses the slug list to resolve which slice dir

@@ -163,12 +163,17 @@ graph TD
     %% DetailPaneContainer beside the (unchanged) value-stream map. The pane fetches
     %% slice artifacts ONLY through SPA_CLIENT.getSlices/getSliceArtifact over the
     %% existing /slices routes (R_SLICES). itemDetail is the pure slug-derivation
-    %% DOMAIN. DetailPane renders raw artifact text in a <pre> (UC-S005-4 swaps in
-    %% ArtifactView; UC-S005-5 mounts ItemHistoryPanel into the labelled slot).
+    %% DOMAIN. DetailPane NOW (UC-S005-4) renders artifact text through ArtifactView
+    %% (markdown→semantic HTML via marked; fenced ```mermaid / .mmd→Mermaid SVG via
+    %% the SPA_MMDADAPTER port) and (UC-S005-5) mounts ItemHistoryPanel into the
+    %% labelled history slot, fed by DetailPaneContainer's new getItemLedger fetch.
     SPA_OBSVIEW["src/app/src/components/ObservatoryView.jsx — composition (UC-S005-3)<br/>lifts selectedId + items; resolves selected record; mounts tree rail + VSM + detail pane; open-on-click / Back-to-map"]:::s005changed
     SPA_ITEMDETAIL["src/app/src/state/itemDetail.js — detail DOMAIN (UC-S005-3)<br/>deriveSliceSlug(item, slugs) (sNNN→slice dir), defaultArtifactName, paneLabel; no fetch/DOM; pure"]:::s005changed
-    SPA_PANECTR["src/app/src/components/DetailPaneContainer.jsx — data→render container (UC-S005-3)<br/>getSlices once + getSliceArtifact on select; deriveSliceSlug; non-slice→placeholder; close returns focus to value-stream-map"]:::s005changed
-    SPA_PANE["src/app/src/components/DetailPane.jsx — non-modal labelled region (UC-S005-3)<br/>role=region aria-label Item detail:id; identity dl + breadcrumb + raw <pre> artifact slot + history slot; managed focus; Esc/×/Back-to-map=onClose"]:::s005changed
+    SPA_PANECTR["src/app/src/components/DetailPaneContainer.jsx — data→render container (UC-S005-3/5)<br/>getSlices once + getSliceArtifact on select + getItemLedger(project,itemId) on select (UC-S005-5); deriveSliceSlug; non-slice→placeholder; close returns focus to originating node"]:::s005changed
+    SPA_PANE["src/app/src/components/DetailPane.jsx — non-modal labelled region (UC-S005-3/4/5)<br/>role=region aria-label Item detail:id; identity dl + breadcrumb; mounts ArtifactView (artifact-view slot) + ItemHistoryPanel (item-history-slot); managed focus; Esc/×/Back-to-map=onClose"]:::s005changed
+    SPA_ARTVIEW["src/app/src/components/ArtifactView.jsx — artifact render (UC-S005-4)<br/>marked: md→semantic HTML (h1/ul/table/code, no top-level <pre>); extracts fenced ```mermaid; .mmd→diagram via renderMmd port; fail-soft→'not yet available' / readable-text fallback; svg role=img+aria-label"]:::s005changed
+    SPA_MMDADAPTER["src/app/src/lib/mermaidRender.js — Mermaid ADAPTER (UC-S005-4)<br/>the ONLY importer of the concrete mermaid SDK; renderMermaidToSvg(code,id)->svg; securityLevel=strict; proven live in browser (jsdom can't lay out SVG)"]:::s005changed
+    SPA_HISTORY["src/app/src/components/ItemHistoryPanel.jsx — item ledger history (UC-S005-5)<br/>role=region aria-label Item history:id; role=list rows newest-first (HH:MM·agent·event·outcome, DEFECT-005 readable style, never row:N); empty→'no history'; GEO-S005-2 vertical stack"]:::s005changed
     SPA_VSMCTR["src/app/src/components/VsmContainer.jsx — value-stream map container (s004; unchanged, placed beside the rail)"]:::stable
 
     SPA_MAIN -->|mounts observatory view| SPA_OBSVIEW
@@ -177,11 +182,24 @@ graph TD
     SPA_OBSVIEW -->|getActive| SPA_CLIENT
     SPA_OBSVIEW -->|selected record| SPA_PANECTR
     SPA_PANECTR -->|getSlices/getSliceArtifact| SPA_CLIENT
+    SPA_PANECTR -->|getItemLedger project,itemId| SPA_CLIENT
     SPA_PANECTR -->|deriveSliceSlug/defaultArtifactName| SPA_ITEMDETAIL
-    SPA_PANECTR -->|renders| SPA_PANE
+    SPA_PANECTR -->|renders historyRows + artifactText| SPA_PANE
+    SPA_PANE -->|mounts kind/text/source| SPA_ARTVIEW
+    SPA_PANE -->|mounts rows/itemId| SPA_HISTORY
     SPA_PANE -->|paneLabel| SPA_ITEMDETAIL
     SPA_PANE -->|@import| SPA_TOKENS
+    SPA_ARTVIEW -->|renderMmd port default| SPA_MMDADAPTER
+    SPA_ARTVIEW -->|@import| SPA_TOKENS
+    SPA_HISTORY -->|@import| SPA_TOKENS
+    SPA_MMDADAPTER -.->|dynamic import| MERMAID_SDK
+    SPA_ARTVIEW -.->|marked text→HTML| MARKED_SDK
     SPA_CLIENT -.->|HTTP GET /api/projects/:id/slices + /slices/:slug/:artifact (getSlices/getSliceArtifact)| R_SLICE
+    SPA_CLIENT -.->|HTTP GET /api/projects/:id/ledger?item_id=id (getItemLedger; UC-S005-1 endpoint)| R_LEDGER
+
+    R_LEDGER["server: GET /api/projects/:id/ledger?item_id (UC-S005-1)<br/>shared tolerant parseLedger; rows newest-first; unknown id→[]; existing — no server change in UC-S005-4/5"]:::stable
+    MARKED_SDK["marked (npm) — client-side markdown→HTML"]:::stable
+    MERMAID_SDK["mermaid (npm) — client-side diagram→SVG"]:::stable
 
     classDef stable fill:#eee,stroke:#999,color:#000
     classDef delivered fill:#d5f5e3,stroke:#1e8449,color:#000

@@ -16,7 +16,7 @@
 //   - Esc and the close affordance call onClose
 //   - on open focus moves into the pane (A11Y-S005-3 managed focus)
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/preact';
+import { render, screen, fireEvent, within } from '@testing-library/preact';
 import { DetailPane } from '../DetailPane.jsx';
 
 const UC_ITEM = {
@@ -56,7 +56,7 @@ describe('DetailPane (UC-S005-3)', () => {
     expect(screen.getByTestId('breadcrumb')).toHaveTextContent('UC-S001-1');
   });
 
-  it('for a slice-backed node lists its available artifacts and shows the chosen one as RAW text', () => {
+  it('for a slice-backed node lists its artifacts and renders the chosen one as markdown HTML (UC-S005-4)', () => {
     render(
       <DetailPane
         item={UC_ITEM}
@@ -68,8 +68,9 @@ describe('DetailPane (UC-S005-3)', () => {
       />,
     );
     const view = screen.getByTestId('artifact-view');
-    // raw text shown in a <pre> (UC-S005-3 scope; UC-S005-4 swaps in the renderer)
-    expect(view.querySelector('pre')).toBeTruthy();
+    // UC-S005-4: markdown is rendered as semantic HTML (a heading), NOT raw <pre>
+    expect(view.querySelector('h1')).toBeTruthy();
+    expect(view.querySelector(':scope > pre')).toBeNull();
     expect(view).toHaveTextContent('The read layer.');
     // the artifact list is offered as switchable controls
     expect(screen.getByTestId('artifact-list')).toHaveTextContent('acceptance.md');
@@ -93,10 +94,27 @@ describe('DetailPane (UC-S005-3)', () => {
     errSpy.mockRestore();
   });
 
-  it('leaves a labelled empty slot for the item-history panel (UC-S005-5)', () => {
-    render(<DetailPane item={UC_ITEM} onClose={() => {}} />);
+  it('mounts the ItemHistoryPanel into the history slot with the passed rows (UC-S005-5)', () => {
+    render(
+      <DetailPane
+        item={UC_ITEM}
+        historyRows={[
+          { timestamp: '2026-06-09T15:10:00Z', agent: 'engineer', event: 'task_end', outcome: 'success' },
+          { timestamp: '2026-06-09T14:36:00Z', agent: 'engineer', event: 'task_start', outcome: 'na' },
+        ]}
+        onClose={() => {}}
+      />,
+    );
     const slot = screen.getByTestId('item-history-slot');
-    expect(slot.getAttribute('aria-label')).toMatch(/history/i);
+    const panel = within(slot).getByTestId('item-history');
+    expect(within(panel).getAllByTestId('history-row')).toHaveLength(2);
+    expect(panel).toHaveTextContent('task_end');
+  });
+
+  it('history slot shows "no history" when the item has no rows (UC-S005-5)', () => {
+    render(<DetailPane item={UC_ITEM} historyRows={[]} onClose={() => {}} />);
+    const slot = screen.getByTestId('item-history-slot');
+    expect(within(slot).getByTestId('item-history')).toHaveTextContent(/no history/i);
   });
 
   it('calls onClose when the × close control is clicked', () => {

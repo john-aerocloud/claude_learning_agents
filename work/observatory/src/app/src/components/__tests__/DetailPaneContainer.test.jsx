@@ -16,7 +16,7 @@
 //     focusOnClose handler (DEFECT-006: the parent restores focus to the
 //     originating tree node, not the value-stream map).
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/preact';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/preact';
 import { DetailPaneContainer } from '../DetailPaneContainer.jsx';
 
 const UC_ITEM = { id: 'UC-S001-1', type: 'use-case', state: 'done', value: 'HIGH', cost: '2' };
@@ -26,6 +26,10 @@ const deps = (over = {}) => ({
   project: 'observatory',
   loadSlices: vi.fn().mockResolvedValue(['s001-read-layer', 's005-workitem-tree']),
   loadArtifact: vi.fn().mockResolvedValue('# Slice 001\nThe read layer.'),
+  loadLedger: vi.fn().mockResolvedValue([
+    { timestamp: '2026-06-09T15:10:00Z', agent: 'engineer', event: 'task_end', outcome: 'success', item_id: 'UC-S001-1' },
+    { timestamp: '2026-06-09T14:36:00Z', agent: 'engineer', event: 'task_start', outcome: 'na', item_id: 'UC-S001-1' },
+  ]),
   onClose: vi.fn(),
   ...over,
 });
@@ -52,6 +56,23 @@ describe('DetailPaneContainer (UC-S005-3)', () => {
     await waitFor(() => expect(screen.getByTestId('detail-pane')).toBeTruthy());
     expect(screen.getByTestId('artifact-view')).toHaveTextContent(/not yet available/i);
     expect(d.loadArtifact).not.toHaveBeenCalled();
+  });
+
+  it('fetches the item ledger and renders its history rows in the pane (UC-S005-5)', async () => {
+    const d = deps();
+    render(<DetailPaneContainer item={UC_ITEM} {...d} />);
+    await waitFor(() => expect(screen.getByTestId('item-history')).toBeTruthy());
+    await waitFor(() =>
+      expect(within(screen.getByTestId('item-history-slot')).getAllByTestId('history-row')).toHaveLength(2),
+    );
+    expect(d.loadLedger).toHaveBeenCalledWith('observatory', 'UC-S001-1');
+    expect(screen.getByTestId('item-history')).toHaveTextContent('task_end');
+  });
+
+  it('shows "no history" when the item has no ledger rows (UC-S005-5)', async () => {
+    const d = deps({ loadLedger: vi.fn().mockResolvedValue([]) });
+    render(<DetailPaneContainer item={REQ_ITEM} {...d} />);
+    await waitFor(() => expect(screen.getByTestId('item-history')).toHaveTextContent(/no history/i));
   });
 
   it('on close calls onClose AND the injected focusOnClose handler (DEFECT-006: parent restores focus to the originating tree node)', async () => {

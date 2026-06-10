@@ -23,7 +23,7 @@
 // into DetailPane's slots later; this container leaves them untouched.
 
 import { useEffect, useState, useCallback } from 'preact/hooks';
-import { getSlices, getSliceArtifact } from '../api/client.js';
+import { getSlices, getSliceArtifact, getItemLedger } from '../api/client.js';
 import { deriveSliceSlug, defaultArtifactName } from '../state/itemDetail.js';
 import { DetailPane } from './DetailPane.jsx';
 
@@ -46,6 +46,7 @@ function focusValueStreamMap() {
  *        value-stream map when not injected.
  * @param {(project:string)=>Promise<string[]|null>} [props.loadSlices]
  * @param {(project:string, slug:string, artifact:string)=>Promise<string|null>} [props.loadArtifact]
+ * @param {(project:string, itemId:string)=>Promise<Array|null>} [props.loadLedger] - UC-S005-5
  */
 export function DetailPaneContainer({
   item,
@@ -54,11 +55,15 @@ export function DetailPaneContainer({
   focusOnClose,
   loadSlices = getSlices,
   loadArtifact = getSliceArtifact,
+  loadLedger = getItemLedger,
 }) {
   const [slugs, setSlugs] = useState(null);
   const [slug, setSlug] = useState(null);
   const [artifactName, setArtifactName] = useState(defaultArtifactName());
   const [artifactText, setArtifactText] = useState(null);
+  // UC-S005-5: the selected item's ledger history rows (newest-first), or null
+  // while loading / [] when the item has no rows.
+  const [historyRows, setHistoryRows] = useState(null);
 
   // Fetch the slice-slug list once per project (the slug map for the whole tree).
   useEffect(() => {
@@ -94,6 +99,22 @@ export function DetailPaneContainer({
     return () => { active = false; };
   }, [item ? item.id : null, slugs, project, loadArtifact]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // UC-S005-5: fetch the selected item's ledger history (newest-first). Keyed on
+  // the item id + project; a node with no item never loads. Fail-soft to [].
+  useEffect(() => {
+    if (!item || !project) {
+      setHistoryRows(null);
+      return undefined;
+    }
+    setHistoryRows(null); // reset to loading on item change
+    let active = true;
+    Promise.resolve()
+      .then(() => loadLedger(project, item.id))
+      .then((rows) => { if (active) setHistoryRows(Array.isArray(rows) ? rows : []); })
+      .catch(() => { if (active) setHistoryRows([]); });
+    return () => { active = false; };
+  }, [item ? item.id : null, project, loadLedger]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Switch which artifact is shown (artifact-list tab click).
   const onSelectArtifact = useCallback(
     (name) => {
@@ -125,6 +146,7 @@ export function DetailPaneContainer({
       artifactName={artifactName}
       artifactText={artifactText}
       onSelectArtifact={onSelectArtifact}
+      historyRows={historyRows}
       onClose={handleClose}
     />
   );

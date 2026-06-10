@@ -14,6 +14,7 @@ import {
   getFlow,
   getStageFlow,
   getItems,
+  getItemLedger,
   getSlices,
   getSliceArtifact,
   fetchQueues,
@@ -148,6 +149,27 @@ describe('api/client URL construction + parsing', () => {
   it('getSliceArtifact fails soft to null on a network error', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('boom')));
     expect(await getSliceArtifact('observatory', 's001-read-layer', 'slice.md')).toBeNull();
+  });
+
+  it('getItemLedger builds /ledger?item_id=<id> and returns the RAW array (no envelope) (UC-S005-5)', async () => {
+    const fixture = [{ timestamp: '2026-06-09T15:10:00Z', agent: 'engineer', event: 'task_end', item_id: 'UC-S001-1' }];
+    const f = mockFetchJson(fixture);
+    vi.stubGlobal('fetch', f);
+    const rows = await getItemLedger('observatory', 'UC-S001-1');
+    expect(f.mock.calls[0][0]).toBe('/api/projects/observatory/ledger?item_id=UC-S001-1');
+    expect(rows).toEqual(fixture);
+  });
+
+  it('getItemLedger URL-encodes the project and item id segments', async () => {
+    const f = mockFetchJson([]);
+    vi.stubGlobal('fetch', f);
+    await getItemLedger('a/b', 'UC S/1');
+    expect(f.mock.calls[0][0]).toBe('/api/projects/a%2Fb/ledger?item_id=UC%20S%2F1');
+  });
+
+  it('getItemLedger fails soft to null on a network/HTTP error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('down')));
+    expect(await getItemLedger('observatory', 'UC-S001-1')).toBeNull();
   });
 
   it('getItems encodes the project segment', async () => {

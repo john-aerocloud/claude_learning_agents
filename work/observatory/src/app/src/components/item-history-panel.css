@@ -1,0 +1,88 @@
+/* UC-S005-5 — ItemHistoryPanel: the item's ledger history rows in the detail
+ * pane. Rows STACK vertically in newest-first order (GEO-S005-2: a list, not a
+ * grid — each row shares a left offset, top offsets strictly increase). All
+ * tokens from tokens.css; readable line style mirrors the DEFECT-005 reveal. */
+
+.item-history {
+  margin-top: var(--sp-3, 12px);
+}
+
+.item-history__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2, 8px);
+  margin-bottom: var(--sp-1, 4px);
+}
+
+.item-history__title {
+  font-weight: var(--fw-label, 600);
+  color: var(--c-text);
+  text-transform: lowercase;
+}
+
+.item-history__file {
+  color: var(--c-text-dim);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-meta);
+}
+
+.item-history__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column; /* GEO-S005-2: rows stack vertically */
+  gap: 2px;
+}
+
+.item-history__row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 0;
+  font-size: var(--fs-meta);
+  color: var(--c-text);
+  border-bottom: 1px solid var(--c-border, rgba(0, 0, 0, 0.06));
+}
+
+.item-history__time {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--c-text-dim);
+}
+
+.item-history__sep {
+  color: var(--c-text-dim);
+}
+
+.item-history__agent {
+  font-weight: var(--fw-meta, 500);
+}
+
+.item-history__event {
+  color: var(--c-text);
+}
+
+.item-history__outcome {
+  color: var(--c-text-dim);
+}
+
+.item-history__dur {
+  color: var(--c-text-dim);
+}
+
+.item-history__note {
+  flex-basis: 100%;
+  color: var(--c-text-dim);
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.item-history__empty {
+  color: var(--c-text-dim);
+  font-style: italic;
+  margin: var(--sp-1, 4px) 0 0;
+}

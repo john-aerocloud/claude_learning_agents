@@ -28,6 +28,8 @@
 import { useEffect, useRef } from 'preact/hooks';
 import './detail-pane.css';
 import { paneLabel } from '../state/itemDetail.js';
+import { ItemHistoryPanel } from './ItemHistoryPanel.jsx';
+import { ArtifactView } from './ArtifactView.jsx';
 
 /**
  * @param {object} props
@@ -37,6 +39,7 @@ import { paneLabel } from '../state/itemDetail.js';
  * @param {string} [props.artifactName]     - the currently-shown artifact name
  * @param {string|null} [props.artifactText]- RAW text of the shown artifact (null → absent)
  * @param {(name:string)=>void} [props.onSelectArtifact] - switch shown artifact
+ * @param {Array|null} [props.historyRows] - the item's ledger rows (UC-S005-5; newest-first)
  * @param {()=>void} props.onClose          - close the pane (Esc / × / Back to map)
  */
 export function DetailPane({
@@ -46,6 +49,7 @@ export function DetailPane({
   artifactName = 'slice.md',
   artifactText = null,
   onSelectArtifact,
+  historyRows = null,
   onClose,
 }) {
   const headingRef = useRef(null);
@@ -66,7 +70,8 @@ export function DetailPane({
   };
 
   const source = slug ? `work/.../slices/${slug}/${artifactName}` : null;
-  const hasArtifact = typeof artifactText === 'string' && artifactText.length > 0;
+  // UC-S005-4: artifact KIND drives the renderer — .mmd → Mermaid SVG, else markdown.
+  const artifactKind = /\.mmd$/i.test(artifactName || '') ? 'mmd' : 'md';
 
   return (
     <section
@@ -138,28 +143,20 @@ export function DetailPane({
         </div>
       ) : null}
 
-      {/* ARTIFACT VIEW SLOT — UC-S005-3 shows RAW text in a <pre>. UC-S005-4 will
-          replace the <pre> branch with <ArtifactView kind text /> (markdown→HTML,
-          .mmd→SVG) inside this same data-testid="artifact-view" container. */}
-      <div class="detail-pane__artifact" data-testid="artifact-view" data-source={source || undefined}>
-        {hasArtifact ? (
-          <pre class="detail-pane__raw" data-testid="artifact-raw">{artifactText}</pre>
-        ) : (
-          <p class="detail-pane__placeholder">Artifact not yet available for this item.</p>
-        )}
-      </div>
+      {/* ARTIFACT VIEW SLOT — UC-S005-4: <ArtifactView> renders the artifact text
+          as markdown→HTML (semantic) or .mmd→Mermaid SVG, with a readable-text
+          fallback (never blank/broken). data-testid="artifact-view" + data-source. */}
+      <ArtifactView
+        kind={artifactKind}
+        text={artifactText}
+        source={source}
+      />
 
-      {/* ITEM-HISTORY SLOT — UC-S005-5 mounts <ItemHistoryPanel rows itemId /> here.
-          Left as a labelled empty region so the slot is present + assertable. */}
-      <div
-        class="detail-pane__history-slot"
-        data-testid="item-history-slot"
-        role="region"
-        aria-label={`Item history: ${item.id}`}
-      >
-        <p class="detail-pane__placeholder detail-pane__placeholder--muted">
-          Item history loads here.
-        </p>
+      {/* ITEM-HISTORY SLOT — UC-S005-5: <ItemHistoryPanel> renders the item's
+          ledger rows (newest-first) as readable history lines. The slot wrapper
+          carries the stable data-testid="item-history-slot" hook. */}
+      <div class="detail-pane__history-slot" data-testid="item-history-slot">
+        <ItemHistoryPanel rows={historyRows} itemId={item.id} />
       </div>
     </section>
   );

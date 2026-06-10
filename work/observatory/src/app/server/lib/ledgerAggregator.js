@@ -228,6 +228,18 @@ export const CANONICAL_STAGES = [
 const REWORK_EVENTS = new Set(['failure', 'recovery', 'rework']);
 const DONE_OUTCOMES = new Set(['success', 'pass']);
 
+// DEFECT-005 — the traceability reveal must show readable CONTRIBUTING EVENTS,
+// not internal CSV line indices. The aggregator already visits each contributing
+// row, so we project its readable fields into source_events. Capped server-side
+// so a busy stage (85 engineer task_starts) does not ship a huge payload; the
+// true count is reported as source_total so the UI can render "…and N more".
+const SOURCE_EVENTS_CAP = 50;
+
+/** Project a parsed ledger row into a readable source-event tuple (DEFECT-005). */
+function toSourceEvent(r) {
+  return { ts: r.timestamp, agent: r.agent, event: r.event, item_id: r.item_id };
+}
+
 function isUiValidate(r) {
   const hay = `${r.note} ${r.slice} ${r.ref}`.toLowerCase();
   return hay.includes('validate') || hay.includes('validation');
@@ -362,6 +374,8 @@ function emptyStages(queues = null, itemRegistry = null, now = Date.now()) {
     rework: 0,
     wip_items: [],
     source_rows: [],
+    source_events: [],
+    source_total: 0,
     ...queueFieldsFor(s.stage, queues, itemRegistry, now),
   }));
 }
@@ -401,7 +415,11 @@ export function aggregateStageFlow(ledgerCsv, project, itemsCsv = null, opts = {
 
   return CANONICAL_STAGES.map((stageDef) => {
     const m = STAGE_MATCHERS[stageDef.stage];
-    const sourceRows = new Set();
+    // DEFECT-005: keep the contributing ROW (not just its index) keyed by rowRef
+    // so we can emit both source_rows (audit) and readable source_events. A Map
+    // preserves insertion order and dedups exactly as the old Set did.
+    const sourceByRef = new Map();
+    const sourceRows = { add: (r) => sourceByRef.set(r.rowRef, r) };
     let throughput = 0;
     let rework = 0;
 
@@ -415,25 +433,25 @@ export function aggregateStageFlow(ledgerCsv, project, itemsCsv = null, opts = {
     for (const r of rows) {
       if (m.tpIn(r)) {
         throughput += 1;
-        sourceRows.add(r.rowRef);
+        sourceRows.add(r);
       }
       if (m.rework && m.rework(r)) {
         rework += 1;
-        sourceRows.add(r.rowRef);
+        sourceRows.add(r);
       }
       const id = r.item_id;
       if (m.openIn(r) && id) {
         openByItem.set(id, r);
-        sourceRows.add(r.rowRef);
+        sourceRows.add(r);
       } else if (m.close(r) && id && openByItem.has(id)) {
         const openRow = openByItem.get(id);
         openByItem.delete(id);
-        sourceRows.add(r.rowRef);
+        sourceRows.add(r);
         const d = pairDurationS(openRow, r);
         if (d !== null) dwellSamples.push(d);
       } else if (m.close(r) && id) {
         // close with no open (half-open / out-of-order) — record source, no crash
-        sourceRows.add(r.rowRef);
+        sourceRows.add(r);
       }
     }
 
@@ -444,6 +462,12 @@ export function aggregateStageFlow(ledgerCsv, project, itemsCsv = null, opts = {
       const entry = itemRegistry.get(id);
       return entry !== undefined && !entry.terminal;
     });
+
+    // DEFECT-005: contributing rows in encounter order. source_rows keeps the
+    // audit indices; source_events projects readable fields (capped, with the
+    // true total so the UI can render "…and N more").
+    const contributing = [...sourceByRef.values()];
+    const sourceTotal = contributing.length;
 
     return {
       stage: stageDef.stage,
@@ -456,7 +480,9 @@ export function aggregateStageFlow(ledgerCsv, project, itemsCsv = null, opts = {
       wip: wipItems.length,
       rework,
       wip_items: wipItems,
-      source_rows: [...sourceRows],
+      source_rows: contributing.map((r) => r.rowRef),
+      source_events: contributing.slice(0, SOURCE_EVENTS_CAP).map(toSourceEvent),
+      source_total: sourceTotal,
       ...queueFieldsFor(stageDef.stage, queues, itemRegistry, now),
     };
   });

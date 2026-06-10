@@ -436,6 +436,68 @@ describe('aggregateStageFlow — queue current-state (DEFECT-004 §3/§4)', () =
   });
 });
 
+describe('aggregateStageFlow — source_events (DEFECT-005 readable traceability)', () => {
+  it('emits a readable source_event {ts,agent,event,item_id} per contributing row alongside source_rows', () => {
+    const out = aggregateStageFlow(
+      csv([
+        row({ ts: '2026-06-09T14:36:00Z', agent: 'engineer', event: 'task_start', item: 'UC-S001-1' }),
+        row({ ts: '2026-06-09T14:50:00Z', agent: 'engineer', event: 'task_end', item: 'UC-S001-1', duration: '840' }),
+      ]),
+      'p',
+    );
+    const eng = byStage(out, 'engineer');
+    expect(Array.isArray(eng.source_events)).toBe(true);
+    // the task_start (throughput in-event) AND its closing task_end both contribute
+    expect(eng.source_events.length).toBeGreaterThanOrEqual(2);
+    const start = eng.source_events.find((e) => e.event === 'task_start');
+    expect(start).toMatchObject({
+      ts: '2026-06-09T14:36:00Z',
+      agent: 'engineer',
+      event: 'task_start',
+      item_id: 'UC-S001-1',
+    });
+    // source_rows is still present (audit hook / existing tests rely on it)
+    expect(Array.isArray(eng.source_rows)).toBe(true);
+    expect(eng.source_rows.length).toBe(eng.source_events.length);
+    // source_total mirrors how many contributing events exist
+    expect(eng.source_total).toBe(eng.source_events.length);
+  });
+
+  it('empty stage → source_events [] and source_total 0 (never null)', () => {
+    const out = aggregateStageFlow(csv([]), 'p');
+    for (const s of out) {
+      expect(Array.isArray(s.source_events)).toBe(true);
+      expect(s.source_events).toEqual([]);
+      expect(s.source_total).toBe(0);
+    }
+  });
+
+  it('source_events carry NO bare "row:N" content — the values are real ledger fields', () => {
+    const out = aggregateStageFlow(
+      csv([row({ ts: '2026-06-09T14:36:00Z', agent: 'engineer', event: 'task_start', item: 'UC-X' })]),
+      'p',
+    );
+    const eng = byStage(out, 'engineer');
+    for (const e of eng.source_events) {
+      expect(e.ts).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(typeof e.agent).toBe('string');
+      expect(typeof e.event).toBe('string');
+      expect(String(e.event)).not.toMatch(/^row:/);
+    }
+  });
+
+  it('caps source_events at the server cap but reports the true source_total when capped', () => {
+    const rows = [];
+    for (let i = 0; i < 85; i++) {
+      rows.push(row({ ts: `2026-06-09T14:${String(i % 60).padStart(2, '0')}:00Z`, agent: 'engineer', event: 'task_start', item: `UC-${i}` }));
+    }
+    const eng = byStage(aggregateStageFlow(csv(rows), 'p'), 'engineer');
+    expect(eng.throughput).toBe(85);
+    expect(eng.source_total).toBe(85);
+    expect(eng.source_events.length).toBeLessThanOrEqual(50);
+  });
+});
+
 describe('aggregateStageFlow — REAL ledger (real-data gate, not a fixture)', () => {
   const realLedger = readFileSync(join(repoRoot, 'process', 'dora', 'ledger.csv'), 'utf8');
   const realItems = readFileSync(
@@ -465,6 +527,18 @@ describe('aggregateStageFlow — REAL ledger (real-data gate, not a fixture)', (
     const eng = byStage(out, 'engineer');
     expect(eng.throughput).toBeGreaterThanOrEqual(8);
     expect(eng.source_rows.length).toBeGreaterThan(0);
+  });
+
+  it('DEFECT-005: real engineer source_events are readable ledger fields (not row:N), capped with a true total', () => {
+    const eng = byStage(aggregateStageFlow(realLedger, 'observatory'), 'engineer');
+    expect(eng.source_events.length).toBeGreaterThan(0);
+    expect(eng.source_total).toBeGreaterThanOrEqual(eng.source_events.length);
+    for (const e of eng.source_events) {
+      expect(e.ts).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(e.agent).toBe('engineer');
+      expect(typeof e.event).toBe('string');
+      expect(String(e.event)).not.toMatch(/^row:/);
+    }
   });
 
   it('every canonical stage is present even on the real ledger', () => {

@@ -118,8 +118,15 @@ test('@a11y A11Y-2/4 — the engineer node accessible name carries its figures i
 });
 
 test('@a11y A11Y-3 — Tab reaches the stage nodes in canonical flow order', async ({ page }) => {
-  const order = ['intake', 'decompose', 'ready', 'capabilities', 'ui-design', 'engineer'];
-  for (const s of order) {
+  // CHK-4/UC-S005-2: the work-item tree is a left-rail landmark mounted BEFORE
+  // the map in DOM. By the WAI-ARIA tree pattern it is a SINGLE tab stop (roving
+  // tabindex — one tabbable treeitem); start the map tab-order walk from the map
+  // region itself so the assertion is about the map, independent of the tree.
+  await page.getByTestId('stage-intake').focus();
+  const testid0 = await page.evaluate(() => document.activeElement?.getAttribute('data-testid'));
+  expect(testid0).toBe('stage-intake');
+  const rest = ['decompose', 'ready', 'capabilities', 'ui-design', 'engineer'];
+  for (const s of rest) {
     await page.keyboard.press('Tab');
     const testid = await page.evaluate(() => document.activeElement?.getAttribute('data-testid'));
     expect(testid).toBe(`stage-${s}`);

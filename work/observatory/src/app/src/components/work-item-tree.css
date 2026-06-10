@@ -74,13 +74,24 @@
 .tree-node--backlog { border-left-color: var(--c-tree-state-backlog); }
 .tree-node--blocked { border-left-color: var(--c-tree-state-blocked); }
 
+/* Toggle and leaf spacer occupy an IDENTICAL fixed box so the GEO-S005-1 indent
+ * (the depth-scaled padding-left) is the SOLE driver of a child's content offset
+ * — a branch vs leaf must not perturb the per-level step. */
+.disclosure-toggle,
+.disclosure-spacer {
+  flex: 0 0 var(--target-min);
+  width: var(--target-min);
+  min-width: var(--target-min);
+  height: var(--target-min);
+  min-height: var(--target-min);
+  box-sizing: border-box;
+  padding: 0;
+}
+
 .disclosure-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: var(--target-min);
-  min-height: var(--target-min);
-  padding: 0;
   background: none;
   border: none;
   color: var(--c-text-dim);
@@ -97,11 +108,14 @@
 
 .disclosure-spacer {
   display: inline-block;
-  min-width: var(--target-min);
-  min-height: 1px;
 }
 
+/* fixed glyph box so a per-type glyph (▣ vs ▸ vs ◎) of differing intrinsic
+ * width does not perturb the GEO-S005-1 per-level indent step. */
 .tree-node__glyph {
+  flex: 0 0 1.1em;
+  width: 1.1em;
+  text-align: center;
   color: var(--c-text-dim);
 }
 
@@ -131,13 +145,17 @@
   flex: 0 0 auto;
 }
 
+/* state-badge TEXT uses the readable --c-text (≥ 4.5:1, A11Y-S005-7); the state
+ * colour rides the BORDER only (non-text UI, ≥ 3:1) so the small-size violet/teal
+ * tokens never become sub-4.5:1 text. Text label is the authoritative cue. */
 .state-badge {
   border: 1px solid transparent;
+  color: var(--c-text);
 }
-.state-badge--done { color: var(--c-tree-state-done); border-color: var(--c-tree-state-done); }
-.state-badge--active { color: var(--c-tree-state-active); border-color: var(--c-tree-state-active); }
-.state-badge--backlog { color: var(--c-tree-state-backlog); border-color: var(--c-tree-state-backlog); }
-.state-badge--blocked { color: var(--c-tree-state-blocked); border-color: var(--c-tree-state-blocked); }
+.state-badge--done { border-color: var(--c-tree-state-done); }
+.state-badge--active { border-color: var(--c-tree-state-active); }
+.state-badge--backlog { border-color: var(--c-tree-state-backlog); }
+.state-badge--blocked { border-color: var(--c-tree-state-blocked); }
 
 .vc-badge {
   color: var(--c-text-dim);
@@ -151,17 +169,14 @@
   align-items: center;
   gap: 2px;
   border: 1px solid transparent;
+  color: var(--c-text); /* readable text (≥ 4.5:1); colour rides the border */
 }
 .space-tag__icon { font-size: var(--fs-tree-badge); }
 
-.space-tag--work {
-  color: var(--c-space-work);
-  border-color: var(--c-space-work);
-}
-.space-tag--process {
-  color: var(--c-space-process);
-  border-color: var(--c-space-process);
-}
+/* distinct colour band PER space on the border (AC-S005-2-5: distinct class →
+ * distinct computed colour); border is non-text UI so ≥ 3:1 suffices. */
+.space-tag--work { border-color: var(--c-space-work); }
+.space-tag--process { border-color: var(--c-space-process); }
 
 /* A11Y-S005-9 — reduced motion: collapse expand/collapse transitions to 0ms. */
 @media (prefers-reduced-motion: reduce) {

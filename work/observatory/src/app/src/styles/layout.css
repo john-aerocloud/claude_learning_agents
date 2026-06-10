@@ -1,0 +1,13 @@
+/* CHK-4 / UC-S005-2 layout: the work-item tree rail beside the value-stream map.
+ * ui-design.md §1 — the rail is a persistent left landmark; the map column is the
+ * existing primary surface, unchanged in its own layout. Desktop-first. */
+.observatory-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-4);
+}
+
+.observatory-main-col {
+  flex: 1 1 auto;
+  min-width: 0;
+}

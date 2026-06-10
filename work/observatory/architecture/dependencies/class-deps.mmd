@@ -56,7 +56,7 @@ graph TD
     %% is the network, not an import) — so SPA_CLIENT depends on the deployed :3001
     %% surface (R_PROJ/R_ITEMS/R_DORA/R_EVENTS routes), drawn as a runtime call edge.
     %% S2-UC2..6 attach to SPA_MAIN/SPA_CLIENT, not to each other. ---
-    SPA_CLIENT["src/app/src/api/client.js — SPA API ADAPTER (S2-UC1; +getFlow s003-UC1)<br/>only module knowing :3001 base URL + endpoint shapes<br/>getActive/getProjects/getQueues/getPolicy/getBaseline/getFlow/subscribeEvents<br/>fail-soft: null on net/HTTP/parse error"]:::s003changed
+    SPA_CLIENT["src/app/src/api/client.js — SPA API ADAPTER (S2-UC1; +getFlow s004-UC1)<br/>only module knowing :3001 base URL + endpoint shapes<br/>getActive/getProjects/getQueues/getPolicy/getBaseline/getFlow/getStageFlow/subscribeEvents<br/>fail-soft: null on net/HTTP/parse error"]:::delivered
     SPA_APP["src/app/src/App.jsx — app shell (S2-UC1)<br/>banner + main landmark = composition slot + build-sha stamp"]:::delivered
     SPA_MAIN["src/app/src/main.jsx — Preact entry (S2-UC1)<br/>WIRING SEAM: mounts App; UC3 mounts MapContainer as App child here"]:::delivered
 
@@ -87,7 +87,7 @@ graph TD
     %% PipelineMap consumes constraintQueue and flips data-constraint + mounts
     %% ConstraintBadge (◆+text corner ribbon, A11Y-6) on the matched box; distinct
     %% visual channel from SPA_BADGE so they co-occur without masking (A11Y-7).
-    SPA_PARSER["src/app/src/parsers/baseline.js — ToC constraint + DORA parser (S2-UC5; +parseBaseline s003-UC1, domain)<br/>parseConstraint/matchConstraintQueue (S2-UC5) + parseBaseline(raw)->{metrics,agentTimes,constraint,sourceRef} (s003-UC1)<br/>four-metric + 9 per-agent rows; raw-string fidelity (§8); fail-soft, no throw"]:::s003changed
+    SPA_PARSER["src/app/src/parsers/baseline.js — ToC constraint + DORA parser (S2-UC5; +parseBaseline s004, domain)<br/>parseConstraint/matchConstraintQueue (S2-UC5) + parseBaseline(raw)->{metrics,agentTimes,constraint,sourceRef} (s004)<br/>four-metric + 9 per-agent rows; raw-string fidelity (§8); fail-soft, no throw"]:::delivered
     SPA_CONSTRAINT["src/app/src/components/ConstraintBadge.jsx — constraint corner ribbon (S2-UC5)<br/>pure fn of present; data-testid='constraint-badge'; ◆ aria-hidden + 'constraint' text<br/>distinct visual channel from state-badge (A11Y-6/7); --c-constraint token"]:::delivered
 
     %% --- s003-UC1 DORA/flow parse seam (REALISED this UC; shared seam for UC2/3/4) ---
@@ -96,8 +96,8 @@ graph TD
     %% UCs (UC2 DoraPanel, UC3 StageCards, UC4 TimeThiefView — not yet built) bind
     %% to. Both compose the shared SPA_MDTABLE GFM-table cell extractor. Pure
     %% domain; raw-string fidelity (§8); fail-soft → empty arrays / nulls, no throw.
-    SPA_MDTABLE["src/app/src/parsers/markdown-table.js — GFM table cell extractor (s003-UC1, domain)<br/>tableRows(raw)->string[][]; trims cells only (interior verbatim); skips separator rows<br/>column-agnostic (callers identify table by cell shape); fail-soft → []"]:::s003changed
-    SPA_FLOWPARSER["src/app/src/parsers/flow.js — flow.md time-thief + queue parser (s003-UC1, domain)<br/>parseFlow(raw)->{timeThieves,queues,sourceRef}; raw-string fidelity (§8 F3)<br/>picks tables by header cell; fail-soft → empty arrays, no throw"]:::s003changed
+    SPA_MDTABLE["src/app/src/parsers/markdown-table.js — GFM table cell extractor (s004, domain)<br/>tableRows(raw)->string[][]; trims cells only (interior verbatim); skips separator rows<br/>column-agnostic (callers identify table by cell shape); fail-soft → []"]:::delivered
+    SPA_FLOWPARSER["src/app/src/parsers/flow.js — flow.md time-thief + queue parser (s004, domain)<br/>parseFlow(raw)->{timeThieves,queues,sourceRef}; raw-string fidelity (§8 F3)<br/>picks tables by header cell; fail-soft → empty arrays, no throw"]:::delivered
 
     %% --- S2-UC6 SSE live refresh (REALISED this UC) ---
     %% MapContainer subscribes to the SSE change channel (SPA_CLIENT.subscribeEvents
@@ -133,6 +133,30 @@ graph TD
     SPA_CLIENT -.->|HTTP GET :3001/api/projects/:id/dora/flow (getFlow, s003-UC1)| R_DORA
     SPA_CLIENT -.->|EventSource :3001/api/events| R_EVENTS
 
+    %% --- s005 CHK-4 / UC-S005-2 work-item tree (left-rail navigator) ---
+    %% The tree half talks to the read layer ONLY through SPA_CLIENT.getItems
+    %% (new helper) over the existing /items route (R_ITEMS). The pure tree-builder
+    %% domain turns the flat ItemRecord[] into the REQ→CHK→SLC→UC forest; the
+    %% container owns expanded/selected interaction state; WorkItemTree renders the
+    %% WAI-ARIA tree; TreeNode + SpaceTagBadge are pure leaves. onSelect is the
+    %% UC-S005-3 detail-pane drill seam (built next UC, not here).
+    SPA_TREEBUILD["src/app/src/state/workItemTree.js — tree-builder DOMAIN (UC-S005-2)<br/>buildTree(items)->forest (count-invariant: orphans→roots), visibleNodes, deriveSpace (/work vs /process)<br/>no fetch/DOM; pure"]:::s005changed
+    SPA_TREECTR["src/app/src/components/WorkItemTreeContainer.jsx — data→render container (UC-S005-2)<br/>getActive→getItems on mount; owns expanded Set (default all-branches) + selectedId; fail-soft→empty"]:::s005changed
+    SPA_TREE["src/app/src/components/WorkItemTree.jsx — WAI-ARIA tree render (UC-S005-2)<br/>role=tree; roving tabindex; ↑↓→← + Enter; onSelect = UC-S005-3 drill hook; pure fn of props"]:::s005changed
+    SPA_TREENODE["src/app/src/components/TreeNode.jsx — treeitem render (UC-S005-2)<br/>state/value-cost badges (text-authoritative, A11Y-S005-6/7); GEO-S005-1 depth padding-left; aria-level/selected"]:::s005changed
+    SPA_SPACETAG["src/app/src/components/SpaceTagBadge.jsx — /work-vs-/process badge (UC-S005-2)<br/>§8 three-cue: text + ▤/⚙ icon (aria-hidden) + colour-band class; non-colour-redundant"]:::s005changed
+
+    SPA_MAIN -->|mounts tree rail beside map| SPA_TREECTR
+    SPA_TREECTR -->|getActive/getItems| SPA_CLIENT
+    SPA_TREECTR -->|buildTree forest| SPA_TREEBUILD
+    SPA_TREECTR -->|renders| SPA_TREE
+    SPA_TREE -->|buildTree/visibleNodes| SPA_TREEBUILD
+    SPA_TREE -->|renders treeitems| SPA_TREENODE
+    SPA_TREENODE -->|deriveSpace| SPA_TREEBUILD
+    SPA_TREENODE -->|mounts space badge| SPA_SPACETAG
+    SPA_TREE -->|@import| SPA_TOKENS
+    SPA_CLIENT -.->|HTTP GET :3001/api/projects/:id/items (getItems)| R_ITEMS
+
     classDef stable fill:#eee,stroke:#999,color:#000
     classDef delivered fill:#d5f5e3,stroke:#1e8449,color:#000
-    classDef s003changed fill:#fdebd0,stroke:#ca6f1e,color:#000
+    classDef s005changed fill:#fff3cd,stroke:#b8860b,color:#000

@@ -60,16 +60,31 @@ describe('createWatcher — file-watch domain', () => {
   });
 
   it('AC5.2/T-READ-14: ignoreInitial — no event for files present before start', async () => {
-    // Pre-existing file before the watcher starts.
-    writeFileSync(join(root, 'work', 'pre.txt'), 'existing');
+    // Pre-existing file written and ALLOWED TO SETTLE before the watcher starts,
+    // so the OS watch backend (FSEvents/inotify) cannot replay its recent write
+    // as a post-ready `change`. Settling here removes the flake source — a fixed
+    // post-start sleep was racing chokidar's initial-scan tail (OI-FLAKY-WATCHER).
+    const pre = join(root, 'work', 'pre.txt');
+    writeFileSync(pre, 'existing');
+    await new Promise((r) => setTimeout(r, 50)); // let the write timestamp settle
+
     watcher = createWatcher({ repoRoot: root });
     await watcher.ready();
-    let fired = false;
-    const unsub = watcher.subscribe(() => { fired = true; });
-    // Give the watcher a beat to (not) emit the initial scan, then assert silence.
-    await new Promise((r) => setTimeout(r, 200));
+
+    // Record any path the watcher emits AFTER ready (must never include pre.txt).
+    const seen = [];
+    const unsub = watcher.subscribe((e) => seen.push(e.path));
+
+    // Event-driven bound: write a NEW file and wait for ITS event. Once a
+    // post-ready event has been delivered, the watcher is provably live — so if
+    // the pre-existing file were going to fire, it would have by now. This makes
+    // the assertion deterministic instead of leaning on a fixed sleep length.
+    const pending = waitForChange(watcher, (e) => e.path === join('work', 'live.txt'), 1000);
+    writeFileSync(join(root, 'work', 'live.txt'), 'new');
+    await pending;
     unsub();
-    expect(fired).toBe(false);
+
+    expect(seen).not.toContain(join('work', 'pre.txt'));
   });
 
   it('AC5.5/T-READ-16: after a subscriber unsubscribes, a later write does not crash and the watcher still serves remaining subscribers', async () => {

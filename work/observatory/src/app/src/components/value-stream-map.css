@@ -168,6 +168,11 @@
 .queue-item {
   font-size: var(--fs-meta);
   color: var(--c-text-dim);
+  /* UC-S014-1: flex row so the trailing SteerMenu trigger (margin-left:auto)
+   * sits on the chip's trailing edge after the wait text (ui-design §IA). */
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
 }
 
 .queue-item__id {

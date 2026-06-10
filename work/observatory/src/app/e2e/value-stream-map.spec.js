@@ -122,13 +122,24 @@ test('@a11y A11Y-3 — Tab reaches the stage nodes in canonical flow order', asy
   // the map in DOM. By the WAI-ARIA tree pattern it is a SINGLE tab stop (roving
   // tabindex — one tabbable treeitem); start the map tab-order walk from the map
   // region itself so the assertion is about the map, independent of the tree.
+  //
+  // UC-S014-1: queue chips now host a Tab-reachable steer trigger
+  // (S14-1-A11Y-1), so a queue stage's chip buttons are LEGITIMATE tab stops
+  // after their stage node. The invariant pinned here keeps its intent: the
+  // stage NODES are reached in canonical flow order — steer triggers may
+  // intervene, nothing else may.
   await page.getByTestId('stage-intake').focus();
   const testid0 = await page.evaluate(() => document.activeElement?.getAttribute('data-testid'));
   expect(testid0).toBe('stage-intake');
   const rest = ['decompose', 'ready', 'capabilities', 'ui-design', 'engineer'];
   for (const s of rest) {
-    await page.keyboard.press('Tab');
-    const testid = await page.evaluate(() => document.activeElement?.getAttribute('data-testid'));
+    let testid = null;
+    // bounded walk: at most MAX_QUEUE_ITEMS_SHOWN (3) steer triggers per stage
+    for (let hops = 0; hops < 5; hops += 1) {
+      await page.keyboard.press('Tab');
+      testid = await page.evaluate(() => document.activeElement?.getAttribute('data-testid'));
+      if (testid !== 'steer-btn') break; // ONLY steer triggers may intervene
+    }
     expect(testid).toBe(`stage-${s}`);
   }
 });

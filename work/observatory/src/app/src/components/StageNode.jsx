@@ -19,6 +19,7 @@
 
 import { useState } from 'preact/hooks';
 import { MetricSource } from './MetricSource.jsx';
+import { SteerMenu } from './SteerMenu.jsx';
 import './value-stream-map.css';
 
 const GATES = new Set(['intake', 'deploy']);
@@ -152,7 +153,7 @@ function InFlightBadge({ stage, count, sourceRows, sourceEvents, sourceTotal, op
  * labelled "Depth" (NOT "WIP" — depth is sitting/waiting, WIP is in-flight) plus
  * each queued item's id + humanised accruing wait. First 3 items, then "+N more";
  * the depth badge always shows the full count. queue_depth 0 → "0 queued", no rows. */
-function QueueDepth({ stage, depth, items, sourceRows, sourceEvents, sourceTotal, open }) {
+function QueueDepth({ stage, depth, items, sourceRows, sourceEvents, sourceTotal, open, onSteer }) {
   const panelId = `src-${stage}-depth`;
   const list = Array.isArray(items) ? items : [];
   const shown = list.slice(0, MAX_QUEUE_ITEMS_SHOWN);
@@ -181,6 +182,9 @@ function QueueDepth({ stage, depth, items, sourceRows, sourceEvents, sourceTotal
             >
               <span class="queue-item__id">{q.item_id}</span>{' '}
               <span class="queue-item__wait">waiting {humaniseDwell(q.wait_s)}</span>
+              {/* UC-S014-1 — trailing steer action; item-bearing chips ONLY
+                  (never the "+N more" chip below). Read-only composition. */}
+              <SteerMenu itemId={q.item_id} onSteer={onSteer} />
             </li>
           ))}
           {moreCount > 0 ? (
@@ -208,7 +212,7 @@ function GateMarker({ gate }) {
 /** One canonical stage node — name, optional gate marker, four labelled figures
  * (WIP promoted to an in-flight badge when wip>0), each carrying its MetricSource
  * traceability reveal. role=group, the single focusable tab stop (A11Y-3). */
-export function StageNode({ data }) {
+export function StageNode({ data, onSteer }) {
   const {
     stage, label, throughput, throughput_per_active_day, active_days,
     dwell_median_s, dwell_pairs, wip, rework, source_rows,
@@ -286,7 +290,7 @@ export function StageNode({ data }) {
         <StageMetric stage={stage} kind="throughput" label="Throughput" value={throughputText} sourceRows={source_rows} sourceEvents={source_events} sourceTotal={source_total} summary={throughputSummary} open={open} />
         <StageMetric stage={stage} kind="dwell" label="Dwell" value={dwell} sourceRows={source_rows} sourceEvents={source_events} sourceTotal={source_total} open={open} />
         {isQueue
-          ? <QueueDepth stage={stage} depth={depth} items={queue_items} sourceRows={source_rows} sourceEvents={source_events} sourceTotal={source_total} open={open} />
+          ? <QueueDepth stage={stage} depth={depth} items={queue_items} sourceRows={source_rows} sourceEvents={source_events} sourceTotal={source_total} open={open} onSteer={onSteer} />
           : wipActive
             ? <InFlightBadge stage={stage} count={wip} sourceRows={source_rows} sourceEvents={source_events} sourceTotal={source_total} open={open} />
             : <StageMetric stage={stage} kind="wip" label="WIP" value={String(wip)} sourceRows={source_rows} sourceEvents={source_events} sourceTotal={source_total} open={open} />}

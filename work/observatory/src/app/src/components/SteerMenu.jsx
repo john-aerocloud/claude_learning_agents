@@ -8,9 +8,10 @@
 // panel (UC-S014-2 consumes the callback), the API, or the hosts that mount it.
 //
 // OVERLAY DISCIPLINE (DEFECT-006 / GEO-S014-1..4): the popover is
-// `position: fixed` — it is rendered inside the component subtree but is OUT of
-// document flow, so opening it never moves the host chip/row, its siblings, or
-// the page scrollHeight. Anchoring clamps the popover inside the viewport
+// `position: fixed` AND portalled to document.body — out of document flow AND
+// out of the host's stacking context, so opening it never moves the host
+// chip/row, its siblings, or the page scrollHeight, and later DOM siblings
+// (.vsm-lane__flow) cannot paint over it. Anchoring clamps it inside the viewport
 // (GEO-S014-4: no negative left/top, right ≤ innerWidth — never a horizontal
 // scroll).
 //
@@ -28,6 +29,7 @@
 // never the data-action enum value (STEER-FIG-2).
 
 import { useState, useRef, useEffect, useLayoutEffect, useId } from 'preact/hooks';
+import { createPortal } from 'preact/compat';
 import './steer-menu.css';
 
 // The four steer-action types (exact visible labels — AC-2; order is contract).
@@ -108,12 +110,15 @@ export function SteerMenu({ itemId, itemLabel, onSteer }) {
   }, [open]);
 
   // Click-outside closes (no focus steal). Capture phase so a host's own
-  // stopPropagation cannot hide the outside press from us.
+  // stopPropagation cannot hide the outside press from us. The popover is
+  // PORTALLED to document.body, so "inside" = trigger subtree OR menu subtree.
   useEffect(() => {
     if (!open) return undefined;
     const onDocPointerDown = (e) => {
       const root = triggerRef.current && triggerRef.current.parentNode;
-      if (root && root.contains(e.target)) return; // inside trigger/menu subtree
+      const inTrigger = root && root.contains(e.target);
+      const inMenu = menuRef.current && menuRef.current.contains(e.target);
+      if (inTrigger || inMenu) return;
       setOpen(false);
     };
     document.addEventListener('mousedown', onDocPointerDown, true);
@@ -185,13 +190,17 @@ export function SteerMenu({ itemId, itemLabel, onSteer }) {
   };
 
   return (
+    // The trigger carries data-steer-item-id, NOT data-item-id: data-item-id is
+    // the treeitem <li>'s UNIQUE selector contract (UC-S005-2) — duplicating it
+    // on the trigger breaks `[data-item-id="X"]` strict-mode selection
+    // everywhere (found by the existing e2e suite on first composition).
     <span class="steer" data-steer-item={itemId}>
       <button
         ref={triggerRef}
         type="button"
         class="steer-btn"
         data-testid="steer-btn"
-        data-item-id={itemId}
+        data-steer-item-id={itemId}
         aria-haspopup="menu"
         aria-expanded={open ? 'true' : 'false'}
         aria-label={accName}
@@ -201,7 +210,7 @@ export function SteerMenu({ itemId, itemLabel, onSteer }) {
       >
         <span aria-hidden="true">⋯</span>
       </button>
-      {open ? (
+      {open ? createPortal(
         <div
           ref={menuRef}
           id={menuId}
@@ -227,7 +236,13 @@ export function SteerMenu({ itemId, itemLabel, onSteer }) {
               {a.label}
             </button>
           ))}
-        </div>
+        </div>,
+        // PORTAL target: document.body — a fixed-position popover nested in the
+        // stage-node/tree-row subtree is clipped by SIBLING stacking contexts
+        // (.vsm-lane__flow painted over it, intercepting menuitem clicks); the
+        // body-level portal gives it its own stacking context above both
+        // surfaces (GEO-S014-3 "fixed OR portalled" — we do both).
+        document.body,
       ) : null}
     </span>
   );

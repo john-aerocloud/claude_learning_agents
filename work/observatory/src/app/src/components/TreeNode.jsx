@@ -21,6 +21,7 @@
 // clicking the disclosure chevron expands/collapses WITHOUT drilling.
 
 import { SpaceTagBadge } from './SpaceTagBadge.jsx';
+import { SteerMenu } from './SteerMenu.jsx';
 import { deriveSpace } from '../state/workItemTree.js';
 
 // Type → short glyph (decorative; the type also rides the accessible name as text).
@@ -57,8 +58,11 @@ function typeWord(type) {
  * @param {string|null} props.activeId   - the roving-tabindex active node id
  * @param {(id:string)=>void} props.onSelect
  * @param {(id:string)=>void} props.onToggle
+ * @param {(itemId:string, actionType:string)=>void} [props.onSteer]
+ *   - UC-S014-1 read-only prop slot for the row's SteerMenu (no logic change;
+ *     UC-S014-2 wires the steer-panel consumer)
  */
-export function TreeNode({ node, expandedIds, selectedId, activeId, onSelect, onToggle }) {
+export function TreeNode({ node, expandedIds, selectedId, activeId, onSelect, onToggle, onSteer }) {
   const { item, depth, children, hasChildren } = node;
   const space = deriveSpace(item);
   const isExpanded = hasChildren && expandedIds && expandedIds.has(item.id);
@@ -137,6 +141,11 @@ export function TreeNode({ node, expandedIds, selectedId, activeId, onSelect, on
         </span>
 
         <SpaceTagBadge space={space} />
+
+        {/* UC-S014-1 — trailing steer action on every item-bearing row. The
+            SteerMenu stops its own click/keydown propagation, so the row's
+            drill (onClick=select) and the tree's roving-keydown are untouched. */}
+        <SteerMenu itemId={item.id} itemLabel={item.job} onSteer={onSteer} />
       </div>
 
       {hasChildren && isExpanded ? (
@@ -149,6 +158,7 @@ export function TreeNode({ node, expandedIds, selectedId, activeId, onSelect, on
               activeId={activeId}
               onSelect={onSelect}
               onToggle={onToggle}
+              onSteer={onSteer}
             />
           ))}
         </ul>

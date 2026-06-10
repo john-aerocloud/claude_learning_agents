@@ -34,6 +34,8 @@ import { buildTree, visibleNodes } from '../state/workItemTree.js';
  * @param {string|null} [props.selectedId]  - currently drilled node (UC-S005-3)
  * @param {(id:string)=>void} [props.onSelect] - drill hook (UC-S005-3 detail pane)
  * @param {(id:string)=>void} [props.onToggle] - expand/collapse a branch
+ * @param {(itemId:string, actionType:string)=>void} [props.onSteer]
+ *   - UC-S014-1 read-only prop slot threaded to every row's SteerMenu
  * @param {string} [props.sourceRef]       - traceability source path
  */
 export function WorkItemTree({
@@ -42,6 +44,7 @@ export function WorkItemTree({
   selectedId = null,
   onSelect,
   onToggle,
+  onSteer,
   sourceRef = 'work/observatory/items/items.csv',
 }) {
   const expanded = expandedIds || new Set();
@@ -156,6 +159,7 @@ export function WorkItemTree({
               activeId={activeId}
               onSelect={onSelect}
               onToggle={onToggle}
+              onSteer={onSteer}
             />
           ))
         )}

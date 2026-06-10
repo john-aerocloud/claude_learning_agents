@@ -12,6 +12,11 @@
 .metric-source {
   position: absolute;
   z-index: 5;
+  /* UC-S014-1 — the reveal is a PASSIVE read-only tooltip: it must never
+   * intercept pointer events meant for interactive content beneath it (the
+   * node-hover opens every panel, and the dwell panel drops over the queue
+   * chips' steer buttons — a mouse user could not click them). */
+  pointer-events: none;
   top: calc(100% + 4px);
   left: 0;
   min-width: 180px;

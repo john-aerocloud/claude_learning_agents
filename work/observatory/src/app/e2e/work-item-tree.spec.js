@@ -67,9 +67,12 @@ test('every node carries a non-empty data-space + a space-tag with visible text 
   page,
 }) => {
   const nodes = page.getByTestId('tree-node');
-  const count = await nodes.count();
-  expect(count).toBe(7);
-  for (let i = 0; i < count; i++) {
+  // WEB-FIRST (polling) count: a parallel worker's SSE-live spec transiently
+  // appends a fixture row (work-item-tree-live.spec append→restore); a
+  // non-retrying nodes.count() snapshot raced it. toHaveCount settles on the
+  // restored fixture truth — permanent pollution still fails after timeout.
+  await expect(nodes).toHaveCount(7);
+  for (let i = 0; i < 7; i++) {
     const space = await nodes.nth(i).getAttribute('data-space');
     expect(space).toBeTruthy();
   }

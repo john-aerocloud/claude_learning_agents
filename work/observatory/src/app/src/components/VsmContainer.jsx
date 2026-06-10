@@ -45,11 +45,15 @@ function isRelevantChange(path) {
  * @param {() => Promise<Array|null>} [props.loadFlow] - stage-flow loader (injectable for tests).
  * @param {(onChange: (evt:{type:string,path:string}) => void) => (() => void)} [props.subscribe]
  * @param {number} [props.debounceMs]
+ * @param {(itemId: string, actionType: string) => void} [props.onSteer]
+ *   - UC-S014-1 read-only prop slot, threaded to the queue-chip SteerMenus
+ *     (UC-S014-2 wires the steer-panel consumer).
  */
 export function VsmContainer({
   loadFlow = loadStageFlow,
   subscribe = subscribeEvents,
   debounceMs = DEFAULT_DEBOUNCE_MS,
+  onSteer,
 }) {
   const [stages, setStages] = useState(null);
   const [liveState, setLiveState] = useState('reconnecting');
@@ -142,7 +146,7 @@ export function VsmContainer({
           automatically.
         </div>
       ) : null}
-      <ValueStreamMap stages={stages} stale={stale} />
+      <ValueStreamMap stages={stages} stale={stale} onSteer={onSteer} />
     </div>
   );
 }

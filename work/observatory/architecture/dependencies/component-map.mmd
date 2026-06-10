@@ -8,6 +8,7 @@ graph LR
   PipelineMapScreen["Surface: Pipeline Map (CHK-2 / s002) — SUPERSEDED as primary"]
   DoraPanelScreen["Surface: DORA Panel sections (CHK-3 / s003)"]
   ValueStreamScreen["Surface: Value-stream Map (s004) — PRIMARY view, DEFECT-001 fix"]
+  ObservatoryDrawerLayer["Surface: Floating drawer layer (DEFECT-006) — fixed overlay above the map, NOT in .observatory-main-col flow"]
 
   %% --- design-system components ---
   PipelineMap["PipelineMap"]
@@ -63,6 +64,27 @@ graph LR
   %% supersession: PipelineMap is no longer mounted as the primary view (still in tree, tested).
   PipelineMap -. superseded-by .-> ValueStreamMap
 
+  %% DEFECT-006: DetailPane RE-POINTED — was an in-flow sibling of ValueStreamMap inside
+  %% .observatory-main-col (reflowed the map); now a position:fixed floating drawer on its
+  %% own overlay layer. The re-point is the regression-guard input for the tester (GEO-S005-3b).
+  DetailPane["DetailPane (s005 / DEFECT-006: floating drawer)"]
+  DetailPane --> ObservatoryDrawerLayer
+
+  %% s014 / UC-S014-1: SteerMenu (NEW) — per-item steer trigger + body-portalled
+  %% role=menu popover (4 action types). Composed READ-ONLY into the queue chips
+  %% (StageNode) and the tree rows (TreeNode); onSteer(itemId, actionType) prop
+  %% slot threads VsmContainer→ValueStreamMap→StageNode and WorkItemTree→TreeNode
+  %% (no host logic change). The popover renders on the fixed-overlay layer
+  %% (DEFECT-006 discipline) — zero flow height, own stacking context.
+  %% NOTE for tester: trigger carries data-steer-item-id (NOT data-item-id — that
+  %% stays the treeitem's unique selector); MetricSource reveal panels are now
+  %% pointer-events:none so they cannot intercept clicks on the chips' triggers.
+  TreeNode["TreeNode (s005 / UC-S005-2 row)"]
+  SteerMenu["SteerMenu (s014 / UC-S014-1: steer trigger + action menu)"]
+  SteerMenu --> StageNode
+  SteerMenu --> TreeNode
+  SteerMenu --> ObservatoryDrawerLayer
+
   classDef delivered fill:#d5f5e3,stroke:#1e8449,color:#000;
   class PipelineMapScreen,PipelineMap,QueueBox,BufferStateIndicator,ConstraintBadge,FlowArrow,LiveStatusDot delivered;
   %% CHK-3 nodes added this slice — tester UI test-plan input; cleared at s003 delivery.
@@ -71,3 +93,13 @@ graph LR
   %% s004 nodes added/re-pointed THIS commit (DEFECT-001) — tester UI test-plan input; cleared at s004 delivery.
   classDef s004changed fill:#ffd9b3,stroke:#cc6600,color:#000;
   class ValueStreamScreen,VsmContainer,ValueStreamMap,StageNode,StageMetric,InFlightBadge,GateMarker,ReworkLoopConnector s004changed;
+  %% DEFECT-006 re-point THIS commit — tester UI test-plan input (map-bbox-unchanged regression
+  %% guard, AC-S005-3-7 / GEO-S005-3b); cleared when the engineer's fix is delivered.
+  classDef defect006changed fill:#f8d7da,stroke:#a94442,color:#000;
+  class DetailPane,ObservatoryDrawerLayer defect006changed;
+  %% s014 / UC-S014-1 nodes+edges added THIS commit — tester UI test-plan input
+  %% (steer menu on chips/rows; hosts StageNode+TreeNode re-touched read-only;
+  %% MetricSource pointer-events change is in the same blast radius); cleared at
+  %% s014 delivery after the tester consumes.
+  classDef s014changed fill:#fff3cd,stroke:#b8860b,color:#000;
+  class SteerMenu,TreeNode,StageNode s014changed;

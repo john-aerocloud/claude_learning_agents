@@ -96,9 +96,13 @@ const ZERO_STAGES = FLOW_ORDER.map((stage) => ({
  * the container/tests assert) and dims the figures via the `value-stream-map--stale`
  * class. Staleness meaning is carried authoritatively by the container's text
  * banner + LiveStatusDot, never colour/dim alone.
- * @param {{ stages?: Array|null, stale?: boolean }} props
+ * UC-S014-1 — `onSteer(itemId, actionType)` is a READ-ONLY prop slot threaded
+ * down to the StageNode queue chips' SteerMenu (no logic here; UC-S014-2 wires
+ * the consumer).
+ * @param {{ stages?: Array|null, stale?: boolean,
+ *           onSteer?: (itemId: string, actionType: string) => void }} props
  */
-export function ValueStreamMap({ stages, stale = false }) {
+export function ValueStreamMap({ stages, stale = false, onSteer }) {
   const src = Array.isArray(stages) && stages.length > 0 ? stages : ZERO_STAGES;
   const byStage = Object.fromEntries(src.map((s) => [s.stage, s]));
   // Only the 10 canonical nodes render (rework is the loop, not a node).
@@ -126,7 +130,7 @@ export function ValueStreamMap({ stages, stale = false }) {
           <div class="vsm-lane__flow">
             {lane.stages.map((stage, i) => (
               <>
-                <StageNode data={nodeFor(stage)} />
+                <StageNode data={nodeFor(stage)} onSteer={onSteer} />
                 {i < lane.stages.length - 1
                   ? <FlowArrow from={stage} to={lane.stages[i + 1]} />
                   : null}

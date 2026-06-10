@@ -37,7 +37,10 @@ describe('SteerMenu (UC-S014-1) — trigger contract', () => {
     expect(btn.tagName).toBe('BUTTON');
     expect(btn.getAttribute('aria-haspopup')).toBe('menu');
     expect(btn.getAttribute('aria-expanded')).toBe('false');
-    expect(btn.getAttribute('data-item-id')).toBe('CHK-5');
+    // data-steer-item-id, NOT data-item-id — the latter is the treeitem <li>'s
+    // unique selector contract and must not be duplicated on the trigger.
+    expect(btn.getAttribute('data-steer-item-id')).toBe('CHK-5');
+    expect(btn.hasAttribute('data-item-id')).toBe(false);
     // menu closed = absent
     expect(screen.queryByTestId('steer-menu')).toBeNull();
   });

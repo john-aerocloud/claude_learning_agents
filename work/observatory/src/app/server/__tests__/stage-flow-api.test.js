@@ -111,6 +111,59 @@ describe('GET /api/projects/:id/stage-flow', () => {
   });
 });
 
+describe('GET /api/projects/:id/stage-flow — queue current-state (DEFECT-004)', () => {
+  let root;
+  let server;
+  const QUEUE_HEADER = 'item_id,enqueued_ts,value,cost,vc_ratio,position,reason';
+  const ITEMS_HEADER =
+    'id,type,parent,children,job,state,value,cost,vc_ratio,created_ts,done_ts,dora_ref';
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'obs-stageflow-q-'));
+    ({ server } = createTestServer({ repoRoot: root, skipWatcher: true }));
+    writeLedger(root, HEADER + '\n');
+    mkdirSync(join(root, 'work', 'p', 'items'), { recursive: true });
+    mkdirSync(join(root, 'work', 'p', 'queues'), { recursive: true });
+  });
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  it('surfaces queue_depth + queue_items for the ready buffer stage; null on work stages (AC-3)', async () => {
+    writeFileSync(
+      join(root, 'work', 'p', 'items', 'items.csv'),
+      ITEMS_HEADER + '\nUC-A,use-case,CHK,,job,ready,,,,,,\nUC-B,use-case,CHK,,job,ready,,,,,,\n',
+    );
+    writeFileSync(
+      join(root, 'work', 'p', 'queues', 'ready.csv'),
+      QUEUE_HEADER +
+        '\nUC-A,2026-06-10T08:00:00Z,HIGH,2,1.5,1,r\nUC-B,2026-06-10T07:00:00Z,MED,2,1.0,2,r\n',
+    );
+    const res = await request(server).get('/api/projects/p/stage-flow');
+    const ready = res.body.find((s) => s.stage === 'ready');
+    expect(ready.queue_depth).toBe(2);
+    expect(ready.queue_items.map((q) => q.item_id).sort()).toEqual(['UC-A', 'UC-B']);
+    expect(ready.queue_items.every((q) => typeof q.wait_s === 'number' && q.wait_s > 0)).toBe(true);
+    const eng = res.body.find((s) => s.stage === 'engineer');
+    expect(eng.queue_depth).toBeNull();
+    expect(eng.queue_items).toBeNull();
+  });
+
+  it('excludes a stale queue entry (items.csv state=done) from depth + items (AC-4)', async () => {
+    writeFileSync(
+      join(root, 'work', 'p', 'items', 'items.csv'),
+      ITEMS_HEADER + '\nUC-DONE,use-case,CHK,,job,done,,,,,,\nUC-LIVE,use-case,CHK,,job,ready,,,,,,\n',
+    );
+    writeFileSync(
+      join(root, 'work', 'p', 'queues', 'ready.csv'),
+      QUEUE_HEADER +
+        '\nUC-DONE,2026-06-10T14:00:00Z,HIGH,2,1.5,1,r\nUC-LIVE,2026-06-10T14:00:00Z,MED,2,1.0,2,r\n',
+    );
+    const res = await request(server).get('/api/projects/p/stage-flow');
+    const ready = res.body.find((s) => s.stage === 'ready');
+    expect(ready.queue_depth).toBe(1);
+    expect(ready.queue_items.map((q) => q.item_id)).toEqual(['UC-LIVE']);
+  });
+});
+
 function snapshot(root) {
   const dora = join(root, 'process', 'dora');
   return existsSync(dora) ? readdirSync(dora).sort() : [];

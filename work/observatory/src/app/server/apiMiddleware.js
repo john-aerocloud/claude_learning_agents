@@ -50,6 +50,8 @@ const SLICE_ARTIFACTS = new Set([
   'ui-design.md', 'test-plan.md', 'result.md',
 ]);
 const QUEUE_NAMES = new Set(['intake', 'ready', 'deploy', 'rework', 'policy']);
+// DEFECT-004 — buffer stages whose queue CSVs feed stage-flow current-state.
+const BUFFER_QUEUE_STAGES = ['intake', 'ready', 'deploy', 'rework'];
 const SAFE_SEGMENT = /^[A-Za-z0-9._-]+$/;
 const SAFE_PROJECT_ID = /^[A-Za-z0-9._-]+$/;
 
@@ -230,10 +232,26 @@ export function createApiMiddleware({ repoRoot, watcher }) {
       // GET /api/projects/:id/stage-flow
       if (rest === '/stage-flow') {
         const ledgerCsv = readRaw(ledgerPath);
-        const itemsCsv = SAFE_PROJECT_ID.test(id)
+        const safe = SAFE_PROJECT_ID.test(id);
+        const itemsCsv = safe
           ? readRaw(join(repoRoot, 'work', id, 'items', 'items.csv'))
           : null;
-        return json(res, 200, aggregateStageFlow(ledgerCsv, id, itemsCsv));
+        // DEFECT-004: read the buffer-stage queue CSVs so the aggregator can
+        // compute current depth/wait + the coherence cross-check. `now` is
+        // request time (this is a normal Node process — Date.now() is fine).
+        const queues = safe
+          ? Object.fromEntries(
+              BUFFER_QUEUE_STAGES.map((stage) => [
+                stage,
+                readRaw(join(repoRoot, 'work', id, 'queues', `${stage}.csv`)),
+              ]),
+            )
+          : null;
+        return json(
+          res,
+          200,
+          aggregateStageFlow(ledgerCsv, id, itemsCsv, { queues, now: Date.now() }),
+        );
       }
 
       // GET /api/projects/:id/ledger?item_id=...

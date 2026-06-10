@@ -42,6 +42,18 @@ import { parseCsv } from '../parsers/csv.js';
 
 const TERMINAL_ITEM_STATES = new Set(['done', 'dropped', 'cancelled']);
 
+// DEFECT-004 — buffer (queue) stages hold items RIGHT NOW. Each maps to a queue
+// CSV (work/<project>/queues/<stage>.csv) for current depth/wait, and (where a
+// clean items.csv state exists) to the items.csv state used for the coherence
+// cross-check (§4): queue_depth must equal the items.csv count for that state.
+// `coherenceState: null` → depth comes from the queue CSV only, no warning.
+const BUFFER_STAGES = {
+  intake: { coherenceState: 'backlog' },
+  ready: { coherenceState: 'ready' },
+  deploy: { coherenceState: null },
+  rework: { coherenceState: null },
+};
+
 /**
  * Build an item-id → {exists, terminal} registry from raw items.csv text.
  * Null/empty/unparseable input → null (signals "no reconciliation, fail soft").
@@ -62,9 +74,80 @@ function buildItemRegistry(itemsCsv) {
     const id = (rec.id ?? '').trim();
     if (!id) continue;
     const state = (rec.state ?? '').trim().toLowerCase();
-    reg.set(id, { terminal: TERMINAL_ITEM_STATES.has(state) });
+    reg.set(id, { terminal: TERMINAL_ITEM_STATES.has(state), state });
   }
   return reg.size > 0 ? reg : null;
+}
+
+/**
+ * Compute the queue current-state fields for one buffer stage (DEFECT-004 §3/§4).
+ * Stale-filters the queue CSV against the item registry (an item whose items.csv
+ * state is terminal — done/dropped/cancelled — is a STALE queue entry and is
+ * dropped silently with a server-side warning, per §4.1), computes accruing
+ * wait_s = now − enqueued_ts, and cross-checks depth against the items.csv count
+ * for the stage's coherence state (§4 consistency check → coherence_warning).
+ * Fail-soft: no/empty/unparseable queue CSV → depth 0, items [], warning false.
+ * @param {{coherenceState: string|null}} bufferDef
+ * @param {string|null|undefined} queueCsv raw work/<project>/queues/<stage>.csv
+ * @param {Map<string,{terminal:boolean,state:string}>|null} itemRegistry
+ * @param {number} now epoch ms used for wait_s (request time)
+ * @param {string} stage stage id (for log context)
+ * @returns {{queue_depth:number, queue_items:Array, coherence_warning:boolean}}
+ */
+function computeQueueState(bufferDef, queueCsv, itemRegistry, now, stage) {
+  let rows = [];
+  if (typeof queueCsv === 'string' && queueCsv.trim() !== '') {
+    try {
+      rows = parseCsv(queueCsv);
+    } catch {
+      rows = []; // unparseable queue CSV → empty (fail-soft, never throw)
+    }
+  }
+
+  const queueItems = [];
+  for (const r of Array.isArray(rows) ? rows : []) {
+    const id = (r.item_id ?? '').trim();
+    if (!id) continue;
+    // §4.1 stale-entry filter: a queue row for a terminal item does NOT count.
+    if (itemRegistry) {
+      const entry = itemRegistry.get(id);
+      if (entry && entry.terminal) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[stage-flow] stale queue entry filtered: ${id} in ${stage} queue but items.csv state is terminal`,
+        );
+        continue;
+      }
+    }
+    const enqueuedAt = (r.enqueued_ts ?? '').trim();
+    const t = Date.parse(enqueuedAt);
+    const waitS = Number.isFinite(t) && Number.isFinite(now) && now > t
+      ? Math.round((now - t) / 1000)
+      : 0;
+    queueItems.push({ item_id: id, enqueued_at: enqueuedAt, wait_s: waitS });
+  }
+
+  const queueDepth = queueItems.length;
+
+  // §4 coherence cross-check: where the stage has a clean items.csv state, the
+  // count of items in that state (the tree's view) must equal queue_depth. If
+  // they differ, surface a warning rather than show a silently-wrong number.
+  let coherenceWarning = false;
+  if (bufferDef.coherenceState && itemRegistry) {
+    let stateCount = 0;
+    for (const entry of itemRegistry.values()) {
+      if (entry.state === bufferDef.coherenceState) stateCount += 1;
+    }
+    if (stateCount !== queueDepth) {
+      coherenceWarning = true;
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[stage-flow] coherence mismatch in ${stage}: items.csv ${bufferDef.coherenceState}-count=${stateCount} vs queue_depth=${queueDepth}`,
+      );
+    }
+  }
+
+  return { queue_depth: queueDepth, queue_items: queueItems, coherence_warning: coherenceWarning };
 }
 
 // NOTE ON PARSING — why NOT the shared parseCsv (csv.js):
@@ -257,7 +340,18 @@ function pairDurationS(openRow, closeRow) {
   return null;
 }
 
-function emptyStages() {
+// Queue current-state fields for a stage: a buffer stage gets computed depth/
+// items/warning; a work stage gets nulls (the UI treats null as "not a queue").
+function queueFieldsFor(stage, queues, itemRegistry, now) {
+  const bufferDef = BUFFER_STAGES[stage];
+  if (!bufferDef) {
+    return { queue_depth: null, queue_items: null, coherence_warning: false };
+  }
+  const queueCsv = queues && typeof queues === 'object' ? queues[stage] : null;
+  return computeQueueState(bufferDef, queueCsv, itemRegistry, now, stage);
+}
+
+function emptyStages(queues = null, itemRegistry = null, now = Date.now()) {
   return CANONICAL_STAGES.map((s) => ({
     stage: s.stage,
     label: s.label,
@@ -267,6 +361,7 @@ function emptyStages() {
     rework: 0,
     wip_items: [],
     source_rows: [],
+    ...queueFieldsFor(s.stage, queues, itemRegistry, now),
   }));
 }
 
@@ -281,18 +376,26 @@ function emptyStages() {
  * @returns {Array<{stage:string,label:string,throughput:number,dwell_median_s:number,
  *   wip:number,rework:number,wip_items:string[],source_rows:string[]}>}
  */
-export function aggregateStageFlow(ledgerCsv, project, itemsCsv = null) {
-  if (typeof ledgerCsv !== 'string' || ledgerCsv.trim() === '') return emptyStages();
+export function aggregateStageFlow(ledgerCsv, project, itemsCsv = null, opts = {}) {
+  // DEFECT-004: queue current-state (depth/wait/coherence) is computed from the
+  // queue CSVs + item registry at REQUEST TIME. `now` is request time (epoch ms);
+  // the server may pass Date.now() — this is a normal Node process.
+  const queues = opts && typeof opts === 'object' ? opts.queues || null : null;
+  const now = opts && Number.isFinite(opts.now) ? opts.now : Date.now();
 
   // DEFECT-002: reconcile WIP against the authoritative item registry. null →
   // no registry available → keep raw open-enter pairing (fail soft).
   const itemRegistry = buildItemRegistry(itemsCsv);
 
+  if (typeof ledgerCsv !== 'string' || ledgerCsv.trim() === '') {
+    return emptyStages(queues, itemRegistry, now);
+  }
+
   let rows;
   try {
     rows = parseLedger(ledgerCsv).filter((r) => r.project === project);
   } catch {
-    return emptyStages(); // never throw on a malformed ledger
+    return emptyStages(queues, itemRegistry, now); // never throw on a malformed ledger
   }
 
   return CANONICAL_STAGES.map((stageDef) => {
@@ -350,6 +453,7 @@ export function aggregateStageFlow(ledgerCsv, project, itemsCsv = null) {
       rework,
       wip_items: wipItems,
       source_rows: [...sourceRows],
+      ...queueFieldsFor(stageDef.stage, queues, itemRegistry, now),
     };
   });
 }

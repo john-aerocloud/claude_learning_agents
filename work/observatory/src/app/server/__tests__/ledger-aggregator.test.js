@@ -83,7 +83,12 @@ describe('aggregateStageFlow — shape contract', () => {
       });
       expect(Array.isArray(s.source_rows)).toBe(true);
       expect(Array.isArray(s.wip_items)).toBe(true);
-      for (const v of Object.values(s)) expect(v).not.toBeNull();
+      // Historical fields are never null; queue fields are null on work stages
+      // (DEFECT-004 — null = "not a queue"), so they are excluded from this sweep.
+      const QUEUE_FIELDS = new Set(['queue_depth', 'queue_items']);
+      for (const [k, v] of Object.entries(s)) {
+        if (!QUEUE_FIELDS.has(k)) expect(v).not.toBeNull();
+      }
     }
   });
 
@@ -290,6 +295,109 @@ describe('aggregateStageFlow — WIP reconciliation against items.csv (DEFECT-00
     expect(eng.throughput).toBe(1);
     expect(eng.dwell_median_s).toBe(600);
     expect(eng.wip).toBe(0);
+  });
+});
+
+describe('aggregateStageFlow — queue current-state (DEFECT-004 §3/§4)', () => {
+  const ITEMS_HEADER =
+    'id,type,parent,children,job,state,value,cost,vc_ratio,created_ts,done_ts,dora_ref';
+  function itemsCsv(rows) {
+    return [ITEMS_HEADER, ...rows.map((r) => `${r.id},use-case,CHK,,job,${r.state},,,,,,`)].join('\n') + '\n';
+  }
+  const QUEUE_HEADER = 'item_id,enqueued_ts,value,cost,vc_ratio,position,reason';
+  function queueCsv(rows) {
+    return [QUEUE_HEADER, ...rows.map((r) => `${r.id},${r.enqueued_ts},MED,2,1.00,1,reason`)].join('\n') + '\n';
+  }
+  // 2026-06-10T15:00:00Z as the request "now" so wait_s is deterministic.
+  const NOW = Date.parse('2026-06-10T15:00:00Z');
+
+  it('work stages carry queue_depth=null and queue_items=null (not a queue)', () => {
+    const out = aggregateStageFlow(csv([]), 'p', null, { now: NOW });
+    const eng = byStage(out, 'engineer');
+    expect(eng.queue_depth).toBeNull();
+    expect(eng.queue_items).toBeNull();
+  });
+
+  it('buffer stage with no queue data → queue_depth 0, queue_items []', () => {
+    const out = aggregateStageFlow(csv([]), 'p', null, { now: NOW });
+    const ready = byStage(out, 'ready');
+    expect(ready.queue_depth).toBe(0);
+    expect(ready.queue_items).toEqual([]);
+  });
+
+  it('queue_depth counts live queue rows; queue_items carry id/enqueued_at/wait_s (AC-3/AC-5)', () => {
+    const items = itemsCsv([
+      { id: 'UC-A', state: 'ready' },
+      { id: 'UC-B', state: 'ready' },
+    ]);
+    const queues = {
+      ready: queueCsv([
+        { id: 'UC-A', enqueued_ts: '2026-06-10T14:00:00Z' }, // 1h wait
+        { id: 'UC-B', enqueued_ts: '2026-06-10T13:00:00Z' }, // 2h wait
+      ]),
+    };
+    const ready = byStage(aggregateStageFlow(csv([]), 'p', items, { queues, now: NOW }), 'ready');
+    expect(ready.queue_depth).toBe(2);
+    expect(ready.queue_items.map((q) => q.item_id)).toEqual(['UC-A', 'UC-B']);
+    const a = ready.queue_items.find((q) => q.item_id === 'UC-A');
+    expect(a.enqueued_at).toBe('2026-06-10T14:00:00Z');
+    expect(a.wait_s).toBe(3600);
+    expect(ready.queue_items.find((q) => q.item_id === 'UC-B').wait_s).toBe(7200);
+  });
+
+  it('STALE queue entry (items.csv state done) is excluded from depth AND queue_items (AC-4)', () => {
+    const items = itemsCsv([
+      { id: 'UC-DONE', state: 'done' },
+      { id: 'UC-LIVE', state: 'ready' },
+    ]);
+    const queues = {
+      ready: queueCsv([
+        { id: 'UC-DONE', enqueued_ts: '2026-06-10T14:00:00Z' },
+        { id: 'UC-LIVE', enqueued_ts: '2026-06-10T14:00:00Z' },
+      ]),
+    };
+    const ready = byStage(aggregateStageFlow(csv([]), 'p', items, { queues, now: NOW }), 'ready');
+    expect(ready.queue_depth).toBe(1);
+    expect(ready.queue_items.map((q) => q.item_id)).toEqual(['UC-LIVE']);
+  });
+
+  it('coherence_warning false when queue depth equals items.csv ready-count for the stage (AC-6)', () => {
+    const items = itemsCsv([
+      { id: 'UC-A', state: 'ready' },
+      { id: 'UC-B', state: 'ready' },
+    ]);
+    const queues = {
+      ready: queueCsv([
+        { id: 'UC-A', enqueued_ts: '2026-06-10T14:00:00Z' },
+        { id: 'UC-B', enqueued_ts: '2026-06-10T14:00:00Z' },
+      ]),
+    };
+    const ready = byStage(aggregateStageFlow(csv([]), 'p', items, { queues, now: NOW }), 'ready');
+    expect(ready.coherence_warning).toBe(false);
+  });
+
+  it('coherence_warning true when items.csv has a ready item NOT in the queue CSV (AC-6 mismatch)', () => {
+    // 3 ready in items.csv, only 2 queued → mismatch surfaced, not hidden.
+    const items = itemsCsv([
+      { id: 'UC-A', state: 'ready' },
+      { id: 'UC-B', state: 'ready' },
+      { id: 'UC-C', state: 'ready' },
+    ]);
+    const queues = {
+      ready: queueCsv([
+        { id: 'UC-A', enqueued_ts: '2026-06-10T14:00:00Z' },
+        { id: 'UC-B', enqueued_ts: '2026-06-10T14:00:00Z' },
+      ]),
+    };
+    const ready = byStage(aggregateStageFlow(csv([]), 'p', items, { queues, now: NOW }), 'ready');
+    expect(ready.queue_depth).toBe(2);
+    expect(ready.coherence_warning).toBe(true);
+  });
+
+  it('never throws when queues option is malformed/absent (fail-soft)', () => {
+    expect(() => aggregateStageFlow(csv([]), 'p', null, { queues: { ready: null } })).not.toThrow();
+    expect(() => aggregateStageFlow(csv([]), 'p', null, {})).not.toThrow();
+    expect(() => aggregateStageFlow(csv([]), 'p')).not.toThrow();
   });
 });
 

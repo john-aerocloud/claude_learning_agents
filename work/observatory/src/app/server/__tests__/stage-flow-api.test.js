@@ -65,6 +65,49 @@ describe('GET /api/projects/:id/stage-flow', () => {
     expect(eng.source_rows.length).toBeGreaterThan(0);
   });
 
+  it('DEFECT-009: OBSERVATORY_NOW pins request `now` so a static fixture open stays recent (e2e time seam)', async () => {
+    // A static fixture ledger has a fixed-date open in-event; without a pinned
+    // `now` it ages past the 30-min horizon and silently drops to wip=0. The
+    // OBSERVATORY_NOW env (ISO ts) makes the read-time `now` deterministic so the
+    // browser fixture's in-flight node renders. Recent (5 min) → WIP; the close
+    // for UC-1 means only CHK-X is open.
+    const FIXED_NOW = '2026-06-09T01:15:00Z';
+    writeLedger(
+      root,
+      HEADER +
+        '\n2026-06-09T01:10:00Z,p,1,s,engineer,task_start,,na,,build c,CHK-X,engineer\n',
+    );
+    const prev = process.env.OBSERVATORY_NOW;
+    process.env.OBSERVATORY_NOW = FIXED_NOW;
+    try {
+      const res = await request(server).get('/api/projects/p/stage-flow');
+      const eng = res.body.find((s) => s.stage === 'engineer');
+      expect(eng.wip).toBe(1);
+      expect(eng.wip_items).toEqual([{ item_id: 'CHK-X', note: 'build c' }]);
+    } finally {
+      if (prev === undefined) delete process.env.OBSERVATORY_NOW;
+      else process.env.OBSERVATORY_NOW = prev;
+    }
+  });
+
+  it('DEFECT-009: a static fixture open with NO time pin ages out (wip=0) under real Date.now()', async () => {
+    // Guards the failure mode: 2026-06-09 open is days old at real now → stale.
+    const prev = process.env.OBSERVATORY_NOW;
+    delete process.env.OBSERVATORY_NOW;
+    writeLedger(
+      root,
+      HEADER +
+        '\n2026-06-09T01:10:00Z,p,1,s,engineer,task_start,,na,,build c,CHK-X,engineer\n',
+    );
+    try {
+      const res = await request(server).get('/api/projects/p/stage-flow');
+      const eng = res.body.find((s) => s.stage === 'engineer');
+      expect(eng.wip).toBe(0);
+    } finally {
+      if (prev !== undefined) process.env.OBSERVATORY_NOW = prev;
+    }
+  });
+
   it('AC1.8 unknown project returns 200 with all stages present, all zeros', async () => {
     writeLedger(
       root,

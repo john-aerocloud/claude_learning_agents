@@ -39,6 +39,22 @@ import { parseLedger } from './lib/ledgerAggregator.js';
 const SHA = process.env.OBSERVATORY_SHA || process.env.GIT_SHA || 'dev';
 const HEARTBEAT_MS = 30_000;
 
+// DEFECT-009 — request-time `now` (epoch ms) for the WIP recency horizon.
+// Real servers use Date.now(). A static-fixture server (e2e) can pin it via
+// OBSERVATORY_NOW (ISO timestamp OR epoch-ms string) so a fixed-date in-flight
+// open stays "recent" and the browser fixture renders deterministically. Read
+// per-request (not cached) so a test can flip it; unparseable → Date.now().
+function requestNow() {
+  const raw = process.env.OBSERVATORY_NOW;
+  if (raw) {
+    const asNum = Number(raw);
+    if (Number.isFinite(asNum) && raw.trim() !== '') return asNum;
+    const asIso = Date.parse(raw);
+    if (Number.isFinite(asIso)) return asIso;
+  }
+  return Date.now();
+}
+
 // Read methods the server permits (F7/T-READ-10).
 const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
@@ -247,10 +263,14 @@ export function createApiMiddleware({ repoRoot, watcher }) {
               ]),
             )
           : null;
+        // DEFECT-009: `now` governs the WIP recency horizon. Real requests use
+        // Date.now(); a static FIXTURE server (e2e) pins it via OBSERVATORY_NOW
+        // (ISO ts or epoch ms) so a fixed-date in-flight open stays "recent" and
+        // the browser fixture renders deterministically. Unparseable → Date.now().
         return json(
           res,
           200,
-          aggregateStageFlow(ledgerCsv, id, itemsCsv, { queues, now: Date.now() }),
+          aggregateStageFlow(ledgerCsv, id, itemsCsv, { queues, now: requestNow() }),
         );
       }
 

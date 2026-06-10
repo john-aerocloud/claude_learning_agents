@@ -16,6 +16,14 @@ import { dirname, resolve } from 'node:path';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_REPO = resolve(HERE, 'e2e', 'fixtures', 'repo');
 
+// DEFECT-009 — WIP is now recency-bounded (30-min horizon). The fixture ledger's
+// single in-flight open (CHK-4 task_start @ 2026-06-09T01:00:00Z, no end) would
+// age past the horizon under a live Date.now() and silently drop to wip=0,
+// breaking the in-flight-badge specs. Pin the read-time `now` to 15 min after
+// that open so the fixture's in-flight node renders deterministically (every
+// other open in the fixture has its matching close, so only CHK-4 is WIP).
+const FIXTURE_NOW = '2026-06-09T01:15:00Z';
+
 // EPHEMERAL-PORT SUPPORT (UC-S005-3): default is :5173 (the single dev topology).
 // Set OBSERVATORY_E2E_PORT to run the spec server on a different port WITHOUT
 // touching an operator's running :5173 — Playwright then launches its own Vite
@@ -42,13 +50,17 @@ export default defineConfig({
     {
       // Single Vite server: SPA + API on E2E_PORT (default :5173).
       // Uses the fixture repo for deterministic counts.
+      // Set REUSE_SERVER=1 to reuse a pre-running server on a non-default port
+      // (e.g. a live :5203 server for real-data validation runs).
       command: `npm run dev -- --port ${E2E_PORT} --strictPort`,
       cwd: HERE,
       port: E2E_PORT,
-      // When running on a non-default port we ALWAYS start our own (never reuse).
-      reuseExistingServer: E2E_PORT === 5173 && !process.env.CI,
+      // When running on a non-default port we ALWAYS start our own (never reuse),
+      // UNLESS REUSE_SERVER=1 is set (for real-data tester validation against a
+      // pre-started ephemeral server).
+      reuseExistingServer: (E2E_PORT === 5173 && !process.env.CI) || !!process.env.REUSE_SERVER,
       timeout: 60_000,
-      env: { OBSERVATORY_REPO_ROOT: FIXTURE_REPO },
+      env: { OBSERVATORY_REPO_ROOT: FIXTURE_REPO, OBSERVATORY_NOW: FIXTURE_NOW },
     },
   ],
 });

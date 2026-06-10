@@ -42,6 +42,16 @@ import { parseCsv } from '../parsers/csv.js';
 
 const TERMINAL_ITEM_STATES = new Set(['done', 'dropped', 'cancelled']);
 
+// DEFECT-009 — WIP is RECENCY-based, not items.csv-membership-based.
+// An open in-event (task_start/stage_enter with no matching close) is in-flight
+// iff it is RECENT — within this staleness horizon of request time. DEFECT-002's
+// phantom orphans (a held/dropped UC's enter, hours-to-days old) fail this gate;
+// real current work (chunks/slices/meta product works on, minutes old) passes it.
+// Real agent tasks complete in single-digit minutes; 30 min is well above the
+// 99th percentile of observed task durations and far below known phantom ages.
+// Named so it can be tuned without logic changes (ruling §"Horizon value").
+const WIP_STALENESS_HORIZON_MS = 30 * 60 * 1000; // 30 minutes
+
 // DEFECT-004 — buffer (queue) stages hold items RIGHT NOW. Each maps to a queue
 // CSV (work/<project>/queues/<stage>.csv) for current depth/wait, and (where a
 // clean items.csv state exists) to the items.csv state used for the coherence
@@ -479,13 +489,32 @@ export function aggregateStageFlow(ledgerCsv, project, itemsCsv = null, opts = {
       }
     }
 
-    // DEFECT-002: an open enter is genuine in-flight only if the item still
-    // exists in the registry AND is non-terminal. No registry → keep all opens.
-    const wipItems = [...openByItem.keys()].filter((id) => {
-      if (!itemRegistry) return true; // fail-soft: no registry to reconcile against
-      const entry = itemRegistry.get(id);
-      return entry !== undefined && !entry.terminal;
-    });
+    // DEFECT-009: WIP is RECENCY-based (supersedes DEFECT-002 membership filter).
+    // An open in-event is in-flight iff:
+    //   (1) it is RECENT: (now - open.timestamp) <= WIP_STALENESS_HORIZON_MS; AND
+    //   (2) NOT (the item EXISTS in items.csv AND is in a terminal state).
+    // Priority: stale → exclude; recent + terminal-in-registry → exclude;
+    //   recent + (absent-or-non-terminal) → WIP. Absence does NOT disqualify
+    //   (chunks/slices/meta tokens have no registry row but are real work).
+    // wip_items entries are {item_id, note} (DEFECT-008): note = the open row's
+    // ledger note ("" when blank). The stale phantoms (UC-S003-2/3/4) are
+    // hours-to-days old and fail (1) — DEFECT-002 stays fixed by recency.
+    const wipItems = [];
+    for (const [id, openRow] of openByItem) {
+      // (1) recency gate — primary discriminator.
+      const openTs = Date.parse(openRow.timestamp);
+      const recent = Number.isFinite(openTs) && Number.isFinite(now)
+        ? (now - openTs) <= WIP_STALENESS_HORIZON_MS
+        : true; // unparseable ts → fail-soft to "recent" (never silently drop)
+      if (!recent) continue;
+      // (2) secondary terminal check — only when the item is in the registry.
+      // Absence from the registry does NOT disqualify (DEFECT-009 fix).
+      if (itemRegistry) {
+        const entry = itemRegistry.get(id);
+        if (entry !== undefined && entry.terminal) continue;
+      }
+      wipItems.push({ item_id: id, note: openRow.note ?? '' });
+    }
 
     // DEFECT-005: contributing rows in encounter order. source_rows keeps the
     // audit indices; source_events projects readable fields (capped, with the

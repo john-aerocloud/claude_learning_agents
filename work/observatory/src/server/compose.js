@@ -22,6 +22,7 @@ import { createDoraRouter } from './routes/dora.js';
 import { createSlicesRouter } from './routes/slices.js';
 import { createEventsRouter } from './routes/events.js';
 import { createStageFlowRouter } from './routes/stageFlow.js';
+import { createLedgerRouter } from './routes/ledger.js';
 
 /**
  * Build the fully-composed read-layer app plus the watcher backing /api/events.
@@ -42,6 +43,7 @@ export function buildServerApp(opts = {}) {
     createSlicesRouter({ repoRoot }), // UC4
     createEventsRouter({ watcher }), // UC5
     createStageFlowRouter({ repoRoot }), // UC-S004-1 (stage-flow aggregation)
+    createLedgerRouter({ repoRoot }), // UC-S005-1 (ledger-by-item-id history)
   ];
 
   const app = createApp({ repoRoot, extraRouters, allowedOrigin: opts.allowedOrigin });

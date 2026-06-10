@@ -1,0 +1,188 @@
+/* UC-S004-2/3/4 — value-stream map (the DEFECT-001 real-data primary surface).
+ * Three lanes (queue / build / release) stacked top→bottom; within a lane the
+ * stage nodes flow left→right (flex-wrap) connected by FlowArrows. Geometry
+ * contract (GEO-1..8): nodes are >= --node-min wide, lanes stack into distinct
+ * top-offset rows, gate nodes are shape-distinct, the wip>0 in-flight badge
+ * pops the silhouette. Tokens are all from tokens.css (additive s004 block). */
+
+.value-stream-map {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-lane);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-box);
+  padding: var(--sp-4);
+}
+
+.value-stream-map__h {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-label);
+  font-weight: var(--fw-label);
+  color: var(--c-text);
+}
+
+/* a lane band: heading + a left→right wrapping flow of nodes */
+.vsm-lane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.vsm-lane__h {
+  font-size: var(--fs-meta);
+  font-weight: var(--fw-meta);
+  color: var(--c-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.vsm-lane__flow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: var(--gap-node);
+}
+
+/* one stage node */
+.stage-node {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: var(--node-min);
+  flex: 1 1 var(--node-min);
+  max-width: 280px;
+  background: var(--c-surface-raised);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-box);
+  box-shadow: var(--elev-box);
+  padding: var(--sp-3);
+}
+
+.stage-node:focus-visible,
+.stage-node:focus {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* gate nodes: shape-distinct (clipped diamond corners + heavier border) — a
+ * geometric/structural cue distinct from work-node radius (GEO-4), never colour. */
+.stage-node[data-stage-kind='gate'] {
+  border-width: 2px;
+  border-radius: 2px;
+  clip-path: polygon(
+    12px 0,
+    calc(100% - 12px) 0,
+    100% 12px,
+    100% calc(100% - 12px),
+    calc(100% - 12px) 100%,
+    12px 100%,
+    0 calc(100% - 12px),
+    0 12px
+  );
+}
+
+/* wip-active node: --c-wip border accent (one of FOUR redundant cues) */
+.stage-node[data-wip-active='true'] {
+  border-color: var(--c-wip-bd);
+  border-width: 2px;
+}
+
+.stage-node__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+.stage-node__name {
+  font-size: var(--fs-label);
+  font-weight: var(--fw-label);
+  color: var(--c-text);
+}
+
+.gate-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-meta);
+  font-weight: var(--fw-meta);
+  color: var(--c-text-dim);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-badge);
+  padding: 1px 6px;
+}
+
+/* the 2×2 labelled figures */
+.stage-figs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-2);
+  margin: 0;
+}
+
+.stage-metric {
+  display: flex;
+  flex-direction: column;
+}
+
+.stage-metric__label {
+  font-size: var(--fs-meta);
+  font-weight: var(--fw-meta);
+  color: var(--c-text-dim);
+  margin: 0;
+}
+
+.stage-metric__value {
+  font-size: var(--fs-stage-fig);
+  font-weight: var(--fw-metric);
+  color: var(--c-text);
+  margin: 0;
+}
+
+/* the in-flight badge: a prominent bordered pill that POPS out of the 2×2 grid
+ * (spans both columns, larger) so the silhouette changes when wip>0 (GEO-6). */
+.inflight-badge {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: start;
+  font-size: var(--fs-stage-fig);
+  font-weight: var(--fw-metric);
+  color: var(--c-wip);
+  background: color-mix(in srgb, var(--c-wip) 14%, transparent);
+  border: 2px solid var(--c-wip-bd);
+  border-radius: 999px;
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.inflight-badge__glyph {
+  color: var(--c-wip);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .inflight-badge__glyph {
+    animation: vsm-pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes vsm-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+  }
+}
+
+/* rework loop: a returning right→left SVG path + a visible text label OUTSIDE
+ * the aria-hidden svg (A11Y-6). */
+.rework-loop {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-end;
+  color: var(--c-state-over);
+  font-size: var(--fs-meta);
+  font-weight: var(--fw-meta);
+}
+
+.rework-loop__label {
+  white-space: nowrap;
+}

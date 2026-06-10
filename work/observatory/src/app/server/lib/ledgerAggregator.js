@@ -340,6 +340,17 @@ const STAGE_MATCHERS = {
   },
 };
 
+// DEFECT-007 — active-days denominator for the throughput RATE.
+// The UTC calendar date (YYYY-MM-DD) of an ISO timestamp. This is exactly the
+// basis dora.py uses for deploy-frequency (parse_ts(ts).date()) and queue
+// throughput — so the map's per-stage rate is coherent with baseline.md.
+// Unparseable / blank timestamp → null (does not contribute a date).
+function utcDate(ts) {
+  if (typeof ts !== 'string') return null;
+  const m = /^(\d{4}-\d{2}-\d{2})T/.exec(ts.trim());
+  return m ? m[1] : null;
+}
+
 // Median of a numeric array; [] → 0. Returns the average of the two middle
 // values for even counts (a real positive number, AC1.6).
 function median(values) {
@@ -379,6 +390,8 @@ function emptyStages(queues = null, itemRegistry = null, now = Date.now()) {
     stage: s.stage,
     label: s.label,
     throughput: 0,
+    active_days: 0,
+    throughput_per_active_day: null, // DEFECT-007 — 0 active days ⇒ null (UI shows "—")
     dwell_median_s: 0,
     dwell_pairs: 0,
     wip: 0,
@@ -480,10 +493,22 @@ export function aggregateStageFlow(ledgerCsv, project, itemsCsv = null, opts = {
     const contributing = [...sourceByRef.values()];
     const sourceTotal = contributing.length;
 
+    // DEFECT-007 — throughput is a RATE: items per active-day. active_days is the
+    // count of DISTINCT UTC calendar dates among the contributing rows (same basis
+    // as dora.py deploy-frequency, §1 of the ruling). 0 active days → rate is null
+    // (the UI renders "—"), never a division-by-zero artefact. throughput (the raw
+    // integer count) is KEPT — it is the numerator shown in the source/hover panel.
+    const activeDays = new Set(
+      contributing.map((r) => utcDate(r.timestamp)).filter(Boolean),
+    ).size;
+    const throughputPerActiveDay = activeDays === 0 ? null : throughput / activeDays;
+
     return {
       stage: stageDef.stage,
       label: stageDef.label,
       throughput,
+      active_days: activeDays,
+      throughput_per_active_day: throughputPerActiveDay,
       dwell_median_s: median(dwellSamples),
       // DEFECT-004 AC-2: number of completed pairs behind dwell — the UI shows
       // "—" (unknown ≠ 0) when < 2 pairs, never a misleading "0s".

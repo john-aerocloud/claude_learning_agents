@@ -85,7 +85,9 @@ describe('aggregateStageFlow — shape contract', () => {
       expect(Array.isArray(s.wip_items)).toBe(true);
       // Historical fields are never null; queue fields are null on work stages
       // (DEFECT-004 — null = "not a queue"), so they are excluded from this sweep.
-      const QUEUE_FIELDS = new Set(['queue_depth', 'queue_items']);
+      // DEFECT-007: throughput_per_active_day is null when active_days=0 (the
+      // empty case here) — that null is intentional ("—"), not a missing number.
+      const QUEUE_FIELDS = new Set(['queue_depth', 'queue_items', 'throughput_per_active_day']);
       for (const [k, v] of Object.entries(s)) {
         if (!QUEUE_FIELDS.has(k)) expect(v).not.toBeNull();
       }
@@ -121,6 +123,61 @@ describe('aggregateStageFlow — throughput (engineer = task_start count, AC1.4)
       'p',
     );
     expect(byStage(out, 'engineer').throughput).toBe(1);
+  });
+});
+
+// DEFECT-007 — throughput is a RATE: items per active-day.
+// active_days = distinct UTC calendar dates of the stage's contributing rows;
+// throughput_per_active_day = throughput / active_days (null when active_days=0).
+describe('aggregateStageFlow — throughput rate (DEFECT-007 D7-AC-2/AC-3)', () => {
+  it('D7-AC-3: active_days = distinct UTC dates of contributing rows', () => {
+    // 3 engineer task_starts across 2 distinct UTC calendar dates
+    const out = aggregateStageFlow(
+      csv([
+        row({ ts: '2026-06-01T08:00:00Z', agent: 'engineer', event: 'task_start', item: 'A' }),
+        row({ ts: '2026-06-01T20:00:00Z', agent: 'engineer', event: 'task_start', item: 'B' }),
+        row({ ts: '2026-06-02T09:00:00Z', agent: 'engineer', event: 'task_start', item: 'C' }),
+      ]),
+      'p',
+    );
+    const eng = byStage(out, 'engineer');
+    expect(eng.throughput).toBe(3);
+    expect(eng.active_days).toBe(2);
+  });
+
+  it('D7-AC-2: throughput_per_active_day = throughput / active_days (float)', () => {
+    const out = aggregateStageFlow(
+      csv([
+        row({ ts: '2026-06-01T08:00:00Z', agent: 'engineer', event: 'task_start', item: 'A' }),
+        row({ ts: '2026-06-01T20:00:00Z', agent: 'engineer', event: 'task_start', item: 'B' }),
+        row({ ts: '2026-06-02T09:00:00Z', agent: 'engineer', event: 'task_start', item: 'C' }),
+      ]),
+      'p',
+    );
+    const eng = byStage(out, 'engineer');
+    expect(eng.throughput_per_active_day).toBeCloseTo(3 / 2, 2); // 1.5
+  });
+
+  it('D7-AC-3: active_days=0 and throughput_per_active_day=null when the stage has no events', () => {
+    const out = aggregateStageFlow(csv([]), 'p');
+    for (const s of out) {
+      expect(s.active_days).toBe(0);
+      expect(s.throughput_per_active_day).toBeNull();
+    }
+  });
+
+  it('keeps the raw integer throughput count alongside the rate', () => {
+    const out = aggregateStageFlow(
+      csv([
+        row({ ts: '2026-06-01T08:00:00Z', agent: 'engineer', event: 'task_start', item: 'A' }),
+        row({ ts: '2026-06-01T20:00:00Z', agent: 'engineer', event: 'task_start', item: 'B' }),
+      ]),
+      'p',
+    );
+    const eng = byStage(out, 'engineer');
+    expect(eng.throughput).toBe(2); // integer count preserved
+    expect(eng.active_days).toBe(1);
+    expect(eng.throughput_per_active_day).toBeCloseTo(2, 2);
   });
 });
 
@@ -614,5 +671,22 @@ describe('aggregateStageFlow — REAL ledger (real-data gate, not a fixture)', (
       expect(Number.isInteger(s.wip)).toBe(true);
       expect(s.wip).toBeGreaterThanOrEqual(0);
     }
+  });
+
+  // DEFECT-007 D7-AC-7 — basis coherence: the engineer-stage active_days denominator
+  // MUST equal the number of distinct UTC calendar dates of task_start rows for
+  // agent=engineer in the live ledger (same basis dora.py uses for deploy-frequency).
+  it('D7-AC-7: engineer active_days == distinct UTC dates of engineer task_start rows', () => {
+    const eng = byStage(aggregateStageFlow(realLedger, 'observatory'), 'engineer');
+    const distinctDates = new Set(
+      realLedger
+        .split('\n')
+        .filter((l) => l.includes(',observatory,') && l.includes(',engineer,task_start,'))
+        .map((l) => l.split(',')[0].slice(0, 10)),
+    );
+    expect(eng.active_days).toBe(distinctDates.size);
+    expect(eng.active_days).toBeGreaterThanOrEqual(1);
+    // and the rate is the count divided by that denominator
+    expect(eng.throughput_per_active_day).toBeCloseTo(eng.throughput / eng.active_days, 2);
   });
 });

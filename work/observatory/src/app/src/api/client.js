@@ -27,6 +27,7 @@
 //   getPolicy(project)     -> Promise<PolicyRecord[]|null>    (the policy queue CSV)
 //   getBaseline()          -> Promise<string|null>            (raw baseline.md)
 //   getFlow(project)       -> Promise<string|null>            (raw flow.md; UC-S003-1)
+//   getItems(project)      -> Promise<ItemRecord[]|null>      (work-item records; UC-S005-2)
 //   subscribeEvents(onChange) -> () => void                   (SSE; returns unsubscribe)
 // AC-named aliases (acceptance.md AC1.3-1.5): fetchQueues, fetchPolicy, fetchBaseline, fetchFlow.
 
@@ -99,6 +100,21 @@ export async function getFlow(project) {
  */
 export async function getStageFlow(project) {
   return getJson(`/api/projects/${encodeURIComponent(project)}/stage-flow`);
+}
+
+/**
+ * GET /api/projects/:id/items → ItemRecord[] (raw §4 records:
+ * {id,type,parent,children,job,state,value,cost,vc_ratio,...}), or null when
+ * missing/unreachable. Like getStageFlow, this endpoint returns the ARRAY
+ * DIRECTLY (no {content} envelope) — match the UC-S001-2 /items route shape.
+ * Fails soft to null on any network/HTTP/parse error (the caller maps null →
+ * empty tree). Project segment is URL-encoded. UC-S005-2's WorkItemTree builds
+ * the REQ→CHK→SLC→UC hierarchy from these records' parent/children fields.
+ * @param {string} project
+ * @returns {Promise<Array|null>}
+ */
+export async function getItems(project) {
+  return getJson(`/api/projects/${encodeURIComponent(project)}/items`);
 }
 
 /**

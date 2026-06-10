@@ -13,6 +13,7 @@ import {
   getBaseline,
   getFlow,
   getStageFlow,
+  getItems,
   fetchQueues,
   fetchPolicy,
   fetchBaseline,
@@ -93,6 +94,29 @@ describe('api/client URL construction + parsing', () => {
   it('getStageFlow fails soft to null on a network/HTTP error', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('boom')));
     expect(await getStageFlow('observatory')).toBeNull();
+  });
+
+  it('getItems(project) builds /api/projects/:id/items and returns the RAW array (no envelope) (UC-S005-2)', async () => {
+    const fixture = [
+      { id: 'REQ-OBSERVATORY', type: 'requirement', parent: '', children: 'CHK-1', job: 'Observe', state: 'active', value: 'HIGH', cost: 'XL', vc_ratio: 'HIGH/XL' },
+    ];
+    const f = mockFetchJson(fixture);
+    vi.stubGlobal('fetch', f);
+    const rows = await getItems('observatory');
+    expect(f).toHaveBeenCalledWith('/api/projects/observatory/items');
+    expect(rows).toEqual(fixture);
+  });
+
+  it('getItems encodes the project segment', async () => {
+    const f = mockFetchJson([]);
+    vi.stubGlobal('fetch', f);
+    await getItems('a/b');
+    expect(f).toHaveBeenCalledWith('/api/projects/a%2Fb/items');
+  });
+
+  it('getItems fails soft to null on a network/HTTP error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('boom')));
+    expect(await getItems('observatory')).toBeNull();
   });
 
   it('getQueues encodes path segments (defends against malformed project ids)', async () => {

@@ -63,7 +63,7 @@ export function sourceAttr(sourceRows) {
 /** A single labelled figure (label + value) + its MetricSource traceability
  * reveal. Never a bare number (AC3.1). The value is wired to its source panel
  * via aria-describedby (A11Y-10) and carries the programmatic data-source (SRC-1). */
-function StageMetric({ stage, kind, label, value, sourceRows, open }) {
+function StageMetric({ stage, kind, label, value, sourceRows, sourceEvents, sourceTotal, open }) {
   const panelId = `src-${stage}-${kind}`;
   return (
     <div class="stage-metric" data-testid={`metric-${stage}-${kind}`}>
@@ -81,6 +81,8 @@ function StageMetric({ stage, kind, label, value, sourceRows, open }) {
         id={panelId}
         stage={stage}
         kind={kind}
+        sourceEvents={sourceEvents}
+        sourceTotal={sourceTotal}
         sourceRows={sourceRows}
         open={open}
       />
@@ -91,7 +93,7 @@ function StageMetric({ stage, kind, label, value, sourceRows, open }) {
 /** The prominent non-colour-redundant in-flight indicator (replaces the plain
  * WIP metric when wip>0). Visible text "● N in-flight"; glyph aria-hidden. It
  * ALSO carries the wip MetricSource reveal so the operator can trace WIP. */
-function InFlightBadge({ stage, count, sourceRows, open }) {
+function InFlightBadge({ stage, count, sourceRows, sourceEvents, sourceTotal, open }) {
   const panelId = `src-${stage}-wip`;
   return (
     <div
@@ -104,7 +106,7 @@ function InFlightBadge({ stage, count, sourceRows, open }) {
     >
       <span class="inflight-badge__glyph" aria-hidden="true">●</span>
       <span>{count} in-flight</span>
-      <MetricSource id={panelId} stage={stage} kind="wip" sourceRows={sourceRows} open={open} />
+      <MetricSource id={panelId} stage={stage} kind="wip" sourceEvents={sourceEvents} sourceTotal={sourceTotal} sourceRows={sourceRows} open={open} />
     </div>
   );
 }
@@ -113,7 +115,7 @@ function InFlightBadge({ stage, count, sourceRows, open }) {
  * labelled "Depth" (NOT "WIP" — depth is sitting/waiting, WIP is in-flight) plus
  * each queued item's id + humanised accruing wait. First 3 items, then "+N more";
  * the depth badge always shows the full count. queue_depth 0 → "0 queued", no rows. */
-function QueueDepth({ stage, depth, items, sourceRows, open }) {
+function QueueDepth({ stage, depth, items, sourceRows, sourceEvents, sourceTotal, open }) {
   const panelId = `src-${stage}-depth`;
   const list = Array.isArray(items) ? items : [];
   const shown = list.slice(0, MAX_QUEUE_ITEMS_SHOWN);
@@ -151,7 +153,7 @@ function QueueDepth({ stage, depth, items, sourceRows, open }) {
           ) : null}
         </ul>
       ) : null}
-      <MetricSource id={panelId} stage={stage} kind="depth" sourceRows={sourceRows} open={open} />
+      <MetricSource id={panelId} stage={stage} kind="depth" sourceEvents={sourceEvents} sourceTotal={sourceTotal} sourceRows={sourceRows} open={open} />
     </div>
   );
 }
@@ -172,6 +174,7 @@ function GateMarker({ gate }) {
 export function StageNode({ data }) {
   const {
     stage, label, throughput, dwell_median_s, dwell_pairs, wip, rework, source_rows,
+    source_events, source_total,
     queue_depth, queue_items, coherence_warning,
   } = data;
   const isGate = GATES.has(stage);
@@ -240,14 +243,14 @@ export function StageNode({ data }) {
         </p>
       ) : null}
       <dl class="stage-figs">
-        <StageMetric stage={stage} kind="throughput" label="Throughput" value={throughputText} sourceRows={source_rows} open={open} />
-        <StageMetric stage={stage} kind="dwell" label="Dwell" value={dwell} sourceRows={source_rows} open={open} />
+        <StageMetric stage={stage} kind="throughput" label="Throughput" value={throughputText} sourceRows={source_rows} sourceEvents={source_events} sourceTotal={source_total} open={open} />
+        <StageMetric stage={stage} kind="dwell" label="Dwell" value={dwell} sourceRows={source_rows} sourceEvents={source_events} sourceTotal={source_total} open={open} />
         {isQueue
-          ? <QueueDepth stage={stage} depth={depth} items={queue_items} sourceRows={source_rows} open={open} />
+          ? <QueueDepth stage={stage} depth={depth} items={queue_items} sourceRows={source_rows} sourceEvents={source_events} sourceTotal={source_total} open={open} />
           : wipActive
-            ? <InFlightBadge stage={stage} count={wip} sourceRows={source_rows} open={open} />
-            : <StageMetric stage={stage} kind="wip" label="WIP" value={String(wip)} sourceRows={source_rows} open={open} />}
-        <StageMetric stage={stage} kind="rework" label="Rework" value={reworkText} sourceRows={source_rows} open={open} />
+            ? <InFlightBadge stage={stage} count={wip} sourceRows={source_rows} sourceEvents={source_events} sourceTotal={source_total} open={open} />
+            : <StageMetric stage={stage} kind="wip" label="WIP" value={String(wip)} sourceRows={source_rows} sourceEvents={source_events} sourceTotal={source_total} open={open} />}
+        <StageMetric stage={stage} kind="rework" label="Rework" value={reworkText} sourceRows={source_rows} sourceEvents={source_events} sourceTotal={source_total} open={open} />
       </dl>
     </div>
   );

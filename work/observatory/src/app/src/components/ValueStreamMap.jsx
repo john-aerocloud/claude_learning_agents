@@ -84,7 +84,7 @@ function ReworkLoopConnector({ from = 'validate', to = 'engineer' }) {
 /** All-zeros skeleton row when stages is null/empty (fail-soft) — the full 10
  * labelled nodes at zero, NOT a blank region (AC2.6 / GEO-8 / CC1). */
 const ZERO_STAGES = FLOW_ORDER.map((stage) => ({
-  stage, label: stage, throughput: 0, dwell_median_s: 0, wip: 0, rework: 0, source_rows: [],
+  stage, label: stage, throughput: 0, dwell_median_s: 0, wip: 0, rework: 0, source_rows: [], source_events: [], source_total: 0,
 }));
 
 /**
@@ -103,7 +103,7 @@ export function ValueStreamMap({ stages, stale = false }) {
   const byStage = Object.fromEntries(src.map((s) => [s.stage, s]));
   // Only the 10 canonical nodes render (rework is the loop, not a node).
   const nodeFor = (stage) =>
-    byStage[stage] || { stage, label: stage, throughput: 0, dwell_median_s: 0, wip: 0, rework: 0, source_rows: [] };
+    byStage[stage] || { stage, label: stage, throughput: 0, dwell_median_s: 0, wip: 0, rework: 0, source_rows: [], source_events: [], source_total: 0 };
 
   return (
     <section

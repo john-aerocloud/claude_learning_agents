@@ -14,8 +14,8 @@
   z-index: 5;
   top: calc(100% + 4px);
   left: 0;
-  min-width: 140px;
-  max-width: 240px;
+  min-width: 180px;
+  max-width: 320px;
   background: var(--c-surface-raised, #fff);
   color: var(--c-text);
   border: 1px solid var(--c-source-link, var(--c-border));
@@ -42,7 +42,16 @@
   color: var(--c-source-link, var(--c-text-dim));
 }
 
-.metric-source__rows {
+/* DEFECT-005 — name the source file at the top of the reveal. */
+.metric-source__file {
+  display: block;
+  margin-top: 2px;
+  color: var(--c-text-dim);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-meta);
+}
+
+.metric-source__events {
   list-style: none;
   margin: var(--sp-1, 4px) 0 0;
   padding: 0;
@@ -51,10 +60,16 @@
   gap: 2px;
 }
 
-.metric-source__row {
-  font-family: var(--font-mono, ui-monospace, monospace);
+.metric-source__event {
   color: var(--c-text);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.metric-source__more {
+  color: var(--c-text-dim);
+  font-style: italic;
 }
 
 .metric-source__empty {

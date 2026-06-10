@@ -23,7 +23,14 @@ const engineer = {
   dwell_median_s: 720,
   wip: 2,
   rework: 3,
+  // DEFECT-005: source_rows kept for the data-source audit attr; the reveal
+  // renders the readable source_events instead of bare row:N.
   source_rows: ['row:34', 'row:35'],
+  source_events: [
+    { ts: '2026-06-09T14:36:00Z', agent: 'engineer', event: 'stage_exit', item_id: 'UC-S001-1' },
+    { ts: '2026-06-09T15:10:00Z', agent: 'engineer', event: 'task_start', item_id: 'UC-S002-3' },
+  ],
+  source_total: 2,
 };
 
 const zeroStage = {
@@ -34,6 +41,8 @@ const zeroStage = {
   wip: 0,
   rework: 0,
   source_rows: [],
+  source_events: [],
+  source_total: 0,
 };
 
 function renderNode(data) {
@@ -74,9 +83,13 @@ describe('StageNode metric traceability (UC-S004-5)', () => {
     fireEvent.keyDown(node, { key: 'Enter' });
     const panel = screen.getByTestId('metric-source-engineer-throughput');
     expect(panel).not.toHaveAttribute('hidden');
-    // a REAL ledger row ref, not a placeholder
-    expect(panel).toHaveTextContent('row:34');
-    expect(panel).toHaveTextContent('row:35');
+    // DEFECT-005: readable contributing EVENTS, not bare row:N
+    expect(panel).toHaveTextContent('stage_exit');
+    expect(panel).toHaveTextContent('UC-S001-1');
+    expect(panel).toHaveTextContent('task_start');
+    expect(panel.textContent).not.toMatch(/\brow:\d+/);
+    // names the source file so the operator can open it
+    expect(panel).toHaveTextContent('process/dora/ledger.csv');
     // the visible "source" affordance carries text, not colour-only
     expect(panel).toHaveTextContent(/source/i);
   });

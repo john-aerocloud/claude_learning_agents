@@ -85,6 +85,16 @@ work/observatory/src/app/
 **File-watch mechanism:** `chokidar` watching the entire repo root with
 `ignoreInitial: true`. FSEvents on macOS gives sub-second latency.
 
+**Server-side auto-restart (OI-SERVER-RESTART — fixed):** `viteApiPlugin.js`
+adds `SERVER_DIR` (the `server/` source directory) to Vite's existing chokidar
+watcher. Any `.js` change under `server/` (excluding `__tests__/`) triggers
+`server.restart()` after a 300ms debounce. Vite re-runs config + plugins, which
+re-imports the API middleware modules fresh. Client files under `src/` continue
+to HMR without a full restart (they are never under `server/`). No restart loop
+— server/ files are not in the Vite HMR module graph. Verified: `apiMiddleware.js`
+edit auto-restarted in under 1s (no manual restart); client `App.jsx` edit
+produced HMR only (no full restart in log).
+
 **Push channel: SSE.** `GET /api/events` — long-lived, heartbeat every 30s,
 clean teardown on `req.close`. Rationale: one-way server-to-client push; SSE is
 the correct primitive; no WebSocket needed.

@@ -42,6 +42,81 @@ describe('WorkItemTreeContainer (UC-S005-2)', () => {
     await waitFor(() => expect(screen.getByTestId('work-item-tree')).toHaveTextContent(/no work items/i));
   });
 
+  // UC-S005-6 — SSE live refresh. The container subscribes to the change channel
+  // (injected `subscribe` so jsdom drives it without EventSource) and re-fetches
+  // items on a relevant change frame (items.csv / a queue CSV), preserving the
+  // expanded + selected interaction state across the refresh, and unsubscribes on
+  // unmount. Mirrors VsmContainer's SSE pattern.
+  it('re-fetches items on an items.csv SSE change frame and re-renders updated state (AC-S005-6-2)', async () => {
+    let handler;
+    const subscribe = (onChange) => { handler = onChange; return () => {}; };
+    const updated = ITEMS.map((it) => (it.id === 'CHK-1' ? { ...it, state: 'in-progress' } : it));
+    const loadItems = vi.fn()
+      .mockResolvedValueOnce(ITEMS)
+      .mockResolvedValueOnce(updated);
+    render(<WorkItemTreeContainer loadItems={loadItems} subscribe={subscribe} debounceMs={0} />);
+    await waitFor(() => expect(screen.getAllByTestId('tree-node')).toHaveLength(3));
+    // CHK-1 starts "done"
+    expect(document.querySelector('[data-item-id="CHK-1"]')).toHaveTextContent(/done/i);
+
+    handler({ type: 'change', path: 'work/observatory/items/items.csv' });
+
+    await waitFor(() =>
+      expect(document.querySelector('[data-item-id="CHK-1"]')).toHaveTextContent(/in-progress/i),
+    );
+    expect(loadItems).toHaveBeenCalledTimes(2);
+  });
+
+  it('adds a newly-appended row on items.csv change without reload (node count grows — AC-S005-6-2)', async () => {
+    let handler;
+    const subscribe = (onChange) => { handler = onChange; return () => {}; };
+    const grown = [...ITEMS, { id: 'UC-2', type: 'use-case', parent: 'CHK-1', children: '', job: 'u2', state: 'ready', value: 'LOW', cost: '1' }];
+    const loadItems = vi.fn()
+      .mockResolvedValueOnce(ITEMS)
+      .mockResolvedValueOnce(grown);
+    render(<WorkItemTreeContainer loadItems={loadItems} subscribe={subscribe} debounceMs={0} />);
+    await waitFor(() => expect(screen.getAllByTestId('tree-node')).toHaveLength(3));
+    handler({ type: 'change', path: 'work/observatory/items/items.csv' });
+    await waitFor(() => expect(screen.getAllByTestId('tree-node')).toHaveLength(4));
+  });
+
+  it('ignores an irrelevant SSE change frame (no re-fetch)', async () => {
+    let handler;
+    const subscribe = (onChange) => { handler = onChange; return () => {}; };
+    const loadItems = vi.fn().mockResolvedValue(ITEMS);
+    render(<WorkItemTreeContainer loadItems={loadItems} subscribe={subscribe} debounceMs={0} />);
+    await waitFor(() => expect(loadItems).toHaveBeenCalledTimes(1));
+    handler({ type: 'change', path: 'work/observatory/slices/s005/slice.md' });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(loadItems).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves the operator collapse state across an SSE re-fetch', async () => {
+    let handler;
+    const subscribe = (onChange) => { handler = onChange; return () => {}; };
+    const loadItems = vi.fn().mockResolvedValue(ITEMS);
+    render(<WorkItemTreeContainer loadItems={loadItems} subscribe={subscribe} debounceMs={0} />);
+    await waitFor(() => expect(screen.getAllByTestId('tree-node')).toHaveLength(3));
+    // operator collapses CHK-1 → UC-1 hidden
+    const chk = document.querySelector('[data-item-id="CHK-1"] > .tree-node__row');
+    fireEvent.click(within(chk).getByTestId('disclosure-toggle'));
+    await waitFor(() => expect(screen.queryByText('UC-1')).toBeNull());
+    // an SSE refresh fires; the collapse must NOT be blown away
+    handler({ type: 'change', path: 'work/observatory/items/items.csv' });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(screen.queryByText('UC-1')).toBeNull();
+  });
+
+  it('unsubscribes from the SSE channel on unmount', async () => {
+    const unsubscribe = vi.fn();
+    const subscribe = vi.fn(() => unsubscribe);
+    const loadItems = vi.fn().mockResolvedValue(ITEMS);
+    const { unmount } = render(<WorkItemTreeContainer loadItems={loadItems} subscribe={subscribe} />);
+    await waitFor(() => expect(screen.getAllByTestId('tree-node')).toHaveLength(3));
+    unmount();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
   // UC-S005-3 — controlled selection + onItemsLoaded so a parent composition can
   // lift the selected item record into the detail pane.
   it('uses controlled selectedId/onSelect when provided and reports loaded items', async () => {

@@ -20,8 +20,8 @@
 // FAIL-SOFT: getItems returns null on any failure; the container maps null →
 // the WorkItemTree empty state (never a blank/crash).
 
-import { useEffect, useState } from 'preact/hooks';
-import { getActive, getItems } from '../api/client.js';
+import { useEffect, useState, useRef, useCallback } from 'preact/hooks';
+import { getActive, getItems, subscribeEvents } from '../api/client.js';
 import { WorkItemTree } from './WorkItemTree.jsx';
 import { buildTree } from '../state/workItemTree.js';
 
@@ -30,6 +30,18 @@ async function loadActiveItems() {
   const project = await getActive();
   if (!project) return null;
   return getItems(project);
+}
+
+const DEFAULT_DEBOUNCE_MS = 250;
+
+/** Is this SSE change-frame path one that affects the work-item tree? The tree is
+ * computed from items.csv (states/value/cost) and the queue CSVs (queue
+ * positions); a change to either re-derives the tree. Other paths are ignored.
+ * Mirrors VsmContainer.isRelevantChange (which gates on ledger.csv). */
+function isRelevantChange(path) {
+  if (typeof path !== 'string') return false;
+  const p = path.replace(/\\/g, '/');
+  return /items\.csv$/i.test(p) || /\/queues\/[^/]+\.csv$/i.test(p);
 }
 
 /** Collect every branch (hasChildren) id in the forest → the default expanded set. */
@@ -50,12 +62,18 @@ function allBranchIds(forest) {
 /**
  * @param {object} [props]
  * @param {() => Promise<Array|null>} [props.loadItems] - items loader (injectable for tests)
+ * @param {(onChange:(evt:{type:string,path:string})=>void)=>(()=>void)} [props.subscribe]
+ *        SSE subscribe seam (UC-S005-6). Injected so jsdom drives it without
+ *        EventSource; default is the real subscribeEvents.
+ * @param {number} [props.debounceMs] - coalesce a burst of change frames into one re-fetch
  * @param {string|null} [props.selectedId] - CONTROLLED selection (UC-S005-3 lifts it)
  * @param {(id:string)=>void} [props.onSelect] - CONTROLLED select handler
  * @param {(items:Array)=>void} [props.onItemsLoaded] - report the loaded item rows up
  */
 export function WorkItemTreeContainer({
   loadItems = loadActiveItems,
+  subscribe = subscribeEvents,
+  debounceMs = DEFAULT_DEBOUNCE_MS,
   selectedId: controlledSelectedId,
   onSelect: controlledOnSelect,
   onItemsLoaded,
@@ -63,7 +81,6 @@ export function WorkItemTreeContainer({
   const [items, setItems] = useState(null);
   const [expanded, setExpanded] = useState(new Set());
   const [internalSelectedId, setInternalSelectedId] = useState(null);
-  const [didInitExpand, setDidInitExpand] = useState(false);
 
   // Selection is CONTROLLED when the parent passes onSelect (UC-S005-3 lifts the
   // selected item into the detail pane); otherwise the container owns it (the
@@ -71,7 +88,36 @@ export function WorkItemTreeContainer({
   const isControlled = typeof controlledOnSelect === 'function';
   const selectedId = isControlled ? (controlledSelectedId ?? null) : internalSelectedId;
 
-  // Initial one-shot load on mount; default-expand every branch once.
+  // Stable refs so the SSE effect (subscribed once) never closes over a stale
+  // loader / callback and never needs to re-subscribe when they change.
+  const loadRef = useRef(loadItems);
+  loadRef.current = loadItems;
+  const onItemsLoadedRef = useRef(onItemsLoaded);
+  onItemsLoadedRef.current = onItemsLoaded;
+  // The default-expand-every-branch happens ONCE (first successful load). An SSE
+  // re-fetch must NOT reset the operator's collapse/expand state — a ref, not
+  // state, so refresh() reads it synchronously without re-subscribing.
+  const didInitExpand = useRef(false);
+
+  // refresh() re-fetches items and re-renders, PRESERVING expanded + selected
+  // (it never re-runs the init-expand). It is the SSE change-frame path and is
+  // fail-soft: a null/failed load maps to the empty tree, never a crash.
+  const refresh = useCallback(() => {
+    return Promise.resolve()
+      .then(() => loadRef.current())
+      .then((next) => {
+        const arr = Array.isArray(next) ? next : null;
+        setItems(arr);
+        if (arr && onItemsLoadedRef.current) onItemsLoadedRef.current(arr);
+        if (arr && !didInitExpand.current) {
+          setExpanded(allBranchIds(buildTree(arr)));
+          didInitExpand.current = true;
+        }
+      })
+      .catch(() => setItems(null));
+  }, []);
+
+  // Initial one-shot load on mount (and when an injected loader changes).
   useEffect(() => {
     let active = true;
     Promise.resolve()
@@ -80,15 +126,42 @@ export function WorkItemTreeContainer({
         if (!active) return;
         const arr = Array.isArray(next) ? next : null;
         setItems(arr);
-        if (arr && onItemsLoaded) onItemsLoaded(arr);
-        if (arr && !didInitExpand) {
+        if (arr && onItemsLoadedRef.current) onItemsLoadedRef.current(arr);
+        if (arr && !didInitExpand.current) {
           setExpanded(allBranchIds(buildTree(arr)));
-          setDidInitExpand(true);
+          didInitExpand.current = true;
         }
       })
       .catch(() => { if (active) setItems(null); });
     return () => { active = false; };
   }, [loadItems]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // UC-S005-6 — SSE live refresh. Subscribe ONCE on mount; a relevant change
+  // frame (items.csv / a queue CSV) triggers a debounced re-fetch so states +
+  // queue positions update live without a manual reload. Unsubscribe on unmount.
+  // Mirrors VsmContainer; the real EventSource path is proven by the live spec.
+  useEffect(() => {
+    let timer = null;
+    let unsubscribe = null;
+
+    const onChange = (evt) => {
+      if (!evt || !isRelevantChange(evt.path)) return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => { timer = null; refresh(); }, debounceMs);
+    };
+
+    try {
+      unsubscribe = subscribe(onChange);
+    } catch {
+      // no EventSource / blocked → the tree stays on its last good data (the
+      // initial load already populated it); never crash the render.
+    }
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }, [subscribe, debounceMs, refresh]);
 
   const onToggle = (id) => {
     setExpanded((prev) => {

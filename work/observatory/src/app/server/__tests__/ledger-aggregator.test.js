@@ -782,9 +782,11 @@ describe('aggregateStageFlow — WIP recency rule (DEFECT-009)', () => {
     expect(typeof entry.note).toBe('string');
   });
 
-  it('priority: an open exactly at the horizon boundary (30 min) is still WIP; 31 min is stale', () => {
-    const recent = csv([row({ ts: minsAgo(30), agent: 'engineer', event: 'task_start', item: 'CHK-EDGE' })]);
-    const stale = csv([row({ ts: minsAgo(31), agent: 'engineer', event: 'task_start', item: 'CHK-EDGE' })]);
+  // DEFECT-011: horizon raised 30 min → 2 h (the 30-min premise was falsified
+  // by real 29–32-min tasks). Boundary re-pinned at 120/121 min.
+  it('priority: an open exactly at the horizon boundary (120 min) is still WIP; 121 min is stale', () => {
+    const recent = csv([row({ ts: minsAgo(120), agent: 'engineer', event: 'task_start', item: 'CHK-EDGE' })]);
+    const stale = csv([row({ ts: minsAgo(121), agent: 'engineer', event: 'task_start', item: 'CHK-EDGE' })]);
     expect(byStage(aggregateStageFlow(recent, 'p', null, { now: NOW }), 'engineer').wip).toBe(1);
     expect(byStage(aggregateStageFlow(stale, 'p', null, { now: NOW }), 'engineer').wip).toBe(0);
   });
@@ -815,10 +817,11 @@ describe('aggregateStageFlow — WIP recency-only rule (DEFECT-010)', () => {
     expect(eng.wip_items).toEqual([{ item_id: 'UC-S004-5', note: 'rework on delivered UC' }]);
   });
 
-  it('D10-AC-b: a STALE open (>30 min) on ANY item is NOT WIP (DEFECT-002 regression guard)', () => {
+  // DEFECT-011: stale threshold is now the 2 h horizon — ages here sit past it.
+  it('D10-AC-b: a STALE open (>2 h) on ANY item is NOT WIP (DEFECT-002 regression guard)', () => {
     const ledger = csv([
       row({ ts: minsAgo(180), agent: 'engineer', event: 'stage_enter', item: 'UC-S003-2' }),
-      row({ ts: minsAgo(31), agent: 'product', event: 'task_start', item: 'CHK-2' }),
+      row({ ts: minsAgo(121), agent: 'product', event: 'task_start', item: 'CHK-2' }),
     ]);
     const items = itemsCsv([{ id: 'CHK-2', state: 'done' }]); // UC-S003-2 absent
     const out = aggregateStageFlow(ledger, 'p', items, { now: NOW });
@@ -889,5 +892,54 @@ describe('aggregateStageFlow — WIP recency-only rule (DEFECT-010)', () => {
     expect(entry).toEqual({ item_id: 'UC-S004-5', note: '' });
     expect(typeof entry.item_id).toBe('string');
     expect(typeof entry.note).toBe('string');
+  });
+});
+
+// DEFECT-011 — the staleness horizon itself was too short. The 30-min value was
+// justified by "real agent tasks complete in single-digit minutes" — FALSIFIED:
+// a product task (REPLENISH-CHK6) ran past 30 min and vanished from Decompose
+// WIP while genuinely still running; the engineer task alongside it ran 29 min
+// and would have vanished at minute 30 too. The horizon must comfortably exceed
+// REAL task durations (observed max ~29 min, growing) while still excluding the
+// hours-old DEFECT-002 phantoms. Horizon is now 2 HOURS. Recency stays the ONLY
+// gate (EXP-035 craft rule: no new exclusions).
+// @covers AGG (server/lib/ledgerAggregator.js)
+describe('aggregateStageFlow — WIP horizon covers real task durations (DEFECT-011)', () => {
+  const NOW = Date.parse('2026-06-10T16:14:00Z');
+  const minsAgo = (m) => new Date(NOW - m * 60_000).toISOString();
+
+  it('D11-AC-a: a 32-min-old product task_start with no close IS Decompose WIP=1 (the reported case)', () => {
+    // Repro of the live evidence: task_start REPLENISH-CHK6/CHK-6 at 15:42:04Z,
+    // still running at ~16:14Z (32 min) — dashboard showed WIP=0.
+    const ledger = csv([
+      row({ ts: minsAgo(32), agent: 'product', event: 'task_start', item: 'CHK-6', note: 'REPLENISH-CHK6' }),
+    ]);
+    const dec = byStage(aggregateStageFlow(ledger, 'p', null, { now: NOW }), 'decompose');
+    expect(dec.wip).toBe(1);
+    expect(dec.wip_items).toEqual([{ item_id: 'CHK-6', note: 'REPLENISH-CHK6' }]);
+  });
+
+  it('D11-AC-b: a 90-min-old engineer open with no close IS build WIP=1 (long real task, within horizon)', () => {
+    const ledger = csv([
+      row({ ts: minsAgo(90), agent: 'engineer', event: 'task_start', item: 'UC-LONG', note: 'long build' }),
+    ]);
+    const eng = byStage(aggregateStageFlow(ledger, 'p', null, { now: NOW }), 'engineer');
+    expect(eng.wip).toBe(1);
+  });
+
+  it('D11-AC-c: an hours-old orphan open is STILL NOT WIP (DEFECT-002 stays fixed)', () => {
+    const ledger = csv([
+      row({ ts: minsAgo(180), agent: 'engineer', event: 'stage_enter', item: 'UC-S003-2' }),
+    ]);
+    const eng = byStage(aggregateStageFlow(ledger, 'p', null, { now: NOW }), 'engineer');
+    expect(eng.wip).toBe(0);
+    expect(eng.wip_items.map((w) => w.item_id)).not.toContain('UC-S003-2');
+  });
+
+  it('D11-AC-d: horizon boundary — exactly 120 min is WIP; 121 min is stale', () => {
+    const recent = csv([row({ ts: minsAgo(120), agent: 'engineer', event: 'task_start', item: 'CHK-EDGE' })]);
+    const stale = csv([row({ ts: minsAgo(121), agent: 'engineer', event: 'task_start', item: 'CHK-EDGE' })]);
+    expect(byStage(aggregateStageFlow(recent, 'p', null, { now: NOW }), 'engineer').wip).toBe(1);
+    expect(byStage(aggregateStageFlow(stale, 'p', null, { now: NOW }), 'engineer').wip).toBe(0);
   });
 });

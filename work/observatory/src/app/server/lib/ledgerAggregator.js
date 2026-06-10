@@ -30,15 +30,19 @@
 //     matching out-event (task_end OR stage_exit). Pulled-but-not-done work is
 //     COUNTABLE here — this is the key fix. wip_items names the open ids.
 
-// DEFECT-002/009/010 — WIP staleness history.
+// DEFECT-002/009/010/011 — WIP staleness history.
 // WIP from raw enter/exit pairing alone counts a HELD/DROPPED open enter as
 // in-flight FOREVER (DEFECT-002). DEFECT-009 made RECENCY the primary gate but
 // kept an items.csv terminal SECONDARY exclusion. DEFECT-010 DROPS that secondary
 // check: it hid recent ACTIVE work logged against delivered (terminal) chunks/UCs.
 // WIP is now RECENCY-ONLY (a recent open in-event with no close IS in-flight,
 // registry state irrelevant); recency alone excludes the hours-old DEFECT-002
-// phantoms. The items.csv registry is still used for QUEUE-DEPTH stale-filtering
-// and coherence (DEFECT-004) — see computeQueueState; only the WIP path drops it.
+// phantoms. DEFECT-011: the 30-min horizon ITSELF was too short — its premise
+// ("real agent tasks complete in single-digit minutes") was falsified by real
+// 29–32-min tasks that vanished from WIP while still running; horizon is now
+// 2 HOURS (see WIP_STALENESS_HORIZON_MS). The items.csv registry is still used
+// for QUEUE-DEPTH stale-filtering and coherence (DEFECT-004) — see
+// computeQueueState; only the WIP path drops it.
 // Throughput/dwell/rework are HISTORICAL counts and are never reconciled.
 import { parseCsv } from '../parsers/csv.js';
 
@@ -47,12 +51,18 @@ const TERMINAL_ITEM_STATES = new Set(['done', 'dropped', 'cancelled']);
 // DEFECT-009 — WIP is RECENCY-based, not items.csv-membership-based.
 // An open in-event (task_start/stage_enter with no matching close) is in-flight
 // iff it is RECENT — within this staleness horizon of request time. DEFECT-002's
-// phantom orphans (a held/dropped UC's enter, hours-to-days old) fail this gate;
-// real current work (chunks/slices/meta product works on, minutes old) passes it.
-// Real agent tasks complete in single-digit minutes; 30 min is well above the
-// 99th percentile of observed task durations and far below known phantom ages.
+// phantom orphans (a held/dropped UC's enter, hours-to-days old) fail this gate.
+// DEFECT-011 — horizon value. The earlier claim "real agent tasks complete in
+// single-digit minutes" is FALSE: observed real tasks now run ~29–32 minutes
+// (and durations grow with model capability). The 30-min horizon hid a
+// genuinely-running 32-min product task (REPLENISH-CHK6) and would have hidden
+// the 29-min engineer task beside it at minute 30. 2 hours comfortably exceeds
+// the observed max (~4x headroom) while remaining far below known phantom ages
+// (the DEFECT-002 orphans were hours-to-days old; an abandoned open ages past
+// 2h quickly, so phantoms still self-clear). Recency stays the ONLY gate
+// (EXP-035: simplest predicate wins; no new exclusions added).
 // Named so it can be tuned without logic changes (ruling §"Horizon value").
-const WIP_STALENESS_HORIZON_MS = 30 * 60 * 1000; // 30 minutes
+const WIP_STALENESS_HORIZON_MS = 2 * 60 * 60 * 1000; // 2 hours (DEFECT-011)
 
 // DEFECT-004 — buffer (queue) stages hold items RIGHT NOW. Each maps to a queue
 // CSV (work/<project>/queues/<stage>.csv) for current depth/wait, and (where a

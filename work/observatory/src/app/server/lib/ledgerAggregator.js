@@ -357,6 +357,7 @@ function emptyStages(queues = null, itemRegistry = null, now = Date.now()) {
     label: s.label,
     throughput: 0,
     dwell_median_s: 0,
+    dwell_pairs: 0,
     wip: 0,
     rework: 0,
     wip_items: [],
@@ -449,6 +450,9 @@ export function aggregateStageFlow(ledgerCsv, project, itemsCsv = null, opts = {
       label: stageDef.label,
       throughput,
       dwell_median_s: median(dwellSamples),
+      // DEFECT-004 AC-2: number of completed pairs behind dwell — the UI shows
+      // "—" (unknown ≠ 0) when < 2 pairs, never a misleading "0s".
+      dwell_pairs: dwellSamples.length,
       wip: wipItems.length,
       rework,
       wip_items: wipItems,

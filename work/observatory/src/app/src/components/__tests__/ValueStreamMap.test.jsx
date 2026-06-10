@@ -23,18 +23,20 @@ import { ValueStreamMap } from '../ValueStreamMap.jsx';
 // A stage-flow array as the endpoint returns it — 11 entries (10 nodes + rework
 // loop entry). engineer throughput 7 + wip 2 mirrors the live data the defect
 // re-check must show non-zero.
+// DEFECT-004: dwell renders humanised only with >= 2 completed pairs (else "—"),
+// so rows whose humanised dwell is asserted carry dwell_pairs: 2.
 const flow = [
-  { stage: 'intake', label: 'Intake (gate)', throughput: 5, dwell_median_s: 30, wip: 0, rework: 0, source_rows: ['r1'] },
-  { stage: 'decompose', label: 'Decompose (product)', throughput: 4, dwell_median_s: 120, wip: 0, rework: 1, source_rows: ['r2'] },
-  { stage: 'ready', label: 'Ready (queue)', throughput: 4, dwell_median_s: 0, wip: 0, rework: 0, source_rows: ['r3'] },
-  { stage: 'capabilities', label: 'Capabilities (cicd)', throughput: 3, dwell_median_s: 600, wip: 0, rework: 0, source_rows: ['r4'] },
-  { stage: 'ui-design', label: 'UI-Design', throughput: 3, dwell_median_s: 300, wip: 1, rework: 0, source_rows: ['r5'] },
-  { stage: 'engineer', label: 'Build / TDD (engineer)', throughput: 7, dwell_median_s: 720, wip: 2, rework: 3, source_rows: ['r6', 'r7'], wip_items: [{ item_id: 'UC-X', since_ts: 't1' }, { item_id: 'UC-Y', since_ts: 't2' }] },
-  { stage: 'ui-validate', label: 'UI-Validate', throughput: 2, dwell_median_s: 90, wip: 0, rework: 0, source_rows: ['r8'] },
-  { stage: 'deploy', label: 'Deploy (gate)', throughput: 6, dwell_median_s: 45, wip: 0, rework: 0, source_rows: ['r9'] },
-  { stage: 'validate', label: 'Validate (tester)', throughput: 5, dwell_median_s: 3600, wip: 1, rework: 2, source_rows: ['r10'] },
-  { stage: 'done', label: 'Done', throughput: 5, dwell_median_s: 0, wip: 0, rework: 0, source_rows: ['r11'] },
-  { stage: 'rework', label: 'Rework (loop)', throughput: 0, dwell_median_s: 0, wip: 0, rework: 6, source_rows: ['r12'] },
+  { stage: 'intake', label: 'Intake (gate)', throughput: 5, dwell_median_s: 30, dwell_pairs: 2, wip: 0, rework: 0, source_rows: ['r1'] },
+  { stage: 'decompose', label: 'Decompose (product)', throughput: 4, dwell_median_s: 120, dwell_pairs: 2, wip: 0, rework: 1, source_rows: ['r2'] },
+  { stage: 'ready', label: 'Ready (queue)', throughput: 4, dwell_median_s: 0, dwell_pairs: 0, wip: 0, rework: 0, source_rows: ['r3'] },
+  { stage: 'capabilities', label: 'Capabilities (cicd)', throughput: 3, dwell_median_s: 600, dwell_pairs: 2, wip: 0, rework: 0, source_rows: ['r4'] },
+  { stage: 'ui-design', label: 'UI-Design', throughput: 3, dwell_median_s: 300, dwell_pairs: 2, wip: 1, rework: 0, source_rows: ['r5'] },
+  { stage: 'engineer', label: 'Build / TDD (engineer)', throughput: 7, dwell_median_s: 720, dwell_pairs: 5, wip: 2, rework: 3, source_rows: ['r6', 'r7'], wip_items: [{ item_id: 'UC-X', since_ts: 't1' }, { item_id: 'UC-Y', since_ts: 't2' }] },
+  { stage: 'ui-validate', label: 'UI-Validate', throughput: 2, dwell_median_s: 90, dwell_pairs: 2, wip: 0, rework: 0, source_rows: ['r8'] },
+  { stage: 'deploy', label: 'Deploy (gate)', throughput: 6, dwell_median_s: 45, dwell_pairs: 2, wip: 0, rework: 0, source_rows: ['r9'] },
+  { stage: 'validate', label: 'Validate (tester)', throughput: 5, dwell_median_s: 3600, dwell_pairs: 2, wip: 1, rework: 2, source_rows: ['r10'] },
+  { stage: 'done', label: 'Done', throughput: 5, dwell_median_s: 0, dwell_pairs: 0, wip: 0, rework: 0, source_rows: ['r11'] },
+  { stage: 'rework', label: 'Rework (loop)', throughput: 0, dwell_median_s: 0, dwell_pairs: 0, wip: 0, rework: 6, source_rows: ['r12'] },
 ];
 
 const TEN = ['intake', 'decompose', 'ready', 'capabilities', 'ui-design', 'engineer', 'ui-validate', 'deploy', 'validate', 'done'];

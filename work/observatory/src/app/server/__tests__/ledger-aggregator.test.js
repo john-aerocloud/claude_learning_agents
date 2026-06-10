@@ -193,6 +193,41 @@ describe('aggregateStageFlow — dwell median (AC1.6)', () => {
   });
 });
 
+describe('aggregateStageFlow — dwell_pairs (DEFECT-004 AC-2 "—" signal)', () => {
+  it('reports the count of completed dwell pairs so the UI can show "—" when < 2', () => {
+    const out = aggregateStageFlow(
+      csv([
+        row({ agent: 'engineer', event: 'task_start', item: 'A' }),
+        row({ agent: 'engineer', event: 'task_end', item: 'A', duration: '100' }),
+      ]),
+      'p',
+    );
+    // one completed pair → dwell_pairs 1 (UI renders "—" since < 2)
+    expect(byStage(out, 'engineer').dwell_pairs).toBe(1);
+  });
+
+  it('dwell_pairs is 0 when no pairs complete (open task only)', () => {
+    const out = aggregateStageFlow(
+      csv([row({ agent: 'engineer', event: 'task_start', item: 'A' })]),
+      'p',
+    );
+    expect(byStage(out, 'engineer').dwell_pairs).toBe(0);
+  });
+
+  it('dwell_pairs counts each completed pair (>=2 → real dwell shown)', () => {
+    const out = aggregateStageFlow(
+      csv([
+        row({ agent: 'engineer', event: 'task_start', item: 'A' }),
+        row({ agent: 'engineer', event: 'task_end', item: 'A', duration: '100' }),
+        row({ agent: 'engineer', event: 'task_start', item: 'B' }),
+        row({ agent: 'engineer', event: 'task_end', item: 'B', duration: '300' }),
+      ]),
+      'p',
+    );
+    expect(byStage(out, 'engineer').dwell_pairs).toBe(2);
+  });
+});
+
 describe('aggregateStageFlow — rework (failure/recovery, AC, may be 0)', () => {
   it('counts failure and recovery events for the stage', () => {
     const out = aggregateStageFlow(

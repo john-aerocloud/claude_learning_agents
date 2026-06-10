@@ -149,6 +149,49 @@
   margin: 0;
 }
 
+/* DEFECT-004 — the QueueDepth figure on buffer stages: depth value + the list of
+ * queued items with their accruing wait. Spans the grid so the item list reads
+ * as a column under the "N queued" value. */
+.stage-metric--depth {
+  grid-column: 1 / -1;
+}
+
+.queue-items {
+  list-style: none;
+  margin: var(--sp-1) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.queue-item {
+  font-size: var(--fs-meta);
+  color: var(--c-text-dim);
+}
+
+.queue-item__id {
+  font-weight: var(--fw-metric);
+  color: var(--c-text);
+}
+
+.queue-item--more {
+  font-style: italic;
+}
+
+/* DEFECT-004 — coherence mismatch banner: visible TEXT (not colour-only) when the
+ * queue count disagrees with the tree's ready-count, so the discrepancy is
+ * surfaced rather than shown as a silently-wrong number. */
+.stage-node__coherence {
+  margin: var(--sp-1) 0;
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-meta);
+  font-weight: var(--fw-metric);
+  color: var(--c-wip, #b45309);
+  border: 1px solid var(--c-wip-bd, #b45309);
+  border-radius: 6px;
+}
+
 /* the in-flight badge: a prominent bordered pill that POPS out of the 2×2 grid
  * (spans both columns, larger) so the silhouette changes when wip>0 (GEO-6). */
 .inflight-badge {

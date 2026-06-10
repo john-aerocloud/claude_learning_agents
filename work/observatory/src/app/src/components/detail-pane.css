@@ -71,9 +71,30 @@
   cursor: pointer;
 }
 
+.detail-pane__crumb-item {
+  display: inline-flex;
+  align-items: center;
+}
+
 .detail-pane__crumb-current {
   color: var(--c-text);
   font-weight: 600;
+}
+
+/* UC-S005-6: an ancestor crumb is a zoom-out control (one level out). */
+.detail-pane__crumb-link {
+  background: none;
+  border: none;
+  color: var(--c-source-link);
+  padding: 2px 4px;
+  min-height: var(--target-min);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+}
+
+.detail-pane__crumb-link:hover {
+  color: var(--c-text);
 }
 
 .detail-pane__head {

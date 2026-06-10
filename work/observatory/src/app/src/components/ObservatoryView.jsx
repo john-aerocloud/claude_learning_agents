@@ -77,6 +77,15 @@ export function ObservatoryView({
   }, []);
   const onClose = useCallback(() => setSelectedId(null), []);
 
+  // UC-S005-6 (zoom-out one level): clicking an ancestor crumb re-selects that
+  // ancestor so the drawer reframes on the parent and the tree selection follows.
+  const onZoomTo = useCallback((id) => {
+    if (typeof document !== 'undefined') {
+      originRef.current = document.querySelector(`[role="treeitem"][data-item-id="${id}"]`);
+    }
+    setSelectedId(id);
+  }, []);
+
   // DEFECT-006: restore focus to the originating tree node (not the map) on close.
   // The treeitem owns roving tabindex; if it is not focusable at the moment of
   // close, make it focusable so focus lands on the node the operator drilled from.
@@ -111,6 +120,8 @@ export function ObservatoryView({
           and never reflows the column. Wiring unchanged. */}
       <DetailPaneContainer
         item={selectedItem}
+        items={items}
+        onZoomTo={onZoomTo}
         project={project}
         onClose={onClose}
         focusOnClose={focusOnClose}

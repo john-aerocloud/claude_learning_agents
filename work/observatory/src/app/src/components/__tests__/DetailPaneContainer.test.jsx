@@ -75,6 +75,38 @@ describe('DetailPaneContainer (UC-S005-3)', () => {
     await waitFor(() => expect(screen.getByTestId('item-history')).toHaveTextContent(/no history/i));
   });
 
+  it('derives the zoom-out breadcrumb path from items and selection (UC-S005-6)', async () => {
+    const items = [
+      { id: 'REQ-OBSERVATORY', type: 'requirement', parent: '', children: 'CHK-1' },
+      { id: 'CHK-1', type: 'chunk', parent: 'REQ-OBSERVATORY', children: 'UC-S001-1' },
+      { id: 'UC-S001-1', type: 'use-case', parent: 'CHK-1', children: '' },
+    ];
+    const d = deps();
+    render(<DetailPaneContainer item={UC_ITEM} items={items} {...d} />);
+    await waitFor(() => expect(screen.getByTestId('detail-pane')).toBeTruthy());
+    const crumbs = within(screen.getByTestId('breadcrumb')).getAllByTestId('crumb');
+    expect(crumbs.map((c) => c.getAttribute('data-crumb-id'))).toEqual([
+      'REQ-OBSERVATORY', 'CHK-1', 'UC-S001-1',
+    ]);
+  });
+
+  it('forwards onZoomTo so an ancestor crumb re-selects upward (UC-S005-6)', async () => {
+    const items = [
+      { id: 'REQ-OBSERVATORY', type: 'requirement', parent: '', children: 'CHK-1' },
+      { id: 'CHK-1', type: 'chunk', parent: 'REQ-OBSERVATORY', children: 'UC-S001-1' },
+      { id: 'UC-S001-1', type: 'use-case', parent: 'CHK-1', children: '' },
+    ];
+    const onZoomTo = vi.fn();
+    const d = deps();
+    render(<DetailPaneContainer item={UC_ITEM} items={items} onZoomTo={onZoomTo} {...d} />);
+    await waitFor(() => expect(screen.getByTestId('detail-pane')).toBeTruthy());
+    const chk = within(screen.getByTestId('breadcrumb'))
+      .getAllByTestId('crumb')
+      .find((c) => c.getAttribute('data-crumb-id') === 'CHK-1');
+    fireEvent.click(within(chk).getByRole('button'));
+    expect(onZoomTo).toHaveBeenCalledWith('CHK-1');
+  });
+
   it('on close calls onClose AND the injected focusOnClose handler (DEFECT-006: parent restores focus to the originating tree node)', async () => {
     const focusOnClose = vi.fn();
     const d = deps({ focusOnClose });

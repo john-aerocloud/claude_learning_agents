@@ -12,7 +12,7 @@
 //   - clicking a tree node opens the pane for that item (open-on-click — AC-S005-3-1).
 //   - "Back to map" closes the pane (AC-S005-3-6).
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/preact';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/preact';
 import { ObservatoryView } from '../ObservatoryView.jsx';
 
 const ITEMS = [
@@ -77,6 +77,34 @@ describe('ObservatoryView (UC-S005-3)', () => {
     expect(mainCol.contains(pane)).toBe(false);
     // it lives within the observatory layout (as a sibling), not detached.
     expect(document.querySelector('.observatory-layout').contains(pane)).toBe(true);
+  });
+
+  it('UC-S005-6: the open pane breadcrumb shows the full ancestry path of the node', async () => {
+    render(<ObservatoryView {...deps()} />);
+    await waitFor(() => expect(screen.getAllByTestId('tree-node').length).toBe(3));
+    fireEvent.click(document.querySelector('[data-item-id="UC-S001-1"] > .tree-node__row'));
+    await waitFor(() => expect(screen.getByTestId('detail-pane')).toBeTruthy());
+    const crumbs = within(screen.getByTestId('breadcrumb')).getAllByTestId('crumb');
+    expect(crumbs.map((c) => c.getAttribute('data-crumb-id'))).toEqual([
+      'REQ-DEMO', 'CHK-1', 'UC-S001-1',
+    ]);
+  });
+
+  it('UC-S005-6: clicking an ancestor crumb zooms out, re-framing the pane on that ancestor', async () => {
+    render(<ObservatoryView {...deps()} />);
+    await waitFor(() => expect(screen.getAllByTestId('tree-node').length).toBe(3));
+    fireEvent.click(document.querySelector('[data-item-id="UC-S001-1"] > .tree-node__row'));
+    await waitFor(() => expect(screen.getByTestId('detail-pane')).toBeTruthy());
+    // click the CHK-1 ancestor crumb → the pane now reframes on CHK-1
+    const chk = within(screen.getByTestId('breadcrumb'))
+      .getAllByTestId('crumb')
+      .find((c) => c.getAttribute('data-crumb-id') === 'CHK-1');
+    fireEvent.click(within(chk).getByRole('button'));
+    await waitFor(() =>
+      expect(screen.getByTestId('detail-pane').getAttribute('aria-label')).toBe('Item detail: CHK-1'),
+    );
+    // the tree's selection follows the zoom-out
+    expect(document.querySelector('[data-item-id="CHK-1"]').getAttribute('aria-selected')).toBe('true');
   });
 
   it('DEFECT-006: on close focus returns to the ORIGINATING tree node (not the map)', async () => {

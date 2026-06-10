@@ -56,6 +56,48 @@ describe('DetailPane (UC-S005-3)', () => {
     expect(screen.getByTestId('breadcrumb')).toHaveTextContent('UC-S001-1');
   });
 
+  it('renders the full ancestry path in the breadcrumb when a path is given (AC-S005-6-1)', () => {
+    render(
+      <DetailPane
+        item={UC_ITEM}
+        crumbPath={[
+          { id: 'REQ-OBSERVATORY', type: 'requirement' },
+          { id: 'CHK-1', type: 'chunk' },
+          { id: 'UC-S001-1', type: 'use-case' },
+        ]}
+        onClose={() => {}}
+      />,
+    );
+    const nav = screen.getByTestId('breadcrumb');
+    expect(nav).toHaveTextContent('REQ-OBSERVATORY');
+    expect(nav).toHaveTextContent('CHK-1');
+    // current crumb (selected) is marked
+    const current = within(nav).getAllByTestId('crumb').at(-1);
+    expect(current.getAttribute('aria-current')).toBe('page');
+    expect(current.getAttribute('data-crumb-id')).toBe('UC-S001-1');
+  });
+
+  it('clicking an ancestor crumb zooms out via onZoomTo (AC-S005-6-1)', () => {
+    const onZoomTo = vi.fn();
+    render(
+      <DetailPane
+        item={UC_ITEM}
+        crumbPath={[
+          { id: 'REQ-OBSERVATORY', type: 'requirement' },
+          { id: 'CHK-1', type: 'chunk' },
+          { id: 'UC-S001-1', type: 'use-case' },
+        ]}
+        onZoomTo={onZoomTo}
+        onClose={() => {}}
+      />,
+    );
+    const chk = within(screen.getByTestId('breadcrumb'))
+      .getAllByTestId('crumb')
+      .find((c) => c.getAttribute('data-crumb-id') === 'CHK-1');
+    fireEvent.click(within(chk).getByRole('button'));
+    expect(onZoomTo).toHaveBeenCalledWith('CHK-1');
+  });
+
   it('for a slice-backed node lists its artifacts and renders the chosen one as markdown HTML (UC-S005-4)', () => {
     render(
       <DetailPane

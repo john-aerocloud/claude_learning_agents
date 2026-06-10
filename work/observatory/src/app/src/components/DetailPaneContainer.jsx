@@ -22,9 +22,10 @@
 // artifact-view slot. UC-S005-4 (markdown/mmd) and UC-S005-5 (history) compose
 // into DetailPane's slots later; this container leaves them untouched.
 
-import { useEffect, useState, useCallback } from 'preact/hooks';
+import { useEffect, useState, useCallback, useMemo } from 'preact/hooks';
 import { getSlices, getSliceArtifact, getItemLedger } from '../api/client.js';
 import { deriveSliceSlug, defaultArtifactName } from '../state/itemDetail.js';
+import { ancestryPath } from '../state/workItemTree.js';
 import { DetailPane } from './DetailPane.jsx';
 
 /** Return focus to the value-stream map element if present (managed focus). */
@@ -39,6 +40,10 @@ function focusValueStreamMap() {
 /**
  * @param {object} props
  * @param {object|null} props.item   - the selected ItemRecord (null → pane closed)
+ * @param {Array} [props.items]      - UC-S005-6: the full ItemRecord[] (to derive
+ *        the zoom-out breadcrumb ancestry path via ancestryPath)
+ * @param {(id:string)=>void} [props.onZoomTo] - UC-S005-6: zoom out one level
+ *        (re-select an ancestor crumb)
  * @param {string} props.project     - active project id
  * @param {()=>void} props.onClose   - parent handler that clears the selection
  * @param {()=>void} [props.focusOnClose] - parent focus-restore handler (DEFECT-006:
@@ -50,6 +55,8 @@ function focusValueStreamMap() {
  */
 export function DetailPaneContainer({
   item,
+  items,
+  onZoomTo,
   project,
   onClose,
   focusOnClose,
@@ -136,6 +143,14 @@ export function DetailPaneContainer({
     else focusValueStreamMap();
   }, [onClose, focusOnClose]);
 
+  // UC-S005-6: derive the root→selected zoom-out path from the full item set.
+  // ancestryPath fails soft to [] for an absent items set or unknown id; DetailPane
+  // then falls back to a single crumb of the item itself (AC-S005-3-5 preserved).
+  const crumbPath = useMemo(
+    () => (item ? ancestryPath(item.id, items) : []),
+    [item ? item.id : null, items],
+  );
+
   if (!item) return null;
 
   return (
@@ -147,6 +162,8 @@ export function DetailPaneContainer({
       artifactText={artifactText}
       onSelectArtifact={onSelectArtifact}
       historyRows={historyRows}
+      crumbPath={crumbPath}
+      onZoomTo={onZoomTo}
       onClose={handleClose}
     />
   );

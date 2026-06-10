@@ -30,6 +30,7 @@ import './detail-pane.css';
 import { paneLabel } from '../state/itemDetail.js';
 import { ItemHistoryPanel } from './ItemHistoryPanel.jsx';
 import { ArtifactView } from './ArtifactView.jsx';
+import { ZoomBreadcrumb } from './ZoomBreadcrumb.jsx';
 
 /**
  * @param {object} props
@@ -40,6 +41,9 @@ import { ArtifactView } from './ArtifactView.jsx';
  * @param {string|null} [props.artifactText]- RAW text of the shown artifact (null → absent)
  * @param {(name:string)=>void} [props.onSelectArtifact] - switch shown artifact
  * @param {Array|null} [props.historyRows] - the item's ledger rows (UC-S005-5; newest-first)
+ * @param {Array} [props.crumbPath]         - UC-S005-6 root->selected ancestry chain
+ *        (from ancestryPath). Absent → a single-crumb path of the item itself.
+ * @param {(id:string)=>void} [props.onZoomTo] - UC-S005-6 zoom-out one level (re-select ancestor)
  * @param {()=>void} props.onClose          - close the pane (Esc / × / Back to map)
  */
 export function DetailPane({
@@ -50,6 +54,8 @@ export function DetailPane({
   artifactText = null,
   onSelectArtifact,
   historyRows = null,
+  crumbPath = null,
+  onZoomTo,
   onClose,
 }) {
   const headingRef = useRef(null);
@@ -73,6 +79,12 @@ export function DetailPane({
   // UC-S005-4: artifact KIND drives the renderer — .mmd → Mermaid SVG, else markdown.
   const artifactKind = /\.mmd$/i.test(artifactName || '') ? 'mmd' : 'md';
 
+  // UC-S005-6: the zoom-out breadcrumb path. Use the derived ancestry chain when
+  // the container supplies one; otherwise fall back to a single crumb of the
+  // current item so the breadcrumb always carries the selected id (AC-S005-3-5).
+  const breadcrumbPath =
+    Array.isArray(crumbPath) && crumbPath.length > 0 ? crumbPath : [{ id: item.id, type: item.type }];
+
   return (
     <section
       class="detail-pane"
@@ -82,20 +94,10 @@ export function DetailPane({
       data-pane-item={item.id}
       onKeyDown={onKeyDown}
     >
-      {/* Breadcrumb + zoom-out controls (UC-S005-6 fleshes out the path; the
-          shell here carries the item id + a "Back to map" zoom-out — AC-S005-3-5/6). */}
-      <nav class="detail-pane__crumb" aria-label="Zoom path" data-testid="breadcrumb">
-        <button
-          type="button"
-          class="detail-pane__crumb-root"
-          data-testid="back-to-map"
-          onClick={() => onClose && onClose()}
-        >
-          ◂ Back to map
-        </button>
-        <span class="detail-pane__crumb-sep" aria-hidden="true">▸</span>
-        <span class="detail-pane__crumb-current" aria-current="page">{item.id}</span>
-      </nav>
+      {/* UC-S005-6: the zoom-out breadcrumb renders the full root->selected path
+          (Pipeline ▸ CHK-4 ▸ s005 ▸ UC), each ancestor a zoom-out control, plus
+          a "Back to map" full zoom-out (AC-S005-6-1/4, A11Y-S005-5). */}
+      <ZoomBreadcrumb path={breadcrumbPath} onClose={onClose} onZoomTo={onZoomTo} />
 
       <header class="detail-pane__head">
         <h2

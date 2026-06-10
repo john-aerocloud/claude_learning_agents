@@ -235,9 +235,20 @@ const DONE_OUTCOMES = new Set(['success', 'pass']);
 // true count is reported as source_total so the UI can render "…and N more".
 const SOURCE_EVENTS_CAP = 50;
 
-/** Project a parsed ledger row into a readable source-event tuple (DEFECT-005). */
+// DEFECT-008 — the bare item_id is opaque ("SLC-vision" says nothing about the
+// work). Every ledger row already carries a rich `note` (the human "why"), which
+// the tolerant parser preserves (commas and all). Carry it into source_events so
+// the reveal can show context, not just a machine ref. The UI trims/ellipsises;
+// we keep the full note here (a server cap could be added if payloads grow).
+/** Project a parsed ledger row into a readable source-event tuple (DEFECT-005/008). */
 function toSourceEvent(r) {
-  return { ts: r.timestamp, agent: r.agent, event: r.event, item_id: r.item_id };
+  return {
+    ts: r.timestamp,
+    agent: r.agent,
+    event: r.event,
+    item_id: r.item_id,
+    note: r.note ?? '',
+  };
 }
 
 function isUiValidate(r) {

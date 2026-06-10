@@ -83,6 +83,60 @@ describe('MetricSource readable traceability (DEFECT-005)', () => {
     lines.forEach((l) => expect(l.getAttribute('data-source-row')).toBeTruthy());
   });
 
+  it('DEFECT-008: renders the note after the item_id (HH:MM · agent · event · item_id — note)', () => {
+    renderSource({
+      sourceEvents: [
+        { ts: '2026-06-09T14:50:00Z', agent: 'product', event: 'task_start', item_id: 'SLC-vision', note: 'Gate-1 vision: JTBD + success measures authored' },
+      ],
+      sourceTotal: 1,
+    });
+    const panel = screen.getByTestId('metric-source-engineer-throughput');
+    const line = within(panel).getByTestId('source-event');
+    expect(line.textContent).toContain('SLC-vision');
+    expect(line.textContent).toContain('Gate-1 vision: JTBD + success measures authored');
+    // an em-dash separates the id from its note
+    expect(line.textContent).toMatch(/SLC-vision\s+—\s+Gate-1 vision/);
+  });
+
+  it('DEFECT-008: ellipsises a very long note so the reveal line does not blow out', () => {
+    const longNote = 'x'.repeat(300);
+    renderSource({
+      sourceEvents: [
+        { ts: '2026-06-09T14:50:00Z', agent: 'product', event: 'task_start', item_id: 'SLC-vision', note: longNote },
+      ],
+      sourceTotal: 1,
+    });
+    const line = within(screen.getByTestId('metric-source-engineer-throughput')).getByTestId('source-event');
+    // truncated well below the raw length, ending with an ellipsis
+    expect(line.textContent.length).toBeLessThan(200);
+    expect(line.textContent).toContain('…');
+  });
+
+  it('DEFECT-008: empty note → no trailing em-dash (falls back cleanly to the id)', () => {
+    renderSource({
+      sourceEvents: [
+        { ts: '2026-06-09T14:50:00Z', agent: 'engineer', event: 'task_start', item_id: 'UC-Y', note: '' },
+      ],
+      sourceTotal: 1,
+    });
+    const line = within(screen.getByTestId('metric-source-engineer-throughput')).getByTestId('source-event');
+    expect(line.textContent).toContain('UC-Y');
+    expect(line.textContent).not.toContain('—');
+  });
+
+  it('DEFECT-008: the audit ref still carries the ledger fields and never row:N', () => {
+    renderSource({
+      sourceEvents: [
+        { ts: '2026-06-09T14:50:00Z', agent: 'product', event: 'task_start', item_id: 'SLC-vision', note: 'Gate-1 vision' },
+      ],
+      sourceTotal: 1,
+    });
+    const line = within(screen.getByTestId('metric-source-engineer-throughput')).getByTestId('source-event');
+    const ref = line.getAttribute('data-source-row');
+    expect(ref).toContain('SLC-vision');
+    expect(ref).not.toMatch(/\brow:\d+/);
+  });
+
   it('stays hidden until open', () => {
     const { container } = render(
       <MetricSource id="x" stage="engineer" kind="throughput" sourceEvents={events} sourceTotal={2} />,

@@ -28,6 +28,17 @@ import './metric-source.css';
 const SOURCE_FILE = 'process/dora/ledger.csv';
 // Show the most recent few events; the rest collapse into "…and N more".
 const MAX_EVENTS_SHOWN = 8;
+// DEFECT-008: a note carries the human "why" but can be long — trim and
+// ellipsise so one reveal line does not blow out. The server keeps the full note.
+const MAX_NOTE_LEN = 120;
+
+/** Trim and ellipsise a note for a single reveal line; "" when there is none. */
+function shortNote(note) {
+  if (typeof note !== 'string') return '';
+  const n = note.trim();
+  if (n === '') return '';
+  return n.length > MAX_NOTE_LEN ? `${n.slice(0, MAX_NOTE_LEN - 1)}…` : n;
+}
 
 /** Render an ISO timestamp as a local HH:MM; falls back to the raw value. */
 function formatTime(ts) {
@@ -39,11 +50,17 @@ function formatTime(ts) {
   return `${hh}:${mm}`;
 }
 
-/** One readable source line: "HH:MM · agent · event · item_id" (item omitted if blank). */
+/**
+ * One readable source line: "HH:MM · agent · event · item_id — note"
+ * (item omitted if blank; DEFECT-008 appends the human "why" note after an
+ * em-dash; when the note is empty the em-dash is dropped — clean fall-back to id).
+ */
 function eventLine(e) {
   const parts = [formatTime(e.ts), e.agent, e.event];
   if (e.item_id) parts.push(e.item_id);
-  return parts.filter(Boolean).join(' · ');
+  const head = parts.filter(Boolean).join(' · ');
+  const note = shortNote(e.note);
+  return note ? `${head} — ${note}` : head;
 }
 
 /** A stable audit ref for a line (the ledger fields, not an internal index). */
@@ -54,7 +71,7 @@ function auditRef(e) {
 /**
  * @param {{
  *   id: string; stage: string; kind: string; open?: boolean;
- *   sourceEvents?: Array<{ts:string,agent:string,event:string,item_id:string}>;
+ *   sourceEvents?: Array<{ts:string,agent:string,event:string,item_id:string,note?:string}>;
  *   sourceTotal?: number; sourceRows?: string[];
  * }} props
  */

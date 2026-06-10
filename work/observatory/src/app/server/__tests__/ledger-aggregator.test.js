@@ -463,6 +463,58 @@ describe('aggregateStageFlow — source_events (DEFECT-005 readable traceability
     expect(eng.source_total).toBe(eng.source_events.length);
   });
 
+  it('DEFECT-008: source_events carry the ledger note (the human "why"), not just the id', () => {
+    const out = aggregateStageFlow(
+      csv([
+        row({
+          ts: '2026-06-09T14:50:00Z',
+          agent: 'product',
+          event: 'task_start',
+          item: 'SLC-vision',
+          note: 'Gate-1 vision: JTBD + success measures authored',
+        }),
+      ]),
+      'p',
+    );
+    const dec = byStage(out, 'decompose');
+    const e = dec.source_events.find((x) => x.item_id === 'SLC-vision');
+    expect(e).toMatchObject({
+      ts: '2026-06-09T14:50:00Z',
+      agent: 'product',
+      event: 'task_start',
+      item_id: 'SLC-vision',
+      note: 'Gate-1 vision: JTBD + success measures authored',
+    });
+  });
+
+  it('DEFECT-008: a comma-rich note survives into the source_event note field', () => {
+    const out = aggregateStageFlow(
+      csv([
+        row({
+          ts: '2026-06-09T14:50:00Z',
+          agent: 'engineer',
+          event: 'task_start',
+          item: 'UC-X',
+          note: 'note with, embedded, commas',
+        }),
+      ]),
+      'p',
+    );
+    const eng = byStage(out, 'engineer');
+    const e = eng.source_events.find((x) => x.item_id === 'UC-X');
+    expect(e.note).toBe('note with, embedded, commas');
+  });
+
+  it('DEFECT-008: an empty note yields note "" (never undefined) so the UI can fall back', () => {
+    const out = aggregateStageFlow(
+      csv([row({ ts: '2026-06-09T14:50:00Z', agent: 'engineer', event: 'task_start', item: 'UC-Y' })]),
+      'p',
+    );
+    const eng = byStage(out, 'engineer');
+    const e = eng.source_events.find((x) => x.item_id === 'UC-Y');
+    expect(e.note).toBe('');
+  });
+
   it('empty stage → source_events [] and source_total 0 (never null)', () => {
     const out = aggregateStageFlow(csv([]), 'p');
     for (const s of out) {
@@ -539,6 +591,16 @@ describe('aggregateStageFlow — REAL ledger (real-data gate, not a fixture)', (
       expect(typeof e.event).toBe('string');
       expect(String(e.event)).not.toMatch(/^row:/);
     }
+  });
+
+  it('DEFECT-008: real source_events carry a populated note for at least some events', () => {
+    const out = aggregateStageFlow(realLedger, 'observatory');
+    const allEvents = out.flatMap((s) => s.source_events);
+    expect(allEvents.length).toBeGreaterThan(0);
+    // every source_event has a string note field (never undefined)
+    for (const e of allEvents) expect(typeof e.note).toBe('string');
+    // and at least one carries real human context
+    expect(allEvents.some((e) => e.note.trim().length > 0)).toBe(true);
   });
 
   it('every canonical stage is present even on the real ledger', () => {

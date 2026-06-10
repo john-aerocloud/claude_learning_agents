@@ -74,4 +74,62 @@ describe('VsmContainer (UC-S004-2/6)', () => {
     await new Promise((r) => setTimeout(r, 5));
     expect(loadFlow).toHaveBeenCalledTimes(1);
   });
+
+  // ── DEFECT-003: stale-shown-as-live ───────────────────────────────────────
+  // The subscribe seam exposes connection lifecycle via opts.onOpen/onError; the
+  // container must surface a disconnected/stale state and re-fetch on reconnect.
+  it('on SSE error shows the disconnected indicator and marks the figures stale — DEFECT-003', async () => {
+    let opts;
+    const subscribe = (_onChange, o) => { opts = o; return () => {}; };
+    const loadFlow = vi.fn().mockResolvedValue(flow);
+    render(<VsmContainer loadFlow={loadFlow} subscribe={subscribe} />);
+    await waitFor(() => expect(loadFlow).toHaveBeenCalled());
+
+    // connection drops
+    opts.onError();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('live-status')).toHaveAttribute('data-state', 'disconnected');
+    });
+    // a prominent, non-colour-only banner spells out the staleness
+    const banner = screen.getByTestId('stale-banner');
+    expect(banner).toHaveTextContent(/disconnected/i);
+    expect(banner).toHaveTextContent(/stale/i);
+    // figures are MARKED not-current (not silently presented as live)
+    expect(screen.getByTestId('value-stream-map')).toHaveAttribute('data-stale', 'true');
+  });
+
+  it('re-fetches /stage-flow on SSE reconnect (open after error) and clears stale — DEFECT-003', async () => {
+    let opts;
+    const subscribe = (_onChange, o) => { opts = o; return () => {}; };
+    const loadFlow = vi.fn()
+      .mockResolvedValueOnce(flow)
+      .mockResolvedValueOnce(flow.map((s) => (s.stage === 'engineer' ? { ...s, throughput: 9 } : s)));
+    render(<VsmContainer loadFlow={loadFlow} subscribe={subscribe} />);
+    await waitFor(() => {
+      expect(within(screen.getByTestId('stage-engineer')).getByTestId('metric-engineer-throughput')).toHaveTextContent('7');
+    });
+
+    // drop, then reconnect
+    opts.onError();
+    await waitFor(() => expect(screen.getByTestId('value-stream-map')).toHaveAttribute('data-stale', 'true'));
+    opts.onOpen();
+
+    // self-heals: re-fetch ran, numbers updated, stale cleared, dot back to live
+    await waitFor(() => {
+      expect(within(screen.getByTestId('stage-engineer')).getByTestId('metric-engineer-throughput')).toHaveTextContent('9');
+    });
+    expect(screen.getByTestId('value-stream-map')).toHaveAttribute('data-stale', 'false');
+    expect(screen.getByTestId('live-status')).toHaveAttribute('data-state', 'connected');
+    expect(screen.queryByTestId('stale-banner')).toBeNull();
+    expect(loadFlow).toHaveBeenCalledTimes(2);
+  });
+
+  it('the initial connected render is NOT stale and shows no banner — DEFECT-003', async () => {
+    const loadFlow = vi.fn().mockResolvedValue(flow);
+    render(<VsmContainer loadFlow={loadFlow} subscribe={() => () => {}} />);
+    await waitFor(() => expect(loadFlow).toHaveBeenCalled());
+    expect(screen.getByTestId('value-stream-map')).toHaveAttribute('data-stale', 'false');
+    expect(screen.queryByTestId('stale-banner')).toBeNull();
+  });
 });

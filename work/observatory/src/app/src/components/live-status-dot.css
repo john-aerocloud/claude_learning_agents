@@ -36,6 +36,20 @@
   color: var(--c-state-over);
 }
 
+/* DEFECT-003: disconnected — a prominent, non-colour-only alert state. Text is
+ * authoritative; the colour + heavier border are redundant cues, never the only
+ * signal. No pulse animation (a dead channel must not look like a live one). */
+.live-status[data-state='disconnected'] {
+  color: var(--c-constraint);
+  border-color: var(--c-constraint);
+  font-weight: 600;
+}
+
+.live-status[data-state='disconnected'] .live-status__dot {
+  color: var(--c-constraint);
+  animation: none;
+}
+
 @keyframes live-pulse {
   0%,
   100% {

@@ -34,4 +34,15 @@ describe('LiveStatusDot (UC-S002-6 live-connection indicator)', () => {
     render(<LiveStatusDot state="reconnecting" />);
     expect(screen.getByTestId('live-status')).toHaveAttribute('data-state', 'reconnecting');
   });
+
+  // DEFECT-003 — a lost/errored SSE connection must show a CLEAR, non-colour-only
+  // disconnected state (text carries the meaning), not silently look "live".
+  it('announces a disconnected state with visible text (non-colour cue) — DEFECT-003', () => {
+    render(<LiveStatusDot state="disconnected" />);
+    const dot = screen.getByTestId('live-status');
+    expect(dot).toHaveAttribute('data-state', 'disconnected');
+    expect(dot).toHaveAccessibleName(/disconnected/i);
+    // visible text, not colour alone, carries the meaning
+    expect(dot).toHaveTextContent(/disconnected/i);
+  });
 });

@@ -15,6 +15,15 @@
   padding: var(--sp-4);
 }
 
+/* DEFECT-003: stale figures are visibly de-emphasised so they are never mistaken
+ * for live readings. Dim is a SECONDARY cue — the text banner + disconnected
+ * LiveStatusDot carry the authoritative meaning. The lane content (not the
+ * banner) is dimmed; a static filter respects reduced-motion. */
+.value-stream-map--stale .vsm-lane {
+  opacity: 0.45;
+  filter: grayscale(0.5);
+}
+
 .value-stream-map__h {
   margin: 0 0 var(--sp-2);
   font-size: var(--fs-label);

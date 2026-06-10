@@ -249,4 +249,44 @@ describe('api/client subscribeEvents seam', () => {
     expect(() => handlers.message({ data: 'not-json' })).not.toThrow();
     expect(onChange).not.toHaveBeenCalled();
   });
+
+  // DEFECT-003 — the client must surface CONNECTION state (open/error) so the
+  // container can show a disconnected/stale cue and re-fetch on reconnect.
+  it('subscribeEvents forwards EventSource open/error to onOpen/onError callbacks (DEFECT-003)', () => {
+    const handlers = {};
+    const FakeES = vi.fn(function () {
+      this.close = vi.fn();
+      this.addEventListener = (name, fn) => {
+        handlers[name] = fn;
+      };
+    });
+    vi.stubGlobal('EventSource', FakeES);
+
+    const onChange = vi.fn();
+    const onOpen = vi.fn();
+    const onError = vi.fn();
+    subscribeEvents(onChange, { onOpen, onError });
+
+    handlers.open({});
+    expect(onOpen).toHaveBeenCalledTimes(1);
+
+    handlers.error({});
+    expect(onError).toHaveBeenCalledTimes(1);
+    // a connection event is NOT a data frame — onChange stays untouched
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('subscribeEvents stays back-compatible: works with no options object (DEFECT-003)', () => {
+    const handlers = {};
+    const FakeES = vi.fn(function () {
+      this.close = vi.fn();
+      this.addEventListener = (name, fn) => { handlers[name] = fn; };
+    });
+    vi.stubGlobal('EventSource', FakeES);
+    const onChange = vi.fn();
+    // no second argument; open/error must not throw
+    subscribeEvents(onChange);
+    expect(() => handlers.open && handlers.open({})).not.toThrow();
+    expect(() => handlers.error && handlers.error({})).not.toThrow();
+  });
 });

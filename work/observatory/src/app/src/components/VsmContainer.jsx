@@ -22,6 +22,7 @@ import { useEffect, useState, useRef, useCallback } from 'preact/hooks';
 import { getActive, getStageFlow, subscribeEvents } from '../api/client.js';
 import { ValueStreamMap } from './ValueStreamMap.jsx';
 import { LiveStatusDot } from './LiveStatusDot.jsx';
+import './vsm-container.css';
 
 /** Default loader: resolve the active project, then fetch its stage-flow array. */
 async function loadStageFlow() {
@@ -52,15 +53,23 @@ export function VsmContainer({
 }) {
   const [stages, setStages] = useState(null);
   const [liveState, setLiveState] = useState('reconnecting');
+  // DEFECT-003: have we lost the live channel since the last good fetch? When
+  // true the figures are marked not-current and the disconnected banner shows.
+  const [stale, setStale] = useState(false);
 
   const loadRef = useRef(loadFlow);
   loadRef.current = loadFlow;
 
+  // refresh() always clears stale on a successful fetch — it is the self-heal
+  // path used both by the SSE change-frame re-fetch and the reconnect re-fetch.
   const refresh = useCallback(() => {
     return Promise.resolve()
       .then(() => loadRef.current())
-      .then((next) => setStages(Array.isArray(next) ? next : null)) // null → zero skeleton
-      .catch(() => setStages(null)); // fail-soft
+      .then((next) => {
+        setStages(Array.isArray(next) ? next : null); // null → zero skeleton
+        setStale(false); // fresh data is current again
+      })
+      .catch(() => setStages(null)); // fail-soft (stale stays set if it was)
   }, []);
 
   // Initial one-shot load on mount (and when an injected loader changes).
@@ -77,6 +86,10 @@ export function VsmContainer({
   useEffect(() => {
     let timer = null;
     let unsubscribe = null;
+    // Track whether we are currently in a dropped state, so the NEXT open is
+    // recognised as a reconnect (→ re-fetch). A local flag, not React state,
+    // because the open/error handlers read it synchronously within this effect.
+    let dropped = false;
 
     const onChange = (evt) => {
       if (!evt || !isRelevantChange(evt.path)) return;
@@ -84,8 +97,24 @@ export function VsmContainer({
       timer = setTimeout(() => { timer = null; refresh(); }, debounceMs);
     };
 
+    // DEFECT-003 connection lifecycle:
+    //  - onError: the live channel dropped — surface it (disconnected) and mark
+    //    the visible figures STALE so they are never read as current.
+    //  - onOpen: (re)connected — flip back to connected and, if we had just been
+    //    disconnected, re-fetch immediately so the numbers self-heal.
+    const onError = () => {
+      dropped = true;
+      setLiveState('disconnected');
+      setStale(true);
+    };
+    const onOpen = () => {
+      setLiveState('connected');
+      if (dropped) refresh(); // a RECONNECT → re-fetch to self-heal
+      dropped = false;
+    };
+
     try {
-      unsubscribe = subscribe(onChange);
+      unsubscribe = subscribe(onChange, { onOpen, onError });
       setLiveState('connected');
     } catch {
       setLiveState('reconnecting'); // no EventSource / blocked → degrade dot, keep data
@@ -102,7 +131,18 @@ export function VsmContainer({
       <div class="map-live__bar">
         <LiveStatusDot state={liveState} />
       </div>
-      <ValueStreamMap stages={stages} />
+      {stale ? (
+        <div
+          class="map-live__stale-banner"
+          data-testid="stale-banner"
+          role="alert"
+          aria-live="assertive"
+        >
+          Disconnected — data may be stale. Reconnecting and will refresh
+          automatically.
+        </div>
+      ) : null}
+      <ValueStreamMap stages={stages} stale={stale} />
     </div>
   );
 }

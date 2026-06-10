@@ -90,9 +90,15 @@ const ZERO_STAGES = FLOW_ORDER.map((stage) => ({
 /**
  * The value-stream map. `stages` is the /stage-flow array (11 entries incl.
  * rework) or null/[] (fail-soft → all-zeros skeleton).
- * @param {{ stages?: Array|null }} props
+ *
+ * DEFECT-003 — `stale` (default false) marks the figures as NOT-CURRENT when the
+ * live channel is lost: it stamps `data-stale="true"` (the machine-readable cue
+ * the container/tests assert) and dims the figures via the `value-stream-map--stale`
+ * class. Staleness meaning is carried authoritatively by the container's text
+ * banner + LiveStatusDot, never colour/dim alone.
+ * @param {{ stages?: Array|null, stale?: boolean }} props
  */
-export function ValueStreamMap({ stages }) {
+export function ValueStreamMap({ stages, stale = false }) {
   const src = Array.isArray(stages) && stages.length > 0 ? stages : ZERO_STAGES;
   const byStage = Object.fromEntries(src.map((s) => [s.stage, s]));
   // Only the 10 canonical nodes render (rework is the loop, not a node).
@@ -101,8 +107,10 @@ export function ValueStreamMap({ stages }) {
 
   return (
     <section
-      class="value-stream-map"
+      class={`value-stream-map${stale ? ' value-stream-map--stale' : ''}`}
       data-testid="value-stream-map"
+      data-stale={stale ? 'true' : 'false'}
+      aria-busy={stale ? 'true' : 'false'}
       role="region"
       aria-label="Value-stream map"
     >

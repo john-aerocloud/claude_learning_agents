@@ -122,10 +122,23 @@ export async function getItems(project) {
  * `onChange({ type, path })`. Returns an unsubscribe that closes the
  * EventSource. EventSource reconnects natively on drop; an unparseable frame is
  * ignored (never throws). UC6 builds path-filtering + re-fetch on top of this.
+ *
+ * DEFECT-003 — the SSE channel also surfaces CONNECTION state so the UI never
+ * presents stale data as live. The optional second argument hooks the raw
+ * EventSource lifecycle events:
+ *   - onOpen()  fires on EventSource `open` (connected / reconnected). The
+ *     container uses the reconnect open to re-fetch and self-heal.
+ *   - onError() fires on EventSource `error` (dropped / unreachable). The
+ *     container marks the figures stale and shows a disconnected indicator.
+ * These are connection events, NOT data frames — they never call onChange. The
+ * options arg is optional, so the original `subscribeEvents(onChange)` contract
+ * is unchanged.
  * @param {(evt: { type: string, path: string }) => void} onChange
+ * @param {{ onOpen?: () => void, onError?: () => void }} [opts]
  * @returns {() => void} unsubscribe
  */
-export function subscribeEvents(onChange) {
+export function subscribeEvents(onChange, opts = {}) {
+  const { onOpen, onError } = opts;
   const source = new EventSource(`${API_BASE}/api/events`);
   source.addEventListener('message', (e) => {
     let evt;
@@ -136,6 +149,8 @@ export function subscribeEvents(onChange) {
     }
     onChange(evt);
   });
+  if (typeof onOpen === 'function') source.addEventListener('open', () => onOpen());
+  if (typeof onError === 'function') source.addEventListener('error', () => onError());
   return () => source.close();
 }
 

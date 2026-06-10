@@ -10,10 +10,13 @@
 // A node that maps to NO slice (REQ/CHK) never triggers an artifact fetch — the
 // pane shows the "not yet available" placeholder (AC-S005-3-4).
 //
-// CLOSE → RETURN FOCUS TO MAP (A11Y-S005-3): on close the container calls the
-// parent's onClose (which clears selection so the pane unmounts) AND moves focus
-// to data-testid="value-stream-map" so the keyboard user lands back on the
-// primary surface — the symmetric zoom-out the §7 "clear path back" requires.
+// CLOSE → RETURN FOCUS (A11Y-S005-3, DEFECT-006 revision): on close the container
+// calls the parent's onClose (which clears selection so the pane unmounts) AND
+// invokes the injected `focusOnClose` handler. The parent (ObservatoryView)
+// restores focus to the ORIGINATING tree node — the non-modal drawer drops the
+// keyboard user back where they were so they can drill the next sibling without
+// re-traversing. If no handler is injected (standalone use), it falls back to
+// focusing the value-stream map.
 //
 // SCOPE: UC-S005-3 fetches + shows the artifact as RAW text inside DetailPane's
 // artifact-view slot. UC-S005-4 (markdown/mmd) and UC-S005-5 (history) compose
@@ -38,6 +41,9 @@ function focusValueStreamMap() {
  * @param {object|null} props.item   - the selected ItemRecord (null → pane closed)
  * @param {string} props.project     - active project id
  * @param {()=>void} props.onClose   - parent handler that clears the selection
+ * @param {()=>void} [props.focusOnClose] - parent focus-restore handler (DEFECT-006:
+ *        returns focus to the originating tree node). Falls back to focusing the
+ *        value-stream map when not injected.
  * @param {(project:string)=>Promise<string[]|null>} [props.loadSlices]
  * @param {(project:string, slug:string, artifact:string)=>Promise<string|null>} [props.loadArtifact]
  */
@@ -45,6 +51,7 @@ export function DetailPaneContainer({
   item,
   project,
   onClose,
+  focusOnClose,
   loadSlices = getSlices,
   loadArtifact = getSliceArtifact,
 }) {
@@ -104,8 +111,9 @@ export function DetailPaneContainer({
 
   const handleClose = useCallback(() => {
     onClose && onClose();
-    focusValueStreamMap();
-  }, [onClose]);
+    if (typeof focusOnClose === 'function') focusOnClose();
+    else focusValueStreamMap();
+  }, [onClose, focusOnClose]);
 
   if (!item) return null;
 

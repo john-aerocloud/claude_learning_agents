@@ -1,28 +1,55 @@
-/* UC-S005-3 — DetailPane styling.
+/* UC-S005-3 / DEFECT-006 — DetailPane styling.
  *
- * The pane is a NON-MODAL region anchored to the RIGHT side of the main column,
- * overlaying the value-stream map but NEVER the tree rail (GEO-S005-3: the
- * pane's left edge sits past the rail because the pane lives inside
- * .observatory-main-col, which is already to the right of the rail). It is a
- * sticky right-anchored panel — the map stays visible/scrollable beside it.
+ * The pane is a NON-MODAL, right-anchored FLOATING DRAWER. It is position:fixed
+ * with its OWN stacking context (z-index above the map), so it is REMOVED from
+ * .observatory-main-col's flow — opening it does NOT grow the column or reflow
+ * the page (GEO-S005-3b / AC-S005-3-7; the in-flow build added +690px, the float
+ * adds 0). It floats OVER the value-stream map (intentional z-index overlap) but
+ * never over the tree rail (its left edge ≈ inset+drawer-left ≫ rail right edge —
+ * GEO-S005-3). No scrim, no aria-modal, no focus trap — the map stays readable
+ * beside/behind the drawer (the "whole and the part" requirement).
  *
- * Token-based; reuses the s002/s003/s004 design system (surface, border, focus
- * ring, spacing). Reduced-motion: no transitions (A11Y-S005-9). */
+ * Containment is via tokens (tokens.css): --z-drawer / --drawer-width /
+ * --drawer-inset / --drawer-elev / --dur-drawer. The fixed width + inset
+ * guarantee right+width ≤ viewport, so no horizontal scrollbar appears.
+ *
+ * Token-based; reuses the s002/s003/s004 design system. Reduced-motion: the
+ * slide-in is gated behind prefers-reduced-motion: no-preference, so under
+ * `reduce` the drawer appears instantly (A11Y-S005-9). */
 
 .detail-pane {
-  position: sticky;
-  top: var(--sp-4);
-  align-self: flex-start;
-  width: min(440px, 42vw);
-  max-height: calc(100vh - 2 * var(--sp-4));
+  position: fixed;
+  top: var(--drawer-inset);
+  right: var(--drawer-inset);
+  bottom: var(--drawer-inset);
+  width: var(--drawer-width);
+  max-height: calc(100vh - 2 * var(--drawer-inset));
   overflow: auto;
-  margin-left: auto; /* anchor right within the main column */
+  z-index: var(--z-drawer);
   background: var(--c-surface-raised);
   border: 1px solid var(--c-border);
   border-radius: var(--radius-box);
   padding: var(--sp-4);
   color: var(--c-text);
-  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--drawer-elev);
+}
+
+/* Slide-in only when the user has not asked to reduce motion (A11Y-S005-9). */
+@media (prefers-reduced-motion: no-preference) {
+  .detail-pane {
+    animation: detail-pane-slide-in var(--dur-drawer) ease-out;
+  }
+
+  @keyframes detail-pane-slide-in {
+    from {
+      transform: translateX(16px);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
 }
 
 .detail-pane__crumb {
@@ -171,6 +198,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .detail-pane {
+    animation: none; /* instant appearance under reduce (A11Y-S005-9) */
     transition: none;
   }
 }

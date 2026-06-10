@@ -64,4 +64,32 @@ describe('ObservatoryView (UC-S005-3)', () => {
     // map still present after zoom-out
     expect(screen.getByTestId('value-stream-map')).toBeTruthy();
   });
+
+  it('DEFECT-006: renders the pane OUTSIDE .observatory-main-col (sibling of it within .observatory-layout) so it cannot reflow the column', async () => {
+    const d = deps();
+    render(<ObservatoryView {...d} />);
+    await waitFor(() => expect(screen.getAllByTestId('tree-node').length).toBe(3));
+    fireEvent.click(document.querySelector('[data-item-id="UC-S001-1"] > .tree-node__row'));
+    await waitFor(() => expect(screen.getByTestId('detail-pane')).toBeTruthy());
+    const pane = screen.getByTestId('detail-pane');
+    const mainCol = document.querySelector('.observatory-main-col');
+    // structural containment: the drawer is NOT a descendant of the main column.
+    expect(mainCol.contains(pane)).toBe(false);
+    // it lives within the observatory layout (as a sibling), not detached.
+    expect(document.querySelector('.observatory-layout').contains(pane)).toBe(true);
+  });
+
+  it('DEFECT-006: on close focus returns to the ORIGINATING tree node (not the map)', async () => {
+    const d = deps();
+    render(<ObservatoryView {...d} />);
+    await waitFor(() => expect(screen.getAllByTestId('tree-node').length).toBe(3));
+    const node = document.querySelector('[role="treeitem"][data-item-id="UC-S001-1"]');
+    fireEvent.click(node.querySelector('.tree-node__row'));
+    await waitFor(() => expect(screen.getByTestId('detail-pane')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('back-to-map'));
+    await waitFor(() => expect(screen.queryByTestId('detail-pane')).toBeNull());
+    // focus landed on (or inside) the originating tree node, not the value-stream map.
+    const active = document.activeElement;
+    expect(node.contains(active) || active === node).toBe(true);
+  });
 });

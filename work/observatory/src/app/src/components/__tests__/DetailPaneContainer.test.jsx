@@ -12,7 +12,9 @@
 //   - no item selected → renders nothing (pane closed).
 //   - a UC node → resolves its slice slug, fetches + shows the artifact text.
 //   - a REQ node (no slice) → shows the "not yet available" placeholder; never fetches an artifact.
-//   - onClose returns focus to the value-stream map element + clears selection upward.
+//   - on close it clears selection upward (onClose) AND invokes the injected
+//     focusOnClose handler (DEFECT-006: the parent restores focus to the
+//     originating tree node, not the value-stream map).
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/preact';
 import { DetailPaneContainer } from '../DetailPaneContainer.jsx';
@@ -52,19 +54,13 @@ describe('DetailPaneContainer (UC-S005-3)', () => {
     expect(d.loadArtifact).not.toHaveBeenCalled();
   });
 
-  it('on close calls onClose and returns focus to the value-stream map (A11Y-S005-3)', async () => {
-    // stand up a fake value-stream map element to receive focus
-    const map = document.createElement('div');
-    map.setAttribute('data-testid', 'value-stream-map');
-    map.setAttribute('tabindex', '-1');
-    document.body.appendChild(map);
-
-    const d = deps();
+  it('on close calls onClose AND the injected focusOnClose handler (DEFECT-006: parent restores focus to the originating tree node)', async () => {
+    const focusOnClose = vi.fn();
+    const d = deps({ focusOnClose });
     render(<DetailPaneContainer item={UC_ITEM} {...d} />);
     await waitFor(() => expect(screen.getByTestId('detail-pane')).toBeTruthy());
     fireEvent.click(screen.getByTestId('detail-pane-close'));
     expect(d.onClose).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(document.activeElement).toBe(map));
-    map.remove();
+    await waitFor(() => expect(focusOnClose).toHaveBeenCalledTimes(1));
   });
 });

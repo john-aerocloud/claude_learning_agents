@@ -69,23 +69,44 @@ test('GEO-S005-4 — selected node is visually linked to the open pane (aria-sel
   );
 });
 
-test('AC-S005-3-6 / A11Y-S005-3 — "Back to map" closes the pane and returns focus to the value-stream map', async ({
+test('AC-S005-3-6 / A11Y-S005-3 — "Back to map" closes the pane, surfaces the map, returns focus to the originating tree node (DEFECT-006)', async ({
   page,
 }) => {
   await page.locator('[data-item-id="UC-S004-1"] > .tree-node__row').click();
   await expect(page.getByTestId('detail-pane')).toBeVisible();
   await page.getByTestId('back-to-map').click();
   await expect(page.getByTestId('detail-pane')).toHaveCount(0);
+  // "Back to map" still surfaces the map (AC-S005-3-6)
   await expect(page.getByTestId('value-stream-map')).toBeVisible();
-  const focused = await page.evaluate(() =>
-    document.activeElement?.getAttribute('data-testid'),
+  // DEFECT-006 revision: focus returns to the ORIGINATING tree node (the treeitem
+  // that was clicked), not the map — the non-modal drawer drops the keyboard user
+  // back where they were so they can drill the next sibling without re-traversing.
+  const focusedItem = await page.evaluate(
+    () => document.activeElement?.closest('[role="treeitem"]')?.getAttribute('data-item-id'),
   );
-  expect(focused).toBe('value-stream-map');
+  expect(focusedItem).toBe('UC-S004-1');
 });
 
-test('Esc closes the pane (keyboard zoom-out)', async ({ page }) => {
+test('Esc closes the pane and returns focus to the originating tree node (DEFECT-006)', async ({
+  page,
+}) => {
   await page.locator('[data-item-id="UC-S004-1"] > .tree-node__row').click();
   await expect(page.getByTestId('detail-pane')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('detail-pane')).toHaveCount(0);
+  const focusedItem = await page.evaluate(
+    () => document.activeElement?.closest('[role="treeitem"]')?.getAttribute('data-item-id'),
+  );
+  expect(focusedItem).toBe('UC-S004-1');
+});
+
+test('× close button returns focus to the originating tree node (DEFECT-006)', async ({ page }) => {
+  await page.locator('[data-item-id="UC-S004-1"] > .tree-node__row').click();
+  await expect(page.getByTestId('detail-pane')).toBeVisible();
+  await page.getByTestId('detail-pane-close').click();
+  await expect(page.getByTestId('detail-pane')).toHaveCount(0);
+  const focusedItem = await page.evaluate(
+    () => document.activeElement?.closest('[role="treeitem"]')?.getAttribute('data-item-id'),
+  );
+  expect(focusedItem).toBe('UC-S004-1');
 });

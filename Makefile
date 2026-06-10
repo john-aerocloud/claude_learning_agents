@@ -346,10 +346,25 @@ browser-observatory:
 # EPHEMERAL Vite server on :5199 (against the committed fixture repo), so the run
 # never touches an operator's running :5173. Playwright starts AND tears down the
 # :5199 server itself (OBSERVATORY_E2E_PORT + CI force a non-reused own-server).
+# --workers=1 SERIALISES the run: the UC-S005-6 live-refresh spec MUTATES the
+# shared items.csv fixture (append a row → tree re-renders → restore in afterEach),
+# so it must fully complete its restore before any deterministic spec that asserts
+# an exact items.csv-derived node count / map height (work-item-tree.spec.js,
+# detail-pane-geometry.spec.js) runs — single-worker sequential execution
+# guarantees that with no cross-file race.
 browser-observatory-ephemeral:
-	OBSERVATORY_E2E_PORT=5199 CI=1 npm --prefix work/observatory/src/app run test:browser
+	OBSERVATORY_E2E_PORT=5199 CI=1 npm --prefix work/observatory/src/app run test:browser -- --workers=1
 
-.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral a11y-observatory
+# browser-observatory-real-data: run the EXP-033 real-data spec against a
+# PRE-STARTED ephemeral Vite server on :5203 (pointing at the live observatory
+# repo, not the fixture). Requires the operator to have already started:
+#   npm --prefix work/observatory/src/app run dev -- --port 5203
+# The spec is gated on REUSE_SERVER=1 and skipped by the fixture-backed suite.
+# After the run the operator should kill the :5203 server by PID (never pkill -f vite).
+browser-observatory-real-data:
+	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
+
+.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory
 
 # make dora-flow PROJECT=oxo-online  -> rewrites work/<project>/dora/flow.md
 # (per-project queues + time thieves + parallelism efficiency). v40 pull-flow view.

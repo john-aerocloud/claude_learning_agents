@@ -75,7 +75,7 @@ function auditRef(e) {
  *   sourceTotal?: number; sourceRows?: string[];
  * }} props
  */
-export function MetricSource({ id, stage, kind, sourceEvents, sourceTotal, open }) {
+export function MetricSource({ id, stage, kind, sourceEvents, sourceTotal, summary, open }) {
   const events = Array.isArray(sourceEvents) ? sourceEvents.filter(Boolean) : [];
   const total = Number.isFinite(sourceTotal) ? sourceTotal : events.length;
   const hasEvents = events.length > 0;
@@ -97,6 +97,16 @@ export function MetricSource({ id, stage, kind, sourceEvents, sourceTotal, open 
       <span class="metric-source__file" data-testid={`source-file-${stage}-${kind}`}>
         {SOURCE_FILE}
       </span>
+      {/* DEFECT-007 D7-AC-4 — the throughput raw COUNT is demoted here (numerator
+          of the headline rate), e.g. "13 items over 2 active days (6.5 items/day)". */}
+      {typeof summary === 'string' && summary !== '' ? (
+        <span
+          class="metric-source__summary"
+          data-testid={`metric-source-summary-${stage}-${kind}`}
+        >
+          {summary}
+        </span>
+      ) : null}
       {hasEvents ? (
         <ul class="metric-source__events">
           {shown.map((e) => (

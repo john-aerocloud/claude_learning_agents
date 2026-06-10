@@ -31,7 +31,7 @@ const flow = [
   { stage: 'ready', label: 'Ready (queue)', throughput: 4, dwell_median_s: 0, dwell_pairs: 0, wip: 0, rework: 0, source_rows: ['r3'] },
   { stage: 'capabilities', label: 'Capabilities (cicd)', throughput: 3, dwell_median_s: 600, dwell_pairs: 2, wip: 0, rework: 0, source_rows: ['r4'] },
   { stage: 'ui-design', label: 'UI-Design', throughput: 3, dwell_median_s: 300, dwell_pairs: 2, wip: 1, rework: 0, source_rows: ['r5'] },
-  { stage: 'engineer', label: 'Build / TDD (engineer)', throughput: 7, dwell_median_s: 720, dwell_pairs: 5, wip: 2, rework: 3, source_rows: ['r6', 'r7'], wip_items: [{ item_id: 'UC-X', since_ts: 't1' }, { item_id: 'UC-Y', since_ts: 't2' }] },
+  { stage: 'engineer', label: 'Build / TDD (engineer)', throughput: 7, active_days: 2, throughput_per_active_day: 3.5, dwell_median_s: 720, dwell_pairs: 5, wip: 2, rework: 3, source_rows: ['r6', 'r7'], wip_items: [{ item_id: 'UC-X', since_ts: 't1' }, { item_id: 'UC-Y', since_ts: 't2' }] },
   { stage: 'ui-validate', label: 'UI-Validate', throughput: 2, dwell_median_s: 90, dwell_pairs: 2, wip: 0, rework: 0, source_rows: ['r8'] },
   { stage: 'deploy', label: 'Deploy (gate)', throughput: 6, dwell_median_s: 45, dwell_pairs: 2, wip: 0, rework: 0, source_rows: ['r9'] },
   { stage: 'validate', label: 'Validate (tester)', throughput: 5, dwell_median_s: 3600, dwell_pairs: 2, wip: 1, rework: 2, source_rows: ['r10'] },
@@ -103,12 +103,12 @@ describe('ValueStreamMap render (UC-S004-2/3/4)', () => {
     expect(loop.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
   });
 
-  it('shows all four labelled figures per node (AC3.1) with integer throughput + humanised dwell (AC3.2/3.3)', () => {
+  it('shows all four labelled figures per node (AC3.1) with throughput RATE + humanised dwell (DEFECT-007 / AC3.3)', () => {
     render(<ValueStreamMap stages={flow} />);
     const eng = screen.getByTestId('stage-engineer');
-    // throughput 7 (integer)
+    // DEFECT-007: throughput headline is the RATE (7 / 2 active days = 3.5 items/day)
     expect(within(eng).getByTestId('metric-engineer-throughput')).toHaveTextContent(/Throughput/i);
-    expect(within(eng).getByTestId('metric-engineer-throughput')).toHaveTextContent('7');
+    expect(within(eng).getByTestId('metric-value-engineer-throughput')).toHaveTextContent('3.5 items/day');
     // dwell 720s → 12m
     expect(within(eng).getByTestId('metric-engineer-dwell')).toHaveTextContent(/12m/);
     // rework 3
@@ -134,7 +134,7 @@ describe('ValueStreamMap render (UC-S004-2/3/4)', () => {
   it('carries the in-flight signal as TEXT in the node accessible name (A11Y-2 / A11Y-4)', () => {
     render(<ValueStreamMap stages={flow} />);
     // node name carries figures incl. ", 2 in-flight"
-    const eng = screen.getByRole('group', { name: /Build \/ TDD.*throughput 7.*WIP.*2 in-flight.*rework 3/i });
+    const eng = screen.getByRole('group', { name: /Build \/ TDD.*throughput 3\.5 items\/day.*WIP.*2 in-flight.*rework 3/i });
     expect(eng).toBeInTheDocument();
   });
 

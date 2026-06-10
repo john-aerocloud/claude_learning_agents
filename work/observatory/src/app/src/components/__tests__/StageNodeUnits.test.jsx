@@ -11,10 +11,14 @@ import { describe, it, expect } from 'vitest';
 import { render, screen, within } from '@testing-library/preact';
 import { StageNode } from '../StageNode.jsx';
 
+// DEFECT-007 — throughput headline now shows the RATE (items/day), so fixtures
+// carry the new rate fields. throughput stays as the raw count (numerator).
 const workStage = {
   stage: 'engineer',
   label: 'Build / TDD (engineer)',
-  throughput: 7,
+  throughput: 13,
+  active_days: 2,
+  throughput_per_active_day: 6.5,
   dwell_median_s: 720,
   dwell_pairs: 5,
   wip: 2,
@@ -29,6 +33,8 @@ const readyStage = {
   stage: 'ready',
   label: 'Ready (queue)',
   throughput: 3,
+  active_days: 3,
+  throughput_per_active_day: 1,
   dwell_median_s: 0,
   dwell_pairs: 0,
   wip: 0,
@@ -42,22 +48,60 @@ const readyStage = {
   coherence_warning: false,
 };
 
-describe('StageNode — throughput unit (AC-1)', () => {
-  it('renders throughput as "N items" (plural)', () => {
+// DEFECT-007 — D7-AC-1/AC-5: the headline throughput figure is a RATE with a
+// per-time unit (/day), never a bare count. Format rules per ruling §3.
+describe('StageNode — throughput RATE headline (DEFECT-007 D7-AC-1/AC-5)', () => {
+  it('renders the rate with the /day unit (non-integer → 1 dp)', () => {
     render(<StageNode data={workStage} />);
     const v = screen.getByTestId('metric-value-engineer-throughput');
-    expect(v.textContent).toMatch(/\d+ items?/);
-    expect(v.textContent).toBe('7 items');
+    expect(v.textContent).toBe('6.5 items/day');
+    expect(v.textContent).toMatch(/[\d.]+ items?\/day/);
   });
 
-  it('uses the singular "1 item"', () => {
-    render(<StageNode data={{ ...workStage, throughput: 1 }} />);
-    expect(screen.getByTestId('metric-value-engineer-throughput').textContent).toBe('1 item');
+  it('D7-AC-5: rate exactly 1.0 → singular "1 item/day"', () => {
+    render(<StageNode data={{ ...workStage, throughput: 3, active_days: 3, throughput_per_active_day: 1 }} />);
+    expect(screen.getByTestId('metric-value-engineer-throughput').textContent).toBe('1 item/day');
   });
 
-  it('renders "0 items" (never a bare 0)', () => {
-    render(<StageNode data={{ ...workStage, throughput: 0 }} />);
-    expect(screen.getByTestId('metric-value-engineer-throughput').textContent).toBe('0 items');
+  it('integer rate > 1 drops the trailing .0 → "6 items/day"', () => {
+    render(<StageNode data={{ ...workStage, throughput: 12, active_days: 2, throughput_per_active_day: 6 }} />);
+    expect(screen.getByTestId('metric-value-engineer-throughput').textContent).toBe('6 items/day');
+  });
+
+  it('rate < 1 keeps the decimal, never "<1" → "0.3 items/day"', () => {
+    render(<StageNode data={{ ...workStage, throughput: 3, active_days: 10, throughput_per_active_day: 0.3 }} />);
+    const t = screen.getByTestId('metric-value-engineer-throughput').textContent;
+    expect(t).toBe('0.3 items/day');
+    expect(t).not.toMatch(/<1/);
+  });
+
+  it('D7-AC-5: null rate (0 active days) → "—"', () => {
+    render(<StageNode data={{ ...workStage, throughput: 0, active_days: 0, throughput_per_active_day: null }} />);
+    expect(screen.getByTestId('metric-value-engineer-throughput').textContent).toBe('—');
+  });
+
+  it('D7-AC-1: headline is never a bare count (no /^\\d+ items?$/)', () => {
+    render(<StageNode data={workStage} />);
+    const t = screen.getByTestId('metric-value-engineer-throughput').textContent.trim();
+    expect(t).not.toMatch(/^\d+ items?$/);
+    expect(t).toMatch(/[\d.]+ items?\/day|—/);
+  });
+});
+
+// DEFECT-007 — D7-AC-4: the raw COUNT is demoted to the source/hover line, not lost.
+describe('StageNode — throughput source line keeps the count (D7-AC-4)', () => {
+  it('source panel reveals "<count> items over <d> active days (<rate>)"', () => {
+    render(<StageNode data={workStage} />);
+    const panel = screen.getByTestId('metric-source-engineer-throughput');
+    expect(panel.textContent).toMatch(/13 items over 2 active days/);
+    expect(panel.textContent).toMatch(/\d+ items? over \d+ active days?/);
+    expect(panel.textContent).toContain('6.5 items/day');
+  });
+
+  it('source panel shows "0 items (no active days in window)" when active_days=0', () => {
+    render(<StageNode data={{ ...workStage, throughput: 0, active_days: 0, throughput_per_active_day: null }} />);
+    const panel = screen.getByTestId('metric-source-engineer-throughput');
+    expect(panel.textContent).toMatch(/0 items \(no active days in window\)/);
   });
 });
 
@@ -146,25 +190,32 @@ describe('StageNode — coherence warning (AC-6)', () => {
   });
 });
 
-describe('StageNode — accessible name carries units (AC-7)', () => {
-  // Ruling AC-7 pattern; the queue branch admits the optional "(longest wait …)" suffix.
-  const pat = /.+ stage, throughput \d+ items?, dwell .+, (depth \d+ queued[^,]*|WIP \d+(, \d+ in-flight)?), rework \d+ rework/;
+describe('StageNode — accessible name carries the throughput RATE (DEFECT-007 D7-AC-6)', () => {
+  // Ruling D7-AC-6 pattern (supersedes D4-AC-7 for throughput): the rate token
+  // carries the /day unit. Queue branch admits the optional "(longest wait …)".
+  const pat = /.+ stage, throughput ([\d.]+ items?\/day|—), dwell .+, (depth \d+ queued[^,]*|WIP \d+(, \d+ in-flight)?), rework \d+ rework/;
 
-  it('work stage aria-label matches the unit pattern with WIP', () => {
+  it('work stage aria-label carries "throughput N items/day"', () => {
     render(<StageNode data={workStage} />);
     const name = screen.getByTestId('stage-engineer').getAttribute('aria-label');
     expect(name).toMatch(pat);
-    expect(name).toContain('throughput 7 items');
+    expect(name).toContain('throughput 6.5 items/day');
     expect(name).toContain('WIP');
     expect(name).toContain('rework 3 rework');
   });
 
-  it('queue stage aria-label uses "depth N queued"', () => {
+  it('queue stage aria-label uses the rate + "depth N queued"', () => {
     render(<StageNode data={readyStage} />);
     const name = screen.getByTestId('stage-ready').getAttribute('aria-label');
     expect(name).toMatch(pat);
     expect(name).toContain('depth 2 queued');
-    expect(name).toContain('throughput 3 items');
+    expect(name).toContain('throughput 1 item/day');
+  });
+
+  it('null rate → accessible name reads "throughput —"', () => {
+    render(<StageNode data={{ ...workStage, throughput: 0, active_days: 0, throughput_per_active_day: null }} />);
+    const name = screen.getByTestId('stage-engineer').getAttribute('aria-label');
+    expect(name).toMatch(/throughput —/);
   });
 
   it('no bare metric number in any [data-metric] visible text', () => {

@@ -36,10 +36,46 @@ export function humaniseDwell(seconds) {
   return `${Math.round(s / 3600)}h`;
 }
 
-/** DEFECT-004 AC-1 — throughput always carries the unit "items" (singular "1 item"). */
+/** DEFECT-004 AC-1 — throughput COUNT label (singular "1 item"). Retained for the
+ * source/hover summary; no longer the headline (DEFECT-007 made the headline a rate). */
 export function throughputLabel(n) {
   const v = Number(n) || 0;
   return `${v} ${v === 1 ? 'item' : 'items'}`;
+}
+
+/**
+ * DEFECT-007 — the headline throughput is a RATE (items per active-day). Format
+ * rules (ruling §3):
+ *   null            → "—"            (0 active days; nothing to rate)
+ *   exactly 1.0     → "1 item/day"   (singular "item")
+ *   integer (>1,0)  → "N items/day"  (drop trailing .0)
+ *   non-integer     → "N.N items/day" (one decimal place)
+ *   < 1 (e.g. 0.3)  → "0.3 items/day" (keep the decimal; never "<1")
+ * The "/day" unit is ALWAYS shown — it is what makes this a rate.
+ */
+export function throughputRateLabel(rate) {
+  if (rate === null || rate === undefined || !Number.isFinite(Number(rate))) return '—';
+  const v = Number(rate);
+  // Minimum decimal places: whole numbers drop ".0"; otherwise one decimal.
+  const isWhole = Number.isInteger(v);
+  const text = isWhole ? String(v) : v.toFixed(1);
+  const num = Number(text);
+  const unit = num === 1 ? 'item/day' : 'items/day';
+  return `${text} ${unit}`;
+}
+
+/** DEFECT-007 D7-AC-4 — the raw count is DEMOTED to the source/hover line, not lost:
+ * "13 items over 2 active days (6.5 items/day)"; "0 items (no active days in window)"
+ * when there are no active days. */
+export function throughputSourceSummary(count, activeDays, rate) {
+  const c = Number(count) || 0;
+  const d = Number(activeDays) || 0;
+  const itemWord = c === 1 ? 'item' : 'items';
+  if (d === 0 || rate === null || rate === undefined) {
+    return `${c} ${itemWord} (no active days in window)`;
+  }
+  const dayWord = d === 1 ? 'active day' : 'active days';
+  return `${c} ${itemWord} over ${d} ${dayWord} (${throughputRateLabel(rate)})`;
 }
 
 /** DEFECT-004 AC-2 — dwell text: humanised when >= 2 completed pairs, else "—"
@@ -63,7 +99,7 @@ export function sourceAttr(sourceRows) {
 /** A single labelled figure (label + value) + its MetricSource traceability
  * reveal. Never a bare number (AC3.1). The value is wired to its source panel
  * via aria-describedby (A11Y-10) and carries the programmatic data-source (SRC-1). */
-function StageMetric({ stage, kind, label, value, sourceRows, sourceEvents, sourceTotal, open }) {
+function StageMetric({ stage, kind, label, value, sourceRows, sourceEvents, sourceTotal, summary, open }) {
   const panelId = `src-${stage}-${kind}`;
   return (
     <div class="stage-metric" data-testid={`metric-${stage}-${kind}`}>
@@ -84,6 +120,7 @@ function StageMetric({ stage, kind, label, value, sourceRows, sourceEvents, sour
         sourceEvents={sourceEvents}
         sourceTotal={sourceTotal}
         sourceRows={sourceRows}
+        summary={summary}
         open={open}
       />
     </div>
@@ -173,15 +210,18 @@ function GateMarker({ gate }) {
  * traceability reveal. role=group, the single focusable tab stop (A11Y-3). */
 export function StageNode({ data }) {
   const {
-    stage, label, throughput, dwell_median_s, dwell_pairs, wip, rework, source_rows,
+    stage, label, throughput, throughput_per_active_day, active_days,
+    dwell_median_s, dwell_pairs, wip, rework, source_rows,
     source_events, source_total,
     queue_depth, queue_items, coherence_warning,
   } = data;
   const isGate = GATES.has(stage);
   const isQueue = isQueueStage(data);
   const wipActive = Number(wip) > 0;
-  // DEFECT-004 AC-1/AC-2: every figure carries a unit; dwell is "—" when unknown.
-  const throughputText = throughputLabel(throughput);
+  // DEFECT-007: the headline throughput is now a RATE (items/day); the raw count
+  // is demoted to the source/hover summary. DEFECT-004 AC-2 dwell still "—" when unknown.
+  const throughputText = throughputRateLabel(throughput_per_active_day);
+  const throughputSummary = throughputSourceSummary(throughput, active_days, throughput_per_active_day);
   const dwell = dwellLabel(dwell_median_s, dwell_pairs);
   const reworkText = `${Number(rework) || 0} rework`;
   const depth = Number(queue_depth) || 0;
@@ -243,7 +283,7 @@ export function StageNode({ data }) {
         </p>
       ) : null}
       <dl class="stage-figs">
-        <StageMetric stage={stage} kind="throughput" label="Throughput" value={throughputText} sourceRows={source_rows} sourceEvents={source_events} sourceTotal={source_total} open={open} />
+        <StageMetric stage={stage} kind="throughput" label="Throughput" value={throughputText} sourceRows={source_rows} sourceEvents={source_events} sourceTotal={source_total} summary={throughputSummary} open={open} />
         <StageMetric stage={stage} kind="dwell" label="Dwell" value={dwell} sourceRows={source_rows} sourceEvents={source_events} sourceTotal={source_total} open={open} />
         {isQueue
           ? <QueueDepth stage={stage} depth={depth} items={queue_items} sourceRows={source_rows} sourceEvents={source_events} sourceTotal={source_total} open={open} />

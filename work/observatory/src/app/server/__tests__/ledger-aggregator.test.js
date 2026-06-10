@@ -12,7 +12,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { aggregateStageFlow, CANONICAL_STAGES, parseLedger } from '../lib/ledgerAggregator.js';
 
-const repoRoot = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..', '..', '..', '..');
+// From server/__tests__/ go up: server → app → src → observatory → work → repo root
+const repoRoot = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..', '..', '..', '..', '..');
 
 // Build a CSV the same way the real ledger is shaped (header + rows).
 const HEADER =
@@ -56,7 +57,6 @@ describe('parseLedger — tolerant line parser (real ledger is malformed CSV)', 
   });
 
   it('recovers rows that the strict CSV parser would swallow via an unbalanced quote', () => {
-    // A stray double-quote in one note must NOT consume the following rows.
     const text =
       HEADER +
       '\n2026-06-01T00:00:00Z,p,1,s1,engineer,task_end,100,pass,REF,commit 1715807",UC-A,\n' +
@@ -83,7 +83,6 @@ describe('aggregateStageFlow — shape contract', () => {
       });
       expect(Array.isArray(s.source_rows)).toBe(true);
       expect(Array.isArray(s.wip_items)).toBe(true);
-      // No field null/undefined.
       for (const v of Object.values(s)) expect(v).not.toBeNull();
     }
   });
@@ -124,10 +123,8 @@ describe('aggregateStageFlow — WIP (half-open enter = in-flight, AC1.5)', () =
   it('counts an item with an in-event and no matching out-event as WIP', () => {
     const out = aggregateStageFlow(
       csv([
-        // A: completed pair → not WIP
         row({ ts: '2026-06-01T00:00:00Z', agent: 'engineer', event: 'task_start', item: 'A' }),
         row({ ts: '2026-06-01T00:10:00Z', agent: 'engineer', event: 'task_end', item: 'A' }),
-        // B: half-open → WIP (in-flight, pulled but not done — the key fix)
         row({ ts: '2026-06-01T00:05:00Z', agent: 'engineer', event: 'stage_enter', item: 'B' }),
       ]),
       'p',
@@ -161,7 +158,7 @@ describe('aggregateStageFlow — dwell median (AC1.6)', () => {
       ]),
       'p',
     );
-    expect(byStage(out, 'engineer').dwell_median_s).toBe(200); // median(100,300)
+    expect(byStage(out, 'engineer').dwell_median_s).toBe(200);
   });
 
   it('computes dwell from timestamps when duration_s is absent', () => {
@@ -172,7 +169,7 @@ describe('aggregateStageFlow — dwell median (AC1.6)', () => {
       ]),
       'p',
     );
-    expect(byStage(out, 'engineer').dwell_median_s).toBe(60); // 1 minute
+    expect(byStage(out, 'engineer').dwell_median_s).toBe(60);
   });
 
   it('odd-count median is the middle value', () => {
@@ -222,9 +219,9 @@ describe('aggregateStageFlow — other stage mappings', () => {
     expect(byStage(out, 'validate').throughput).toBe(1);
     expect(byStage(out, 'capabilities').throughput).toBe(1);
     expect(byStage(out, 'deploy').throughput).toBe(1);
-    expect(byStage(out, 'done').throughput).toBe(1); // deploy outcome=success
-    expect(byStage(out, 'intake').throughput).toBe(1); // enqueue queue=intake
-    expect(byStage(out, 'ready').throughput).toBe(1); // enqueue queue=ready
+    expect(byStage(out, 'done').throughput).toBe(1);
+    expect(byStage(out, 'intake').throughput).toBe(1);
+    expect(byStage(out, 'ready').throughput).toBe(1);
   });
 
   it('tolerates ragged rows (comma-shifted note) without throwing', () => {
@@ -235,11 +232,6 @@ describe('aggregateStageFlow — other stage mappings', () => {
   });
 });
 
-// DEFECT-002 — phantom/stuck WIP from abandoned items. An open enter-without-exit
-// must count as WIP ONLY if the item still EXISTS in items.csv AND its state is
-// non-terminal. An open enter for an item absent-from-items.csv or terminal
-// (done/dropped/cancelled) is STALE → not in-flight. Missing items.csv → fall
-// back to raw open-enter (fail-soft), never throw.
 describe('aggregateStageFlow — WIP reconciliation against items.csv (DEFECT-002)', () => {
   const ITEMS_HEADER =
     'id,type,parent,children,job,state,value,cost,vc_ratio,created_ts,done_ts,dora_ref';
@@ -249,8 +241,8 @@ describe('aggregateStageFlow — WIP reconciliation against items.csv (DEFECT-00
 
   it('open enter for an item ABSENT from items.csv is NOT WIP (phantom dropped work)', () => {
     const ledger = csv([
-      row({ agent: 'engineer', event: 'stage_enter', item: 'UC-S003-2' }), // dropped, removed from items.csv
-      row({ agent: 'engineer', event: 'stage_enter', item: 'UC-LIVE' }), // present & non-terminal
+      row({ agent: 'engineer', event: 'stage_enter', item: 'UC-S003-2' }),
+      row({ agent: 'engineer', event: 'stage_enter', item: 'UC-LIVE' }),
     ]);
     const items = itemsCsv([{ id: 'UC-LIVE', state: 'in-progress' }]);
     const eng = byStage(aggregateStageFlow(ledger, 'p', items), 'engineer');
@@ -284,23 +276,20 @@ describe('aggregateStageFlow — WIP reconciliation against items.csv (DEFECT-00
   it('missing/empty items.csv → fall back to raw open-enter (fail-soft, never throw)', () => {
     const ledger = csv([row({ agent: 'engineer', event: 'stage_enter', item: 'UC-A' })]);
     expect(() => aggregateStageFlow(ledger, 'p', null)).not.toThrow();
-    // No registry to reconcile against → keep the raw open-enter behaviour.
     expect(byStage(aggregateStageFlow(ledger, 'p', null), 'engineer').wip_items).toEqual(['UC-A']);
     expect(byStage(aggregateStageFlow(ledger, 'p'), 'engineer').wip_items).toEqual(['UC-A']);
   });
 
   it('throughput/dwell/rework are historical and NOT reconciled (only WIP is "now")', () => {
-    // A dropped item that completed pairs in the past still counts toward
-    // throughput; reconciliation only suppresses it from in-flight WIP.
     const ledger = csv([
       row({ ts: '2026-06-01T00:00:00Z', agent: 'engineer', event: 'task_start', item: 'UC-DROPPED' }),
       row({ ts: '2026-06-01T00:10:00Z', agent: 'engineer', event: 'task_end', item: 'UC-DROPPED', duration: '600' }),
     ]);
     const items = itemsCsv([{ id: 'UC-DROPPED', state: 'dropped' }]);
     const eng = byStage(aggregateStageFlow(ledger, 'p', items), 'engineer');
-    expect(eng.throughput).toBe(1); // historical throughput preserved
-    expect(eng.dwell_median_s).toBe(600); // historical dwell preserved
-    expect(eng.wip).toBe(0); // but not in-flight now
+    expect(eng.throughput).toBe(1);
+    expect(eng.dwell_median_s).toBe(600);
+    expect(eng.wip).toBe(0);
   });
 });
 
@@ -317,7 +306,6 @@ describe('aggregateStageFlow — REAL ledger (real-data gate, not a fixture)', (
     for (const phantom of ['UC-S003-2', 'UC-S003-3', 'UC-S003-4']) {
       expect(eng.wip_items).not.toContain(phantom);
     }
-    // Every reported WIP item must still exist in items.csv and be non-terminal.
     const live = new Set(
       realItems
         .split('\n')
@@ -332,10 +320,7 @@ describe('aggregateStageFlow — REAL ledger (real-data gate, not a fixture)', (
   it('returns non-empty plausible build throughput for observatory (>= UCs delivered)', () => {
     const out = aggregateStageFlow(realLedger, 'observatory');
     const eng = byStage(out, 'engineer');
-    // Hand-count of engineer task_start rows for observatory grows as slices are
-    // delivered; assert >= 8 (current count at time of writing). The tolerant
-    // parser must recover all rows despite malformed/unbalanced-quote rows.
-    expect(eng.throughput).toBeGreaterThanOrEqual(8); // >= CHK-3 UCs delivered (plausibility)
+    expect(eng.throughput).toBeGreaterThanOrEqual(8);
     expect(eng.source_rows.length).toBeGreaterThan(0);
   });
 

@@ -331,12 +331,12 @@ board-stream-skeleton:
 	  --note "§30 DynamoDB Stream skeleton FAILED vs prod (T-LB-10)" ; exit 1 )
 
 # --- Observatory validation entrypoints (CHK-2) --------------------------------
-# test-observatory: server Vitest + SPA Vitest unit/component tests (no browser).
+# test-observatory: single Vitest suite covering domain (server/__tests__) +
+# SPA (src/__tests__) — one command, one project, single-server topology.
 # browser-observatory: Playwright map-render + keyboard-nav specs (local).
 # Both targets bypass the APP/validate machinery (observatory is local-only; no
 # cloud deploy gate, no test:validation suite).
 test-observatory:
-	npm --prefix work/observatory run test:ci && \
 	npm --prefix work/observatory/src/app run test:ci
 
 browser-observatory:

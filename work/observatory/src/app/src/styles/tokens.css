@@ -47,6 +47,48 @@
 
   /* target size floor (WCAG 2.2 §2.5.8) */
   --target-min: 24px;
+
+  /* --- CHK-3 (s003) additive: DORA panel / stage cards / time-thief --- */
+  /* metric figure type scale (re-uses the count weight for the big number) */
+  --fs-metric: 1.75rem;        /* metric value (just below queue --fs-count) */
+  --fw-metric: 700;
+  --fs-metric-window: 0.8rem;  /* metric window line ("/ 20 slice(s)") */
+  /* dashboard section rhythm + card grid */
+  --sp-section: 32px;          /* gap between dashboard sections */
+  --card-min: 200px;           /* StageCard min track width (auto-fill grid) */
+  --gap-card: 16px;            /* StageCardGrid gap */
+  /* source-link affordance (traceability §8) — uses the focus blue channel */
+  --c-source-link: #5aa9ff;    /* = --c-focus; ≥ 4.5:1 text on --c-surface */
+  --fs-source: 0.72rem;        /* source-link / "view source" caption */
+
+  /* --- CHK-2 re-scope (s004) additive: value-stream map --- */
+  /* in-flight (WIP>0) accent — distinct hue; one of four redundant cues, never alone */
+  --c-wip: #7d5fff;            /* ≥ 4.5:1 text on --c-surface */
+  --c-wip-bd: #7d5fff;         /* in-flight node/pill border; ≥ 3:1 vs --c-surface */
+  /* value-stream layout / geometry contract */
+  --node-min: 200px;           /* StageNode min width (= --card-min) — GEO-2 */
+  --gap-node: 16px;            /* within-lane node gap (= --sp-4) */
+  --gap-lane: 24px;            /* inter-lane band gap (= --sp-6) */
+  --fs-stage-fig: 1.5rem;      /* per-stage figure value (below --fs-metric) */
+
+  /* --- CHK-4 (s005) additive: work-item tree + drill detail pane --- */
+  /* tree geometry (GEO-1: indented hierarchy, never a flat list) */
+  --tree-indent: 16px;         /* per-level indent step (= --sp-4); GEO-1 contract */
+  --tree-node-min-h: 28px;     /* node row min height (toggle hit area ≥ --target-min) */
+  --rail-width: 320px;         /* WorkItemTree left-rail width (desktop) */
+  --pane-min-width: 420px;     /* DetailPane min width; GEO-3 (no tree overlap) */
+  /* tree node state band — REDUNDANT (icon + text + colour); ≥ 3:1 edge vs surface */
+  --c-tree-state-done: #3aa66f;     /* = --c-state-ok lightness; text "done" authoritative */
+  --c-tree-state-active: #7d5fff;   /* = --c-wip channel; text "in-progress" */
+  --c-tree-state-backlog: #a6adbb;  /* = --c-text-dim; text "backlog" */
+  --c-tree-state-blocked: #d96c8f;  /* = --c-constraint channel; text "blocked" */
+  --c-tree-selected: #5aa9ff;       /* selected node accent (= --c-focus); GEO-4 */
+  /* /process vs /work space distinction — NON-colour-redundant (text + icon + band) */
+  --c-space-work: #2f9e8f;     /* teal band; ≥ 3:1 edge vs --c-surface; text "work" */
+  --c-space-process: #b07de0;  /* violet band; ≥ 3:1 edge vs --c-surface; text "process" */
+  --fs-tree: 0.85rem;          /* tree node label */
+  --fs-tree-badge: 0.72rem;    /* state / value-cost / space-tag badge text */
+  --fs-history: 0.8rem;        /* item-history row text */
 }
 
 html,

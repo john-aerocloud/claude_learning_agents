@@ -3,8 +3,8 @@
 // HEXAGONAL ROLE: this is the ADAPTER that fronts a single external concept —
 // the filesystem watch (chokidar) — and translates raw chokidar events into a
 // domain-shaped change event: { type: 'change', path: <repo-root-relative> }.
-// It exposes a small PORT so the SSE route adapter (routes/events.js) and any
-// future consumer never import chokidar:
+// It exposes a small PORT so the SSE route adapter and any future consumer
+// never import chokidar:
 //
 //   const w = createWatcher({ repoRoot });
 //   await w.ready();                 // resolves once the initial scan is done
@@ -18,8 +18,7 @@
 // LATENCY (F6 / AC5.3, N<1s): no debounce is applied to the emit path. chokidar
 // on macOS uses FSEvents (sub-200ms typical); on Linux, inotify. Adding a
 // debounce would only add latency against the 1s budget for no benefit at this
-// volume, so we forward each event immediately. (If a future burst-coalescing
-// need appears, debounce here — never above 1s.)
+// volume, so we forward each event immediately.
 
 import chokidar from 'chokidar';
 import { relative } from 'node:path';

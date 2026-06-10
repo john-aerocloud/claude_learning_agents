@@ -1,11 +1,12 @@
 %%{ init: { "theme": "default" } }%%
 graph TD
-    UC1["UC1 — project registry<br/>GET /api/projects, /api/active"]:::changed
-    UC2["UC2 — CSV parsers<br/>items + queues"]:::changed
-    UC3["UC3 — DORA/flow pass-through<br/>baseline.md, flow.md, .mmd"]:::changed
-    UC4["UC4 — slice-artifact pass-through<br/>GET /api/projects/:id/slices/:slug/:artifact"]:::changed
-    UC5["UC5 — SSE file-watch<br/>GET /api/events"]:::changed
-    UC6["UC6 — server scaffold<br/>Express + CORS + read-only + start:check"]:::changed
+    %% s001 — CHK-1 read layer (server)
+    UC1["UC1 — project registry<br/>GET /api/projects, /api/active"]
+    UC2["UC2 — CSV parsers<br/>items + queues"]
+    UC3["UC3 — DORA/flow pass-through<br/>baseline.md, flow.md, .mmd"]
+    UC4["UC4 — slice-artifact pass-through<br/>GET /api/projects/:id/slices/:slug/:artifact"]
+    UC5["UC5 — SSE file-watch<br/>GET /api/events"]
+    UC6["UC6 — server scaffold<br/>Express + CORS + read-only + start:check"]
 
     UC1 --> UC6
     UC2 --> UC6
@@ -13,14 +14,95 @@ graph TD
     UC4 --> UC6
     UC5 --> UC6
 
-    %% Scaffold scheduling edges (§39 — caught pre-build, not a collision)
-    %% UC1 establishes package.json, src/server/ bootstrap, vitest.config, base Express app.
-    %% UC2-5 all require that scaffold to exist before they can lay their route handlers.
-    %% These are scheduling serialisation edges, not logic dependencies.
-    UC1 -->|scaffold| UC2:::scaffoldEdge
-    UC1 -->|scaffold| UC3:::scaffoldEdge
-    UC1 -->|scaffold| UC4:::scaffoldEdge
-    UC1 -->|scaffold| UC5:::scaffoldEdge
+    %% Scaffold scheduling edges (s001 server scaffold)
+    UC1 -->|scaffold| UC2
+    UC1 -->|scaffold| UC3
+    UC1 -->|scaffold| UC4
+    UC1 -->|scaffold| UC5
 
-    classDef changed fill:#ffe599,stroke:#b7950b,color:#000
-    classDef scaffoldEdge fill:#d9ead3,stroke:#38761d,color:#000
+    %% s002 — CHK-2 pipeline map (SPA)
+    S2UC1["S2-UC1 — Vite SPA scaffold<br/>src/app/ + API client"]
+    S2UC2["S2-UC2 — Queue data + state layer<br/>QueueState[] with starving/over-WIP"]
+    S2UC3["S2-UC3 — Pipeline map render<br/>4-box flow diagram, live counts"]
+    S2UC4["S2-UC4 — Buffer-state flags<br/>starving / over-WIP indicators"]
+    S2UC5["S2-UC5 — ToC constraint highlight<br/>parse baseline.md, mark queue box"]
+    S2UC6["S2-UC6 — SSE live refresh<br/>EventSource → re-fetch → re-render"]
+
+    %% s002 internal dependencies
+    S2UC1 -->|scaffold| S2UC2
+    S2UC1 -->|scaffold| S2UC3
+    S2UC1 -->|scaffold| S2UC4
+    S2UC1 -->|scaffold| S2UC5
+    S2UC1 -->|scaffold| S2UC6
+    S2UC2 --> S2UC3
+    S2UC2 --> S2UC4
+    S2UC3 --> S2UC4
+    S2UC3 --> S2UC5
+    S2UC2 --> S2UC6
+    S2UC3 --> S2UC6
+    S2UC4 --> S2UC6
+    S2UC5 --> S2UC6
+
+    %% Cross-slice: s002 SPA consumes s001 server API
+    UC6 -->|"CHK-1 API (localhost:3001)"| S2UC1
+
+    %% s003 — DROPPED (absorbed into s004 CHK-2 re-scope; 2026-06-09)
+    %% S3UC1..S3UC6 nodes removed from active graph
+
+    %% s004 — CHK-2 (re-scoped) value-stream map (server + SPA)
+    S4UC1["S4-UC1 — Ledger-aggregation endpoint<br/>GET /api/projects/:id/stage-flow<br/>FOUNDATIONAL"]
+    S4UC2["S4-UC2 — Value-stream map render<br/>all stages, gates, Rework loop"]
+    S4UC3["S4-UC3 — Per-stage metric display<br/>throughput / dwell / WIP / rework labels"]
+    S4UC4["S4-UC4 — In-flight WIP indication<br/>wip>0 visual distinction + item chips"]
+    S4UC5["S4-UC5 — Metric traceability<br/>hover → source ledger rows"]
+    S4UC6["S4-UC6 — Live refresh via SSE<br/>ledger.csv append → re-fetch → re-render"]
+
+    %% s004 internal dependencies
+    S4UC1 --> S4UC2
+    S4UC2 --> S4UC3
+    S4UC3 --> S4UC4
+    S4UC3 --> S4UC5
+    S4UC3 --> S4UC6
+
+    %% Cross-slice: s004 server extends s001 read-layer; SPA extends s002 scaffold + SSE
+    UC2 -->|"CSV parser infra (read-layer)"| S4UC1
+    UC3 -->|"route pattern (read-layer)"| S4UC1
+    UC5 -->|"SSE channel (server)"| S4UC6
+    S2UC1 -->|"SPA scaffold (src/app/)"| S4UC2
+    S2UC6 -->|"SSE hook seam"| S4UC6
+
+    %% s005 — CHK-4 work-item tree & zoom/drill
+    S5UC1["S5-UC1 — Ledger-by-item-id endpoint<br/>GET /api/projects/:id/ledger?item_id=<id><br/>FOUNDATIONAL — tolerant parser reuse"]
+    S5UC2["S5-UC2 — Work-item tree render<br/>REQ→CHK→SLC→UC, state/value/cost, space-tag"]
+    S5UC3["S5-UC3 — Detail pane shell + artifact render<br/>slice.md→HTML, .mmd→SVG, graceful absent"]
+    S5UC4["S5-UC4 — Markdown + Mermaid rendering<br/>MarkdownRenderer + MmdRenderer components"]
+    S5UC5["S5-UC5 — Item history panel<br/>ledger rows by item_id, newest-first"]
+    S5UC6["S5-UC6 — Zoom breadcrumb + SSE refresh<br/>back-to-map + tree/history re-fetch on change"]
+
+    %% s005 internal dependencies
+    S5UC2 --> S5UC3
+    S5UC3 --> S5UC4
+    S5UC3 --> S5UC5
+    S5UC1 --> S5UC5
+    S5UC2 --> S5UC6
+    S5UC3 --> S5UC6
+    S5UC5 --> S5UC6
+
+    %% Cross-slice: s005 reuses s001 read-layer + s002/s004 SPA seams
+    UC2 -->|"CSV parser infra (tolerant ledger)"| S5UC1
+    UC3 -->|"route pattern (read-layer)"| S5UC1
+    UC4 -->|"slice-artifact endpoint reuse"| S5UC3
+    UC5 -->|"SSE channel (server)"| S5UC6
+    S2UC1 -->|"SPA scaffold"| S5UC2
+    S2UC6 -->|"SSE hook seam"| S5UC6
+    S4UC1 -->|"ledgerAggregator shared module"| S5UC1
+
+    classDef stable fill:#eee,stroke:#999,color:#000
+    classDef delivered fill:#d5f5e3,stroke:#1e8449,color:#000
+    classDef superseded fill:#f9ebea,stroke:#c0392b,color:#666
+    classDef changed fill:#fff3cd,stroke:#b7950b,color:#000
+
+    class UC1,UC2,UC3,UC4,UC5,UC6 delivered
+    class S2UC1,S2UC2,S2UC3,S2UC4,S2UC5,S2UC6 delivered
+    class S4UC1,S4UC2,S4UC3,S4UC4,S4UC5,S4UC6 delivered
+    class S5UC1,S5UC2,S5UC3,S5UC4,S5UC5,S5UC6 changed

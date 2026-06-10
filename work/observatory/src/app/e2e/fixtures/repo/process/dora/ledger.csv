@@ -1,14 +1,14 @@
 timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note,item_id,queue
-2026-06-09T00:20:00Z,demo,1,s-demo,flow-manager,enqueue,,success,FIX-1,intake enqueue,UC-D1,intake
-2026-06-09T00:20:01Z,demo,1,s-demo,flow-manager,enqueue,,success,FIX-2,intake enqueue,UC-D2,intake
-2026-06-09T00:21:00Z,demo,1,s-demo,product,task_start,,na,FIX-3,decompose start,UC-D1,decompose
-2026-06-09T00:23:00Z,demo,1,s-demo,product,task_end,120,success,FIX-4,decompose end,UC-D1,decompose
-2026-06-09T00:24:00Z,demo,1,s-demo,flow-manager,enqueue,,success,FIX-5,ready enqueue,UC-D1,ready
-2026-06-09T00:30:00Z,demo,1,s-demo,engineer,task_start,,na,FIX-6,build start a,UC-D1,engineer
-2026-06-09T00:42:00Z,demo,1,s-demo,engineer,task_end,720,success,FIX-7,build end a,UC-D1,engineer
-2026-06-09T00:43:00Z,demo,1,s-demo,engineer,task_start,,na,FIX-8,build start b,UC-D2,engineer
-2026-06-09T00:55:00Z,demo,1,s-demo,engineer,task_end,720,success,FIX-9,build end b,UC-D2,engineer
-2026-06-09T01:00:00Z,demo,1,s-demo,engineer,task_start,,na,FIX-10,build start c (in-flight no end),UC-D3,engineer
-2026-06-09T01:10:00Z,demo,1,s-demo,tester,task_start,,na,FIX-11,validate start,UC-D1,validate
-2026-06-09T01:20:00Z,demo,1,s-demo,tester,task_end,600,success,FIX-12,validate end,UC-D1,validate
-2026-06-09T01:25:00Z,demo,1,s-demo,cicd,deploy,,success,FIX-13,deploy success,UC-D1,deploy
+2026-06-09T00:20:00Z,demo,1,s-demo,flow-manager,enqueue,,success,FIX-1,intake enqueue,UC-D1-1,intake
+2026-06-09T00:20:01Z,demo,1,s-demo,flow-manager,enqueue,,success,FIX-2,intake enqueue,UC-D1-2,intake
+2026-06-09T00:21:00Z,demo,1,s-demo,product,task_start,,na,FIX-3,decompose start,UC-D1-1,decompose
+2026-06-09T00:23:00Z,demo,1,s-demo,product,task_end,120,success,FIX-4,decompose end,UC-D1-1,decompose
+2026-06-09T00:24:00Z,demo,1,s-demo,flow-manager,enqueue,,success,FIX-5,ready enqueue,UC-D1-1,ready
+2026-06-09T00:30:00Z,demo,1,s-demo,engineer,task_start,,na,FIX-6,build start a,UC-D1-1,engineer
+2026-06-09T00:42:00Z,demo,1,s-demo,engineer,task_end,720,success,FIX-7,build end a,UC-D1-1,engineer
+2026-06-09T00:43:00Z,demo,1,s-demo,engineer,task_start,,na,FIX-8,build start b,UC-D1-2,engineer
+2026-06-09T00:55:00Z,demo,1,s-demo,engineer,task_end,720,success,FIX-9,build end b,UC-D1-2,engineer
+2026-06-09T01:00:00Z,demo,1,s-demo,engineer,task_start,,na,FIX-10,build start c (in-flight no end),CHK-4,engineer
+2026-06-09T01:10:00Z,demo,1,s-demo,tester,task_start,,na,FIX-11,validate start,UC-D1-1,validate
+2026-06-09T01:20:00Z,demo,1,s-demo,tester,task_end,600,success,FIX-12,validate end,UC-D1-1,validate
+2026-06-09T01:25:00Z,demo,1,s-demo,cicd,deploy,,success,FIX-13,deploy success,UC-D1-1,deploy

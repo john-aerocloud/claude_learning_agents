@@ -1,26 +1,19 @@
-// @covers UC5 — SSE HTTP adapter (routes/events.js): GET /api/events.
+// @covers UC5 — SSE HTTP adapter: GET /api/events (via apiMiddleware).
 // Acceptance: AC5.1 (event-stream header), AC5.3 (<1s change frame over HTTP),
 // AC5.4 (fan-out to 2 clients), AC5.5 (disconnect → no crash on next change),
 // AC5.6 (no wildcard ACAO). F6, T-READ-5, T-READ-15, T-READ-16.
 //
-// We mount the events router into the real createApp via extraRouters (the UC6
-// mount seam) so this test also proves the wiring contract UC6 will use. The SSE
-// stream is long-lived, so we drive it with a raw http GET and read the response
-// stream incrementally — supertest buffers full responses and would hang on an
-// open stream. Every test closes its client sockets, stops the watcher, and
-// closes the server so the suite exits with no open handles.
+// The SSE stream is long-lived, so we drive it with a raw http GET and read the
+// response stream incrementally. Every test closes its client sockets, stops the
+// watcher, and closes the server so the suite exits with no open handles.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import http from 'node:http';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createApp } from '../app.js';
-import { createWatcher } from '../watcher.js';
-import { createEventsRouter } from '../routes/events.js';
+import { createTestServer } from './helpers.js';
 
-// Open a streaming SSE client against host:port. Returns the live request, the
-// response, and a `waitForData(predicate, ms)` that resolves on the first
-// chunk-accumulated SSE frame matching the predicate (parsed `data:` JSON).
+// Open a streaming SSE client against host:port.
 function openSseClient({ port, path = '/api/events', headers = {} }) {
   return new Promise((resolve, reject) => {
     const req = http.get({ host: '127.0.0.1', port, path, headers }, (res) => {
@@ -29,13 +22,12 @@ function openSseClient({ port, path = '/api/events', headers = {} }) {
       res.setEncoding('utf8');
       res.on('data', (chunk) => {
         buf += chunk;
-        // SSE frames are separated by a blank line.
         let idx;
         while ((idx = buf.indexOf('\n\n')) !== -1) {
           const frame = buf.slice(0, idx);
           buf = buf.slice(idx + 2);
           const line = frame.split('\n').find((l) => l.startsWith('data:'));
-          if (!line) continue; // heartbeat comment frame (":\n\n"); ignore
+          if (!line) continue; // heartbeat comment frame; ignore
           let payload;
           try { payload = JSON.parse(line.slice(5).trim()); } catch { continue; }
           for (const w of [...waiters]) {
@@ -56,40 +48,38 @@ function openSseClient({ port, path = '/api/events', headers = {} }) {
             waiters.push({ predicate, timer, resolve: res2 });
           });
         },
-        close() {
-          req.destroy();
-        },
+        close() { req.destroy(); },
       });
     });
     req.on('error', reject);
   });
 }
 
-function listen(app) {
+function listenOn(server) {
   return new Promise((resolve) => {
-    const server = app.listen(0, '127.0.0.1', () => resolve(server));
+    server.listen(0, '127.0.0.1', () => resolve(server));
   });
 }
 
 describe('GET /api/events — SSE live-refresh', () => {
   let root;
-  let watcher;
   let server;
+  let watcher;
   const clients = [];
 
   beforeEach(async () => {
     root = mkdtempSync(join(tmpdir(), 'obs-sse-'));
     mkdirSync(join(root, 'work'), { recursive: true });
-    watcher = createWatcher({ repoRoot: root });
+    ({ server, watcher } = createTestServer({ repoRoot: root, skipWatcher: false }));
     await watcher.ready();
-    const app = createApp({ repoRoot: root, extraRouters: [createEventsRouter({ watcher })] });
-    server = await listen(app);
+    await listenOn(server);
   });
 
   afterEach(async () => {
     for (const c of clients.splice(0)) c.close();
-    if (watcher) await watcher.stop();
-    if (server) await new Promise((r) => server.close(r));
+    await new Promise((r) => server.close(r));
+    await watcher.stop();
+    rmSync(root, { recursive: true, force: true });
   });
 
   function port() {
@@ -129,11 +119,10 @@ describe('GET /api/events — SSE live-refresh', () => {
     expect(rb.payload.type).toBe('change');
   });
 
-  it('AC5.5/T-READ-16: after one client disconnects, a change still reaches the survivor with no crash', async () => {
+  it('AC5.5/T-READ-16: after one client disconnects, a change still reaches the survivor', async () => {
     const a = await openSseClient({ port: port() });
     const b = await openSseClient({ port: port() });
     clients.push(b);
-    // Disconnect client a; give the server a beat to process the close event.
     a.close();
     await new Promise((r) => setTimeout(r, 100));
     const pb = b.waitForData((p) => p.path === join('work', 'survive.txt'), 1000);

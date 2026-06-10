@@ -2,9 +2,6 @@
 // Acceptance: AC2.1, AC2.2, AC2.3, AC2.4-AC2.7 (header-only), AC2.8/AC2.9/AC2.11
 // (missing → null), AC2.10 (extra column ignored). F3, F4; T-READ-3, T-READ-4,
 // T-READ-6, T-READ-7, T-READ-8, T-READ-9.
-//
-// The parser is UC2-LOCAL (own module) to stay disjoint from UC3/UC4 (§39).
-// §4 says raw strings — NO numeric casts. csv-parse default string output is correct.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -48,8 +45,6 @@ describe('parseCsv — pure string parser (domain)', () => {
   });
 
   it('AC2.10 / T-READ-9: extra unknown column kept as a key, §4 columns still correct', () => {
-    // csv-parse with columns:true keys every header it sees; the route shape is
-    // defined by the file's own header. Extra columns are not invented, not lost.
     const csv = [ITEMS_HEADER + ',extra_col', 'X,chunk,,,,backlog,,,,,,,EXTRA'].join('\n');
     const recs = parseCsv(csv);
     expect(recs).toHaveLength(1);

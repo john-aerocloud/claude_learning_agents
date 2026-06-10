@@ -3,19 +3,18 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
 // Playwright config for Observatory browser specs (CHK-2: chromium only).
-// Specs live under e2e/. baseURL is the single consolidated server on :3001.
+// Specs live under e2e/. baseURL is the single Vite server on :5173.
 //
-// TOPOLOGY: ONE server (npm run dev from the observatory package root) serves
-// both the API (/api/*) and the Vite-transformed SPA on port :3001. The
-// SPA client uses relative URLs (API_BASE = '') — same-origin, no CORS.
+// TOPOLOGY: ONE command (`npm run dev` in work/observatory/src/app) launches
+// Vite on :5173 which serves BOTH the SPA (with HMR) AND all /api/* routes via
+// the observatoryApiPlugin. Same-origin requests — no CORS needed.
+//
 // The read layer is pointed at a committed deterministic fixture repo
 // (e2e/fixtures/repo) via OBSERVATORY_REPO_ROOT, so counts are stable
 // (intake 3 / ready 1 starving / deploy 0 / rework 2) and the GEO/A11Y
 // assertions never flap on the live repo.
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_REPO = resolve(HERE, 'e2e', 'fixtures', 'repo');
-// src/app -> work/observatory (the observatory package root) is two levels up.
-const SERVER_PKG = resolve(HERE, '..', '..');
 
 export default defineConfig({
   testDir: 'e2e',
@@ -24,7 +23,7 @@ export default defineConfig({
   retries: 0,
   reporter: 'list',
   use: {
-    baseURL: 'http://localhost:3001',
+    baseURL: 'http://localhost:5173',
     trace: 'on-first-retry',
   },
   projects: [
@@ -35,14 +34,14 @@ export default defineConfig({
   ],
   webServer: [
     {
-      // Single consolidated server: Express API + Vite SPA on :3001.
-      // Uses the fixture repo for deterministic queue counts.
+      // Single Vite server: SPA + API on :5173.
+      // Uses the fixture repo for deterministic counts.
       command: 'npm run dev',
-      cwd: SERVER_PKG,
-      port: 3001,
+      cwd: HERE,
+      port: 5173,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
-      env: { OBSERVATORY_REPO_ROOT: FIXTURE_REPO, PORT: '3001' },
+      env: { OBSERVATORY_REPO_ROOT: FIXTURE_REPO },
     },
   ],
 });

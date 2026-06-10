@@ -337,10 +337,10 @@ describe('aggregateStageFlow — other stage mappings', () => {
   });
 });
 
-describe('aggregateStageFlow — WIP terminal secondary-check + history (DEFECT-002 → DEFECT-009)', () => {
-  // DEFECT-009 reframes DEFECT-002: recency is the PRIMARY gate, the items.csv
-  // terminal check is a SECONDARY confirming signal. Opens here are RECENT (a
-  // pinned `now`); membership-absence no longer excludes, but terminal still does.
+describe('aggregateStageFlow — WIP recency-only + history (DEFECT-002 → DEFECT-009 → DEFECT-010)', () => {
+  // DEFECT-010 ruling (recency-only): the items.csv terminal SECONDARY check is
+  // DROPPED entirely. A recent open with no close IS WIP regardless of the item's
+  // registry state. Recency alone excludes the DEFECT-002 phantoms (hours old).
   const NOW = Date.parse('2026-06-10T12:00:00Z');
   const minsAgo = (m) => new Date(NOW - m * 60_000).toISOString();
   const ITEMS_HEADER =
@@ -363,11 +363,11 @@ describe('aggregateStageFlow — WIP terminal secondary-check + history (DEFECT-
     expect(eng.wip).toBe(2);
   });
 
-  it('recent open for a TERMINAL item (done/dropped/cancelled) is NOT WIP (secondary check)', () => {
+  it('DEFECT-010: recent open for a TERMINAL item (done/dropped/cancelled) IS WIP (terminal check dropped)', () => {
     const ledger = csv([
-      row({ ts: minsAgo(5), agent: 'engineer', event: 'stage_enter', item: 'UC-DONE' }),
-      row({ ts: minsAgo(5), agent: 'engineer', event: 'stage_enter', item: 'UC-DROPPED' }),
-      row({ ts: minsAgo(5), agent: 'engineer', event: 'stage_enter', item: 'UC-CANCELLED' }),
+      row({ ts: minsAgo(5), agent: 'engineer', event: 'stage_enter', item: 'UC-DONE', note: 'd' }),
+      row({ ts: minsAgo(5), agent: 'engineer', event: 'stage_enter', item: 'UC-DROPPED', note: 'x' }),
+      row({ ts: minsAgo(5), agent: 'engineer', event: 'stage_enter', item: 'UC-CANCELLED', note: 'c' }),
       row({ ts: minsAgo(5), agent: 'engineer', event: 'stage_enter', item: 'UC-LIVE', note: 'live' }),
     ]);
     const items = itemsCsv([
@@ -377,7 +377,13 @@ describe('aggregateStageFlow — WIP terminal secondary-check + history (DEFECT-
       { id: 'UC-LIVE', state: 'ready' },
     ]);
     const eng = byStage(aggregateStageFlow(ledger, 'p', items, { now: NOW }), 'engineer');
-    expect(eng.wip_items).toEqual([{ item_id: 'UC-LIVE', note: 'live' }]);
+    expect(eng.wip).toBe(4);
+    expect(eng.wip_items).toEqual([
+      { item_id: 'UC-DONE', note: 'd' },
+      { item_id: 'UC-DROPPED', note: 'x' },
+      { item_id: 'UC-CANCELLED', note: 'c' },
+      { item_id: 'UC-LIVE', note: 'live' },
+    ]);
   });
 
   it('recent open for a present, non-terminal item IS WIP', () => {
@@ -740,15 +746,9 @@ describe('aggregateStageFlow — WIP recency rule (DEFECT-009)', () => {
     expect(eng.wip_items.map((w) => w.item_id)).not.toContain('UC-S003-2');
   });
 
-  it('D9-AC-c: a recent open whose item went terminal (state=done) is NOT WIP', () => {
-    const ledger = csv([
-      row({ ts: minsAgo(5), agent: 'engineer', event: 'task_start', item: 'UC-X-1' }),
-    ]);
-    const items = itemsCsv([{ id: 'UC-X-1', state: 'done' }]);
-    const eng = byStage(aggregateStageFlow(ledger, 'p', items, { now: NOW }), 'engineer');
-    expect(eng.wip).toBe(0);
-    expect(eng.wip_items.map((w) => w.item_id)).not.toContain('UC-X-1');
-  });
+  // D9-AC-c ("a recent open whose item went terminal is NOT WIP") is OVERTURNED
+  // by the DEFECT-010 ruling (recency-only) and is intentionally removed here.
+  // Its replacement is D10-AC-a / D10-AC-d below (terminal item → recent open IS WIP).
 
   it('D9-AC-d: a recent engineer task_start IS engineer WIP=1 (regression guard)', () => {
     const ledger = csv([
@@ -787,5 +787,107 @@ describe('aggregateStageFlow — WIP recency rule (DEFECT-009)', () => {
     const stale = csv([row({ ts: minsAgo(31), agent: 'engineer', event: 'task_start', item: 'CHK-EDGE' })]);
     expect(byStage(aggregateStageFlow(recent, 'p', null, { now: NOW }), 'engineer').wip).toBe(1);
     expect(byStage(aggregateStageFlow(stale, 'p', null, { now: NOW }), 'engineer').wip).toBe(0);
+  });
+});
+
+// DEFECT-010 — RECENCY-ONLY WIP: the items.csv terminal/registry exclusion is
+// DROPPED from the WIP path entirely. A recent open in-event (no matching close)
+// IS in-flight regardless of the item's registry state. Recency alone excludes
+// the DEFECT-002 phantoms (they are hours/days old).
+// Ruling: work/observatory/slices/s012-wip-recency-only/ruling.md (D10-AC-a..h).
+// @covers AGG (server/lib/ledgerAggregator.js)
+describe('aggregateStageFlow — WIP recency-only rule (DEFECT-010)', () => {
+  const NOW = Date.parse('2026-06-10T12:00:00Z');
+  const minsAgo = (m) => new Date(NOW - m * 60_000).toISOString();
+  const ITEMS_HEADER =
+    'id,type,parent,children,job,state,value,cost,vc_ratio,created_ts,done_ts,dora_ref';
+  function itemsCsv(rows) {
+    return [ITEMS_HEADER, ...rows.map((r) => `${r.id},use-case,CHK,,job,${r.state},,,,,,`)].join('\n') + '\n';
+  }
+
+  it('D10-AC-a: recent open on a DONE item IS WIP=1 (the DEFECT-010 regression case)', () => {
+    const ledger = csv([
+      row({ ts: minsAgo(5), agent: 'engineer', event: 'stage_enter', item: 'UC-S004-5', note: 'rework on delivered UC' }),
+    ]);
+    const items = itemsCsv([{ id: 'UC-S004-5', state: 'done' }]);
+    const eng = byStage(aggregateStageFlow(ledger, 'p', items, { now: NOW }), 'engineer');
+    expect(eng.wip).toBe(1);
+    expect(eng.wip_items).toEqual([{ item_id: 'UC-S004-5', note: 'rework on delivered UC' }]);
+  });
+
+  it('D10-AC-b: a STALE open (>30 min) on ANY item is NOT WIP (DEFECT-002 regression guard)', () => {
+    const ledger = csv([
+      row({ ts: minsAgo(180), agent: 'engineer', event: 'stage_enter', item: 'UC-S003-2' }),
+      row({ ts: minsAgo(31), agent: 'product', event: 'task_start', item: 'CHK-2' }),
+    ]);
+    const items = itemsCsv([{ id: 'CHK-2', state: 'done' }]); // UC-S003-2 absent
+    const out = aggregateStageFlow(ledger, 'p', items, { now: NOW });
+    expect(byStage(out, 'engineer').wip).toBe(0);
+    expect(byStage(out, 'decompose').wip).toBe(0);
+    expect(byStage(out, 'engineer').wip_items.map((w) => w.item_id)).not.toContain('UC-S003-2');
+  });
+
+  it('D10-AC-c: recent product open on a chunk IS Decompose WIP=1 (DEFECT-009 regression guard)', () => {
+    const ledger = csv([
+      row({ ts: minsAgo(5), agent: 'product', event: 'task_start', item: 'CHK-2', note: 'slice-next' }),
+    ]);
+    const items = itemsCsv([{ id: 'CHK-2', state: 'done' }]); // terminal — must still count
+    const dec = byStage(aggregateStageFlow(ledger, 'p', items, { now: NOW }), 'decompose');
+    expect(dec.wip).toBe(1);
+    expect(dec.wip_items).toEqual([{ item_id: 'CHK-2', note: 'slice-next' }]);
+  });
+
+  it('D10-AC-d: recent engineer open on a DONE UC IS build WIP=1', () => {
+    const ledger = csv([
+      row({ ts: minsAgo(5), agent: 'engineer', event: 'stage_enter', item: 'UC-S004-5', note: 'build' }),
+    ]);
+    const items = itemsCsv([{ id: 'UC-S004-5', state: 'done' }]);
+    const eng = byStage(aggregateStageFlow(ledger, 'p', items, { now: NOW }), 'engineer');
+    expect(eng.wip).toBe(1);
+    expect(eng.wip_items.map((w) => w.item_id)).toContain('UC-S004-5');
+  });
+
+  it('D10-AC-e: recent cicd open on a DONE chunk IS capabilities WIP=1', () => {
+    const ledger = csv([
+      row({ ts: minsAgo(5), agent: 'cicd', event: 'task_start', item: 'CHK-1', note: 'allowlist' }),
+    ]);
+    const items = itemsCsv([{ id: 'CHK-1', state: 'done' }]);
+    const cap = byStage(aggregateStageFlow(ledger, 'p', items, { now: NOW }), 'capabilities');
+    expect(cap.wip).toBe(1);
+    expect(cap.wip_items).toEqual([{ item_id: 'CHK-1', note: 'allowlist' }]);
+  });
+
+  it('D10-AC-f: a recent open with a matching close is NOT WIP (regardless of item state)', () => {
+    const ledger = csv([
+      row({ ts: minsAgo(9), agent: 'engineer', event: 'task_start', item: 'UC-S004-5' }),
+      row({ ts: minsAgo(2), agent: 'engineer', event: 'task_end', item: 'UC-S004-5' }),
+    ]);
+    const items = itemsCsv([{ id: 'UC-S004-5', state: 'done' }]);
+    const eng = byStage(aggregateStageFlow(ledger, 'p', items, { now: NOW }), 'engineer');
+    expect(eng.wip).toBe(0);
+    expect(eng.wip_items.map((w) => w.item_id)).not.toContain('UC-S004-5');
+  });
+
+  it('D10-AC-g: no items.csv / itemRegistry arg → recent open counts, no error (fail-soft)', () => {
+    const ledger = csv([
+      row({ ts: minsAgo(5), agent: 'engineer', event: 'stage_enter', item: 'UC-S004-5', note: 'no registry' }),
+    ]);
+    expect(() => aggregateStageFlow(ledger, 'p', null, { now: NOW })).not.toThrow();
+    const eng = byStage(aggregateStageFlow(ledger, 'p', null, { now: NOW }), 'engineer');
+    expect(eng.wip).toBe(1);
+    expect(eng.wip_items).toEqual([{ item_id: 'UC-S004-5', note: 'no registry' }]);
+  });
+
+  it('D10-AC-h: wip_items entries are {item_id, note} (note from open row, "" when blank)', () => {
+    const ledger = csv([
+      row({ ts: minsAgo(2), agent: 'engineer', event: 'task_start', item: 'UC-S004-5', note: '' }),
+    ]);
+    const items = itemsCsv([{ id: 'UC-S004-5', state: 'done' }]);
+    const eng = byStage(aggregateStageFlow(ledger, 'p', items, { now: NOW }), 'engineer');
+    expect(eng.wip_items).toHaveLength(1);
+    const entry = eng.wip_items[0];
+    expect(entry).toEqual({ item_id: 'UC-S004-5', note: '' });
+    expect(typeof entry.item_id).toBe('string');
+    expect(typeof entry.note).toBe('string');
   });
 });

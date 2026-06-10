@@ -30,14 +30,16 @@
 //     matching out-event (task_end OR stage_exit). Pulled-but-not-done work is
 //     COUNTABLE here — this is the key fix. wip_items names the open ids.
 
-// DEFECT-002 — WIP reconciliation against the authoritative item registry.
-// WIP from raw enter/exit pairing alone counts an item that was HELD/DROPPED
-// (a stage_enter with no exit) as in-flight FOREVER. An open enter is genuine
-// in-flight ONLY if the item (1) still EXISTS in items.csv AND (2) is in a
-// non-terminal state. Absent-from-registry or terminal → STALE, not in-flight.
-// Throughput/dwell/rework are HISTORICAL counts and are NOT reconciled — only
-// WIP is "now". Fail-soft: no/empty items registry → no reconciliation, keep
-// the raw open-enter behaviour (never throw).
+// DEFECT-002/009/010 — WIP staleness history.
+// WIP from raw enter/exit pairing alone counts a HELD/DROPPED open enter as
+// in-flight FOREVER (DEFECT-002). DEFECT-009 made RECENCY the primary gate but
+// kept an items.csv terminal SECONDARY exclusion. DEFECT-010 DROPS that secondary
+// check: it hid recent ACTIVE work logged against delivered (terminal) chunks/UCs.
+// WIP is now RECENCY-ONLY (a recent open in-event with no close IS in-flight,
+// registry state irrelevant); recency alone excludes the hours-old DEFECT-002
+// phantoms. The items.csv registry is still used for QUEUE-DEPTH stale-filtering
+// and coherence (DEFECT-004) — see computeQueueState; only the WIP path drops it.
+// Throughput/dwell/rework are HISTORICAL counts and are never reconciled.
 import { parseCsv } from '../parsers/csv.js';
 
 const TERMINAL_ITEM_STATES = new Set(['done', 'dropped', 'cancelled']);
@@ -418,10 +420,10 @@ function emptyStages(queues = null, itemRegistry = null, now = Date.now()) {
  * Aggregate the per-stage value-stream for one project from a raw ledger CSV.
  * @param {string|null|undefined} ledgerCsv raw contents of process/dora/ledger.csv
  * @param {string} project project id to filter to
- * @param {string|null} [itemsCsv] raw work/<project>/items/items.csv — when
- *   present, WIP is reconciled against it (DEFECT-002): an open enter for an
- *   item absent-from-registry or terminal is NOT in-flight. Omitted/null/empty
- *   → no reconciliation (fail-soft, raw open-enter behaviour preserved).
+ * @param {string|null} [itemsCsv] raw work/<project>/items/items.csv — used for
+ *   QUEUE-DEPTH stale-filtering + coherence (DEFECT-004) only. WIP is RECENCY-ONLY
+ *   (DEFECT-010) and does NOT consult the registry. Omitted/null/empty → no queue
+ *   reconciliation (fail-soft); WIP is unaffected by its presence either way.
  * @returns {Array<{stage:string,label:string,throughput:number,dwell_median_s:number,
  *   wip:number,rework:number,wip_items:string[],source_rows:string[]}>}
  */
@@ -489,30 +491,24 @@ export function aggregateStageFlow(ledgerCsv, project, itemsCsv = null, opts = {
       }
     }
 
-    // DEFECT-009: WIP is RECENCY-based (supersedes DEFECT-002 membership filter).
-    // An open in-event is in-flight iff:
-    //   (1) it is RECENT: (now - open.timestamp) <= WIP_STALENESS_HORIZON_MS; AND
-    //   (2) NOT (the item EXISTS in items.csv AND is in a terminal state).
-    // Priority: stale → exclude; recent + terminal-in-registry → exclude;
-    //   recent + (absent-or-non-terminal) → WIP. Absence does NOT disqualify
-    //   (chunks/slices/meta tokens have no registry row but are real work).
-    // wip_items entries are {item_id, note} (DEFECT-008): note = the open row's
-    // ledger note ("" when blank). The stale phantoms (UC-S003-2/3/4) are
-    // hours-to-days old and fail (1) — DEFECT-002 stays fixed by recency.
+    // DEFECT-010: WIP is RECENCY-ONLY. The items.csv terminal/registry exclusion
+    // (DEFECT-009's secondary rule) is DROPPED entirely — it hid recent ACTIVE
+    // work logged against delivered (terminal) chunks/UCs (defect-fix & rework).
+    //   isWip(openRow, now) = (now - parse(openRow.timestamp)) <= WIP_STALENESS_HORIZON_MS
+    // That is the whole predicate: one condition, no registry lookup, no terminal
+    // check, no done_ts comparison. A recent open in-event with no matching close
+    // IS in-flight regardless of the item's registry state. The DEFECT-002 phantom
+    // orphans (UC-S003-2/3/4) are hours-to-days old and fail recency → still
+    // excluded (DEFECT-002 stays fixed by recency alone). The items.csv registry
+    // is NOT consulted here; it remains used for queue depth/coherence (DEFECT-004).
+    // wip_items entries are {item_id, note} (DEFECT-008): note = open row's note.
     const wipItems = [];
     for (const [id, openRow] of openByItem) {
-      // (1) recency gate — primary discriminator.
       const openTs = Date.parse(openRow.timestamp);
       const recent = Number.isFinite(openTs) && Number.isFinite(now)
         ? (now - openTs) <= WIP_STALENESS_HORIZON_MS
         : true; // unparseable ts → fail-soft to "recent" (never silently drop)
       if (!recent) continue;
-      // (2) secondary terminal check — only when the item is in the registry.
-      // Absence from the registry does NOT disqualify (DEFECT-009 fix).
-      if (itemRegistry) {
-        const entry = itemRegistry.get(id);
-        if (entry !== undefined && entry.terminal) continue;
-      }
       wipItems.push({ item_id: id, note: openRow.note ?? '' });
     }
 

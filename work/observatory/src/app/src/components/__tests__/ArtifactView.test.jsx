@@ -41,6 +41,17 @@ describe('ArtifactView markdown render (UC-S005-4)', () => {
     expect(view.querySelector('code')).toBeTruthy();
   });
 
+  it('strips leading YAML frontmatter so it is not rendered as a setext heading', () => {
+    const md = ['---', 'slice: s001', 'status: ready', '---', '', '# Real Heading', '', 'body text', ''].join('\n');
+    render(<ArtifactView kind="md" text={md} source="x/slice.md" />);
+    const view = screen.getByTestId('artifact-view');
+    const h1 = view.querySelector('h1');
+    expect(h1).toBeTruthy();
+    expect(h1.textContent).toBe('Real Heading');
+    // the frontmatter keys are not rendered as heading text
+    expect(view.textContent).not.toMatch(/slice: s001/);
+  });
+
   it('renders markdown lists as <ul>/<li>', () => {
     render(<ArtifactView kind="md" text={'- one\n- two\n'} source="x/slice.md" />);
     const view = screen.getByTestId('artifact-view');

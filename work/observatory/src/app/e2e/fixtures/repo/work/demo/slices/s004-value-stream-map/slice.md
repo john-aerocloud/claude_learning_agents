@@ -7,4 +7,23 @@ browser spec. Clicking the UC-S004-1 node in the demo tree resolves the slug
 ## Marker
 UNIQUE-FIXTURE-MARKER-S004 — the browser spec asserts this string is visible in
 the rendered artifact view, proving the full path (tree click → slug derivation
-→ /slices/:slug/:artifact fetch → raw render) works end-to-end in a real browser.
+→ /slices/:slug/:artifact fetch → markdown render) works end-to-end in a real browser.
+
+## Success measures (markdown table — UC-S005-4 AC-S005-4-1)
+
+| measure | target |
+| --- | --- |
+| render | table not pipes |
+| code | fenced block |
+
+A fenced code block (UC-S005-4 AC-S005-4-2):
+
+```js
+const x = 1;
+```
+
+A fenced mermaid diagram (UC-S005-4 AC-S005-3-3 / A11Y-S005-10):
+
+```mermaid
+graph TD; A[Start] --> B[End];
+```

@@ -29,14 +29,62 @@ test('AC-S005-3-1 — clicking a node opens the detail pane as a labelled region
   await expect(pane).toHaveAttribute('aria-label', 'Item detail: UC-S004-1');
 });
 
-test('slice-backed node fetches + renders its REAL slice.md raw text', async ({ page }) => {
+test('slice-backed node fetches + renders its REAL slice.md as MARKDOWN HTML (UC-S005-4)', async ({ page }) => {
   await page.locator('[data-item-id="UC-S004-1"] > .tree-node__row').click();
   const view = page.getByTestId('artifact-view');
   await expect(view).toBeVisible();
   // the real fixture artifact text reached the screen via same-origin HTTP
   await expect(view).toContainText('UNIQUE-FIXTURE-MARKER-S004');
+  // UC-S005-4 / AC-S005-3-2: rendered as semantic HTML (a heading), not a raw <pre> blob
+  await expect(view.locator('h1').first()).toBeVisible();
+  await expect(view.locator(':scope > pre')).toHaveCount(0);
   // breadcrumb shows the item id (AC-S005-3-5)
   await expect(page.getByTestId('breadcrumb')).toContainText('UC-S004-1');
+});
+
+test('AC-S005-4-1/4-2 — markdown table renders as <table>, fenced code as <code> (UC-S005-4)', async ({ page }) => {
+  await page.locator('[data-item-id="UC-S004-1"] > .tree-node__row').click();
+  const view = page.getByTestId('artifact-view');
+  await expect(view).toBeVisible();
+  await expect(view.locator('table')).toHaveCount(1); // AC-S005-4-1
+  await expect(view.locator('code').first()).toBeVisible(); // AC-S005-4-2
+});
+
+test('AC-S005-3-3 / A11Y-S005-10 — a fenced ```mermaid block renders as an SVG (role=img + aria-label) (UC-S005-4)', async ({ page }) => {
+  await page.locator('[data-item-id="UC-S004-1"] > .tree-node__row').click();
+  const host = page.getByTestId('mmd-render');
+  await expect(host).toBeVisible();
+  const svg = host.locator('svg');
+  await expect(svg).toBeVisible({ timeout: 10000 }); // real mermaid render is async
+  await expect(svg).toHaveAttribute('role', 'img');
+  await expect(svg).toHaveAttribute('aria-label', /.+/);
+});
+
+test('AC-S005-5-1/5-2/5-3 — item history shows the item ledger rows readably, newest-first (UC-S005-5)', async ({ page }) => {
+  await page.locator('[data-item-id="UC-S004-1"] > .tree-node__row').click();
+  const history = page.getByTestId('item-history');
+  await expect(history).toBeVisible();
+  const rows = page.getByTestId('history-row');
+  await expect(rows).toHaveCount(2); // FIX-14 + FIX-15 for UC-S004-1 (history-panel fixture rows)
+  // AC-S005-5-3: readable fields — agent + event visible, NOT a bare row:N index
+  await expect(history).toContainText('flow-manager');
+  await expect(history).toContainText('note');
+  await expect(history).not.toContainText(/\brow:\d+/);
+  // AC-S005-5-2: newest-first — first row's timestamp >= last row's
+  const firstTs = await rows.first().getAttribute('data-timestamp');
+  const lastTs = await rows.last().getAttribute('data-timestamp');
+  expect(Date.parse(firstTs)).toBeGreaterThanOrEqual(Date.parse(lastTs));
+});
+
+test('AC-S005-5-4 — a node with no ledger rows shows the "no history" placeholder, no crash (UC-S005-5)', async ({ page }) => {
+  const errors = [];
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  // UC-D4-1 has no ledger rows in the fixture
+  await page.locator('[data-item-id="UC-D4-1"] > .tree-node__row').click();
+  const history = page.getByTestId('item-history');
+  await expect(history).toBeVisible();
+  await expect(history).toContainText(/no history/i);
+  expect(errors, errors.join('\n')).toHaveLength(0);
 });
 
 test('AC-S005-3-4 — a non-slice node (REQ) shows the "not yet available" placeholder, no console error', async ({

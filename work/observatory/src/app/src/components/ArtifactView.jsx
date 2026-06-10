@@ -32,10 +32,17 @@ function extractMermaid(md) {
   return { code: m[1].trim(), rest };
 }
 
+/** Strip a leading YAML frontmatter block (--- ... ---) so it is not rendered
+ *  as a setext heading. Only a frontmatter block at the very start is removed. */
+function stripFrontmatter(md) {
+  const fm = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
+  return fm.test(md) ? md.replace(fm, '') : md;
+}
+
 /** Render markdown text to a semantic-HTML string (fail-soft to empty). */
 function mdToHtml(text) {
   try {
-    return marked.parse(text, { gfm: true, breaks: false });
+    return marked.parse(stripFrontmatter(text), { gfm: true, breaks: false });
   } catch {
     return '';
   }

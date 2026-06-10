@@ -1,0 +1,92 @@
+/* UC-S014-1 — SteerMenu: per-item trigger (⋯) + fixed-position popover menu.
+ * Tokens only (design/components.md: token-based custom — no off-token values).
+ * OVERLAY DISCIPLINE: .steer-menu is position:fixed — never in document flow,
+ * so opening it cannot reflow the host chip/row or grow the page
+ * (GEO-S014-1/2/3, the DEFECT-006 drawer rule applied to a popover). */
+
+.steer {
+  display: inline-flex;
+  margin-left: auto; /* trailing-action position on flex rows (chip + tree row) */
+}
+
+.steer-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--target-min);  /* ≥ 24×24 hit box — S14-1-A11Y-4 / WCAG 2.5.8 */
+  min-height: var(--target-min);
+  padding: 0;
+  background: transparent;
+  color: var(--c-text-dim);
+  border: 1px solid transparent;
+  border-radius: var(--radius-badge);
+  font-family: var(--ff-base);
+  font-size: var(--fs-label);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.steer-btn:hover,
+.steer-btn[aria-expanded='true'] {
+  color: var(--c-text);
+  background: var(--c-surface-raised);
+  border-color: var(--c-border);
+}
+
+/* Visible, non-colour-redundant focus (S14-1-A11Y-3): the ring is a shape cue. */
+.steer-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  color: var(--c-text);
+}
+
+.steer-menu {
+  position: fixed; /* GEO-S014-3 — overlay, zero flow height */
+  z-index: var(--z-drawer); /* above the map/tree surfaces (DEFECT-006 layer) */
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  padding: var(--sp-1);
+  background: var(--c-surface-raised);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-badge);
+  box-shadow: var(--elev-box), var(--drawer-elev);
+  animation: steer-menu-in var(--dur-fast) ease-out;
+}
+
+@keyframes steer-menu-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* S14-1-A11Y-6 — instant (0ms) under reduced motion; no flashing. */
+@media (prefers-reduced-motion: reduce) {
+  .steer-menu {
+    animation: none;
+  }
+}
+
+.steer-menu__item {
+  display: block;
+  text-align: left;
+  min-height: var(--target-min); /* ≥ 24px tall — S14-1-A11Y-4 */
+  padding: var(--sp-1) var(--sp-2);
+  background: transparent;
+  color: var(--c-text);
+  border: none;
+  border-radius: var(--radius-badge);
+  font-family: var(--ff-base);
+  font-size: var(--fs-label);
+  font-weight: var(--fw-meta);
+  cursor: pointer;
+}
+
+.steer-menu__item:hover {
+  background: var(--c-surface);
+}
+
+.steer-menu__item:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  background: var(--c-surface);
+}

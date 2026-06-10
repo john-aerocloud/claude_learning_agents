@@ -117,6 +117,38 @@ export function deriveSpace(item) {
   return 'work';
 }
 
+/**
+ * UC-S005-6 — the zoom-out breadcrumb path: the ROOT→selected chain of records
+ * for `id`, following each record's `parent` link up to a root. The returned
+ * array is ordered root-first with the SELECTED record last (the "current"
+ * crumb). Each element is the full ItemRecord so the breadcrumb can label each
+ * level (id + type). An orphan (parent id not present in the input) yields just
+ * itself; an unknown id or null/empty input yields []. A parent cycle is broken
+ * by a visited set so the walk always terminates.
+ * @param {string|null|undefined} id
+ * @param {Array|null|undefined} items
+ * @returns {Array} root→selected chain of ItemRecords (selected last)
+ */
+export function ancestryPath(id, items) {
+  if (!id || !Array.isArray(items) || items.length === 0) return [];
+  const byId = new Map();
+  for (const it of items) {
+    if (it && it.id != null) byId.set(it.id, it);
+  }
+  if (!byId.has(id)) return [];
+
+  const chain = [];
+  const visited = new Set();
+  let cur = byId.get(id);
+  while (cur && !visited.has(cur.id)) {
+    visited.add(cur.id);
+    chain.push(cur);
+    const p = cur.parent;
+    cur = p && byId.has(p) ? byId.get(p) : null;
+  }
+  return chain.reverse(); // root first, selected last
+}
+
 /** Flatten the forest into a depth-first ordered list of VISIBLE nodes given an
  * `expanded` Set of item ids. A node is visible if all its ancestors are
  * expanded. Used by the render layer for roving-tabindex keyboard navigation. */

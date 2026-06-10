@@ -9,7 +9,7 @@
 //   countNodes — total node count == input row count (AC-S005-2-1 invariant).
 //   deriveSpace — observatory items default to "work"; /process origin → "process".
 import { describe, it, expect } from 'vitest';
-import { buildTree, countNodes, deriveSpace } from '../workItemTree.js';
+import { buildTree, countNodes, deriveSpace, ancestryPath } from '../workItemTree.js';
 
 const ITEMS = [
   { id: 'REQ-OBSERVATORY', type: 'requirement', parent: '', children: 'CHK-1|CHK-4', state: 'active', value: 'HIGH', cost: 'XL' },
@@ -72,6 +72,40 @@ describe('countNodes (AC-S005-2-1 invariant)', () => {
   it('counts orphans too (no node dropped)', () => {
     const withOrphan = [...ITEMS, { id: 'ORPHAN-1', type: 'use-case', parent: 'GHOST', children: '', state: 'ready', value: 'LOW', cost: '1' }];
     expect(countNodes(buildTree(withOrphan))).toBe(withOrphan.length);
+  });
+});
+
+describe('ancestryPath (UC-S005-6 — zoom-out breadcrumb path)', () => {
+  it('returns the root→selected chain of {id,type} for a deep UC node', () => {
+    const path = ancestryPath('UC-S001-1', ITEMS);
+    expect(path.map((p) => p.id)).toEqual(['REQ-OBSERVATORY', 'CHK-1', 'UC-S001-1']);
+    expect(path[path.length - 1].id).toBe('UC-S001-1'); // selected is last (current)
+    expect(path[0].type).toBe('requirement'); // carries the record for labelling
+  });
+
+  it('returns a single-element path for a root node (REQ)', () => {
+    expect(ancestryPath('REQ-OBSERVATORY', ITEMS).map((p) => p.id)).toEqual(['REQ-OBSERVATORY']);
+  });
+
+  it('returns just the node itself when its parent id is absent (orphan, no loss)', () => {
+    const withOrphan = [...ITEMS, { id: 'ORPHAN-1', type: 'use-case', parent: 'GHOST', children: '' }];
+    expect(ancestryPath('ORPHAN-1', withOrphan).map((p) => p.id)).toEqual(['ORPHAN-1']);
+  });
+
+  it('returns [] for an unknown id or null/empty input (fail-soft)', () => {
+    expect(ancestryPath('NOPE-9', ITEMS)).toEqual([]);
+    expect(ancestryPath(null, ITEMS)).toEqual([]);
+    expect(ancestryPath('UC-S001-1', null)).toEqual([]);
+  });
+
+  it('breaks a parent cycle (never loops forever)', () => {
+    const cyclic = [
+      { id: 'A', type: 'chunk', parent: 'B', children: '' },
+      { id: 'B', type: 'chunk', parent: 'A', children: '' },
+    ];
+    const path = ancestryPath('A', cyclic).map((p) => p.id);
+    expect(path[path.length - 1]).toBe('A');
+    expect(path.length).toBeLessThanOrEqual(2);
   });
 });
 

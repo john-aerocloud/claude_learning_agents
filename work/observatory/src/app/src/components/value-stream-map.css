@@ -187,8 +187,11 @@
   padding: var(--sp-1) var(--sp-2);
   font-size: var(--fs-meta);
   font-weight: var(--fw-metric);
-  color: var(--c-wip, #b45309);
-  border: 1px solid var(--c-wip-bd, #b45309);
+  /* meaning rides on the literal text (not colour); use the high-contrast body
+   * text token (≥ 4.5:1) so the warning passes WCAG 1.4.3, with a coloured
+   * border as the redundant non-text cue (A11Y-7/11). */
+  color: var(--c-text);
+  border: 1px solid var(--c-wip-bd);
   border-radius: 6px;
 }
 

@@ -15,6 +15,14 @@
 // SCOPE: GEO-1, GEO-2 + core A11Y (region, group names w/ count, tab order,
 // focus visible). The badge-specific GEO-3 / A11Y-5/6/7 and axe contrast
 // (A11Y-8) belong to UC4/UC5 once the badges exist.
+// SKIPPED for DEFECT-001/s004: these specs drive the OLD primary root surface
+// (the CHK-2 PipelineMap mounted at `/`). That surface was SUPERSEDED — main.jsx
+// now mounts the value-stream map (VsmContainer) as the primary view, because
+// the queue-depth PipelineMap showed 0,0,0,0 in a pull system (DEFECT-001). The
+// PipelineMap component + its unit tests (src/components/__tests__/
+// PipelineMap.test.jsx) remain in the tree and pass; only this ROOT-surface live
+// drive is retired. The live root-surface coverage now lives in
+// e2e/value-stream-map.spec.js. Kept (skipped, not deleted) for provenance.
 import { test, expect } from '@playwright/test';
 
 test.beforeEach(async ({ page }) => {
@@ -23,7 +31,7 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByTestId('queue-intake')).toBeVisible();
 });
 
-test('AC3.2 — all four queue boxes render with numeric live counts', async ({ page }) => {
+test.skip('AC3.2 — all four queue boxes render with numeric live counts', async ({ page }) => {
   const expected = { intake: '3', ready: '1', deploy: '0', rework: '2' };
   for (const [name, count] of Object.entries(expected)) {
     const box = page.getByTestId(`queue-${name}`);
@@ -32,7 +40,7 @@ test('AC3.2 — all four queue boxes render with numeric live counts', async ({ 
   }
 });
 
-test('GEO-1 — four boxes lay out left→right as a flow (x strictly increasing, forward row shares a y band)', async ({
+test.skip('GEO-1 — four boxes lay out left→right as a flow (x strictly increasing, forward row shares a y band)', async ({
   page,
 }) => {
   const intake = await page.getByTestId('queue-intake').boundingBox();
@@ -48,7 +56,7 @@ test('GEO-1 — four boxes lay out left→right as a flow (x strictly increasing
   expect(overlaps(ready, deploy)).toBe(true);
 });
 
-test('GEO-2 — Rework is the return loop BELOW the forward row, not a 5th inline box', async ({
+test.skip('GEO-2 — Rework is the return loop BELOW the forward row, not a 5th inline box', async ({
   page,
 }) => {
   const deploy = await page.getByTestId('queue-deploy').boundingBox();
@@ -58,11 +66,11 @@ test('GEO-2 — Rework is the return loop BELOW the forward row, not a 5th inlin
   expect(rework.y).toBeGreaterThanOrEqual(deploy.y + deploy.height);
 });
 
-test('@a11y A11Y-1 — map root is a region named "Pipeline map"', async ({ page }) => {
+test.skip('@a11y A11Y-1 — map root is a region named "Pipeline map"', async ({ page }) => {
   await expect(page.getByRole('region', { name: /pipeline map/i })).toBeVisible();
 });
 
-test('@a11y A11Y-2 — each box is a group whose accessible name carries the count (and state when not ok)', async ({
+test.skip('@a11y A11Y-2 — each box is a group whose accessible name carries the count (and state when not ok)', async ({
   page,
 }) => {
   await expect(page.getByRole('group', { name: /intake queue, 3 items/i })).toBeVisible();
@@ -71,7 +79,7 @@ test('@a11y A11Y-2 — each box is a group whose accessible name carries the cou
   await expect(page.getByRole('group', { name: /rework queue, 2 items/i })).toBeVisible();
 });
 
-test('@a11y A11Y-3 — Tab reaches all four boxes in flow order intake→ready→deploy→rework', async ({
+test.skip('@a11y A11Y-3 — Tab reaches all four boxes in flow order intake→ready→deploy→rework', async ({
   page,
 }) => {
   const order = ['intake', 'ready', 'deploy', 'rework'];
@@ -82,7 +90,7 @@ test('@a11y A11Y-3 — Tab reaches all four boxes in flow order intake→ready�
   }
 });
 
-test('@a11y A11Y-3/4 — a focused box shows a visible focus ring (outline or box-shadow)', async ({
+test.skip('@a11y A11Y-3/4 — a focused box shows a visible focus ring (outline or box-shadow)', async ({
   page,
 }) => {
   const box = page.getByTestId('queue-ready');
@@ -96,7 +104,7 @@ test('@a11y A11Y-3/4 — a focused box shows a visible focus ring (outline or bo
   expect(hasOutline || hasShadow).toBe(true);
 });
 
-test('@a11y A11Y-9 — each focusable QueueBox is at least 24×24px (WCAG 2.2 §2.5.8)', async ({
+test.skip('@a11y A11Y-9 — each focusable QueueBox is at least 24×24px (WCAG 2.2 §2.5.8)', async ({
   page,
 }) => {
   for (const name of ['intake', 'ready', 'deploy', 'rework']) {
@@ -112,7 +120,7 @@ test('@a11y A11Y-9 — each focusable QueueBox is at least 24×24px (WCAG 2.2 §
 // actually renders ON the right box, with VISIBLE text (not colour-only), and
 // its geometry is contained inside the owning box (GEO-3).
 
-test('@a11y A11Y-5 — the starving Ready box shows a state-badge with VISIBLE "starving" text (not colour-only)', async ({
+test.skip('@a11y A11Y-5 — the starving Ready box shows a state-badge with VISIBLE "starving" text (not colour-only)', async ({
   page,
 }) => {
   const ready = page.getByTestId('queue-ready');
@@ -128,11 +136,11 @@ test('@a11y A11Y-5 — the starving Ready box shows a state-badge with VISIBLE "
   expect(iconHidden).toBe('true');
 });
 
-test('@a11y A11Y-5 — an ok box (deploy) shows NO state-badge', async ({ page }) => {
+test.skip('@a11y A11Y-5 — an ok box (deploy) shows NO state-badge', async ({ page }) => {
   await expect(page.getByTestId('queue-deploy').getByTestId('state-badge')).toHaveCount(0);
 });
 
-test('GEO-3 — the state-badge bounding box is contained within its owning Ready box', async ({
+test.skip('GEO-3 — the state-badge bounding box is contained within its owning Ready box', async ({
   page,
 }) => {
   const box = await page.getByTestId('queue-ready').boundingBox();
@@ -152,7 +160,7 @@ test('GEO-3 — the state-badge bounding box is contained within its owning Read
 // renders ON the right box with VISIBLE text, co-occurs with the state-badge
 // without masking, and its geometry is contained inside the owning box (GEO-3).
 
-test('@a11y A11Y-6 — the constraint Ready box shows a constraint-badge with VISIBLE "constraint" text (AC5.7)', async ({
+test.skip('@a11y A11Y-6 — the constraint Ready box shows a constraint-badge with VISIBLE "constraint" text (AC5.7)', async ({
   page,
 }) => {
   const ready = page.getByTestId('queue-ready');
@@ -164,7 +172,7 @@ test('@a11y A11Y-6 — the constraint Ready box shows a constraint-badge with VI
   expect(iconHidden).toBe('true');
 });
 
-test('@a11y A11Y-6 — non-constraint boxes have data-constraint="false" and no badge (AC5.6 path)', async ({
+test.skip('@a11y A11Y-6 — non-constraint boxes have data-constraint="false" and no badge (AC5.6 path)', async ({
   page,
 }) => {
   for (const name of ['intake', 'deploy', 'rework']) {
@@ -174,7 +182,7 @@ test('@a11y A11Y-6 — non-constraint boxes have data-constraint="false" and no 
   }
 });
 
-test('@a11y A11Y-7 — the Ready box shows BOTH the state-badge and the constraint-badge (co-occurrence, no masking)', async ({
+test.skip('@a11y A11Y-7 — the Ready box shows BOTH the state-badge and the constraint-badge (co-occurrence, no masking)', async ({
   page,
 }) => {
   const ready = page.getByTestId('queue-ready');
@@ -192,7 +200,7 @@ test('@a11y A11Y-7 — the Ready box shows BOTH the state-badge and the constrai
   expect(overlapArea).toBe(0); // the two cues never overlap (distinct visual channels)
 });
 
-test('@a11y A11Y-7 — the Ready accessible name carries count, state AND constraint', async ({
+test.skip('@a11y A11Y-7 — the Ready accessible name carries count, state AND constraint', async ({
   page,
 }) => {
   await expect(
@@ -200,7 +208,7 @@ test('@a11y A11Y-7 — the Ready accessible name carries count, state AND constr
   ).toBeVisible();
 });
 
-test('GEO-3 — the constraint-badge bounding box is contained within its owning Ready box', async ({
+test.skip('GEO-3 — the constraint-badge bounding box is contained within its owning Ready box', async ({
   page,
 }) => {
   const box = await page.getByTestId('queue-ready').boundingBox();
@@ -212,7 +220,7 @@ test('GEO-3 — the constraint-badge bounding box is contained within its owning
   expect(badge.y + badge.height).toBeLessThanOrEqual(box.y + box.height + 0.5);
 });
 
-test('no console errors on initial load (UC1 AC1.2 still holds with the map mounted)', async ({
+test.skip('no console errors on initial load (UC1 AC1.2 still holds with the map mounted)', async ({
   page,
 }) => {
   const errors = [];

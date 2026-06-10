@@ -14,6 +14,14 @@
 // auto-retrying expect with a tight timeout, and measure wall-clock latency.
 // The fixture file is RESTORED in afterEach (even on failure) so the committed
 // fixture and the deterministic UC3/UC4/UC5 specs are never left dirty.
+// SKIPPED for DEFECT-001/s004: these specs drive the OLD primary root surface
+// (queue-* boxes of the CHK-2 PipelineMap) which main.jsx no longer mounts — the
+// value-stream map (VsmContainer) is now the primary view. MapContainer + its
+// unit tests remain in the tree and pass; the EventSource live-refresh contract
+// for the new surface is UC-S004-6 (not in this DEFECT-001 scope) and will get
+// its own value-stream live-drive spec then. Kept (skipped, not deleted) for
+// provenance. VsmContainer already wires its own SSE re-fetch (unit-pinned in
+// src/components/__tests__/VsmContainer.test.jsx).
 import { test, expect } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
@@ -43,7 +51,7 @@ test.afterEach(async () => {
   if (original !== undefined) writeFileSync(READY_CSV, original);
 });
 
-test('AC6.4 — appending a row to ready.csv updates the Ready count live within ~1s (no reload)', async ({
+test.skip('AC6.4 — appending a row to ready.csv updates the Ready count live within ~1s (no reload)', async ({
   page,
 }) => {
   const readyCount = page.getByTestId('queue-ready').getByTestId('queue-count');
@@ -61,7 +69,7 @@ test('AC6.4 — appending a row to ready.csv updates the Ready count live within
   expect(latency).toBeLessThan(3000);
 });
 
-test('the live-status indicator is present and announces the connected state (non-colour cue)', async ({
+test.skip('the live-status indicator is present and announces the connected state (non-colour cue)', async ({
   page,
 }) => {
   const dot = page.getByTestId('live-status');
@@ -71,7 +79,7 @@ test('the live-status indicator is present and announces the connected state (no
   await expect(dot).toContainText(/live/i);
 });
 
-test('@a11y A11Y-10 — under prefers-reduced-motion, a live update changes the count with 0s transition', async ({
+test.skip('@a11y A11Y-10 — under prefers-reduced-motion, a live update changes the count with 0s transition', async ({
   browser,
 }) => {
   // A dedicated reduced-motion context so the media query is emulated for the

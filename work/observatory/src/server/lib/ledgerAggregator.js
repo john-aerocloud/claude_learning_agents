@@ -30,6 +30,43 @@
 //     matching out-event (task_end OR stage_exit). Pulled-but-not-done work is
 //     COUNTABLE here — this is the key fix. wip_items names the open ids.
 
+// DEFECT-002 — WIP reconciliation against the authoritative item registry.
+// WIP from raw enter/exit pairing alone counts an item that was HELD/DROPPED
+// (a stage_enter with no exit) as in-flight FOREVER. An open enter is genuine
+// in-flight ONLY if the item (1) still EXISTS in items.csv AND (2) is in a
+// non-terminal state. Absent-from-registry or terminal → STALE, not in-flight.
+// Throughput/dwell/rework are HISTORICAL counts and are NOT reconciled — only
+// WIP is "now". Fail-soft: no/empty items registry → no reconciliation, keep
+// the raw open-enter behaviour (never throw).
+import { parseCsv } from '../parsers/csv.js';
+
+const TERMINAL_ITEM_STATES = new Set(['done', 'dropped', 'cancelled']);
+
+/**
+ * Build an item-id → {exists, terminal} registry from raw items.csv text.
+ * Null/empty/unparseable input → null (signals "no reconciliation, fail soft").
+ * @param {string|null|undefined} itemsCsv raw work/<project>/items/items.csv
+ * @returns {Map<string,{terminal:boolean}>|null}
+ */
+function buildItemRegistry(itemsCsv) {
+  if (typeof itemsCsv !== 'string' || itemsCsv.trim() === '') return null;
+  let records;
+  try {
+    records = parseCsv(itemsCsv);
+  } catch {
+    return null; // unparseable registry → fall back to raw open-enter (fail soft)
+  }
+  if (!Array.isArray(records) || records.length === 0) return null;
+  const reg = new Map();
+  for (const rec of records) {
+    const id = (rec.id ?? '').trim();
+    if (!id) continue;
+    const state = (rec.state ?? '').trim().toLowerCase();
+    reg.set(id, { terminal: TERMINAL_ITEM_STATES.has(state) });
+  }
+  return reg.size > 0 ? reg : null;
+}
+
 // NOTE ON PARSING — why NOT the shared parseCsv (csv.js):
 // The real process/dora/ledger.csv is not strict RFC-4180. Agents append free
 // text into `note` that contains unescaped commas AND unbalanced double-quotes
@@ -237,11 +274,19 @@ function emptyStages() {
  * Aggregate the per-stage value-stream for one project from a raw ledger CSV.
  * @param {string|null|undefined} ledgerCsv raw contents of process/dora/ledger.csv
  * @param {string} project project id to filter to
+ * @param {string|null} [itemsCsv] raw work/<project>/items/items.csv — when
+ *   present, WIP is reconciled against it (DEFECT-002): an open enter for an
+ *   item absent-from-registry or terminal is NOT in-flight. Omitted/null/empty
+ *   → no reconciliation (fail-soft, raw open-enter behaviour preserved).
  * @returns {Array<{stage:string,label:string,throughput:number,dwell_median_s:number,
  *   wip:number,rework:number,wip_items:string[],source_rows:string[]}>}
  */
-export function aggregateStageFlow(ledgerCsv, project) {
+export function aggregateStageFlow(ledgerCsv, project, itemsCsv = null) {
   if (typeof ledgerCsv !== 'string' || ledgerCsv.trim() === '') return emptyStages();
+
+  // DEFECT-002: reconcile WIP against the authoritative item registry. null →
+  // no registry available → keep raw open-enter pairing (fail soft).
+  const itemRegistry = buildItemRegistry(itemsCsv);
 
   let rows;
   try {
@@ -288,7 +333,13 @@ export function aggregateStageFlow(ledgerCsv, project) {
       }
     }
 
-    const wipItems = [...openByItem.keys()];
+    // DEFECT-002: an open enter is genuine in-flight only if the item still
+    // exists in the registry AND is non-terminal. No registry → keep all opens.
+    const wipItems = [...openByItem.keys()].filter((id) => {
+      if (!itemRegistry) return true; // fail-soft: no registry to reconcile against
+      const entry = itemRegistry.get(id);
+      return entry !== undefined && !entry.terminal;
+    });
 
     return {
       stage: stageDef.stage,

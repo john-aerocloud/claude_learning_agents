@@ -235,8 +235,99 @@ describe('aggregateStageFlow — other stage mappings', () => {
   });
 });
 
+// DEFECT-002 — phantom/stuck WIP from abandoned items. An open enter-without-exit
+// must count as WIP ONLY if the item still EXISTS in items.csv AND its state is
+// non-terminal. An open enter for an item absent-from-items.csv or terminal
+// (done/dropped/cancelled) is STALE → not in-flight. Missing items.csv → fall
+// back to raw open-enter (fail-soft), never throw.
+describe('aggregateStageFlow — WIP reconciliation against items.csv (DEFECT-002)', () => {
+  const ITEMS_HEADER =
+    'id,type,parent,children,job,state,value,cost,vc_ratio,created_ts,done_ts,dora_ref';
+  function itemsCsv(rows) {
+    return [ITEMS_HEADER, ...rows.map((r) => `${r.id},use-case,CHK,,job,${r.state},,,,,,`)].join('\n') + '\n';
+  }
+
+  it('open enter for an item ABSENT from items.csv is NOT WIP (phantom dropped work)', () => {
+    const ledger = csv([
+      row({ agent: 'engineer', event: 'stage_enter', item: 'UC-S003-2' }), // dropped, removed from items.csv
+      row({ agent: 'engineer', event: 'stage_enter', item: 'UC-LIVE' }), // present & non-terminal
+    ]);
+    const items = itemsCsv([{ id: 'UC-LIVE', state: 'in-progress' }]);
+    const eng = byStage(aggregateStageFlow(ledger, 'p', items), 'engineer');
+    expect(eng.wip_items).toEqual(['UC-LIVE']);
+    expect(eng.wip).toBe(1);
+  });
+
+  it('open enter for a TERMINAL item (done/dropped/cancelled) is NOT WIP', () => {
+    const ledger = csv([
+      row({ agent: 'engineer', event: 'stage_enter', item: 'UC-DONE' }),
+      row({ agent: 'engineer', event: 'stage_enter', item: 'UC-DROPPED' }),
+      row({ agent: 'engineer', event: 'stage_enter', item: 'UC-CANCELLED' }),
+      row({ agent: 'engineer', event: 'stage_enter', item: 'UC-LIVE' }),
+    ]);
+    const items = itemsCsv([
+      { id: 'UC-DONE', state: 'done' },
+      { id: 'UC-DROPPED', state: 'dropped' },
+      { id: 'UC-CANCELLED', state: 'cancelled' },
+      { id: 'UC-LIVE', state: 'ready' },
+    ]);
+    const eng = byStage(aggregateStageFlow(ledger, 'p', items), 'engineer');
+    expect(eng.wip_items).toEqual(['UC-LIVE']);
+  });
+
+  it('open enter for a present, non-terminal item IS WIP', () => {
+    const ledger = csv([row({ agent: 'engineer', event: 'stage_enter', item: 'UC-A' })]);
+    const items = itemsCsv([{ id: 'UC-A', state: 'active' }]);
+    expect(byStage(aggregateStageFlow(ledger, 'p', items), 'engineer').wip_items).toEqual(['UC-A']);
+  });
+
+  it('missing/empty items.csv → fall back to raw open-enter (fail-soft, never throw)', () => {
+    const ledger = csv([row({ agent: 'engineer', event: 'stage_enter', item: 'UC-A' })]);
+    expect(() => aggregateStageFlow(ledger, 'p', null)).not.toThrow();
+    // No registry to reconcile against → keep the raw open-enter behaviour.
+    expect(byStage(aggregateStageFlow(ledger, 'p', null), 'engineer').wip_items).toEqual(['UC-A']);
+    expect(byStage(aggregateStageFlow(ledger, 'p'), 'engineer').wip_items).toEqual(['UC-A']);
+  });
+
+  it('throughput/dwell/rework are historical and NOT reconciled (only WIP is "now")', () => {
+    // A dropped item that completed pairs in the past still counts toward
+    // throughput; reconciliation only suppresses it from in-flight WIP.
+    const ledger = csv([
+      row({ ts: '2026-06-01T00:00:00Z', agent: 'engineer', event: 'task_start', item: 'UC-DROPPED' }),
+      row({ ts: '2026-06-01T00:10:00Z', agent: 'engineer', event: 'task_end', item: 'UC-DROPPED', duration: '600' }),
+    ]);
+    const items = itemsCsv([{ id: 'UC-DROPPED', state: 'dropped' }]);
+    const eng = byStage(aggregateStageFlow(ledger, 'p', items), 'engineer');
+    expect(eng.throughput).toBe(1); // historical throughput preserved
+    expect(eng.dwell_median_s).toBe(600); // historical dwell preserved
+    expect(eng.wip).toBe(0); // but not in-flight now
+  });
+});
+
 describe('aggregateStageFlow — REAL ledger (real-data gate, not a fixture)', () => {
   const realLedger = readFileSync(join(repoRoot, 'process', 'dora', 'ledger.csv'), 'utf8');
+  const realItems = readFileSync(
+    join(repoRoot, 'work', 'observatory', 'items', 'items.csv'),
+    'utf8',
+  );
+
+  it('DEFECT-002: UC-S003-2/3/4 (absent from items.csv) are NOT in engineer.wip_items', () => {
+    const out = aggregateStageFlow(realLedger, 'observatory', realItems);
+    const eng = byStage(out, 'engineer');
+    for (const phantom of ['UC-S003-2', 'UC-S003-3', 'UC-S003-4']) {
+      expect(eng.wip_items).not.toContain(phantom);
+    }
+    // Every reported WIP item must still exist in items.csv and be non-terminal.
+    const live = new Set(
+      realItems
+        .split('\n')
+        .slice(1)
+        .map((l) => l.split(','))
+        .filter((c) => c.length > 5 && !['done', 'dropped', 'cancelled'].includes(c[5]))
+        .map((c) => c[0]),
+    );
+    for (const id of eng.wip_items) expect(live.has(id)).toBe(true);
+  });
 
   it('returns non-empty plausible build throughput for observatory (>= UCs delivered)', () => {
     const out = aggregateStageFlow(realLedger, 'observatory');

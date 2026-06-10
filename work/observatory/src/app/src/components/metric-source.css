@@ -1,0 +1,65 @@
+/* UC-S004-5 — MetricSource traceability reveal.
+ * A small popover anchored under its metric figure. Hidden until the owning
+ * StageNode opens it (focus+Enter or hover); `[hidden]` removes it from layout
+ * AND the a11y tree. The "↗ source" caption is a text+glyph affordance (never
+ * colour-only). All tokens from tokens.css. */
+
+.stage-metric,
+.inflight-badge {
+  position: relative;
+}
+
+.metric-source {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 140px;
+  max-width: 240px;
+  background: var(--c-surface-raised, #fff);
+  color: var(--c-text);
+  border: 1px solid var(--c-source-link, var(--c-border));
+  border-radius: var(--radius-box);
+  box-shadow: var(--elev-box);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-meta);
+  font-weight: var(--fw-meta);
+}
+
+.metric-source[hidden] {
+  display: none;
+}
+
+.metric-source__caption {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--c-source-link, var(--c-text-dim));
+  font-weight: var(--fw-label);
+}
+
+.metric-source__glyph {
+  color: var(--c-source-link, var(--c-text-dim));
+}
+
+.metric-source__rows {
+  list-style: none;
+  margin: var(--sp-1, 4px) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.metric-source__row {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--c-text);
+  white-space: nowrap;
+}
+
+.metric-source__empty {
+  display: block;
+  margin-top: var(--sp-1, 4px);
+  color: var(--c-text-dim);
+  font-style: italic;
+}

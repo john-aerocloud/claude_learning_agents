@@ -22,6 +22,7 @@
 // pulled-but-not-done work must be impossible to miss).
 
 import './value-stream-map.css';
+import { StageNode } from './StageNode.jsx';
 
 // Canonical 10-stage flow order = the geometry contract (GEO-3 / AC2.2).
 const FLOW_ORDER = [
@@ -36,65 +37,6 @@ const LANES = [
   { id: 'build', label: 'Build', stages: ['capabilities', 'ui-design', 'engineer', 'ui-validate'] },
   { id: 'release', label: 'Release', stages: ['deploy', 'validate', 'done'] },
 ];
-
-const GATES = new Set(['intake', 'deploy']);
-
-/** Humanise a dwell in seconds: <60s → "Ns", <3600s → "Xm", else "Xh" (AC3.3). */
-function humaniseDwell(seconds) {
-  const s = Number(seconds) || 0;
-  if (s < 60) return `${Math.round(s)}s`;
-  if (s < 3600) return `${Math.round(s / 60)}m`;
-  return `${Math.round(s / 3600)}h`;
-}
-
-/** Join source_rows into a non-empty data-source string ("no events recorded" at 0). */
-function sourceAttr(sourceRows) {
-  if (Array.isArray(sourceRows) && sourceRows.length > 0) return sourceRows.join(' ');
-  return 'no events recorded';
-}
-
-/** A single labelled figure (label + value), never a bare number (AC3.1). */
-function StageMetric({ stage, kind, label, value, source }) {
-  return (
-    <div class="stage-metric" data-testid={`metric-${stage}-${kind}`}>
-      <dt class="stage-metric__label">{label}</dt>
-      <dd
-        class="stage-metric__value"
-        data-metric={kind}
-        data-source={sourceAttr(source)}
-      >
-        {value}
-      </dd>
-    </div>
-  );
-}
-
-/** The prominent non-colour-redundant in-flight indicator (replaces the plain
- * WIP metric when wip>0). Visible text "● N in-flight"; glyph aria-hidden. */
-function InFlightBadge({ stage, count, source }) {
-  return (
-    <div
-      class="inflight-badge"
-      data-testid={`inflight-${stage}`}
-      data-inflight={count}
-      data-metric="wip"
-      data-source={sourceAttr(source)}
-    >
-      <span class="inflight-badge__glyph" aria-hidden="true">●</span>
-      <span>{count} in-flight</span>
-    </div>
-  );
-}
-
-/** Gate marker: "gate" text + ◇ glyph (glyph aria-hidden) — non-colour cues. */
-function GateMarker({ gate }) {
-  return (
-    <span class="gate-marker" data-testid={`gate-${gate}`}>
-      <span aria-hidden="true">◇</span>
-      <span>gate</span>
-    </span>
-  );
-}
 
 /** Decorative forward connector (reused intent from s002 FlowArrow). */
 function FlowArrow({ from, to }) {
@@ -135,46 +77,6 @@ function ReworkLoopConnector({ from = 'validate', to = 'engineer' }) {
         <path d="M10 6 L2 12 L10 18 Z" fill="currentColor" />
       </svg>
       <span class="rework-loop__label">Rework</span>
-    </div>
-  );
-}
-
-/** One canonical stage node — name, optional gate marker, four labelled figures
- * (WIP promoted to an in-flight badge when wip>0). role=group, focusable. */
-function StageNode({ data }) {
-  const { stage, label, throughput, dwell_median_s, wip, rework, source_rows } = data;
-  const isGate = GATES.has(stage);
-  const wipActive = Number(wip) > 0;
-  const dwell = humaniseDwell(dwell_median_s);
-
-  // accessible name carries the key figures (A11Y-2/A11Y-4) — number never bare.
-  const wipPhrase = wipActive ? `WIP ${wip}, ${wip} in-flight` : `WIP ${wip}`;
-  let name = `${label} stage, throughput ${throughput}, dwell ${dwell}, ${wipPhrase}, rework ${rework}`;
-  if (isGate) name = `gate: ${name}`;
-
-  return (
-    <div
-      class="stage-node"
-      data-testid={`stage-${stage}`}
-      role="group"
-      aria-label={name}
-      tabindex="0"
-      data-stage-kind={isGate ? 'gate' : 'work'}
-      data-wip={String(wip)}
-      data-wip-active={wipActive ? 'true' : 'false'}
-    >
-      <div class="stage-node__head">
-        <span class="stage-node__name">{label}</span>
-        {isGate ? <GateMarker gate={stage} /> : null}
-      </div>
-      <dl class="stage-figs">
-        <StageMetric stage={stage} kind="throughput" label="Throughput" value={String(throughput)} source={source_rows} />
-        <StageMetric stage={stage} kind="dwell" label="Dwell" value={dwell} source={source_rows} />
-        {wipActive
-          ? <InFlightBadge stage={stage} count={wip} source={source_rows} />
-          : <StageMetric stage={stage} kind="wip" label="WIP" value={String(wip)} source={source_rows} />}
-        <StageMetric stage={stage} kind="rework" label="Rework" value={String(rework)} source={source_rows} />
-      </dl>
     </div>
   );
 }

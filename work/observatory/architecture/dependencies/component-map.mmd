@@ -85,6 +85,31 @@ graph LR
   SteerMenu --> TreeNode
   SteerMenu --> ObservatoryDrawerLayer
 
+  %% s014 / UC-S014-2: SteerPanel (NEW) — the right-anchored NON-MODAL steer
+  %% drawer the SteerMenu opens (DetailPane drawer IDIOM, not the component):
+  %% position:fixed + portalled to document.body, z = --z-drawer + 1 (topmost
+  %% over a co-open DetailPane). Regions: header → SteerContextBlock (labelled
+  %% dt/dd context, data-source anchor) → IntentNote textarea → guarded
+  %% "Generate prompt" (aria-disabled until ≥1 char) → UC-S014-3 output SLOT.
+  %% Data: useSteerContext(itemId) fetches the EXISTING /items endpoint
+  %% (READ-ONLY; no new route) → {status, context} — the contract UC-S014-3
+  %% (promptBuilder) and UC-S015-3 (ReslicePreviewPanel) consume verbatim.
+  %% RUNTIME ROUTING for the tester: ObservatoryView now OWNS the steer gesture
+  %% — onSteer threads ObservatoryView→WorkItemTreeContainer→WorkItemTree→
+  %% TreeNode→SteerMenu AND ObservatoryView→VsmContainer→ValueStreamMap→
+  %% StageNode→SteerMenu (UC-S014-1's stub destination is now real); selection
+  %% mounts SteerPanelContainer as a layout sibling (body-portalled overlay).
+  %% Esc/×/Cancel close → focus RETURNS to the opening steer trigger.
+  SteerPanel["SteerPanel (s014 / UC-S014-2: steer drawer — context + intent + guarded Generate; non-modal dialog)"]
+  SteerContextBlock["SteerContextBlock (s014 / UC-S014-2: labelled item context dt/dd; — for unknowns; not-found/error fail-soft)"]
+  IntentNote["IntentNote (s014 / UC-S014-2: labelled free-text intent textarea)"]
+  UseSteerContext["useSteerContext (s014 / UC-S014-2 hook: /items → {status, context} — UC-S014-3 + UC-S015-3 contract)"]
+  SteerMenu --> SteerPanel
+  SteerPanel --> UseSteerContext
+  SteerContextBlock --> SteerPanel
+  IntentNote --> SteerPanel
+  SteerPanel --> ObservatoryDrawerLayer
+
   %% s015 / UC-S015-1: WIP navigation panel — ROUTED VIEW (EXP-016). ObservatoryView's
   %% main column gains a ViewSwitch tablist ("Pipeline" | "In-flight WIP") that swaps
   %% the column content between VsmContainer (default) and WipPanel. The two surfaces
@@ -121,11 +146,14 @@ graph LR
   %% All of the above: s003-changed, s004changed, defect006changed marks cleared at their delivery.
   %% (ValueStreamMap moved to def012changed below — DEFECT-012 queue-lane re-route.)
   class PipelineMapScreen,PipelineMap,QueueBox,BufferStateIndicator,ConstraintBadge,FlowArrow,LiveStatusDot,DoraPanelScreen,DoraPanel,MetricCard,StageCardGrid,StageCard,TimeThiefView,SourceLink,ValueStreamScreen,VsmContainer,StageMetric,InFlightBadge,GateMarker,ReworkLoopConnector,DetailPane,ObservatoryDrawerLayer delivered;
-  %% s014 still in-flight: UC-S014-1 done but UC-S014-2/3/4 planned; SteerMenu+StageNode+TreeNode
-  %% remain in blast radius for the remaining s014 UCs (panel, prompt builder, clipboard/SSE).
+  %% s014 still in-flight: UC-S014-1+2 done but UC-S014-3/4 planned; SteerMenu+StageNode+TreeNode
+  %% remain in blast radius for the remaining s014 UCs (prompt builder, clipboard/SSE).
+  %% UC-S014-2 THIS commit: SteerPanel/SteerContextBlock/IntentNote/useSteerContext added;
+  %% SteerMenu→SteerPanel edge made real (onSteer now opens the panel — ObservatoryView +
+  %% WorkItemTreeContainer carry the pass-through). Tester UI test-plan input.
   %% Convention: s014changed cleared only at full s014 slice delivery after tester final sign-off.
   classDef s014changed fill:#fff3cd,stroke:#b8860b,color:#000;
-  class SteerMenu,TreeNode,StageNode s014changed;
+  class SteerMenu,TreeNode,StageNode,SteerPanel,SteerContextBlock,IntentNote,UseSteerContext s014changed;
   %% s015 / UC-S015-1 nodes added THIS commit + VsmContainer re-pointed (conditional
   %% mount inside the pipeline tabpanel) — tester UI test-plan input; cleared at
   %% s015 delivery after the tester consumes.

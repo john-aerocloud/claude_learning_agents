@@ -69,6 +69,9 @@ function allBranchIds(forest) {
  * @param {string|null} [props.selectedId] - CONTROLLED selection (UC-S005-3 lifts it)
  * @param {(id:string)=>void} [props.onSelect] - CONTROLLED select handler
  * @param {(items:Array)=>void} [props.onItemsLoaded] - report the loaded item rows up
+ * @param {(itemId:string, actionType:string)=>void} [props.onSteer]
+ *        UC-S014-2 read-only pass-through to the tree rows' SteerMenus
+ *        (ObservatoryView consumes it to open the SteerPanel).
  */
 export function WorkItemTreeContainer({
   loadItems = loadActiveItems,
@@ -77,6 +80,7 @@ export function WorkItemTreeContainer({
   selectedId: controlledSelectedId,
   onSelect: controlledOnSelect,
   onItemsLoaded,
+  onSteer,
 }) {
   const [items, setItems] = useState(null);
   const [expanded, setExpanded] = useState(new Set());
@@ -181,6 +185,7 @@ export function WorkItemTreeContainer({
       selectedId={selectedId}
       onToggle={onToggle}
       onSelect={onSelect}
+      onSteer={onSteer}
     />
   );
 }

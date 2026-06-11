@@ -398,6 +398,61 @@ convention, LiveStatusDot, the existing SSE channel, `--focus-ring`,
   `--elev-box`+`--drawer-elev`/`--radius-badge`/`--dur-fast`, 0ms animation
   under reduced motion).
 
+## SteerPanel  (s014 / UC-S014-2 — steer drawer: context + intent + guarded Generate)
+- **Role:** the right-anchored NON-MODAL floating drawer a SteerMenu action
+  opens — item context block + intent-note textarea + guarded "Generate
+  prompt" + Cancel/×. Reuses the DEFECT-006 drawer IDIOM (not the DetailPane
+  component): `position:fixed`, portalled to `document.body`, drawer tokens,
+  `z-index: calc(--z-drawer + 1)` (topmost over a co-open DetailPane). The
+  UC-S014-3 prompt output renders into the marked
+  `data-testid="prompt-output-slot"` below the action row.
+- **Props (pure render):** `{ itemId; actionType; status:
+  "loading"|"ready"|"not-found"|"error"; context: SteerContext|null;
+  onCancel(); onGenerate(intentNote, {itemId, actionType, context}) }`.
+  `SteerPanelContainer` (same file) wires `useSteerContext` → panel.
+- **States:** loading (labelled "Loading item context…" skeleton, textarea
+  disabled) · ready · not-found ("Item <id> not found" — stale/queue-only id,
+  fail-soft; form hidden, Cancel/× stay) · error ("Could not load item context
+  — try again").
+- **Selector:** `getByRole('dialog', { name: /steer: <itemId>/i })` — NON-modal
+  (no `aria-modal`), `aria-labelledby` → heading; `data-testid="steer-panel"` +
+  `data-item-id` + `data-action`. Close ×
+  `getByRole('button', { name: /close steer panel/i })` /
+  `steer-panel-close`; Cancel `steer-cancel`; Generate `steer-generate`
+  (`aria-disabled` reflects the empty-intent guard).
+- **A11y:** focus → heading on open; keyboard order heading → textarea →
+  Generate → Cancel → × (× is LAST in DOM, CSS-positioned top-right); Esc/×/
+  Cancel close and focus RETURNS to the opening steer trigger; no trap
+  (non-modal). Hit boxes ≥ `--target-min`; `--focus-ring`; the Generate guard
+  is `aria-disabled` + non-colour inset cue. NOTE: the panel header is a
+  `<div>`, not `<header>` — a `<header>` inside `role=dialog` still maps to a
+  page banner landmark (axe `landmark-no-duplicate-banner`).
+- **Geometry (GEO-S014-2-1..4):** pure overlay — underlying VSM/tree bboxes +
+  scrollHeights byte-identical open vs closed; on-screen within the viewport;
+  slide-in `--dur-drawer`, instant under reduced motion.
+- **Library:** custom (drawer + surface + focus tokens; no off-token values).
+
+## SteerContextBlock  (s014 / UC-S014-2 — labelled item context, inside SteerPanel)
+- **Role:** the figure surface of the steer flow: six `<dt>`/`<dd>` pairs —
+  Item ("<id> — <job sentence>", never the id alone), Job, State, Value, Cost,
+  Steering action (the HUMAN label, never the `data-action` enum).
+- **Selector:** `data-testid="steer-context"` (carries
+  `data-source="work/<project>/items/items.csv#id=<id>"` — SourceLink
+  convention); each field `data-testid="steer-ctx-<id|job|state|value|cost|action>"`.
+- **Legibility:** human labels/values only — no raw CSV keys (`vc_ratio`,
+  `done_ts`, …); absent values render "—" (unknown ≠ blank/zero); fields STACK
+  (single-column grid: shared dd left edge, monotonic tops).
+- **Library:** custom (reuses the s003/s004 labelled dt/dd pattern).
+
+## IntentNote  (s014 / UC-S014-2 — free-text intent textarea, inside SteerPanel)
+- **Role:** the operator's natural-language intent; gates Generate (≥1 char).
+- **Selector:** `getByRole('textbox', { name: /intent/i })`;
+  `data-testid="intent-note"`; associated `<label for>`; placeholder
+  "Describe what you want to happen (e.g. split this UC into two…)".
+- **States:** empty (Generate guarded) · non-empty (Generate live) · disabled
+  (loading; hidden in not-found/error).
+- **Library:** custom.
+
 ## ViewSwitch  (s015 / UC-S015-1 — main-column two-view tablist)
 - **Role:** the explicit two-view navigation ("Pipeline" | "In-flight WIP") at the
   top of the main column. ROUTED VIEW (EXP-016): activating a tab swaps the

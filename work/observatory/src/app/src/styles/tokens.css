@@ -89,6 +89,18 @@
   --fs-tree: 0.85rem;          /* tree node label */
   --fs-tree-badge: 0.72rem;    /* state / value-cost / space-tag badge text */
   --fs-history: 0.8rem;        /* item-history row text */
+
+  /* --- DEFECT-006 additive: floating DetailPane drawer (overlay) ---
+   * The DetailPane is RE-DESIGNED from an in-flow sticky column sibling of the
+   * value-stream map into a right-anchored drawer that FLOATS OVER the map
+   * (own stacking context). The map's layout is unchanged whether the pane is
+   * open or closed (GEO-S005-3b). Reuses --c-surface-raised / --c-border /
+   * --radius-box / --focus-ring; only positioning tokens are new. */
+  --z-drawer: 40;              /* DetailPane drawer; above map (metric-source tooltip is z 5) */
+  --drawer-width: min(440px, 38vw);  /* right-drawer width (fixed; never reflows the map) */
+  --drawer-inset: var(--sp-4); /* gap from viewport top/right/bottom edge */
+  --drawer-elev: -8px 0 32px rgba(0, 0, 0, 0.5);  /* left-cast shadow lifts it off the map */
+  --dur-drawer: 160ms;         /* slide-in duration; 0ms under prefers-reduced-motion */
 }
 
 html,

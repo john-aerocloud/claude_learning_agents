@@ -30,6 +30,9 @@ import { getActive } from '../api/client.js';
 import { WorkItemTreeContainer } from './WorkItemTreeContainer.jsx';
 import { VsmContainer } from './VsmContainer.jsx';
 import { DetailPaneContainer } from './DetailPaneContainer.jsx';
+import { SteerPanelContainer } from './SteerPanel.jsx';
+import { ViewSwitch } from './ViewSwitch.jsx';
+import { WipPanelContainer } from './WipPanel.jsx';
 
 /**
  * @param {object} [props]
@@ -49,6 +52,16 @@ export function ObservatoryView({
   const [project, setProject] = useState(null);
   // DEFECT-006: the treeitem element that opened the pane — focus returns here on close.
   const originRef = useRef(null);
+  // UC-S014-2: the active steer gesture — {itemId, actionType} | null. Set by
+  // any SteerMenu's onSteer (chips via VsmContainer, rows via the tree
+  // container); non-null mounts the SteerPanel drawer. The panel captures its
+  // own focus-return target (the steer trigger) on mount.
+  const [steer, setSteer] = useState(null);
+  // UC-S015-1: which main-column view is active — 'pipeline' (default; the
+  // at-a-glance home, J1 stays 0-click) or 'wip' (the WIP navigation panel).
+  // ROUTED VIEW (EXP-016): the two surfaces never co-exist — switching unmounts
+  // the other, so there is no overlay-reflow failure mode by construction.
+  const [view, setView] = useState('pipeline');
 
   // Resolve the active project once (the DetailPaneContainer needs it to build
   // the /slices + /slices/:slug/:artifact URLs).
@@ -97,6 +110,10 @@ export function ObservatoryView({
     }
   }, []);
 
+  // UC-S014-2: SteerMenu selection → open the steer panel for that item+action.
+  const onSteer = useCallback((itemId, actionType) => setSteer({ itemId, actionType }), []);
+  const onSteerClose = useCallback(() => setSteer(null), []);
+
   // Pass loaders to the tree container only when injected (tests); otherwise the
   // container uses its real defaults (getActive→getItems).
   const treeProps = loadItems ? { loadItems } : {};
@@ -111,9 +128,34 @@ export function ObservatoryView({
         selectedId={selectedId}
         onSelect={onSelect}
         onItemsLoaded={setItems}
+        onSteer={onSteer}
       />
       <div class="observatory-main-col">
-        <VsmContainer />
+        {/* UC-S015-1: the two-view switch. STRUCTURAL wrapper only — the
+            VsmContainer line (incl. the UC-S014-2 onSteer pass-through) is
+            unchanged; it is merely hosted inside its tabpanel. Both tabpanels
+            stay in the DOM (valid aria-controls targets); the INACTIVE one is
+            hidden AND empty, so the inactive view is genuinely unmounted
+            (GEO-S015-1: no hidden-but-present reflow). */}
+        <ViewSwitch active={view} onSelect={setView} />
+        <div
+          role="tabpanel"
+          id="view-panel-pipeline"
+          aria-labelledby="view-tab-pipeline"
+          hidden={view !== 'pipeline'}
+        >
+          {view === 'pipeline' ? (
+            <VsmContainer onSteer={onSteer} />
+          ) : null}
+        </div>
+        <div
+          role="tabpanel"
+          id="view-panel-wip"
+          aria-labelledby="view-tab-wip"
+          hidden={view !== 'wip'}
+        >
+          {view === 'wip' ? <WipPanelContainer /> : null}
+        </div>
       </div>
       {/* DEFECT-006: the drawer is a SIBLING of the main column (not nested in
           it). It is position:fixed (detail-pane.css) so it floats over the map
@@ -127,6 +169,18 @@ export function ObservatoryView({
         focusOnClose={focusOnClose}
         {...paneProps}
       />
+      {/* UC-S014-2: the steer drawer — body-portalled fixed overlay (its own
+          stacking context above both drawers' host surfaces); onGenerate is
+          UC-S014-3's seam (prompt building — not wired in this UC). */}
+      {steer ? (
+        <SteerPanelContainer
+          itemId={steer.itemId}
+          actionType={steer.actionType}
+          project={project}
+          {...(loadItems ? { loadItems } : {})}
+          onCancel={onSteerClose}
+        />
+      ) : null}
     </div>
   );
 }

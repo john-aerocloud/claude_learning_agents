@@ -1,0 +1,211 @@
+/* UC-S014-2 — SteerPanel styling.
+ *
+ * A NON-MODAL, right-anchored FLOATING DRAWER reusing the DEFECT-006 drawer
+ * tokens (--z-drawer / --drawer-width / --drawer-inset / --drawer-elev /
+ * --dur-drawer). position:fixed + body portal → ZERO flow height: opening it
+ * never reflows the VSM, the tree rail, or the page (GEO-S014-2-1/2/3). The
+ * fixed width + inset guarantee right+width ≤ viewport — no horizontal scroll
+ * (GEO-S014-2-4). z-index is --z-drawer + 1 so when a DetailPane is also open
+ * the SteerPanel is the topmost drawer (ui-design coexistence note).
+ *
+ * No scrim, no focus trap — the dashboard stays readable behind the drawer.
+ * Reduced motion: the slide-in is gated behind prefers-reduced-motion:
+ * no-preference, so under `reduce` it appears instantly (S14-2-A11Y-6).
+ * Token-based throughout; no off-token values. */
+
+.steer-panel {
+  position: fixed;
+  top: var(--drawer-inset);
+  right: var(--drawer-inset);
+  bottom: var(--drawer-inset);
+  width: var(--drawer-width);
+  max-height: calc(100vh - 2 * var(--drawer-inset));
+  overflow: auto;
+  z-index: calc(var(--z-drawer) + 1); /* topmost drawer over a co-open DetailPane */
+  background: var(--c-surface-raised);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-box);
+  padding: var(--sp-4);
+  color: var(--c-text);
+  box-shadow: var(--drawer-elev);
+}
+
+/* Slide-in only when the user has not asked to reduce motion (S14-2-A11Y-6). */
+@media (prefers-reduced-motion: no-preference) {
+  .steer-panel {
+    animation: steer-panel-slide-in var(--dur-drawer) ease-out;
+  }
+
+  @keyframes steer-panel-slide-in {
+    from {
+      transform: translateX(16px);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .steer-panel {
+    animation: none; /* instant appearance under reduce */
+    transition: none;
+  }
+}
+
+.steer-panel__head {
+  border-bottom: 1px solid var(--c-border);
+  padding-bottom: var(--sp-2);
+  margin-bottom: var(--sp-3);
+  /* leave room for the CSS-positioned × (last-in-DOM, visually top-right) */
+  padding-right: calc(var(--target-min) + var(--sp-2));
+}
+
+.steer-panel__h {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.steer-panel__h:focus-visible,
+.steer-panel__h:focus {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-badge);
+}
+
+/* The chosen steering action, as its HUMAN label (S14-2-FIG-1). */
+.steer-panel__sub {
+  margin: var(--sp-1) 0 0;
+  color: var(--c-text-dim);
+  font-size: 0.85rem;
+}
+
+/* × — LAST in DOM (keyboard order), top-right visually. */
+.steer-panel__close {
+  position: absolute;
+  top: var(--sp-4);
+  right: var(--sp-4);
+  background: none;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-badge);
+  color: var(--c-text);
+  font-size: 1.2rem;
+  line-height: 1;
+  min-width: var(--target-min);
+  min-height: var(--target-min);
+  cursor: pointer;
+}
+
+/* Context block: ONE labelled pair per row — dd column shares its left edge,
+ * row tops strictly increase (GEO-S014-2-4 stacked-list guard; A11Y-7). */
+.steer-context {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--sp-2) var(--sp-4);
+  align-items: baseline;
+  margin: 0 0 var(--sp-4);
+}
+
+.steer-context dt {
+  color: var(--c-text-dim);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.steer-context dd {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.steer-panel__placeholder {
+  margin: 0 0 var(--sp-4);
+  color: var(--c-text-dim);
+  font-style: italic;
+}
+
+.steer-panel__intent {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-3);
+}
+
+.steer-panel__intent-label {
+  color: var(--c-text-dim);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.intent-note {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-badge);
+  color: var(--c-text);
+  font: inherit;
+  font-size: 0.9rem;
+  padding: var(--sp-2);
+  min-height: calc(3 * var(--target-min));
+  resize: vertical;
+}
+
+.intent-note:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.intent-note:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.steer-panel__actions {
+  display: flex;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+
+.steer-generate,
+.steer-cancel {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-badge);
+  color: var(--c-text);
+  padding: var(--sp-1) var(--sp-3);
+  min-height: var(--target-min);
+  min-width: var(--target-min);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.steer-generate {
+  border-color: var(--c-source-link);
+  font-weight: 600;
+}
+
+/* Guarded state: aria-disabled — NON-COLOUR cues (inset shadow + flat cursor +
+ * dimming), the control stays in the a11y tree (S14-2-A11Y-3). */
+.steer-generate[aria-disabled='true'] {
+  border-color: var(--c-border);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
+  opacity: 0.55;
+  cursor: not-allowed;
+  font-weight: 400;
+}
+
+.steer-generate:focus-visible,
+.steer-cancel:focus-visible,
+.steer-panel__close:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* keep the guarded inset visible even when focused (both cues, layered) */
+.steer-generate[aria-disabled='true']:focus-visible {
+  box-shadow: var(--focus-ring), inset 0 1px 3px rgba(0, 0, 0, 0.4);
+}

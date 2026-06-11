@@ -41,12 +41,16 @@ import { DefectsPanelContainer } from './DefectsPanel.jsx';
  * @param {() => Promise<string|null>} [props.loadActiveProject]
  * @param {(project:string)=>Promise<string[]|null>} [props.loadSlices]
  * @param {(project:string, slug:string, artifact:string)=>Promise<string|null>} [props.loadArtifact]
+ * @param {object} [props.wipLoaders] UC-S015-2: injectable useWipItems loaders
+ *   ({loadActive,loadFlow,loadItems,subscribe}) for tests; omitted in prod →
+ *   the WipPanelContainer uses its real API defaults.
  */
 export function ObservatoryView({
   loadItems,
   loadActiveProject = getActive,
   loadSlices,
   loadArtifact,
+  wipLoaders,
 }) {
   const [items, setItems] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
@@ -156,7 +160,12 @@ export function ObservatoryView({
           aria-labelledby="view-tab-wip"
           hidden={view !== 'wip'}
         >
-          {view === 'wip' ? <WipPanelContainer /> : null}
+          {/* UC-S015-2: the SAME onSteer the tree rows and VSM chips use is
+              threaded to the WIP rows — every action (incl. re-slice, until
+              UC-S015-3 re-points that one branch) opens the SteerPanel below. */}
+          {view === 'wip' ? (
+            <WipPanelContainer onSteer={onSteer} {...(wipLoaders || {})} />
+          ) : null}
         </div>
         {/* UC-S013-2: the Defects routed view — same hidden-AND-empty tabpanel
             discipline (GEO-S013-2-1: the inactive view is genuinely unmounted,

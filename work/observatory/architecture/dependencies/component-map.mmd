@@ -188,25 +188,6 @@ graph LR
   DefectsPanel --> DefectsViewScreen
   DefectRow --> DefectsPanel
 
-  %% s013 / UC-S013-2: Defects view — THIRD ROUTED VIEW in the main column.
-  %% ViewSwitch (s015, EXTENDED — no fork: the TABS table grew to three; the
-  %% active/onSelect contract is unchanged) now fans out to THREE view screens.
-  %% DefectsPanel lists the /defects records grouped CONFIRMED-first then CLOSED
-  %% (grouping/sort in useDefects — the panel is pure render); same hidden-AND-
-  %% empty tabpanel discipline as the WIP view (GEO-S013-2-1: lossless switch).
-  %% NOTE for tester: DefectRow carries data-defect-id (NOT data-item-id — that
-  %% stays the tree/WIP unique contract) — the slot UC-S013-3's drill composes
-  %% against. Open row cue = "OPEN" text + ⚠ glyph + --c-state-over band (never
-  %% colour alone); ledger-only null severity renders "—"; open MTTR renders
-  %% "open", never "0". Heading focus is a LAYOUT effect (sha 0c2b49c idiom —
-  %% deterministic on mount, never racing a re-render).
-  DefectsViewScreen["Surface: Defects view (s013 / UC-S013-2) — main-column routed view (tabpanel)"]
-  DefectsPanel["DefectsPanel (s013 / UC-S013-2: grouped defects list — open leads; polite live-region count; labelled empty state)"]
-  DefectRow["DefectRow (s013 / UC-S013-2: one defect; dl figures id/title/status/severity/MTTR; data-defect-id slot)"]
-  ViewSwitch --> DefectsViewScreen
-  DefectsPanel --> DefectsViewScreen
-  DefectRow --> DefectsPanel
-
   classDef delivered fill:#d5f5e3,stroke:#1e8449,color:#000;
   %% CHK-3 (s003) DROPPED — scope absorbed into CHK-2 restated done-condition (s004 delivered).
   %% s004 DELIVERED 2026-06-10T11:00:00Z — CHK-2 done-condition MET.
@@ -237,13 +218,6 @@ graph LR
   %% (decompose→staging→ready connectors); cleared at delivery after the tester consumes.
   classDef def012changed fill:#fdd,stroke:#c0392b,color:#000;
   class StagingQueueBox,ValueStreamMap def012changed;
-  %% s013 / UC-S013-2 — DefectsViewScreen/DefectsPanel/DefectRow added THIS commit;
-  %% ViewSwitch EXTENDED to three tabs in the same commit (it keeps its s015changed
-  %% mark — s015 is still in flight — but it IS in the s013 blast radius too: the
-  %% ViewSwitch --> DefectsViewScreen edge above is s013's). Tester UI test-plan
-  %% input; cleared at s013 delivery after the tester consumes.
-  classDef s013changed fill:#fff3bf,stroke:#b7791f,color:#000;
-  class DefectsViewScreen,DefectsPanel,DefectRow s013changed;
   %% s013 / UC-S013-2 — DefectsViewScreen/DefectsPanel/DefectRow added THIS commit;
   %% ViewSwitch EXTENDED to three tabs in the same commit (it keeps its s015changed
   %% mark — s015 is still in flight — but it IS in the s013 blast radius too: the

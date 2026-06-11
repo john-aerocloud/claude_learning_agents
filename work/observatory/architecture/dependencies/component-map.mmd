@@ -110,6 +110,27 @@ graph LR
   IntentNote --> SteerPanel
   SteerPanel --> ObservatoryDrawerLayer
 
+  %% s014 / UC-S014-3 THIS commit: promptBuilder (NEW) — PURE lib fn (steer
+  %% action type + SteerContext + intent note → filled slash-command prompt;
+  %% client-side only, NO server call on Generate). Templates are STATIC
+  %% strings, one per action type, shapes matching the committed
+  %% .claude/commands (/defect's four REAL fields expected/actual/intent/
+  %% importance; /intake priority update; /slice-next re-slice; freeform
+  %% custom). RUNTIME ROUTING for the tester: SteerPanelContainer (NOT
+  %% ObservatoryView — untouched this UC) owns generation — panel onGenerate →
+  %% buildPrompt → `prompt` prop → PromptOutput <pre> rendered INSIDE the
+  %% UC-S014-2 reserved slot (prompt-output-slot). Output is SELECTABLE text
+  %% (user-select: text); prompt carries item id WITH job sentence + operator
+  %% intent VERBATIM, never raw row refs (no sourceRef path / row:N). Copy
+  %% button/toast + SSE refresh are UC-S014-4 — pinned ABSENT by
+  %% SteerPanelPrompt.test.jsx.
+  PromptBuilder["promptBuilder (s014 / UC-S014-3: pure lib fn — all tokens resolved, — for unknowns, intent verbatim)"]
+  SteerPromptTemplates["templates/steer-prompts (s014 / UC-S014-3: one static template per action type, .claude/commands shapes)"]
+  PromptOutput["PromptOutput (s014 / UC-S014-3: read-only selectable pre in the SteerPanel output slot)"]
+  PromptBuilder --> SteerPanel
+  SteerPromptTemplates --> PromptBuilder
+  PromptOutput --> SteerPanel
+
   %% s015 / UC-S015-1: WIP navigation panel — ROUTED VIEW (EXP-016). ObservatoryView's
   %% main column gains a ViewSwitch tablist ("Pipeline" | "In-flight WIP") that swaps
   %% the column content between VsmContainer (default) and WipPanel. The two surfaces
@@ -128,6 +149,15 @@ graph LR
   WipPanel --> WipViewScreen
   WipRow --> WipPanel
 
+  %% s015 / UC-S015-2 THIS commit: SteerMenu composed READ-ONLY into WipRow as the
+  %% trailing row element (the TreeNode/StageNode idiom; trigger rides
+  %% data-steer-item-id, the row keeps data-item-id unique). RUNTIME ROUTING for
+  %% the tester: onSteer threads ObservatoryView→WipPanelContainer→WipPanel→
+  %% WipRow→SteerMenu; ALL FOUR actions (incl. re-slice — explicit no-dead-end,
+  %% interim until UC-S015-3 re-points that one branch) open the EXISTING
+  %% SteerPanel with the item pre-loaded; close returns focus to the WIP-row trigger.
+  SteerMenu --> WipRow
+
   %% DEFECT-012: StagingQueueBox (NEW) — the staging buffer ("decomposed,
   %% awaiting triage") rendered INSIDE ValueStreamMap's queue lane BETWEEN the
   %% Decompose and Ready stage nodes, wrapped with two MiniArrows in the
@@ -138,6 +168,25 @@ graph LR
   %% staging-buffer (NOT stage-*); depth 0 renders an explicit drained state.
   StagingQueueBox["StagingQueueBox (DEFECT-012: staging buffer between Decompose and Ready; depth + id/job rows; drained empty state)"]
   StagingQueueBox --> ValueStreamMap
+
+  %% s013 / UC-S013-2: Defects view — THIRD ROUTED VIEW in the main column.
+  %% ViewSwitch (s015, EXTENDED — no fork: the TABS table grew to three; the
+  %% active/onSelect contract is unchanged) now fans out to THREE view screens.
+  %% DefectsPanel lists the /defects records grouped CONFIRMED-first then CLOSED
+  %% (grouping/sort in useDefects — the panel is pure render); same hidden-AND-
+  %% empty tabpanel discipline as the WIP view (GEO-S013-2-1: lossless switch).
+  %% NOTE for tester: DefectRow carries data-defect-id (NOT data-item-id — that
+  %% stays the tree/WIP unique contract) — the slot UC-S013-3's drill composes
+  %% against. Open row cue = "OPEN" text + ⚠ glyph + --c-state-over band (never
+  %% colour alone); ledger-only null severity renders "—"; open MTTR renders
+  %% "open", never "0". Heading focus is a LAYOUT effect (sha 0c2b49c idiom —
+  %% deterministic on mount, never racing a re-render).
+  DefectsViewScreen["Surface: Defects view (s013 / UC-S013-2) — main-column routed view (tabpanel)"]
+  DefectsPanel["DefectsPanel (s013 / UC-S013-2: grouped defects list — open leads; polite live-region count; labelled empty state)"]
+  DefectRow["DefectRow (s013 / UC-S013-2: one defect; dl figures id/title/status/severity/MTTR; data-defect-id slot)"]
+  ViewSwitch --> DefectsViewScreen
+  DefectsPanel --> DefectsViewScreen
+  DefectRow --> DefectsPanel
 
   classDef delivered fill:#d5f5e3,stroke:#1e8449,color:#000;
   %% CHK-3 (s003) DROPPED — scope absorbed into CHK-2 restated done-condition (s004 delivered).
@@ -153,13 +202,26 @@ graph LR
   %% WorkItemTreeContainer carry the pass-through). Tester UI test-plan input.
   %% Convention: s014changed cleared only at full s014 slice delivery after tester final sign-off.
   classDef s014changed fill:#fff3cd,stroke:#b8860b,color:#000;
-  class SteerMenu,TreeNode,StageNode,SteerPanel,SteerContextBlock,IntentNote,UseSteerContext s014changed;
-  %% s015 / UC-S015-1 nodes added THIS commit + VsmContainer re-pointed (conditional
-  %% mount inside the pipeline tabpanel) — tester UI test-plan input; cleared at
-  %% s015 delivery after the tester consumes.
+  %% UC-S014-3 THIS commit: PromptBuilder/SteerPromptTemplates/PromptOutput added;
+  %% SteerPanel + its container gained the prompt prop + generation wiring
+  %% (ObservatoryView untouched). Tester UI test-plan input.
+  class SteerMenu,TreeNode,StageNode,SteerPanel,SteerContextBlock,IntentNote,UseSteerContext,PromptBuilder,SteerPromptTemplates,PromptOutput s014changed;
+  %% s015 / UC-S015-1 nodes added + VsmContainer re-pointed (conditional
+  %% mount inside the pipeline tabpanel); UC-S015-2 adds the SteerMenu --> WipRow
+  %% edge (trailing steer composition; SteerMenu joins the s015 blast radius —
+  %% it keeps its s014changed mark, s014 still in flight, but the WipRow hosting
+  %% edge is s015's). Tester UI test-plan input; cleared at s015 delivery after
+  %% the tester consumes.
   classDef s015changed fill:#ffe0b3,stroke:#cc6600,color:#000;
-  class WipViewScreen,ViewSwitch,WipPanel,WipRow,VsmContainer s015changed;
+  class WipViewScreen,ViewSwitch,WipPanel,WipRow,VsmContainer,SteerMenu s015changed;
   %% DEFECT-012 — StagingQueueBox added + ValueStreamMap queue lane re-routed
   %% (decompose→staging→ready connectors); cleared at delivery after the tester consumes.
   classDef def012changed fill:#fdd,stroke:#c0392b,color:#000;
   class StagingQueueBox,ValueStreamMap def012changed;
+  %% s013 / UC-S013-2 — DefectsViewScreen/DefectsPanel/DefectRow added THIS commit;
+  %% ViewSwitch EXTENDED to three tabs in the same commit (it keeps its s015changed
+  %% mark — s015 is still in flight — but it IS in the s013 blast radius too: the
+  %% ViewSwitch --> DefectsViewScreen edge above is s013's). Tester UI test-plan
+  %% input; cleared at s013 delivery after the tester consumes.
+  classDef s013changed fill:#fff3bf,stroke:#b7791f,color:#000;
+  class DefectsViewScreen,DefectsPanel,DefectRow s013changed;

@@ -74,7 +74,18 @@
   border-radius: var(--radius-badge);
 }
 
+/* UC-S015-2 / GEO-S015-2-WIP-2: ONE flex band — figures take the slack, the
+ * steer trigger sits at the trailing edge (.steer's margin-left:auto idiom).
+ * The dd top band (GEO-S015-4) is untouched: the dl keeps its own layout. */
+.wip-row__body {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+}
+
 .wip-row__figures {
+  flex: 1 1 auto;
+  min-width: 0;
   margin: 0;
   display: flex;
   flex-wrap: nowrap; /* GEO-S015-4: one scannable line of figures at desktop */

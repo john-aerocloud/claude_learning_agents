@@ -14,14 +14,21 @@
 // number/reference is announced bare; dwell carries a unit; unknown renders "—"
 // (never "0 s"); zero WIP renders the labelled empty state, never a blank.
 //
-// COMPOSITION HOOK: each row carries data-item-id (the live id) — the slot
-// UC-S015-2's SteerMenu composes against. No steer affordance here.
+// COMPOSITION HOOK (UC-S015-2): each row carries data-item-id (the live id)
+// and hosts the DELIVERED s014 SteerMenu as the TRAILING element of the row
+// content (the TreeNode/StageNode idiom) — the trigger rides
+// data-steer-item-id, NEVER data-item-id (the row's unique strict-mode
+// contract). onSteer is a PASS-THROUGH prop threaded
+// WipPanelContainer → WipPanel → WipRow → SteerMenu; the dispatch itself
+// (all four actions → SteerPanel, until UC-S015-3 re-points re-slice) lives in
+// ObservatoryView — no routing logic here.
 import { useEffect, useRef } from 'preact/hooks';
 import { useWipItems, formatHorizon, WIP_SOURCE_REF } from '../hooks/useWipItems.js';
+import { SteerMenu } from './SteerMenu.jsx';
 import './wip-panel.css';
 
-/** One in-flight item row (UC-S015-1 — presentational). */
-export function WipRow({ item, horizonMs }) {
+/** One in-flight item row (UC-S015-1 list; UC-S015-2 trailing steer affordance). */
+export function WipRow({ item, horizonMs, onSteer }) {
   const { id, job, stage, stageLabel, value, cost, dwellText, isStale } = item;
   const horizonText = formatHorizon(horizonMs);
   const accessibleName =
@@ -41,6 +48,10 @@ export function WipRow({ item, horizonMs }) {
           <span aria-hidden="true">⏳</span> stale — over {horizonText}
         </span>
       ) : null}
+      {/* UC-S015-2 / GEO-S015-2-WIP-2: the figures + the trailing steer
+          affordance share ONE flex band — "figures … steer", the trigger at
+          the trailing edge, never interrupting the scannable figure line. */}
+      <div class="wip-row__body">
       <dl class="wip-row__figures">
         <div class="wip-row__figure">
           <dt>item</dt>
@@ -67,6 +78,11 @@ export function WipRow({ item, horizonMs }) {
           <dd data-testid="wip-dwell">{dwellText}</dd>
         </div>
       </dl>
+      {/* UC-S015-2: the delivered s014 SteerMenu, read-only reuse — portalled
+          fixed popover (zero flow height, GEO-S015-2-WIP-1); accessible name
+          carries the HUMAN reference id + job (S15-2-FIG-1). */}
+      <SteerMenu itemId={id} itemLabel={job} onSteer={onSteer} />
+      </div>
     </li>
   );
 }
@@ -78,8 +94,9 @@ export function WipRow({ item, horizonMs }) {
  * @param {'loading'|'ready'|'empty'} props.status
  * @param {number|null} props.horizonMs  live recency horizon (S15-1-WIP-1)
  * @param {string} [props.sourceRef]
+ * @param {(itemId:string, actionType:string)=>void} [props.onSteer]  UC-S015-2 pass-through
  */
-export function WipPanel({ items = [], status = 'loading', horizonMs = null, sourceRef = WIP_SOURCE_REF }) {
+export function WipPanel({ items = [], status = 'loading', horizonMs = null, sourceRef = WIP_SOURCE_REF, onSteer }) {
   // S15-1-A11Y-2: switching to the WIP view lands the reader in the panel —
   // the heading takes focus on mount (the panel only mounts on view switch;
   // SSE refreshes update props, they do not remount, so focus is not stolen).
@@ -116,7 +133,7 @@ export function WipPanel({ items = [], status = 'loading', horizonMs = null, sou
       {count > 0 ? (
         <ul role="list" class="wip-panel__list" data-testid="wip-list">
           {items.map((item) => (
-            <WipRow key={`${item.stage}:${item.id}`} item={item} horizonMs={horizonMs} />
+            <WipRow key={`${item.stage}:${item.id}`} item={item} horizonMs={horizonMs} onSteer={onSteer} />
           ))}
         </ul>
       ) : null}
@@ -127,15 +144,17 @@ export function WipPanel({ items = [], status = 'loading', horizonMs = null, sou
 /**
  * Data→render container: useWipItems → WipPanel. Loaders/subscribe injectable
  * for tests; defaults are the real API adapter (api/client.js).
+ * onSteer (UC-S015-2) is render wiring, not a hook option — split it off.
  */
-export function WipPanelContainer(props) {
-  const state = useWipItems(props);
+export function WipPanelContainer({ onSteer, ...hookOpts }) {
+  const state = useWipItems(hookOpts);
   return (
     <WipPanel
       items={state.items}
       status={state.status}
       horizonMs={state.horizonMs}
       sourceRef={state.sourceRef}
+      onSteer={onSteer}
     />
   );
 }

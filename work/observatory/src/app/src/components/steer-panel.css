@@ -209,3 +209,37 @@
 .steer-generate[aria-disabled='true']:focus-visible {
   box-shadow: var(--focus-ring), inset 0 1px 3px rgba(0, 0, 0, 0.4);
 }
+
+/* ---- UC-S014-3: generated prompt output ------------------------------- */
+/* A read-only, SELECTABLE <pre> in the reserved output slot: the operator
+   reviews then selects/copies the text themselves (one-click copy is
+   UC-S014-4). user-select: text is explicit so no ancestor rule can ever
+   make the handoff text unselectable; whitespace is preserved exactly —
+   the rendered bytes ARE the prompt that gets pasted to Claude. */
+.steer-panel__output-slot {
+  margin-top: var(--sp-3, 12px);
+}
+
+.prompt-output {
+  margin: 0;
+  padding: var(--sp-3, 12px);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-box);
+  color: var(--c-text);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.85rem;
+  line-height: 1.45;
+  white-space: pre-wrap;       /* wrap long intent lines, keep line structure */
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+  max-height: 40vh;            /* long prompts scroll inside the drawer */
+  overflow-y: auto;
+}
+
+.prompt-output:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}

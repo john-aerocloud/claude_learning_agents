@@ -35,6 +35,7 @@ import { useState, useLayoutEffect, useRef, useId } from 'preact/hooks';
 import { createPortal } from 'preact/compat';
 import { STEER_ACTIONS } from './SteerMenu.jsx';
 import { useSteerContext } from '../hooks/useSteerContext.js';
+import { buildPrompt } from '../lib/promptBuilder.js';
 import './steer-panel.css';
 
 /** Human label for a steer action type — NEVER the enum value (S14-2-FIG-1). */
@@ -56,8 +57,9 @@ function dash(v) {
  * @param {object|null} props.context - SteerContext from useSteerContext
  * @param {() => void} props.onCancel
  * @param {(intentNote:string, seam:{itemId:string,actionType:string,context:object|null}) => void} [props.onGenerate]
+ * @param {string|null} [props.prompt] - UC-S014-3: the generated prompt to render in the output slot
  */
-export function SteerPanel({ itemId, actionType, status, context, onCancel, onGenerate }) {
+export function SteerPanel({ itemId, actionType, status, context, onCancel, onGenerate, prompt = null }) {
   const [note, setNote] = useState('');
   const headingRef = useRef(null);
   const returnFocusRef = useRef(null);
@@ -210,9 +212,22 @@ export function SteerPanel({ itemId, actionType, status, context, onCancel, onGe
         </button>
       </div>
 
-      {/* PROMPT OUTPUT SLOT — UC-S014-3 renders the generated prompt here
-          (data-testid="prompt-output"); deliberately empty in UC-S014-2. */}
-      <div class="steer-panel__output-slot" data-testid="prompt-output-slot" />
+      {/* PROMPT OUTPUT SLOT (UC-S014-3) — the generated, copy-ready prompt.
+          A <pre>: read-only, whitespace-exact, SELECTABLE text (user-select:
+          text in steer-panel.css) so the operator can select+copy manually;
+          the one-click copy button is UC-S014-4, deliberately absent here. */}
+      <div class="steer-panel__output-slot" data-testid="prompt-output-slot">
+        {typeof prompt === 'string' && prompt.length > 0 ? (
+          <pre
+            class="prompt-output"
+            data-testid="prompt-output"
+            aria-label="Generated prompt"
+            tabindex="0"
+          >
+            {prompt}
+          </pre>
+        ) : null}
+      </div>
 
       {/* × is LAST in DOM (keyboard path: textarea → Generate → Cancel → ×)
           but CSS-positioned top-right in the header (S14-2-A11Y-1). */}
@@ -235,6 +250,12 @@ export function SteerPanel({ itemId, actionType, status, context, onCancel, onGe
 /**
  * SteerPanelContainer — the thin wiring seam ObservatoryView mounts: resolves
  * the item context via useSteerContext and renders the pure SteerPanel.
+ *
+ * UC-S014-3: the container OWNS prompt generation — on the panel's onGenerate
+ * it calls the pure buildPrompt (client-side only, no server request) and
+ * passes the result back down as the `prompt` prop, so ObservatoryView needs
+ * no change. A caller-supplied onGenerate still fires (UC-S014-2 contract
+ * preserved — UC-S014-4's copy/SSE work can observe generation).
  * @param {object} props
  * @param {string} props.itemId
  * @param {string} props.actionType
@@ -247,6 +268,11 @@ export function SteerPanelContainer({ itemId, actionType, project = null, loadIt
   const opts = { project };
   if (loadItems) opts.loadItems = loadItems;
   const { status, context } = useSteerContext(itemId, opts);
+  const [prompt, setPrompt] = useState(null);
+  const handleGenerate = (intentNote, seam) => {
+    setPrompt(buildPrompt(seam.actionType, seam.context, intentNote));
+    if (typeof onGenerate === 'function') onGenerate(intentNote, seam);
+  };
   return (
     <SteerPanel
       itemId={itemId}
@@ -254,7 +280,8 @@ export function SteerPanelContainer({ itemId, actionType, project = null, loadIt
       status={status}
       context={context}
       onCancel={onCancel}
-      onGenerate={onGenerate}
+      onGenerate={handleGenerate}
+      prompt={prompt}
     />
   );
 }

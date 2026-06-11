@@ -31,7 +31,7 @@
 // error ("Could not load item context — try again"). Not-found/error hide the
 // textarea + Generate; Cancel/× always available.
 
-import { useState, useEffect, useRef, useId } from 'preact/hooks';
+import { useState, useLayoutEffect, useRef, useId } from 'preact/hooks';
 import { createPortal } from 'preact/compat';
 import { STEER_ACTIONS } from './SteerMenu.jsx';
 import { useSteerContext } from '../hooks/useSteerContext.js';
@@ -68,7 +68,14 @@ export function SteerPanel({ itemId, actionType, status, context, onCancel, onGe
   // Managed focus (S14-2-A11Y-2): capture the opener (the SteerMenu trigger —
   // it re-focused itself when the menu closed), move focus to the heading on
   // open, and RETURN focus to the opener on unmount.
-  useEffect(() => {
+  // useLAYOUTEffect, not useEffect (UC-S014-2 rework, WCAG 2.4.3): a deferred
+  // post-paint effect leaves a frame where focus is still on the steer trigger
+  // (close(true) focused it synchronously in the click handler) — the ~50%
+  // intermittent S14-2-A11Y-2 failure. Layout effects run synchronously with
+  // the mount commit, so the heading is focused before anything can observe
+  // the panel — deterministic in every execution order. Pinned by the
+  // raw-render unit spec in SteerPanel.test.jsx.
+  useLayoutEffect(() => {
     returnFocusRef.current =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (headingRef.current) headingRef.current.focus();

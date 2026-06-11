@@ -17,6 +17,7 @@
 //   - focus: heading focused on open; focus returns to the opener on unmount
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/preact';
+import { render as preactRender } from 'preact';
 import { SteerPanel } from '../SteerPanel.jsx';
 
 const CTX = {
@@ -55,6 +56,28 @@ describe('SteerPanel (UC-S014-2) — dialog contract', () => {
     render(<SteerPanel {...baseProps()} />);
     await waitFor(() =>
       expect(document.activeElement).toBe(screen.getByTestId('steer-panel-heading')));
+  });
+
+  // REWORK UC-S014-2 (tester defect, S14-2-A11Y-2 / WCAG 2.4.3): the heading
+  // focus must be SYNCHRONOUS with the mount commit. A deferred (post-paint
+  // rAF) useEffect leaves a window where activeElement is still the SteerMenu
+  // trigger — the ~50% prod flake. Testing-library's act() force-flushes
+  // deferred effects and hides exactly this window, so mount with Preact's RAW
+  // render (real scheduling) and sample IMMEDIATELY after commit — no waitFor.
+  it('focuses the heading synchronously at mount — never a frame where the opener keeps focus', () => {
+    const opener = document.createElement('button');
+    opener.setAttribute('data-testid', 'opener-trigger');
+    document.body.appendChild(opener);
+    opener.focus();
+    const host = document.body.appendChild(document.createElement('div'));
+    try {
+      preactRender(<SteerPanel {...baseProps()} />, host); // commit + layout effects, rAF effects NOT flushed
+      expect(document.activeElement).toBe(screen.getByTestId('steer-panel-heading'));
+    } finally {
+      preactRender(null, host);
+      host.remove();
+      opener.remove();
+    }
   });
 
   it('returns focus to the element that was focused when it opened (unmount)', async () => {

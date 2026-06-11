@@ -153,7 +153,16 @@ test('S14-2-A11Y-1/2 — keyboard-only: open → focus heading → Tab order tex
     inPanel: !!document.activeElement?.closest('[data-testid="steer-panel"]'),
   }));
 
-  // focus moved INTO the panel — to the heading (S14-2-A11Y-2)
+  // focus moved INTO the panel — to the heading (S14-2-A11Y-2). Sampled
+  // IMMEDIATELY (still loading): the heading focus is synchronous with mount
+  // (useLayoutEffect — UC-S014-2 rework), so there is no frame where the
+  // steer trigger keeps focus.
+  expect((await active()).testid).toBe('steer-panel-heading');
+
+  // Tab order (S14-2-A11Y-1) is the READY panel's contract — while loading the
+  // textarea is disabled (not focusable) and Tab would legitimately skip it.
+  await expect(page.getByTestId('steer-context')).toBeVisible();
+  // …and the loading→ready re-render must NOT have stolen focus off the heading
   expect((await active()).testid).toBe('steer-panel-heading');
 
   await page.keyboard.press('Tab');

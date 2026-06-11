@@ -179,6 +179,19 @@ export async function getSliceArtifact(project, slug, artifact) {
 }
 
 /**
+ * GET /api/projects/:id/defects → DefectRecord[] (UC-S013-1 route:
+ * {id,title,status,severity,reported_ts,recovered_ts,mttr_s,mttr_units,...}),
+ * or null when missing/unreachable. Returns the ARRAY DIRECTLY (no envelope),
+ * like /items. UC-S013-2's useDefects composes these records into the grouped
+ * defects-list view-model. Project segment is URL-encoded. Fail-soft to null.
+ * @param {string} project
+ * @returns {Promise<Array|null>}
+ */
+export async function getDefects(project) {
+  return getJson(`/api/projects/${encodeURIComponent(project)}/defects`);
+}
+
+/**
  * Open the SSE channel (GET /api/events) and forward each `change` frame to
  * `onChange({ type, path })`. Returns an unsubscribe that closes the
  * EventSource. EventSource reconnects natively on drop; an unparseable frame is

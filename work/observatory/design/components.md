@@ -517,3 +517,67 @@ convention, LiveStatusDot, the existing SSE channel, `--focus-ring`,
   crumb; each crumb keyboard-operable (Tab+Enter — AC-S005-6-4); `▸` aria-hidden.
   Back-to-map returns focus to the map.
 - **Library:** custom. Specialises the SourceLink text+glyph affordance style.
+
+---
+
+# CHK-8 (s013) components — defects view
+
+UC-S013-2. Reuses: the `ViewSwitch` tablist (s015, EXTENDED to a third "Defects"
+tab — routed view, no overlay/reflow), the WipPanel/WipRow `<dl>` figure layout +
+heading-focus + count-live-region idiom, the WipRow stale-badge idiom (re-skinned
+as the open badge), the §8 redundant state-encoding rule, the `data-source`
+SourceLink convention, the tree DEF glyph "⚠", and tree-state/space/spacing tokens.
+**No new design tokens.** See `slices/s013-defects-view/ui-design.md`.
+
+## ViewSwitch  (EXTENDED s013 / UC-S013-2 — third tab)
+- **Change:** the s015 two-tab tablist gains a third tab "Defects"
+  (`data-view="defects"`, `data-testid="view-tab-defects"`, `aria-controls=
+  "view-panel-defects"`). `active`/`onSelect` contract unchanged; `active` now
+  ranges `pipeline|wip|defects`. Roving tabindex cycles THREE tabs.
+- **A11y (S13-2-A11Y-1):** Arrow/Home/End cycle all three; `aria-selected` reflects
+  the active view; tab name "Defects". Selected = aria + underline band + colour
+  (never colour alone). Hit box ≥ `--target-min`.
+- **Library:** custom (no fork — extend the existing component).
+
+## DefectsPanel  (s013 / UC-S013-2)
+- **Role:** the Defects view-region; lists every defect GROUPED open-first
+  (CONFIRMED) then CLOSED, each group id-ascending.
+- **Props:** `{ defects: DefectRow[]; status: "loading"|"ready"|"empty"; openCount;
+  sourceRef }` (grouping/sort/MTTR-humanisation in `useDefects.js`; panel is pure
+  render; `DefectsPanelContainer` is the hook→panel wiring).
+- **States:** default (two groups) · empty ("No defects recorded") · loading
+  (region + heading immediate) · live (SSE — UC-S013-4 slot).
+- **Selector:** `getByRole('region', { name: 'Defects' })`, `data-testid=
+  "defects-panel"` (+ `data-source`); visible `<h2>` "Defects" (takes focus on
+  mount — reuses WipPanel heading-focus); count line `data-testid="defects-count"`
+  `role="status"` `aria-live="polite"` ("N defects, M open"); group headings `<h3>`
+  `data-testid="defects-group-open"` ("Open — needs attention", present iff ≥1
+  CONFIRMED) / `defects-group-closed` ("Closed"); per-group row list `role="list"`.
+- **A11y/geometry (S13-2-A11Y-2/6, GEO-S013-2-1/4):** one `<h2>` under page `<h1>`,
+  `<h3>` group headings (no skipped levels); lossless view-switch (VSM unmounted,
+  bbox identical before→Defects→back); open group leads geometrically.
+- **Library:** custom (reuses WipPanel idiom).
+
+## DefectRow  (s013 / UC-S013-2 — one defect; child of DefectsPanel)
+- **Role:** one scannable line of labelled figures: id · title (sentence) · status
+  badge · severity badge · MTTR (unit-bearing or "open"). Mirrors WipRow `<dl>`.
+- **Props:** `{ defect: DefectRow }`.
+- **States:** default (CLOSED) · open (CONFIRMED — leads, distinct cue) · hover ·
+  focus-visible (clickable in UC-S013-3) · severity-unknown (null → "—").
+- **Selector:** `role="listitem"`, `data-testid="defect-row"`, **`data-defect-id`**
+  (the UC-S013-3 drill hook — DEDICATED attr, NOT `data-item-id`, which is the
+  tree/WIP unique contract — same lesson as s014's `data-steer-item-id`);
+  `data-status="CONFIRMED|CLOSED"`, `data-open`, `data-severity`. Figures are
+  `<dt>`/`<dd>` pairs (`defect-id|defect-title|defect-status|defect-severity|
+  defect-mttr`); status badge `defect-status-badge`, severity badge
+  `defect-severity-badge`. Accessible name carries id+title+status+severity+MTTR.
+- **Open cue (REUSES §8 + WipRow stale idiom, never colour-only):** visible text
+  "OPEN" (CONFIRMED→operator's word; authoritative) + `⚠` glyph (`aria-hidden`,
+  the tree DEF glyph) + `--c-state-over` left band; CLOSED = "CLOSED" text +
+  done channel + ✓-style glyph. `data-open="true|false"`.
+- **Severity badge (REUSES §8):** text "HIGH/MED-HIGH/MED/LOW" authoritative; null
+  (ledger-only DEFECT-011) renders "—" (unknown ≠ blank ≠ defaulted LOW).
+- **Figure legibility (S13-2-FIG-1..5):** MTTR unit-bearing ("13 min") or "open"
+  (`mttr_s=null`, never "0"); title is a sentence shown WITH the id (never a
+  `row:N` ref); status in the operator's word.
+- **Library:** custom (reuses WipRow figure layout + badge idiom).

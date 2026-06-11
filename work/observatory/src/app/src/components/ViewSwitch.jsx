@@ -1,7 +1,10 @@
-// UC-S015-1 — ViewSwitch: the two-view tablist ("Pipeline" | "In-flight WIP")
-// at the top of the main column. ROUTED-VIEW model (EXP-016): activating a tab
-// swaps the main-column content — the two surfaces never co-exist, so there is
-// no overlay-reflow failure mode by construction.
+// UC-S015-1 — ViewSwitch: the routed-view tablist at the top of the main
+// column. ROUTED-VIEW model (EXP-016): activating a tab swaps the main-column
+// content — the surfaces never co-exist, so there is no overlay-reflow failure
+// mode by construction.
+// UC-S013-2 EXTENDS the tablist to THREE views ("Pipeline" | "In-flight WIP" |
+// "Defects") — reuse, not fork (ui-design.md dispatch directive): the
+// component was already a generic tablist; only the TABS table grew.
 //
 // A11Y (S15-1-A11Y-1/4/5): proper tablist/tab semantics, roving tabindex
 // (active tab is the single tab stop), Arrow/Home/End move focus, Enter/Space
@@ -13,12 +16,13 @@ import './view-switch.css';
 const TABS = [
   { view: 'pipeline', label: 'Pipeline' },
   { view: 'wip', label: 'In-flight WIP' },
+  { view: 'defects', label: 'Defects' },
 ];
 
 /**
  * @param {object} props
- * @param {'pipeline'|'wip'} props.active
- * @param {(view: 'pipeline'|'wip') => void} props.onSelect
+ * @param {'pipeline'|'wip'|'defects'} props.active
+ * @param {(view: 'pipeline'|'wip'|'defects') => void} props.onSelect
  */
 export function ViewSwitch({ active, onSelect }) {
   const tabRefs = {};

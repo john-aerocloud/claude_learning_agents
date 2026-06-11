@@ -33,6 +33,7 @@ import { DetailPaneContainer } from './DetailPaneContainer.jsx';
 import { SteerPanelContainer } from './SteerPanel.jsx';
 import { ViewSwitch } from './ViewSwitch.jsx';
 import { WipPanelContainer } from './WipPanel.jsx';
+import { DefectsPanelContainer } from './DefectsPanel.jsx';
 
 /**
  * @param {object} [props]
@@ -58,9 +59,10 @@ export function ObservatoryView({
   // own focus-return target (the steer trigger) on mount.
   const [steer, setSteer] = useState(null);
   // UC-S015-1: which main-column view is active — 'pipeline' (default; the
-  // at-a-glance home, J1 stays 0-click) or 'wip' (the WIP navigation panel).
-  // ROUTED VIEW (EXP-016): the two surfaces never co-exist — switching unmounts
-  // the other, so there is no overlay-reflow failure mode by construction.
+  // at-a-glance home, J1 stays 0-click), 'wip' (the WIP navigation panel), or
+  // 'defects' (UC-S013-2: the defects list panel).
+  // ROUTED VIEW (EXP-016): the surfaces never co-exist — switching unmounts
+  // the others, so there is no overlay-reflow failure mode by construction.
   const [view, setView] = useState('pipeline');
 
   // Resolve the active project once (the DetailPaneContainer needs it to build
@@ -155,6 +157,17 @@ export function ObservatoryView({
           hidden={view !== 'wip'}
         >
           {view === 'wip' ? <WipPanelContainer /> : null}
+        </div>
+        {/* UC-S013-2: the Defects routed view — same hidden-AND-empty tabpanel
+            discipline (GEO-S013-2-1: the inactive view is genuinely unmounted,
+            never hidden-but-present reflowing). */}
+        <div
+          role="tabpanel"
+          id="view-panel-defects"
+          aria-labelledby="view-tab-defects"
+          hidden={view !== 'defects'}
+        >
+          {view === 'defects' ? <DefectsPanelContainer /> : null}
         </div>
       </div>
       {/* DEFECT-006: the drawer is a SIBLING of the main column (not nested in

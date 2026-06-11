@@ -245,6 +245,28 @@ graph TD
     SPA_WIPPANEL -->|@import| SPA_TOKENS
     SPA_VIEWSWITCH -->|@import| SPA_TOKENS
 
+    %% --- s013 / UC-S013-2 defects list panel (THIRD routed view in the main column) ---
+    %% SPA_VIEWSWITCH EXTENDED this commit (TABS grew to three — reuse, no fork;
+    %% node keeps its s015changed mark, s015 still in flight) and SPA_OBSVIEW
+    %% gained the view-panel-defects tabpanel (hidden AND empty when inactive —
+    %% GEO-S013-2-1 lossless switch, same discipline as the WIP tabpanel).
+    %% The hook reads /defects via the NEW SPA_CLIENT.getDefects (→ R_DEFECTS,
+    %% the UC-S013-1 seam); composeDefects (CONFIRMED group first then CLOSED,
+    %% id-ascending; statusLabel CONFIRMED→"OPEN"; severity null→"—"; isOpen
+    %% WINS over a drifted mttr_s → "open", never "0") + formatMttr ("13 min" |
+    %% "1 h 21 min" | "—"; unknown≠0) are PURE domain. DefectRow carries
+    %% data-defect-id (NOT data-item-id) — UC-S013-3's drill slot. Heading
+    %% focus is a LAYOUT effect (sha 0c2b49c idiom — deterministic on mount).
+    %% SSE re-fetch is UC-S013-4 (the polite count live-region slot is built).
+    SPA_DEFECTSHOOK["src/app/src/hooks/useDefects.js — defects-list data hook + PURE domain (UC-S013-2)<br/>composeDefects(records)->grouped DefectVM[] (open first, id asc; OPEN wins over drifted mttr_s)<br/>formatMttr ('13 min' | '53 s' | '—'; unknown≠0); fail-soft empty on null/malformed"]:::s013changed
+    SPA_DEFECTSPANEL["src/app/src/components/DefectsPanel.jsx — DefectsPanel + DefectRow + DefectsPanelContainer (UC-S013-2)<br/>region 'Defects'; role=status polite count 'N defects, M open'; h3 groups (open leads, absent at 0 open)<br/>dt/dd labelled figures; OPEN badge text+⚠+band; data-defect-id slot (UC-S013-3 drill); heading focus = layout effect"]:::s013changed
+
+    SPA_OBSVIEW -->|"mounts when view=defects (third tabpanel; UC-S013-2)"| SPA_DEFECTSPANEL
+    SPA_DEFECTSPANEL -->|useDefects state| SPA_DEFECTSHOOK
+    SPA_DEFECTSHOOK -->|getActive/getDefects| SPA_CLIENT
+    SPA_CLIENT -.->|"HTTP GET /api/projects/:id/defects (getDefects — NEW adapter fn, UC-S013-2)"| R_DEFECTS
+    SPA_DEFECTSPANEL -->|@import| SPA_TOKENS
+
     MARKED_SDK["marked (npm) — client-side markdown→HTML"]:::stable
     MERMAID_SDK["mermaid (npm) — client-side diagram→SVG"]:::stable
 

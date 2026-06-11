@@ -167,6 +167,47 @@ describe('ValueStreamMap render (UC-S004-2/3/4)', () => {
     expect(document.querySelectorAll('[data-testid^="inflight-"]').length).toBe(0);
   });
 
+  // ── DEFECT-012: the staging buffer between Decompose and Ready ────────────
+  // @covers def-012 @covers StagingQueueBox
+  it('renders the staging buffer box BETWEEN stage-decompose and stage-ready in the queue lane (DEFECT-012)', () => {
+    const staging = {
+      queue: 'staging', depth: 2,
+      rows: [
+        { item_id: 'UC-S015-1', job: 'WIP panel' },
+        { item_id: 'UC-S015-2', job: 'Navigate views' },
+      ],
+    };
+    render(<ValueStreamMap stages={flow} staging={staging} />);
+    const lane = screen.getByTestId('vsm-lane-queue');
+    const box = within(lane).getByTestId('staging-buffer');
+    expect(box).toHaveAttribute('data-depth', '2');
+    // DOM order carries the flow meaning: decompose → staging buffer → ready
+    const decompose = screen.getByTestId('stage-decompose');
+    const ready = screen.getByTestId('stage-ready');
+    expect(decompose.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(box.compareDocumentPosition(ready) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // the connectors route THROUGH the buffer (decompose→staging, staging→ready)
+    expect(lane.querySelector('[data-from="decompose"][data-to="staging"]')).not.toBeNull();
+    expect(lane.querySelector('[data-from="staging"][data-to="ready"]')).not.toBeNull();
+    expect(lane.querySelector('[data-from="decompose"][data-to="ready"]')).toBeNull();
+  });
+
+  it('the staging buffer is ALWAYS visible — no staging prop → depth 0 drained empty state (buffers are visible)', () => {
+    render(<ValueStreamMap stages={flow} />);
+    const box = within(screen.getByTestId('vsm-lane-queue')).getByTestId('staging-buffer');
+    expect(box).toHaveAttribute('data-depth', '0');
+    expect(within(box).getByTestId('staging-depth')).toHaveTextContent(/0 awaiting triage/i);
+    expect(within(box).getByTestId('staging-empty')).toBeInTheDocument();
+  });
+
+  it('the staging box keeps the existing guards intact: still exactly 10 stage-* nodes, no new data-metric (DEFECT-012)', () => {
+    render(<ValueStreamMap stages={flow} staging={{ depth: 1, rows: [{ item_id: 'UC-X', job: 'j' }] }} />);
+    expect(document.querySelectorAll('[data-testid^="stage-"]').length).toBe(10);
+    const box = screen.getByTestId('staging-buffer');
+    expect(box.querySelectorAll('[data-metric]').length).toBe(0);
+    expect(box.querySelectorAll('button, a[href], [tabindex]').length).toBe(0);
+  });
+
   it('renders a graceful skeleton when stages is null/empty (fail-soft from getStageFlow null)', () => {
     render(<ValueStreamMap stages={null} />);
     // region still present; 10 zeroed nodes rendered as the skeleton, never blank/crash

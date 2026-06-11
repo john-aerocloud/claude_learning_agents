@@ -103,12 +103,24 @@ graph LR
   WipPanel --> WipViewScreen
   WipRow --> WipPanel
 
+  %% DEFECT-012: StagingQueueBox (NEW) — the staging buffer ("decomposed,
+  %% awaiting triage") rendered INSIDE ValueStreamMap's queue lane BETWEEN the
+  %% Decompose and Ready stage nodes, wrapped with two MiniArrows in the
+  %% .staging-handoff flex item (replaces the old decompose→ready FlowArrow).
+  %% Data: VsmContainer loads GET /queues/staging (getStagingQueue) and passes
+  %% the {queue,depth,rows} envelope down; re-fetches on a staging.csv SSE frame.
+  %% NOTE for tester: box is NOT focusable (A11Y-3 tab walk unchanged); testid
+  %% staging-buffer (NOT stage-*); depth 0 renders an explicit drained state.
+  StagingQueueBox["StagingQueueBox (DEFECT-012: staging buffer between Decompose and Ready; depth + id/job rows; drained empty state)"]
+  StagingQueueBox --> ValueStreamMap
+
   classDef delivered fill:#d5f5e3,stroke:#1e8449,color:#000;
   %% CHK-3 (s003) DROPPED — scope absorbed into CHK-2 restated done-condition (s004 delivered).
   %% s004 DELIVERED 2026-06-10T11:00:00Z — CHK-2 done-condition MET.
   %% DEFECT-006 FIXED — DetailPane floating-drawer re-point delivered as part of s005 (CHK-4 done 2026-06-10T19:00:00Z).
   %% All of the above: s003-changed, s004changed, defect006changed marks cleared at their delivery.
-  class PipelineMapScreen,PipelineMap,QueueBox,BufferStateIndicator,ConstraintBadge,FlowArrow,LiveStatusDot,DoraPanelScreen,DoraPanel,MetricCard,StageCardGrid,StageCard,TimeThiefView,SourceLink,ValueStreamScreen,VsmContainer,ValueStreamMap,StageMetric,InFlightBadge,GateMarker,ReworkLoopConnector,DetailPane,ObservatoryDrawerLayer delivered;
+  %% (ValueStreamMap moved to def012changed below — DEFECT-012 queue-lane re-route.)
+  class PipelineMapScreen,PipelineMap,QueueBox,BufferStateIndicator,ConstraintBadge,FlowArrow,LiveStatusDot,DoraPanelScreen,DoraPanel,MetricCard,StageCardGrid,StageCard,TimeThiefView,SourceLink,ValueStreamScreen,VsmContainer,StageMetric,InFlightBadge,GateMarker,ReworkLoopConnector,DetailPane,ObservatoryDrawerLayer delivered;
   %% s014 still in-flight: UC-S014-1 done but UC-S014-2/3/4 planned; SteerMenu+StageNode+TreeNode
   %% remain in blast radius for the remaining s014 UCs (panel, prompt builder, clipboard/SSE).
   %% Convention: s014changed cleared only at full s014 slice delivery after tester final sign-off.
@@ -119,3 +131,7 @@ graph LR
   %% s015 delivery after the tester consumes.
   classDef s015changed fill:#ffe0b3,stroke:#cc6600,color:#000;
   class WipViewScreen,ViewSwitch,WipPanel,WipRow,VsmContainer s015changed;
+  %% DEFECT-012 — StagingQueueBox added + ValueStreamMap queue lane re-routed
+  %% (decompose→staging→ready connectors); cleared at delivery after the tester consumes.
+  classDef def012changed fill:#fdd,stroke:#c0392b,color:#000;
+  class StagingQueueBox,ValueStreamMap def012changed;

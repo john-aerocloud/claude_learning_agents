@@ -13,6 +13,7 @@ import {
   getBaseline,
   getFlow,
   getStageFlow,
+  getStagingQueue,
   getItems,
   getItemLedger,
   getSlices,
@@ -97,6 +98,29 @@ describe('api/client URL construction + parsing', () => {
   it('getStageFlow fails soft to null on a network/HTTP error', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('boom')));
     expect(await getStageFlow('observatory')).toBeNull();
+  });
+
+  // DEFECT-012 — staging buffer (decomposed, awaiting triage). @covers def-012
+  it('getStagingQueue(project) builds /api/projects/:id/queues/staging and returns the {queue,depth,rows} envelope (DEFECT-012)', async () => {
+    const fixture = {
+      queue: 'staging',
+      depth: 1,
+      rows: [{ item_id: 'UC-S015-1', parent: 'SLC-S015', job: 'WIP panel', value: 'HIGH', cost: '2.0', produced_ts: 't', producer_ref: 'REPLENISH-CHK6' }],
+    };
+    const f = mockFetchJson(fixture);
+    vi.stubGlobal('fetch', f);
+    const body = await getStagingQueue('observatory');
+    expect(f).toHaveBeenCalledWith('/api/projects/observatory/queues/staging');
+    expect(body).toEqual(fixture);
+  });
+
+  it('getStagingQueue encodes the project segment and fails soft to null (DEFECT-012)', async () => {
+    const f = mockFetchJson({ queue: 'staging', depth: 0, rows: [] });
+    vi.stubGlobal('fetch', f);
+    await getStagingQueue('a/b');
+    expect(f).toHaveBeenCalledWith('/api/projects/a%2Fb/queues/staging');
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('boom')));
+    expect(await getStagingQueue('observatory')).toBeNull();
   });
 
   it('getItems(project) builds /api/projects/:id/items and returns the RAW array (no envelope) (UC-S005-2)', async () => {

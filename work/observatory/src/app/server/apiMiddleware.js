@@ -15,6 +15,7 @@
 //   GET /api/active                                 → UC1 active project
 //   GET /api/projects/:id/items                     → UC2 items CSV
 //   GET /api/projects/:id/queues/:queue             → UC2 queue CSV
+//   GET /api/projects/:id/queues/staging            → DEFECT-012 staging buffer {queue,depth,rows}
 //   GET /api/dora/baseline                          → UC3 global baseline.md
 //   GET /api/projects/:id/dora/:artifact            → UC3 per-project dora artifact
 //   GET /api/projects/:id/deps/:artifact            → UC3 deps mmd
@@ -37,6 +38,7 @@ import { readRaw } from './parsers/file-reader.js';
 import { aggregateStageFlow } from './lib/ledgerAggregator.js';
 import { parseLedger } from './lib/ledgerAggregator.js';
 import { getDefects } from './routes/defects.js';
+import { getStagingQueue } from './routes/staging.js';
 
 const SHA = process.env.OBSERVATORY_SHA || process.env.GIT_SHA || 'dev';
 const HEARTBEAT_MS = 30_000;
@@ -189,6 +191,12 @@ export function createApiMiddleware({ repoRoot, watcher }) {
       const queuesMatch = rest.match(/^\/queues\/([^/]+)$/);
       if (queuesMatch) {
         const queue = decodeURIComponent(queuesMatch[1]);
+        // DEFECT-012 — the staging buffer (decomposed, awaiting triage) has its
+        // own envelope { queue, depth, rows }: empty is the HAPPY state, so a
+        // missing file is depth 0, never null (see routes/staging.js).
+        if (queue === 'staging') {
+          return json(res, 200, getStagingQueue({ repoRoot, projectId: id }));
+        }
         if (!QUEUE_NAMES.has(queue)) {
           return json(res, 404, { error: 'unknown queue', queue });
         }

@@ -23,6 +23,7 @@
 
 import './value-stream-map.css';
 import { StageNode } from './StageNode.jsx';
+import { StagingQueueBox } from './StagingQueueBox.jsx';
 
 // Canonical 10-stage flow order = the geometry contract (GEO-3 / AC2.2).
 const FLOW_ORDER = [
@@ -54,6 +55,29 @@ function FlowArrow({ from, to }) {
     >
       <line x1="2" y1="12" x2="30" y2="12" stroke="currentColor" stroke-width="2" />
       <path d="M30 6 L38 12 L30 18 Z" fill="currentColor" />
+    </svg>
+  );
+}
+
+/** DEFECT-012 — compact forward connector flanking the staging buffer box.
+ * Same decorative contract as FlowArrow (aria-hidden, data-from/data-to carry
+ * the topology) but 16px wide so the whole decompose→staging→ready handoff
+ * fits the queue lane as ONE flex item without wrapping the lane band. */
+function MiniArrow({ from, to }) {
+  return (
+    <svg
+      class="flow-arrow flow-arrow--mini"
+      data-testid="flow-arrow"
+      data-from={from}
+      data-to={to}
+      aria-hidden="true"
+      focusable="false"
+      viewBox="0 0 12 24"
+      width="12"
+      height="24"
+    >
+      <line x1="0" y1="12" x2="6" y2="12" stroke="currentColor" stroke-width="2" />
+      <path d="M6 7 L11 12 L6 17 Z" fill="currentColor" />
     </svg>
   );
 }
@@ -99,10 +123,15 @@ const ZERO_STAGES = FLOW_ORDER.map((stage) => ({
  * UC-S014-1 — `onSteer(itemId, actionType)` is a READ-ONLY prop slot threaded
  * down to the StageNode queue chips' SteerMenu (no logic here; UC-S014-2 wires
  * the consumer).
+ * DEFECT-012 — `staging` is the {queue,depth,rows} envelope from
+ * GET /queues/staging. The staging BUFFER box renders between the Decompose
+ * and Ready nodes in the queue lane, ALWAYS (a buffer is visible even when
+ * drained — depth 0 shows the explicit empty state, never absence).
  * @param {{ stages?: Array|null, stale?: boolean,
+ *           staging?: {depth?: number, rows?: Array}|null,
  *           onSteer?: (itemId: string, actionType: string) => void }} props
  */
-export function ValueStreamMap({ stages, stale = false, onSteer }) {
+export function ValueStreamMap({ stages, stale = false, staging = null, onSteer }) {
   const src = Array.isArray(stages) && stages.length > 0 ? stages : ZERO_STAGES;
   const byStage = Object.fromEntries(src.map((s) => [s.stage, s]));
   // Only the 10 canonical nodes render (rework is the loop, not a node).
@@ -128,14 +157,27 @@ export function ValueStreamMap({ stages, stale = false, onSteer }) {
         >
           <span class="vsm-lane__h">{lane.label}</span>
           <div class="vsm-lane__flow">
-            {lane.stages.map((stage, i) => (
-              <>
-                <StageNode data={nodeFor(stage)} onSteer={onSteer} />
-                {i < lane.stages.length - 1
-                  ? <FlowArrow from={stage} to={lane.stages[i + 1]} />
-                  : null}
-              </>
-            ))}
+            {lane.stages.map((stage, i) => {
+              // DEFECT-012: the staging buffer (decomposed, awaiting triage)
+              // sits BETWEEN Decompose and Ready — the connector routes
+              // decompose → staging → ready instead of decompose → ready.
+              const next = i < lane.stages.length - 1 ? lane.stages[i + 1] : null;
+              const stagingHere = stage === 'decompose' && next === 'ready';
+              return (
+                <>
+                  <StageNode data={nodeFor(stage)} onSteer={onSteer} />
+                  {stagingHere ? (
+                    <div class="staging-handoff" data-testid="staging-handoff">
+                      <MiniArrow from="decompose" to="staging" />
+                      <StagingQueueBox staging={staging} />
+                      <MiniArrow from="staging" to="ready" />
+                    </div>
+                  ) : next ? (
+                    <FlowArrow from={stage} to={next} />
+                  ) : null}
+                </>
+              );
+            })}
             {/* the rework loop sits in the build lane (back-path into engineer) */}
             {lane.id === 'build' ? <ReworkLoopConnector from="validate" to="engineer" /> : null}
           </div>

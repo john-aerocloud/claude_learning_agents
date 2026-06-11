@@ -103,6 +103,20 @@ export async function getStageFlow(project) {
 }
 
 /**
+ * GET /api/projects/:id/queues/staging → { queue:'staging', depth, rows } —
+ * the DEFECT-012 staging buffer (decomposed items awaiting flow-manager
+ * triage). Unlike the other queue helpers this returns the ENVELOPE directly
+ * (depth is explicit because EMPTY IS THE HAPPY STATE — the board renders
+ * "0 awaiting triage", not absence). Fails soft to null on any network/HTTP/
+ * parse error; the caller maps null → the empty-buffer state. Encoded segment.
+ * @param {string} project
+ * @returns {Promise<{queue:string, depth:number, rows:Array}|null>}
+ */
+export async function getStagingQueue(project) {
+  return getJson(`/api/projects/${encodeURIComponent(project)}/queues/staging`);
+}
+
+/**
  * GET /api/projects/:id/items → ItemRecord[] (raw §4 records:
  * {id,type,parent,children,job,state,value,cost,vc_ratio,...}), or null when
  * missing/unreachable. Like getStageFlow, this endpoint returns the ARRAY

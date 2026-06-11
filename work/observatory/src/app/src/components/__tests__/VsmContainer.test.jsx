@@ -75,6 +75,51 @@ describe('VsmContainer (UC-S004-2/6)', () => {
     expect(loadFlow).toHaveBeenCalledTimes(1);
   });
 
+  // ── DEFECT-012: the staging buffer reaches the board ──────────────────────
+  // @covers def-012 @covers StagingQueueBox
+  it('loads the staging buffer on mount and renders its depth + items between Decompose and Ready — DEFECT-012', async () => {
+    const loadFlow = vi.fn().mockResolvedValue(flow);
+    const loadStaging = vi.fn().mockResolvedValue({
+      queue: 'staging', depth: 2,
+      rows: [
+        { item_id: 'UC-S015-1', job: 'WIP panel' },
+        { item_id: 'UC-S015-2', job: 'Navigate views' },
+      ],
+    });
+    render(<VsmContainer loadFlow={loadFlow} loadStaging={loadStaging} subscribe={() => () => {}} />);
+    await waitFor(() => {
+      expect(screen.getByTestId('staging-buffer')).toHaveAttribute('data-depth', '2');
+    });
+    expect(screen.getByTestId('staging-item-UC-S015-1')).toHaveTextContent(/WIP panel/);
+    expect(loadStaging).toHaveBeenCalled();
+  });
+
+  it('fails soft to the drained staging box when the staging load returns null — DEFECT-012', async () => {
+    const loadFlow = vi.fn().mockResolvedValue(flow);
+    const loadStaging = vi.fn().mockResolvedValue(null);
+    render(<VsmContainer loadFlow={loadFlow} loadStaging={loadStaging} subscribe={() => () => {}} />);
+    await waitFor(() => expect(loadStaging).toHaveBeenCalled());
+    expect(screen.getByTestId('staging-buffer')).toHaveAttribute('data-depth', '0');
+  });
+
+  it('re-fetches the staging buffer on a staging.csv SSE change frame (product append / triage drain) — DEFECT-012', async () => {
+    let handler;
+    const subscribe = (onChange) => { handler = onChange; return () => {}; };
+    const loadFlow = vi.fn().mockResolvedValue(flow);
+    const loadStaging = vi.fn()
+      .mockResolvedValueOnce({ depth: 0, rows: [] })
+      .mockResolvedValueOnce({ depth: 1, rows: [{ item_id: 'UC-NEW', job: 'fresh decompose' }] });
+    render(<VsmContainer loadFlow={loadFlow} loadStaging={loadStaging} subscribe={subscribe} debounceMs={0} />);
+    await waitFor(() => {
+      expect(screen.getByTestId('staging-buffer')).toHaveAttribute('data-depth', '0');
+    });
+    handler({ type: 'change', path: 'work/observatory/queues/staging.csv' });
+    await waitFor(() => {
+      expect(screen.getByTestId('staging-buffer')).toHaveAttribute('data-depth', '1');
+    });
+    expect(screen.getByTestId('staging-item-UC-NEW')).toHaveTextContent(/fresh decompose/);
+  });
+
   // ── DEFECT-003: stale-shown-as-live ───────────────────────────────────────
   // The subscribe seam exposes connection lifecycle via opts.onOpen/onError; the
   // container must surface a disconnected/stale state and re-fetch on reconnect.

@@ -19,7 +19,7 @@
 // loader maps null → the ValueStreamMap zero skeleton (never a blank/crash).
 
 import { useEffect, useState, useRef, useCallback } from 'preact/hooks';
-import { getActive, getStageFlow, subscribeEvents } from '../api/client.js';
+import { getActive, getStageFlow, getStagingQueue, subscribeEvents } from '../api/client.js';
 import { ValueStreamMap } from './ValueStreamMap.jsx';
 import { LiveStatusDot } from './LiveStatusDot.jsx';
 import './vsm-container.css';
@@ -31,18 +31,30 @@ async function loadStageFlow() {
   return getStageFlow(project);
 }
 
+/** DEFECT-012 default loader: the staging buffer (decomposed, awaiting triage)
+ * envelope {queue,depth,rows} for the active project. Null on any failure —
+ * the box fails soft to the drained (depth 0) rendering. */
+async function loadStagingBuffer() {
+  const project = await getActive();
+  if (!project) return null;
+  return getStagingQueue(project);
+}
+
 const DEFAULT_DEBOUNCE_MS = 250;
 
 /** Is this SSE change-frame path one that affects the value-stream map? The map
- * is computed entirely from the DORA ledger, so only a ledger.csv change matters. */
+ * is computed from the DORA ledger; DEFECT-012 adds the staging buffer, which
+ * changes when queues/staging.csv does (product append / flow-manager drain). */
 function isRelevantChange(path) {
   if (typeof path !== 'string') return false;
-  return /ledger\.csv$/i.test(path.replace(/\\/g, '/'));
+  return /(?:ledger|staging)\.csv$/i.test(path.replace(/\\/g, '/'));
 }
 
 /**
  * @param {object} [props]
  * @param {() => Promise<Array|null>} [props.loadFlow] - stage-flow loader (injectable for tests).
+ * @param {() => Promise<object|null>} [props.loadStaging] - DEFECT-012 staging-buffer
+ *   loader ({queue,depth,rows} envelope; injectable for tests).
  * @param {(onChange: (evt:{type:string,path:string}) => void) => (() => void)} [props.subscribe]
  * @param {number} [props.debounceMs]
  * @param {(itemId: string, actionType: string) => void} [props.onSteer]
@@ -51,11 +63,14 @@ function isRelevantChange(path) {
  */
 export function VsmContainer({
   loadFlow = loadStageFlow,
+  loadStaging = loadStagingBuffer,
   subscribe = subscribeEvents,
   debounceMs = DEFAULT_DEBOUNCE_MS,
   onSteer,
 }) {
   const [stages, setStages] = useState(null);
+  // DEFECT-012 — the staging buffer envelope; null fails soft to depth 0.
+  const [staging, setStaging] = useState(null);
   const [liveState, setLiveState] = useState('reconnecting');
   // DEFECT-003: have we lost the live channel since the last good fetch? When
   // true the figures are marked not-current and the disconnected banner shows.
@@ -63,10 +78,18 @@ export function VsmContainer({
 
   const loadRef = useRef(loadFlow);
   loadRef.current = loadFlow;
+  const loadStagingRef = useRef(loadStaging);
+  loadStagingRef.current = loadStaging;
 
   // refresh() always clears stale on a successful fetch — it is the self-heal
   // path used both by the SSE change-frame re-fetch and the reconnect re-fetch.
+  // DEFECT-012: the staging buffer rides the same refresh (its own failure
+  // fails soft to null → drained box; it never blocks the map's figures).
   const refresh = useCallback(() => {
+    Promise.resolve()
+      .then(() => loadStagingRef.current())
+      .then((next) => setStaging(next ?? null))
+      .catch(() => setStaging(null)); // fail-soft → drained (depth 0) box
     return Promise.resolve()
       .then(() => loadRef.current())
       .then((next) => {
@@ -83,8 +106,12 @@ export function VsmContainer({
       .then(loadFlow)
       .then((next) => { if (active) setStages(Array.isArray(next) ? next : null); })
       .catch(() => { if (active) setStages(null); });
+    Promise.resolve()
+      .then(loadStaging)
+      .then((next) => { if (active) setStaging(next ?? null); })
+      .catch(() => { if (active) setStaging(null); });
     return () => { active = false; };
-  }, [loadFlow]);
+  }, [loadFlow, loadStaging]);
 
   // SSE live refresh — subscribe ONCE on mount; debounce a burst into one re-fetch.
   useEffect(() => {
@@ -146,7 +173,7 @@ export function VsmContainer({
           automatically.
         </div>
       ) : null}
-      <ValueStreamMap stages={stages} stale={stale} onSteer={onSteer} />
+      <ValueStreamMap stages={stages} stale={stale} staging={staging} onSteer={onSteer} />
     </div>
   );
 }

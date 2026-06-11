@@ -88,12 +88,19 @@ describe('aggregateStageFlow — open_items + wip_horizon_ms (UC-S015-1, additiv
   });
 
   it('an open row with an unparseable-for-dwell timestamp fails soft to dwell_ms=null, stale=false (FIG-3 source case)', () => {
-    // parseLedger requires a leading ISO date to accept the line, so drive the
-    // domain directly with a NaN `now` — dwell becomes uncomputable → null.
+    // DEFECT (found UC-S015-3 build): the original pin drove `now: NaN`, but the
+    // documented aggregateStageFlow entry contract REPLACES a non-finite opts.now
+    // with Date.now() — so the pin was time-of-day dependent (it passed only
+    // while the wall clock was BEFORE the fixture timestamp, via the `now >=
+    // openTs` guard, and failed every afternoon). The REAL FIG-3 source case is
+    // an open row whose timestamp parseLedger ACCEPTS (leading \d{4}-\d{2}-\d{2}T
+    // shape) but Date.parse rejects (calendar-invalid) → dwell uncomputable →
+    // null, stale=false, with a FINITE request-time now. Deterministic at any
+    // clock time.
     const ledger =
       HEADER +
-      '\n2026-06-11T11:45:00Z,p,1,s,engineer,task_start,,na,,build x,UC-1,engineer\n';
-    const eng = aggregateStageFlow(ledger, 'p', null, { now: Number.NaN }).find(
+      '\n2026-02-30T99:99:99Z,p,1,s,engineer,task_start,,na,,build x,UC-1,engineer\n';
+    const eng = aggregateStageFlow(ledger, 'p', null, { now: NOW }).find(
       (s) => s.stage === 'engineer',
     );
     expect(eng.open_items).toHaveLength(1);

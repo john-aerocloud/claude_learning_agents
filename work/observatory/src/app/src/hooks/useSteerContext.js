@@ -24,11 +24,27 @@
 // context null and never throw into the render. Raw CSV row keys (vc_ratio,
 // done_ts, …) are NOT carried into the contract — only the six fields above.
 //
-// SSE refresh is UC-S014-4 (the hook gains a subscribeEvents re-fetch there —
-// deliberately NOT wired in this UC).
+// SSE REFRESH (UC-S014-4, S14-4-SSE-1/2): the hook subscribes to the SSE
+// change channel (subscribeEvents — the useWipItems idiom) and re-fetches,
+// DEBOUNCED, on a relevant items.csv frame. The refresh is IN-PLACE: status
+// stays 'ready' with the old context while the re-fetch is in flight (no
+// loading-skeleton flash — GEO-S014-4-4 upstream guard); an ADDITIVE
+// `refreshing` flag drives the ContextRefreshCue. Fail-soft: no EventSource
+// (jsdom) → static data, no crash (`unsubscribe = null` path). The displayed
+// PROMPT is untouched by any refresh — prompt state lives in
+// SteerPanelContainer and mutates only on an explicit Generate
+// (PROMPT-FREEZE-1).
 
-import { useState, useEffect, useRef } from 'preact/hooks';
-import { getActive, getItems } from '../api/client.js';
+import { useState, useEffect, useRef, useCallback } from 'preact/hooks';
+import { getActive, getItems, subscribeEvents } from '../api/client.js';
+
+const DEFAULT_DEBOUNCE_MS = 250;
+
+/** Is this SSE change-frame path one the steer context reads? items.csv only. */
+function isRelevantChange(path) {
+  if (typeof path !== 'string') return false;
+  return /items\.csv$/i.test(path.replace(/\\/g, '/'));
+}
 
 /** Humanise a state token: underscores read as spaces ("in_progress" → "in progress"). */
 function humanState(state) {
@@ -53,10 +69,19 @@ function toSteerContext(row, project) {
  * @param {string|null} [opts.project] - active project id; resolved via loadProject when absent
  * @param {() => Promise<string|null>} [opts.loadProject] - active-project resolver (injectable)
  * @param {(project:string) => Promise<Array|null>} [opts.loadItems] - items loader (injectable)
- * @returns {{status: 'loading'|'ready'|'not-found'|'error', context: object|null}}
+ * @param {(onChange:(evt:{type:string,path:string})=>void) => (()=>void)} [opts.subscribe] - SSE channel (injectable)
+ * @param {number} [opts.debounceMs] - SSE frame-burst debounce window
+ * @returns {{status: 'loading'|'ready'|'not-found'|'error', context: object|null, refreshing: boolean}}
  */
-export function useSteerContext(itemId, { project = null, loadProject = getActive, loadItems = getItems } = {}) {
+export function useSteerContext(itemId, {
+  project = null,
+  loadProject = getActive,
+  loadItems = getItems,
+  subscribe = subscribeEvents,
+  debounceMs = DEFAULT_DEBOUNCE_MS,
+} = {}) {
   const [state, setState] = useState({ status: 'loading', context: null });
+  const [refreshing, setRefreshing] = useState(false);
 
   // Stable refs so the fetch effect re-runs only on itemId/project changes,
   // never because a caller passed a fresh loader closure (container pattern).
@@ -64,6 +89,28 @@ export function useSteerContext(itemId, { project = null, loadProject = getActiv
   loadProjectRef.current = loadProject;
   const loadItemsRef = useRef(loadItems);
   loadItemsRef.current = loadItems;
+  const itemIdRef = useRef(itemId);
+  itemIdRef.current = itemId;
+  const projectRef = useRef(project);
+  projectRef.current = project;
+
+  /** Resolve the steer context once: rows → ready/not-found/error state. */
+  const resolveContext = useCallback((id) => Promise.resolve()
+    .then(() => projectRef.current || loadProjectRef.current())
+    .then((proj) =>
+      Promise.resolve()
+        .then(() => loadItemsRef.current(proj))
+        .then((rows) => ({ proj, rows })))
+    .then(({ proj, rows }) => {
+      if (!Array.isArray(rows)) {
+        return { status: 'error', context: null }; // unreachable/failed /items
+      }
+      const row = rows.find((r) => r && r.id === id);
+      if (!row) {
+        return { status: 'not-found', context: null }; // stale/queue-only id
+      }
+      return { status: 'ready', context: toSteerContext(row, proj) };
+    }), []);
 
   useEffect(() => {
     if (!itemId) {
@@ -72,30 +119,53 @@ export function useSteerContext(itemId, { project = null, loadProject = getActiv
     }
     let active = true;
     setState({ status: 'loading', context: null });
-    Promise.resolve()
-      .then(() => project || loadProjectRef.current())
-      .then((proj) =>
-        Promise.resolve()
-          .then(() => loadItemsRef.current(proj))
-          .then((rows) => ({ proj, rows })))
-      .then(({ proj, rows }) => {
-        if (!active) return;
-        if (!Array.isArray(rows)) {
-          setState({ status: 'error', context: null }); // unreachable/failed /items
-          return;
-        }
-        const row = rows.find((r) => r && r.id === itemId);
-        if (!row) {
-          setState({ status: 'not-found', context: null }); // stale/queue-only id
-          return;
-        }
-        setState({ status: 'ready', context: toSteerContext(row, proj) });
-      })
+    resolveContext(itemId)
+      .then((next) => { if (active) setState(next); })
       .catch(() => {
         if (active) setState({ status: 'error', context: null }); // fail-soft, never throw
       });
     return () => { active = false; };
-  }, [itemId, project]);
+  }, [itemId, project, resolveContext]);
 
-  return state;
+  // IN-PLACE refresh (UC-S014-4): no loading reset — the old context stays
+  // displayed while the re-fetch is in flight; `refreshing` flags it.
+  const refresh = useCallback(() => {
+    const id = itemIdRef.current;
+    if (!id) return Promise.resolve();
+    setRefreshing(true);
+    return resolveContext(id)
+      .then((next) => {
+        if (itemIdRef.current === id) setState(next); // drop stale-id frames
+      })
+      .catch(() => {
+        if (itemIdRef.current === id) setState({ status: 'error', context: null });
+      })
+      .finally(() => setRefreshing(false));
+  }, [resolveContext]);
+
+  // SSE live refresh — debounce a burst of change frames into one re-fetch
+  // (mirrors useWipItems; fail-soft when there is no EventSource).
+  useEffect(() => {
+    let timer = null;
+    let unsubscribe = null;
+    const onChange = (evt) => {
+      if (!evt || !isRelevantChange(evt.path)) return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        refresh();
+      }, debounceMs);
+    };
+    try {
+      unsubscribe = subscribe(onChange);
+    } catch {
+      unsubscribe = null; // no EventSource (jsdom) → static data, no crash
+    }
+    return () => {
+      if (timer) clearTimeout(timer);
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }, [subscribe, debounceMs, refresh]);
+
+  return { ...state, refreshing };
 }

@@ -48,7 +48,11 @@ describe('useSteerContext (UC-S014-2) — ready path', () => {
       project: 'demo',
       loadItems: () => new Promise(() => {}), // never resolves
     });
-    expect(out.current).toEqual({ status: 'loading', context: null });
+    // UC-S014-4 widened the return with the ADDITIVE `refreshing` flag
+    // (ui-design state-shape note: {status, context} shape unchanged) — this
+    // pin asserts the original contract fields, not key-set equality.
+    expect(out.current).toMatchObject({ status: 'loading', context: null });
+    expect(out.current.refreshing).toBe(false);
   });
 
   it('maps the found row onto the six-field context contract', async () => {

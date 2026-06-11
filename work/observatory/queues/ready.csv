@@ -1,2 +1,2 @@
 item_id,enqueued_ts,value,cost,vc_ratio,position,reason
-UC-S013-2,2026-06-11T07:44:00Z,HIGH,2.5,1.60,1,DAG-ready: UC-S013-1 tester-passed (done); seams DefectsPanel.jsx disjoint from in-flight UC-S014-2+UC-S015-1
+UC-S015-3,2026-06-11T10:50:00Z,HIGH,3.0,1.00,2,verdict-pending:UC-S015-2+UC-S014-2(done); DO NOT pull until UC-S015-2 tester PASS; ui-designer structure pass required before build

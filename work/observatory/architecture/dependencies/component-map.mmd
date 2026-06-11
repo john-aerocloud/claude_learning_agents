@@ -131,6 +131,17 @@ graph LR
   SteerPromptTemplates --> PromptBuilder
   PromptOutput --> SteerPanel
 
+  %% s014 / UC-S014-4 THIS commit (part 1 — SSE seam): useSteerContext gains a
+  %% DEBOUNCED subscribeEvents → in-place refresh (the useWipItems idiom): a
+  %% relevant items.csv change frame re-fetches the context WITHOUT a loading
+  %% reset (old context stays displayed; additive `refreshing` flag exposed for
+  %% the ContextRefreshCue). Fail-soft without EventSource (jsdom → static).
+  %% RUNTIME ROUTING for the tester: the refresh updates the CONTEXT BLOCK ONLY
+  %% — prompt state lives in SteerPanelContainer and mutates exclusively on an
+  %% explicit Generate press (PROMPT-FREEZE-1).
+  SubscribeEvents["subscribeEvents (api/client.js: the SSE /api/events channel)"]
+  UseSteerContext --> SubscribeEvents
+
   %% s015 / UC-S015-1: WIP navigation panel — ROUTED VIEW (EXP-016). ObservatoryView's
   %% main column gains a ViewSwitch tablist ("Pipeline" | "In-flight WIP") that swaps
   %% the column content between VsmContainer (default) and WipPanel. The two surfaces
@@ -205,7 +216,9 @@ graph LR
   %% UC-S014-3 THIS commit: PromptBuilder/SteerPromptTemplates/PromptOutput added;
   %% SteerPanel + its container gained the prompt prop + generation wiring
   %% (ObservatoryView untouched). Tester UI test-plan input.
-  class SteerMenu,TreeNode,StageNode,SteerPanel,SteerContextBlock,IntentNote,UseSteerContext,PromptBuilder,SteerPromptTemplates,PromptOutput s014changed;
+  %% UC-S014-4 part 1: SubscribeEvents node + UseSteerContext --> SubscribeEvents
+  %% edge added (debounced SSE in-place refresh). Tester UI test-plan input.
+  class SteerMenu,TreeNode,StageNode,SteerPanel,SteerContextBlock,IntentNote,UseSteerContext,PromptBuilder,SteerPromptTemplates,PromptOutput,SubscribeEvents s014changed;
   %% s015 / UC-S015-1 nodes added + VsmContainer re-pointed (conditional
   %% mount inside the pipeline tabpanel); UC-S015-2 adds the SteerMenu --> WipRow
   %% edge (trailing steer composition; SteerMenu joins the s015 blast radius —

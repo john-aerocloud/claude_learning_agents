@@ -1,0 +1,51 @@
+/* UC-S014-4 — CopyToast: portalled, position:fixed — own stacking context,
+ * ZERO flow height (GEO-S014-4-1: showing it reflows nothing). Anchored
+ * bottom-right INSIDE the viewport (GEO-S014-4-2: never causes scroll).
+ * Token-based; the --c-state-ok accent is a REDUNDANT success channel on top
+ * of the authoritative text (S14-4-A11Y-3). */
+
+.copy-toast {
+  position: fixed;
+  right: var(--sp-4);
+  bottom: var(--sp-4);
+  z-index: calc(var(--z-drawer) + 2); /* above the steer drawer */
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  background: var(--c-surface-raised);
+  border: 1px solid var(--c-state-ok);
+  border-radius: var(--radius-box);
+  box-shadow: var(--drawer-elev);
+  color: var(--c-text);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: 0.85rem;
+}
+
+.copy-toast__glyph {
+  color: var(--c-state-ok);
+}
+
+/* Fade-in only when motion is welcome (S14-4-A11Y-6); --dur-fast, no flashing. */
+@media (prefers-reduced-motion: no-preference) {
+  .copy-toast {
+    animation: copy-toast-in var(--dur-fast) ease-out;
+  }
+
+  @keyframes copy-toast-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .copy-toast {
+    animation: none; /* instant appear/disappear under reduce */
+    transition: none;
+  }
+}

@@ -142,6 +142,31 @@ graph LR
   SubscribeEvents["subscribeEvents (api/client.js: the SSE /api/events channel)"]
   UseSteerContext --> SubscribeEvents
 
+  %% s014 / UC-S014-4 THIS commit (part 2 — copy + toast + cue; slice FINAL UC):
+  %% CopyPromptButton (NEW) — one-click clipboard handoff INSIDE
+  %% prompt-output-slot, AFTER the <pre> (tab order prompt → copy); copies the
+  %% prompt prop BYTE-EQUAL to the displayed <pre> (PROMPT-COPY-1); label
+  %% "Copy prompt" → "Copied ✓" (accessible name matches /copy/i in BOTH
+  %% states); failed write shows NO success cue. CopyToast (NEW) — polite
+  %% status region (role=status aria-live=polite), portalled to document.body
+  %% + position:fixed (zero flow height — GEO-S014-4-1), auto-dismisses after
+  %% --dur-toast (ONE new token), never takes focus. ContextRefreshCue (NEW) —
+  %% the EXP-036 stale/live cue (LiveStatusDot idiom) on the context block:
+  %% live/refreshing/updated; `updated` = "Context updated — regenerate to
+  %% refresh the prompt" (the PROMPT-FREEZE-1 divergence signal; cue state is
+  %% derived in SteerPanelContainer from `refreshing` + a context snapshot
+  %% taken at the last Generate). RUNTIME ROUTING for the tester: SSE frame →
+  %% useSteerContext refresh → context block re-renders IN PLACE; prompt state
+  %% (SteerPanelContainer) is untouched — only an explicit Generate press
+  %% rebuilds it. UC-S014-3's copy/toast ABSENT pins are FLIPPED in this
+  %% commit (pin-flip ledger, ui-design.md UC-S014-4).
+  CopyPromptButton["CopyPromptButton (s014 / UC-S014-4: one-click clipboard copy — byte-equal payload, Copied ✓ flip)"]
+  CopyToast["CopyToast (s014 / UC-S014-4: polite portalled copy confirmation — fixed overlay, auto-dismiss, never steals focus)"]
+  ContextRefreshCue["ContextRefreshCue (s014 / UC-S014-4: EXP-036 live/refreshing/updated cue — regenerate sentence on divergence)"]
+  CopyPromptButton --> SteerPanel
+  CopyToast --> SteerPanel
+  ContextRefreshCue --> SteerContextBlock
+
   %% s015 / UC-S015-1: WIP navigation panel — ROUTED VIEW (EXP-016). ObservatoryView's
   %% main column gains a ViewSwitch tablist ("Pipeline" | "In-flight WIP") that swaps
   %% the column content between VsmContainer (default) and WipPanel. The two surfaces
@@ -250,8 +275,11 @@ graph LR
   %% SteerPanel + its container gained the prompt prop + generation wiring
   %% (ObservatoryView untouched). Tester UI test-plan input.
   %% UC-S014-4 part 1: SubscribeEvents node + UseSteerContext --> SubscribeEvents
-  %% edge added (debounced SSE in-place refresh). Tester UI test-plan input.
-  class SteerMenu,TreeNode,StageNode,SteerPanel,SteerContextBlock,IntentNote,UseSteerContext,PromptBuilder,SteerPromptTemplates,PromptOutput,SubscribeEvents s014changed;
+  %% edge added (debounced SSE in-place refresh). Part 2: CopyPromptButton/
+  %% CopyToast/ContextRefreshCue added (copy handoff + EXP-036 cue); SteerPanel
+  %% gained toast state + refreshCue prop; SteerPanelContainer gained the
+  %% PROMPT-FREEZE-1 snapshot + cue derivation. Tester UI test-plan input.
+  class SteerMenu,TreeNode,StageNode,SteerPanel,SteerContextBlock,IntentNote,UseSteerContext,PromptBuilder,SteerPromptTemplates,PromptOutput,SubscribeEvents,CopyPromptButton,CopyToast,ContextRefreshCue s014changed;
   %% s015 / UC-S015-1 nodes added + VsmContainer re-pointed (conditional
   %% mount inside the pipeline tabpanel); UC-S015-2 adds the SteerMenu --> WipRow
   %% edge (trailing steer composition; SteerMenu joins the s015 blast radius —

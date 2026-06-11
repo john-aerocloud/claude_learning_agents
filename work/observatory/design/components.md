@@ -453,6 +453,72 @@ convention, LiveStatusDot, the existing SSE channel, `--focus-ring`,
   (loading; hidden in not-found/error).
 - **Library:** custom.
 
+## PromptOutput  (s014 / UC-S014-3, RATIFIED at UC-S014-4 — read-only prompt surface)
+- **Role:** the generated, copy-ready prompt: a read-only, SELECTABLE `<pre>`
+  in SteerPanel's `prompt-output-slot`. Promoted from a UC-S014-3 build detail
+  to a design-system component so future prompt surfaces (UC-S015-4's enriched
+  re-slice preview) inherit it rather than re-derive.
+- **Presentation (pinned in steer-panel.css):** mono font (`--font-mono`) —
+  "code/command, copy exactly"; `white-space: pre-wrap` + `overflow-wrap:
+  anywhere` (line structure kept, no horizontal scroll); `max-height: 40vh` +
+  `overflow-y: auto` (long prompts scroll INSIDE the drawer); `user-select:
+  text` + `cursor: text` explicit (manual select+copy always possible);
+  `tabindex="0"` + `aria-label="Generated prompt"` + `--focus-ring`.
+- **Selector:** `data-testid="prompt-output"` inside
+  `data-testid="prompt-output-slot"`.
+- **Library:** custom (existing tokens only — a ratification, not a redesign).
+
+## CopyPromptButton  (s014 / UC-S014-4 — one-click clipboard handoff)
+- **Role:** copies the displayed prompt to the clipboard — the terminal step of
+  the steer handoff. Present ONLY when a prompt is displayed (absent, never
+  disabled, otherwise); rendered INSIDE `prompt-output-slot` AFTER the `<pre>`
+  (tab order: prompt → copy).
+- **Copy contract (PROMPT-COPY-1):** payload byte-equal to the `prompt` prop ==
+  the `<pre>` textContent — no re-serialisation/trimming. A FAILED write shows
+  NO success cue (the UI never lies); a second click re-copies + re-toasts.
+- **States:** idle ("Copy prompt") · copied ("Copied ✓", the ✓ aria-hidden;
+  reverts after `--dur-toast`) · focus-visible (`--focus-ring`) · active.
+- **Selector:** `getByRole('button', { name: /copy/i })` — stable across BOTH
+  label states; `data-testid="copy-prompt-btn"`; `data-copied`.
+- **A11y:** native `<button>` (Enter+Space); hit box ≥ `--target-min`; success
+  is label TEXT + toast, never colour alone.
+- **Library:** custom (token-based).
+
+## CopyToast  (s014 / UC-S014-4 — polite copy confirmation)
+- **Role:** transient "Copied to clipboard" confirmation. A status region, not
+  a dialog: it NEVER takes focus and has no dismiss control.
+- **Props:** `{ visible; message }` — visibility + the auto-dismiss timer are
+  the caller's (SteerPanel's); hidden renders NOTHING (absent, not invisible).
+- **Geometry:** portalled to `document.body` + `position:fixed` bottom-right —
+  own stacking context, ZERO flow height (showing it reflows nothing,
+  GEO-S014-4-1); always inside the viewport.
+- **Selector:** `data-testid="copy-toast"`; `role="status"`
+  `aria-live="polite"` (never `alert`/`assertive` — a confirmation, not an
+  interruption).
+- **Motion:** fade `--dur-fast` under no-preference; INSTANT under
+  `prefers-reduced-motion: reduce`. Visible duration = `--dur-toast` (the
+  UC's ONE new token; read by `toastDurationMs()` so JS+CSS share a source).
+- **Library:** custom (token-based; `--c-state-ok` accent is redundant only).
+
+## ContextRefreshCue  (s014 / UC-S014-4 — EXP-036 stale/live cue on the steer context)
+- **Role:** tells the operator whether the displayed item context is live,
+  refreshing, or has DIVERGED from the prompt they already generated — the
+  PROMPT-FREEZE-1 companion: context refreshes live, the prompt stays frozen,
+  and this cue is how the operator KNOWS to regenerate.
+- **States:** `live` ("Live", ● glyph) · `refreshing` ("Refreshing…") ·
+  `updated` ("Context updated — regenerate to refresh the prompt", ⟳ glyph +
+  `--c-state-over` band — text authoritative, never colour alone). Unknown
+  state falls back to `live` (never blank).
+- **Derivation:** SteerPanelContainer — `refreshing` from useSteerContext's
+  additive flag; `updated` = a prompt exists AND the context JSON diverged
+  from the snapshot taken at the last Generate.
+- **Selector:** `data-testid="steer-context-live"`; `data-state`;
+  `role="status"` `aria-live="polite"` (announce-once — the SSE debounce
+  collapses a frame burst, S14-4-A11Y-8); accessible name carries the full
+  state ("Item context: …").
+- **Library:** custom (the LiveStatusDot idiom — text + aria-hidden glyph +
+  polite status; reuses the `--c-state-over` attention channel).
+
 ## ViewSwitch  (s015 / UC-S015-1 — main-column two-view tablist)
 - **Role:** the explicit two-view navigation ("Pipeline" | "In-flight WIP") at the
   top of the main column. ROUTED VIEW (EXP-016): activating a tab swaps the

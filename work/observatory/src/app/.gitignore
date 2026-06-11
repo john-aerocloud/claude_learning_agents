@@ -6,3 +6,6 @@ dist/
 # Playwright run artifacts
 test-results/
 playwright-report/
+
+# Per-run throwaway fixture copy for the live-mutation specs (e2e/global-setup.mjs)
+e2e/fixtures/repo-live-tmp/

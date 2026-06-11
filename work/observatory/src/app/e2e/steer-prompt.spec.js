@@ -10,7 +10,9 @@
 //   FIG    no {{token}} residue; no raw row refs (sourceRef path) in the output
 //   SELECT the output is selectable text (computed user-select, and a real
 //          selection drive returns the prompt text)
-//   UC-4-  the copy button / toast do NOT exist yet (UC-S014-4 pinned absent)
+//   UC-4-  PIN FLIPPED (UC-S014-4 pin-flip ledger): the copy button + toast
+//          now EXIST with a displayed prompt (full copy/GEO/A11Y behaviour is
+//          e2e/steer-copy.spec.js — this file keeps the presence boundary)
 //
 // Fixture repo: tree row REQ-DEMO is a REAL items.csv item (job "Demo
 // requirement for the work-item tree e2e") — same anchor as steer-panel.spec.js.
@@ -99,10 +101,14 @@ test('the prompt is SELECTABLE text — a real selection returns the prompt byte
   expect(selected).toMatch(/^Steer request — demo/);
 });
 
-test('UC-S014-4 boundary — no copy button, no toast (clipboard copy NOT built here)', async ({ page }) => {
+test('UC-S014-4 PIN FLIPPED — the copy button accompanies the prompt; the toast only after a copy', async ({ page }) => {
+  // Was: "no copy button, no toast (clipboard copy NOT built here)" — flipped
+  // per the UC-S014-4 pin-flip ledger (replaced, not silently deleted).
+  // Full copy behaviour (payload bytes, toast, GEO no-reflow, focus) lives in
+  // e2e/steer-copy.spec.js; this spec keeps the presence boundary.
   await openAndType(page, 'raise-defect');
   await page.getByTestId('steer-generate').click();
   await expect(page.locator(OUTPUT)).toBeVisible();
-  await expect(page.locator(PANEL).getByRole('button', { name: /copy/i })).toHaveCount(0);
-  await expect(page.getByTestId('copy-toast')).toHaveCount(0);
+  await expect(page.locator(PANEL).getByRole('button', { name: /copy/i })).toHaveCount(1);
+  await expect(page.getByTestId('copy-toast')).toHaveCount(0); // not before a copy
 });

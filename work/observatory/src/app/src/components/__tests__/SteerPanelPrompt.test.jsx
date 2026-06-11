@@ -14,7 +14,10 @@
 //   - AC-3: output non-empty well under 500 ms of the click (jsdom, measured);
 //   - AC-4: generation makes NO server request (the injected items loader is
 //     called once for context fetch, never again on generate);
-//   - clipboard copy is UC-S014-4 — pinned ABSENT here (no copy button yet).
+//   - PIN FLIPPED (UC-S014-4 pin-flip ledger, ui-design.md): this file
+//     originally pinned the copy button ABSENT; UC-S014-4 REPLACED that pin
+//     with the present-assertion below (copy button accompanies the prompt) —
+//     the full copy behaviour lives in SteerPanelCopy.test.jsx.
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/preact';
 import { SteerPanel, SteerPanelContainer } from '../SteerPanel.jsx';
@@ -61,11 +64,15 @@ describe('SteerPanel — prompt output rendering (UC-S014-3)', () => {
     expect(screen.queryByTestId('prompt-output')).toBeNull();
   });
 
-  it('has NO copy button — clipboard copy is UC-S014-4, not built here', () => {
+  it('PIN FLIPPED (UC-S014-4): the copy button now accompanies a displayed prompt', () => {
+    // Was: "has NO copy button — clipboard copy is UC-S014-4, not built here"
+    // (queryByTestId('copy-prompt-btn') null). Flipped per the UC-S014-4
+    // pin-flip ledger — replaced, not silently deleted. Full copy behaviour
+    // (payload, toast, focus, dismiss) is pinned in SteerPanelCopy.test.jsx.
     const prompt = buildPrompt('custom', CTX, 'note');
     render(<SteerPanel {...baseProps({ prompt })} />);
-    expect(screen.queryByTestId('copy-prompt')).toBeNull();
-    expect(screen.queryByRole('button', { name: /copy/i })).toBeNull();
+    expect(screen.getByTestId('copy-prompt-btn')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /copy/i })).toBeTruthy();
   });
 });
 

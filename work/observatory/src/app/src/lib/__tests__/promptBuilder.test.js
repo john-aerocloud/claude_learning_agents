@@ -1,5 +1,6 @@
 // @covers uc-s014-3
 // @covers PromptBuilder
+// @covers SteerPromptTemplates
 // UC-S014-3 — promptBuilder: PURE function (action type + SteerContext +
 // intent note → filled slash-command prompt string). AC-5 is this file: it
 // passes standalone, without the server, without the DOM.

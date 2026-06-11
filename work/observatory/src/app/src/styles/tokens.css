@@ -101,6 +101,13 @@
   --drawer-inset: var(--sp-4); /* gap from viewport top/right/bottom edge */
   --drawer-elev: -8px 0 32px rgba(0, 0, 0, 0.5);  /* left-cast shadow lifts it off the map */
   --dur-drawer: 160ms;         /* slide-in duration; 0ms under prefers-reduced-motion */
+
+  /* UC-S014-4 — CopyToast. The ONE new token of the UC: how long the copy
+   * confirmation stays visible before auto-dismiss (read by toastDurationMs()
+   * so JS and CSS share a single source). The fade transition itself is
+   * --dur-fast (0ms under prefers-reduced-motion — that media-query gate is
+   * on the transition, not this timer). */
+  --dur-toast: 3000ms;         /* copy-toast visible duration before auto-dismiss */
 }
 
 html,

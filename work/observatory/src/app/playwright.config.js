@@ -30,8 +30,22 @@ const FIXTURE_NOW = '2026-06-09T01:15:00Z';
 // on that port (against the fixture repo) and tears it down after the run.
 const E2E_PORT = Number(process.env.OBSERVATORY_E2E_PORT || 5173);
 
+// LIVE-MUTATION ISOLATION (UC-S014-4): specs that MUTATE watched fixture
+// files (the SSE live-refresh drives: steer-sse-live, work-item-tree-live)
+// target a SECOND server on LIVE_PORT watching a per-run THROWAWAY COPY of
+// the fixture repo (e2e/fixtures/repo-live-tmp, recreated by
+// e2e/global-setup.mjs each run — an interrupted mutation can never leak).
+// Rationale: since UC-S014-4 an items.csv change frame re-fetches /items in
+// every OPEN steer panel, so a parallel-worker write to the SHARED fixture
+// breaks the zero-network pins (steer-prompt AC-4 / steer-copy F-1)
+// non-deterministically. One mutating server + one read-only server — no
+// cross-worker write contamination, by construction.
+const LIVE_PORT = Number(process.env.OBSERVATORY_E2E_LIVE_PORT || E2E_PORT + 50);
+const FIXTURE_REPO_LIVE = resolve(HERE, 'e2e', 'fixtures', 'repo-live-tmp');
+
 export default defineConfig({
   testDir: 'e2e',
+  globalSetup: './e2e/global-setup.mjs',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: 0,
@@ -61,6 +75,18 @@ export default defineConfig({
       reuseExistingServer: (E2E_PORT === 5173 && !process.env.CI) || !!process.env.REUSE_SERVER,
       timeout: 60_000,
       env: { OBSERVATORY_REPO_ROOT: FIXTURE_REPO, OBSERVATORY_NOW: FIXTURE_NOW },
+    },
+    {
+      // LIVE-MUTATION server (UC-S014-4 isolation): same app, own port, own
+      // throwaway fixture copy. Only the live-mutation specs navigate here
+      // (they hard-code this baseURL via OBSERVATORY_E2E_LIVE_PORT/E2E_PORT+50).
+      // Never reused — its fixture must be the fresh per-run copy.
+      command: `npm run dev -- --port ${LIVE_PORT} --strictPort`,
+      cwd: HERE,
+      port: LIVE_PORT,
+      reuseExistingServer: false,
+      timeout: 60_000,
+      env: { OBSERVATORY_REPO_ROOT: FIXTURE_REPO_LIVE, OBSERVATORY_NOW: FIXTURE_NOW },
     },
   ],
 });

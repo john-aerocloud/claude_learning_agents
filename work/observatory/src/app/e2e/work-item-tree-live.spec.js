@@ -18,20 +18,31 @@
 // METHOD (mirrors live-refresh.spec.js): NO fixed sleep — MUTATE the watched
 // fixture items.csv, then POLL the rendered node count via auto-retrying expect
 // with a tight timeout, measuring wall-clock latency. The fixture is RESTORED in
-// afterEach (even on failure) so the committed fixture and the deterministic
-// UC-S005-2/3 specs are never left dirty.
+// afterEach (even on failure) so the per-run copy stays coherent between tests.
+//
+// LIVE-MUTATION ISOLATION (UC-S014-4): this file targets the DEDICATED
+// live-mutation server (playwright.config webServer #2, LIVE_PORT) watching
+// the per-run throwaway fixture copy (e2e/fixtures/repo-live-tmp). Since
+// UC-S014-4, an items.csv change frame re-fetches /items in every OPEN steer
+// panel — so mutating the SHARED fixture from a parallel worker broke the
+// zero-network pins (steer-prompt AC-4 / steer-copy F-1) non-deterministically.
+// All assertions are unchanged; only the server/fixture this file points at.
 import { test, expect } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { readFileSync, writeFileSync } from 'node:fs';
 
-// These specs MUTATE the shared fixture items.csv and restore it, so they must
-// NOT run concurrently with each other or the other tree/pane specs that read
-// the same file. Serialise this file (config is fullyParallel).
+// These specs MUTATE their fixture items.csv and restore it, so they must
+// NOT run concurrently with each other. Serialise this file (config is
+// fullyParallel).
 test.describe.configure({ mode: 'serial' });
 
+const E2E_PORT = Number(process.env.OBSERVATORY_E2E_PORT || 5173);
+const LIVE_PORT = Number(process.env.OBSERVATORY_E2E_LIVE_PORT || E2E_PORT + 50);
+test.use({ baseURL: `http://localhost:${LIVE_PORT}` });
+
 const HERE = dirname(fileURLToPath(import.meta.url));
-const ITEMS_CSV = resolve(HERE, 'fixtures', 'repo', 'work', 'demo', 'items', 'items.csv');
+const ITEMS_CSV = resolve(HERE, 'fixtures', 'repo-live-tmp', 'work', 'demo', 'items', 'items.csv');
 
 let original;
 

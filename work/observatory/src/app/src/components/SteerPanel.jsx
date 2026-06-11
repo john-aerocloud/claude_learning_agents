@@ -31,11 +31,14 @@
 // error ("Could not load item context — try again"). Not-found/error hide the
 // textarea + Generate; Cancel/× always available.
 
-import { useState, useLayoutEffect, useRef, useId } from 'preact/hooks';
+import { useState, useEffect, useLayoutEffect, useRef, useId } from 'preact/hooks';
 import { createPortal } from 'preact/compat';
 import { STEER_ACTIONS } from './SteerMenu.jsx';
 import { useSteerContext } from '../hooks/useSteerContext.js';
 import { buildPrompt } from '../lib/promptBuilder.js';
+import { CopyPromptButton } from './CopyPromptButton.jsx';
+import { CopyToast, toastDurationMs } from './CopyToast.jsx';
+import { ContextRefreshCue } from './ContextRefreshCue.jsx';
 import './steer-panel.css';
 
 /** Human label for a steer action type — NEVER the enum value (S14-2-FIG-1). */
@@ -58,14 +61,31 @@ function dash(v) {
  * @param {() => void} props.onCancel
  * @param {(intentNote:string, seam:{itemId:string,actionType:string,context:object|null}) => void} [props.onGenerate]
  * @param {string|null} [props.prompt] - UC-S014-3: the generated prompt to render in the output slot
+ * @param {'live'|'refreshing'|'updated'|null} [props.refreshCue] - UC-S014-4: EXP-036 context cue (container-derived)
  */
-export function SteerPanel({ itemId, actionType, status, context, onCancel, onGenerate, prompt = null }) {
+export function SteerPanel({ itemId, actionType, status, context, onCancel, onGenerate, prompt = null, refreshCue = null }) {
   const [note, setNote] = useState('');
+  const [toastVisible, setToastVisible] = useState(false);
+  const toastTimerRef = useRef(null);
   const headingRef = useRef(null);
   const returnFocusRef = useRef(null);
   const uid = useId();
   const headingId = `steer-panel-h-${uid}`;
   const noteId = `intent-note-${uid}`;
+
+  // UC-S014-4: the toast's auto-dismiss timer lives here (the panel owns the
+  // copy handler's UI consequence; CopyToast stays pure). Cleaned on unmount.
+  useEffect(() => () => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+  }, []);
+  const onCopied = () => {
+    setToastVisible(true); // S14-4-A11Y-7: a status region — focus is untouched
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => {
+      toastTimerRef.current = null;
+      setToastVisible(false); // auto-dismiss after --dur-toast
+    }, toastDurationMs());
+  };
 
   // Managed focus (S14-2-A11Y-2): capture the opener (the SteerMenu trigger —
   // it re-focused itself when the menu closed), move focus to the heading on
@@ -151,6 +171,10 @@ export function SteerPanel({ itemId, actionType, status, context, onCancel, onGe
           {`Item ${itemId} not found`}
         </p>
       ) : null}
+      {/* UC-S014-4: the EXP-036 stale/live cue — sits ABOVE the context block;
+          its single line changes IN PLACE so the dl's stacked geometry below
+          is untouched by a state flip (GEO-S014-4-4). */}
+      {status === 'ready' && refreshCue ? <ContextRefreshCue state={refreshCue} /> : null}
       {status === 'ready' && context ? (
         <dl
           class="steer-context"
@@ -214,20 +238,29 @@ export function SteerPanel({ itemId, actionType, status, context, onCancel, onGe
 
       {/* PROMPT OUTPUT SLOT (UC-S014-3) — the generated, copy-ready prompt.
           A <pre>: read-only, whitespace-exact, SELECTABLE text (user-select:
-          text in steer-panel.css) so the operator can select+copy manually;
-          the one-click copy button is UC-S014-4, deliberately absent here. */}
+          text in steer-panel.css) so the operator can select+copy manually.
+          UC-S014-4: the one-click CopyPromptButton trails the <pre> (tab
+          order prompt → copy, S14-4-A11Y-1) and copies the SAME bytes the
+          <pre> renders (PROMPT-COPY-1); present ONLY with a prompt. */}
       <div class="steer-panel__output-slot" data-testid="prompt-output-slot">
         {typeof prompt === 'string' && prompt.length > 0 ? (
-          <pre
-            class="prompt-output"
-            data-testid="prompt-output"
-            aria-label="Generated prompt"
-            tabindex="0"
-          >
-            {prompt}
-          </pre>
+          <>
+            <pre
+              class="prompt-output"
+              data-testid="prompt-output"
+              aria-label="Generated prompt"
+              tabindex="0"
+            >
+              {prompt}
+            </pre>
+            <CopyPromptButton prompt={prompt} onCopied={onCopied} />
+          </>
         ) : null}
       </div>
+
+      {/* UC-S014-4: copy confirmation — portalled fixed status region; zero
+          flow height (GEO-S014-4-1); never takes focus (S14-4-A11Y-7). */}
+      <CopyToast visible={toastVisible} />
 
       {/* × is LAST in DOM (keyboard path: textarea → Generate → Cancel → ×)
           but CSS-positioned top-right in the header (S14-2-A11Y-1). */}
@@ -256,23 +289,42 @@ export function SteerPanel({ itemId, actionType, status, context, onCancel, onGe
  * passes the result back down as the `prompt` prop, so ObservatoryView needs
  * no change. A caller-supplied onGenerate still fires (UC-S014-2 contract
  * preserved — UC-S014-4's copy/SSE work can observe generation).
+ *
+ * UC-S014-4 — PROMPT-FREEZE-1 lives HERE: prompt state mutates ONLY in
+ * handleGenerate (an explicit Generate press). useSteerContext's SSE refresh
+ * re-renders the context block; nothing on that path touches `prompt`. The
+ * container also snapshots the context used at the last Generate and derives
+ * the ContextRefreshCue state: refreshing → 'refreshing'; a prompt generated
+ * from context that has since CHANGED → 'updated' (the EXP-036 divergence
+ * signal); otherwise 'live'.
  * @param {object} props
  * @param {string} props.itemId
  * @param {string} props.actionType
  * @param {string|null} [props.project] - active project (hook resolves it when absent)
  * @param {(project:string)=>Promise<Array|null>} [props.loadItems] - injectable items loader
+ * @param {(onChange:(evt:object)=>void) => (()=>void)} [props.subscribe] - injectable SSE channel
+ * @param {number} [props.debounceMs] - SSE debounce window (tests)
  * @param {() => void} props.onCancel
  * @param {(intentNote:string, seam:object) => void} [props.onGenerate]
  */
-export function SteerPanelContainer({ itemId, actionType, project = null, loadItems, onCancel, onGenerate }) {
+export function SteerPanelContainer({ itemId, actionType, project = null, loadItems, subscribe, debounceMs, onCancel, onGenerate }) {
   const opts = { project };
   if (loadItems) opts.loadItems = loadItems;
-  const { status, context } = useSteerContext(itemId, opts);
+  if (subscribe) opts.subscribe = subscribe;
+  if (debounceMs !== undefined) opts.debounceMs = debounceMs;
+  const { status, context, refreshing } = useSteerContext(itemId, opts);
   const [prompt, setPrompt] = useState(null);
+  const [promptCtxJson, setPromptCtxJson] = useState(null);
   const handleGenerate = (intentNote, seam) => {
     setPrompt(buildPrompt(seam.actionType, seam.context, intentNote));
+    setPromptCtxJson(JSON.stringify(seam.context)); // snapshot for the divergence cue
     if (typeof onGenerate === 'function') onGenerate(intentNote, seam);
   };
+  const diverged =
+    prompt !== null && promptCtxJson !== null && JSON.stringify(context) !== promptCtxJson;
+  const refreshCue = status === 'ready'
+    ? (refreshing ? 'refreshing' : diverged ? 'updated' : 'live')
+    : null;
   return (
     <SteerPanel
       itemId={itemId}
@@ -282,6 +334,7 @@ export function SteerPanelContainer({ itemId, actionType, project = null, loadIt
       onCancel={onCancel}
       onGenerate={handleGenerate}
       prompt={prompt}
+      refreshCue={refreshCue}
     />
   );
 }

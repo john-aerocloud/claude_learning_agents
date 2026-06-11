@@ -1024,3 +1024,6 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note,item_i
 2026-06-11T07:35:13Z,observatory,8,s017-staging-buffer,engineer,deploy,,success,bc2ff5f,DEFECT-012 staging buffer live on :5173 (route + board box; probe 200 + endpoint envelope verified),DEF-012,
 2026-06-11T07:35:13Z,observatory,8,s017-staging-buffer,engineer,task_end,2700,success,bc2ff5f,DEFECT-012 fixed: staging API + StagingQueueBox between Decompose and Ready; 19 unit + 4 e2e pinning tests red->green; full suite 640 green,DEF-012,
 2026-06-11T07:35:13Z,observatory,8,s017-staging-buffer,engineer,stage_exit,,success,bc2ff5f,engineer stage complete for DEFECT-012,DEF-012,
+2026-06-11T07:36:31Z,observatory,8,s015-wip-navigate-reslice-preview,engineer,deploy,,success,b7ec8a8,merge-to-main x2 (0f7055b stage-flow open_items+horizon; b7ec8a8 WIP components dark) - :5173 dev server auto-deploys trunk; ObservatoryView wiring commit pending UC-S014-2 shared-file landing,UC-S015-1,
+2026-06-11T07:40:10Z,observatory,8,s014-steer-prompt-handoff,engineer,deploy,,success,1111636,UC-S014-2 steer panel landed on trunk (unit 640 + e2e 88 green),UC-S014-2,
+2026-06-11T07:40:10Z,observatory,8,s014-steer-prompt-handoff,engineer,stage_exit,5160,success,UC-S014-2,SteerPanel + useSteerContext + wiring built TDD; UC done conditions F-1..F-5 + A11Y + GEO + FIG green in browser,UC-S014-2,

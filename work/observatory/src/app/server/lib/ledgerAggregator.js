@@ -447,7 +447,13 @@ export function aggregateStageFlow(ledgerCsv, project, itemsCsv = null, opts = {
   // queue CSVs + item registry at REQUEST TIME. `now` is request time (epoch ms);
   // the server may pass Date.now() — this is a normal Node process.
   const queues = opts && typeof opts === 'object' ? opts.queues || null : null;
-  const now = opts && Number.isFinite(opts.now) ? opts.now : Date.now();
+  // `now` defaults to request time — but an EXPLICITLY-passed non-finite now
+  // (NaN) is honoured as "uncomputable", NOT silently swapped for Date.now():
+  // the downstream dwell/wait guards then fail soft to null (unknown ≠ 0,
+  // S15-1-FIG-3). The old `Number.isFinite(opts.now) ? … : Date.now()` was a
+  // time bomb — the NaN-now pin only passed while the wall clock trailed the
+  // fixture's open timestamp, and went red on trunk the moment it caught up.
+  const now = opts && opts.now !== undefined ? Number(opts.now) : Date.now();
 
   // DEFECT-002: reconcile WIP against the authoritative item registry. null →
   // no registry available → keep raw open-enter pairing (fail soft).

@@ -14,3 +14,4 @@ timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note,item_i
 2026-06-09T01:25:00Z,demo,1,s-demo,cicd,deploy,,success,FIX-13,deploy success,UC-D1-1,deploy
 2026-06-09T02:00:00Z,demo,1,s-demo,flow-manager,note,,na,FIX-14,UC-S004-1 pulled for history-panel fixture,UC-S004-1,ready
 2026-06-09T02:18:00Z,demo,1,s-demo,orchestrator,stage_note,,success,FIX-15,UC-S004-1 history-panel fixture row,UC-S004-1,ready
+2026-06-08T20:00:00Z,demo,1,s-demo,tester,task_start,,na,FIX-16,validate stuck (s015 stale-open fixture - no task_end),UC-D1-2,validate

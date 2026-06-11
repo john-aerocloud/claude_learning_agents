@@ -206,7 +206,7 @@ graph TD
     %% itself untouched — fresh DEFECT-011 fix preserved).
     R_DEFECTS["server/routes/defects.js — defects route ADAPTER (UC-S013-1)<br/>GET /api/projects/:id/defects[?id=DEFECT-NNN]<br/>fs: glob work/:id/defects/DEFECT-*.md + read process/dora/ledger.csv; never throws"]:::s013changed
     LIB_DEFECTS["server/lib/defectsAggregator.js — defects DOMAIN (UC-S013-1, pure)<br/>md-record parse (3 live shapes) ∪ ledger failure/recovery pairing by ref<br/>MTTR=first recovery−first failure (s, mttr_units); unmatched failure=OPEN; sorted by id"]:::s013changed
-    AGG_LEDGER["server/lib/ledgerAggregator.js — shared tolerant parseLedger + stage-flow domain (UC-S004-1; READ-ONLY in s013)"]:::stable
+    AGG_LEDGER["server/lib/ledgerAggregator.js — shared tolerant parseLedger + stage-flow domain (UC-S004-1)<br/>UC-S015-1 ADDITIVE: every stage gains wip_horizon_ms (exported WIP_STALENESS_HORIZON_MS)<br/>+ open_items[{item_id,note,opened_at,dwell_ms,stale}] — ALL unmatched opens regardless of age,<br/>stale-flagged; wip/wip_items recency headline UNCHANGED (DEFECT-010/011 preserved)"]:::s015changed
     R_DEFECTS -->|aggregateDefects files+ledgerCsv+projectId| LIB_DEFECTS
     LIB_DEFECTS -.->|parseLedger import (read-only reuse, no second parser)| AGG_LEDGER
 
@@ -216,3 +216,5 @@ graph TD
     classDef stable fill:#eee,stroke:#999,color:#000
     classDef delivered fill:#d5f5e3,stroke:#1e8449,color:#000
     classDef s013changed fill:#fff3bf,stroke:#b7791f,color:#000
+    %% s015 / UC-S015-1 — marks cleared at s015 delivery after the tester consumes.
+    classDef s015changed fill:#ffe0b3,stroke:#cc6600,color:#000

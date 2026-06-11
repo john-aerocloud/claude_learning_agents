@@ -62,7 +62,10 @@ const TERMINAL_ITEM_STATES = new Set(['done', 'dropped', 'cancelled']);
 // 2h quickly, so phantoms still self-clear). Recency stays the ONLY gate
 // (EXP-035: simplest predicate wins; no new exclusions added).
 // Named so it can be tuned without logic changes (ruling §"Horizon value").
-const WIP_STALENESS_HORIZON_MS = 2 * 60 * 60 * 1000; // 2 hours (DEFECT-011)
+// EXPORTED (UC-S015-1): the stage-flow response stamps this on every stage as
+// `wip_horizon_ms` so the WIP navigation panel reads the LIVE horizon from the
+// source instead of hard-coding 2h client-side (S15-1-WIP-1 / EXP-035).
+export const WIP_STALENESS_HORIZON_MS = 2 * 60 * 60 * 1000; // 2 hours (DEFECT-011)
 
 // DEFECT-004 — buffer (queue) stages hold items RIGHT NOW. Each maps to a queue
 // CSV (work/<project>/queues/<stage>.csv) for current depth/wait, and (where a
@@ -419,6 +422,8 @@ function emptyStages(queues = null, itemRegistry = null, now = Date.now()) {
     wip: 0,
     rework: 0,
     wip_items: [],
+    wip_horizon_ms: WIP_STALENESS_HORIZON_MS, // UC-S015-1: live horizon, never client-hardcoded
+    open_items: [],
     source_rows: [],
     source_events: [],
     source_total: 0,
@@ -513,8 +518,25 @@ export function aggregateStageFlow(ledgerCsv, project, itemsCsv = null, opts = {
     // is NOT consulted here; it remains used for queue depth/coherence (DEFECT-004).
     // wip_items entries are {item_id, note} (DEFECT-008): note = open row's note.
     const wipItems = [];
+    // UC-S015-1 — open_items: EVERY unmatched open, regardless of age, with its
+    // open timestamp + computed dwell. The recency horizon governs the at-a-glance
+    // WIP headline (wip/wip_items, below — unchanged); the WIP NAVIGATION panel is
+    // precisely where stale-open items must NOT silently vanish (S15-1-WIP-2), so
+    // they ship here flagged `stale` instead of being dropped. dwell_ms is null
+    // (unknown ≠ 0, S15-1-FIG-3) when it cannot be computed.
+    const openItems = [];
     for (const [id, openRow] of openByItem) {
       const openTs = Date.parse(openRow.timestamp);
+      const dwellMs = Number.isFinite(openTs) && Number.isFinite(now) && now >= openTs
+        ? now - openTs
+        : null;
+      openItems.push({
+        item_id: id,
+        note: openRow.note ?? '',
+        opened_at: openRow.timestamp,
+        dwell_ms: dwellMs,
+        stale: dwellMs !== null && dwellMs > WIP_STALENESS_HORIZON_MS,
+      });
       const recent = Number.isFinite(openTs) && Number.isFinite(now)
         ? (now - openTs) <= WIP_STALENESS_HORIZON_MS
         : true; // unparseable ts → fail-soft to "recent" (never silently drop)
@@ -551,6 +573,9 @@ export function aggregateStageFlow(ledgerCsv, project, itemsCsv = null, opts = {
       wip: wipItems.length,
       rework,
       wip_items: wipItems,
+      wip_horizon_ms: WIP_STALENESS_HORIZON_MS, // UC-S015-1 (S15-1-WIP-1)
+      open_items: openItems, // UC-S015-1 (S15-1-WIP-2) — all opens, stale flagged
+
       source_rows: contributing.map((r) => r.rowRef),
       source_events: contributing.slice(0, SOURCE_EVENTS_CAP).map(toSourceEvent),
       source_total: sourceTotal,

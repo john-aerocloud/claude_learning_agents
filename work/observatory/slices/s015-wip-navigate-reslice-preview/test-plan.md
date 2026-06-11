@@ -101,4 +101,98 @@ data shape arriving from the real stage-flow endpoint is correct).
 
 | Node | Status | Note |
 |---|---|---|
-| `WipRow` (live real-data browser run) | No dedicated real-data browser spec | Fixture spec covers all acceptance conditions; live API probe confirms correct data shape. A real-data WipPanel browser spec would require a new fixture or REUSE_SERVER run against live data — considered future improvement. |
+| `WipRow` (live real-data browser run) | Covered — `wip-steer-real-data.spec.js` added this UC | EXP-033 real-data browser spec exercises the WipRow steer affordance against the live :5173 server with real WIP items. |
+
+---
+
+# Test plan — UC-S015-2 (steer actions from WIP rows)
+
+Slice: s015-wip-navigate-reslice-preview
+UC: UC-S015-2 — Steer action routing from WIP panel rows
+SHAs under test: a273b02 (WipRow SteerMenu composition), b21cffc (ObservatoryView onSteer threading)
+Run date: 2026-06-11
+Tester: tester agent
+
+---
+
+## Changed nodes from component-map.mmd (s015changed / SteerMenu WipRow edge)
+
+| Node | Class | Covering spec |
+|---|---|---|
+| `SteerMenu --> WipRow` (new edge) | `s015changed` | `wip-steer.spec.js` (`@covers uc-s015-2`, `@covers SPA_WIPROW`, `@covers SteerMenu`) |
+| `WipRow` (extended — SteerMenu trailing) | `s015changed` | `wip-steer.spec.js` |
+| `WipPanel` (extended — onSteer pass-through) | `s015changed` | `wip-steer.spec.js` |
+| `SteerMenu` (composed into WipRow) | `s015changed` | `wip-steer.spec.js` |
+| `ObservatoryView` (onSteer threaded to WipPanelContainer) | `SPA_OBSVIEW` | `ObservatoryViewWipSteer.test.jsx` (jsdom) + `wip-steer.spec.js` (browser) |
+
+## Acceptance conditions tick-off (acceptance.md UC-S015-2)
+
+### Functional conditions (F-S2-1..F-S2-4)
+
+| Condition | Test | Surface | Tick |
+|---|---|---|---|
+| F-S2-1: `data-testid="steer-btn"` present on EVERY WIP row; clicking shows 4-option picker | `wip-steer.spec.js` F-S2-1/A11Y-1/FIG-1 | Fixture :5199 | PASS |
+| F-S2-2: "Raise defect" / "Re-prioritise" / "Custom steer" opens SteerPanel with correct item id | `wip-steer.spec.js` F-S2-2/F-S2-4/A11Y-5 | Fixture :5199 | PASS |
+| F-S2-3: "Request re-slice / split" opens SteerPanel with `data-action="re-slice"` (no dead-end) | `wip-steer.spec.js` F-S2-3 | Fixture :5199 | PASS |
+| F-S2-4: WIP rows remain rendered while steer drawer is open; close and pick different row works | `wip-steer.spec.js` F-S2-2/F-S2-4/A11Y-5 | Fixture :5199 | PASS |
+
+### Accessibility (S15-2-A11Y-1..5)
+
+| Condition | Test | Tick |
+|---|---|---|
+| A11Y-1: one steer trigger per row; accessible name carries item id + job, never positional token | `wip-steer.spec.js` F-S2-1/A11Y-1/FIG-1 | PASS |
+| A11Y-2: Tab-reachable; Enter/Space/ArrowDown opens; focus → first menuitem; Esc closes + returns to trigger; Tab escapes (no trap) | `wip-steer.spec.js` A11Y-2 | PASS |
+| A11Y-3: per-row trigger hit box ≥ 24×24 CSS px | `wip-steer.spec.js` A11Y-3 | PASS |
+| A11Y-4: axe CLEAN on WIP view with triggers present AND with menu open | `wip-steer.spec.js` A11Y-4 | PASS |
+| A11Y-5: Cancel/×/Esc from SteerPanel returns focus to originating WIP-row trigger | `wip-steer.spec.js` F-S2-2/F-S2-4/A11Y-5 | PASS |
+
+### Visual-structural / no-reflow (GEO-S015-2-WIP-1..4)
+
+| Condition | Test | Tick |
+|---|---|---|
+| GEO-WIP-1: steer menu is a pure overlay — wip-panel bbox + page scrollHeight byte-identical open vs closed; menu portalled to body | `wip-steer.spec.js` GEO-S015-2-WIP-1 | PASS |
+| GEO-WIP-2: trigger trailing; figure `<dd>` band unbroken (GEO-S015-4 holds with trigger present) | `wip-steer.spec.js` GEO-S015-2-WIP-2 | PASS |
+| GEO-WIP-3: list still STACKS with triggers present (GEO-S015-2 not regressed) | `wip-steer.spec.js` GEO-S015-2-WIP-3 | PASS |
+| GEO-WIP-4: open menu clamped on-screen from right-edge trigger; no horizontal scroll | `wip-steer.spec.js` GEO-S015-2-WIP-4 | PASS |
+
+### Figure legibility (S15-2-FIG-1..2)
+
+| Condition | Test | Tick |
+|---|---|---|
+| FIG-1: trigger accessible name contains live `data-item-id` + job sentence, never `row:\d+`/nth | `wip-steer.spec.js` F-S2-1/A11Y-1/FIG-1 | PASS |
+| FIG-2: visible menuitem text is human label; enum rides `data-action` only — no raw `re-slice`/`custom` as visible text | `wip-steer.spec.js` S15-2-FIG-2 | PASS |
+
+### UC-S015-1 regression guard
+
+| Condition | Test | Tick |
+|---|---|---|
+| All 12 wip-panel.spec.js tests (UC-S015-1 conditions) still pass with the steer trigger present | `wip-panel.spec.js` 12/12 | PASS |
+
+### EXP-033 real-data cross-check
+
+Live server (:5173, real work/observatory/items/items.csv + ledger.csv):
+
+| Check | Ground truth | Observed | Match |
+|---|---|---|---|
+| WIP panel renders with real open items | stage-flow API returns 9 open_items across engineer/ui-design/validate stages | `wip-count` live-region shows "9 items in flight"; all 9 rows visible with steer triggers | YES |
+| Each real WIP row has one steer trigger | spec iterates all 9 live rows checking `[data-testid="steer-btn"]` count=1 | all 9 rows: one trigger each | YES |
+| Trigger accessible name carries real item id (not `row:N`) | all item ids contain letters (real project prefix: UC-S, CHK-, etc.) | names match `/^Steer [A-Z]/`, none match `row:\d+` | YES |
+| 4 human-labelled actions on a real WIP row | first row UC-S003-2 → steer menu has 4 menuitems | "Raise defect" / "Re-prioritise" / "Request re-slice / split" / "Custom steer" visible | YES |
+| SteerPanel opens with real item id pre-loaded | pick "Raise defect" on first row → SteerPanel `data-item-id="UC-S003-2"` | panel `data-item-id` matches the row's `data-item-id` | YES |
+| Re-slice does NOT dead-end | pick "Request re-slice / split" → SteerPanel opens with `data-action="re-slice"` | panel opens; `data-action="re-slice"` confirmed | YES |
+| WIP list stays mounted behind drawer | check `wip-row` count while panel open | count=9 unchanged while SteerPanel is visible | YES |
+| GEO: panel/page geometry byte-identical menu open vs closed | snapshot before/after keyboard-open of first row menu | `panel`, `panelScroll`, `pageScroll` objects byte-equal | YES |
+| List still STACKS with real live rows | first two rows' bounding boxes | row[1].y > row[0].y; |row[1].x - row[0].x| ≤ 1 | YES |
+| axe CLEAN on WIP view with real items and real menu open | axe scan with triggers present and with menu open | 0 violations on both scans | YES |
+
+Note: Items UC-S003-2/3/4 are in the ledger but NOT in items.csv — `useSteerContext` returns `not-found` for these (the steer panel gracefully shows the not-found placeholder). This is correct application behaviour, not a defect. WIP rows still render correctly with their job falling back to the ledger's `note` field. F-S2-3 real-data test iterates rows to find one with a context-bearing item and confirms the human action label renders correctly.
+
+---
+
+## Validation runs (UC-S015-2)
+
+| Suite | Port | Data | Conditions covered | Result |
+|---|---|---|---|---|
+| `wip-steer.spec.js` (fixture-backed) | :5199 ephemeral (CI=1, --workers=1) | Fixture ledger (UC-D1-2 stale, CHK-4 fresh) | F-S2-1..4, A11Y-1..5, GEO-WIP-1..4, FIG-1..2 | 11/11 PASS |
+| `wip-panel.spec.js` (regression guard) | :5199 ephemeral (CI=1, --workers=1) | Fixture ledger | All UC-S015-1 conditions | 12/12 PASS |
+| `wip-steer-real-data.spec.js` (EXP-033 real-data) | :5173 live (REUSE_SERVER=1) | Real items.csv + ledger.csv | F-S2-1..4, A11Y-3..4, FIG-1..2, GEO-WIP-1/3, EXP-033 | 8/8 PASS |

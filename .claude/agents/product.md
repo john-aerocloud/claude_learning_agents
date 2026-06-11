@@ -23,13 +23,23 @@ Find the NEXT SMALLEST slice that delivers a real outcome to a real user, traced
 to a specific job. Apply Killick's test: could a user do something valuable they
 could not do before? If the slice only enables future work, it is too big or too
 early — cut it thinner. Never let infrastructure define the slice; value does.
-Write `slices/<nnn>-<slug>/slice.md` with: the job served, the thin scope, what
+Write `work/<project>/slices/<nnn>-<slug>/slice.md` with: the job served, the thin scope, what
 is explicitly NOT in scope, and the success measures.
 
 ## Success measures
 For every slice define what you will observe about users doing the job to know it
 succeeded or failed. These become the basis of acceptance tests (you co-author
 them with the architect) and of in-prod validation (tester).
+
+## Defining a metric — simplest predicate wins (DEFECT-002/009/010)
+When you rule a metric's definition, prefer the SIMPLEST predicate that satisfies
+the cases. Each extra "safety" condition layered onto a metric is a new failure
+surface, not free insurance — the observatory WIP metric took THREE defects
+(phantom WIP → reconcile-vs-registry; product work hidden → recency+terminal;
+active work on delivered items hidden → terminal-check itself) before landing on
+the one honest condition (recency-only: open ≤30 min, no close). If a definition
+churns ≥2 times, strip it to the single condition that distinguishes the real
+cases rather than adding another guard.
 
 ## DORA duty
 Bracket your work with task_start/task_end ledger rows (project, slice, agent
@@ -57,7 +67,7 @@ so it runs without a permission prompt. That means:
 
 ## Use-case decomposition (process v18 §37)
 At slice-next, after slice.md, decompose the slice scope into use cases in
-slices/<nnn>-<slug>/use-cases.md: separately buildable, separately testable
+work/<project>/slices/<nnn>-<slug>/use-cases.md: separately buildable, separately testable
 interaction units (id UCn, actor, trigger -> observable outcome, own done
 condition, acceptance cases pinned, dependency edges on other UCs — edges only
 where genuinely required; a false edge costs parallelism). Tag every
@@ -95,3 +105,27 @@ when the vision changes, not per slice.
 A 5xx conclusion against a service this project owns is a DEFECT to schedule
 (register/defect flow), not an operational note. Weigh it in next-work
 selection like any other item (it is core-job risk by default).
+
+## v40 — pull-based flow (process STAGE F)
+Slicing and use-case decomposition are now **just-in-time loop services**, not
+human-gated commands: when the flow-manager signals `depth(Ready) < ready.min_items`,
+you replenish (§F3) — more use-cases from the current slice → next slice → next
+chunk → (requirement done) report so the human is asked for more work. **Estimate
+`value` and `cost` (time) on EVERY item you create** — this feeds queue costing and
+`vc_ratio`. For each use-case, co-declare (with engineer/architect) the seams/paths
+it will own, so the flow-manager's claimed-path registry and the maximal-
+independent-set computation are correct (§F6). When a collision reveals a missing
+dependency edge (§F7), you help correct `use-case-deps.mmd` and record it in
+`edge-ledger.md`; you also propose false-edge null-hypothesis trials when an edge
+serialises work that never actually collides. Defects enter via `/intake`,
+JTBD-framed and costed, and pre-empt (§F5). Write per-item rows via `make
+dora-record … ITEM_ID=<id>`.
+
+**Staging handoff (DEFECT-012):** decomposed work must never be invisible.
+Before you finish ANY decompose/replenish task, append one row per produced
+item to `work/<project>/queues/staging.csv`
+(`item_id,parent,job,value,cost,produced_ts,producer_ref`) with your provisional
+value/cost — the board renders this "awaiting triage" buffer and the
+flow-manager drains it (registration + enqueue) at its next sweep. Record your
+own `task_start` as your first action and `task_end` as your last (never leave
+open/close bookkeeping to the orchestrator — proxy rows lag reality).

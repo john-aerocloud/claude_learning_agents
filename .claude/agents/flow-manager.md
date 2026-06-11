@@ -95,6 +95,13 @@ below-floor signal is a refill-NOW trigger, not an informational note** — keep
 re-raising it until Ready is back at/above floor; never let it be tolerated as
 "expected" (the s001–s004 gap: §F3).
 
+**Staging drain (DEFECT-012):** product appends decomposed items to
+`queues/staging.csv` at completion. At EVERY sweep, drain it: register each row
+in items.csv, enqueue DAG-ready items to Ready (re-cost/re-prioritise), mark the
+rest planned/chain-blocked, then remove the row. A staging row surviving two
+sweeps is a triage-latency breach — raise it at the retro. Empty staging is the
+happy state (policy: min_items 0 / wip_limit 20).
+
 **Enqueue-to-empty wake (§F9):** whenever you enqueue an item onto a queue that
 was **empty** (depth 0 → 1), emit a **`loop_wake`** ledger row (`queue`=the
 queue, `item_id`=the item) signalling the orchestrator to (re)start the loop if

@@ -97,12 +97,90 @@ graph TD
     S2UC6 -->|"SSE hook seam"| S5UC6
     S4UC1 -->|"ledgerAggregator shared module"| S5UC1
 
+    %% s013 — CHK-8 defects view (SECONDARY)
+    S13UC1["S13-UC1 — Defects read endpoint<br/>GET /api/projects/:id/defects<br/>parse DEFECT-*.md + join ledger MTTR<br/>FOUNDATIONAL"]
+    S13UC2["S13-UC2 — Defects list panel<br/>status + severity + MTTR per row<br/>CONFIRMED first; non-colour-redundant"]
+    S13UC3["S13-UC3 — Defect drill-down + MTTR card<br/>DetailPane reuse; MttrCard; MarkdownRenderer"]
+    S13UC4["S13-UC4 — SSE live refresh<br/>useDefects.js wired to subscribeEvents"]
+
+    %% s013 internal dependencies
+    S13UC1 --> S13UC2
+    S13UC2 --> S13UC3
+    S13UC2 --> S13UC4
+
+    %% Cross-slice: s013 reuses s001 ledger + s005 drawer/renderer
+    S4UC1 -->|"ledgerAggregator reuse"| S13UC1
+    UC2 -->|"CSV parser infra"| S13UC1
+    UC5 -->|"SSE channel (server)"| S13UC4
+    S5UC3 -->|"DetailPane floating drawer reuse"| S13UC3
+    S5UC4 -->|"MarkdownRenderer reuse"| S13UC3
+    S2UC6 -->|"SSE hook seam"| S13UC4
+
+    %% s014 — CHK-5 steer prompt handoff (SECONDARY)
+    S14UC1["S14-UC1 — Steer-action menu<br/>Steer button on WIP chips + tree rows<br/>4 action-type options"]
+    S14UC2["S14-UC2 — Steer panel<br/>item context + intent note textarea<br/>Generate prompt button"]
+    S14UC3["S14-UC3 — Prompt builder<br/>promptBuilder.js pure fn<br/>template → formatted prompt"]
+    S14UC4["S14-UC4 — Copy to clipboard + SSE refresh<br/>toast confirm; context re-fetch on SSE"]
+
+    %% s014 internal dependencies (linear chain)
+    S14UC1 --> S14UC2
+    S14UC2 --> S14UC3
+    S14UC3 --> S14UC4
+
+    %% Cross-slice: s014 reuses s001 read-layer + s005 SPA seams
+    UC2 -->|"items endpoint (item context)"| S14UC2
+    UC5 -->|"SSE channel (server)"| S14UC4
+    S2UC1 -->|"SPA scaffold"| S14UC1
+    S2UC6 -->|"SSE hook seam"| S14UC4
+    S5UC2 -->|"WorkItemTree row slot (read-only)"| S14UC1
+    S4UC4 -->|"VSM WIP chip slot (read-only)"| S14UC1
+
+    %% s015 — CHK-6 WIP navigate & re-slice/split before/after preview (SECONDARY)
+    S15UC1["S15-UC1 — WIP navigation panel<br/>list in-flight items sorted by time-in-stage<br/>FOUNDATIONAL for CHK-6"]
+    S15UC2["S15-UC2 — Steer action routing from WIP rows<br/>SteerMenu reuse + dispatch re-slice → preview"]
+    S15UC3["S15-UC3 — Re-slice/split before/after preview panel<br/>ReslicePreviewPanel; before/after two-column form"]
+    S15UC4["S15-UC4 — Enriched re-slice/split prompt<br/>promptBuilder extension; Part A + Part B tokens"]
+
+    %% s015 internal dependencies
+    S15UC1 --> S15UC2
+    S15UC2 --> S15UC3
+    S15UC3 --> S15UC4
+
+    %% Cross-slice: s015 builds on s014 steer engine + existing data endpoints
+    S14UC1 -->|"SteerMenu READ-ONLY reuse"| S15UC2
+    S14UC2 -->|"useSteerContext — item context load"| S15UC3
+    S14UC3 -->|"promptBuilder.js — extended by UC-S015-4"| S15UC4
+    S4UC1 -->|"stage-flow WIP data (time-in-stage)"| S15UC1
+    UC2 -->|"items endpoint (job/value/cost)"| S15UC1
+    S2UC6 -->|"SSE hook seam (panel refresh)"| S15UC1
+
+    %% s018 — CHK-7 guided cost-of-delay intake (SECONDARY)
+    S18UC1["S18-UC1 — Intake wizard shell + JTBD capture<br/>IntakeWizard.jsx; 3-field panel + live job-sentence preview"]
+    S18UC2["S18-UC2 — CoD signals step + value-token scorer<br/>CodStep.jsx; codScorer.js pure fn<br/>deterministic HIGH/MED/LOW rule"]
+    S18UC3["S18-UC3 — Queue-rank preview<br/>useQueueRank.js; directional count<br/>from live /api/projects/:id/items"]
+    S18UC4["S18-UC4 — Intake prompt builder + clipboard handoff<br/>intakePromptBuilder.js pure fn; intake-prompt.txt<br/>SteerPanel clipboard-copy + toast REUSE"]
+
+    %% s018 internal dependencies (linear chain)
+    S18UC1 --> S18UC2
+    S18UC2 --> S18UC3
+    S18UC3 --> S18UC4
+
+    %% Cross-slice: s018 reuses s001 read-layer + s002 SPA scaffold + s014 clipboard mechanic
+    S2UC1 -->|"SPA scaffold"| S18UC1
+    UC2 -->|"items endpoint (queue rank)"| S18UC3
+    S14UC3 -->|"promptBuilder pattern (sibling model)"| S18UC4
+    S14UC4 -->|"SteerPanel clipboard-copy + toast REUSE"| S18UC4
+
     classDef stable fill:#eee,stroke:#999,color:#000
     classDef delivered fill:#d5f5e3,stroke:#1e8449,color:#000
     classDef superseded fill:#f9ebea,stroke:#c0392b,color:#666
-    classDef changed fill:#fff3cd,stroke:#b7950b,color:#000
+    classDef changed fill:#fef9c3,stroke:#b7950b,color:#000
 
     class UC1,UC2,UC3,UC4,UC5,UC6 delivered
     class S2UC1,S2UC2,S2UC3,S2UC4,S2UC5,S2UC6 delivered
     class S4UC1,S4UC2,S4UC3,S4UC4,S4UC5,S4UC6 delivered
-    class S5UC1,S5UC2,S5UC3,S5UC4,S5UC5,S5UC6 changed
+    class S5UC1,S5UC2,S5UC3,S5UC4,S5UC5,S5UC6 delivered
+    class S13UC1,S13UC2,S13UC3,S13UC4 stable
+    class S14UC1,S14UC2,S14UC3,S14UC4 stable
+    class S15UC1,S15UC2,S15UC3,S15UC4 stable
+    class S18UC1,S18UC2,S18UC3,S18UC4 changed

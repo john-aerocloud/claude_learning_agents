@@ -1,0 +1,11 @@
+queue,param,value,unit,owner,target_metric,last_tuned,experiment
+intake,min_items,2,count,flow-manager,throughput,<created>,EXP-022
+intake,wip_limit,10,count,flow-manager,gross-lead-time,<created>,EXP-022
+ready,min_items,2,count,flow-manager,throughput,<created>,EXP-022
+ready,wip_limit,4,count,flow-manager,gross-lead-time,<created>,EXP-022
+deploy,min_items,0,count,cicd,throughput,<created>,EXP-022
+deploy,wip_limit,1,count,cicd,gross-lead-time,<created>,EXP-022
+rework,min_items,0,count,flow-manager,mttr,<created>,EXP-022
+rework,wip_limit,2,count,flow-manager,mttr,<created>,EXP-022
+staging,min_items,0,count,flow-manager,throughput,2026-06-11,DEF-012-fix
+staging,wip_limit,20,count,flow-manager,gross-lead-time,2026-06-11,DEF-012-fix

@@ -1,0 +1,2 @@
+item_id,enqueued_ts,value,cost,vc_ratio,position,reason
+UC-S013-2,2026-06-11T07:44:00Z,HIGH,2.5,1.60,1,DAG-ready: UC-S013-1 tester-passed (done); seams DefectsPanel.jsx disjoint from in-flight UC-S014-2+UC-S015-1

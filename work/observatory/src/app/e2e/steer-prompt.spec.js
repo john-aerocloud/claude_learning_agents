@@ -67,7 +67,9 @@ test('AC-2 — re-prioritise prompt carries the human verb (never a bare enum ke
 });
 
 test('AC-4 — generation fires ZERO network requests (pure client-side)', async ({ page }) => {
-  await openAndType(page, 're-slice');
+  // UC-S015-3 re-pointed `re-slice` to the ReslicePreviewPanel; this pin is
+  // action-agnostic, so it drives a SteerPanel-routed action instead.
+  await openAndType(page, 're-prioritise');
   const requests = [];
   page.on('request', (r) => requests.push(r.url()));
   await page.getByTestId('steer-generate').click();

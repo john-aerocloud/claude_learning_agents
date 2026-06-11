@@ -42,8 +42,11 @@ test.beforeEach(async ({ page }) => {
 
 /** Open the steer panel from a trigger by KEYBOARD ONLY (no hover):
  * focus trigger → Enter (menu opens, first item focused) → arrow to the
- * action → Enter (menu closes, panel opens). */
-async function openPanelByKeyboard(page, btnSelector, action = 're-slice') {
+ * action → Enter (menu closes, panel opens).
+ * UC-S015-3 re-pointed `re-slice` to the ReslicePreviewPanel, so this suite's
+ * SteerPanel pins drive a SteerPanel-routed action ('custom') — the panel
+ * behaviour under test is action-agnostic and unchanged. */
+async function openPanelByKeyboard(page, btnSelector, action = 'custom') {
   await page.locator(btnSelector).focus();
   await page.keyboard.press('Enter');
   await expect(page.locator(MENU)).toBeVisible();
@@ -71,7 +74,7 @@ function geometrySnapshot(page) {
 
 test('F-1 / S14-2-FIG-1 — panel opens with the REAL item id + job sentence + human action label', async ({ page }) => {
   await page.locator(TREE_BTN).click();
-  await page.getByRole('menuitem', { name: 'Request re-slice / split' }).click();
+  await page.getByRole('menuitem', { name: 'Custom steer' }).click();
 
   const panel = page.locator(PANEL);
   await expect(panel).toBeVisible();
@@ -80,7 +83,7 @@ test('F-1 / S14-2-FIG-1 — panel opens with the REAL item id + job sentence + h
 
   await expect(page.getByTestId('steer-ctx-id')).toHaveText(`REQ-DEMO — ${REQ_JOB}`);
   await expect(page.getByTestId('steer-ctx-job')).toHaveText(REQ_JOB);
-  await expect(page.getByTestId('steer-ctx-action')).toHaveText('Request re-slice / split');
+  await expect(page.getByTestId('steer-ctx-action')).toHaveText('Custom steer');
   // traceability anchor back to the source file (§8)
   await expect(page.getByTestId('steer-context'))
     .toHaveAttribute('data-source', 'work/demo/items/items.csv#id=REQ-DEMO');

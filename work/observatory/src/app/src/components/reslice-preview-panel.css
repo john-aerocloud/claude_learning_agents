@@ -1,0 +1,70 @@
+/* UC-S015-3 — ReslicePreviewPanel: ONLY the two-column geometry on top of the
+ * shared steer-panel.css drawer family (sibling, NOT a fork: position/inset/
+ * z-index/elevation/reduced-motion/guard styling all come from .steer-panel).
+ *
+ * GEO-S015-3-2 (geometry carries meaning): Before and After render SIDE-BY-SIDE
+ * at desktop width — a 2-col grid, shared top band, After strictly right of
+ * Before, no overlap. Within each column the fields STACK (GEO-S015-3-3).
+ * The drawer is WIDER than the single-column steer drawer so two readable
+ * columns fit, still clamped to the viewport (GEO-S015-3-4: never wider than
+ * 100vw minus the inset — no horizontal scroll). Token-based; the column gap
+ * reuses --sp-4 (no new token needed — ui-design "prefer reuse"). */
+
+.reslice-preview-panel {
+  /* two readable columns need more width than --drawer-width (min(440px,38vw));
+     same clamp DISCIPLINE: fixed width, never exceeds the viewport. */
+  width: min(720px, calc(100vw - 2 * var(--drawer-inset)));
+}
+
+.reslice-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr; /* TWO columns, side-by-side (GEO-S015-3-2) */
+  gap: var(--sp-4);
+  align-items: start; /* shared top band */
+  margin-bottom: var(--sp-3);
+}
+
+.reslice-col {
+  min-width: 0; /* long job sentences wrap inside their column, never overflow */
+}
+
+.reslice-col__h {
+  margin: 0 0 var(--sp-2);
+  font-size: 0.95rem;
+}
+
+/* Before-column figures reuse .steer-context (dt/dd grid); the note below
+ * sets the operator's expectation of the After column. */
+.reslice-before__note {
+  margin: var(--sp-2) 0 0;
+  color: var(--c-text-dim);
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+/* After column: label/field pairs STACK vertically (GEO-S015-3-3). */
+.reslice-after {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.reslice-field__label {
+  color: var(--c-text-dim);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.reslice-part {
+  margin-bottom: var(--sp-2);
+  min-height: calc(2 * var(--target-min));
+}
+
+/* The directional cost note — plain readable text, present ONLY when both
+ * parts are non-empty (S15-3-FIG-3); not a colour-only cue. */
+.reslice-cost-note {
+  margin: 0;
+  color: var(--c-text-dim);
+  font-size: 0.85rem;
+}

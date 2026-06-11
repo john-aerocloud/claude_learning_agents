@@ -57,8 +57,10 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator(TREE_BTN)).toBeVisible();
 });
 
-/** Open the steer panel from a trigger by KEYBOARD ONLY (no hover). */
-async function openPanelByKeyboard(page, btnSelector, action = 're-slice') {
+/** Open the steer panel from a trigger by KEYBOARD ONLY (no hover).
+ * UC-S015-3 re-pointed `re-slice` to the ReslicePreviewPanel, so the
+ * SteerPanel pins here drive a SteerPanel-routed action ('custom'). */
+async function openPanelByKeyboard(page, btnSelector, action = 'custom') {
   await page.locator(btnSelector).focus();
   await page.keyboard.press('Enter');
   await expect(page.locator(MENU)).toBeVisible();
@@ -86,7 +88,7 @@ function geometrySnapshot(page) {
 
 test('EXP-033 / F-1 / S14-2-FIG-1 — panel opens with REAL item id + job sentence from live items.csv', async ({ page }) => {
   await page.locator(TREE_BTN).click();
-  await page.getByRole('menuitem', { name: 'Request re-slice / split' }).click();
+  await page.getByRole('menuitem', { name: 'Custom steer' }).click();
 
   const panel = page.locator(PANEL);
   await expect(panel).toBeVisible();
@@ -96,7 +98,7 @@ test('EXP-033 / F-1 / S14-2-FIG-1 — panel opens with REAL item id + job senten
   // Wait for the context to load (async fetch)
   await expect(page.getByTestId('steer-context')).toBeVisible({ timeout: 10000 });
   await expect(page.getByTestId('steer-ctx-id')).toHaveText(`${ITEM_ID} — ${ITEM_JOB}`);
-  await expect(page.getByTestId('steer-ctx-action')).toHaveText('Request re-slice / split');
+  await expect(page.getByTestId('steer-ctx-action')).toHaveText('Custom steer');
   // Source ref anchors to the real observatory project items.csv
   await expect(page.getByTestId('steer-context'))
     .toHaveAttribute('data-source', 'work/observatory/items/items.csv#id=REQ-OBSERVATORY');
@@ -196,7 +198,7 @@ test('GEO-S014-2-1/2/3/4 — pure overlay on live server: zero reflow, fixed, bo
   // Now open the menu via Enter (focus is already on the trigger)
   await page.keyboard.press('Enter');
   await expect(page.locator(MENU)).toBeVisible();
-  await page.locator(`[data-testid="steer-action-re-slice"]`).press('Enter');
+  await page.locator(`[data-testid="steer-action-custom"]`).press('Enter');
   await expect(page.locator(PANEL)).toBeVisible();
   await expect(page.getByTestId('steer-context')).toBeVisible({ timeout: 10000 });
   const open = await geometrySnapshot(page);

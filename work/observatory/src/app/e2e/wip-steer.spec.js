@@ -167,15 +167,18 @@ test('F-S2-2 / F-S2-4 / S15-2-A11Y-5 — action opens the SteerPanel pre-loaded;
   await expect(page.getByTestId('steer-panel')).toHaveAttribute('data-item-id', 'UC-D1-2');
 });
 
-test('F-S2-3 — "Request re-slice / split" from a WIP row does NOT dead-end: SteerPanel opens with data-action="re-slice"', async ({ page }) => {
+test('F-S2-3 — "Request re-slice / split" from a WIP row does NOT dead-end: the ReslicePreviewPanel opens (UC-S015-3 re-point)', async ({ page }) => {
+  // UC-S015-3 re-pointed the re-slice branch: the no-dead-end condition is
+  // preserved by the NEW destination — the two-column preview drawer with the
+  // SAME item context pre-loaded (reslice-preview.spec.js owns its full pins).
   await page.locator(BTN('UC-D1-2')).click();
   await page.getByRole('menuitem', { name: 'Request re-slice / split' }).click();
-  const panel = page.getByTestId('steer-panel');
+  const panel = page.getByTestId('reslice-preview-panel');
   await expect(panel).toBeVisible();
   await expect(panel).toHaveAttribute('data-item-id', 'UC-D1-2');
-  await expect(panel).toHaveAttribute('data-action', 're-slice');
-  // interim destination is the REAL steer flow, not a stub: context resolves
-  await expect(page.getByTestId('steer-ctx-action')).toHaveText('Request re-slice / split');
+  await expect(page.getByTestId('steer-panel')).toHaveCount(0);
+  // the destination is the REAL preview flow, not a stub: context resolves
+  await expect(page.getByTestId('reslice-before-id')).toHaveText(/UC-D1-2 — /);
 });
 
 test('GEO-S015-2-WIP-1 — the steer menu is a PURE overlay: panel + page geometry byte-identical open vs closed; portalled to body', async ({ page }) => {

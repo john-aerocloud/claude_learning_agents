@@ -169,6 +169,39 @@ graph LR
   %% SteerPanel with the item pre-loaded; close returns focus to the WIP-row trigger.
   SteerMenu --> WipRow
 
+  %% s015 / UC-S015-3 THIS commit: ReslicePreviewPanel (NEW) — the two-column
+  %% before/after re-slice preview drawer. SIBLING of SteerPanel in the SAME
+  %% drawer family (steer-panel.css idiom REUSED: fixed + body-portalled +
+  %% z-drawer+1, non-modal, focus move/return, Esc/×/Cancel) — style reuse,
+  %% NOT component composition. Regions: h2 header → TWO-COLUMN body
+  %% (BeforeColumn "Current item" = the useSteerContext six-field contract
+  %% rendered VERBATIM, dt/dd + data-source | AfterColumn "Proposed split" =
+  %% part-a-job/part-b-job textareas + directional cost note ONLY when both
+  %% parts non-empty) → intent textarea → guarded "Looks right — generate
+  %% prompt" (aria-disabled until ALL THREE fields non-empty) → reserved
+  %% prompt-output-slot pinned EMPTY (prompt rendering is UC-S015-4).
+  %% useReslicePreview (NEW hook) — PURE LOCAL After-state (no server calls).
+  %% RUNTIME ROUTING CHANGE for the tester (RESLICE-DISPATCH-1): the
+  %% ObservatoryView steer dispatch is RE-POINTED for ONE action —
+  %% actionType==='re-slice' now mounts ReslicePreviewPanelContainer; the
+  %% other three actions still mount SteerPanelContainer. Holds from EVERY
+  %% SteerMenu origin (WIP row, tree row, VSM chip) — per-action, not
+  %% per-origin. PREVIEW-ONLY: writes nothing; Generate's only output is the
+  %% onGenerate({itemId, context, partAJob, partBJob, intentNote}) seam —
+  %% UC-S015-4's verbatim input contract.
+  ReslicePreviewPanel["ReslicePreviewPanel (s015 / UC-S015-3: two-column before/after re-slice preview drawer — non-modal, preview-only)"]
+  BeforeColumn["BeforeColumn (s015 / UC-S015-3: 'Current item' — useSteerContext six-field contract verbatim, dt/dd + data-source + replaced-by note)"]
+  AfterColumn["AfterColumn (s015 / UC-S015-3: 'Proposed split' — Part A/Part B textareas + conditional directional cost note)"]
+  UseReslicePreview["useReslicePreview (s015 / UC-S015-3 hook: pure local After state — canGenerate guard + costNote; no server calls)"]
+  BeforeColumn --> ReslicePreviewPanel
+  AfterColumn --> ReslicePreviewPanel
+  ReslicePreviewPanel --> UseSteerContext
+  ReslicePreviewPanel --> UseReslicePreview
+  ReslicePreviewPanel --> ObservatoryDrawerLayer
+  %% the RE-POINTED dispatch edge: SteerMenu's re-slice action now lands here
+  %% (the other three actions keep their SteerMenu --> SteerPanel adjacency).
+  SteerMenu -- "re-slice (re-pointed UC-S015-3)" --> ReslicePreviewPanel
+
   %% DEFECT-012: StagingQueueBox (NEW) — the staging buffer ("decomposed,
   %% awaiting triage") rendered INSIDE ValueStreamMap's queue lane BETWEEN the
   %% Decompose and Ready stage nodes, wrapped with two MiniArrows in the
@@ -238,3 +271,12 @@ graph LR
   %% input; cleared at s013 delivery after the tester consumes.
   classDef s013changed fill:#fff3bf,stroke:#b7791f,color:#000;
   class DefectsViewScreen,DefectsPanel,DefectRow s013changed;
+  %% s015 / UC-S015-3 THIS commit — ReslicePreviewPanel/BeforeColumn/AfterColumn/
+  %% UseReslicePreview added; the ObservatoryView re-slice dispatch branch
+  %% RE-POINTED to ReslicePreviewPanel (SteerMenu -- re-slice --> ReslicePreviewPanel;
+  %% the other three actions keep SteerMenu --> SteerPanel). UseSteerContext is in
+  %% the UC-S015-3 blast radius too (Before-column reuse; it keeps its s014changed
+  %% mark — s014 still in flight). Tester UI test-plan input; cleared at s015
+  %% delivery after the tester consumes. (Separate class statement so parallel
+  %% UC commits do not collide on one line.)
+  class ReslicePreviewPanel,BeforeColumn,AfterColumn,UseReslicePreview s015changed;

@@ -159,15 +159,15 @@ test('F-S2-2 — "Raise defect" from a real WIP row opens SteerPanel with item p
   await expect(panel).toHaveCount(0);
 });
 
-test('F-S2-3 — "Request re-slice / split" from a real WIP row opens SteerPanel (data-action="re-slice"), NOT a dead-end', async ({ page }) => {
+test('F-S2-3 — "Request re-slice / split" from a real WIP row opens the ReslicePreviewPanel (UC-S015-3 re-point), NOT a dead-end', async ({ page }) => {
   const count = await page.getByTestId('wip-row').count();
   if (count === 0) { return; }
 
-  // F-S2-3 acceptance: the steer panel opens with data-action="re-slice" and
-  // resolves context from items.csv (proving the full steer flow is live —
-  // UC-S014-3 prompt builder is active). Some WIP items may NOT be in items.csv
-  // (UC-S003-2/3/4 are ledger-only items); we pick the first row whose item
-  // HAS a context entry so the steer-ctx-action assertion is observable.
+  // F-S2-3 acceptance (UC-S015-3 re-point note): the re-slice branch now opens
+  // the two-column preview drawer; the no-dead-end condition is preserved by
+  // the NEW destination. Some WIP items may NOT be in items.csv (ledger-only);
+  // we pick the first row whose item HAS a context entry so the Before-column
+  // assertion is observable.
   let targetId = null;
   for (let i = 0; i < count; i += 1) {
     const row = page.getByTestId('wip-row').nth(i);
@@ -175,32 +175,32 @@ test('F-S2-3 — "Request re-slice / split" from a real WIP row opens SteerPanel
     const btn = row.locator('[data-testid="steer-btn"]');
     await btn.click();
     await page.getByRole('menuitem', { name: 'Request re-slice / split' }).click();
-    const panel = page.getByTestId('steer-panel');
+    const panel = page.getByTestId('reslice-preview-panel');
     await expect(panel).toBeVisible();
     await expect(panel).toHaveAttribute('data-item-id', id);
-    await expect(panel).toHaveAttribute('data-action', 're-slice');
+    await expect(page.getByTestId('steer-panel')).toHaveCount(0);
     // Check if context loaded (some items are ledger-only, not in items.csv)
-    const contextVisible = await page.getByTestId('steer-context').isVisible({ timeout: 3000 }).catch(() => false);
+    const contextVisible = await page.getByTestId('reslice-before-id').isVisible({ timeout: 3000 }).catch(() => false);
     if (contextVisible) {
       targetId = id;
       break;
     }
     // This item has no context (not-found); close and try the next row
-    await page.getByTestId('steer-cancel').click();
+    await page.getByTestId('reslice-cancel').click();
     await expect(panel).toHaveCount(0);
   }
 
   if (targetId === null) {
     console.log('F-S2-3 NOTE: all live WIP items are ledger-only (not in items.csv); '
-      + 'steer panel opens correctly (data-action=re-slice proven) but context loading '
+      + 'the reslice preview panel opens correctly (re-point proven) but context loading '
       + 'cannot be asserted with live data. Re-slice does NOT dead-end — the panel is open.');
     return;
   }
 
-  // Context loaded — assert the human action label in the steer context block
-  await expect(page.getByTestId('steer-ctx-action')).toHaveText('Request re-slice / split');
-  await page.getByTestId('steer-cancel').click();
-  await expect(page.getByTestId('steer-panel')).toHaveCount(0);
+  // Context loaded — assert the Before column carries the live id + job sentence
+  await expect(page.getByTestId('reslice-before-id')).toHaveText(new RegExp(`^${targetId} — `));
+  await page.getByTestId('reslice-cancel').click();
+  await expect(page.getByTestId('reslice-preview-panel')).toHaveCount(0);
 });
 
 test('S15-2-A11Y-4 — axe CLEAN on WIP view with triggers present AND with menu open (live data)', async ({ page }) => {

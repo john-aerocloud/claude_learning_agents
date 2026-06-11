@@ -31,6 +31,7 @@ import { WorkItemTreeContainer } from './WorkItemTreeContainer.jsx';
 import { VsmContainer } from './VsmContainer.jsx';
 import { DetailPaneContainer } from './DetailPaneContainer.jsx';
 import { SteerPanelContainer } from './SteerPanel.jsx';
+import { ReslicePreviewPanelContainer } from './ReslicePreviewPanel.jsx';
 import { ViewSwitch } from './ViewSwitch.jsx';
 import { WipPanelContainer } from './WipPanel.jsx';
 import { DefectsPanelContainer } from './DefectsPanel.jsx';
@@ -193,15 +194,28 @@ export function ObservatoryView({
       />
       {/* UC-S014-2: the steer drawer — body-portalled fixed overlay (its own
           stacking context above both drawers' host surfaces); onGenerate is
-          UC-S014-3's seam (prompt building — not wired in this UC). */}
+          UC-S014-3's seam (prompt building — not wired in this UC).
+          UC-S015-3 (RESLICE-DISPATCH-1): the ONE-line re-point the UC-S015-2
+          seam note pinned — `re-slice` now mounts the ReslicePreviewPanel
+          (two-column before/after preview, preview-only); the other three
+          actions still mount the SteerPanel. Per-action, not per-origin. */}
       {steer ? (
-        <SteerPanelContainer
-          itemId={steer.itemId}
-          actionType={steer.actionType}
-          project={project}
-          {...(loadItems ? { loadItems } : {})}
-          onCancel={onSteerClose}
-        />
+        steer.actionType === 're-slice' ? (
+          <ReslicePreviewPanelContainer
+            itemId={steer.itemId}
+            project={project}
+            {...(loadItems ? { loadItems } : {})}
+            onCancel={onSteerClose}
+          />
+        ) : (
+          <SteerPanelContainer
+            itemId={steer.itemId}
+            actionType={steer.actionType}
+            project={project}
+            {...(loadItems ? { loadItems } : {})}
+            onCancel={onSteerClose}
+          />
+        )
       ) : null}
     </div>
   );

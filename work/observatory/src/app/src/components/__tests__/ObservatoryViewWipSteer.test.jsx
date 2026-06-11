@@ -68,15 +68,18 @@ describe('ObservatoryView ⨯ WIP-row steer routing (UC-S015-2)', () => {
       expect(screen.getByTestId('steer-ctx-id').textContent).toBe('CHK-1 — First demo chunk'));
   });
 
-  it('"Request re-slice / split" does NOT dead-end: it opens the SteerPanel with data-action="re-slice" (F-S2-3 interim)', async () => {
+  it('"Request re-slice / split" does NOT dead-end: it opens the ReslicePreviewPanel (F-S2-3, UC-S015-3 re-point)', async () => {
+    // UC-S015-3 re-pointed the re-slice branch (the acceptance re-point note):
+    // the no-dead-end condition is preserved by the NEW destination — the
+    // two-column preview drawer pre-loaded with the same item.
     render(<ObservatoryView {...deps()} />);
     await openWipRowMenu();
     fireEvent.click(screen.getByTestId('steer-action-re-slice'));
-    const panel = await screen.findByTestId('steer-panel');
+    const panel = await screen.findByTestId('reslice-preview-panel');
     expect(panel.getAttribute('data-item-id')).toBe('CHK-1');
-    expect(panel.getAttribute('data-action')).toBe('re-slice');
+    expect(screen.queryByTestId('steer-panel')).toBeNull();
     await waitFor(() =>
-      expect(screen.getByTestId('steer-ctx-action').textContent).toBe('Request re-slice / split'));
+      expect(screen.getByTestId('reslice-before-id').textContent).toBe('CHK-1 — First demo chunk'));
   });
 
   it('every one of the four actions routes to a steer destination (nothing no-ops)', async () => {
@@ -84,8 +87,14 @@ describe('ObservatoryView ⨯ WIP-row steer routing (UC-S015-2)', () => {
       const { unmount } = render(<ObservatoryView {...deps()} />);
       await openWipRowMenu();
       fireEvent.click(screen.getByTestId(`steer-action-${actionType}`));
-      const panel = await screen.findByTestId('steer-panel');
-      expect(panel.getAttribute('data-action')).toBe(actionType);
+      // UC-S015-3: re-slice routes to the preview drawer; the rest to SteerPanel
+      if (actionType === 're-slice') {
+        const panel = await screen.findByTestId('reslice-preview-panel');
+        expect(panel.getAttribute('data-item-id')).toBe('CHK-1');
+      } else {
+        const panel = await screen.findByTestId('steer-panel');
+        expect(panel.getAttribute('data-action')).toBe(actionType);
+      }
       unmount();
     }
   });

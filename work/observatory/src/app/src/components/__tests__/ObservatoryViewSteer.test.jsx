@@ -28,7 +28,10 @@ const deps = () => ({
   loadArtifact: vi.fn().mockResolvedValue(null),
 });
 
-async function openSteerPanel(actionTestId = 'steer-action-re-slice') {
+// UC-S015-3 re-pointed the `re-slice` action to the ReslicePreviewPanel, so
+// this suite's SteerPanel pins now drive a SteerPanel-routed action ('custom')
+// — the wiring under test (onSteer → drawer with item context) is unchanged.
+async function openSteerPanel(actionTestId = 'steer-action-custom') {
   await waitFor(() => expect(screen.getAllByTestId('tree-node').length).toBe(2));
   const row = document.querySelector('[data-item-id="CHK-1"] > .tree-node__row');
   fireEvent.click(row.querySelector('[data-testid="steer-btn"]'));
@@ -41,10 +44,10 @@ describe('ObservatoryView ⨯ steer wiring (UC-S014-2)', () => {
     await openSteerPanel();
     const panel = await screen.findByTestId('steer-panel');
     expect(panel.getAttribute('data-item-id')).toBe('CHK-1');
-    expect(panel.getAttribute('data-action')).toBe('re-slice');
+    expect(panel.getAttribute('data-action')).toBe('custom');
     await waitFor(() =>
       expect(screen.getByTestId('steer-ctx-id').textContent).toBe('CHK-1 — First demo chunk'));
-    expect(screen.getByTestId('steer-ctx-action').textContent).toBe('Request re-slice / split');
+    expect(screen.getByTestId('steer-ctx-action').textContent).toBe('Custom steer');
   });
 
   it('steer never drills: the DetailPane stays closed while the SteerPanel opens', async () => {

@@ -581,3 +581,57 @@ SourceLink convention, the tree DEF glyph "⚠", and tree-state/space/spacing to
   (`mttr_s=null`, never "0"); title is a sentence shown WITH the id (never a
   `row:N` ref); status in the operator's word.
 - **Library:** custom (reuses WipRow figure layout + badge idiom).
+
+## ReslicePreviewPanel  (s015 / UC-S015-3 — two-column before/after re-slice preview drawer)
+- **Role:** the destination of the `re-slice` steer action (RESLICE-DISPATCH-1
+  re-point): a NON-MODAL right-anchored drawer previewing a proposed 2-way split
+  beside the live item context. PREVIEW-ONLY — writes nothing; Generate's only
+  output is the `onGenerate({itemId, context, partAJob, partBJob, intentNote})`
+  seam (UC-S015-4's verbatim input contract). Output slot pinned EMPTY until -4.
+- **Family:** SIBLING of SteerPanel in the SAME drawer family — reuses the
+  `steer-panel.css` idiom (fixed + body-portalled + `--z-drawer`+1, focus
+  move/return, Esc/×/Cancel, aria-disabled Generate guard styling); style reuse,
+  NOT component composition. `reslice-preview-panel.css` adds ONLY the
+  two-column geometry (width `min(720px, 100vw − 2·inset)`, 2-col grid,
+  gap `--sp-4` — no new token).
+- **Props:** pure render — `{ itemId; status; context (useSteerContext six-field
+  contract); partAJob; partBJob; intentNote; canGenerate; costNote; onPartAChange;
+  onPartBChange; onIntentChange; onCancel; onGenerate }`. Container wires
+  `useSteerContext(itemId)` + `useReslicePreview()` (pure local After state).
+- **States:** loading (Before placeholder, fields disabled) · ready · not-found
+  ("Item <id> not found", After + Generate hidden, fail-soft) · error.
+- **Selector:** `getByRole('dialog', { name: /re-slice.*: <id>/i })` (non-modal,
+  no `aria-modal`); `data-testid="reslice-preview-panel"` + `data-item-id`;
+  Generate `reslice-generate` ("Looks right — generate prompt", `aria-disabled`
+  until Part A + Part B + intent ALL non-empty); `reslice-cancel`; `reslice-close`
+  (× last in DOM, CSS top-right); slot `prompt-output-slot` (EMPTY).
+- **A11y/geometry:** h2 panel title → two h3 column headings; keyboard path
+  heading → Part A → Part B → intent → Generate → Cancel → ×; focus returns to
+  the opening SteerMenu trigger; reduced-motion → instant; pure overlay (zero
+  reflow, GEO-S015-3-1); columns side-by-side at desktop (GEO-S015-3-2).
+- **Library:** custom (drawer-family reuse; no new tokens).
+
+## BeforeColumn  (s015 / UC-S015-3 — "Current item", read-only; child of ReslicePreviewPanel)
+- **Role:** PURE render of the `useSteerContext` six-field contract VERBATIM —
+  the same labelled `<dt>`/`<dd>` figure surface as SteerContextBlock, so the
+  operator sees identical context whether steering or re-slicing. Plus the fixed
+  expectation note "After split, this item will be replaced by Part A and Part B".
+- **Fields:** Item ("<id> — <job>"), Job, Value, Cost, Current stage — human
+  labels/values only, `—` for unknowns; never a raw CSV key.
+- **Selector:** `data-testid="reslice-before"` + `data-source={sourceRef}`;
+  fields `reslice-before-<id|job|value|cost|stage>`; note `reslice-before-note`.
+- **Library:** custom (reuses `.steer-context` dt/dd grid).
+
+## AfterColumn  (s015 / UC-S015-3 — "Proposed split", operator input; child of ReslicePreviewPanel)
+- **Role:** collects the proposed 2-way split: Part A / Part B job-sentence
+  textareas (labelled "Part A job sentence" / "Part B job sentence", human
+  placeholders) + the computed directional cost note "Each part will be smaller
+  than the original — favours flow" shown ONLY when BOTH parts are non-empty
+  (S15-3-FIG-3: an unfilled split is NOT a staged proposal — absent, not "—").
+- **State source:** `useReslicePreview()` — pure local `{partAJob, partBJob,
+  intentNote, canGenerate, costNote}`; no server calls.
+- **Selector:** `data-testid="reslice-after"`; fields `part-a-job` / `part-b-job`
+  (`getByRole('textbox', { name: /part [ab] job/i })`); note `reslice-cost-note`
+  (absent when either part is empty).
+- **Library:** custom (reuses `.intent-note` field styling; fields stack —
+  GEO-S015-3-3).

@@ -56,7 +56,7 @@ graph TD
     %% is the network, not an import) — so SPA_CLIENT depends on the deployed :3001
     %% surface (R_PROJ/R_ITEMS/R_DORA/R_EVENTS routes), drawn as a runtime call edge.
     %% S2-UC2..6 attach to SPA_MAIN/SPA_CLIENT, not to each other. ---
-    SPA_CLIENT["src/app/src/api/client.js — SPA API ADAPTER (S2-UC1; +getFlow s004-UC1)<br/>only module knowing :3001 base URL + endpoint shapes<br/>getActive/getProjects/getQueues/getPolicy/getBaseline/getFlow/getStageFlow/subscribeEvents<br/>fail-soft: null on net/HTTP/parse error"]:::delivered
+    SPA_CLIENT["src/app/src/api/client.js — SPA API ADAPTER (S2-UC1; +getFlow s004-UC1; +getStagingQueue DEF-012)<br/>only module knowing :3001 base URL + endpoint shapes<br/>getActive/getProjects/getQueues/getPolicy/getBaseline/getFlow/getStageFlow/getStagingQueue/subscribeEvents<br/>fail-soft: null on net/HTTP/parse error"]:::def012changed
     SPA_APP["src/app/src/App.jsx — app shell (S2-UC1)<br/>banner + main landmark = composition slot + build-sha stamp"]:::delivered
     SPA_MAIN["src/app/src/main.jsx — Preact entry (S2-UC1)<br/>WIRING SEAM: mounts App; UC3 mounts MapContainer as App child here"]:::delivered
 
@@ -174,7 +174,7 @@ graph TD
     SPA_ARTVIEW["src/app/src/components/ArtifactView.jsx — artifact render (UC-S005-4)<br/>marked: md→semantic HTML (h1/ul/table/code, no top-level <pre>); extracts fenced ```mermaid; .mmd→diagram via renderMmd port; fail-soft→'not yet available' / readable-text fallback; svg role=img+aria-label"]:::delivered
     SPA_MMDADAPTER["src/app/src/lib/mermaidRender.js — Mermaid ADAPTER (UC-S005-4)<br/>the ONLY importer of the concrete mermaid SDK; renderMermaidToSvg(code,id)->svg; securityLevel=strict; proven live in browser (jsdom can't lay out SVG)"]:::delivered
     SPA_HISTORY["src/app/src/components/ItemHistoryPanel.jsx — item ledger history (UC-S005-5)<br/>role=region aria-label Item history:id; role=list rows newest-first (HH:MM·agent·event·outcome, DEFECT-005 readable style, never row:N); empty→'no history'; GEO-S005-2 vertical stack"]:::delivered
-    SPA_VSMCTR["src/app/src/components/VsmContainer.jsx — value-stream map container (s004; unchanged, placed beside the rail)"]:::stable
+    SPA_VSMCTR["src/app/src/components/VsmContainer.jsx — value-stream map container (s004)<br/>DEF-012: also loads the staging buffer (getActive→getStagingQueue), re-fetches on a<br/>staging.csv SSE frame (isRelevantChange now ledger.csv OR staging.csv), passes staging→map"]:::def012changed
 
     SPA_MAIN -->|mounts observatory view| SPA_OBSVIEW
     SPA_OBSVIEW -->|controlled selectedId/onSelect/onItemsLoaded| SPA_TREECTR
@@ -210,6 +210,41 @@ graph TD
     R_DEFECTS -->|aggregateDefects files+ledgerCsv+projectId| LIB_DEFECTS
     LIB_DEFECTS -.->|parseLedger import (read-only reuse, no second parser)| AGG_LEDGER
 
+    %% --- DEFECT-012 staging buffer (decomposed — awaiting triage) ---
+    %% Product appends produced items to work/:id/queues/staging.csv at decompose
+    %% completion; the flow-manager drains it at every sweep. The buffer is VISIBLE:
+    %% apiMiddleware dispatches /queues/staging to the new route adapter BEFORE the
+    %% generic queue allowlist (additive; readQueue + ledgerAggregator untouched);
+    %% the board renders StagingQueueBox between the Decompose and Ready stage nodes
+    %% (inside ValueStreamMap's queue lane as the staging-handoff flex item).
+    R_STAGING["server/routes/staging.js — staging buffer route ADAPTER (DEF-012)<br/>GET /api/projects/:id/queues/staging → {queue,depth,rows}<br/>missing/header-only csv → depth 0 (empty = HAPPY state, never null/error)"]:::def012changed
+    SPA_STAGINGBOX["src/app/src/components/StagingQueueBox.jsx — staging buffer box (DEF-012, pure render)<br/>'Staging / awaiting triage' between Decompose and Ready; depth always shown<br/>('N awaiting triage'); depth 0 → explicit drained empty state; rows id+job; NOT focusable"]:::def012changed
+    R_STAGING -->|parseCsv reuse, §4 raw strings| P_CSV
+    SPA_VSMCTR -->|staging prop via ValueStreamMap queue lane| SPA_STAGINGBOX
+    SPA_VSMCTR -->|getActive/getStagingQueue| SPA_CLIENT
+    SPA_CLIENT -.->|HTTP GET /api/projects/:id/queues/staging (getStagingQueue)| R_STAGING
+
+    %% --- s015 / UC-S015-1 WIP navigation panel (ROUTED VIEW in the main column) ---
+    %% ObservatoryView gains a ViewSwitch tablist + two tabpanels; the ACTIVE view's
+    %% container is mounted, the other is genuinely absent (GEO-S015-1) — VsmContainer's
+    %% mount is now CONDITIONAL on view (runtime routing change for the tester).
+    %% The hook composes /stage-flow's UC-S015-1 additive fields (open_items +
+    %% wip_horizon_ms, read via SPA_CLIENT.getStageFlow → AGG_LEDGER) with /items
+    %% (job/value/cost); sort (dwell DESC, nulls last) + stale derivation live in the
+    %% PURE composeWipItems domain fn. horizonMs flows server→client — never a client
+    %% literal (S15-1-WIP-1). WipRow's data-item-id is UC-S015-2's SteerMenu slot.
+    SPA_VIEWSWITCH["src/app/src/components/ViewSwitch.jsx — two-view tablist (UC-S015-1)<br/>role=tablist 'Dashboard view'; roving tabindex; Arrow/Home/End move, Enter/Space activate<br/>pure fn of {active,onSelect}; aria-controls → view-panel-* tabpanels"]:::s015changed
+    SPA_WIPHOOK["src/app/src/hooks/useWipItems.js — WIP-nav data hook + PURE domain (UC-S015-1)<br/>composeWipItems(flow,items)->sorted WipItem[] (dwell DESC, nulls last; stale from LIVE horizon)<br/>formatDwell ('2 h 14 min' | '—'; unknown≠0) / formatHorizon; SSE debounced re-fetch on ledger/items.csv"]:::s015changed
+    SPA_WIPPANEL["src/app/src/components/WipPanel.jsx — WipPanel + WipRow + WipPanelContainer (UC-S015-1)<br/>region 'In-flight WIP'; role=status polite count; dt/dd labelled figures; stale badge text+⏳+band<br/>data-item-id slot (UC-S015-2 hook); empty 'No items currently in flight'; heading takes focus on mount"]:::s015changed
+
+    SPA_OBSVIEW -->|"mounts tablist (UC-S015-1; main col now view-switched)"| SPA_VIEWSWITCH
+    SPA_OBSVIEW -->|"mounts when view=wip (view=pipeline mounts VsmContainer instead)"| SPA_WIPPANEL
+    SPA_WIPPANEL -->|useWipItems state| SPA_WIPHOOK
+    SPA_WIPHOOK -->|getActive/getStageFlow/getItems/subscribeEvents| SPA_CLIENT
+    SPA_WIPHOOK -.->|"consumes wip_horizon_ms + open_items (UC-S015-1 additive stage-flow fields)"| AGG_LEDGER
+    SPA_WIPPANEL -->|@import| SPA_TOKENS
+    SPA_VIEWSWITCH -->|@import| SPA_TOKENS
+
     MARKED_SDK["marked (npm) — client-side markdown→HTML"]:::stable
     MERMAID_SDK["mermaid (npm) — client-side diagram→SVG"]:::stable
 
@@ -218,3 +253,5 @@ graph TD
     classDef s013changed fill:#fff3bf,stroke:#b7791f,color:#000
     %% s015 / UC-S015-1 — marks cleared at s015 delivery after the tester consumes.
     classDef s015changed fill:#ffe0b3,stroke:#cc6600,color:#000
+    %% DEF-012 — marks cleared at slice delivery after the tester consumes.
+    classDef def012changed fill:#fdd,stroke:#c0392b,color:#000

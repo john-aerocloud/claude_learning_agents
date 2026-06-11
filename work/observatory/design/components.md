@@ -398,6 +398,58 @@ convention, LiveStatusDot, the existing SSE channel, `--focus-ring`,
   `--elev-box`+`--drawer-elev`/`--radius-badge`/`--dur-fast`, 0ms animation
   under reduced motion).
 
+## ViewSwitch  (s015 / UC-S015-1 — main-column two-view tablist)
+- **Role:** the explicit two-view navigation ("Pipeline" | "In-flight WIP") at the
+  top of the main column. ROUTED VIEW (EXP-016): activating a tab swaps the
+  main-column content — the two surfaces never co-exist (no overlay reflow by
+  construction). Default view = Pipeline (J1 stays 0-click).
+- **Props:** `{ active: "pipeline"|"wip"; onSelect(view) }` (pure fn of props).
+- **States:** per tab — default · hover · focus-visible · selected (`aria-selected`).
+- **Selector:** `getByRole('tablist', { name: 'Dashboard view' })`,
+  `data-testid="view-switch"`; tabs `getByRole('tab', { name: 'Pipeline' | 'In-flight WIP' })`,
+  `data-testid="view-tab-pipeline|view-tab-wip"`, `data-view`, `aria-selected`,
+  `aria-controls="view-panel-<view>"`.
+- **A11y (S15-1-A11Y-1/4):** roving tabindex (active tab = single tab stop);
+  Arrow/Home/End move focus; Enter/Space activate (manual activation); hit boxes
+  ≥ `--target-min`; `--focus-ring`. Selected state = aria + underline band + colour
+  (never colour alone).
+- **Library:** custom (token-based).
+
+## WipPanel  (s015 / UC-S015-1 — the in-flight WIP view region)
+- **Role:** lists every item with an open in-event (ANY age — stale-open items are
+  flagged, never dropped: S15-1-WIP-2/DEFECT-011), pre-sorted longest-in-stage
+  first (sort is upstream in `useWipItems`; the panel is presentational).
+- **Props:** `{ items: WipItem[]; status: "loading"|"ready"|"empty"; horizonMs;
+  sourceRef }` — `horizonMs` is the LIVE recency horizon from `/stage-flow`
+  `wip_horizon_ms` (never a client literal — S15-1-WIP-1).
+- **States:** default (N rows) · empty ("No items currently in flight") · loading
+  (region + heading immediate) · live (SSE re-fetch via the hook).
+- **Selector:** `getByRole('region', { name: 'In-flight WIP' })`,
+  `data-testid="wip-panel"` (+ `data-source`); visible `<h2>` "In-flight WIP"
+  (takes focus on mount — S15-1-A11Y-2); row list `role="list"`; count line
+  `data-testid="wip-count"` `role="status"` `aria-live="polite"` (S15-1-A11Y-7).
+- **Library:** custom (token-based; reuses `--c-text-dim`, `--fs-tree*`, `--sp-*`,
+  `--radius-*`, `--focus-ring`, `--target-min`).
+
+## WipRow  (s015 / UC-S015-1 — one in-flight item; child of WipPanel)
+- **Role:** one scannable line of labelled figures: id · job sentence · human
+  stage label · value · cost · time-in-stage (unit-bearing — S15-1-FIG-1/2;
+  unknown dwell renders "—", never "0 s" — S15-1-FIG-3).
+- **Props:** `{ item: WipItem; horizonMs }`.
+- **States:** default · stale-open (dwell > horizon) · (steer-affordance slot —
+  populated by UC-S015-2, not here).
+- **Selector:** `role="listitem"`, `data-testid="wip-row"`,
+  **`data-item-id="<id>"`** (the UC-S015-2 SteerMenu composition contract),
+  `data-stale="true|false"`, `data-stage`; figures are `<dt>`/`<dd>` pairs
+  (`wip-id|wip-job|wip-stage|wip-value|wip-cost|wip-dwell`); stale badge
+  `data-testid="stale-badge"`.
+- **Stale cue (REUSES §8, never colour-only):** visible text "stale — over Nh"
+  (authoritative) + `⏳` glyph (`aria-hidden`) + `--c-state-over` left band;
+  accessible name appends ", stale, over Nh".
+- **A11y (S15-1-A11Y-5):** row `aria-label` carries id + job + stage + dwell
+  (+ stale) so no figure is announced bare.
+- **Library:** custom (token-based).
+
 ## ZoomBreadcrumb  (s005 / UC-S005-3/6)
 - **Role:** zoom-path trail + the explicit zoom-OUT controls.
 - **Props:** `{ path: BreadcrumbStep[]; onZoomTo(step); onBackToMap }`.

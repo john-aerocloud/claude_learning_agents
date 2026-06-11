@@ -1,0 +1,43 @@
+/* UC-S015-1 — ViewSwitch tablist (token-based; no off-token values).
+ * Tabs meet --target-min (S15-1-A11Y-4) and show a non-colour focus ring
+ * (S15-1-A11Y-3). The selected state is conveyed by aria-selected (semantics),
+ * the underline band (shape) AND colour — never colour alone. */
+@import './../styles/tokens.css';
+
+.view-switch {
+  display: flex;
+  gap: var(--sp-2);
+  padding: 0 0 var(--sp-3) 0;
+}
+
+.view-switch__tab {
+  min-width: var(--target-min);
+  min-height: var(--target-min);
+  padding: var(--sp-2) var(--sp-4);
+  font-family: var(--ff-base);
+  font-size: var(--fs-label);
+  font-weight: var(--fw-label);
+  color: var(--c-text-dim);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-badge);
+  /* shape cue for the selected state: a bottom band, not colour alone */
+  border-bottom: 3px solid transparent;
+  cursor: pointer;
+}
+
+.view-switch__tab:hover {
+  color: var(--c-text);
+  background: var(--c-surface-raised);
+}
+
+.view-switch__tab[aria-selected='true'] {
+  color: var(--c-text);
+  background: var(--c-surface-raised);
+  border-bottom-color: var(--c-focus);
+}
+
+.view-switch__tab:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}

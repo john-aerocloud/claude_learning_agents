@@ -85,21 +85,37 @@ graph LR
   SteerMenu --> TreeNode
   SteerMenu --> ObservatoryDrawerLayer
 
+  %% s015 / UC-S015-1: WIP navigation panel — ROUTED VIEW (EXP-016). ObservatoryView's
+  %% main column gains a ViewSwitch tablist ("Pipeline" | "In-flight WIP") that swaps
+  %% the column content between VsmContainer (default) and WipPanel. The two surfaces
+  %% NEVER co-exist (inactive tabpanel is hidden AND empty → genuinely unmounted), so
+  %% there is no overlay-reflow failure mode by construction (GEO-S015-1).
+  %% RUNTIME ROUTING CHANGE for the tester: VsmContainer is now mounted CONDITIONALLY
+  %% inside the pipeline tabpanel (was: unconditionally in .observatory-main-col) —
+  %% GEO-S015-1 pins that switch-away-and-back restores a byte-identical VSM bbox.
+  %% WipRow carries data-item-id — the composition slot UC-S015-2's SteerMenu reads.
+  WipViewScreen["Surface: In-flight WIP view (s015 / UC-S015-1) — main-column routed view (tabpanel)"]
+  ViewSwitch["ViewSwitch (s015 / UC-S015-1: two-view tablist, main-column header)"]
+  WipPanel["WipPanel (s015 / UC-S015-1: in-flight list, dwell-sorted desc; live-region count)"]
+  WipRow["WipRow (s015 / UC-S015-1: one in-flight item; stale-open badge text+glyph+band; data-item-id slot)"]
+  ViewSwitch --> ValueStreamScreen
+  ViewSwitch --> WipViewScreen
+  WipPanel --> WipViewScreen
+  WipRow --> WipPanel
+
   classDef delivered fill:#d5f5e3,stroke:#1e8449,color:#000;
-  class PipelineMapScreen,PipelineMap,QueueBox,BufferStateIndicator,ConstraintBadge,FlowArrow,LiveStatusDot delivered;
-  %% CHK-3 nodes added this slice — tester UI test-plan input; cleared at s003 delivery.
-  classDef changed fill:#fff3cd,stroke:#b8860b,color:#000;
-  class DoraPanelScreen,DoraPanel,MetricCard,StageCardGrid,StageCard,TimeThiefView,SourceLink changed;
-  %% s004 nodes added/re-pointed THIS commit (DEFECT-001) — tester UI test-plan input; cleared at s004 delivery.
-  classDef s004changed fill:#ffd9b3,stroke:#cc6600,color:#000;
-  class ValueStreamScreen,VsmContainer,ValueStreamMap,StageNode,StageMetric,InFlightBadge,GateMarker,ReworkLoopConnector s004changed;
-  %% DEFECT-006 re-point THIS commit — tester UI test-plan input (map-bbox-unchanged regression
-  %% guard, AC-S005-3-7 / GEO-S005-3b); cleared when the engineer's fix is delivered.
-  classDef defect006changed fill:#f8d7da,stroke:#a94442,color:#000;
-  class DetailPane,ObservatoryDrawerLayer defect006changed;
-  %% s014 / UC-S014-1 nodes+edges added THIS commit — tester UI test-plan input
-  %% (steer menu on chips/rows; hosts StageNode+TreeNode re-touched read-only;
-  %% MetricSource pointer-events change is in the same blast radius); cleared at
-  %% s014 delivery after the tester consumes.
+  %% CHK-3 (s003) DROPPED — scope absorbed into CHK-2 restated done-condition (s004 delivered).
+  %% s004 DELIVERED 2026-06-10T11:00:00Z — CHK-2 done-condition MET.
+  %% DEFECT-006 FIXED — DetailPane floating-drawer re-point delivered as part of s005 (CHK-4 done 2026-06-10T19:00:00Z).
+  %% All of the above: s003-changed, s004changed, defect006changed marks cleared at their delivery.
+  class PipelineMapScreen,PipelineMap,QueueBox,BufferStateIndicator,ConstraintBadge,FlowArrow,LiveStatusDot,DoraPanelScreen,DoraPanel,MetricCard,StageCardGrid,StageCard,TimeThiefView,SourceLink,ValueStreamScreen,VsmContainer,ValueStreamMap,StageMetric,InFlightBadge,GateMarker,ReworkLoopConnector,DetailPane,ObservatoryDrawerLayer delivered;
+  %% s014 still in-flight: UC-S014-1 done but UC-S014-2/3/4 planned; SteerMenu+StageNode+TreeNode
+  %% remain in blast radius for the remaining s014 UCs (panel, prompt builder, clipboard/SSE).
+  %% Convention: s014changed cleared only at full s014 slice delivery after tester final sign-off.
   classDef s014changed fill:#fff3cd,stroke:#b8860b,color:#000;
   class SteerMenu,TreeNode,StageNode s014changed;
+  %% s015 / UC-S015-1 nodes added THIS commit + VsmContainer re-pointed (conditional
+  %% mount inside the pipeline tabpanel) — tester UI test-plan input; cleared at
+  %% s015 delivery after the tester consumes.
+  classDef s015changed fill:#ffe0b3,stroke:#cc6600,color:#000;
+  class WipViewScreen,ViewSwitch,WipPanel,WipRow,VsmContainer s015changed;

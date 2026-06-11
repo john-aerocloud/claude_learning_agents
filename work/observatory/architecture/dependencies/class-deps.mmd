@@ -140,11 +140,11 @@ graph TD
     %% container owns expanded/selected interaction state; WorkItemTree renders the
     %% WAI-ARIA tree; TreeNode + SpaceTagBadge are pure leaves. onSelect is the
     %% UC-S005-3 detail-pane drill seam (built next UC, not here).
-    SPA_TREEBUILD["src/app/src/state/workItemTree.js — tree-builder DOMAIN (UC-S005-2)<br/>buildTree(items)->forest (count-invariant: orphans→roots), visibleNodes, deriveSpace (/work vs /process)<br/>no fetch/DOM; pure"]:::s005changed
-    SPA_TREECTR["src/app/src/components/WorkItemTreeContainer.jsx — data→render container (UC-S005-2)<br/>getActive→getItems on mount; owns expanded Set (default all-branches) + selectedId; fail-soft→empty"]:::s005changed
-    SPA_TREE["src/app/src/components/WorkItemTree.jsx — WAI-ARIA tree render (UC-S005-2)<br/>role=tree; roving tabindex; ↑↓→← + Enter; onSelect = UC-S005-3 drill hook; pure fn of props"]:::s005changed
-    SPA_TREENODE["src/app/src/components/TreeNode.jsx — treeitem render (UC-S005-2)<br/>state/value-cost badges (text-authoritative, A11Y-S005-6/7); GEO-S005-1 depth padding-left; aria-level/selected"]:::s005changed
-    SPA_SPACETAG["src/app/src/components/SpaceTagBadge.jsx — /work-vs-/process badge (UC-S005-2)<br/>§8 three-cue: text + ▤/⚙ icon (aria-hidden) + colour-band class; non-colour-redundant"]:::s005changed
+    SPA_TREEBUILD["src/app/src/state/workItemTree.js — tree-builder DOMAIN (UC-S005-2)<br/>buildTree(items)->forest (count-invariant: orphans→roots), visibleNodes, deriveSpace (/work vs /process)<br/>no fetch/DOM; pure"]:::delivered
+    SPA_TREECTR["src/app/src/components/WorkItemTreeContainer.jsx — data→render container (UC-S005-2)<br/>getActive→getItems on mount; owns expanded Set (default all-branches) + selectedId; fail-soft→empty"]:::delivered
+    SPA_TREE["src/app/src/components/WorkItemTree.jsx — WAI-ARIA tree render (UC-S005-2)<br/>role=tree; roving tabindex; ↑↓→← + Enter; onSelect = UC-S005-3 drill hook; pure fn of props"]:::delivered
+    SPA_TREENODE["src/app/src/components/TreeNode.jsx — treeitem render (UC-S005-2)<br/>state/value-cost badges (text-authoritative, A11Y-S005-6/7); GEO-S005-1 depth padding-left; aria-level/selected"]:::delivered
+    SPA_SPACETAG["src/app/src/components/SpaceTagBadge.jsx — /work-vs-/process badge (UC-S005-2)<br/>§8 three-cue: text + ▤/⚙ icon (aria-hidden) + colour-band class; non-colour-redundant"]:::delivered
 
     SPA_TREECTR -->|getActive/getItems| SPA_CLIENT
     SPA_TREECTR -->|buildTree forest| SPA_TREEBUILD
@@ -167,13 +167,13 @@ graph TD
     %% (markdown→semantic HTML via marked; fenced ```mermaid / .mmd→Mermaid SVG via
     %% the SPA_MMDADAPTER port) and (UC-S005-5) mounts ItemHistoryPanel into the
     %% labelled history slot, fed by DetailPaneContainer's new getItemLedger fetch.
-    SPA_OBSVIEW["src/app/src/components/ObservatoryView.jsx — composition (UC-S005-3)<br/>lifts selectedId + items; resolves selected record; mounts tree rail + VSM + detail pane; open-on-click / Back-to-map"]:::s005changed
-    SPA_ITEMDETAIL["src/app/src/state/itemDetail.js — detail DOMAIN (UC-S005-3)<br/>deriveSliceSlug(item, slugs) (sNNN→slice dir), defaultArtifactName, paneLabel; no fetch/DOM; pure"]:::s005changed
-    SPA_PANECTR["src/app/src/components/DetailPaneContainer.jsx — data→render container (UC-S005-3/5)<br/>getSlices once + getSliceArtifact on select + getItemLedger(project,itemId) on select (UC-S005-5); deriveSliceSlug; non-slice→placeholder; close returns focus to originating node"]:::s005changed
-    SPA_PANE["src/app/src/components/DetailPane.jsx — non-modal labelled region (UC-S005-3/4/5)<br/>role=region aria-label Item detail:id; identity dl + breadcrumb; mounts ArtifactView (artifact-view slot) + ItemHistoryPanel (item-history-slot); managed focus; Esc/×/Back-to-map=onClose"]:::s005changed
-    SPA_ARTVIEW["src/app/src/components/ArtifactView.jsx — artifact render (UC-S005-4)<br/>marked: md→semantic HTML (h1/ul/table/code, no top-level <pre>); extracts fenced ```mermaid; .mmd→diagram via renderMmd port; fail-soft→'not yet available' / readable-text fallback; svg role=img+aria-label"]:::s005changed
-    SPA_MMDADAPTER["src/app/src/lib/mermaidRender.js — Mermaid ADAPTER (UC-S005-4)<br/>the ONLY importer of the concrete mermaid SDK; renderMermaidToSvg(code,id)->svg; securityLevel=strict; proven live in browser (jsdom can't lay out SVG)"]:::s005changed
-    SPA_HISTORY["src/app/src/components/ItemHistoryPanel.jsx — item ledger history (UC-S005-5)<br/>role=region aria-label Item history:id; role=list rows newest-first (HH:MM·agent·event·outcome, DEFECT-005 readable style, never row:N); empty→'no history'; GEO-S005-2 vertical stack"]:::s005changed
+    SPA_OBSVIEW["src/app/src/components/ObservatoryView.jsx — composition (UC-S005-3)<br/>lifts selectedId + items; resolves selected record; mounts tree rail + VSM + detail pane; open-on-click / Back-to-map"]:::delivered
+    SPA_ITEMDETAIL["src/app/src/state/itemDetail.js — detail DOMAIN (UC-S005-3)<br/>deriveSliceSlug(item, slugs) (sNNN→slice dir), defaultArtifactName, paneLabel; no fetch/DOM; pure"]:::delivered
+    SPA_PANECTR["src/app/src/components/DetailPaneContainer.jsx — data→render container (UC-S005-3/5)<br/>getSlices once + getSliceArtifact on select + getItemLedger(project,itemId) on select (UC-S005-5); deriveSliceSlug; non-slice→placeholder; close returns focus to originating node"]:::delivered
+    SPA_PANE["src/app/src/components/DetailPane.jsx — non-modal labelled region (UC-S005-3/4/5)<br/>role=region aria-label Item detail:id; identity dl + breadcrumb; mounts ArtifactView (artifact-view slot) + ItemHistoryPanel (item-history-slot); managed focus; Esc/×/Back-to-map=onClose"]:::delivered
+    SPA_ARTVIEW["src/app/src/components/ArtifactView.jsx — artifact render (UC-S005-4)<br/>marked: md→semantic HTML (h1/ul/table/code, no top-level <pre>); extracts fenced ```mermaid; .mmd→diagram via renderMmd port; fail-soft→'not yet available' / readable-text fallback; svg role=img+aria-label"]:::delivered
+    SPA_MMDADAPTER["src/app/src/lib/mermaidRender.js — Mermaid ADAPTER (UC-S005-4)<br/>the ONLY importer of the concrete mermaid SDK; renderMermaidToSvg(code,id)->svg; securityLevel=strict; proven live in browser (jsdom can't lay out SVG)"]:::delivered
+    SPA_HISTORY["src/app/src/components/ItemHistoryPanel.jsx — item ledger history (UC-S005-5)<br/>role=region aria-label Item history:id; role=list rows newest-first (HH:MM·agent·event·outcome, DEFECT-005 readable style, never row:N); empty→'no history'; GEO-S005-2 vertical stack"]:::delivered
     SPA_VSMCTR["src/app/src/components/VsmContainer.jsx — value-stream map container (s004; unchanged, placed beside the rail)"]:::stable
 
     SPA_MAIN -->|mounts observatory view| SPA_OBSVIEW
@@ -198,9 +198,21 @@ graph TD
     SPA_CLIENT -.->|HTTP GET /api/projects/:id/ledger?item_id=id (getItemLedger; UC-S005-1 endpoint)| R_LEDGER
 
     R_LEDGER["server: GET /api/projects/:id/ledger?item_id (UC-S005-1)<br/>shared tolerant parseLedger; rows newest-first; unknown id→[]; existing — no server change in UC-S005-4/5"]:::stable
+
+    %% --- s013 defects view (UC-S013-1, NEW server seam) ---
+    %% apiMiddleware.js dispatches GET /api/projects/:id/defects[?id=] to the new
+    %% route adapter; domain aggregation is pure (no fs/HTTP) and REUSES the shared
+    %% tolerant parseLedger READ-ONLY (no second CSV parser; ledgerAggregator.js
+    %% itself untouched — fresh DEFECT-011 fix preserved).
+    R_DEFECTS["server/routes/defects.js — defects route ADAPTER (UC-S013-1)<br/>GET /api/projects/:id/defects[?id=DEFECT-NNN]<br/>fs: glob work/:id/defects/DEFECT-*.md + read process/dora/ledger.csv; never throws"]:::s013changed
+    LIB_DEFECTS["server/lib/defectsAggregator.js — defects DOMAIN (UC-S013-1, pure)<br/>md-record parse (3 live shapes) ∪ ledger failure/recovery pairing by ref<br/>MTTR=first recovery−first failure (s, mttr_units); unmatched failure=OPEN; sorted by id"]:::s013changed
+    AGG_LEDGER["server/lib/ledgerAggregator.js — shared tolerant parseLedger + stage-flow domain (UC-S004-1; READ-ONLY in s013)"]:::stable
+    R_DEFECTS -->|aggregateDefects files+ledgerCsv+projectId| LIB_DEFECTS
+    LIB_DEFECTS -.->|parseLedger import (read-only reuse, no second parser)| AGG_LEDGER
+
     MARKED_SDK["marked (npm) — client-side markdown→HTML"]:::stable
     MERMAID_SDK["mermaid (npm) — client-side diagram→SVG"]:::stable
 
     classDef stable fill:#eee,stroke:#999,color:#000
     classDef delivered fill:#d5f5e3,stroke:#1e8449,color:#000
-    classDef s005changed fill:#fff3cd,stroke:#b8860b,color:#000
+    classDef s013changed fill:#fff3bf,stroke:#b7791f,color:#000

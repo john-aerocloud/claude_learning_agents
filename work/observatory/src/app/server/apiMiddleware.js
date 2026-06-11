@@ -22,6 +22,7 @@
 //   GET /api/projects/:id/slices/:slug/:artifact    → UC4 slice artifact
 //   GET /api/projects/:id/stage-flow                → UC-S004-1 value-stream
 //   GET /api/projects/:id/ledger?item_id=           → UC-S005-1 ledger history
+//   GET /api/projects/:id/defects?id=               → UC-S013-1 defect records + MTTR
 //   GET /api/events                                 → UC5 SSE live-refresh
 //
 // SECURITY: artifact names validated against fixed allowlists (AC3.7/T-READ-12/
@@ -35,6 +36,7 @@ import { readItems, readQueue } from './parsers/csv.js';
 import { readRaw } from './parsers/file-reader.js';
 import { aggregateStageFlow } from './lib/ledgerAggregator.js';
 import { parseLedger } from './lib/ledgerAggregator.js';
+import { getDefects } from './routes/defects.js';
 
 const SHA = process.env.OBSERVATORY_SHA || process.env.GIT_SHA || 'dev';
 const HEARTBEAT_MS = 30_000;
@@ -272,6 +274,12 @@ export function createApiMiddleware({ repoRoot, watcher }) {
           200,
           aggregateStageFlow(ledgerCsv, id, itemsCsv, { queues, now: requestNow() }),
         );
+      }
+
+      // GET /api/projects/:id/defects[?id=DEFECT-NNN] — UC-S013-1
+      if (rest === '/defects') {
+        const idFilter = url.searchParams.get('id');
+        return json(res, 200, getDefects({ repoRoot, projectId: id, idFilter }));
       }
 
       // GET /api/projects/:id/ledger?item_id=...

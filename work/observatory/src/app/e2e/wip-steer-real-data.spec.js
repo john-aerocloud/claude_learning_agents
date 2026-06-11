@@ -1,4 +1,5 @@
 // @covers uc-s015-2
+// @covers S15UC2
 // @covers SPA_WIPPANEL
 // @covers SPA_WIPROW
 // @covers SteerMenu

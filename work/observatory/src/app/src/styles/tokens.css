@@ -108,6 +108,11 @@
    * --dur-fast (0ms under prefers-reduced-motion — that media-query gate is
    * on the transition, not this timer). */
   --dur-toast: 3000ms;         /* copy-toast visible duration before auto-dismiss */
+
+  /* UC-S018-1 — IntakeWizard. The ONE new token of the UC: the wizard drawer
+   * is a touch wider than --drawer-width (440px) — it hosts three labelled
+   * JTBD fields + the live job-sentence preview (ui-design.md s018). */
+  --wizard-width: min(480px, 90vw); /* IntakeWizard drawer width */
 }
 
 html,

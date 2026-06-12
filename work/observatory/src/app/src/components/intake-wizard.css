@@ -1,0 +1,281 @@
+/* UC-S018-1 — IntakeLauncher + IntakeWizard styling.
+ *
+ * The wizard is the FIFTH consumer of the DEFECT-006 floating-drawer idiom
+ * (DetailPane / SteerPanel / ReslicePreviewPanel / DefectDrill family):
+ * position:fixed + body portal + drawer tokens → ZERO flow height; opening it
+ * never reflows the VSM, the tree rail, or the page (GEO-S018-1-1/2).
+ * Width uses the ONE additive token of the UC (--wizard-width — the wizard
+ * hosts three labelled fields + a preview, a touch wider than --drawer-width).
+ * z-index is --z-drawer + 1 (same tier as the other action drawers — topmost
+ * over a co-open DetailPane). Non-modal: no scrim, no focus trap.
+ * Reduced motion: slide-in gated behind prefers-reduced-motion: no-preference
+ * (A11Y-S018-1-11). Token-based throughout; no off-token values. */
+
+@import './../styles/tokens.css';
+
+/* --- launcher (main-column header, beside the tablist) ------------------ */
+.intake-launcher {
+  /* GEO-S018-1-3: the launcher rides the RIGHT side of the header row so the
+   * ViewSwitch tablist keeps its pre-s018 left-anchored bounding box. */
+  margin-left: auto;
+  min-height: var(--target-min);
+  min-width: var(--target-min);
+  padding: var(--sp-2) var(--sp-4);
+  font-family: var(--ff-base);
+  font-size: var(--fs-label);
+  font-weight: var(--fw-label);
+  color: var(--c-bg);
+  background: var(--c-focus);
+  border: 1px solid var(--c-focus);
+  border-radius: var(--radius-badge);
+  cursor: pointer;
+}
+
+.intake-launcher:hover {
+  background: var(--c-source-link);
+  color: var(--c-bg);
+}
+
+.intake-launcher:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* --- the wizard drawer --------------------------------------------------- */
+.intake-wizard {
+  position: fixed;
+  top: var(--drawer-inset);
+  right: var(--drawer-inset);
+  bottom: var(--drawer-inset);
+  width: var(--wizard-width);
+  max-height: calc(100vh - 2 * var(--drawer-inset));
+  overflow: auto;
+  z-index: calc(var(--z-drawer) + 1); /* action-drawer tier (SteerPanel family) */
+  background: var(--c-surface-raised);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-box);
+  padding: var(--sp-4);
+  color: var(--c-text);
+  box-shadow: var(--drawer-elev);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .intake-wizard {
+    animation: intake-wizard-slide-in var(--dur-drawer) ease-out;
+  }
+
+  @keyframes intake-wizard-slide-in {
+    from {
+      transform: translateX(16px);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .intake-wizard {
+    animation: none; /* instant appearance under reduce (A11Y-S018-1-11) */
+    transition: none;
+  }
+}
+
+.intake-wizard__head {
+  border-bottom: 1px solid var(--c-border);
+  padding-bottom: var(--sp-2);
+  margin-bottom: var(--sp-3);
+  /* room for the CSS-positioned × (last-in-DOM, visually top-right) */
+  padding-right: calc(var(--target-min) + var(--sp-2));
+}
+
+.intake-wizard__h {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.intake-wizard__h:focus-visible,
+.intake-wizard__h:focus {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-badge);
+}
+
+/* × — LAST in DOM (keyboard order), top-right visually. */
+.intake-wizard__close {
+  position: absolute;
+  top: var(--sp-4);
+  right: var(--sp-4);
+  background: none;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-badge);
+  color: var(--c-text);
+  font-size: 1.2rem;
+  line-height: 1;
+  min-width: var(--target-min);
+  min-height: var(--target-min);
+  cursor: pointer;
+}
+
+/* --- step indicator (A11Y-S018-1-9: number + text + shape, never colour
+ *     alone; planned steps carry visible "(soon)" text) ------------------- */
+.wizard-steps {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: 0 0 var(--sp-4);
+  padding: 0;
+}
+
+.wizard-step {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-tree-badge);
+  color: var(--c-text-dim);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-badge);
+  padding: var(--sp-1) var(--sp-2);
+  /* shape cue for the current step: a bottom band (the ViewSwitch idiom) */
+  border-bottom: 3px solid transparent;
+}
+
+.wizard-step__n {
+  font-weight: var(--fw-label);
+  border: 1px solid var(--c-border);
+  border-radius: 50%;
+  min-width: 18px;
+  text-align: center;
+}
+
+.wizard-step--current {
+  color: var(--c-text);
+  background: var(--c-surface);
+  border-bottom-color: var(--c-focus);
+}
+
+.wizard-step--complete {
+  color: var(--c-text);
+}
+
+.wizard-step--planned {
+  opacity: 0.85; /* de-emphasised, but the "(soon)" TEXT is the cue */
+}
+
+.wizard-step__soon {
+  font-style: italic;
+}
+
+/* --- step 1: JTBD fields (stacked form column — GEO-S018-1-4) ------------ */
+.jtbd-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+
+.jtbd-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.jtbd-field__label {
+  color: var(--c-text-dim);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* reuses the .intent-note field treatment (SteerPanel form idiom) */
+.jtbd-field__input {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-badge);
+  color: var(--c-text);
+  font: inherit;
+  font-size: 0.9rem;
+  padding: var(--sp-2);
+  min-height: var(--target-min);
+  resize: vertical;
+}
+
+.jtbd-field__input:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* --- the live job-sentence preview (FIG surface) ------------------------- */
+.job-sentence-preview {
+  margin: 0 0 var(--sp-4);
+  padding: var(--sp-3);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-box);
+  font-size: var(--fs-label);
+  line-height: 1.5;
+  color: var(--c-text);
+}
+
+.job-sentence-preview:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* empty slots: dimmed-but-readable (--c-text-dim ≥ 4.5:1 on --c-surface AND
+ * a distinct computed colour from filled text — A11Y-S018-1-10) */
+.job-sentence__slot {
+  color: var(--c-text-dim);
+  font-style: italic;
+}
+
+.job-sentence__starter {
+  color: var(--c-text-dim);
+}
+
+/* --- planned-step placeholder region (NAV-S018-1-1) ---------------------- */
+.wizard-step-placeholder {
+  margin: 0 0 var(--sp-4);
+  padding: var(--sp-4);
+  border: 1px dashed var(--c-border);
+  border-radius: var(--radius-box);
+  color: var(--c-text-dim);
+  font-style: italic;
+}
+
+/* --- step nav ------------------------------------------------------------ */
+.wizard-nav {
+  display: flex;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+
+.wizard-next,
+.wizard-back,
+.wizard-cancel {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-badge);
+  color: var(--c-text);
+  padding: var(--sp-1) var(--sp-3);
+  min-height: var(--target-min);
+  min-width: var(--target-min);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.wizard-next {
+  border-color: var(--c-source-link);
+  font-weight: 600;
+}
+
+.wizard-next:focus-visible,
+.wizard-back:focus-visible,
+.wizard-cancel:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}

@@ -769,3 +769,78 @@ SourceLink convention, the tree DEF glyph "⚠", and tree-state/space/spacing to
   (absent when either part is empty).
 - **Library:** custom (reuses `.intent-note` field styling; fields stack —
   GEO-S015-3-3).
+
+## IntakeLauncher  (s018 / UC-S018-1 — persistent "+ New Work" primary launcher)
+- **Role:** the always-visible "add new work" affordance in the
+  `.observatory-main-col` header row, BESIDE the ViewSwitch tablist (outside
+  `role="tablist"` — its own tab stop after the tabs). One click opens the
+  IntakeWizard. Persistent across all three routed views.
+- **Placement note (GEO-S018-1-3):** the tablist keeps its pre-s018
+  left-anchored bounding box; the launcher rides the RIGHT side of the header
+  row (`margin-left: auto`) — the engineer's resolution of the ui-design
+  left-or-right freedom in favour of the unmoved-tablist GEO condition.
+- **Selector:** `getByRole('button', { name: 'New Work' })` ·
+  `data-testid="intake-launcher"`. Native `<button type="button">`; the `+`
+  glyph is `aria-hidden` (accessible name is the TEXT "New Work").
+- **Library:** custom (primary-action styling on `--c-focus`; reuses
+  `--target-min`/`--focus-ring`/`--radius-badge`; no new token).
+
+## IntakeWizard  (s018 / UC-S018-1 — guided-intake drawer SHELL + step 1)
+- **Role:** the body-portalled NON-modal floating drawer hosting the guided
+  cost-of-delay intake flow; owns the 4-step state machine (the UC-S018-2/3/4
+  mount seam). THIS UC builds the shell + step 1 (JTBD capture); steps 2–4 are
+  planned-not-dead placeholders. Closing discards the draft (no persistence).
+- **Drawer idiom:** FIFTH consumer of the DEFECT-006 family (DetailPane /
+  SteerPanel / ReslicePreviewPanel / DefectDrill) — `position:fixed`, portal to
+  `document.body`, `z = --z-drawer + 1`, `--wizard-width` (the ONE new token,
+  `min(480px, 90vw)`), no scrim, no focus trap, reduced-motion instant.
+- **Focus contract:** heading (`tabindex=-1`) takes focus on open
+  (useLayoutEffect, the SteerPanel idiom); Esc / × / Cancel close and return
+  focus to the IntakeLauncher. × is LAST in DOM, CSS-positioned top-right.
+- **Selector:** `getByRole('dialog', { name: /new work|intake/i })` (no
+  `aria-modal`) · `data-testid="intake-wizard"`; heading
+  `intake-wizard-heading`; close `intake-wizard-close`; cancel
+  `intake-wizard-cancel`; planned region `wizard-step-placeholder`.
+- **Library:** custom (drawer-family css idiom reuse, not composition).
+
+## WizardStepIndicator  (s018 / UC-S018-1 — 4-step progress list; child of IntakeWizard)
+- **Role:** shows the four intake steps (1 Describe the job · 2 Cost of delay ·
+  3 Queue rank · 4 Generate prompt) and which is current; makes
+  later-steps-planned-not-dead VISIBLE (planned steps carry literal "(soon)"
+  text — never colour/dimming alone).
+- **Selector:** `role="list"` `aria-label="Intake steps"` ·
+  `data-testid="wizard-steps"`; steps `wizard-step-<1..4>` +
+  `data-step-state="current|complete|upcoming|planned"`; current carries
+  `aria-current="step"`.
+- **Library:** custom (number badge + label text authoritative; ViewSwitch
+  bottom-band shape cue for current).
+
+## JtbdFields  (s018 / UC-S018-1 — the step-1 three-field capture group; child of IntakeWizard)
+- **Role:** the three prompting JTBD inputs — Situation (when…) / Motivation
+  (I want to…) / Outcome (so I can…) — each a labelled auto-resizable
+  `<textarea>` with a real `<label for>` (placeholder never the sole label).
+  Fields stack vertically (GEO-S018-1-4).
+- **Selector:** `getByRole('textbox', { name: /situation|motivation|outcome/i })`
+  · `data-testid="jtbd-situation|jtbd-motivation|jtbd-outcome"`.
+- **Library:** custom (reuses the SteerPanel `.intent-note` field treatment).
+
+## JobSentencePreview  (s018 / UC-S018-1 — the live job-sentence figure; child of IntakeWizard)
+- **Role:** the live composed sentence "When [situation], I want to
+  [motivation], so I can [outcome]." updating on every keystroke. FIG contract:
+  empty slots render dimmed bracketed placeholders (`--c-text-dim`, distinct
+  from filled text) — NEVER "undefined"/"null"/a grammar gap; all-empty shows
+  the neutral starter "Start typing to build your job sentence". Grammar lives
+  in the PURE `lib/jobSentence.js` (`composeJobSentence` → marked segments).
+- **Selector:** `data-testid="job-sentence-preview"` · `role="status"`
+  `aria-live="polite"` · `tabindex="0"` (in the forward tab path).
+- **Library:** custom (token-based; no new token).
+
+## WizardStepNav  (s018 / UC-S018-1 — step navigation; child of IntakeWizard)
+- **Role:** Next ("Next: <next step label>") advances the step machine — on a
+  planned step it renders the labelled placeholder region (no crash, no write);
+  Back (absent on step 1) returns with the draft preserved; Cancel closes.
+  Validation gating on Next arrives with UC-S018-2/3.
+- **Selector:** Next `getByRole('button', { name: /next/i })` ·
+  `data-testid="wizard-next"`; Back `wizard-back` (absent on step 1); Cancel
+  `intake-wizard-cancel`.
+- **Library:** custom (token-based buttons; `--c-source-link` accent on Next).

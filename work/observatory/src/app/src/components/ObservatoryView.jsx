@@ -35,6 +35,8 @@ import { ReslicePreviewPanelContainer } from './ReslicePreviewPanel.jsx';
 import { ViewSwitch } from './ViewSwitch.jsx';
 import { WipPanelContainer } from './WipPanel.jsx';
 import { DefectsPanelContainer } from './DefectsPanel.jsx';
+import { IntakeLauncher } from './IntakeLauncher.jsx';
+import { IntakeWizard } from './IntakeWizard.jsx';
 
 /**
  * @param {object} [props]
@@ -69,6 +71,11 @@ export function ObservatoryView({
   // ROUTED VIEW (EXP-016): the surfaces never co-exist — switching unmounts
   // the others, so there is no overlay-reflow failure mode by construction.
   const [view, setView] = useState('pipeline');
+  // UC-S018-1: whether the guided-intake wizard drawer is open. A FLOW, not a
+  // view — deliberately NOT part of the `view` union (a routed tab unmounts on
+  // switch and would discard the half-typed draft); the drawer floats over
+  // whichever view is active. Closing discards the draft (no persistence).
+  const [intakeOpen, setIntakeOpen] = useState(false);
 
   // Resolve the active project once (the DetailPaneContainer needs it to build
   // the /slices + /slices/:slug/:artifact URLs).
@@ -144,7 +151,13 @@ export function ObservatoryView({
             stay in the DOM (valid aria-controls targets); the INACTIVE one is
             hidden AND empty, so the inactive view is genuinely unmounted
             (GEO-S015-1: no hidden-but-present reflow). */}
-        <ViewSwitch active={view} onSelect={setView} />
+        {/* UC-S018-1: header ROW — the tablist keeps its pre-s018 position
+            (left; GEO-S018-1-3); the persistent IntakeLauncher rides the right
+            side, OUTSIDE role=tablist (its own tab stop, after the tabs). */}
+        <div class="observatory-main-col__header">
+          <ViewSwitch active={view} onSelect={setView} />
+          <IntakeLauncher onOpen={() => setIntakeOpen(true)} />
+        </div>
         <div
           role="tabpanel"
           id="view-panel-pipeline"
@@ -217,6 +230,10 @@ export function ObservatoryView({
           />
         )
       ) : null}
+      {/* UC-S018-1: the guided-intake wizard — a drawer SIBLING alongside the
+          other drawers (DEFECT-006 idiom: body-portalled fixed overlay; zero
+          flow height). NO-WRITE: step 1 issues no network call at all. */}
+      {intakeOpen ? <IntakeWizard onClose={() => setIntakeOpen(false)} /> : null}
     </div>
   );
 }

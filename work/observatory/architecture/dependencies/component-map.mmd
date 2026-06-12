@@ -300,6 +300,45 @@ graph LR
   DefectRow -->|"activation (click/Enter/Space) opens the drill"| DefectDrillContainer
   DefectDrillContainer --> DefectsPanel
 
+  %% s018 / UC-S018-1 THIS commit: guided cost-of-delay intake — wizard SHELL +
+  %% JTBD step 1. IntakeLauncher (NEW) is a persistent primary button in the
+  %% .observatory-main-col header ROW beside the ViewSwitch tablist (OUTSIDE
+  %% role=tablist; the tablist keeps its pre-s018 left-anchored bbox — the
+  %% launcher rides margin-left:auto on the RIGHT, a deliberate GEO-S018-1-3
+  %% resolution of the ui-design left/right freedom). Persistent across ALL
+  %% THREE routed views (it lives in the header, not a tabpanel). IntakeWizard
+  %% (NEW) is the FIFTH consumer of the DEFECT-006 drawer idiom (css idiom
+  %% reuse, NOT component composition): body-portalled fixed NON-modal dialog,
+  %% z-drawer+1, --wizard-width (the ONE new token). It OWNS the 4-step state
+  %% machine (the UC-S018-2/3/4 mount seam); step 1 built (JtbdFields three
+  %% labelled textareas + JobSentencePreview role=status live figure fed by
+  %% the PURE lib/jobSentence.js grammar — never "undefined"; all-empty →
+  %% starter line); steps 2-4 planned-not-dead (Next → labelled
+  %% wizard-step-placeholder, Back preserves the draft). NO-WRITE: step 1
+  %% issues ZERO network calls of any kind (first read lands in UC-S018-3).
+  %% RUNTIME ROUTING for the tester: ObservatoryView delta is MINIMAL — one
+  %% intakeOpen useState + a header row wrapping [ViewSwitch][IntakeLauncher] +
+  %% one conditional IntakeWizard drawer sibling; the view union / TABS /
+  %% tabpanels are UNTOUCHED (pinned by ObservatoryViewIntake.test.jsx).
+  %% Esc/×/Cancel close → focus returns to the launcher; heading focus on open.
+  IntakeLauncher["IntakeLauncher (s018 / UC-S018-1: persistent '+ New Work' primary launcher — main-col header row, outside the tablist)"]
+  IntakeWizard["IntakeWizard (s018 / UC-S018-1: guided-intake drawer SHELL + 4-step state machine — non-modal dialog, DEFECT-006 idiom)"]
+  WizardStepIndicator["WizardStepIndicator (s018 / UC-S018-1: 4-step list — aria-current + data-step-state; planned steps carry visible '(soon)')"]
+  JtbdFields["JtbdFields (s018 / UC-S018-1: Situation/Motivation/Outcome labelled textareas — stacked form column)"]
+  JobSentencePreview["JobSentencePreview (s018 / UC-S018-1: live role=status job-sentence figure — dimmed placeholder slots; starter line when all-empty)"]
+  WizardStepNav["WizardStepNav (s018 / UC-S018-1: Next/Back/Cancel — Next advances to a labelled planned placeholder, never dead)"]
+  JobSentenceLib["lib/jobSentence (s018 / UC-S018-1: PURE domain grammar — composeJobSentence segments; the FIG contract)"]
+  IntakeLauncher --> ValueStreamScreen
+  IntakeLauncher --> WipViewScreen
+  IntakeLauncher --> DefectsViewScreen
+  IntakeLauncher -- "click opens (ObservatoryView intakeOpen state)" --> IntakeWizard
+  IntakeWizard --> ObservatoryDrawerLayer
+  WizardStepIndicator --> IntakeWizard
+  JtbdFields --> IntakeWizard
+  JobSentencePreview --> IntakeWizard
+  WizardStepNav --> IntakeWizard
+  JobSentenceLib --> JobSentencePreview
+
   classDef delivered fill:#d5f5e3,stroke:#1e8449,color:#000;
   %% CHK-3 (s003) DROPPED — scope absorbed into CHK-2 restated done-condition (s004 delivered).
   %% s004 DELIVERED 2026-06-10T11:00:00Z — CHK-2 done-condition MET.
@@ -368,3 +407,10 @@ graph LR
   %% s015 delivery after the tester consumes. (Separate class statement so
   %% parallel UC commits do not collide on one line.)
   class PromptBuilder,SteerPromptTemplates s015changed;
+  %% s018 / UC-S018-1 THIS commit — IntakeLauncher/IntakeWizard/
+  %% WizardStepIndicator/JtbdFields/JobSentencePreview/WizardStepNav/
+  %% JobSentenceLib added (see the s018 block above for the runtime routing).
+  %% Tester UI test-plan input; cleared at s018 delivery after the tester
+  %% consumes. (Separate class statement — parallel UC commits do not collide.)
+  classDef s018changed fill:#d6f0ff,stroke:#1c7ed6,color:#000;
+  class IntakeLauncher,IntakeWizard,WizardStepIndicator,JtbdFields,JobSentencePreview,WizardStepNav,JobSentenceLib s018changed;

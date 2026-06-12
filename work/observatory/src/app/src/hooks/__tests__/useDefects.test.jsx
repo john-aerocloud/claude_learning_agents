@@ -97,6 +97,13 @@ describe('composeDefects (UC-S013-2 pure domain)', () => {
     expect(openCount).toBe(1);
   });
 
+  it('attaches the RAW endpoint record to each VM — the drill is a pure projection of in-memory data, no extra fetch (UC-S013-3 build contract #1)', () => {
+    const raw = REC();
+    const { defects } = composeDefects([raw]);
+    expect(defects[0].record).toBe(raw); // same object, not a copy/refetch shape
+    expect(defects[0].record.fix_sha).toBeUndefined; // raw shape untouched
+  });
+
   it('fail-soft: null/malformed input → empty model, no throw', () => {
     expect(composeDefects(null)).toEqual({ openCount: 0, defects: [] });
     expect(composeDefects([{ junk: true }, null])).toEqual({ openCount: 0, defects: [] });

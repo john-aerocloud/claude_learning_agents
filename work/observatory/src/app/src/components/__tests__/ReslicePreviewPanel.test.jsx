@@ -17,7 +17,10 @@
 //   F-S3-4   Generate aria-disabled until Part A + Part B + intent all non-empty
 //   F-S3-5   Cancel/×/Esc call onCancel without generating
 //   FIG-3    cost note ABSENT until both parts non-empty; prompt-output ABSENT
-//            always (the slot is pinned EMPTY until UC-S015-4)
+//            until a prompt exists (UC-S015-4 flipped the always-empty pin:
+//            the pure panel's slot is empty WITHOUT a `prompt` prop; the
+//            container renders the enriched prompt after Generate — see
+//            ReslicePreviewPanelPrompt.test.jsx)
 //   FIG-4    not-found renders "Item <id> not found", no crash
 //   A11Y-2   focus moves to the heading on open, returns to opener on close
 //   A11Y-5/8 dialog NON-modal named "Re-slice / split: <id>"; h2 → two h3s
@@ -132,7 +135,8 @@ describe('ReslicePreviewPanel (pure render)', () => {
   it('S15-3-FIG-3: cost note ABSENT with empty parts, PRESENT when given; prompt slot pinned EMPTY', () => {
     const { rerender } = render(<ReslicePreviewPanel {...readyProps()} />);
     expect(screen.queryByTestId('reslice-cost-note')).toBeNull();
-    // the reserved output slot exists and is EMPTY (UC-S015-4 boundary)
+    // the output slot exists and is EMPTY while no `prompt` prop is given
+    // (UC-S015-4: prompt rendering is driven ONLY by the container-owned prop)
     const slot = screen.getByTestId('prompt-output-slot');
     expect(slot.children.length).toBe(0);
     expect(screen.queryByTestId('prompt-output')).toBeNull();
@@ -175,7 +179,8 @@ describe('ReslicePreviewPanel (pure render)', () => {
       partBJob: 'Part B writes',
       intentNote: 'too big',
     });
-    // generating renders NO prompt here — the slot stays empty (UC-S015-4)
+    // the PURE panel renders no prompt on Generate — prompt state is
+    // container-owned (UC-S015-4): without a `prompt` prop the slot stays empty
     expect(screen.queryByTestId('prompt-output')).toBeNull();
   });
 
@@ -311,8 +316,11 @@ describe('ReslicePreviewPanelContainer (hook wiring)', () => {
     expect(seam.intentNote).toBe('why');
     expect(seam.context.id).toBe('CHK-1');
     expect(seam.context.sourceRef).toBe('work/demo/items/items.csv#id=CHK-1');
-    // the slot is STILL empty after Generate (prompt rendering is UC-S015-4)
-    expect(screen.queryByTestId('prompt-output')).toBeNull();
+    // FLIPPED by UC-S015-4 (was: slot pinned EMPTY after Generate while the
+    // prompt rendering was out of scope): the container now renders the
+    // enriched prompt into the slot. Still PREVIEW-ONLY — the clipboard is
+    // the only write surface; content pins live in ReslicePreviewPanelPrompt.test.jsx.
+    expect(screen.getByTestId('prompt-output').textContent).toContain('Proposed split:');
   });
 
   it('S15-3-FIG-4: an unknown id renders not-found, never a crash', async () => {

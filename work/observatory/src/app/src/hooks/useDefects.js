@@ -73,6 +73,9 @@ export function composeDefects(records) {
       severityText: severity ?? '—', // FIG-4: unknown ≠ defaulted
       // FIG-2: isOpen WINS over any drifted mttr_s — "open", never a number.
       mttrText: isOpen ? 'open' : formatMttr(typeof r.mttr_s === 'number' ? r.mttr_s : null),
+      // UC-S013-3: the RAW endpoint record rides the VM so the drill is a
+      // pure projection of in-memory data — no extra fetch, no server change.
+      record: r,
     });
   }
 

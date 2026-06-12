@@ -17,9 +17,11 @@
 //   - mermaid render failure → readable-text fallback, no throw.
 
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { marked } from 'marked';
 import './artifact-view.css';
 import { renderMermaidToSvg } from '../lib/mermaidRender.js';
+// UC-S013-3: mdToHtml factored out to the SHARED lib/markdown.js (one markdown
+// transform in the codebase — DefectDetail consumes the same module).
+import { mdToHtml } from '../lib/markdown.js';
 
 let mmdSeq = 0;
 
@@ -30,22 +32,6 @@ function extractMermaid(md) {
   if (!m) return { code: null, rest: md };
   const rest = md.slice(0, m.index) + md.slice(m.index + m[0].length);
   return { code: m[1].trim(), rest };
-}
-
-/** Strip a leading YAML frontmatter block (--- ... ---) so it is not rendered
- *  as a setext heading. Only a frontmatter block at the very start is removed. */
-function stripFrontmatter(md) {
-  const fm = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
-  return fm.test(md) ? md.replace(fm, '') : md;
-}
-
-/** Render markdown text to a semantic-HTML string (fail-soft to empty). */
-function mdToHtml(text) {
-  try {
-    return marked.parse(stripFrontmatter(text), { gfm: true, breaks: false });
-  } catch {
-    return '';
-  }
 }
 
 /**

@@ -28,18 +28,38 @@
 // left focus elsewhere ~50% of opens in SteerPanel). The panel only mounts on
 // view switch; refreshes update props without remounting, so focus is never
 // stolen (S13-2-A11Y-2).
-import { useLayoutEffect, useRef } from 'preact/hooks';
+import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { useDefects, DEFECTS_SOURCE_REF } from '../hooks/useDefects.js';
+import { DefectDrillContainer } from './DefectDrillContainer.jsx';
 import './defects-panel.css';
 
-/** One defect row (UC-S013-2 — presentational). */
-export function DefectRow({ defect }) {
+/** One defect row (UC-S013-2 — presentational; UC-S013-3 wires the reserved
+ *  drill slot: the WHOLE row is the activation affordance — an inner
+ *  role=button trigger wraps the figure <dl> (a native <button> cannot
+ *  contain a <dl> — phrasing-content model), click + Enter/Space fire
+ *  onSelectDefect(id), and the trigger focuses itself on activation so the
+ *  drill's return-focus contract (S13-3-A11Y-3) is deterministic). */
+export function DefectRow({ defect, onSelectDefect, isActive = false }) {
   const { id, title, status, statusLabel, isOpen, severity, severityText, mttrText } = defect;
   // S13-2-A11Y-5: the accessible name carries id + title + status + severity
   // + MTTR — never a bare reference. Null severity is announced "unknown".
   const accessibleName =
     `${id}, ${title}, status ${statusLabel}, ` +
     `severity ${severity ?? 'unknown'}, MTTR ${mttrText}`;
+  const activate = (e) => {
+    if (typeof onSelectDefect !== 'function') return;
+    // focus the trigger so Esc/× can return focus to the originating row
+    // (S13-3-A11Y-3) — browsers do not focus on click consistently
+    e.currentTarget.focus();
+    onSelectDefect(id);
+  };
+  const onKeyDown = (e) => {
+    // role=button keyboard contract (S13-3-A11Y-1): Enter AND Space activate
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+      e.preventDefault(); // Space must not scroll
+      activate(e);
+    }
+  };
   return (
     <li
       data-testid="defect-row"
@@ -47,9 +67,20 @@ export function DefectRow({ defect }) {
       data-status={status}
       data-open={isOpen ? 'true' : 'false'}
       data-severity={severity ?? ''}
+      data-active={isActive ? 'true' : 'false'}
       class={`defect-row ${isOpen ? 'defect-row--open' : 'defect-row--closed'}`}
       aria-label={accessibleName}
     >
+      <div
+        role="button"
+        tabIndex={0}
+        class="defect-row__trigger"
+        data-testid="defect-row-trigger"
+        aria-label={accessibleName}
+        aria-expanded={isActive ? 'true' : 'false'}
+        onClick={activate}
+        onKeyDown={onKeyDown}
+      >
       <dl class="defect-row__figures">
         <div class="defect-row__figure">
           <dt>defect</dt>
@@ -83,6 +114,7 @@ export function DefectRow({ defect }) {
           <dd data-testid="defect-mttr">{mttrText}</dd>
         </div>
       </dl>
+      </div>
     </li>
   );
 }
@@ -94,12 +126,16 @@ export function DefectRow({ defect }) {
  * @param {'loading'|'ready'|'empty'} props.status
  * @param {number} props.openCount
  * @param {string} [props.sourceRef]
+ * @param {(id:string) => void} [props.onSelectDefect] - UC-S013-3 drill slot
+ * @param {string|null} [props.activeDefectId] - the drilled defect (data-active/aria-expanded)
  */
 export function DefectsPanel({
   defects = [],
   status = 'loading',
   openCount = 0,
   sourceRef = DEFECTS_SOURCE_REF,
+  onSelectDefect,
+  activeDefectId = null,
 }) {
   // S13-2-A11Y-2: switching to the Defects view lands the reader in the panel
   // — the heading takes focus on mount, as a LAYOUT effect (see header note).
@@ -144,7 +180,12 @@ export function DefectsPanel({
           </h3>
           <ul role="list" class="defects-panel__list">
             {open.map((d) => (
-              <DefectRow key={d.id} defect={d} />
+              <DefectRow
+                key={d.id}
+                defect={d}
+                onSelectDefect={onSelectDefect}
+                isActive={d.id === activeDefectId}
+              />
             ))}
           </ul>
         </>
@@ -156,7 +197,12 @@ export function DefectsPanel({
           </h3>
           <ul role="list" class="defects-panel__list">
             {closed.map((d) => (
-              <DefectRow key={d.id} defect={d} />
+              <DefectRow
+                key={d.id}
+                defect={d}
+                onSelectDefect={onSelectDefect}
+                isActive={d.id === activeDefectId}
+              />
             ))}
           </ul>
         </>
@@ -168,15 +214,33 @@ export function DefectsPanel({
 /**
  * Data→render container: useDefects → DefectsPanel. Loaders injectable for
  * tests; defaults are the real API adapter (api/client.js).
+ *
+ * UC-S013-3: the container OWNS the drill selection — activating a row
+ * selects its id and the DefectDrillContainer renders the SAME raw record the
+ * list hook already holds (pure projection, NO extra fetch; ui-design.md
+ * build contract #1). ObservatoryView needs no change (the drawer is
+ * body-portalled). If a refresh drops the selected id the drill closes
+ * gracefully; an in-place update of the same id updates the open drawer
+ * without remounting (the UC-S013-4 SSE slot).
  */
 export function DefectsPanelContainer(props) {
   const state = useDefects(props);
+  const [selectedId, setSelectedId] = useState(null);
+  const selected = state.defects.find((d) => d.id === selectedId) || null;
   return (
-    <DefectsPanel
-      defects={state.defects}
-      status={state.status}
-      openCount={state.openCount}
-      sourceRef={state.sourceRef}
-    />
+    <>
+      <DefectsPanel
+        defects={state.defects}
+        status={state.status}
+        openCount={state.openCount}
+        sourceRef={state.sourceRef}
+        onSelectDefect={setSelectedId}
+        activeDefectId={selected ? selectedId : null}
+      />
+      <DefectDrillContainer
+        defect={selected ? selected.record : null}
+        onClose={() => setSelectedId(null)}
+      />
+    </>
   );
 }

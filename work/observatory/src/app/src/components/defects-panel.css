@@ -69,6 +69,26 @@
   box-shadow: var(--focus-ring); /* UC-S013-3 makes the row interactive */
 }
 
+/* UC-S013-3 — the drill trigger: the WHOLE row is the activation affordance
+ * (1-click budget). Hit box ≥ --target-min (S13-3-A11Y-6); focus-visible ring
+ * on the trigger (the keyboard-reachable element). */
+.defect-row__trigger {
+  min-height: var(--target-min);
+  cursor: pointer;
+}
+
+.defect-row__trigger:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-badge);
+}
+
+/* open-drawer state cue rides the row band + data-active (text/aria carry it
+ * authoritatively via aria-expanded) */
+.defect-row[data-active='true'] {
+  border-color: var(--c-source-link);
+}
+
 .defect-row--open {
   border-left-color: var(--c-state-over); /* colour cue — third, never alone */
 }

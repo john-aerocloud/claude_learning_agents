@@ -648,6 +648,68 @@ SourceLink convention, the tree DEF glyph "⚠", and tree-state/space/spacing to
   `row:N` ref); status in the operator's word.
 - **Library:** custom (reuses WipRow figure layout + badge idiom).
 
+## DefectDrillContainer  (s013 / UC-S013-3 — the defect drill drawer shell)
+- **Role:** the floating-drawer shell opened when a `DefectRow` is activated. REUSES
+  the DEFECT-006 drawer IDIOM (not the `DetailPane` component body — `DetailPane.jsx`
+  is `item`-coupled + shared with UC-S005-3, a READ-ONLY reuse slot): `position:fixed`,
+  portalled to `document.body`, the existing drawer tokens (`--drawer-inset`/
+  `--drawer-width`/`--z-drawer`/`--drawer-elev`/`--dur-drawer`, 0ms reduced-motion),
+  NON-modal, no scrim. Third consumer of the drawer idiom after DetailPane + SteerPanel.
+- **Props (pure-ish):** `{ defect: DefectRecord|null; onClose() }` — `defect` is the
+  raw UC-S013-1 endpoint record (already in `useDefects.js` state; NO extra fetch).
+- **States:** closed (absent, zero flow height) · open. No loading (pure projection
+  of an in-memory record).
+- **Selector:** `getByRole('region', { name: /defect: DEFECT-\d+/i })`;
+  `data-testid="defect-drill"` + `data-defect-id` (continuity from the row). Heading
+  `<h2>` "<id> — <title>" `data-testid="defect-drill-heading"` `tabindex="-1"`
+  (focus on open). Close `getByRole('button', { name: /close defect/i })`,
+  `data-testid="defect-drill-close"`.
+- **A11y (S13-3-A11Y-1..6):** keyboard-openable from the row; focus → heading on open;
+  Esc/× close + return focus to the originating row; NON-modal (no trap, list stays
+  operable); close target ≥ `--target-min`.
+- **Geometry (GEO-S013-3-1/2):** pure overlay — underlying defects-panel + tree-rail
+  bboxes + page scrollHeight byte-identical open vs closed; on-screen within viewport.
+- **Library:** custom (DEFECT-006 drawer idiom; no new tokens).
+
+## DefectDetail  (s013 / UC-S013-3 — the record body inside the drill drawer)
+- **Role:** labelled body — Four fields (Expected/Actual/Intent/Importance) +
+  Classification + Root cause + Resolution + fix sha(s), in fixed reading order, with
+  markdown-bearing values rendered to HTML.
+- **Props:** `{ defect: DefectRecord }` (pure render).
+- **Markdown:** each md field rendered via the SHARED `marked` transform (prefer a
+  `lib/markdown.js` extraction from `ArtifactView`'s `mdToHtml`; never a second
+  renderer). No raw `**`/`##` in text nodes (S13-3-FIG-6).
+- **Fix sha:** `fix_sha` split on comma → each token a `<code data-testid="defect-fix-sha">`
+  under the "Fix" label; `null` → "—" (S13-3-FIG-4). Absent md field → "—" (FIG-5).
+- **Selector:** `data-testid="defect-detail"` + `data-source` (the `.md` file /
+  ledger ref — provenance, FIG-7); per-field `<h3>` `data-testid="defect-field-<name>"`,
+  `<dd>` `data-field="<name>"`.
+- **A11y/geometry:** ordered `<h3>`s under the drawer `<h2>` (no skipped levels);
+  `<dl>` labelled fields; sections STACK (GEO-S013-3-3).
+- **Library:** custom (reuses s003/s005 labelled `<dl>` pattern + shared markdown transform).
+
+## MttrCard  (s013 / UC-S013-3 — the reported→recovered timeline + MTTR figure; new leaf)
+- **Role:** the one genuinely new leaf — the recovery timeline and the MTTR figure.
+- **Props:** `{ reportedTs; recoveredTs; mttrS; mttrUnits }` (raw endpoint fields;
+  the card owns the duration humanisation so the figure is correct at the leaf).
+- **States:** **resolved** (`recoveredTs`+`mttrS` set → reported→recovered timeline +
+  unit-bearing MTTR "13 min") · **open** (`null` → reported + "Not yet resolved" + an
+  elapsed-open "open for …" figure that is NOT labelled "MTTR" — an MTTR is a closed
+  span; elapsed-open is a running clock; DEFECT-007 dimension/name lesson) ·
+  **unknown** (defensive: reportedTs null → "—", no crash).
+- **Figure legibility (S13-3-FIG-1/2/3):** has a unit (never bare "815"); unit matches
+  the dimension (duration → h/min/s; "MTTR" name only for the closed span); timestamps
+  human-readable (date + UTC clock, not raw epoch); empty/open ≠ zero.
+- **Selector:** `getByRole('group', { name: /MTTR/i })`; `data-testid="mttr-card"` +
+  `data-source="process/dora/ledger.csv#ref=<id>"` + `data-mttr-state="resolved|open|unknown"`;
+  figure `data-testid="mttr-figure"` + `data-mttr-seconds` (raw cross-check);
+  `mttr-reported` / `mttr-recovered` points.
+- **A11y:** labelled group; each timestamp + duration a labelled `<dt>`/`<dd>`
+  (no bare figure); open-state "Not yet resolved" is visible text (not colour/shape only);
+  reduced-motion → no animated timeline draw.
+- **Library:** custom (new leaf; reuses `--c-*`/`--sp-*`/`--radius-box`/`--fs-*`/
+  `--focus-ring` — no new tokens).
+
 ## ReslicePreviewPanel  (s015 / UC-S015-3 — two-column before/after re-slice preview drawer)
 - **Role:** the destination of the `re-slice` steer action (RESLICE-DISPATCH-1
   re-point): a NON-MODAL right-anchored drawer previewing a proposed 2-way split

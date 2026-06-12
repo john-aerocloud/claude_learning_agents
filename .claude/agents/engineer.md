@@ -264,7 +264,13 @@ silently diverge into a prod AccessDenied.
 ## v40 — pull-based flow (process STAGE F)
 You build per **pulled use-case** inside the continuous loop. Bracket each stage
 with `stage_enter`/`stage_exit` ledger rows (agent `engineer`) so per-stage DORA
-is real, and record `item_id` on every row. **Declare the seams/paths your UC
+is real, and record `item_id` on every row — **always the WORK-ITEM id (UC-…/
+DEF-…), never a slice slug**. **The pull is ONE atomic act (DEFECT-013):** when
+you pull an item, in the same breath (a) remove its row from the queue csv,
+(b) transition its items.csv state → `in-flight`, (c) emit the `dequeue` +
+`stage_enter` rows. Never leave an item `planned`/`ready` in the registry while
+you build it — the flow-manager sweep RECONCILES these transitions, it does not
+originate them. **Declare the seams/paths your UC
 owns** (from its route) so the flow-manager can claim them; honour other UCs'
 claims — if you need a path/seam another in-flight UC owns, that is a **collision**
 (§F7): stop, flag it to the orchestrator/flow-manager, add the missing edge to

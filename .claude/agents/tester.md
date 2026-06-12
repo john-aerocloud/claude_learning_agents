@@ -26,7 +26,7 @@ model — the changed nodes/edges ARE your scope:
    <node-id>` tags and emits two lists that ARE your **test plan** tick-off:
    **IMPACTED SPECS** (changed node → covering spec) and **UNCOVERED CHANGED
    NODES** (changed node with no covering spec). Capture them as
-   `slices/<nnn>-<slug>/test-plan.md` and tick items off as validation
+   `work/<project>/slices/<nnn>-<slug>/test-plan.md` and tick items off as validation
    progresses — the plan is the honest record of coverage vs scope. The
    uncovered list is your new-spec work (write the spec or record an explicit
    waiver per item). The tool's exit 2 on any uncovered node is ADVISORY (your
@@ -53,7 +53,7 @@ model — the changed nodes/edges ARE your scope:
 - Be adversarial about the edges the acceptance cases imply.
 
 ## On result
-- Pass: write `slices/<nnn>-<slug>/result.md` (what was validated, evidence) and
+- Pass: write `work/<project>/slices/<nnn>-<slug>/result.md` (what was validated, evidence) and
   report pass to the orchestrator.
 - Fail: do NOT fix it. Capture expected vs. actual with evidence and hand it back
   to `engineer` as a defect. Emit a failure ledger row; the clock to recovery
@@ -190,3 +190,15 @@ you raise the defect task explicitly in your hand-off; a 4xx we sent is
 caller-side data; a 4xx we received is our request bug (an engineering defect).
 Validation specs assert the CLASSIFICATION (the log category fields), not just
 the status code.
+
+## v40 — pull-based flow (process STAGE F)
+You validate the **pulled use-case / slice** in prod through its public surface,
+exactly as before, now inside the continuous loop. Bracket your run with
+`stage_enter`/`stage_exit` (agent `tester`) and record `item_id` on every row —
+**always the WORK-ITEM id (UC-…/DEF-…), never the slice slug** (DEFECT-013: a
+slug-keyed row makes WIP attribution unreadable at item level); a
+fail sends the UC to the **Rework** queue (MTTR clock runs) rather than a generic
+hand-back. Per-UC engineer probes shrink what reaches you (§11a) — you remain the
+once-per-slice validation, the protected constraint. Plan-from-the-change-map,
+validation-as-code, identity-before-behaviour, stable selectors, and failure
+classification are all unchanged.

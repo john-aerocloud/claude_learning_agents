@@ -1,7 +1,7 @@
 # DEFECT-012 — Decomposed work is invisible between product completion and flow-manager triage
 
 **Reported:** 2026-06-10 (human, during live loop observation)
-**Status:** confirmed → fix scheduled (next pickup)
+**Status:** CLOSED (fixed bc2ff5f, recovered 2026-06-11T07:35:13Z, prod re-check PASS below)
 **Surface:** stage-flow board (Intake & Ready region) + flow model
 **Lineage:** DEFECT-009/011 family (product work invisible on the board)
 

@@ -95,6 +95,12 @@ below-floor signal is a refill-NOW trigger, not an informational note** — keep
 re-raising it until Ready is back at/above floor; never let it be tolerated as
 "expected" (the s001–s004 gap: §F3).
 
+**Pull-time state is the puller's duty (DEFECT-013):** whoever executes a pull
+performs the atomic act (queue-row removal + items.csv → `in-flight` + ledger
+rows, keyed by the work-item id). Your sweep RECONCILES — verify ledger
+stage_enter rows agree with items.csv state and repair any drift it finds —
+it never originates those transitions.
+
 **Staging drain (DEFECT-012):** product appends decomposed items to
 `queues/staging.csv` at completion. At EVERY sweep, drain it: register each row
 in items.csv, enqueue DAG-ready items to Ready (re-cost/re-prioritise), mark the

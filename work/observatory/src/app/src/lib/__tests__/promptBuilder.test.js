@@ -1,4 +1,5 @@
 // @covers uc-s014-3
+// @covers uc-s015-4
 // @covers PromptBuilder
 // @covers SteerPromptTemplates
 // UC-S014-3 — promptBuilder: PURE function (action type + SteerContext +
@@ -110,6 +111,69 @@ describe('promptBuilder — unknown ≠ blank (figure legibility §4)', () => {
     const multi = 'line one\nline two: keep | pipes & {braces}';
     const out = buildPrompt('custom', CTX, multi);
     expect(out).toContain(multi);
+  });
+});
+
+describe('promptBuilder — UC-S015-4 enriched re-slice/split (partAJob/partBJob)', () => {
+  const PARTS = { partAJob: 'Part A delivers the read path', partBJob: 'Part B delivers the write path' };
+
+  it('AC-1/AC-2: with both parts, the output carries all five fields verbatim + the labelled "Proposed split:" block', () => {
+    const out = buildPrompt('re-slice', CTX, INTENT, PARTS);
+    expect(out).toMatch(/^\/slice-next\b/); // still the /slice-next command form
+    expect(out).toMatch(/CHK-5 — Compose a structured preview-first prompt/); // id WITH job (before)
+    expect(out).toContain(`Part A: ${PARTS.partAJob}`); // after
+    expect(out).toContain(`Part B: ${PARTS.partBJob}`); // after
+    expect(out).toContain(INTENT); // operator intent verbatim
+    expect(out).toContain('Proposed split:');
+    // instructs Claude to PREVIEW the split before writing anything
+    expect(out).toMatch(/before\/after/i);
+    expect(out).toMatch(/before writing/i);
+  });
+
+  it('AC-2: the before figures (state/value/cost) ride along so Claude can preview queue impact', () => {
+    const out = buildPrompt('re-slice', CTX, INTENT, PARTS);
+    expect(out).toContain('planned');
+    expect(out).toContain('HIGH');
+    expect(out).toContain('Project: demo');
+  });
+
+  it('AC-3: both parts empty (the plain 3-arg s014 path) → output is UNCHANGED, no "Proposed split:" block', () => {
+    const plain = buildPrompt('re-slice', CTX, INTENT);
+    expect(plain).not.toContain('Proposed split:');
+    expect(plain).not.toContain('Part A');
+    // the s014 closing sentence is intact (backward-compat regression, AC-5)
+    expect(plain).toContain('Please propose the thinnest split');
+    // empty/absent opts are byte-identical to the 3-arg call
+    expect(buildPrompt('re-slice', CTX, INTENT, {})).toBe(plain);
+    expect(buildPrompt('re-slice', CTX, INTENT, { partAJob: '', partBJob: '' })).toBe(plain);
+  });
+
+  it('unknown ≠ blank: ONE part empty still renders the block, dashing the missing part', () => {
+    const out = buildPrompt('re-slice', CTX, INTENT, { partAJob: 'only A', partBJob: '' });
+    expect(out).toContain('Part A: only A');
+    expect(out).toContain('Part B: —');
+    expect(out).not.toMatch(/undefined|null/);
+  });
+
+  it('no unresolved {{token}} residue in the enriched output', () => {
+    const out = buildPrompt('re-slice', CTX, INTENT, PARTS);
+    expect(out).not.toMatch(/\{\{[^}]*\}\}/);
+  });
+
+  it('the other three action types IGNORE the parts option (additive, backward-compatible)', () => {
+    for (const type of ['raise-defect', 're-prioritise', 'custom']) {
+      expect(buildPrompt(type, CTX, INTENT, PARTS)).toBe(buildPrompt(type, CTX, INTENT));
+    }
+  });
+
+  it('still pure: same input same output, no network', () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(() => {
+      throw new Error('promptBuilder must not fetch');
+    });
+    const a = buildPrompt('re-slice', CTX, INTENT, PARTS);
+    const b = buildPrompt('re-slice', CTX, INTENT, { ...PARTS });
+    expect(a).toBe(b);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
 

@@ -227,6 +227,27 @@ graph LR
   %% (the other three actions keep their SteerMenu --> SteerPanel adjacency).
   SteerMenu -- "re-slice (re-pointed UC-S015-3)" --> ReslicePreviewPanel
 
+  %% s015 / UC-S015-4 THIS commit: the reserved prompt-output-slot is no longer
+  %% pinned EMPTY — ReslicePreviewPanelContainer now OWNS prompt generation:
+  %% on Generate it calls the ENRICHED buildPrompt('re-slice', context,
+  %% intentNote, {partAJob, partBJob}) (PromptBuilder gained the optional 4th
+  %% arg; templates/steer-prompts/re-slice.js gained the named
+  %% RESLICE_SPLIT_TEMPLATE with {{part_a_job}}/{{part_b_job}} — the plain
+  %% default export is byte-identical to s014, all 3-arg call sites unchanged)
+  %% and renders the result into the slot via the s014 PromptOutput idiom
+  %% (mono/40vh/selectable <pre>) with the DELIVERED CopyPromptButton +
+  %% CopyToast REUSED (byte-equal clipboard, polite toast — not forked).
+  %% PROMPT-FREEZE-1 inherited: prompt state lives in the container and
+  %% mutates ONLY on an explicit Generate; SSE context refresh re-renders the
+  %% Before column, never the prompt. NOTE for tester: the UC-S015-3 e2e pin
+  %% "slot stays EMPTY after Generate" is FLIPPED (traceably, in
+  %% reslice-preview.spec.js); content/GEO/copy pins live in
+  %% e2e/reslice-prompt.spec.js + the REUSE_SERVER=1 real-data probe
+  %% e2e/reslice-prompt-real-data.spec.js.
+  PromptBuilder --> ReslicePreviewPanel
+  CopyPromptButton --> ReslicePreviewPanel
+  CopyToast --> ReslicePreviewPanel
+
   %% DEFECT-012: StagingQueueBox (NEW) — the staging buffer ("decomposed,
   %% awaiting triage") rendered INSIDE ValueStreamMap's queue lane BETWEEN the
   %% Decompose and Ready stage nodes, wrapped with two MiniArrows in the
@@ -301,7 +322,10 @@ graph LR
   %% CopyToast/ContextRefreshCue added (copy handoff + EXP-036 cue); SteerPanel
   %% gained toast state + refreshCue prop; SteerPanelContainer gained the
   %% PROMPT-FREEZE-1 snapshot + cue derivation. Tester UI test-plan input.
-  class SteerMenu,TreeNode,StageNode,SteerPanel,SteerContextBlock,IntentNote,UseSteerContext,PromptBuilder,SteerPromptTemplates,PromptOutput,SubscribeEvents,CopyPromptButton,CopyToast,ContextRefreshCue s014changed;
+  %% UC-S015-4: PromptBuilder + SteerPromptTemplates MOVED to s015changed below
+  %% (s014 delivered 2026-06-12T15:33Z; the re-slice template/builder extension
+  %% is s015's change — tester test-plan input for THIS slice).
+  class SteerMenu,TreeNode,StageNode,SteerPanel,SteerContextBlock,IntentNote,UseSteerContext,PromptOutput,SubscribeEvents,CopyPromptButton,CopyToast,ContextRefreshCue s014changed;
   %% s015 / UC-S015-1 nodes added + VsmContainer re-pointed (conditional
   %% mount inside the pipeline tabpanel); UC-S015-2 adds the SteerMenu --> WipRow
   %% edge (trailing steer composition; SteerMenu joins the s015 blast radius —
@@ -333,3 +357,14 @@ graph LR
   %% delivery after the tester consumes. (Separate class statement so parallel
   %% UC commits do not collide on one line.)
   class ReslicePreviewPanel,BeforeColumn,AfterColumn,UseReslicePreview s015changed;
+  %% s015 / UC-S015-4 THIS commit — PromptBuilder EXTENDED (optional 4th arg
+  %% {partAJob,partBJob}; re-slice picks the enriched template when a part is
+  %% non-empty) + SteerPromptTemplates EXTENDED (named RESLICE_SPLIT_TEMPLATE;
+  %% default export byte-identical to s014). Both MOVED out of s014changed
+  %% (s014 delivered) into the s015 blast radius. ReslicePreviewPanel gained
+  %% the prompt prop + slot rendering + copy/toast wiring; its container owns
+  %% generation + PROMPT-FREEZE. New edges: PromptBuilder/CopyPromptButton/
+  %% CopyToast --> ReslicePreviewPanel. Tester UI test-plan input; cleared at
+  %% s015 delivery after the tester consumes. (Separate class statement so
+  %% parallel UC commits do not collide on one line.)
+  class PromptBuilder,SteerPromptTemplates s015changed;

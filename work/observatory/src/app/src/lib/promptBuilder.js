@@ -17,10 +17,18 @@
 //     ("work/<project>/…") so the prompt names the project humanly;
 //   - intentNote: the operator's words, inserted VERBATIM (multiline kept).
 //
+// UC-S015-4 (additive): a 4th OPTIONAL options arg { partAJob, partBJob } —
+// the ReslicePreviewPanelContainer's handoff seam. When actionType is
+// 're-slice' and EITHER part is non-empty, the ENRICHED split template is
+// used ({{part_a_job}}/{{part_b_job}} resolved, missing part dashed). Both
+// empty/absent → the plain s014 template, byte-identical to the 3-arg call;
+// the other three action types ignore the option entirely.
+//
 // FIGURE LEGIBILITY: every token resolves — absent/empty source values render
 // "—" (unknown ≠ blank/undefined); the item id always travels WITH its job
 // sentence; raw row refs (sourceRef paths, row:N) never appear in the output.
 import { STEER_PROMPT_TEMPLATES } from '../templates/steer-prompts/index.js';
+import { RESLICE_SPLIT_TEMPLATE } from '../templates/steer-prompts/re-slice.js';
 
 /** Unknown ≠ blank: absent/empty values render as an em dash. */
 function dash(v) {
@@ -37,13 +45,21 @@ function projectFromSourceRef(sourceRef) {
  * @param {'raise-defect'|'re-prioritise'|'re-slice'|'custom'} actionType
  * @param {{id:string,job:string,state:string,value:string,cost:string,sourceRef:string}|null} context
  * @param {string} intentNote - operator intent, inserted verbatim
+ * @param {{partAJob?:string, partBJob?:string}} [opts] - UC-S015-4: the proposed
+ *   split from the ReslicePreviewPanel; re-slice only, both empty → plain form
  * @returns {string} the filled, copy-ready prompt
  */
-export function buildPrompt(actionType, context, intentNote) {
-  const template = STEER_PROMPT_TEMPLATES[actionType];
+export function buildPrompt(actionType, context, intentNote, opts = {}) {
+  let template = STEER_PROMPT_TEMPLATES[actionType];
   if (!template) {
     throw new Error(`promptBuilder: unknown steer action type "${actionType}"`);
   }
+  const partAJob = typeof opts.partAJob === 'string' ? opts.partAJob : '';
+  const partBJob = typeof opts.partBJob === 'string' ? opts.partBJob : '';
+  // UC-S015-4: the "Proposed split:" block is OMITTED when both parts are
+  // empty (use-cases AC-3) — the plain s014 re-slice prompt is unchanged.
+  const enriched = actionType === 're-slice' && (partAJob.length > 0 || partBJob.length > 0);
+  if (enriched) template = RESLICE_SPLIT_TEMPLATE;
   const ctx = context || {};
   const tokens = {
     project_id: projectFromSourceRef(ctx.sourceRef),
@@ -53,6 +69,8 @@ export function buildPrompt(actionType, context, intentNote) {
     item_value: dash(ctx.value),
     item_cost: dash(ctx.cost),
     intent_note: dash(intentNote),
+    part_a_job: dash(partAJob),
+    part_b_job: dash(partBJob),
   };
   return template.replace(/\{\{(\w+)\}\}/g, (whole, name) =>
     Object.prototype.hasOwnProperty.call(tokens, name) ? tokens[name] : '—');

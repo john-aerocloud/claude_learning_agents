@@ -10,6 +10,9 @@
 //                        Cancel clean with the WIP panel intact behind
 //   RESLICE-DISPATCH-1   re-slice → ReslicePreviewPanel; other three → SteerPanel
 //   RESLICE-PREVIEW-1    preview-only: ZERO non-GET traffic; output slot EMPTY
+//                        until Generate (UC-S015-4 flipped the always-empty
+//                        pin: Generate now renders the enriched prompt —
+//                        e2e/reslice-prompt.spec.js owns the content/GEO pins)
 //   S15-3-A11Y-1..8      keyboard open→operate→close, focus move+return,
 //                        guard cue not colour-alone, ≥24px targets, name/role/
 //                        state (+axe), reduced motion, labelled dt/dd, headings
@@ -123,7 +126,7 @@ test('F-S3-2 / S15-3-FIG-1 / S15-3-A11Y-7 — Before column = the LIVE six-field
   }
 });
 
-test('F-S3-3 / RESLICE-PREVIEW-1 — typing + Generate fire ZERO write requests; the output slot stays EMPTY', async ({ page }) => {
+test('F-S3-3 / RESLICE-PREVIEW-1 — typing + Generate fire ZERO write requests; the prompt renders CLIENT-SIDE into the slot', async ({ page }) => {
   await openByClick(page);
   await waitReady(page);
   const writes = [];
@@ -135,11 +138,12 @@ test('F-S3-3 / RESLICE-PREVIEW-1 — typing + Generate fire ZERO write requests;
   await expect(page.getByTestId('reslice-generate')).toHaveAttribute('aria-disabled', 'false');
   await page.getByTestId('reslice-generate').click();
 
-  // preview-only: NOTHING written, NOTHING rendered into the reserved slot
+  // FLIPPED by UC-S015-4 (was: slot pinned EMPTY after Generate): the
+  // enriched prompt now renders into the reserved slot — still PREVIEW-ONLY,
+  // generation is pure client-side: ZERO non-GET traffic (content pins live
+  // in e2e/reslice-prompt.spec.js).
+  await expect(page.getByTestId('prompt-output')).toBeVisible();
   expect(writes).toEqual([]);
-  await expect(page.getByTestId('prompt-output')).toHaveCount(0);
-  const slotChildren = await page.locator('[data-testid="reslice-preview-panel"] [data-testid="prompt-output-slot"] > *').count();
-  expect(slotChildren).toBe(0);
 });
 
 test('F-S3-4 / S15-3-A11Y-3 — Generate guard flips ONLY when all three fields are non-empty; cue is not colour alone', async ({ page }) => {

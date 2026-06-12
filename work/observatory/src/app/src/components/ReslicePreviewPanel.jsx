@@ -18,9 +18,15 @@
 // PREVIEW-ONLY (RESLICE-PREVIEW-1): the panel WRITES NOTHING — no items.csv
 // edit, no split, no server call. Generate's ONLY output is
 //   onGenerate({ itemId, context, partAJob, partBJob, intentNote })
-// — the UC-S015-4 handoff seam (the enriched buildPrompt's inputs). The
-// reserved prompt-output slot is pinned EMPTY here; the prompt RENDERING is
-// UC-S015-4's done-condition, exactly as UC-S014-2 excluded UC-S014-3.
+// — the UC-S015-4 handoff seam (the enriched buildPrompt's inputs).
+//
+// UC-S015-4 — the reserved prompt-output slot now renders the ENRICHED
+// re-slice/split prompt (the `prompt` prop, container-owned): the s014
+// PromptOutput presentation (mono/40vh/selectable <pre>, steer-panel.css
+// REUSED), the DELIVERED CopyPromptButton + CopyToast (byte-equal clipboard,
+// polite toast — components reused, not forked). The clipboard stays the
+// app's ONLY write surface. Without a prompt the slot stays EMPTY exactly as
+// UC-S015-3 pinned it.
 //
 // TAB ORDER (S15-3-A11Y-1): heading(focus target, tabindex=-1) → Part A →
 // Part B → intent → Generate → Cancel → ×. The × is LAST IN DOM but
@@ -30,10 +36,13 @@
 // not-found ("Item <id> not found" — After + Generate hidden, fail-soft,
 // S15-3-FIG-4) · error ("Could not load item context — try again").
 
-import { useState, useLayoutEffect, useRef, useId } from 'preact/hooks';
+import { useState, useEffect, useLayoutEffect, useRef, useId } from 'preact/hooks';
 import { createPortal } from 'preact/compat';
 import { useSteerContext } from '../hooks/useSteerContext.js';
 import { useReslicePreview } from '../hooks/useReslicePreview.js';
+import { buildPrompt } from '../lib/promptBuilder.js';
+import { CopyPromptButton } from './CopyPromptButton.jsx';
+import { CopyToast, toastDurationMs } from './CopyToast.jsx';
 import './steer-panel.css';
 import './reslice-preview-panel.css';
 
@@ -57,6 +66,7 @@ function dash(v) {
  * @param {(v:string)=>void} props.onIntentChange
  * @param {() => void} props.onCancel
  * @param {(seam:{itemId:string,context:object|null,partAJob:string,partBJob:string,intentNote:string}) => void} [props.onGenerate]
+ * @param {string|null} [props.prompt] - UC-S015-4: the enriched re-slice prompt to render in the output slot
  */
 export function ReslicePreviewPanel({
   itemId,
@@ -72,7 +82,10 @@ export function ReslicePreviewPanel({
   onIntentChange,
   onCancel,
   onGenerate,
+  prompt = null,
 }) {
+  const [toastVisible, setToastVisible] = useState(false);
+  const toastTimerRef = useRef(null);
   const headingRef = useRef(null);
   const returnFocusRef = useRef(null);
   const uid = useId();
@@ -80,6 +93,21 @@ export function ReslicePreviewPanel({
   const partAId = `part-a-${uid}`;
   const partBId = `part-b-${uid}`;
   const intentId = `reslice-intent-${uid}`;
+
+  // UC-S015-4: the toast's auto-dismiss timer lives here (the SteerPanel
+  // idiom — the panel owns the copy handler's UI consequence; CopyToast stays
+  // pure). Cleaned on unmount.
+  useEffect(() => () => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+  }, []);
+  const onCopied = () => {
+    setToastVisible(true); // a polite status region — focus is untouched
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => {
+      toastTimerRef.current = null;
+      setToastVisible(false); // auto-dismiss after --dur-toast
+    }, toastDurationMs());
+  };
 
   // Managed focus (S15-3-A11Y-2) — the SteerPanel layout-effect idiom
   // (sha 0c2b49c): synchronous with the mount commit so the heading is
@@ -262,9 +290,31 @@ export function ReslicePreviewPanel({
         </button>
       </div>
 
-      {/* RESERVED prompt-output slot — pinned EMPTY until UC-S015-4 renders
-          the enriched re-slice prompt here (the s014 slot convention). */}
-      <div class="steer-panel__output-slot" data-testid="prompt-output-slot" />
+      {/* PROMPT OUTPUT SLOT (UC-S015-4) — the enriched re-slice/split prompt.
+          The s014 idiom INHERITED: a read-only, whitespace-exact, SELECTABLE
+          <pre> (steer-panel.css .prompt-output — mono, 40vh cap) with the
+          one-click CopyPromptButton trailing it (tab order prompt → copy);
+          both present ONLY with a prompt — the slot stays EMPTY otherwise
+          (the UC-S015-3 pin, now scoped to the no-prompt state). */}
+      <div class="steer-panel__output-slot" data-testid="prompt-output-slot">
+        {typeof prompt === 'string' && prompt.length > 0 ? (
+          <>
+            <pre
+              class="prompt-output"
+              data-testid="prompt-output"
+              aria-label="Generated prompt"
+              tabindex="0"
+            >
+              {prompt}
+            </pre>
+            <CopyPromptButton prompt={prompt} onCopied={onCopied} />
+          </>
+        ) : null}
+      </div>
+
+      {/* UC-S015-4: copy confirmation — the DELIVERED CopyToast (portalled
+          fixed status region; zero flow height; never takes focus). */}
+      <CopyToast visible={toastVisible} />
 
       {/* × LAST in DOM (keyboard path), CSS-positioned top-right. */}
       <button
@@ -289,20 +339,41 @@ export function ReslicePreviewPanel({
  * useSteerContext(itemId) feeds the Before column VERBATIM; useReslicePreview
  * owns the After state. Mirrors SteerPanelContainer.
  *
- * NO prompt generation here — onGenerate exposes the UC-S015-4 seam upward;
- * the enriched buildPrompt + slot rendering land in that UC.
+ * UC-S015-4: the container OWNS prompt generation — on the panel's onGenerate
+ * it calls the ENRICHED pure buildPrompt('re-slice', context, intentNote,
+ * { partAJob, partBJob }) (client-side only, no server request) and passes
+ * the result back down as the `prompt` prop. `context` is the SAME
+ * useSteerContext object the Before column rendered, so the prompt's
+ * {{item_*}} tokens and the Before column are byte-consistent. A caller-
+ * supplied onGenerate still fires (UC-S015-3 contract preserved).
+ *
+ * PROMPT-FREEZE-1 (inherited from s014) lives HERE: prompt state mutates ONLY
+ * in handleGenerate (an explicit Generate press). useSteerContext's SSE
+ * refresh re-renders the Before column; nothing on that path touches `prompt`.
  * @param {object} props
  * @param {string} props.itemId
  * @param {string|null} [props.project] - active project (hook resolves it when absent)
  * @param {(project:string)=>Promise<Array|null>} [props.loadItems] - injectable items loader
+ * @param {(onChange:(evt:object)=>void) => (()=>void)} [props.subscribe] - injectable SSE channel
+ * @param {number} [props.debounceMs] - SSE debounce window (tests)
  * @param {() => void} props.onCancel
- * @param {(seam:object) => void} [props.onGenerate] - the UC-S015-4 handoff seam
+ * @param {(seam:object) => void} [props.onGenerate] - the UC-S015-3 handoff seam (still fires)
  */
-export function ReslicePreviewPanelContainer({ itemId, project = null, loadItems, onCancel, onGenerate }) {
+export function ReslicePreviewPanelContainer({ itemId, project = null, loadItems, subscribe, debounceMs, onCancel, onGenerate }) {
   const opts = { project };
   if (loadItems) opts.loadItems = loadItems;
+  if (subscribe) opts.subscribe = subscribe;
+  if (debounceMs !== undefined) opts.debounceMs = debounceMs;
   const { status, context } = useSteerContext(itemId, opts);
   const preview = useReslicePreview();
+  const [prompt, setPrompt] = useState(null);
+  const handleGenerate = (seam) => {
+    setPrompt(buildPrompt('re-slice', seam.context, seam.intentNote, {
+      partAJob: seam.partAJob,
+      partBJob: seam.partBJob,
+    }));
+    if (typeof onGenerate === 'function') onGenerate(seam);
+  };
   return (
     <ReslicePreviewPanel
       itemId={itemId}
@@ -317,7 +388,8 @@ export function ReslicePreviewPanelContainer({ itemId, project = null, loadItems
       onPartBChange={preview.setPartBJob}
       onIntentChange={preview.setIntentNote}
       onCancel={onCancel}
-      onGenerate={onGenerate}
+      onGenerate={handleGenerate}
+      prompt={prompt}
     />
   );
 }

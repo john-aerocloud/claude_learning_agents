@@ -1,2 +1,1 @@
 item_id,enqueued_ts,value,cost,vc_ratio,position,reason
-UC-S018-1,2026-06-12T15:36:38Z,2,1.33,1.50,1,UC-S014-4 cross-slice gate NOW OPEN (CHK-5 done); SPA scaffold done; DAG-ready; vc_ratio=1.50

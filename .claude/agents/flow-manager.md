@@ -99,7 +99,10 @@ re-raising it until Ready is back at/above floor; never let it be tolerated as
 performs the atomic act (queue-row removal + items.csv → `in-flight` + ledger
 rows, keyed by the work-item id). Your sweep RECONCILES — verify ledger
 stage_enter rows agree with items.csv state and repair any drift it finds —
-it never originates those transitions.
+it never originates those transitions. **A repair is itself an atomic act
+(DEFECT-015): restore state AND queue rows AND a ledger note together — a
+partial repair is new drift** (this binds anyone repairing, orchestrator
+included).
 
 **Staging drain (DEFECT-012):** product appends decomposed items to
 `queues/staging.csv` at completion. At EVERY sweep, drain it: register each row

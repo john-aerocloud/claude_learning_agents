@@ -239,13 +239,19 @@ constraint `◆`/"constraint" channel, LiveStatusDot. Data shape = UC-S004-1
 - **Library:** custom (inline SVG + visible label). Specialises FlowArrow.
 
 ## MetricSource  (s004 / UC-S004-5 — traceability reveal; the 1-interaction path)
-- **Props:** `{ source_rows: string[]; metricLabel }`.
-- **States:** value>0 (≥ 1 row ref — AC5.1/5.2) · value=0 ("no events recorded" —
-  AC5.3, not blank/broken).
-- **Selector:** `data-testid="metric-source-<stage>-<kind>"`; `role="tooltip"`
-  referenced by the metric via `aria-describedby`.
-- **A11y:** keyboard-triggerable (focus+Enter, not hover-only), dismissible (Esc);
-  text row refs. Reuses SourceLink "↗ source" affordance.
+- **Disclosure scoping (DEFECT-014):** NODE-scoped SINGLE composite panel — one
+  `role="tooltip"` per node containing a SECTION per metric (Throughput / Dwell /
+  WIP-or-Depth / Rework). NOT one panel per figure (that produced an overlapping
+  four-panel stack). Exactly-one-visible-per-node invariant.
+- **Structure:** `MetricSourcePanel` container (`data-testid="metric-source-<stage>"`,
+  `role="tooltip"`, `pointer-events:none`) holding N `MetricSourceSection`
+  (`data-testid="metric-source-<stage>-<kind>"`, each the caption/file/summary/
+  events/empty body; the section id is the `aria-describedby` target of its value).
+- **States (per section):** value>0 (≥ 1 readable event line — AC5.1/5.2) ·
+  value=0 ("no events recorded" — AC5.3, not blank/broken).
+- **A11y:** keyboard-triggerable at the NODE (focus+Enter/Space, not hover-only),
+  hover-equivalent, dismissible (Esc / leave / blur). NO per-figure tab stops
+  (A11Y-3 — Tab visits nodes only). Reuses SourceLink "↗ source" affordance.
 - **Library:** custom. Reuses s003 SourceLink convention.
 
 ---

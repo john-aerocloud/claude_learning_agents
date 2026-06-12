@@ -217,7 +217,7 @@ export function StageNode({ data, onSteer }) {
     stage, label, throughput, throughput_per_active_day, active_days,
     dwell_median_s, dwell_pairs, wip, rework, source_rows,
     source_events, source_total,
-    queue_depth, queue_items, coherence_warning,
+    queue_depth, queue_items, coherence_warning, coherence_warnings,
   } = data;
   const isGate = GATES.has(stage);
   const isQueue = isQueueStage(data);
@@ -229,7 +229,11 @@ export function StageNode({ data, onSteer }) {
   const dwell = dwellLabel(dwell_median_s, dwell_pairs);
   const reworkText = `${Number(rework) || 0} rework`;
   const depth = Number(queue_depth) || 0;
-  const coherenceMismatch = coherence_warning === true;
+  // DEFECT-013 — the API sends readable drift reasons; show THEM when present
+  // (registry drift on a work stage is not a queue-count problem). A boolean-only
+  // payload (DEFECT-004 legacy / older fixture) keeps the AC-6 queue text.
+  const coherenceReasons = Array.isArray(coherence_warnings) ? coherence_warnings : [];
+  const coherenceMismatch = coherence_warning === true || coherenceReasons.length > 0;
 
   // The reveal is node-scoped: focus+Enter or hover OPENS all four source panels
   // for this node; Esc or mouse-leave CLOSES them (A11Y-10 dismissible).
@@ -256,7 +260,11 @@ export function StageNode({ data, onSteer }) {
     currentPhrase = wipActive ? `WIP ${wip}, ${wip} in-flight` : `WIP ${wip}`;
   }
   let name = `${label} stage, throughput ${throughputText}, dwell ${dwell}, ${currentPhrase}, rework ${reworkText}`;
-  if (coherenceMismatch) name += ', queue count mismatch';
+  if (coherenceMismatch) {
+    name += coherenceReasons.length > 0
+      ? `, coherence warning: ${coherenceReasons.join('; ')}`
+      : ', queue count mismatch';
+  }
   if (isGate) name = `gate: ${name}`;
 
   return (
@@ -283,7 +291,9 @@ export function StageNode({ data, onSteer }) {
       </div>
       {coherenceMismatch ? (
         <p class="stage-node__coherence" data-testid={`coherence-${stage}`} role="status">
-          queue count mismatch — see tree
+          {coherenceReasons.length > 0
+            ? coherenceReasons.join('; ')
+            : 'queue count mismatch — see tree'}
         </p>
       ) : null}
       <dl class="stage-figs">

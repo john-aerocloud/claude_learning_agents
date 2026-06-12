@@ -190,6 +190,41 @@ describe('StageNode — coherence warning (AC-6)', () => {
   });
 });
 
+// DEFECT-013 — the API now sends READABLE drift reasons (coherence_warnings).
+// The stage box shows the reason itself (registry drift on a WORK stage must
+// not masquerade as a queue-count problem); the boolean-only legacy payload
+// keeps the AC-6 fallback text. Non-colour cue: visible role=status text +
+// data-coherence attribute (both already non-colour; AC-6 heritage).
+describe('StageNode — readable coherence reasons (DEFECT-013)', () => {
+  it('renders each coherence_warnings reason verbatim on the stage box', () => {
+    render(
+      <StageNode
+        data={{
+          ...workStage,
+          coherence_warning: true,
+          coherence_warnings: ['UC-S014-4 open in engineer but registry says planned'],
+        }}
+      />,
+    );
+    const node = screen.getByTestId('stage-engineer');
+    expect(node.getAttribute('data-coherence')).toBe('warning');
+    const status = screen.getByTestId('coherence-engineer');
+    expect(status.textContent).toContain('UC-S014-4 open in engineer but registry says planned');
+    // a registry-drift reason must NOT be mislabelled as a queue-count problem
+    expect(status.textContent).not.toMatch(/queue count mismatch/i);
+  });
+
+  it('falls back to the AC-6 queue text when the warning is boolean-only (no reasons)', () => {
+    render(<StageNode data={{ ...readyStage, coherence_warning: true, coherence_warnings: [] }} />);
+    expect(screen.getByTestId('coherence-ready').textContent).toMatch(/queue count mismatch/i);
+  });
+
+  it('no reasons and no boolean → no status element at all', () => {
+    render(<StageNode data={{ ...workStage, coherence_warnings: [] }} />);
+    expect(screen.queryByTestId('coherence-engineer')).toBeNull();
+  });
+});
+
 describe('StageNode — accessible name carries the throughput RATE (DEFECT-007 D7-AC-6)', () => {
   // Ruling D7-AC-6 pattern (supersedes D4-AC-7 for throughput): the rate token
   // carries the /day unit. Queue branch admits the optional "(longest wait …)".

@@ -166,6 +166,30 @@ describe('aggregateStageFlow — throughput rate (DEFECT-007 D7-AC-2/AC-3)', () 
     }
   });
 
+  // DEFECT (found by D7-AC-7 on the live ledger, 2026-06-12): active_days was
+  // derived from ALL contributing rows (incl. stage_enter/task_end), so a
+  // stage_enter on a calendar date with NO task_start inflated the denominator
+  // and broke basis coherence with dora.py (which counts task_start dates).
+  // Pin: the denominator is the distinct UTC dates of the THROUGHPUT in-events
+  // (task_start for the engineer stage) — other row kinds never add a day.
+  it('D7-AC-7 (basis coherence): a stage_enter on a new date does NOT add an active day', () => {
+    const out = aggregateStageFlow(
+      csv([
+        row({ ts: '2026-06-01T08:00:00Z', agent: 'engineer', event: 'task_start', item: 'A' }),
+        row({ ts: '2026-06-01T20:00:00Z', agent: 'engineer', event: 'task_start', item: 'B' }),
+        // a resumed stage on a later date — WIP in-event, NOT a throughput in-event
+        row({ ts: '2026-06-02T09:00:00Z', agent: 'engineer', event: 'stage_enter', item: 'B' }),
+        // and a close on a third date — also not a throughput in-event
+        row({ ts: '2026-06-03T10:00:00Z', agent: 'engineer', event: 'task_end', item: 'A' }),
+      ]),
+      'p',
+    );
+    const eng = byStage(out, 'engineer');
+    expect(eng.throughput).toBe(2); // task_start only (AC1.4 — unchanged)
+    expect(eng.active_days).toBe(1); // 2026-06-01 only — the task_start basis
+    expect(eng.throughput_per_active_day).toBeCloseTo(2, 2);
+  });
+
   it('keeps the raw integer throughput count alongside the rate', () => {
     const out = aggregateStageFlow(
       csv([
@@ -941,5 +965,133 @@ describe('aggregateStageFlow — WIP horizon covers real task durations (DEFECT-
     const stale = csv([row({ ts: minsAgo(121), agent: 'engineer', event: 'task_start', item: 'CHK-EDGE' })]);
     expect(byStage(aggregateStageFlow(recent, 'p', null, { now: NOW }), 'engineer').wip).toBe(1);
     expect(byStage(aggregateStageFlow(stale, 'p', null, { now: NOW }), 'engineer').wip).toBe(0);
+  });
+});
+
+// DEFECT-013 — the board SELF-SURFACES registry/ledger drift instead of waiting
+// for a human report. A RECENT open in-event (within the WIP horizon) whose
+// item_id maps to an items.csv record in a NOT-being-worked state (planned/
+// ready), or to no record at all where one is expected (UC-/DEF-/CHK-/SLC-
+// prefixed), or is not item-shaped at all (a slice slug — EXP-040 item_id
+// discipline violated), extends that stage's coherence_warning with a terse
+// human-meaningful reason. This is a WARNING ONLY: the WIP count stays
+// recency-only (DEFECT-009/010/011 — no new exclusions, EXP-035).
+// @covers AGG (server/lib/ledgerAggregator.js)
+describe('aggregateStageFlow — registry-coherence warning on recent opens (DEFECT-013)', () => {
+  const NOW = Date.parse('2026-06-12T16:25:00Z');
+  const minsAgo = (m) => new Date(NOW - m * 60_000).toISOString();
+  const ITEMS_HEADER =
+    'id,type,parent,children,job,state,value,cost,vc_ratio,created_ts,done_ts,dora_ref';
+  function itemsCsv(rows) {
+    return [ITEMS_HEADER, ...rows.map((r) => `${r.id},use-case,CHK,,job,${r.state},,,,,,`)].join('\n') + '\n';
+  }
+
+  it('D13-AC-1: recent open whose items.csv state is planned ⇒ warning text, WIP UNCHANGED (the live repro)', () => {
+    // Repro of 2026-06-12 16:2x: tester validating UC-S014-4 in prod while the
+    // registry still said planned — drift was silent until a human grepped.
+    const ledger = csv([
+      row({ ts: minsAgo(5), agent: 'tester', event: 'stage_enter', item: 'UC-S014-4', note: 'validation start' }),
+    ]);
+    const items = itemsCsv([{ id: 'UC-S014-4', state: 'planned' }]);
+    const val = byStage(aggregateStageFlow(ledger, 'p', items, { now: NOW }), 'validate');
+    expect(val.coherence_warning).toBe(true);
+    expect(val.coherence_warnings).toContain('UC-S014-4 open in validate but registry says planned');
+    // WARNING, not exclusion — recency-only stays the headline gate.
+    expect(val.wip).toBe(1);
+    expect(val.wip_items).toEqual([{ item_id: 'UC-S014-4', note: 'validation start' }]);
+  });
+
+  it('D13-AC-2: recent open whose items.csv state is ready ⇒ warning (registry claims not-being-worked)', () => {
+    const ledger = csv([
+      row({ ts: minsAgo(5), agent: 'engineer', event: 'stage_enter', item: 'UC-S013-3', note: 'build' }),
+    ]);
+    const items = itemsCsv([{ id: 'UC-S013-3', state: 'ready' }]);
+    const eng = byStage(aggregateStageFlow(ledger, 'p', items, { now: NOW }), 'engineer');
+    expect(eng.coherence_warning).toBe(true);
+    expect(eng.coherence_warnings).toContain('UC-S013-3 open in engineer but registry says ready');
+    expect(eng.wip).toBe(1);
+  });
+
+  it('D13-AC-3: recent open keyed by a slice SLUG (not a work item) ⇒ slug warning, WIP unchanged (the live repro)', () => {
+    // Repro: tester self-recorded its validate stage_enter against the slice
+    // slug s014-steer-prompt-handoff instead of UC-S014-4 (EXP-040 violation).
+    const ledger = csv([
+      row({ ts: minsAgo(5), agent: 'tester', event: 'stage_enter', item: 's014-steer-prompt-handoff', note: 'validation start' }),
+    ]);
+    const items = itemsCsv([{ id: 'UC-S014-4', state: 'in-flight' }]);
+    const val = byStage(aggregateStageFlow(ledger, 'p', items, { now: NOW }), 'validate');
+    expect(val.coherence_warning).toBe(true);
+    expect(val.coherence_warnings).toContain(
+      's014-steer-prompt-handoff open in validate: open event keyed by slug, not a work item',
+    );
+    expect(val.wip).toBe(1);
+  });
+
+  it('D13-AC-4: recent open on an item-shaped id (UC-/DEF-/CHK-/SLC-) ABSENT from items.csv ⇒ absent warning', () => {
+    const ledger = csv([
+      row({ ts: minsAgo(5), agent: 'engineer', event: 'stage_enter', item: 'DEF-099', note: 'defect fix' }),
+    ]);
+    const items = itemsCsv([{ id: 'UC-OTHER', state: 'in-flight' }]);
+    const eng = byStage(aggregateStageFlow(ledger, 'p', items, { now: NOW }), 'engineer');
+    expect(eng.coherence_warning).toBe(true);
+    expect(eng.coherence_warnings).toContain('DEF-099 open in engineer but absent from items.csv');
+    expect(eng.wip).toBe(1);
+  });
+
+  it('D13-AC-5: coherent case — recent open whose registry state is in-flight ⇒ NO warning', () => {
+    const ledger = csv([
+      row({ ts: minsAgo(5), agent: 'engineer', event: 'stage_enter', item: 'UC-S013-3', note: 'build' }),
+    ]);
+    const items = itemsCsv([{ id: 'UC-S013-3', state: 'in-flight' }]);
+    const eng = byStage(aggregateStageFlow(ledger, 'p', items, { now: NOW }), 'engineer');
+    expect(eng.coherence_warning).toBe(false);
+    expect(eng.coherence_warnings).toEqual([]);
+    expect(eng.wip).toBe(1);
+  });
+
+  it('D13-AC-6: recent open on a DONE item ⇒ NO drift warning (DEFECT-010 — rework on delivered is legitimate)', () => {
+    const ledger = csv([
+      row({ ts: minsAgo(5), agent: 'engineer', event: 'stage_enter', item: 'UC-S004-5', note: 'rework' }),
+    ]);
+    const items = itemsCsv([{ id: 'UC-S004-5', state: 'done' }]);
+    const eng = byStage(aggregateStageFlow(ledger, 'p', items, { now: NOW }), 'engineer');
+    expect(eng.coherence_warning).toBe(false);
+    expect(eng.coherence_warnings).toEqual([]);
+    expect(eng.wip).toBe(1); // DEFECT-010 stays fixed
+  });
+
+  it('D13-AC-7: a STALE open (>2 h) on a planned item ⇒ NO warning (the recency horizon gates the check too)', () => {
+    const ledger = csv([
+      row({ ts: minsAgo(180), agent: 'engineer', event: 'stage_enter', item: 'UC-OLD' }),
+    ]);
+    const items = itemsCsv([{ id: 'UC-OLD', state: 'planned' }]);
+    const eng = byStage(aggregateStageFlow(ledger, 'p', items, { now: NOW }), 'engineer');
+    expect(eng.coherence_warning).toBe(false);
+    expect(eng.coherence_warnings).toEqual([]);
+    expect(eng.wip).toBe(0);
+  });
+
+  it('D13-AC-8: no items.csv ⇒ no drift warnings (fail-soft), WIP unchanged', () => {
+    const ledger = csv([
+      row({ ts: minsAgo(5), agent: 'engineer', event: 'stage_enter', item: 'UC-X', note: 'no registry' }),
+    ]);
+    const eng = byStage(aggregateStageFlow(ledger, 'p', null, { now: NOW }), 'engineer');
+    expect(eng.coherence_warning).toBe(false);
+    expect(eng.coherence_warnings).toEqual([]);
+    expect(eng.wip).toBe(1);
+  });
+
+  it('D13-AC-9: DEFECT-004 queue mismatch now also carries a readable reason in coherence_warnings', () => {
+    const items = itemsCsv([{ id: 'UC-R1', state: 'ready' }, { id: 'UC-R2', state: 'ready' }]);
+    const queues = { ready: 'item_id,enqueued_ts,value,cost,note\nUC-R1,2026-06-12T16:00:00Z,,,\n' };
+    const ready = byStage(aggregateStageFlow(csv([]), 'p', items, { now: NOW, queues }), 'ready');
+    expect(ready.coherence_warning).toBe(true);
+    expect(ready.coherence_warnings.length).toBeGreaterThan(0);
+    expect(ready.coherence_warnings[0]).toContain('ready');
+  });
+
+  it('D13-AC-10: every stage carries coherence_warnings as an array (empty when coherent)', () => {
+    const out = aggregateStageFlow(csv([]), 'p');
+    for (const s of out) expect(s.coherence_warnings).toEqual([]);
   });
 });

@@ -48,6 +48,40 @@ import { parseCsv } from '../parsers/csv.js';
 
 const TERMINAL_ITEM_STATES = new Set(['done', 'dropped', 'cancelled']);
 
+// DEFECT-013 — registry/ledger drift self-surfacing. A RECENT open in-event
+// whose items.csv state claims the item is NOT being worked (planned/ready)
+// is drift: the pull was not atomic. NOT terminal states — recent work on a
+// DONE item is legitimate rework (DEFECT-010) and never warned. This check is
+// a WARNING ONLY: it never changes the wip count (recency stays the headline
+// gate — DEFECT-002/009/010/011 lessons hold).
+const NOT_BEING_WORKED_STATES = new Set(['planned', 'ready']);
+// Item-shaped ids are EXPECTED in items.csv: absence is drift. Anything else
+// (e.g. a slice slug like s014-steer-prompt-handoff) violates EXP-040 item_id
+// discipline — self-recorded rows carry the WORK-ITEM id, never the slug.
+const ITEM_SHAPED_ID = /^(UC|DEF|CHK|SLC)-/;
+
+/**
+ * DEFECT-013 — terse human-meaningful drift reason for one RECENT open
+ * in-event, or null when coherent. Registry null → null (fail-soft: no
+ * registry, no reconciliation — mirrors the DEFECT-004 queue path).
+ * @param {string} id open in-event's item_id
+ * @param {string} stage stage id (for the reason text)
+ * @param {Map<string,{terminal:boolean,state:string}>|null} itemRegistry
+ * @returns {string|null}
+ */
+function driftReason(id, stage, itemRegistry) {
+  if (!itemRegistry) return null;
+  const entry = itemRegistry.get(id);
+  if (entry) {
+    return NOT_BEING_WORKED_STATES.has(entry.state)
+      ? `${id} open in ${stage} but registry says ${entry.state}`
+      : null;
+  }
+  return ITEM_SHAPED_ID.test(id)
+    ? `${id} open in ${stage} but absent from items.csv`
+    : `${id} open in ${stage}: open event keyed by slug, not a work item`;
+}
+
 // DEFECT-009 — WIP is RECENCY-based, not items.csv-membership-based.
 // An open in-event (task_start/stage_enter with no matching close) is in-flight
 // iff it is RECENT — within this staleness horizon of request time. DEFECT-002's
@@ -157,7 +191,10 @@ function computeQueueState(bufferDef, queueCsv, itemRegistry, now, stage) {
   // §4 coherence cross-check: where the stage has a clean items.csv state, the
   // count of items in that state (the tree's view) must equal queue_depth. If
   // they differ, surface a warning rather than show a silently-wrong number.
+  // DEFECT-013: the warning now carries a readable REASON (coherence_warnings)
+  // so the board says WHAT drifted, not just that something did.
   let coherenceWarning = false;
+  const coherenceWarnings = [];
   if (bufferDef.coherenceState && itemRegistry) {
     let stateCount = 0;
     for (const entry of itemRegistry.values()) {
@@ -165,6 +202,9 @@ function computeQueueState(bufferDef, queueCsv, itemRegistry, now, stage) {
     }
     if (stateCount !== queueDepth) {
       coherenceWarning = true;
+      coherenceWarnings.push(
+        `items.csv ${bufferDef.coherenceState}-count=${stateCount} vs ${stage} queue depth=${queueDepth}`,
+      );
       // eslint-disable-next-line no-console
       console.warn(
         `[stage-flow] coherence mismatch in ${stage}: items.csv ${bufferDef.coherenceState}-count=${stateCount} vs queue_depth=${queueDepth}`,
@@ -172,7 +212,12 @@ function computeQueueState(bufferDef, queueCsv, itemRegistry, now, stage) {
     }
   }
 
-  return { queue_depth: queueDepth, queue_items: queueItems, coherence_warning: coherenceWarning };
+  return {
+    queue_depth: queueDepth,
+    queue_items: queueItems,
+    coherence_warning: coherenceWarning,
+    coherence_warnings: coherenceWarnings,
+  };
 }
 
 // NOTE ON PARSING — why NOT the shared parseCsv (csv.js):
@@ -404,7 +449,9 @@ function pairDurationS(openRow, closeRow) {
 function queueFieldsFor(stage, queues, itemRegistry, now) {
   const bufferDef = BUFFER_STAGES[stage];
   if (!bufferDef) {
-    return { queue_depth: null, queue_items: null, coherence_warning: false };
+    return {
+      queue_depth: null, queue_items: null, coherence_warning: false, coherence_warnings: [],
+    };
   }
   const queueCsv = queues && typeof queues === 'object' ? queues[stage] : null;
   return computeQueueState(bufferDef, queueCsv, itemRegistry, now, stage);
@@ -540,6 +587,9 @@ export function aggregateStageFlow(ledgerCsv, project, itemsCsv = null, opts = {
     // they ship here flagged `stale` instead of being dropped. dwell_ms is null
     // (unknown ≠ 0, S15-1-FIG-3) when it cannot be computed.
     const openItems = [];
+    // DEFECT-013 — registry-coherence drift reasons for RECENT opens. Warning
+    // only: wip/wip_items above-style counting is untouched (recency-only).
+    const driftWarnings = [];
     for (const [id, openRow] of openByItem) {
       const openTs = Date.parse(openRow.timestamp);
       const dwellMs = Number.isFinite(openTs) && Number.isFinite(now) && now >= openTs
@@ -557,6 +607,12 @@ export function aggregateStageFlow(ledgerCsv, project, itemsCsv = null, opts = {
         : true; // unparseable ts → fail-soft to "recent" (never silently drop)
       if (!recent) continue;
       wipItems.push({ item_id: id, note: openRow.note ?? '' });
+      const drift = driftReason(id, stageDef.stage, itemRegistry);
+      if (drift) {
+        driftWarnings.push(drift);
+        // eslint-disable-next-line no-console
+        console.warn(`[stage-flow] registry drift (DEFECT-013): ${drift}`);
+      }
     }
 
     // DEFECT-005: contributing rows in encounter order. source_rows keeps the
@@ -593,7 +649,18 @@ export function aggregateStageFlow(ledgerCsv, project, itemsCsv = null, opts = {
       source_rows: contributing.map((r) => r.rowRef),
       source_events: contributing.slice(0, SOURCE_EVENTS_CAP).map(toSourceEvent),
       source_total: sourceTotal,
-      ...queueFieldsFor(stageDef.stage, queues, itemRegistry, now),
+      // DEFECT-013 — merge the DEFECT-004 queue mismatch (buffer stages) with
+      // the registry-drift reasons (work stages). coherence_warning stays the
+      // boolean the UI keys on; coherence_warnings carries the readable WHY.
+      ...(() => {
+        const qf = queueFieldsFor(stageDef.stage, queues, itemRegistry, now);
+        const reasons = [...qf.coherence_warnings, ...driftWarnings];
+        return {
+          ...qf,
+          coherence_warning: qf.coherence_warning || driftWarnings.length > 0,
+          coherence_warnings: reasons,
+        };
+      })(),
     };
   });
 }

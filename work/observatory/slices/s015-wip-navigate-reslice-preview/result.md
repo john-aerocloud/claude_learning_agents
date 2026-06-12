@@ -274,3 +274,109 @@ Live server state: 9 open WIP items (UC-S015-1, UC-S003-2/3/4, UC-S004-5, UC-S00
 ## Process notes
 
 The committed `reslice-preview.spec.js` (17 tests) was already complete and covered all UC-S015-3 acceptance conditions. The EXP-033 real-data confirmation was provided by the existing `wip-steer-real-data.spec.js` test 5 (F-S2-3), which was updated at UC-S015-3 build time to assert `ReslicePreviewPanel` rather than `SteerPanel`. The only new work by the tester was the `wip-steer-real-data.spec.js` spec fix (line 95 pattern update) and the test-plan/result file entries.
+
+---
+
+# Validation result — UC-S015-4 (s015-wip-navigate-reslice-preview)
+
+**Verdict: PASS**
+
+**s015 slice verdict: COMPLETE — all four UCs pass. s015-wip-navigate-reslice-preview is SLC DONE.**
+**CHK-6 first-slice done-condition met. UC-S013-4 and CHK-6's usage-gated forecast slices remain.**
+
+UC: UC-S015-4 — enriched re-slice/split prompt rendered, copied byte-equal, frozen against refresh
+SHA under test: 22ce55d (UC-S015-4: the operator hands Claude a structured split proposal)
+Live server: http://localhost:5173 (active project: observatory; 10 live WIP items)
+Run date: 2026-06-12
+Iteration: 9
+
+---
+
+## Summary
+
+All acceptance conditions for UC-S015-4 pass. Validated via:
+
+1. The committed `reslice-prompt.spec.js` (4/4 PASS, fixture :5199) — exercises all browser-level UC-S015-4 conditions: AC-1/2/4 enriched prompt content, PROMPT-COPY-1 clipboard byte-equality + polite toast, PromptOutput presentation (mono/40vh/selectable), GEO no-reflow on prompt render.
+2. The committed `reslice-preview.spec.js` (17/17 PASS, fixture :5199) — UC-S015-3 regression guard; includes the UC-S015-3/UC-S015-4 pin-flip (F-S3-3 now asserts `prompt-output` is VISIBLE after Generate, not absent).
+3. The committed `reslice-prompt-real-data.spec.js` (1/1 PASS, live :5173) — EXP-033 real-data probe on REQ-OBSERVATORY: all five required fields verbatim in the enriched /slice-next prompt, copy byte-equal, zero writes.
+4. Vitest unit suite `test:ci` (869/869 PASS) — includes `promptBuilder.test.js` UC-S015-4 block (7 tests: AC-1/2/3/backward-compat/one-part-dash/no-residue/purity) and `ReslicePreviewPanelPrompt.test.jsx` (8 tests: AC-1/2/4, PROMPT-COPY-1, PROMPT-FREEZE-1, tab-order, auto-dismiss).
+
+---
+
+## Evidence
+
+### reslice-prompt.spec.js fixture run — 4/4 PASS
+
+Run: `OBSERVATORY_E2E_PORT=5199 CI=1 npm --prefix work/observatory/src/app run test:browser -- e2e/reslice-prompt.spec.js --reporter=list --workers=1`
+
+Fixture item: UC-D1-2 ("Demo use case two"), Part A = "Part A delivers the read path", Part B = "Part B delivers the write path", intent = "too big to flow as one item".
+
+| Test | Result |
+|---|---|
+| AC-1/AC-2/AC-4 — enriched /slice-next prompt: `out` starts with `/slice-next`; contains "UC-D1-2 — Demo use case two"; "Proposed split:"; "Part A: Part A delivers the read path"; "Part B: Part B delivers the write path"; intent verbatim; matches `/before writing/i` (preview-first instruction); no `{{…}}` residue; `writes = []` (zero non-GET traffic) | PASS |
+| PromptOutput presentation — `fontFamily` contains "mono"; `maxHeight ≈ 0.4×900px = 360px`; `userSelect = "text"`; `whiteSpace = "pre-wrap"`; `tabindex = "0"` | PASS |
+| PROMPT-COPY-1 — copy-prompt-btn click → `copy-toast` visible within 2000ms; `role=status`; `aria-live=polite`; text matches `/copied to clipboard/i`; `clipboard.readText() === prompt-output.textContent`; copied bytes contain "Part A: Part A delivers the read path" | PASS |
+| GEO no-reflow — `wip-panel` bbox, all `wip-row` bboxes, `document.documentElement.scrollWidth/scrollHeight/scrollX/scrollY` are byte-identical before vs after Generate click; `prompt-output` bounding box is within the `reslice-preview-panel` bounds | PASS |
+
+### reslice-preview.spec.js regression guard — 17/17 PASS
+
+Run: `OBSERVATORY_E2E_PORT=5199 CI=1 npm --prefix work/observatory/src/app run test:browser -- e2e/reslice-preview.spec.js --reporter=list --workers=1`
+
+All UC-S015-3 conditions pass. Of particular note: test 4 (F-S3-3/RESLICE-PREVIEW-1) now asserts `prompt-output` IS VISIBLE after Generate (pin flipped by UC-S015-4 in the spec's commit), confirming the UC-S015-3/UC-S015-4 boundary pin is correctly inverted. The underlying RESLICE-PREVIEW-1 invariant (zero writes) is preserved: `writes.toEqual([])` still passes.
+
+### reslice-prompt-real-data.spec.js EXP-033 real-data run — 1/1 PASS
+
+Run: `OBSERVATORY_E2E_PORT=5173 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/reslice-prompt-real-data.spec.js --reporter=list --workers=1`
+
+Live server state: `GET /api/active` = `{"observatory"}`. Real item anchor: REQ-OBSERVATORY ("Observe and steer the delivery-agent pipeline from a single local read-only surface").
+
+| Field verified | Assertion | Result |
+|---|---|---|
+| Real item id + job in prompt (before) | `out.toContain("REQ-OBSERVATORY — Observe and steer…")` | PASS |
+| "Proposed split:" block | `out.toContain('Proposed split:')` | PASS |
+| Part A verbatim | `out.toContain('Part A: live probe Part A: observe the pipeline')` | PASS |
+| Part B verbatim | `out.toContain('Part B: live probe Part B: steer the pipeline')` | PASS |
+| Intent verbatim | `out.toContain(INTENT)` | PASS |
+| Project derived from sourceRef | `out.toContain('Project: observatory')` | PASS |
+| No {{token}} residue | `out.not.toMatch(/\{\{[^}]*\}\}/)` | PASS |
+| Prompt starts with /slice-next | `out.toMatch(/^\/slice-next\b/)` | PASS |
+| Copy byte-equal | `clipboard.readText() === out.textContent` | PASS |
+| Zero non-GET traffic | `writes.toEqual([])` | PASS |
+
+### Vitest unit suite — 869/869 PASS
+
+Run: `npm --prefix work/observatory/src/app run test:ci`
+
+Key UC-S015-4 unit tests (75 files, 869 tests total):
+
+| Spec | Tests | Key assertions |
+|---|---|---|
+| `promptBuilder.test.js` UC-S015-4 describe block | 7 | AC-1/2 all five fields; AC-3 backward-compat (both empty = s014 output byte-identical); one-part dash ("Part B: —"); no residue; other types ignore parts; purity (no fetch) |
+| `ReslicePreviewPanelPrompt.test.jsx` | 8 | slot/pre byte-equal to buildPrompt(); copy/toast (PROMPT-COPY-1); auto-dismiss; tab-order; AC-1/2/4 container; PROMPT-FREEZE-1 (SSE refresh → Before column updates, prompt stays frozen; explicit re-Generate rebuilds from refreshed context) |
+
+### Concurrent-activity note
+
+During this validation session, DEFECT-014 fix (StageNode/MetricSource composite hover panel) and UC-S013-3 validation were noted as concurrent in-flight work. Neither scope touches `promptBuilder.js`, `ReslicePreviewPanel.jsx`, or the re-slice template. The DEFECT-015 close commit (990a307, HEAD at run time) is docs-only. No mid-session deploy affected the UC-S015-4 validation surface.
+
+### PROMPT-FREEZE-1 adversarial check
+
+The PROMPT-FREEZE-1 condition is validated at unit level only (jsdom SSE state machine test in `ReslicePreviewPanelPrompt.test.jsx` line 213-231). The SSE-triggered context refresh updates `reslice-before-stage` from "in progress" to "done" in-place; the `prompt-output.textContent` remains byte-identical. An explicit re-Generate then rebuilds from the refreshed context (confirmed: updated output contains "done"). This is the authoritative coverage — the browser spec would require a controllable SSE event which is not feasible without fixture infrastructure beyond the ephemeral server scope.
+
+### Backward-compat adversarial check
+
+`reslice-preview.spec.js` test 2 (RESLICE-DISPATCH-1) drives all three non-reslice actions (`raise-defect`, `re-prioritise`, `custom`) from the WIP panel steer button and confirms `steer-panel` opens (not `reslice-preview-panel`). `promptBuilder.test.js` line 163-167 confirms the other action types return byte-identical output whether or not `parts` is passed.
+
+---
+
+## Slice completion
+
+s015-wip-navigate-reslice-preview: all four UCs delivered and validated.
+
+| UC | SHA | Verdict | Run date |
+|---|---|---|---|
+| UC-S015-1 — WIP navigation panel | 0f7055b / b7ec8a8 / d872ac2 | PASS | 2026-06-11 |
+| UC-S015-2 — steer actions from WIP rows | a273b02 / b21cffc | PASS | 2026-06-11 |
+| UC-S015-3 — re-slice/split before/after preview panel | 1996850 | PASS | 2026-06-12 |
+| UC-S015-4 — enriched re-slice/split prompt + copy | 22ce55d | PASS | 2026-06-12 |
+
+CHK-6 first-slice done-condition MET (s015 = SLC done). UC-S013-4 and CHK-6's usage-gated forecast slices remain open.

@@ -304,3 +304,94 @@ Note: `s014-steer-prompt-handoff` is an all-lowercase slice slug that appears as
 | `wip-panel.spec.js` (regression guard) | :5199 ephemeral (CI=1, --workers=1) | Fixture ledger | All UC-S015-1 conditions | 12/12 PASS |
 | `wip-steer.spec.js` (regression guard) | :5199 ephemeral (CI=1, --workers=1) | Fixture ledger | All UC-S015-2 conditions | 11/11 PASS |
 | `wip-steer-real-data.spec.js` (EXP-033 real-data) | :5173 live (REUSE_SERVER=1) | Real items.csv + ledger.csv | F-S2-3 re-point confirmed; ReslicePreviewPanel opens on live item; EXP-033 | 8/8 PASS |
+
+---
+
+# Test plan — UC-S015-4 (enriched re-slice/split prompt + copy)
+
+Slice: s015-wip-navigate-reslice-preview
+UC: UC-S015-4 — enriched buildPrompt extension + prompt rendered in panel + reused copy/toast idiom
+SHA under test: 22ce55d (UC-S015-4: the operator hands Claude a structured split proposal)
+Run date: 2026-06-12
+Tester: tester agent
+Iteration: 9
+
+Note on concurrent activity: HEAD at run time is 990a307 (DEFECT-015 close + DEFECT-014 ruling, 2026-06-12T16:56). That commit touches only process/dora/defect docs — no app code. The UC-S015-4 app code at 22ce55d is what the live Vite dev-server serves unchanged. Identity confirmed: `/api/active` = "observatory".
+
+---
+
+## Changed nodes from component-map.mmd (s015changed UC-S015-4 additions)
+
+| Node | Class | Covering spec |
+|---|---|---|
+| `PromptBuilder` (EXTENDED — optional 4th arg {partAJob,partBJob}; enriched RESLICE_SPLIT_TEMPLATE) | `s015changed` | `promptBuilder.test.js` (UC-S015-4 describe block, 7 tests); `reslice-prompt.spec.js` (AC-1/AC-2 browser) |
+| `SteerPromptTemplates` (EXTENDED — named RESLICE_SPLIT_TEMPLATE; default export byte-identical to s014) | `s015changed` | `promptBuilder.test.js` AC-3 backward-compat; `reslice-prompt.spec.js` AC-1 /slice-next form |
+| `ReslicePreviewPanel` (EXTENDED — prompt prop + slot rendering + copy/toast wiring; container owns PROMPT-FREEZE) | `s015changed` | `ReslicePreviewPanelPrompt.test.jsx` (8 tests: slot/pre/copy/toast/freeze/tab-order/AC-1/AC-4); `reslice-prompt.spec.js` (4 browser tests) |
+| `CopyPromptButton → ReslicePreviewPanel` (new edge — reuse, not fork) | `s015changed` | `ReslicePreviewPanelPrompt.test.jsx` PROMPT-COPY-1; `reslice-prompt.spec.js` PROMPT-COPY-1 |
+| `CopyToast → ReslicePreviewPanel` (new edge — reuse, not fork) | `s015changed` | `ReslicePreviewPanelPrompt.test.jsx` toast auto-dismiss; `reslice-prompt.spec.js` PROMPT-COPY-1 |
+
+## Acceptance conditions tick-off (acceptance.md UC-S015-4 / slice.md SM-S6-5)
+
+The acceptance.md UC-S015-4 section is a stub ("co-authored when pulled"). The committed specs are the acceptance record. Conditions derived from slice.md SM-S6-5, component-map.mmd UC-S015-4 notes, and EXP-033 task description.
+
+### Functional conditions
+
+| Condition | Test | Surface | Tick |
+|---|---|---|---|
+| AC-1/2: Generate renders the enriched /slice-next prompt with all five fields verbatim (item id+job before, Part A + Part B after, intent, "Proposed split:" block, /intake-style preview-first instruction) | `reslice-prompt.spec.js` AC-1/AC-2/AC-4 | Fixture :5199 | PASS |
+| No {{token}} residue in the rendered output | `reslice-prompt.spec.js` AC-1/AC-2/AC-4 + `promptBuilder.test.js` | Unit + Browser | PASS |
+| AC-3: backward-compat — both parts empty → byte-identical to the s014 3-arg path; other action types unchanged | `promptBuilder.test.js` UC-S015-4/AC-3; RESLICE-DISPATCH-1 in `reslice-preview.spec.js` | Unit + Browser | PASS |
+| AC-4: generation is client-side only — ZERO non-GET traffic on Generate | `reslice-prompt.spec.js` AC-1/AC-2/AC-4 (`writes.toEqual([])`) | Browser fixture :5199 | PASS |
+| PROMPT-FREEZE-1: SSE context refresh updates Before column only; displayed prompt byte-identical until explicit re-Generate | `ReslicePreviewPanelPrompt.test.jsx` PROMPT-FREEZE-1 (SSE state machine test) | Unit (jsdom) | PASS |
+| PROMPT-COPY-1: copy puts EXACT displayed bytes on clipboard (byte-equal); polite toast confirms (role=status, aria-live=polite) | `reslice-prompt.spec.js` PROMPT-COPY-1; `ReslicePreviewPanelPrompt.test.jsx` PROMPT-COPY-1 | Unit + Browser | PASS |
+| Toast auto-dismisses after --dur-toast; never takes focus | `ReslicePreviewPanelPrompt.test.jsx` auto-dismiss test (fake timers) | Unit | PASS |
+| EXP-033 real-data: REQ-OBSERVATORY item — enriched prompt contains real id+job, BOTH proposed parts, intent verbatim, "Proposed split:", no {{residue}}; copy byte-equal | `reslice-prompt-real-data.spec.js` LIVE (REUSE_SERVER=1) | Live :5173 | PASS |
+
+### Presentation / geometry conditions
+
+| Condition | Test | Tick |
+|---|---|---|
+| PromptOutput: mono font, 40vh max-height, user-select:text, white-space:pre-wrap, tabindex=0 (keyboard-reachable) | `reslice-prompt.spec.js` — PromptOutput presentation test | PASS |
+| GEO no-reflow on prompt render: WIP panel bbox + row bboxes + document scroll size byte-identical before vs after Generate; prompt renders inside the panel (internal growth only) | `reslice-prompt.spec.js` GEO no-reflow test | PASS |
+| tab order: textareas (Part A/B/intent) → Generate → Cancel → prompt → copy-btn → × (prompt and copy trail the action buttons) | `ReslicePreviewPanelPrompt.test.jsx` keyboard-order test | PASS |
+
+### Regression guards (no prior UC regressed)
+
+| Condition | Test | Tick |
+|---|---|---|
+| reslice-preview.spec.js (UC-S015-3 full suite) — 17/17 incl. pin-flip: F-S3-3/RESLICE-PREVIEW-1 now asserts `prompt-output` VISIBLE after Generate (not pinned absent) | `reslice-preview.spec.js` 17/17 PASS | PASS |
+| UC-S015-1/-2 regression guards not re-run separately (covered implicitly by reslice-preview.spec.js test 2 which opens SteerPanel for three non-reslice actions; RESLICE-DISPATCH-1 remains clean) | Regression by `reslice-preview.spec.js` 17/17 PASS | PASS |
+
+### EXP-033 real-data cross-check (live :5173)
+
+Live server state at run time (2026-06-12): 10 open WIP items including `UC-S015-4` (validate stage). `REQ-OBSERVATORY` is present in items.csv and serves as the real-item anchor for the prompt probe.
+
+| Check | Ground truth | Observed | Match |
+|---|---|---|---|
+| Identity: `/api/active` = "observatory" before any browser action | Production server running observatory | Confirmed via `curl http://localhost:5173/api/active` → `{"active":"observatory"}` | YES |
+| Concurrent activity note: HEAD=990a307, target sha=22ce55d | 990a307 is docs-only (DEFECT-015/014); no app code change | Commit stat confirms `.claude/agents/`, `process/dora/`, `work/observatory/defects/` only — zero src/app changes | YES |
+| LIVE enriched prompt: REQ-OBSERVATORY id+job in output | Real item in items.csv: "Observe and steer the delivery-agent pipeline from a single local read-only surface" | `reslice-prompt-real-data.spec.js` PASS: output matches `${ITEM_ID} — ${ITEM_JOB}` | YES |
+| LIVE: "Proposed split:" block present | Expected in RESLICE_SPLIT_TEMPLATE | Confirmed: `out.toContain('Proposed split:')` PASS | YES |
+| LIVE: Part A / Part B verbatim in output | Test fills "live probe Part A: observe the pipeline" + "live probe Part B: steer the pipeline" | `out.toContain('Part A: live probe Part A…')` PASS | YES |
+| LIVE: intent verbatim | "live probe: confirm the enriched split prompt is generated from real item context" | `out.toContain(INTENT)` PASS | YES |
+| LIVE: "Project: observatory" in output (sourceRef-derived) | context.sourceRef = "work/observatory/items/items.csv#id=REQ-OBSERVATORY" | `out.toContain('Project: observatory')` PASS | YES |
+| LIVE: no {{token}} residue | RESLICE_SPLIT_TEMPLATE fully resolved | `out.not.toMatch(/\{\{[^}]*\}\}/)` PASS | YES |
+| LIVE: copy byte-equal | Clipboard read-back === displayed bytes | `expect(copied).toBe(text)` PASS | YES |
+| LIVE: zero non-GET traffic on Generate + Copy | Client-side generation; clipboard is the only write surface | `writes.toEqual([])` PASS | YES |
+
+---
+
+## Uncovered changed nodes
+
+None. All five changed nodes (`PromptBuilder`, `SteerPromptTemplates`, `ReslicePreviewPanel`, `CopyPromptButton→ReslicePreviewPanel` edge, `CopyToast→ReslicePreviewPanel` edge) have committed covering specs. The `CopyPromptButton` and `CopyToast` nodes are not newly added — they are reused from s014; only the new *edges* to `ReslicePreviewPanel` are s015's change, and those are covered by the copy/toast tests.
+
+---
+
+## Validation runs (UC-S015-4)
+
+| Suite | Port | Data | Conditions covered | Result |
+|---|---|---|---|---|
+| `reslice-prompt.spec.js` (fixture-backed) | :5199 ephemeral (CI=1, --workers=1) | Fixture ledger (UC-D1-2) | AC-1/2/4, PROMPT-COPY-1, PromptOutput presentation, GEO no-reflow | 4/4 PASS |
+| `reslice-preview.spec.js` (regression guard) | :5199 ephemeral (CI=1, --workers=1) | Fixture ledger | UC-S015-3 full suite incl. pin-flip (F-S3-3/RESLICE-PREVIEW-1) | 17/17 PASS |
+| `reslice-prompt-real-data.spec.js` (EXP-033 real-data) | :5173 live (REUSE_SERVER=1) | Real items.csv (REQ-OBSERVATORY) + ledger.csv | EXP-033: real item enriched prompt + copy byte-equal + zero writes | 1/1 PASS |
+| Vitest unit suite (`test:ci`) | jsdom | All unit tests | 869/869 incl. promptBuilder.test.js (7 UC-S015-4 tests), ReslicePreviewPanelPrompt.test.jsx (8 tests: AC-1/2/4/PROMPT-COPY-1/PROMPT-FREEZE-1/tab-order) | 869/869 PASS |

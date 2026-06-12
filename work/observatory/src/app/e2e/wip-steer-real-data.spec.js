@@ -90,9 +90,12 @@ test('EXP-033 — real in-flight items render with steer triggers; trigger names
     expect(name).toMatch(/^Steer /);
     expect(name).not.toMatch(/row:\d+/i);
     expect(name).not.toMatch(/^Steer \d+$/);
-    // data-steer-item-id is a real item id pattern (contains letters)
+    // data-steer-item-id is a real item id pattern (contains letters — mixed
+    // case: UC-S015-1 style OR lowercase-slug s014-steer-prompt-handoff style;
+    // never a bare positional token like row:N or a digit-only id)
     const steerItemId = await btn.getAttribute('data-steer-item-id');
-    expect(steerItemId).toMatch(/[A-Z]/);
+    expect(steerItemId).toMatch(/[a-zA-Z]/);
+    expect(steerItemId).not.toMatch(/^row:\d+$/);
     // S15-2-FIG-1: trigger name contains the item id
     expect(name).toContain(steerItemId);
   }

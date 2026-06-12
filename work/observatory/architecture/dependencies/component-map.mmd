@@ -257,6 +257,28 @@ graph LR
   DefectsPanel --> DefectsViewScreen
   DefectRow --> DefectsPanel
 
+  %% s013 / UC-S013-3: defect drill-down + MTTR card. DefectDrillContainer is
+  %% the THIRD consumer of the DEFECT-006 floating-drawer IDIOM (after
+  %% DetailPane + SteerPanel) — position:fixed, body-portalled, drawer tokens,
+  %% NON-modal; DetailPane.jsx itself NOT edited (item-coupled, read-only reuse
+  %% slot shared with UC-S005-3). The drill is a PURE PROJECTION of the raw
+  %% record the list hook already holds (record rides the DefectVM — no extra
+  %% fetch, no server change). DefectDetail renders the seven md-bearing fields
+  %% through the SHARED lib/markdown.js transform (mdToHtml FACTORED OUT of
+  %% ArtifactView this commit — one markdown path in the codebase). MttrCard
+  %% owns the duration humanisation (reuses formatMttr from useDefects);
+  %% open state = "Not yet resolved" + elapsed figure NEVER labelled "MTTR".
+  %% NOTE for tester: row trigger data-testid=defect-row-trigger (role=button,
+  %% Enter+Space); data-defect-id continuity row → drawer; Esc/× returns focus
+  %% to the originating row; GEO-S013-3-1 pure-overlay invariant.
+  DefectDrillContainer["DefectDrillContainer (s013 / UC-S013-3: defect drill drawer shell — DEFECT-006 idiom, non-modal, heading focus + Esc-return)"]
+  DefectDetail["DefectDetail (s013 / UC-S013-3: labelled record body — four fields/classification/root cause/resolution + fix-sha code refs; md→HTML via shared lib/markdown.js)"]
+  MttrCard["MttrCard (s013 / UC-S013-3: reported→recovered timeline + MTTR figure; open = 'Not yet resolved' + elapsed-open, never labelled MTTR)"]
+  DefectDetail --> DefectDrillContainer
+  MttrCard --> DefectDrillContainer
+  DefectRow -->|"activation (click/Enter/Space) opens the drill"| DefectDrillContainer
+  DefectDrillContainer --> DefectsPanel
+
   classDef delivered fill:#d5f5e3,stroke:#1e8449,color:#000;
   %% CHK-3 (s003) DROPPED — scope absorbed into CHK-2 restated done-condition (s004 delivered).
   %% s004 DELIVERED 2026-06-10T11:00:00Z — CHK-2 done-condition MET.
@@ -298,7 +320,10 @@ graph LR
   %% ViewSwitch --> DefectsViewScreen edge above is s013's). Tester UI test-plan
   %% input; cleared at s013 delivery after the tester consumes.
   classDef s013changed fill:#fff3bf,stroke:#b7791f,color:#000;
-  class DefectsViewScreen,DefectsPanel,DefectRow s013changed;
+  %% UC-S013-3 THIS commit — DefectDrillContainer/DefectDetail/MttrCard added;
+  %% DefectRow activation edge wired (the reserved drill slot). Tester UI
+  %% test-plan input; cleared at s013 delivery after the tester consumes.
+  class DefectsViewScreen,DefectsPanel,DefectRow,DefectDrillContainer,DefectDetail,MttrCard s013changed;
   %% s015 / UC-S015-3 THIS commit — ReslicePreviewPanel/BeforeColumn/AfterColumn/
   %% UseReslicePreview added; the ObservatoryView re-slice dispatch branch
   %% RE-POINTED to ReslicePreviewPanel (SteerMenu -- re-slice --> ReslicePreviewPanel;

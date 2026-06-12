@@ -146,6 +146,13 @@ graph TD
     S15UC2 --> S15UC3
     S15UC3 --> S15UC4
 
+    %% Cross-slice scheduling edge (hidden edge discovered 2026-06-11, §F7):
+    %% S13UC2 and S15UC2 both edit ObservatoryView.jsx in the same wave —
+    %% S13UC2 adds the defects tabpanel; S15UC2 threads onSteer into WipRow and
+    %% ObservatoryView. Concurrent edits collide at the tablist/tabpanel wiring block.
+    %% Engineer serialised by commit order (ae7aa28 first). Formalised here.
+    S13UC2 -->|"ObservatoryView.jsx scheduling (tabpanel wiring seam)"| S15UC2
+
     %% Cross-slice: s015 builds on s014 steer engine + existing data endpoints
     S14UC1 -->|"SteerMenu READ-ONLY reuse"| S15UC2
     S14UC2 -->|"useSteerContext — item context load"| S15UC3
@@ -180,7 +187,10 @@ graph TD
     class S2UC1,S2UC2,S2UC3,S2UC4,S2UC5,S2UC6 delivered
     class S4UC1,S4UC2,S4UC3,S4UC4,S4UC5,S4UC6 delivered
     class S5UC1,S5UC2,S5UC3,S5UC4,S5UC5,S5UC6 delivered
-    class S13UC1,S13UC2,S13UC3,S13UC4 stable
-    class S14UC1,S14UC2,S14UC3,S14UC4 stable
-    class S15UC1,S15UC2,S15UC3,S15UC4 stable
+    class S13UC1 delivered
+    class S13UC2 changed
+    class S13UC3,S13UC4 stable
+    class S14UC1,S14UC2,S14UC3,S14UC4 delivered
+    class S15UC1,S15UC2,S15UC3 delivered
+    class S15UC4 stable
     class S18UC1,S18UC2,S18UC3,S18UC4 changed

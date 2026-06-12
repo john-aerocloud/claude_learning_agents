@@ -127,8 +127,94 @@ prompt (UC-S014-3).
 
 ---
 
-## UC-S014-3 / -4
-Acceptance conditions co-authored when each UC is pulled (product functional ACs
-already in use-cases.md; ui-designer UI/figure conditions added per STRUCTURE
-pass — UC-S014-3 prompt-output presentation; UC-S014-4 copy-toast + SSE refresh,
-designed then).
+## UC-S014-3
+Acceptance conditions co-authored at the UC-S014-3 STRUCTURE pass (delivered,
+e816d30 — prompt-output presentation pinned; copy button + `copy-toast` pinned
+ABSENT, flipped by UC-S014-4 below).
+
+---
+
+## UC-S014-4 — Copy to clipboard (toast confirm) + SSE context refresh
+
+### Functional (from use-cases.md AC-1..AC-4)
+- F-1: clicking "Copy prompt" when a prompt is displayed places the EXACT prompt
+  string on the clipboard (verified via `navigator.clipboard.readText()`) (AC-1).
+- F-2: the toast (`data-testid="copy-toast"`) is visible within 2 s of the click
+  and dismisses/updates appropriately (AC-2).
+- F-3: no file under `work/`/`process/` is modified during the steer interaction;
+  the server write-guard returns 405 on POST/PUT/PATCH/DELETE (AC-3).
+- F-4: updating items.csv while the panel is open refreshes the CONTEXT block to
+  the new state within the SSE window; the prompt output does NOT auto-change
+  (operator must click Generate again) (AC-4).
+
+### Accessibility (WCAG 2.2 AA) — ui-designer
+- **S14-4-A11Y-1** keyboard copy: Copy button reachable by keyboard (tab order
+  after the prompt `<pre>`); activates on Enter AND Space, placing the prompt on
+  the clipboard. (2.1.1)
+- **S14-4-A11Y-2** success announced politely: copy toast is `role="status"`
+  `aria-live="polite"` (announce-once, never `assertive`); "Copied to clipboard"
+  text appears on copy. (4.1.3)
+- **S14-4-A11Y-3** non-colour-redundant success + state: copy success = toast TEXT
+  + button "Copied ✓" label flip (not colour alone); ContextRefreshCue `updated`
+  state = text + glyph + band (not colour alone). (1.4.1)
+- **S14-4-A11Y-4** visible focus: Copy button `:focus-visible` ring (`--focus-ring`,
+  ≥3:1) — non-empty computed outline/box-shadow on focus. (1.4.11)
+- **S14-4-A11Y-5** target size: Copy button hit box ≥ 24×24 CSS px (`--target-min`).
+  (2.5.8)
+- **S14-4-A11Y-6** reduced motion: toast fade `--dur-fast` under no-preference, 0ms
+  (instant) under `prefers-reduced-motion: reduce`; no flashing >3×/s — toast
+  present same frame as copy under emulated reduce. (2.3.3)
+- **S14-4-A11Y-7** toast never traps/steals focus: focus stays on the Copy button
+  when the toast appears (`document.activeElement` unchanged). (2.4.3)
+- **S14-4-A11Y-8** context refresh announced once: ContextRefreshCue is
+  `role="status"` `aria-live="polite"`; a single (debounced) refresh produces one
+  announcement, not per-SSE-frame spam. (4.1.3 / EXP-036)
+
+### Geometry / no-reflow invariant (EXP-016) — ui-designer
+- **GEO-S014-4-1** toast appearance reflows NOTHING: `steer-panel`, `prompt-output`,
+  `value-stream-map`, `work-item-tree` region bboxes + `documentElement.scrollHeight`
+  byte-identical toast-shown vs toast-hidden (toast is `position:fixed`/portalled,
+  zero flow height). (The explicit "GEO no-reflow on toast appearance" condition.)
+- **GEO-S014-4-2** visible toast bbox within the viewport (no negative left/top,
+  right ≤ innerWidth, bottom ≤ innerHeight) — never causes scroll.
+- **GEO-S014-4-3** Copy button sits in `prompt-output-slot` adjacent to the `<pre>`;
+  the `<pre>` retains its `max-height: 40vh` scroll cap (computed maxHeight ≤ 40vh)
+  with the button present.
+- **GEO-S014-4-4** an SSE refresh re-renders `<dd>` text in place; the context block
+  keeps its single-column STACK (each `steer-ctx-*` `<dd>` top increases, shared
+  left — GEO-S014-2-4 re-asserted post-refresh).
+
+### Figure / reference legibility — ui-designer
+- **S14-4-FIG-1** toast text is a human confirmation ("Copied to clipboard"), never
+  a status code / byte count / machine token. (§3)
+- **S14-4-FIG-2** ContextRefreshCue text is a human sentence ("Item context: live" /
+  "Context updated — regenerate to refresh the prompt"), never a raw timestamp,
+  frame id, or SSE event name. (§3 / EXP-036)
+- **S14-4-FIG-3** copied bytes === displayed `<pre>` textContent (== PROMPT-COPY-1):
+  the operator copies exactly the human-meaningful prompt reviewed. (§3)
+
+### Behavioural / trust conditions (co-owned with engineer) — ui-designer pins
+- **PROMPT-COPY-1** (== AC-1): `clipboard.readText()` after Copy === `prompt-output`
+  `<pre>` `textContent` === the `prompt` prop / `buildPrompt(...)` return. Assert all
+  three equal (jsdom/browser).
+- **PROMPT-FREEZE-1** (== AC-4): with a prompt displayed, a simulated SSE
+  context-change frame updates the context block but leaves the `prompt-output`
+  text byte-identical; only an explicit Generate press changes it (assert prompt
+  stable across refresh, then changes after Generate). EXP-036 stale-trust guard.
+- **S14-4-SSE-1** (== AC-4 first half): a source-item change while the panel is open
+  causes `useSteerContext` to re-fetch (debounced `subscribeEvents`, mirroring
+  `useWipItems`) and the context block to show the new value within the SSE window.
+- **S14-4-SSE-2** fail-soft: in jsdom (no `EventSource`) the hook falls back to
+  static data and does not crash (the `useWipItems` `unsubscribe = null` path).
+- **NO-WRITE-1** (== AC-3): the clipboard is the ONLY write surface; no `work/`/
+  `process/` file modified; server write-guard returns 405 on writes.
+
+**Pin-flip note:** UC-S014-3 pins the copy button + `copy-toast` ABSENT. UC-S014-4
+REPLACES those absent-assertions with the present-assertions above (not a silent
+delete) — the engineer updates the UC-S014-3 absent specs in the same commit,
+citing the ui-design Pin-flip ledger.
+
+**Done condition (UC-S014-4):** F-1..F-4 + all S14-4-A11Y-*, GEO-S014-4-*,
+S14-4-FIG-*, PROMPT-COPY-1, PROMPT-FREEZE-1, S14-4-SSE-1/2, NO-WRITE-1 pass
+against the live running app with real data (EXP-033). This is the slice's LAST
+UC — its done condition closes CHK-5.

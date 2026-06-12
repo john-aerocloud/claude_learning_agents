@@ -77,7 +77,8 @@ Two error classes are tracked here; the goal is to drive both toward zero.
 ## Hidden edges discovered (false independence — a collision happened)
 | date | items | shared seam | edge added | collision ledger ref |
 |------|-------|-------------|-----------|----------------------|
-_(none yet — scaffold edge caught pre-build at scheduling time, classified as §39 scheduling edge, not a post-collision hidden edge)_
+| 2026-06-11 | UC-S013-2, UC-S015-2 | `ObservatoryView.jsx` (third tab wiring vs SteerMenu threading) | UC-S013-2 → UC-S015-2 (scheduling edge; ObservatoryView is the composition root that gains both the new defects tabpanel AND the onSteer threading from WipRow; concurrent edits would collide at the tablist/tabpanel wiring block) | UC-S015-2 build note: "serialized behind ae7aa28 on shared ObservatoryView (collision handled by commit order, no choreography)" — post-integration discovery, classified §39 scheduling edge but was undeclared in use-case-deps.mmd; edge to add S13UC2 → S15UC2 or joint serialisation via ObservatoryView ownership |
+| 2026-06-11 | UC-S014-3, UC-S015-2 | `component-map.mmd` (both UCs annotated delta in same delta wave; no logic collision but adjacency conflict) | commit-granularity only — UC-S014-3 build note: "ObservatoryView untouched (collision avoided); component-map delta reached main via a273b02 adjacency" — the component-map.mmd file is a metadata file, not a runtime seam; the engineer avoided the actual ObservatoryView touch; classified commit-granularity / ordering concern, NOT a product-logic hidden edge; no use-case-deps.mmd change required |
 
 ## False-edge null-hypothesis trials (false dependency — needless serialisation)
 | edge | trial start | opportunities run | result (reinstated/retired) | evidence |

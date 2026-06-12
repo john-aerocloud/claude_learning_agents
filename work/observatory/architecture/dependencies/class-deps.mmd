@@ -193,7 +193,10 @@ graph TD
     SPA_ARTVIEW -->|@import| SPA_TOKENS
     SPA_HISTORY -->|@import| SPA_TOKENS
     SPA_MMDADAPTER -.->|dynamic import| MERMAID_SDK
-    SPA_ARTVIEW -.->|marked text→HTML| MARKED_SDK
+    %% UC-S013-3 REDIRECT: ArtifactView's inline mdToHtml/stripFrontmatter
+    %% FACTORED OUT to the shared SPA_MARKDOWNLIB (one markdown path in the
+    %% codebase) — ArtifactView no longer imports marked directly.
+    SPA_ARTVIEW -->|"mdToHtml (was inline marked — redirected UC-S013-3)"| SPA_MARKDOWNLIB
     SPA_CLIENT -.->|HTTP GET /api/projects/:id/slices + /slices/:slug/:artifact (getSlices/getSliceArtifact)| R_SLICE
     SPA_CLIENT -.->|HTTP GET /api/projects/:id/ledger?item_id=id (getItemLedger; UC-S005-1 endpoint)| R_LEDGER
 
@@ -266,6 +269,24 @@ graph TD
     SPA_DEFECTSHOOK -->|getActive/getDefects| SPA_CLIENT
     SPA_CLIENT -.->|"HTTP GET /api/projects/:id/defects (getDefects — NEW adapter fn, UC-S013-2)"| R_DEFECTS
     SPA_DEFECTSPANEL -->|@import| SPA_TOKENS
+
+    %% UC-S013-3 — defect drill drawer + shared markdown lib (THIS commit).
+    %% SPA_DEFECTDRILL = DefectDrillContainer.jsx + DefectDetail.jsx +
+    %% MttrCard.jsx (one drill seam: drawer shell / record body / MTTR leaf).
+    %% Third consumer of the DEFECT-006 drawer idiom (SPA_PANE untouched —
+    %% item-coupled read-only reuse slot). The drill is a PURE PROJECTION of
+    %% the raw record riding the DefectVM (useDefects gained `record: r` — no
+    %% extra fetch, no server change). MttrCard reuses formatMttr (the ONE
+    %% duration humaniser); open = "Not yet resolved" + elapsed, never "MTTR".
+    %% SPA_MARKDOWNLIB = lib/markdown.js — mdToHtml/stripFrontmatter factored
+    %% OUT of ArtifactView (non-behavioural extraction; both consume it now).
+    SPA_DEFECTDRILL["src/app/src/components/DefectDrillContainer.jsx + DefectDetail.jsx + MttrCard.jsx — defect drill (UC-S013-3)<br/>DEFECT-006 drawer idiom (fixed, body-portal, non-modal; heading focus + Esc-return to row)<br/>labelled record body (7 md fields via shared mdToHtml; fix shas as code refs; null→'—')<br/>MttrCard: resolved=unit-bearing MTTR; open='Not yet resolved'+elapsed (never labelled MTTR); ledger data-source"]:::s013changed
+    SPA_MARKDOWNLIB["src/app/src/lib/markdown.js — shared md→HTML transform (UC-S013-3 extraction from ArtifactView)<br/>mdToHtml (gfm, fail-soft '') + stripFrontmatter; the ONE markdown path"]:::s013changed
+    SPA_DEFECTSPANEL -->|"DefectsPanelContainer owns selection; renders drill (selected.record)"| SPA_DEFECTDRILL
+    SPA_DEFECTDRILL -->|"mdToHtml (DefectDetail)"| SPA_MARKDOWNLIB
+    SPA_DEFECTDRILL -->|"formatMttr (MttrCard duration humanisation)"| SPA_DEFECTSHOOK
+    SPA_DEFECTDRILL -->|@import defect-drill.css| SPA_TOKENS
+    SPA_MARKDOWNLIB -.->|marked text→HTML| MARKED_SDK
 
     MARKED_SDK["marked (npm) — client-side markdown→HTML"]:::stable
     MERMAID_SDK["mermaid (npm) — client-side diagram→SVG"]:::stable

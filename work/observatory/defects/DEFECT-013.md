@@ -1,7 +1,7 @@
 # DEFECT-013 — In-flight work is item-invisible: pulled items stay `planned` until the next sweep
 
 **Reported:** 2026-06-12 (human, live loop observation)
-**Status:** CONFIRMED → fix NOW
+**Status:** CLOSED (registry repair + def routing efa22c1; coherence fix 6c038f0; recovery 2026-06-12. Prod re-check: live stages coherent, and the warning caught a REAL recurrence — UC-S018-1 drift via the unrouted ui-designer def — 10 minutes after the manual repair; ui-designer.md routed in response)
 **Surface:** items registry / queue lane / WIP attribution
 **Lineage:** DEFECT-004 (three views disagree) + DEFECT-012 (handoff invisible); EXP-037/EXP-040 family
 

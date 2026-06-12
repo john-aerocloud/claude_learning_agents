@@ -2,9 +2,9 @@
 
 ## What does this do?
 
-Observatory is a local Vite dashboard that observes and steers a multi-project delivery pipeline. It shows the full delivery value-stream in real time — every stage (Intake → Decompose → Ready → Capabilities → Build-TDD → UI-Validate → Deploy → Validate → Done) with throughput, dwell time, in-flight WIP, and rework. Navigate the work-item tree to drill into any requirement, chunk, slice, or use case; see its ledger history and dependencies in context. Steer the pipeline from the dashboard (re-prioritise, request re-slice, raise defect, custom prompts) without hand-editing files — all writes go through Claude's preview-accept gate. Observe defect records with status, severity, and MTTR (time-to-repair) to assess quality. All data is read-only in the browser; live-refresh on file change via SSE.
+Observatory is a local Vite dashboard that observes and steers a multi-project delivery pipeline. It shows the full delivery value-stream in real time — every stage (Intake → Decompose → Ready → Capabilities → Build-TDD → UI-Validate → Deploy → Validate → Done) with throughput, dwell time, in-flight WIP, and rework. Navigate the work-item tree to drill into any requirement, chunk, slice, or use case; see its ledger history and dependencies in context. Steer the pipeline from the dashboard (re-prioritise, request re-slice, raise defect, custom prompts) without hand-editing files — all writes go through Claude's preview-accept gate. Browse in-flight WIP in a dedicated panel sorted by longest-waiting-first; preview before/after split proposals before handing them to Claude. Observe defect records with status, severity, and MTTR (time-to-repair) to assess quality. All data is read-only in the browser; live-refresh on file change via SSE.
 
-**Not yet in scope:** guided cost-of-delay intake (CHK-7, later), detailed WIP navigation panel for split/merge analysis (CHK-6, in progress), inline artifact editing.
+**Not yet in scope:** guided cost-of-delay intake (CHK-7, later), enriched re-slice prompt with context-filled before/after fields (UC-S015-4, in progress), inline artifact editing.
 
 ---
 
@@ -58,7 +58,7 @@ Click **"Defects"** to see all known defect records. Every row shows:
 - **Severity** — HIGH, MED-HIGH, MED, or LOW
 - **MTTR** — time from when the defect was first reported to when it was fixed (e.g. "13 min", "1 h 21 min"), or "open" if still unresolved
 
-CONFIRMED defects are grouped first (these are the ones that need attention). Click any defect row to open the full record in the detail panel: the four problem-statement fields (Expected, Actual, Intent, Importance), root cause, resolution (including the fix commit SHA), and a timeline showing when it was reported, when it was fixed, and how long it took.
+CONFIRMED defects are grouped first (these are the ones that need attention). A drill-down into the full record (problem-statement fields, root cause, resolution, MTTR timeline) is currently in build (UC-S013-3) and will appear here when it ships.
 
 ### Steer actions
 
@@ -66,12 +66,25 @@ On every WIP chip in the value-stream map and every node in the work-item tree, 
 
 1. **Raise defect** — compose a prompt to report a new defect
 2. **Re-prioritise** — request that this item move up or down the queue
-3. **Request re-slice / split** — request that this item be broken into smaller pieces or merged
+3. **Request re-slice / split** — request that this item be broken into smaller pieces
 4. **Custom steer** — write a free-text intent (use this for any other instruction)
 
-Select an action, type your intent note, and the steer panel shows a copy-ready prompt. Review it, click "Copy prompt", and paste it into your Claude session. The UI never writes to the repo — all writes happen through Claude's accept gate.
+Select an action, type your intent note, and the steer panel shows a copy-ready prompt containing your item id, its current job sentence, the action, and your intent verbatim. Review it, click "Copy prompt", and paste it into your Claude session. The UI never writes to the repo — all writes happen through Claude's accept gate.
 
-**Note:** The steer panel is under active development; the four action types are routed correctly, but the prompt generation and context enrichment are still building. Use `/defect`, `/slice-next`, and slash commands in Claude for now if you need full detail.
+**For "Request re-slice / split":** The panel opens a before/after preview showing the current item alongside two free-text fields for proposing Part A and Part B job sentences. When you've filled both parts, click "Looks right — generate prompt" to see a preview of the split proposal, then copy and paste to Claude.
+
+### In-flight WIP panel
+
+Click **"In-flight WIP"** (next to "Pipeline") to see all items currently in progress. The list is sorted by longest-waiting first — the items most likely to need action. Each row shows:
+
+- **Item ID** — the requirement, chunk, slice, or use case id
+- **Job** — the human-readable job sentence
+- **Current stage** — which pipeline stage the item is in
+- **Value & Cost** — the item's priority and effort estimate
+- **Time in stage** — how long the item has been in its current stage (e.g. "5 h 30 min")
+- **Stale badge** — if the item has been waiting more than 2 hours, it's flagged "stale — over 2h" as a visual warning
+
+Click the **⋯ Steer button** on any WIP row to propose action (re-slice, re-prioritise, raise defect, etc.) without navigating away to the tree or value-stream map. The WIP panel stays open behind the steer panel, and you can cancel and pick a different row.
 
 ### Live refresh
 
@@ -90,8 +103,8 @@ Hover over or click any metric to see the source row (coming in a follow-on pass
 
 ### Known limitations
 
-- **WIP staleness horizon:** WIP counts include only tasks with events in the last 2 hours. Very old orphan items (no recent progress) self-clear from the count after 2 hours of silence.
-- **Steer actions:** The four menu options are present and route correctly; full prompt context enrichment (e.g. auto-fill the four DEFECT fields for "Raise defect") is under development.
+- **WIP staleness horizon:** WIP counts (both on the map and in the WIP panel) include only tasks with events in the last 2 hours. Very old orphan items (no recent progress) self-clear from the count after 2 hours of silence. Items stale by this definition remain visible in the WIP panel and are flagged with a "stale" badge.
+- **Re-slice prompt enrichment:** The re-slice/split action currently generates a prompt with the before/after proposal fields; Claude must still structure the four /slice-next intake fields (job, scope, value, cost) from the operator's intent. Full auto-fill of those fields is landing in UC-S015-4 (follow-on).
 - **Single project only:** The dashboard observes the active project (set via `work/ACTIVE` file). Switching projects requires editing the file and reloading the dashboard.
 
 ---
@@ -109,8 +122,10 @@ Hover over or click any metric to see the source row (coming in a follow-on pass
 | Problem | Check |
 |---------|-------|
 | Dashboard shows 0 WIP / all stages empty | Verify `work/ACTIVE` contains your project name (e.g. `observatory`). Refresh the page. |
-| Steer button doesn't appear on a WIP chip or tree node | Ensure you're using a recent build (Ctrl+Shift+R to force-refresh the browser). If a node is a "+N more" collapsed chip, expand it first. |
+| Steer button doesn't appear on a WIP chip, tree node, or WIP panel row | Ensure you're using a recent build (Ctrl+Shift+R to force-refresh the browser). If a node is a "+N more" collapsed chip, expand it first. Check that the item is in `items.csv`. |
+| In-flight WIP panel is empty when there should be items in progress | Verify the ledger has `task_start` rows for items with no matching `task_end` row within the last 2 hours. Items older than 2 hours may be marked "stale" but are still included in the list. Refresh the page to reload ledger data. |
 | Defects list shows fewer than 10 records | Check `work/observatory/defects/` for all `DEFECT-*.md` files. Verify `process/dora/ledger.csv` has matching `failure` and `recovery` rows. |
+| Re-slice/split panel doesn't open when I select "Request re-slice / split" | Ensure s015 has been deployed (check the git log for `s015-wip-navigate-reslice-preview`). Force a browser cache clear (Ctrl+Shift+R) and reload. |
 | Live refresh is slow (>5 seconds) | The file-watch system is catching up. Check system disk I/O. If the issue persists, restart the dev server. |
 | Copy prompt to clipboard didn't work | Ensure your browser allows clipboard access (check security settings). If denied, you can still manually copy the prompt from the panel. |
 

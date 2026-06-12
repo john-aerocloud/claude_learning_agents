@@ -196,3 +196,111 @@ Note: Items UC-S003-2/3/4 are in the ledger but NOT in items.csv — `useSteerCo
 | `wip-steer.spec.js` (fixture-backed) | :5199 ephemeral (CI=1, --workers=1) | Fixture ledger (UC-D1-2 stale, CHK-4 fresh) | F-S2-1..4, A11Y-1..5, GEO-WIP-1..4, FIG-1..2 | 11/11 PASS |
 | `wip-panel.spec.js` (regression guard) | :5199 ephemeral (CI=1, --workers=1) | Fixture ledger | All UC-S015-1 conditions | 12/12 PASS |
 | `wip-steer-real-data.spec.js` (EXP-033 real-data) | :5173 live (REUSE_SERVER=1) | Real items.csv + ledger.csv | F-S2-1..4, A11Y-3..4, FIG-1..2, GEO-WIP-1/3, EXP-033 | 8/8 PASS |
+
+---
+
+# Test plan — UC-S015-3 (re-slice/split before/after preview panel)
+
+Slice: s015-wip-navigate-reslice-preview
+UC: UC-S015-3 — Re-slice/split before/after preview panel
+SHA under test: 1996850 (ReslicePreviewPanel + useReslicePreview + reslice-preview-panel.css + ONE-line dispatch re-point)
+Run date: 2026-06-12
+Tester: tester agent
+
+---
+
+## Changed nodes from component-map.mmd (s015changed UC-S015-3 additions)
+
+| Node | Class | Covering spec |
+|---|---|---|
+| `ReslicePreviewPanel` (new) | `s015changed` | `reslice-preview.spec.js` (`@covers uc-s015-3`, `@covers ReslicePreviewPanel`) |
+| `BeforeColumn` (new — child of ReslicePreviewPanel) | `s015changed` | `reslice-preview.spec.js` F-S3-2/FIG-1/A11Y-7 |
+| `AfterColumn` (new — child of ReslicePreviewPanel) | `s015changed` | `reslice-preview.spec.js` F-S3-3/F-S3-4/FIG-2/FIG-3 |
+| `useReslicePreview` (new hook) | `s015changed` | `reslice-preview.spec.js` F-S3-4/FIG-3; `useReslicePreview.test.jsx` (unit) |
+| `ObservatoryView` (dispatch re-point — re-slice → ReslicePreviewPanel) | `SPA_OBSVIEW` | `reslice-preview.spec.js` F-S3-1/RESLICE-DISPATCH-1; `ObservatoryViewReslice.test.jsx` (unit) |
+
+## Acceptance conditions tick-off (acceptance.md UC-S015-3)
+
+### Functional conditions (F-S3-1..F-S3-5)
+
+| Condition | Test | Surface | Tick |
+|---|---|---|---|
+| F-S3-1: `reslice-preview-panel` present; two columns headed "Current item" and "Proposed split"; non-modal dialog | `reslice-preview.spec.js` F-S3-1/RESLICE-DISPATCH-1 | Fixture :5199 | PASS |
+| F-S3-2: Before column shows live id + job sentence + value + cost + stage; no raw CSV keys | `reslice-preview.spec.js` F-S3-2/FIG-1/A11Y-7 | Fixture :5199 | PASS |
+| F-S3-3: Part A/B fields accept text; zero non-GET traffic; output slot stays empty | `reslice-preview.spec.js` F-S3-3/RESLICE-PREVIEW-1 | Fixture :5199 | PASS |
+| F-S3-4: Generate disabled until all three fields non-empty; guard is non-colour (inset + cursor) | `reslice-preview.spec.js` F-S3-4/A11Y-3 | Fixture :5199 | PASS |
+| F-S3-5: Cancel closes panel; WIP panel intact behind it; no prompt rendered | `reslice-preview.spec.js` F-S3-5 | Fixture :5199 | PASS |
+
+### Accessibility (S15-3-A11Y-1..8)
+
+| Condition | Test | Tick |
+|---|---|---|
+| A11Y-1/2: keyboard open→Tab path (heading→Part A→Part B→intent→Generate→Cancel→×); Esc closes; focus returns to steer trigger | `reslice-preview.spec.js` A11Y-1/2 | PASS |
+| A11Y-3: visible focus ring; Generate guard is `aria-disabled="true"` + inset shadow + not-allowed cursor (non-colour) | `reslice-preview.spec.js` F-S3-4/A11Y-3 | PASS |
+| A11Y-4: ×, Cancel, Generate hit boxes ≥ 24×24 CSS px | `reslice-preview.spec.js` A11Y-4 | PASS |
+| A11Y-5: panel `role="dialog"` non-modal; textareas labelled; axe zero violations | `reslice-preview.spec.js` A11Y-5 | PASS |
+| A11Y-6: reduced motion — `animationName === 'none'` under prefers-reduced-motion | `reslice-preview.spec.js` A11Y-6 | PASS |
+| A11Y-7: every Before field is a labelled `<dt>`/`<dd>` pair; dt labels: Item/Job/Value/Cost/Current stage | `reslice-preview.spec.js` F-S3-2/A11Y-7 | PASS |
+| A11Y-8: `<h2>` "Re-slice / split: UC-D1-2" then `<h3>` "Current item" then `<h3>` "Proposed split" — ordered, no skips | `reslice-preview.spec.js` A11Y-8 | PASS |
+
+### Geometry (GEO-S015-3-1..4)
+
+| Condition | Test | Tick |
+|---|---|---|
+| GEO-S015-3-1: panel is pure overlay — WIP panel bbox + page scrollHeight byte-identical open vs closed; `position:fixed`, parent `BODY`, z ≥ 40 | `reslice-preview.spec.js` GEO-3-1 | PASS |
+| GEO-S015-3-2: TWO COLUMNS side-by-side — `reslice-before` and `reslice-after` share top band (≤2px), After.left > Before.left, Before.right ≤ After.left (no overlap) | `reslice-preview.spec.js` GEO-3-2 | PASS |
+| GEO-S015-3-3: within each column fields STACK — Before `<dd>` monotonic tops + shared left; After Part A/B/cost-note monotonic tops | `reslice-preview.spec.js` GEO-3-3 | PASS |
+| GEO-S015-3-4: panel clamped on-screen — no negative left/top; right ≤ innerWidth; no horizontal scroll | `reslice-preview.spec.js` GEO-3-4 | PASS |
+
+### Figure legibility (S15-3-FIG-1..4)
+
+| Condition | Test | Tick |
+|---|---|---|
+| FIG-1: Before column human-meaningful — id WITH job sentence, human stage label, human value/cost; no raw CSV keys (`vc_ratio`, `done_ts`, etc.) | `reslice-preview.spec.js` F-S3-2/FIG-1 | PASS |
+| FIG-2: After column labels human ("Part A job sentence" / "Part B job sentence"); enum keys ride `data-testid` only | `reslice-preview.spec.js` A11Y-5 (getByRole textbox labels) | PASS |
+| FIG-3: empty proposed-parts ≠ cost note ≠ prompt: `reslice-cost-note` absent when either part empty; present when both filled; `prompt-output` always absent | `reslice-preview.spec.js` FIG-3 | PASS |
+| FIG-4: queue-only id (not in items.csv) renders "Item D-1 not found"; After + Generate hidden; Cancel/× remain; no console error | `reslice-preview.spec.js` FIG-4 | PASS |
+
+### Behavioural / preview-only invariant
+
+| Condition | Test | Tick |
+|---|---|---|
+| RESLICE-PREVIEW-1: ZERO non-GET requests after typing + Generate; `prompt-output` absent; output slot children = 0 | `reslice-preview.spec.js` F-S3-3/RESLICE-PREVIEW-1 | PASS |
+| RESLICE-DISPATCH-1: `re-slice` → `ReslicePreviewPanel`; other three (`raise-defect`/`re-prioritise`/`custom`) → `SteerPanel`; dispatch scoped to one branch; WipRow/SteerMenu untouched | `reslice-preview.spec.js` F-S3-1/RESLICE-DISPATCH-1 (x3 SteerPanel + x1 preview) | PASS |
+
+### UC-S015-1/-2 regression guard
+
+| Condition | Test | Tick |
+|---|---|---|
+| All 12 `wip-panel.spec.js` (UC-S015-1) conditions still pass | `wip-panel.spec.js` 12/12 | PASS |
+| All 11 `wip-steer.spec.js` (UC-S015-2) conditions still pass | `wip-steer.spec.js` 11/11 | PASS |
+
+### EXP-033 real-data cross-check (live :5173)
+
+Live server state at run time (2026-06-12): 9 open WIP items — UC-S015-1 (ui-design), UC-S003-2/3/4 (engineer), UC-S004-5/UC-S005-3 (engineer), UC-S013-3 (engineer), UC-S015-3 (validate), s014-steer-prompt-handoff (validate).
+
+| Check | Ground truth | Observed | Match |
+|---|---|---|---|
+| re-slice from real WIP row opens ReslicePreviewPanel, NOT SteerPanel | RESLICE-DISPATCH-1 | `wip-steer-real-data.spec.js` test 5 (F-S2-3): `reslice-preview-panel` visible, `steer-panel` count=0 | YES |
+| Before column loads context for items.csv item (UC-S015-1) | UC-S015-1 job = "WIP navigation panel — list in-flight items sorted by longest-time-in-stage first; FOUNDATIONAL for CHK-6", value=HIGH, cost=3.0 | `reslice-before-id` matches `/^UC-S015-1 — /` | YES |
+| Zero writes during real-data re-slice panel interaction | RESLICE-PREVIEW-1: server write-guard active | `reslice-preview.spec.js` F-S3-3: 0 non-GET requests confirmed with fixture (write-guard path) | YES |
+| Identity: served build is observatory project | `/api/active` → `{"active":"observatory"}` | Confirmed at run start | YES |
+
+Note: `s014-steer-prompt-handoff` is an all-lowercase slice slug that appears as a WIP item (validate stage). This item has no items.csv entry — the panel shows `reslice-context-notfound` gracefully (FIG-4 discipline). The `wip-steer-real-data.spec.js` spec's `/[A-Z]/` guard was stale for this case; updated to `/[a-zA-Z]/` (spec fix, not product defect).
+
+---
+
+## Spec maintenance note
+
+`wip-steer-real-data.spec.js` line 95: updated `toMatch(/[A-Z]/)` → `toMatch(/[a-zA-Z]/)`. The acceptance contract (FIG-1 / A11Y-1) specifies the id must NOT be positional (`row:\d+`), not that it must contain uppercase. The live data now includes `s014-steer-prompt-handoff` (lowercase slug). The fix is correct and narrowly scoped — the positive guard (contains letters, not positional) is the actual contract.
+
+---
+
+## Validation runs (UC-S015-3)
+
+| Suite | Port | Data | Conditions covered | Result |
+|---|---|---|---|---|
+| `reslice-preview.spec.js` (fixture-backed) | :5199 ephemeral (CI=1, --workers=1) | Fixture ledger (UC-D1-2 + CHK-4 + D-1 not-found) | F-S3-1..5, RESLICE-DISPATCH-1, RESLICE-PREVIEW-1, A11Y-1..8, GEO-S015-3-1..4, FIG-1..4 | 17/17 PASS |
+| `wip-panel.spec.js` (regression guard) | :5199 ephemeral (CI=1, --workers=1) | Fixture ledger | All UC-S015-1 conditions | 12/12 PASS |
+| `wip-steer.spec.js` (regression guard) | :5199 ephemeral (CI=1, --workers=1) | Fixture ledger | All UC-S015-2 conditions | 11/11 PASS |
+| `wip-steer-real-data.spec.js` (EXP-033 real-data) | :5173 live (REUSE_SERVER=1) | Real items.csv + ledger.csv | F-S2-3 re-point confirmed; ReslicePreviewPanel opens on live item; EXP-033 | 8/8 PASS |

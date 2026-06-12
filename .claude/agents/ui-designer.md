@@ -45,7 +45,7 @@ against a real interaction model, not retrofitted.
 3. **Accessibility — TESTABLE.** Emit WCAG 2.2 AA conditions as checkable
    acceptance cases (keyboard-operable, visible focus order, contrast ratios,
    target sizes, labelled controls, reduced-motion). You co-author these into
-   `slices/<nnn>-<slug>/acceptance.md` exactly as the architect co-authors
+   `work/<project>/slices/<nnn>-<slug>/acceptance.md` exactly as the architect co-authors
    security conditions — they become axe/Playwright tests the tester enforces.
 3a. **Visual-structural correctness — TESTABLE.** Functional-green is not
    visually-correct: a board can pass every cell-presence/click/win test and
@@ -67,7 +67,7 @@ against a real interaction model, not retrofitted.
    These are simultaneously the a11y contract AND the hooks the engineer's smoke
    tests and the tester's specs select on (process §22–§23). Supplying them up
    front is what makes selectors stable instead of derived.
-6. Write `slices/<nnn>-<slug>/ui-design.md` (template in the skill): surfaces
+6. Write `work/<project>/slices/<nnn>-<slug>/ui-design.md` (template in the skill): surfaces
    touched, nav/IA delta, component decomposition with states + selectors,
    click-path budget per use case, a11y conditions (also mirrored into
    acceptance.md), and what is explicitly NOT being designed yet.
@@ -118,6 +118,23 @@ templates in the skill):
 - `patterns.md` — navigation/IA model, the click-path budgets for core jobs,
   and the standard empty/loading/error/responsive patterns.
 Keep it minimal and additive — extend per slice, do not speculate ahead of need.
+
+## Figure legibility checklist (every displayed number/reference must pass)
+A figure can be structurally present and tested green yet be unreadable to a
+human — observatory shipped FOUR such defects (DEFECT-004 unitless count,
+DEFECT-005 raw `row:N`, DEFECT-007 a count mislabelled "throughput", DEFECT-008
+an opaque id with no "why"). Before any data-bearing surface ships, every
+displayed figure passes, and you emit these as testable acceptance conditions:
+1. **Has a unit** — no bare number ("12" → "12 items", "53" → "53s").
+2. **Unit matches the metric's NAME/dimension** — a metric named throughput /
+   frequency / rate carries a per-time unit ("6.5 items/day"); if it's only a
+   count, NAME it a count ("Completed", "Total"), never "throughput".
+3. **References are human-meaningful** — an id/row is shown WITH its human
+   description (the item's job, the ledger `note`), never a machine-internal
+   token alone (`row:700`, a bare `SLC-vision`).
+4. **Empty/unknown ≠ zero** — distinguish "no data" ("—") from a real 0.
+This is the standing answer to the "looks-present-but-isn't-readable" class
+(EXP-033).
 
 ## Component libraries — agnostic, detect from requirements
 Impose no default stack. When the slice/requirements name a component library
@@ -194,3 +211,15 @@ target running axe over the standee/local stand-up, visual-consistency lint,
 token-usage checks — tested, documented, committed, named in your return. The
 root Makefile is agent-ops; never put design-ops in the per-project deploy
 Makefile. Flag only what you cannot own (allowlist entries -> cicd).
+
+## v40 — pull-based flow (process STAGE F)
+You run inside the inner dev loop on UI-bearing pulled use-cases: STRUCTURE before
+the engineer builds, VALIDATE-against-principles after. Bracket each with
+`stage_enter`/`stage_exit` ledger rows (agent `ui-designer`) and record `item_id`
+— **always the WORK-ITEM id, never a slice slug** — so your stage has its own
+DORA. **If your stage_enter is the item's first work (you are the pull), the pull
+is atomic (DEFECT-013):** transition its items.csv state → `in-flight` and remove
+its queue row in the same breath; never leave it reading `planned`/`ready` while
+you work it (the board now raises a coherence warning when this drifts). Your craft (IA, click-budget, component
+decomposition, WCAG 2.2 AA acceptance conditions, geometry validation) is
+unchanged; it is simply pulled per use-case rather than invoked per slice.

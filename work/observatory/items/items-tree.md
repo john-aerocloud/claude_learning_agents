@@ -4,7 +4,7 @@ Parent is canonical; this child-indexed view is rebuilt on every mutation so the
 tree traverses both ways without drift. Per-item DORA is computed from the ledger
 (keyed by id), not stored here.
 
-_Last regenerated: 2026-06-11T07:49:00Z (iteration 9 sweep)_
+_Last regenerated: 2026-06-12T15:39:43Z (iteration 9 sweep — flow-manager)_
 
 ```
 REQ-OBSERVATORY [requirement] state=active  value=HIGH  cost=XL  vc_ratio=HIGH/XL
@@ -20,47 +20,76 @@ REQ-OBSERVATORY [requirement] state=active  value=HIGH  cost=XL  vc_ratio=HIGH/X
   │     └── UC-S001-6 [use-case] state=done  vc=1.50  done=2026-06-09T01:20:00Z
   │
   ├── CHK-2 [chunk] state=done  value=HIGH  cost=M  vc_ratio=HIGH/M  done=2026-06-10T11:00:00Z
-  │     Render the pull system as a live value-stream map (full pipeline + stages + gates)
+  │     Render the pull system as a live value-stream map (full pipeline + stages + gates + rework
+  │     + in-flight WIP + hover traceability) — done-condition MET per restated CHK-2
   │     ├── UC-S002-1..6 [use-case] state=done  (all)
   │     ├── UC-S004-1..6 [use-case] state=done  (all)
   │     ├── DEF-011 [defect] state=done  vc=3.00  done=2026-06-10T16:27:57Z
-  │     └── DEF-012 [defect] state=done  vc=1.50  done=2026-06-11T07:35:13Z  <-- ITER 9
+  │     ├── DEF-012 [defect] state=done  vc=1.50  done=2026-06-11T07:35:13Z
+  │     ├── DEF-013 [defect] state=in-flight  vc=1.50  created=2026-06-12T15:30:02Z  dora_ref=DEFECT-013
+  │     │     in-flight work invisible: pulled items stay planned until next sweep; tester row
+  │     │     keyed by slice slug not item_id — aggregator coherence fix
+  │     └── D7-AC-7 [defect] state=planned  vc=2.00  created=2026-06-12T15:36:38Z
+  │           ledger-aggregator.test.js D7-AC-7 asserts absolute active_days against live
+  │           ledger — broke on 4th calendar day; convert to fixture ledger
+  │           [next-pickup-when-free; not pre-emptive]
   │
   ├── CHK-3 [chunk] state=dropped  (scope absorbed into CHK-2)
   │
   ├── CHK-4 [chunk] state=done  value=HIGH  cost=M  vc_ratio=HIGH/M  done=2026-06-10T19:00:00Z
-  │     Navigate REQ→CHK→SLC→UC click in for full slice-artifact detail
+  │     Navigate REQ→CHK→SLC→UC click in for full slice-artifact detail and zoom back out
   │     └── UC-S005-1..6 [use-case] state=done  (all)
   │
-  ├── CHK-5 [chunk] state=active  value=HIGH  cost=M  vc_ratio=HIGH/M
-  │     Compose a structured preview-first prompt for any steer action
-  │     └── SLC-S014 [slice] state=active
+  ├── CHK-5 [chunk] state=done  value=HIGH  cost=M  vc_ratio=HIGH/M  done=2026-06-12T15:33:59Z
+  │     Compose a structured preview-first prompt for any steer action and hand it to Claude
+  │     so all writes go through the human-accept gate and never through the UI
+  │     └── SLC-S014 [slice] state=done  done=2026-06-12T15:33:59Z
   │           ├── UC-S014-1 [use-case] state=done  vc=2.00  done=2026-06-10T16:27:57Z
-  │           ├── UC-S014-2 [use-case] state=ready  vc=1.60  IN-FLIGHT (tester validating)
-  │           ├── UC-S014-3 [use-case] state=planned  vc=1.33  (DAG-blocked on UC-S014-2)
-  │           └── UC-S014-4 [use-case] state=planned  vc=0.80  (DAG-blocked on UC-S014-3)
+  │           ├── UC-S014-2 [use-case] state=done  vc=1.60  done=2026-06-11T10:25:14Z
+  │           ├── UC-S014-3 [use-case] state=done  vc=1.33  done=2026-06-11T10:47:19Z
+  │           └── UC-S014-4 [use-case] state=done  vc=0.80  done=2026-06-12T15:33:59Z  <-- THIS SWEEP
   │
-  ├── CHK-6 [chunk] state=planned  value=MED-HIGH  cost=M
-  │     Navigate WIP and propose re-slice/split/merge/reprioritise/defect actions
-  │     └── SLC-S015 [slice] state=planned
-  │           ├── UC-S015-1 [use-case] state=in-flight  vc=1.00  IN-FLIGHT (tester validating)
-  │           ├── UC-S015-2 [use-case] state=planned  vc=2.00  (DAG-ready on pass of UC-S015-1+UC-S014-1)
-  │           ├── UC-S015-3 [use-case] state=planned  vc=1.00
-  │           └── UC-S015-4 [use-case] state=planned  vc=1.25  (SEAM HOLD: promptBuilder.js)
+  ├── CHK-6 [chunk] state=active  value=MED-HIGH  cost=M
+  │     Navigate WIP and propose re-slice/split/merge/reprioritise/defect actions each routed
+  │     through CHK-5 with before/after preview so steering never bypasses the agents
+  │     └── SLC-S015 [slice] state=active
+  │           ├── UC-S015-1 [use-case] state=done   vc=1.00  done=(tester pass 2026-06-11)
+  │           ├── UC-S015-2 [use-case] state=done   vc=2.00  done=(tester pass 2026-06-11T11:03:19Z)
+  │           ├── UC-S015-3 [use-case] state=done   vc=1.00  done=2026-06-12T15:33:55Z  <-- THIS SWEEP
+  │           └── UC-S015-4 [use-case] state=in-flight  vc=1.25
+  │                 SEAM HOLD released (UC-S014-3 merged); promptBuilder.js + re-slice.txt
+  │                 unclaimed; engineer building (stage_enter 2026-06-12T15:35:35Z)
   │
-  ├── CHK-7 [chunk] state=planned  value=MED  cost=L
-  │     Guide a work author through JTBD + cost-of-delay capture
-  │     └── SLC-S018 [slice] state=planned  <-- REGISTERED ITER 9
-  │           ├── UC-S018-1 [use-case] state=planned  vc=1.50  (DAG-ready: SPA scaffold done)
-  │           ├── UC-S018-2 [use-case] state=planned  vc=1.00  (dep UC-S018-1)
-  │           ├── UC-S018-3 [use-case] state=planned  vc=1.50  (deps UC-S018-1|2 + items endpoint)
-  │           └── UC-S018-4 [use-case] state=planned  vc=2.00  (deps UC-S018-1..3 + UC-S014-4 hard)
+  ├── CHK-7 [chunk] state=active  value=MED  cost=L
+  │     Guide a work author through JTBD + cost-of-delay capture; queue rank preview;
+  │     CHK-5 intake prompt handoff
+  │     └── SLC-S018 [slice] state=active
+  │           ├── UC-S018-1 [use-case] state=ready  vc=1.50  IN Ready pos=1  <-- THIS SWEEP
+  │           │     UC-S014-4 cross-slice gate NOW OPEN; SPA scaffold done; DAG-ready
+  │           ├── UC-S018-2 [use-case] state=planned  vc=1.00  (chain-blocked on UC-S018-1)
+  │           ├── UC-S018-3 [use-case] state=planned  vc=1.50  (chain-blocked on UC-S018-1|2)
+  │           └── UC-S018-4 [use-case] state=planned  vc=2.00  (chain-blocked; UC-S014-4 gate OPEN)
   │
-  └── CHK-8 [chunk] state=planned  value=HIGH  cost=M
-        See all defects with status/severity/MTTR at a glance
-        └── SLC-S013 [slice] state=planned
-              ├── UC-S013-1 [use-case] state=done  vc=2.00  done=2026-06-11T07:43:41Z  <-- ITER 9
-              ├── UC-S013-2 [use-case] state=planned  vc=1.60  IN READY pos=1  <-- ITER 9
-              ├── UC-S013-3 [use-case] state=planned  vc=2.00
-              └── UC-S013-4 [use-case] state=planned  vc=1.33
+  └── CHK-8 [chunk] state=active  value=HIGH  cost=M
+        See all defects with status/severity/MTTR at a glance and drill into any one
+        └── SLC-S013 [slice] state=active
+              ├── UC-S013-1 [use-case] state=done   vc=2.00  done=2026-06-11T07:43:41Z
+              ├── UC-S013-2 [use-case] state=done   vc=1.60  done=(tester pass 2026-06-11T10:50:24Z)
+              ├── UC-S013-3 [use-case] state=in-flight  vc=2.00  (resume build — in-flight)
+              └── UC-S013-4 [use-case] state=planned  vc=1.33  (verdict-pending UC-S013-3)
 ```
+
+## Queue state (post-sweep)
+
+| Queue   | depth | min_items | wip_limit | status |
+|---------|-------|-----------|-----------|--------|
+| intake  | 0     | 2         | 10        | below floor (0 < 2) — no items pending intake |
+| ready   | 1     | 2         | 4         | BELOW FLOOR (1 < 2) — replenishment signal raised |
+| deploy  | 0     | 0         | 1         | ok |
+| rework  | 0     | 0         | 2         | ok |
+| staging | 0     | 0         | 20        | ok (drained) |
+
+## In-flight (leave alone)
+- UC-S013-3: resume build (defects drill-down + MTTR card)
+- UC-S015-4: engineer building (enriched re-slice/split prompt)
+- DEF-013: engineer axis-2 aggregator coherence fix

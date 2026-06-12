@@ -184,3 +184,93 @@ was already complete and covered all acceptance conditions. The EXP-033 live cro
 was conducted via API probe rather than a browser spec (the WipPanel behaviour is fully
 covered by the deterministic fixture spec; the live data probe confirms the correct data
 shape is being served by the production endpoint).
+
+---
+
+# Validation result — UC-S015-3 (s015-wip-navigate-reslice-preview)
+
+**Verdict: PASS**
+
+UC: UC-S015-3 — Re-slice/split before/after preview panel
+SHA under test: 1996850 (ReslicePreviewPanel + useReslicePreview + reslice-preview-panel.css + ONE-line dispatch re-point)
+Live server: http://localhost:5173 (active project: observatory; 9 live WIP items)
+Run date: 2026-06-12
+
+---
+
+## Summary
+
+All acceptance conditions for UC-S015-3 pass. Validated via:
+1. The committed `reslice-preview.spec.js` (17/17 pass) against the ephemeral fixture server (:5199) — exercises all acceptance conditions with deterministic fixture data.
+2. The committed `wip-panel.spec.js` (12/12 pass) and `wip-steer.spec.js` (11/11 pass) as UC-S015-1/-2 regression guards — no prior conditions regressed.
+3. The committed `wip-steer-real-data.spec.js` (8/8 pass) against the live :5173 server — EXP-033 real-data cross-check confirming `re-slice` opens `ReslicePreviewPanel` on real in-flight WIP items.
+
+One spec maintenance fix was applied: `wip-steer-real-data.spec.js` line 95 `/[A-Z]/` → `/[a-zA-Z]/` (stale pattern; the live data now includes `s014-steer-prompt-handoff`, an all-lowercase slice-slug item id; the acceptance contract is "not positional", not "uppercase").
+
+---
+
+## Evidence
+
+### reslice-preview.spec.js fixture run — 17/17 PASS
+
+Run: `OBSERVATORY_E2E_PORT=5199 CI=1 npm --prefix work/observatory/src/app run test:browser -- e2e/reslice-preview.spec.js --reporter=list --workers=1`
+
+Fixture data:
+- UC-D1-2 ("Demo use case two"): in items.csv, value=MED, cost=2, stage=done (stale open)
+- CHK-4: in items.csv, fresh in-flight item
+- D-1: queue-only intake chip, NOT in items.csv → deterministic not-found path
+
+| Test | Result |
+|---|---|
+| F-S3-1 / RESLICE-DISPATCH-1 — re-slice opens `reslice-preview-panel` not `steer-panel`; two named columns; `aria-modal` absent | PASS |
+| RESLICE-DISPATCH-1 — raise-defect/re-prioritise/custom → SteerPanel each with correct `data-action`; `reslice-preview-panel` absent | PASS |
+| F-S3-2 / FIG-1 / A11Y-7 — Before column: `reslice-before-id`="UC-D1-2 — Demo use case two"; job/value/cost/stage correct; dt labels = Item/Job/Value/Cost/Current stage; no raw CSV keys | PASS |
+| F-S3-3 / RESLICE-PREVIEW-1 — type Part A + Part B + intent; Generate fires 0 non-GET requests; `prompt-output` count=0; output slot children=0 | PASS |
+| F-S3-4 / A11Y-3 — Generate `aria-disabled="true"` on open; guard requires all three fields (Part A alone → still disabled; +Part B → still disabled; +intent → `aria-disabled="false"`; clear A → re-guarded); non-colour cue: boxShadow contains "inset", cursor="not-allowed" | PASS |
+| S15-3-FIG-3 — `reslice-cost-note` absent on open; absent with only Part A; present ("Each part will be smaller…") with both parts; absent again after clearing Part B; `prompt-output` always absent | PASS |
+| F-S3-5 — Cancel closes panel (count=0); WIP panel still visible; `wip-row` count unchanged; no prompt output | PASS |
+| S15-3-A11Y-1/2 — keyboard open; heading focused on open (`reslice-heading`); Tab path: heading→part-a→part-b→intent→generate→cancel→close; Esc closes; focus returns to BTN(UC-D1-2) | PASS |
+| S15-3-A11Y-4 — ×/Cancel/Generate bounding boxes: all ≥ 24×24 CSS px | PASS |
+| S15-3-A11Y-5 — `getByRole('textbox', {name:/part a job/i})` visible; same for part b + why-splitting; axe 0 violations | PASS |
+| S15-3-A11Y-6 — `animationName === 'none'` under `prefers-reduced-motion: reduce` | PASS |
+| S15-3-A11Y-8 — heading order: H2 "Re-slice / split: UC-D1-2", H3 "Current item", H3 "Proposed split" | PASS |
+| GEO-S015-3-1 — `wip-panel` bbox + rows + panelScroll + pageScroll byte-identical open vs closed; `position=fixed`, `parent=BODY`, `z ≥ 40` | PASS |
+| GEO-S015-3-2 — `Math.abs(before.top − after.top) ≤ 2`; `after.left > before.left`; `before.right ≤ after.left + 1` (two columns, side-by-side, no overlap) | PASS |
+| GEO-S015-3-3 — Before `<dd>` monotonic tops + shared lefts (≤1px delta); After Part A / Part B / cost-note monotonic tops | PASS |
+| GEO-S015-3-4 — panel.left ≥ 0; panel.top ≥ 0; panel.right ≤ vw; panel.bottom ≤ vh; no horizontal scroll | PASS |
+| S15-3-FIG-4 — intake chip D-1 (not-found path): `reslice-context-notfound` = "Item D-1 not found"; `reslice-after` count=0; `reslice-generate` count=0; `reslice-cancel` visible; `reslice-close` closes panel; 0 console errors | PASS |
+
+### UC-S015-1/-2 regression guards
+
+| Suite | Result |
+|---|---|
+| `wip-panel.spec.js` 12/12 | PASS — all UC-S015-1 conditions unchanged |
+| `wip-steer.spec.js` 11/11 | PASS — all UC-S015-2 conditions unchanged; F-S2-3 test now correctly asserts `ReslicePreviewPanel` opens (was `SteerPanel` with `data-action="re-slice"` under UC-S015-2; re-pointed in UC-S015-3) |
+
+### EXP-033 real-data cross-check (live :5173)
+
+Run: `OBSERVATORY_E2E_PORT=5173 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/wip-steer-real-data.spec.js --reporter=list --workers=1`
+
+Live server state: 9 open WIP items (UC-S015-1, UC-S003-2/3/4, UC-S004-5, UC-S005-3, UC-S013-3, UC-S015-3, s014-steer-prompt-handoff).
+
+| Check | Observed | Match |
+|---|---|---|
+| `re-slice` from real WIP row opens `reslice-preview-panel` (RESLICE-DISPATCH-1) | test 5 (F-S2-3): panel visible, `data-item-id` = row's id, `steer-panel` count=0 | YES |
+| Before column loads live context (UC-S015-1 is items.csv-resident; job = "WIP navigation panel…") | `reslice-before-id` matches `/^UC-S015-1 — /` | YES |
+| `re-slice` does NOT dead-end | preview panel opens, operator can read Before column and Cancel | YES |
+| axe CLEAN with real triggers present and menu open | 0 violations (both scans) | YES |
+| All 9 live rows have one steer trigger; accessible names contain real ids; never `row:\d+` | 9/9 rows pass; `s014-steer-prompt-handoff` is lowercase-letters (not positional) | YES |
+
+### Identity confirmation
+
+`GET /api/active` → `{"active":"observatory"}` — production server confirmed before any browser validation step (principles/01 identity-before-behaviour).
+
+### Spec maintenance note
+
+`wip-steer-real-data.spec.js` line 95 updated from `toMatch(/[A-Z]/)` to `toMatch(/[a-zA-Z]/)`. Root cause: the live WIP now includes `s014-steer-prompt-handoff` (a slice slug used as an item id, all lowercase). The acceptance contract (FIG-1 / A11Y-1) is "not a positional token like `row:\d+`", not "contains uppercase". The fix is narrowly scoped, adds an explicit `not.toMatch(/^row:\d+$/)` guard, and both assertions are correct. This is a spec correction, not a product defect — the panel renders the lowercase id correctly with full steer affordance.
+
+---
+
+## Process notes
+
+The committed `reslice-preview.spec.js` (17 tests) was already complete and covered all UC-S015-3 acceptance conditions. The EXP-033 real-data confirmation was provided by the existing `wip-steer-real-data.spec.js` test 5 (F-S2-3), which was updated at UC-S015-3 build time to assert `ReslicePreviewPanel` rather than `SteerPanel`. The only new work by the tester was the `wip-steer-real-data.spec.js` spec fix (line 95 pattern update) and the test-plan/result file entries.

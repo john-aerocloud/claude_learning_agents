@@ -46,7 +46,7 @@ DEF-013,defect,CHK-2,,in-flight work invisible: pulled items stay planned until 
 D7-AC-7,defect,CHK-2,,ledger-aggregator.test.js D7-AC-7 asserts absolute active_days against live ledger — broke on 4th calendar day; convert to fixture ledger,planned,MED,1.0,2.00,2026-06-12T15:36:38Z,,
 CHK-7,chunk,REQ-OBSERVATORY,SLC-S018,Guide a work author through JTBD + cost-of-delay capture show the item's queue rank before submitting and hand off via the CHK-5 intake prompt so work enters responsibly,active,MED,L,MED/L,2026-06-09T00:10:00Z,,
 SLC-S018,slice,CHK-7,UC-S018-1|UC-S018-2|UC-S018-3|UC-S018-4,Guided CoD intake — JTBD wizard + CoD scorer + queue-rank preview + intake prompt handoff (s018),active,MED,L,MED/L,2026-06-11T07:11:24Z,,
-UC-S018-1,use-case,SLC-S018,,Intake wizard shell + JTBD capture — IntakeWizard.jsx; 3-field panel + live job-sentence preview,ready,MED,2,1.50,2026-06-11T07:11:24Z,,
+UC-S018-1,use-case,SLC-S018,,Intake wizard shell + JTBD capture — IntakeWizard.jsx; 3-field panel + live job-sentence preview,in-flight,MED,2,1.50,2026-06-11T07:11:24Z,,
 UC-S018-2,use-case,SLC-S018,,CoD signals step + value-token scorer — CodStep.jsx; codScorer.js pure fn; deterministic HIGH/MED/LOW rule; dep UC-S018-1,planned,MED,2,1.00,2026-06-11T07:11:24Z,,
 UC-S018-3,use-case,SLC-S018,,Queue-rank preview — useQueueRank.js; directional count from live /api/projects/:id/items; deps UC-S018-1|UC-S018-2 + items endpoint done,planned,MED,2,1.50,2026-06-11T07:11:24Z,,
 UC-S018-4,use-case,SLC-S018,,Intake prompt builder + clipboard handoff — intakePromptBuilder.js pure fn; intake-prompt.txt; SteerPanel clipboard-copy+toast reuse; deps UC-S018-1|UC-S018-2|UC-S018-3 + UC-S014-4 cross-slice hard dep,planned,HIGH,2,2.00,2026-06-11T07:11:24Z,,

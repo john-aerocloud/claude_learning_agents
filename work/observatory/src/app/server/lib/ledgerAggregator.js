@@ -479,6 +479,13 @@ export function aggregateStageFlow(ledgerCsv, project, itemsCsv = null, opts = {
     const sourceRows = { add: (r) => sourceByRef.set(r.rowRef, r) };
     let throughput = 0;
     let rework = 0;
+    // DEFECT-007 D7-AC-7 (basis coherence) — active_days is the denominator of
+    // the throughput RATE, so it counts distinct UTC dates of THROUGHPUT
+    // in-events (tpIn) ONLY — the same rows the numerator counts. Counting all
+    // contributing rows (opens/closes/rework) diluted the rate the first day an
+    // engineer stage_enter landed with no task_start (live ledger 2026-06-12):
+    // aggregator said 4 active days, the task_start hand-count said 3.
+    const tpDates = new Set();
 
     // WIP pairing: walk rows in order, opening/closing per item_id. An item with
     // an open in-event and no later close is in-flight (WIP). Rows lacking an
@@ -491,6 +498,8 @@ export function aggregateStageFlow(ledgerCsv, project, itemsCsv = null, opts = {
       if (m.tpIn(r)) {
         throughput += 1;
         sourceRows.add(r);
+        const tpDate = utcDate(r.timestamp);
+        if (tpDate) tpDates.add(tpDate);
       }
       if (m.rework && m.rework(r)) {
         rework += 1;
@@ -557,13 +566,12 @@ export function aggregateStageFlow(ledgerCsv, project, itemsCsv = null, opts = {
     const sourceTotal = contributing.length;
 
     // DEFECT-007 — throughput is a RATE: items per active-day. active_days is the
-    // count of DISTINCT UTC calendar dates among the contributing rows (same basis
+    // count of DISTINCT UTC calendar dates among the THROUGHPUT in-event rows
+    // (tpDates — D7-AC-7 basis coherence: same rows as the numerator, same basis
     // as dora.py deploy-frequency, §1 of the ruling). 0 active days → rate is null
     // (the UI renders "—"), never a division-by-zero artefact. throughput (the raw
     // integer count) is KEPT — it is the numerator shown in the source/hover panel.
-    const activeDays = new Set(
-      contributing.map((r) => utcDate(r.timestamp)).filter(Boolean),
-    ).size;
+    const activeDays = tpDates.size;
     const throughputPerActiveDay = activeDays === 0 ? null : throughput / activeDays;
 
     return {

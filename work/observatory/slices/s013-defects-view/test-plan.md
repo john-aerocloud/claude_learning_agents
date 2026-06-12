@@ -1,13 +1,13 @@
 ---
 slice: s013-defects-view
 chunk: CHK-8
-uc: UC-S013-1, UC-S013-2
+uc: UC-S013-1, UC-S013-2, UC-S013-3
 produced-by: tester
-date: 2026-06-11
-sha-under-test: ae7aa28 (UC-S013-2 merge; HEAD b21cffc — Defects surface unchanged)
+date: 2026-06-12
+sha-under-test: c7edf5a (UC-S013-3 merge; spec commits 258fec2/fc50759)
 ---
 
-# Test plan — UC-S013-1 + UC-S013-2
+# Test plan — UC-S013-1 + UC-S013-2 + UC-S013-3
 
 ## Scope
 
@@ -114,3 +114,74 @@ No uncovered changed nodes.
 ## Note: GEO-S013-2-1 live-data caveat
 
 The byte-identical VSM bbox assertion is validated by the fixture spec (deterministic OBSERVATORY_NOW pinned, no SSE updates). On the live server, the VSM height changes between baseline and re-capture due to SSE-delivered WIP data updates — asserting byte-identical bbox on live data would be a false negative, not a defect. The structural guards (VSM truly absent while Defects active, scrollHeight unchanged) pass on the live server. This is a validation scope note, not a finding.
+
+---
+
+## UC-S013-3 — Defect drill-down + MTTR card (sha c7edf5a)
+
+### Scope
+
+Validates DefectDrillContainer / DefectDetail / MttrCard against:
+- Fixture server (OBSERVATORY_E2E_PORT=5203, demo project): all geometry, a11y, open-path, markdown rendering
+- Live server (REUSE_SERVER=1, observatory project, :5173): real DEFECT-001 data, DEFECT-011 ledger-only, DEFECT-014 live open, DEFECT-015 zero-MTTR
+
+Mid-session context: DEFECT-014 is CONFIRMED/open (the HMR note said it may land — it did).
+DEFECT-015 landed closed same-session with mttr_s=0 (instantaneous repair edge case).
+Total live records at validation time: 15 (was 12 at prior UC-S013-2 validation).
+
+### Change map (UC-S013-3 s013changed nodes)
+
+| Node | Change | Covering spec |
+|------|--------|---------------|
+| DefectDrillContainer | new: floating drawer shell (DEFECT-006 idiom) | `e2e/defect-drill.spec.js @covers SPA_DEFECTDRILL uc-s013-3` |
+| DefectDetail | new: labelled record body + markdown rendering | `e2e/defect-drill.spec.js @covers SPA_DEFECTDRILL` |
+| MttrCard | new: reported→recovered timeline + MTTR figure | `e2e/defect-drill.spec.js @covers SPA_DEFECTDRILL` |
+| DefectRow (activation) | extended: drill slot wired (click + Enter/Space) | `e2e/defect-drill.spec.js @covers SPA_DEFECTDRILL` |
+
+No uncovered changed nodes.
+
+### Impacted specs (UC-S013-3)
+
+| Spec file | Suite | Covers |
+|-----------|-------|--------|
+| `e2e/defect-drill.spec.js` | 10 fixture browser tests (OBSERVATORY_E2E_PORT=5203, demo project) | SPA_DEFECTDRILL, SPA_MARKDOWNLIB, S13-3-A11Y-1..4+6, GEO-S013-3-1..4, S13-3-FIG-1..7, open-path |
+| `e2e/s013-defect-drill-real-data.spec.js` | 7 real-data browser tests (REUSE_SERVER=1, live :5173) | EXP-033, AC-S013-3-2/3/4/5/7/8/9, live open path DEFECT-014, zero-MTTR DEFECT-015 |
+
+### Test plan tick-off — UC-S013-3 (sha c7edf5a)
+
+| AC | Description | Status |
+|----|-------------|--------|
+| AC-S013-3-1 | Click DEFECT-001 row: drawer opens with data-defect-id continuity | PASS (fixture + real-data) |
+| AC-S013-3-2 | Four fields rendered as HTML (no raw **) | PASS (fixture + real-data) |
+| AC-S013-3-3 | "Opening the Observatory UI" text in Expected field | PASS (real-data) |
+| AC-S013-3-4 | Fix shas "3d8c21c" and "82a622c" as code refs | PASS (real-data) |
+| AC-S013-3-5 | MttrCard "13 min" + human timestamps + reported→recovered | PASS (fixture + real-data) |
+| AC-S013-3-6 | CONFIRMED defect: MttrCard shows "Not yet resolved" | PASS (fixture DEFECT-003 + live DEFECT-014) |
+| AC-S013-3-7 | Null fields render "—"; no crash (DEFECT-011) | PASS (real-data) |
+| AC-S013-3-8 | GEO: scrollHeight + panel bbox byte-identical open vs closed | PASS (real-data) |
+| AC-S013-3-9 | Close returns focus to the row | PASS (real-data) |
+| S13-3-A11Y-1 | Enter opens drawer (keyboard-only) | PASS (fixture) |
+| S13-3-A11Y-2 | Focus moves to defect-drill-heading on open | PASS (fixture) |
+| S13-3-A11Y-3 | Esc returns focus to originating row; no focus trap | PASS (fixture) |
+| S13-3-A11Y-4 | axe zero violations on open drawer | PASS (fixture) |
+| S13-3-A11Y-5 | Non-colour-redundant MTTR state ("Not yet resolved" text) | PASS (fixture open path + live DEFECT-014) |
+| S13-3-A11Y-6 | Close button ≥ 24×24px; row trigger ≥ 24px tall | PASS (fixture) |
+| GEO-S013-3-1 | Drawer is pure overlay: panel + rail + scrollHeight byte-identical | PASS (fixture + real-data) |
+| GEO-S013-3-2 | Drawer on-screen, no horizontal scroll | PASS (fixture) |
+| GEO-S013-3-3 | Record sections STACK (monotonic tops, shared left) | PASS (fixture) |
+| GEO-S013-3-4 | MttrCard timeline: reported top < recovered top (order = meaning) | PASS (fixture) |
+| S13-3-FIG-1 | MTTR "13 min" with unit; data-mttr-seconds=815 | PASS (fixture + real-data) |
+| S13-3-FIG-2 | Open path: "Not yet resolved"; elapsed "open for …"; not labelled MTTR | PASS (fixture DEFECT-003 + live DEFECT-014) |
+| S13-3-FIG-3 | Human timestamps in reported/recovered cells | PASS (fixture + real-data) |
+| S13-3-FIG-4 | Fix shas as code refs; null → "—" | PASS (fixture + real-data) |
+| S13-3-FIG-5 | Null fields render "—" (DEFECT-011 severity, DEFECT-002 all fields) | PASS (fixture + real-data) |
+| S13-3-FIG-6 | Markdown rendered as HTML (no literal **); actual shows real `<strong>` | PASS (fixture + real-data) |
+| S13-3-FIG-7 | data-source non-empty on defect-detail + mttr-card | PASS (fixture + real-data) |
+| EXP-033 BONUS | Live DEFECT-014 (open): "Not yet resolved", elapsed not labelled MTTR, no crash | PASS (real-data — new live record) |
+| EXP-033 BONUS | Live DEFECT-015 (mttr_s=0): no crash, no bare "0", null fields "—" | PASS (real-data — edge case) |
+| Open/closed invariant | All 15 live records: open ones never labelled MTTR; closed ones unit-bearing | PASS — 14 CLOSED + 1 CONFIRMED; DEFECT-014 correctly open |
+
+### Suites run (UC-S013-3)
+
+1. `OBSERVATORY_E2E_PORT=5203 npm --prefix work/observatory/src/app run test:browser -- e2e/defect-drill.spec.js` — 10/10 pass (fixture, demo project, ephemeral :5203)
+2. `REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s013-defect-drill-real-data.spec.js` — 7/7 pass (live :5173, observatory, 15 records)

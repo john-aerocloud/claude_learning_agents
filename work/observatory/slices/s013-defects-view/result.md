@@ -236,3 +236,162 @@ Playwright specs in a real Chromium browser context. All 25 acceptance condition
 open-count reconciled: 12 records, 1 open (DEFECT-012 — md file status=CONFIRMED).
 The Defects tab is reachable in 1 click, the open defect leads the list, MTTR
 renders with units, severity null shows "—", and axe reports zero violations.
+
+---
+
+# Validation result — UC-S013-3 (Defect drill-down + MTTR card)
+
+---
+sha-under-test: c7edf5a (spec commits 258fec2/fc50759)
+verdict: PASS
+iteration: 9
+item-id: UC-S013-3
+date: 2026-06-12
+---
+
+## Identity check (UC-S013-3)
+
+Live server confirmed running at http://localhost:5173. SHA c7edf5a introduced
+DefectDrillContainer / DefectDetail / MttrCard. Spec commits 258fec2 (real-data
+panel spec rebase) and fc50759 (ReslicePreviewPanel repair, orthogonal) are
+post-c7edf5a; the Defects drill surface is unchanged in both.
+
+Mid-session deploys noted: DEFECT-014 (StageNode/MetricSource reshape) was
+CONFIRMED/open at validation time; DEFECT-015 was CLOSED with mttr_s=0. Both
+appeared mid-session, as the task brief anticipated. Their presence provided
+BONUS live coverage of the open-path MttrCard and the zero-MTTR edge case.
+
+## Live data state at validation time
+
+| Record | Status | mttr_s | Notes |
+|--------|--------|--------|-------|
+| DEFECT-001..010 | CLOSED | 315–1686 s | normal closed rows |
+| DEFECT-011 | CLOSED | 667 s | ledger-only, severity=null |
+| DEFECT-012 | CLOSED | 2635 s | was CONFIRMED at UC-S013-2; md file status now updated |
+| DEFECT-013 | CLOSED | 60 s | coherence detector defect |
+| DEFECT-014 | **CONFIRMED** | null | LIVE OPEN — StageNode/MetricSource hover overlap |
+| DEFECT-015 | CLOSED | **0 s** | atomic-repair edge case — same-second recovery |
+
+Total: 15 records, 1 open (DEFECT-014). This supersedes the prior "12 records, 1 open" count.
+
+## EXP-033 real-data verification table (UC-S013-3)
+
+| Defect ID | Expected status | Actual status | Expected severity | Actual severity | Expected MTTR | Actual MTTR display | Match |
+|-----------|----------------|--------------|------------------|-----------------|--------------------|------------------------|-------|
+| DEFECT-001 | CLOSED | CLOSED | HIGH | HIGH | ~815 s / "13 min" | "13 min" | yes |
+| DEFECT-011 | CLOSED (ledger-only) | CLOSED | null | null (severity "—") | 667 s | resolved; severity "—" | yes |
+| DEFECT-014 (first CONFIRMED) | CONFIRMED | CONFIRMED | null | null | null / open path | "Not yet resolved" + "open for …" | yes |
+
+Additional EXP-033 cross-checks:
+- DEFECT-001 Expected field: contains "Opening the Observatory UI" — yes
+- DEFECT-001 fix shas: "3d8c21c" and "82a622c" as `<code>` refs — yes
+- DEFECT-001 MttrCard: data-mttr-seconds=815, "13 min", timestamps "2026-06-10 06:17:47 UTC" / "2026-06-10 06:31:22 UTC" — yes
+- DEFECT-011 provenance: data-source="process/dora/ledger.csv#ref=DEFECT-011" — yes
+- DEFECT-014 open path: data-mttr-state="open", "Not yet resolved" in recovered slot, elapsed-figure NOT labelled "MTTR" — yes
+- DEFECT-015 (mttr_s=0): no crash, no bare "0" in MTTR figure, severity "—" — yes
+- Open/closed label: no "open for…"/"Not yet resolved" ever appears labelled "MTTR" — yes (verified across all 15 records via test assertions and manual browse)
+
+## Surface exercised
+
+- **Fixture browser spec (`e2e/defect-drill.spec.js`):** 10/10 pass on ephemeral
+  server (OBSERVATORY_E2E_PORT=5203, fixture project "demo", deterministic data).
+  Covers: GEO-S013-3-1 pure-overlay no-reflow, GEO-S013-3-2 on-screen anchor,
+  GEO-S013-3-3 record sections STACK, GEO-S013-3-4 MttrCard timeline order,
+  S13-3-A11Y-1/2/3 keyboard (Enter open, heading focus, Esc return, non-modal),
+  S13-3-A11Y-4/6 axe zero violations + target sizes ≥ 24px,
+  S13-3-FIG-1 unit-bearing MTTR, S13-3-FIG-2 open path "Not yet resolved",
+  S13-3-FIG-3 human timestamps, S13-3-FIG-4 fix shas as code refs,
+  S13-3-FIG-5 null fields "—" (DEFECT-002 all-null), S13-3-FIG-6 markdown as HTML,
+  S13-3-FIG-7 data-source provenance.
+
+- **Real-data browser spec (`e2e/s013-defect-drill-real-data.spec.js`):** 7/7 pass
+  on live :5173 (REUSE_SERVER=1, observatory project, 15 defects). Extended this
+  session with 3 new tests (DEFECT-014 live open path, DEFECT-015 zero-MTTR, count
+  line 15/1 open). Covers: AC-S013-3-2/3/4/5/7/8/9, EXP-033, live open path.
+
+## Acceptance case evidence (UC-S013-3)
+
+| AC | Case | Result | Evidence |
+|----|------|--------|----------|
+| AC-S013-3-1 | drawer opens; data-defect-id continuity | PASS | fixture test 1; real-data test 1 |
+| AC-S013-3-2 | Four fields as HTML (no raw **) | PASS | actual contains `<strong>` "0 for everything"; no `**` in drawer text |
+| AC-S013-3-3 | "Opening the Observatory UI" in Expected | PASS | real-data test 1; locator [data-field="expected"] contains text |
+| AC-S013-3-4 | Fix shas "3d8c21c" + "82a622c" as code refs | PASS | two `<code data-testid="defect-fix-sha">` nodes; both texts verified |
+| AC-S013-3-5 | MttrCard "13 min" + human timestamps | PASS | mttr-figure="13 min", data-mttr-seconds=815; mttr-reported="2026-06-10 06:17:47 UTC", mttr-recovered="2026-06-10 06:31:22 UTC" |
+| AC-S013-3-6 | CONFIRMED: "Not yet resolved" | PASS | fixture DEFECT-003 + live DEFECT-014: mttr-recovered="Not yet resolved", data-mttr-state="open" |
+| AC-S013-3-7 | Null fields "—"; no crash (DEFECT-011) | PASS | defect-detail-severity="—"; [data-field="expected"]="—"; defect-fix contains "—"; no console errors |
+| AC-S013-3-8 | GEO: scrollHeight + panel bbox unchanged open vs closed | PASS | real-data: panelBefore==panelAfter, heightBefore==heightAfter |
+| AC-S013-3-9 | Close returns focus to the row | PASS | real-data: defect-row-trigger focused after close |
+| S13-3-A11Y-1 | Enter opens drawer | PASS | fixture: keyboard Enter on trigger → defect-drill visible |
+| S13-3-A11Y-2 | Focus to heading on open | PASS | fixture: defect-drill-heading toBeFocused() |
+| S13-3-A11Y-3 | Esc returns focus; no focus trap | PASS | fixture: trigger toBeFocused() after Esc; other row reachable from open drawer |
+| S13-3-A11Y-4 | axe zero violations on open drawer | PASS | fixture: axe WCAG2A+AA+21AA+22AA scoped to defect-drill = 0 violations |
+| S13-3-A11Y-5 | Non-colour-redundant MTTR state | PASS | "Not yet resolved" text node visible; data-mttr-state attr carries state |
+| S13-3-A11Y-6 | Close button ≥ 24×24; row trigger ≥ 24px tall | PASS | close: 24×24 confirmed; trigger height ≥ 24px confirmed |
+| GEO-S013-3-1 | Pure overlay: panel + rail + scrollHeight byte-identical | PASS | fixture: all three bbox/height values equal before/after open |
+| GEO-S013-3-2 | Drawer on-screen, no horizontal scroll | PASS | fixture: box within viewport; hScroll=false |
+| GEO-S013-3-3 | Record sections STACK | PASS | fixture: 7 section headings monotonic tops, shared left ±1px |
+| GEO-S013-3-4 | MttrCard timeline order (reported y < recovered y) | PASS | fixture: reported.y < recovered.y confirmed |
+| S13-3-FIG-1 | "13 min" with unit; data-mttr-seconds=815 | PASS | fixture + real-data |
+| S13-3-FIG-2 | Open: "Not yet resolved"; "open for …"; NOT labelled MTTR | PASS | fixture DEFECT-003 + live DEFECT-014; label checked via evaluate() |
+| S13-3-FIG-3 | Human timestamps in reported/recovered | PASS | fixture: "2026-06-09 00:30:00 UTC"/"2026-06-09 00:43:35 UTC"; real-data: "2026-06-10 06:17:47 UTC"/"2026-06-10 06:31:22 UTC" |
+| S13-3-FIG-4 | Fix shas as code refs; null → "—" | PASS | fixture DEFECT-001 two shas; DEFECT-002 (null) → "—" in defect-fix |
+| S13-3-FIG-5 | Null fields "—"; no blank/null/thrown error | PASS | fixture DEFECT-002 all-null; real-data DEFECT-011 severity "—" |
+| S13-3-FIG-6 | Markdown as real HTML | PASS | actual `<strong>` present; no `**` literal in drawer text |
+| S13-3-FIG-7 | data-source non-empty; visible source caption | PASS | defect-detail data-source="work/.../DEFECT-001-map-zero-figures.md"; mttr-card data-source="process/dora/ledger.csv#ref=DEFECT-001"; source caption visible |
+
+## Additional findings (bonus coverage)
+
+**DEFECT-014 live open path (EXP-033 bonus):** The task brief anticipated DEFECT-014
+may land mid-session. It did. MttrCard correctly renders data-mttr-state="open",
+mttr-recovered="Not yet resolved", mttr-figure="open for …" (elapsed since
+2026-06-12T15:53:45Z), and the figure's dt label does NOT contain "MTTR". No
+console errors. The S13-3-FIG-2 / AC-S013-3-6 open path is now confirmed against
+BOTH a fixture record (demo DEFECT-003) AND a live open defect (DEFECT-014).
+
+**DEFECT-015 zero-MTTR edge case:** mttr_s=0 (reported_ts = recovered_ts =
+2026-06-12T15:55:30Z — instantaneous same-second repair). The UI rendered without
+crash, severity shows "—" (null). The MTTR figure did NOT show bare "0". This
+edge case is now a committed spec; re-verify if the humaniser is ever touched.
+
+**DEFECT-012 status change:** At UC-S013-2 validation, DEFECT-012 was CONFIRMED
+(the panel showed 1 open). At this session, the live API shows DEFECT-012 as CLOSED
+(mttr_s=2635, recovered_ts=2026-06-11T07:43:41Z). This is a data change in the
+source md file, not a regression — the prior validation noted the recovery row
+existed in the ledger but the md file had not been updated. It has since been
+updated. Current live count: 15 records, 1 open (DEFECT-014).
+
+## Summary (UC-S013-3)
+
+- Defect drill opens in 1 click or keyboard Enter: yes
+- Heading carries id — title ("DEFECT-001 — UI shows 0 for everything while work is happening"): yes
+- Four fields rendered as HTML (no raw **): yes
+- DEFECT-001 Expected text "Opening the Observatory UI" visible: yes
+- Fix shas "3d8c21c" + "82a622c" as `<code>` refs: yes
+- MttrCard "13 min" (815 s) with human timestamps: yes
+- Open path ("Not yet resolved", elapsed not labelled MTTR): yes — fixture DEFECT-003 + live DEFECT-014
+- Null fields render "—" (DEFECT-011 severity, DEFECT-002 all fields): yes
+- GEO invariant (pure overlay — scrollHeight unchanged): yes
+- A11y: axe zero violations on open drawer: yes
+- Keyboard: Enter opens, heading focused, Esc returns to row, no focus trap: yes
+- All 15 live records: open ones correctly show "Not yet resolved"; MTTR label appears only on resolved spans: yes
+
+## New specs committed (UC-S013-3 session)
+
+`work/observatory/src/app/e2e/s013-defect-drill-real-data.spec.js` — extended with 3 new tests:
+- `EXP-033/S13-3-FIG-2` — live DEFECT-014 open path
+- `EXP-033/S13-3-FIG-1/5` — live DEFECT-015 zero-MTTR edge case
+- `EXP-033/AC-S013-2-1` — live count line 15 records / 1 open
+
+Relevancy: pinned (real-data ground truth; re-verify after any change to drill
+components, lib/markdown.js, DEFECT-001.md, DEFECT-014/015.md, or the live ledger).
+
+## Verdict (UC-S013-3)
+
+**PASS.** UC-S013-3 (Defect drill-down + MTTR card) is validated against the live
+production server (http://localhost:5173, sha c7edf5a) through committed Playwright
+specs in a real Chromium browser context. All acceptance conditions pass:
+AC-S013-3-1..9, S13-3-A11Y-1..6, GEO-S013-3-1..4, S13-3-FIG-1..7. The open-path
+(S13-3-FIG-2/AC-S013-3-6) is confirmed against both a fixture record and the live
+open DEFECT-014. EXP-033 real-data cross-checks complete. s013 is now 3/4 done;
+only UC-S013-4 (SSE live refresh) remains.

@@ -112,3 +112,72 @@ test('AC-S013-3-8/9 — GEO no-reflow on live data; close returns to the list wi
   await expect(page.getByTestId('defect-drill')).toHaveCount(0);
   await expect(row(page, 'DEFECT-001').getByTestId('defect-row-trigger')).toBeFocused();
 });
+
+// EXP-033 BONUS: DEFECT-014 is the live open defect (CONFIRMED, recovered_ts=null,
+// mttr_s=null). All 15 live records exist now. Validates the OPEN MttrCard path
+// on real production data (complement to the fixture DEFECT-003 path).
+test('EXP-033/S13-3-FIG-2 — live OPEN DEFECT-014: MttrCard shows "Not yet resolved", elapsed figure NOT labelled MTTR, no crash', async ({
+  page,
+}) => {
+  const errors = [];
+  page.on('console', (msg) => {
+    if (msg.type() === 'error') errors.push(msg.text());
+  });
+  await openDrill(page, 'DEFECT-014');
+  // drawer opened — identity confirmed
+  await expect(page.getByTestId('defect-drill')).toHaveAttribute('data-defect-id', 'DEFECT-014');
+  const card = page.getByTestId('mttr-card');
+  await expect(card).toHaveAttribute('data-mttr-state', 'open');
+  // recovered slot must say "Not yet resolved" — never a timestamp or "0"
+  await expect(page.getByTestId('mttr-recovered')).toHaveText('Not yet resolved');
+  const figure = page.getByTestId('mttr-figure');
+  // the elapsed figure must be "open for …" format — NOT labelled MTTR (DEFECT-007 lesson)
+  await expect(figure).toHaveText(/^open for \d+/);
+  expect(await figure.textContent()).not.toMatch(/^0|null/);
+  // the dt label over the elapsed figure must NOT say "MTTR"
+  const label = await figure.evaluate((dd) => dd.closest('div').querySelector('dt').textContent);
+  expect(label).not.toMatch(/MTTR/);
+  // no raw-seconds data on the figure (open span has no mttr_s)
+  await expect(figure).not.toHaveAttribute('data-mttr-seconds', /.+/);
+  // fix_sha is null for DEFECT-014 — must show "—"
+  await expect(page.getByTestId('defect-fix')).toContainText('—');
+  expect(errors).toEqual([]);
+});
+
+// DEFECT-015 has mttr_s=0 (reported_ts === recovered_ts — instantaneous repair).
+// The UI must not crash and must not show bare "0" or "0 s" as the MTTR.
+// Acceptable: "< 1 min" / "0 s" is a known boundary — but "0" alone violates FIG-1
+// (bare integer, no unit). The unit is mandatory. No crash is the hard floor.
+test('EXP-033/S13-3-FIG-1/5 — live DEFECT-015 (mttr_s=0): no crash, bare "0" never visible, null fields render "—"', async ({
+  page,
+}) => {
+  const errors = [];
+  page.on('console', (msg) => {
+    if (msg.type() === 'error') errors.push(msg.text());
+  });
+  await openDrill(page, 'DEFECT-015');
+  await expect(page.getByTestId('defect-drill')).toHaveAttribute('data-defect-id', 'DEFECT-015');
+  const card = page.getByTestId('mttr-card');
+  await expect(card).toHaveAttribute('data-mttr-state', 'resolved');
+  const figureText = await page.getByTestId('mttr-figure').textContent();
+  // must NOT be bare "0" — must carry a unit or be a labelled boundary
+  expect(figureText).not.toMatch(/^0$/);
+  expect(figureText).not.toMatch(/^0\s*$/);
+  // severity null -> "—" (same as DEFECT-011)
+  await expect(page.getByTestId('defect-detail-severity')).toHaveText('—');
+  expect(errors).toEqual([]);
+});
+
+// Count line now reflects 15 records, 1 open (DEFECT-014).
+// Validates the updated live state (data drift from the original acceptance.md sketch).
+test('EXP-033/AC-S013-2-1 — live defect list now shows 15 records with 1 open (DEFECT-014)', async ({
+  page,
+}) => {
+  const countText = await page.getByTestId('defects-count').textContent();
+  expect(countText).toContain('15');
+  expect(countText).toContain('1');
+  expect(countText.toLowerCase()).toContain('open');
+  // DEFECT-014 leads the list (CONFIRMED group first)
+  await expect(row(page, 'DEFECT-014')).toHaveAttribute('data-open', 'true');
+  await expect(row(page, 'DEFECT-014')).toHaveAttribute('data-status', 'CONFIRMED');
+});

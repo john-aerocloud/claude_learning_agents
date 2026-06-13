@@ -1,11 +1,13 @@
-/* UC-S004-5 — MetricSource traceability reveal.
- * A small popover anchored under its metric figure. Hidden until the owning
+/* UC-S004-5 + DEFECT-014 — MetricSource traceability reveal.
+ * ONE composite popover per stage node (ui-designer ruling b), anchored under
+ * the node, containing a labelled SECTION per metric. Hidden until the owning
  * StageNode opens it (focus+Enter or hover); `[hidden]` removes it from layout
- * AND the a11y tree. The "↗ source" caption is a text+glyph affordance (never
- * colour-only). All tokens from tokens.css. */
+ * AND the a11y tree. The "↗ … source" captions are text+glyph affordances
+ * (never colour-only). All tokens from tokens.css. */
 
-.stage-metric,
-.inflight-badge {
+/* DEFECT-014 — the single panel anchors to the NODE (it used to anchor to each
+ * figure, which stacked four overlapping panels on node hover). */
+.stage-node {
   position: relative;
 }
 
@@ -13,14 +15,14 @@
   position: absolute;
   z-index: 5;
   /* UC-S014-1 — the reveal is a PASSIVE read-only tooltip: it must never
-   * intercept pointer events meant for interactive content beneath it (the
-   * node-hover opens every panel, and the dwell panel drops over the queue
-   * chips' steer buttons — a mouse user could not click them). */
+   * intercept pointer events meant for interactive content beneath it
+   * (e.g. the queue chips' steer buttons a mouse user clicks while the
+   * panel is open). */
   pointer-events: none;
   top: calc(100% + 4px);
   left: 0;
   min-width: 180px;
-  max-width: 320px;
+  max-width: 360px;
   background: var(--c-surface-raised, #fff);
   color: var(--c-text);
   border: 1px solid var(--c-source-link, var(--c-border));
@@ -33,6 +35,17 @@
 
 .metric-source[hidden] {
   display: none;
+}
+
+/* DEFECT-014 — one provenance section per metric inside the single panel. */
+.metric-source__section {
+  display: block;
+}
+
+.metric-source__section + .metric-source__section {
+  margin-top: var(--sp-2, 8px);
+  padding-top: var(--sp-2, 8px);
+  border-top: 1px solid var(--c-border);
 }
 
 .metric-source__caption {

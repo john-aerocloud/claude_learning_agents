@@ -162,8 +162,9 @@ describe('ValueStreamMap render (UC-S004-2/3/4)', () => {
     expect(screen.getByRole('region', { name: /value-stream map/i })).toBeInTheDocument();
     const nodes = document.querySelectorAll('[data-testid^="stage-"]');
     expect(nodes.length).toBe(10);
-    // all four "0" figures still present on each node; no in-flight badge anywhere
-    expect(within(screen.getByTestId('stage-engineer')).getByTestId('metric-engineer-throughput')).toHaveTextContent('0');
+    // all four zero figures still present on each node; no in-flight badge anywhere
+    // (DEFECT-014: the raw count lives in the node panel's throughput summary)
+    expect(within(screen.getByTestId('stage-engineer')).getByTestId('metric-source-summary-engineer-throughput')).toHaveTextContent('0 items');
     expect(document.querySelectorAll('[data-testid^="inflight-"]').length).toBe(0);
   });
 

@@ -10,15 +10,17 @@
 // focused, separately-testable unit (parallel-safe: this file + MetricSource.jsx
 // are owned by UC-S004-5; VsmContainer.jsx is owned by UC-S004-6 and untouched).
 //
-// TRACEABILITY UX (acceptance.md UC-S004-5 + A11Y-8/10): the node is the single
-// focusable tab stop (A11Y-3 keeps Tab visiting nodes in flow order — we add NO
-// per-metric tab stops). Focusing the node and pressing Enter (or hovering it)
-// REVEALS each figure's source panel; Esc dismisses. Every figure value is wired
-// to its source panel via aria-describedby (A11Y-10). value>0 → real ledger row
-// refs; value=0 → "no events recorded" (AC5.3), never blank/broken.
+// TRACEABILITY UX (acceptance.md UC-S004-5 + A11Y-8/10 + DEFECT-014): the node
+// is the single focusable tab stop (A11Y-3 keeps Tab visiting nodes in flow
+// order — we add NO per-metric tab stops). Focusing the node and pressing Enter
+// (or hovering it) REVEALS the ONE composite source panel — all four metrics
+// sectioned inside it (DEFECT-014 ruling b; never four stacked overlays); Esc
+// dismisses. Every figure value is wired to its provenance section via
+// aria-describedby (A11Y-10). value>0 → real ledger event lines; value=0 →
+// "no events recorded" (AC5.3), never blank/broken.
 
 import { useState } from 'preact/hooks';
-import { MetricSource } from './MetricSource.jsx';
+import { MetricSourcePanel, MetricSourceSection } from './MetricSource.jsx';
 import { SteerMenu } from './SteerMenu.jsx';
 import './value-stream-map.css';
 
@@ -97,10 +99,11 @@ export function sourceAttr(sourceRows) {
   return 'no events recorded';
 }
 
-/** A single labelled figure (label + value) + its MetricSource traceability
- * reveal. Never a bare number (AC3.1). The value is wired to its source panel
- * via aria-describedby (A11Y-10) and carries the programmatic data-source (SRC-1). */
-function StageMetric({ stage, kind, label, value, sourceRows, sourceEvents, sourceTotal, summary, open }) {
+/** A single labelled figure (label + value). Never a bare number (AC3.1). The
+ * value is wired to its provenance SECTION in the node's single MetricSourcePanel
+ * via aria-describedby (A11Y-10, DEFECT-014) and carries the programmatic
+ * data-source (SRC-1). */
+function StageMetric({ stage, kind, label, value, sourceRows }) {
   const panelId = `src-${stage}-${kind}`;
   return (
     <div class="stage-metric" data-testid={`metric-${stage}-${kind}`}>
@@ -114,24 +117,15 @@ function StageMetric({ stage, kind, label, value, sourceRows, sourceEvents, sour
       >
         {value}
       </dd>
-      <MetricSource
-        id={panelId}
-        stage={stage}
-        kind={kind}
-        sourceEvents={sourceEvents}
-        sourceTotal={sourceTotal}
-        sourceRows={sourceRows}
-        summary={summary}
-        open={open}
-      />
     </div>
   );
 }
 
 /** The prominent non-colour-redundant in-flight indicator (replaces the plain
- * WIP metric when wip>0). Visible text "● N in-flight"; glyph aria-hidden. It
- * ALSO carries the wip MetricSource reveal so the operator can trace WIP. */
-function InFlightBadge({ stage, count, sourceRows, sourceEvents, sourceTotal, open }) {
+ * WIP metric when wip>0). Visible text "● N in-flight"; glyph aria-hidden. Its
+ * aria-describedby points at the wip SECTION of the node's single panel
+ * (DEFECT-014) so the operator can still trace WIP. */
+function InFlightBadge({ stage, count, sourceRows }) {
   const panelId = `src-${stage}-wip`;
   return (
     <div
@@ -144,7 +138,6 @@ function InFlightBadge({ stage, count, sourceRows, sourceEvents, sourceTotal, op
     >
       <span class="inflight-badge__glyph" aria-hidden="true">●</span>
       <span>{count} in-flight</span>
-      <MetricSource id={panelId} stage={stage} kind="wip" sourceEvents={sourceEvents} sourceTotal={sourceTotal} sourceRows={sourceRows} open={open} />
     </div>
   );
 }
@@ -153,7 +146,7 @@ function InFlightBadge({ stage, count, sourceRows, sourceEvents, sourceTotal, op
  * labelled "Depth" (NOT "WIP" — depth is sitting/waiting, WIP is in-flight) plus
  * each queued item's id + humanised accruing wait. First 3 items, then "+N more";
  * the depth badge always shows the full count. queue_depth 0 → "0 queued", no rows. */
-function QueueDepth({ stage, depth, items, sourceRows, sourceEvents, sourceTotal, open, onSteer }) {
+function QueueDepth({ stage, depth, items, sourceRows, onSteer }) {
   const panelId = `src-${stage}-depth`;
   const list = Array.isArray(items) ? items : [];
   const shown = list.slice(0, MAX_QUEUE_ITEMS_SHOWN);
@@ -194,7 +187,6 @@ function QueueDepth({ stage, depth, items, sourceRows, sourceEvents, sourceTotal
           ) : null}
         </ul>
       ) : null}
-      <MetricSource id={panelId} stage={stage} kind="depth" sourceEvents={sourceEvents} sourceTotal={sourceTotal} sourceRows={sourceRows} open={open} />
     </div>
   );
 }
@@ -235,8 +227,10 @@ export function StageNode({ data, onSteer }) {
   const coherenceReasons = Array.isArray(coherence_warnings) ? coherence_warnings : [];
   const coherenceMismatch = coherence_warning === true || coherenceReasons.length > 0;
 
-  // The reveal is node-scoped: focus+Enter or hover OPENS all four source panels
-  // for this node; Esc or mouse-leave CLOSES them (A11Y-10 dismissible).
+  // The reveal is node-scoped: focus+Enter or hover OPENS the ONE composite
+  // source panel for this node (DEFECT-014 — all four metrics sectioned inside
+  // it, never four stacked overlays); Esc, mouse-leave or blur CLOSES it
+  // (A11Y-10 dismissible).
   const [open, setOpen] = useState(false);
 
   const onKeyDown = (e) => {
@@ -297,15 +291,27 @@ export function StageNode({ data, onSteer }) {
         </p>
       ) : null}
       <dl class="stage-figs">
-        <StageMetric stage={stage} kind="throughput" label="Throughput" value={throughputText} sourceRows={source_rows} sourceEvents={source_events} sourceTotal={source_total} summary={throughputSummary} open={open} />
-        <StageMetric stage={stage} kind="dwell" label="Dwell" value={dwell} sourceRows={source_rows} sourceEvents={source_events} sourceTotal={source_total} open={open} />
+        <StageMetric stage={stage} kind="throughput" label="Throughput" value={throughputText} sourceRows={source_rows} />
+        <StageMetric stage={stage} kind="dwell" label="Dwell" value={dwell} sourceRows={source_rows} />
         {isQueue
-          ? <QueueDepth stage={stage} depth={depth} items={queue_items} sourceRows={source_rows} sourceEvents={source_events} sourceTotal={source_total} open={open} onSteer={onSteer} />
+          ? <QueueDepth stage={stage} depth={depth} items={queue_items} sourceRows={source_rows} onSteer={onSteer} />
           : wipActive
-            ? <InFlightBadge stage={stage} count={wip} sourceRows={source_rows} sourceEvents={source_events} sourceTotal={source_total} open={open} />
-            : <StageMetric stage={stage} kind="wip" label="WIP" value={String(wip)} sourceRows={source_rows} sourceEvents={source_events} sourceTotal={source_total} open={open} />}
-        <StageMetric stage={stage} kind="rework" label="Rework" value={reworkText} sourceRows={source_rows} sourceEvents={source_events} sourceTotal={source_total} open={open} />
+            ? <InFlightBadge stage={stage} count={wip} sourceRows={source_rows} />
+            : <StageMetric stage={stage} kind="wip" label="WIP" value={String(wip)} sourceRows={source_rows} />}
+        <StageMetric stage={stage} kind="rework" label="Rework" value={reworkText} sourceRows={source_rows} />
       </dl>
+      {/* DEFECT-014 — ONE node-scoped composite source panel (ui-designer
+          ruling b): all four metrics sectioned inside a single overlay; each
+          section keeps the per-kind id its metric value points at via
+          aria-describedby, so the value→provenance wiring is unchanged. */}
+      <MetricSourcePanel id={`src-${stage}`} stage={stage} open={open}>
+        <MetricSourceSection id={`src-${stage}-throughput`} stage={stage} kind="throughput" label="Throughput" sourceEvents={source_events} sourceTotal={source_total} summary={throughputSummary} />
+        <MetricSourceSection id={`src-${stage}-dwell`} stage={stage} kind="dwell" label="Dwell" sourceEvents={source_events} sourceTotal={source_total} />
+        {isQueue
+          ? <MetricSourceSection id={`src-${stage}-depth`} stage={stage} kind="depth" label="Depth" sourceEvents={source_events} sourceTotal={source_total} />
+          : <MetricSourceSection id={`src-${stage}-wip`} stage={stage} kind="wip" label="WIP" sourceEvents={source_events} sourceTotal={source_total} />}
+        <MetricSourceSection id={`src-${stage}-rework`} stage={stage} kind="rework" label="Rework" sourceEvents={source_events} sourceTotal={source_total} />
+      </MetricSourcePanel>
     </div>
   );
 }

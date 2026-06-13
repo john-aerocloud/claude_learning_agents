@@ -31,7 +31,7 @@ describe('VsmContainer (UC-S004-2/6)', () => {
     const loadFlow = vi.fn().mockResolvedValue(flow);
     render(<VsmContainer loadFlow={loadFlow} subscribe={() => () => {}} />);
     await waitFor(() => {
-      expect(within(screen.getByTestId('stage-engineer')).getByTestId('metric-engineer-throughput')).toHaveTextContent('7');
+      expect(within(screen.getByTestId('stage-engineer')).getByTestId('metric-source-summary-engineer-throughput')).toHaveTextContent('7 items');
     });
     // the in-flight badge for the wip>0 stage is visible — pulled work not invisible
     expect(within(screen.getByTestId('stage-engineer')).getByTestId('inflight-engineer')).toHaveTextContent(/2 in-flight/i);
@@ -55,11 +55,11 @@ describe('VsmContainer (UC-S004-2/6)', () => {
       .mockResolvedValueOnce(flow.map((s) => (s.stage === 'engineer' ? { ...s, throughput: 8 } : s)));
     render(<VsmContainer loadFlow={loadFlow} subscribe={subscribe} debounceMs={0} />);
     await waitFor(() => {
-      expect(within(screen.getByTestId('stage-engineer')).getByTestId('metric-engineer-throughput')).toHaveTextContent('7');
+      expect(within(screen.getByTestId('stage-engineer')).getByTestId('metric-source-summary-engineer-throughput')).toHaveTextContent('7 items');
     });
     handler({ type: 'change', path: 'process/dora/ledger.csv' });
     await waitFor(() => {
-      expect(within(screen.getByTestId('stage-engineer')).getByTestId('metric-engineer-throughput')).toHaveTextContent('8');
+      expect(within(screen.getByTestId('stage-engineer')).getByTestId('metric-source-summary-engineer-throughput')).toHaveTextContent('8 items');
     });
   });
 
@@ -152,7 +152,7 @@ describe('VsmContainer (UC-S004-2/6)', () => {
       .mockResolvedValueOnce(flow.map((s) => (s.stage === 'engineer' ? { ...s, throughput: 9 } : s)));
     render(<VsmContainer loadFlow={loadFlow} subscribe={subscribe} />);
     await waitFor(() => {
-      expect(within(screen.getByTestId('stage-engineer')).getByTestId('metric-engineer-throughput')).toHaveTextContent('7');
+      expect(within(screen.getByTestId('stage-engineer')).getByTestId('metric-source-summary-engineer-throughput')).toHaveTextContent('7 items');
     });
 
     // drop, then reconnect
@@ -162,7 +162,7 @@ describe('VsmContainer (UC-S004-2/6)', () => {
 
     // self-heals: re-fetch ran, numbers updated, stale cleared, dot back to live
     await waitFor(() => {
-      expect(within(screen.getByTestId('stage-engineer')).getByTestId('metric-engineer-throughput')).toHaveTextContent('9');
+      expect(within(screen.getByTestId('stage-engineer')).getByTestId('metric-source-summary-engineer-throughput')).toHaveTextContent('9 items');
     });
     expect(screen.getByTestId('value-stream-map')).toHaveAttribute('data-stale', 'false');
     expect(screen.getByTestId('live-status')).toHaveAttribute('data-state', 'connected');

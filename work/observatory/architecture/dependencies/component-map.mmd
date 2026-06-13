@@ -345,7 +345,9 @@ graph LR
   %% DEFECT-006 FIXED — DetailPane floating-drawer re-point delivered as part of s005 (CHK-4 done 2026-06-10T19:00:00Z).
   %% All of the above: s003-changed, s004changed, defect006changed marks cleared at their delivery.
   %% (ValueStreamMap moved to def012changed below — DEFECT-012 queue-lane re-route.)
-  class PipelineMapScreen,PipelineMap,QueueBox,BufferStateIndicator,ConstraintBadge,FlowArrow,LiveStatusDot,DoraPanelScreen,DoraPanel,MetricCard,StageCardGrid,StageCard,TimeThiefView,SourceLink,ValueStreamScreen,VsmContainer,StageMetric,InFlightBadge,GateMarker,ReworkLoopConnector,DetailPane,ObservatoryDrawerLayer delivered;
+  %% (StageMetric/InFlightBadge moved to def014changed below — per-figure
+  %% MetricSource render removed, aria-describedby now targets the shared panel's sections.)
+  class PipelineMapScreen,PipelineMap,QueueBox,BufferStateIndicator,ConstraintBadge,FlowArrow,LiveStatusDot,DoraPanelScreen,DoraPanel,MetricCard,StageCardGrid,StageCard,TimeThiefView,SourceLink,ValueStreamScreen,VsmContainer,GateMarker,ReworkLoopConnector,DetailPane,ObservatoryDrawerLayer delivered;
   %% s014 still in-flight: UC-S014-1+2 done but UC-S014-3/4 planned; SteerMenu+StageNode+TreeNode
   %% remain in blast radius for the remaining s014 UCs (prompt builder, clipboard/SSE).
   %% UC-S014-2 THIS commit: SteerPanel/SteerContextBlock/IntentNote/useSteerContext added;
@@ -364,7 +366,9 @@ graph LR
   %% UC-S015-4: PromptBuilder + SteerPromptTemplates MOVED to s015changed below
   %% (s014 delivered 2026-06-12T15:33Z; the re-slice template/builder extension
   %% is s015's change — tester test-plan input for THIS slice).
-  class SteerMenu,TreeNode,StageNode,SteerPanel,SteerContextBlock,IntentNote,UseSteerContext,PromptOutput,SubscribeEvents,CopyPromptButton,CopyToast,ContextRefreshCue s014changed;
+  %% (StageNode moved to def014changed below — s014 delivered 2026-06-12T15:33Z;
+  %% the composite source-panel reshape is DEF-014's change.)
+  class SteerMenu,TreeNode,SteerPanel,SteerContextBlock,IntentNote,UseSteerContext,PromptOutput,SubscribeEvents,CopyPromptButton,CopyToast,ContextRefreshCue s014changed;
   %% s015 / UC-S015-1 nodes added + VsmContainer re-pointed (conditional
   %% mount inside the pipeline tabpanel); UC-S015-2 adds the SteerMenu --> WipRow
   %% edge (trailing steer composition; SteerMenu joins the s015 blast radius —
@@ -414,3 +418,24 @@ graph LR
   %% consumes. (Separate class statement — parallel UC commits do not collide.)
   classDef s018changed fill:#d6f0ff,stroke:#1c7ed6,color:#000;
   class IntakeLauncher,IntakeWizard,WizardStepIndicator,JtbdFields,JobSentencePreview,WizardStepNav,JobSentenceLib s018changed;
+
+  %% DEFECT-014 THIS commit — node hover/focus+Enter used to open FOUR per-figure
+  %% MetricSource panels in an overlapping stack; ui-designer ruling (b): ONE
+  %% node-scoped composite panel with the four metrics SECTIONED. MetricSource.jsx
+  %% split into MetricSourcePanel (role=tooltip container, hidden from node `open`,
+  %% data-testid="metric-source-<stage>", pointer-events:none) + MetricSourceSection
+  %% (the old per-kind body; KEEPS data-testid="metric-source-<stage>-<kind>" and
+  %% the src-<stage>-<kind> id the metric values' aria-describedby points at).
+  %% EDGES REDIRECTED: StageMetric/InFlightBadge/QueueDepth --> MetricSource removed
+  %% (per-figure render gone); StageNode --> MetricSourcePanel added (one per node,
+  %% sibling of the figures list). Interaction state (hover/Enter/Space open;
+  %% Esc/leave/blur close; data-source-open attr) UNCHANGED at node level.
+  %% Tester selectors: metric-source-<stage> = the one panel; per-kind section,
+  %% source-file/source-event/summary selectors all unchanged. Tester UI
+  %% test-plan input; cleared at DEF-014 closure after the tester consumes.
+  MetricSourcePanel["MetricSourcePanel (DEFECT-014: the ONE node-scoped role=tooltip overlay — was four per-figure panels)"]
+  MetricSourceSection["MetricSourceSection (DEFECT-014: per-kind provenance body — keeps the old metric-source-<stage>-<kind> selectors + aria-describedby target ids)"]
+  MetricSourcePanel --> StageNode
+  MetricSourceSection --> MetricSourcePanel
+  classDef def014changed fill:#ffe3f0,stroke:#c2185b,color:#000;
+  class StageNode,StageMetric,InFlightBadge,MetricSourcePanel,MetricSourceSection def014changed;

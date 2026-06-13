@@ -1,26 +1,37 @@
-// UC-S004-5 + DEFECT-005 — the metric TRACEABILITY reveal (components.md MetricSource).
+// UC-S004-5 + DEFECT-005 + DEFECT-014 — the metric TRACEABILITY reveal
+// (components.md MetricSource).
 //
-// HEXAGONAL ROLE: pure render. Given a metric's contributing ledger EVENTS
-// (source_events from the UC-S004-1 endpoint), it renders a role="tooltip" panel
-// the operator opens (focus+Enter or hover on the owning node) to see WHERE the
-// number came from in HUMAN-READABLE form — so they can open ledger.csv and
-// verify the claim independently (SM3 traceability).
+// HEXAGONAL ROLE: pure render. Given each metric's contributing ledger EVENTS
+// (source_events from the UC-S004-1 endpoint), it renders the role="tooltip"
+// panel the operator opens (focus+Enter or hover on the owning node) to see
+// WHERE the numbers came from in HUMAN-READABLE form — so they can open
+// ledger.csv and verify the claim independently (SM3 traceability).
 //
-// DEFECT-005: the reveal previously dumped raw "row:N" CSV line indices —
-// meaningless to a human. It now renders each contributing event as a readable
-// line "HH:MM · <agent> · <event> · <item_id>", names the source file, and caps
-// the visible list to the most recent few + "…and N more" so a busy stage
-// (85 engineer task_starts) does not dump 85 lines.
+// DEFECT-014 (ui-designer ruling, option b): the reveal was rendered ONCE PER
+// FIGURE — node hover opened FOUR absolutely-positioned panels in an
+// overlapping stack. It is now split into:
+//   - MetricSourcePanel  — the ONE node-scoped overlay container
+//     (role="tooltip", `hidden` from `open`, data-testid="metric-source-<stage>",
+//     pointer-events:none via .metric-source). StageNode renders exactly one.
+//   - MetricSourceSection — the old per-kind body (caption/file/summary/events/
+//     empty), one per metric INSIDE the panel. It keeps the per-kind
+//     data-testid "metric-source-<stage>-<kind>" and the `src-<stage>-<kind>`
+//     id the metric value's aria-describedby points at — the value→provenance
+//     wiring and all existing tester selectors survive unchanged.
 //
-// CONTRACT (acceptance.md UC-S004-5 + A11Y-10):
-//   - role="tooltip", referenced by its metric value via aria-describedby (the
-//     `id` prop matches the metric's aria-describedby).
-//   - value>0 → readable event lines (NOT row:N), behind a visible "↗ source"
-//     caption (text + glyph, never colour-only — reuses the s003 SourceLink convention).
+// DEFECT-005: each contributing event renders as a readable line
+// "HH:MM · <agent> · <event> · <item_id>", names the source file, and caps the
+// visible list to the most recent few + "…and N more".
+//
+// CONTRACT (acceptance.md UC-S004-5 + A11Y-10 + DEFECT-014 D14-AC-1..6):
+//   - the PANEL has role="tooltip"; each metric value references its SECTION
+//     via aria-describedby (the section `id` prop).
+//   - value>0 → readable event lines (NOT row:N) behind a visible
+//     "↗ <Metric> source" caption (text + glyph, never colour-only).
 //   - value=0 (no events) → "no events recorded" (AC5.3), not blank/broken.
-//   - hidden until the owning node reveals it (`open`); dismissible via Esc /
-//     mouse-leave handled by the owning StageNode.
-//   - data-testid="metric-source-<stage>-<kind>" (stable selector); each line
+//   - the panel is hidden until the owning node reveals it (`open`);
+//     dismissible via Esc / mouse-leave / blur handled by the owning StageNode.
+//   - sections keep data-testid="metric-source-<stage>-<kind>"; each event line
 //     carries a data-source-row audit attribute.
 
 import './metric-source.css';
@@ -69,30 +80,57 @@ function auditRef(e) {
 }
 
 /**
+ * DEFECT-014 — the ONE node-scoped overlay container. StageNode renders exactly
+ * one per node (sibling of the figures list); the per-metric sections live
+ * inside it. `hidden` removes it from layout AND the a11y tree until the node
+ * opens it, so the open-node invariant is exactly-one-visible-tooltip.
+ *
+ * @param {{ id?: string; stage: string; open?: boolean; children: any }} props
+ */
+export function MetricSourcePanel({ id, stage, open, children }) {
+  return (
+    <div
+      id={id}
+      class="metric-source"
+      data-testid={`metric-source-${stage}`}
+      role="tooltip"
+      hidden={open ? undefined : true}
+    >
+      {children}
+    </div>
+  );
+}
+
+/**
+ * DEFECT-014 — one metric's provenance SECTION (the pre-014 panel body):
+ * labelled caption, source file, optional DEFECT-007 summary, readable event
+ * lines or the AC5.3 empty state. Carries the per-kind selectors and the id
+ * the metric value's aria-describedby points at.
+ *
  * @param {{
- *   id: string; stage: string; kind: string; open?: boolean;
+ *   id: string; stage: string; kind: string; label?: string;
  *   sourceEvents?: Array<{ts:string,agent:string,event:string,item_id:string,note?:string}>;
- *   sourceTotal?: number; sourceRows?: string[];
+ *   sourceTotal?: number; sourceRows?: string[]; summary?: string;
  * }} props
  */
-export function MetricSource({ id, stage, kind, sourceEvents, sourceTotal, summary, open }) {
+export function MetricSourceSection({ id, stage, kind, label, sourceEvents, sourceTotal, summary }) {
   const events = Array.isArray(sourceEvents) ? sourceEvents.filter(Boolean) : [];
   const total = Number.isFinite(sourceTotal) ? sourceTotal : events.length;
   const hasEvents = events.length > 0;
   const shown = events.slice(0, MAX_EVENTS_SHOWN);
   const moreCount = Math.max(total - shown.length, 0);
+  const caption = label ? `${label} source` : 'source';
 
   return (
-    <div
+    <section
       id={id}
-      class="metric-source"
+      class="metric-source__section"
       data-testid={`metric-source-${stage}-${kind}`}
-      role="tooltip"
-      hidden={open ? undefined : true}
+      aria-label={caption}
     >
       <span class="metric-source__caption">
         <span class="metric-source__glyph" aria-hidden="true">↗</span>
-        <span>source</span>
+        <span>{caption}</span>
       </span>
       <span class="metric-source__file" data-testid={`source-file-${stage}-${kind}`}>
         {SOURCE_FILE}
@@ -130,6 +168,6 @@ export function MetricSource({ id, stage, kind, sourceEvents, sourceTotal, summa
       ) : (
         <span class="metric-source__empty">no events recorded</span>
       )}
-    </div>
+    </section>
   );
 }

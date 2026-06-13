@@ -8,19 +8,32 @@
 //   - names the source file "process/dora/ledger.csv" at the top of the reveal
 //   - many events → shows MAX_EVENTS_SHOWN most recent + "…and N more"
 //   - value=0 / no events → "no events recorded" (AC5.3 preserved)
-//   - keeps role="tooltip" + a per-line data-source-row audit attribute
+//   - keeps role="tooltip" (DEFECT-014: on the node-scoped PANEL container)
+//     + a per-line data-source-row audit attribute
+//
+// DEFECT-014: MetricSource split into MetricSourcePanel (the ONE node-scoped
+// role=tooltip container) + MetricSourceSection (the per-kind body these pins
+// target — it keeps the metric-source-<stage>-<kind> testid and content).
 import { describe, it, expect } from 'vitest';
 import { render, screen, within } from '@testing-library/preact';
-import { MetricSource } from '../MetricSource.jsx';
+import { MetricSourcePanel, MetricSourceSection } from '../MetricSource.jsx';
 
 const events = [
   { ts: '2026-06-09T14:36:00Z', agent: 'engineer', event: 'stage_exit', item_id: 'UC-S001-1' },
   { ts: '2026-06-09T15:10:00Z', agent: 'engineer', event: 'task_start', item_id: 'UC-S002-3' },
 ];
 
-function renderSource(props) {
+function renderSource(props, panelProps = { open: true }) {
   return render(
-    <MetricSource id="src-engineer-throughput" stage="engineer" kind="throughput" open {...props} />,
+    <MetricSourcePanel id="src-engineer" stage="engineer" {...panelProps}>
+      <MetricSourceSection
+        id="src-engineer-throughput"
+        stage="engineer"
+        kind="throughput"
+        label="Throughput"
+        {...props}
+      />
+    </MetricSourcePanel>,
   );
 }
 
@@ -75,11 +88,12 @@ describe('MetricSource readable traceability (DEFECT-005)', () => {
     expect(panel).toHaveTextContent(/no events recorded/i);
   });
 
-  it('keeps role="tooltip" and a per-line data-source-row audit attribute', () => {
+  it('keeps role="tooltip" (on the DEFECT-014 panel) and a per-line data-source-row audit attribute', () => {
     renderSource({ sourceEvents: events, sourceTotal: 2 });
-    const panel = screen.getByTestId('metric-source-engineer-throughput');
+    const panel = screen.getByTestId('metric-source-engineer');
     expect(panel).toHaveAttribute('role', 'tooltip');
-    const lines = within(panel).getAllByTestId('source-event');
+    const section = screen.getByTestId('metric-source-engineer-throughput');
+    const lines = within(section).getAllByTestId('source-event');
     lines.forEach((l) => expect(l.getAttribute('data-source-row')).toBeTruthy());
   });
 
@@ -137,11 +151,10 @@ describe('MetricSource readable traceability (DEFECT-005)', () => {
     expect(ref).not.toMatch(/\brow:\d+/);
   });
 
-  it('stays hidden until open', () => {
-    const { container } = render(
-      <MetricSource id="x" stage="engineer" kind="throughput" sourceEvents={events} sourceTotal={2} />,
-    );
-    expect(container.querySelector('[data-testid="metric-source-engineer-throughput"]')).toHaveAttribute('hidden');
+  it('stays hidden until open (DEFECT-014: the panel container carries hidden)', () => {
+    const { container } = renderSource({ sourceEvents: events, sourceTotal: 2 }, { open: false });
+    expect(container.querySelector('[data-testid="metric-source-engineer"]')).toHaveAttribute('hidden');
+    expect(container.querySelector('[data-testid="metric-source-engineer-throughput"]')).not.toBeVisible();
   });
 
   it('never leaks row:N even if only the legacy source_rows shape is passed (defensive)', () => {

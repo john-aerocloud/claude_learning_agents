@@ -59,11 +59,13 @@ describe('StageNode metric traceability (UC-S004-5)', () => {
     metrics.forEach((m) => expect(m.getAttribute('data-source')).toBeTruthy());
   });
 
-  it('hides the source panels until revealed (no premature reveal)', () => {
+  it('hides the source panel until revealed (no premature reveal)', () => {
     renderNode(engineer);
-    // panels exist in the DOM for aria-describedby wiring but are hidden by default
-    const panel = screen.getByTestId('metric-source-engineer-throughput');
+    // DEFECT-014: the sections exist in the DOM for aria-describedby wiring but
+    // the ONE node-scoped container is hidden by default
+    const panel = screen.getByTestId('metric-source-engineer');
     expect(panel).toHaveAttribute('hidden');
+    expect(screen.getByTestId('metric-source-engineer-throughput')).not.toBeVisible();
   });
 
   it('each metric value is wired to its source panel via aria-describedby (A11Y-10)', () => {
@@ -99,18 +101,18 @@ describe('StageNode metric traceability (UC-S004-5)', () => {
     const node = screen.getByTestId('stage-engineer');
     node.focus();
     fireEvent.keyDown(node, { key: 'Enter' });
-    expect(screen.getByTestId('metric-source-engineer-throughput')).not.toHaveAttribute('hidden');
+    expect(screen.getByTestId('metric-source-engineer')).not.toHaveAttribute('hidden');
     fireEvent.keyDown(node, { key: 'Escape' });
-    expect(screen.getByTestId('metric-source-engineer-throughput')).toHaveAttribute('hidden');
+    expect(screen.getByTestId('metric-source-engineer')).toHaveAttribute('hidden');
   });
 
   it('reveals on hover (mouseenter) as an alternative to keyboard (AC5.1 click-or-hover)', () => {
     renderNode(engineer);
     const node = screen.getByTestId('stage-engineer');
     fireEvent.mouseEnter(node);
-    expect(screen.getByTestId('metric-source-engineer-throughput')).not.toHaveAttribute('hidden');
+    expect(screen.getByTestId('metric-source-engineer')).not.toHaveAttribute('hidden');
     fireEvent.mouseLeave(node);
-    expect(screen.getByTestId('metric-source-engineer-throughput')).toHaveAttribute('hidden');
+    expect(screen.getByTestId('metric-source-engineer')).toHaveAttribute('hidden');
   });
 
   it('shows "no events recorded" for a zero metric instead of a blank/broken panel (AC5.3)', () => {
@@ -124,7 +126,11 @@ describe('StageNode metric traceability (UC-S004-5)', () => {
 
   it('the source panel has role="tooltip" so it is announced as the metric description (A11Y-10)', () => {
     renderNode(engineer);
-    const panel = screen.getByTestId('metric-source-engineer-throughput');
+    // DEFECT-014: role=tooltip lives on the ONE node-scoped container; the
+    // per-kind sections inside it carry the aria-describedby target ids
+    const panel = screen.getByTestId('metric-source-engineer');
     expect(panel).toHaveAttribute('role', 'tooltip');
+    const section = screen.getByTestId('metric-source-engineer-throughput');
+    expect(panel.contains(section)).toBe(true);
   });
 });

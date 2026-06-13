@@ -174,7 +174,12 @@ graph TD
     SPA_ARTVIEW["src/app/src/components/ArtifactView.jsx — artifact render (UC-S005-4)<br/>marked: md→semantic HTML (h1/ul/table/code, no top-level <pre>); extracts fenced ```mermaid; .mmd→diagram via renderMmd port; fail-soft→'not yet available' / readable-text fallback; svg role=img+aria-label"]:::delivered
     SPA_MMDADAPTER["src/app/src/lib/mermaidRender.js — Mermaid ADAPTER (UC-S005-4)<br/>the ONLY importer of the concrete mermaid SDK; renderMermaidToSvg(code,id)->svg; securityLevel=strict; proven live in browser (jsdom can't lay out SVG)"]:::delivered
     SPA_HISTORY["src/app/src/components/ItemHistoryPanel.jsx — item ledger history (UC-S005-5)<br/>role=region aria-label Item history:id; role=list rows newest-first (HH:MM·agent·event·outcome, DEFECT-005 readable style, never row:N); empty→'no history'; GEO-S005-2 vertical stack"]:::delivered
-    SPA_VSMCTR["src/app/src/components/VsmContainer.jsx — value-stream map container (s004)<br/>DEF-012: also loads the staging buffer (getActive→getStagingQueue), re-fetches on a<br/>staging.csv SSE frame (isRelevantChange now ledger.csv OR staging.csv), passes staging→map<br/>DEF-013 (StageNode within the map): coherence_warnings reasons render verbatim on the stage<br/>box (role=status + data-coherence; boolean-only payload keeps the AC-6 queue-mismatch text)"]:::def013changed
+    %% DEF-014 (StageNode/MetricSource within the map): the per-figure source-panel
+    %% render collapsed to ONE node-scoped composite role=tooltip panel (sectioned per
+    %% metric; selectors/aria wiring preserved). Adapter-INTERNAL reshape — no module/
+    %% port seam or data-flow change at this level; the redirected component edges are
+    %% marked def014changed in component-map.mmd (tester test-plan input).
+    SPA_VSMCTR["src/app/src/components/VsmContainer.jsx — value-stream map container (s004)<br/>DEF-012: also loads the staging buffer (getActive→getStagingQueue), re-fetches on a<br/>staging.csv SSE frame (isRelevantChange now ledger.csv OR staging.csv), passes staging→map<br/>DEF-013 (StageNode within the map): coherence_warnings reasons render verbatim on the stage<br/>box (role=status + data-coherence; boolean-only payload keeps the AC-6 queue-mismatch text)<br/>DEF-014 (StageNode within the map): ONE composite MetricSource panel per node — see component-map"]:::def013changed
 
     SPA_MAIN -->|mounts observatory view| SPA_OBSVIEW
     SPA_OBSVIEW -->|controlled selectedId/onSelect/onItemsLoaded| SPA_TREECTR

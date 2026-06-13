@@ -5,9 +5,12 @@
 // getDefects) into the grouped DefectVM[] the presentational DefectsPanel
 // renders. The composition (composeDefects) and the MTTR humanisation
 // (formatMttr) are PURE DOMAIN — no fetch, no DOM — exported for direct unit
-// testing; the hook adds only fetch state. SSE live refresh is UC-S013-4 (the
-// hook's refresh path is built so that wiring lands without a remount — the
-// panel's heading focus must not be stolen, mirroring useWipItems).
+// testing; the hook adds only fetch/SSE state. SSE live refresh (UC-S013-4)
+// is the useWipItems debounced subscribeEvents→re-fetch idiom: relevant frames
+// are defects/*.md AND ledger.csv (MTTR is a ledger join — a recovery row
+// landing must refresh the list); the refresh is IN-PLACE (no remount, no
+// loading flash — the panel's heading focus is never stolen); fail-soft when
+// EventSource is absent (jsdom) — static data, no crash.
 //
 // FIGURE LEGIBILITY (S13-2-FIG-1/2/4/5):
 //   - mttrText carries a time unit ("13 min" / "1 h 21 min" / "53 s"), never a
@@ -24,10 +27,12 @@
 // GROUPING (GEO-S013-2-4 order source): CONFIRMED (open) first, then CLOSED;
 // each group sorted id-ascending — in the HOOK so the panel stays presentational
 // (same discipline as useWipItems).
-import { useCallback, useEffect, useState } from 'preact/hooks';
-import { getActive, getDefects } from '../api/client.js';
+import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
+import { getActive, getDefects, subscribeEvents } from '../api/client.js';
 
 export const DEFECTS_SOURCE_REF = 'work/<project>/defects/ + process/dora/ledger.csv';
+
+const DEFAULT_DEBOUNCE_MS = 250;
 
 /**
  * Humanise an MTTR duration in SECONDS with a time unit (S13-2-FIG-1).
@@ -88,35 +93,85 @@ export function composeDefects(records) {
   return { openCount: defects.filter((d) => d.isOpen).length, defects };
 }
 
+/** Is this SSE change-frame path one that affects the defects list? The
+ * records are parsed from work/<project>/defects/*.md; reported/recovered
+ * timestamps and MTTR are a DORA-ledger join (UC-S013-1) — BOTH sources are
+ * relevant (S13-4-SSE-1; this differs from the items.csv-only steer hook). */
+function isRelevantChange(path) {
+  if (typeof path !== 'string') return false;
+  const p = path.replace(/\\/g, '/');
+  return /(^|\/)defects\/[^/]+\.md$/i.test(p) || /ledger\.csv$/i.test(p);
+}
+
 /**
  * The defects-list hook. Resolves the active project, loads the defect
- * records, and composes the grouped view-model. Loaders injectable for tests;
+ * records, composes the grouped view-model, and re-fetches (debounced) on a
+ * relevant SSE change frame — the data path behind the polite live-region
+ * count update (S13-2-A11Y-7 / UC-S013-4). Loaders injectable for tests;
  * defaults are the real API adapter (api/client.js).
  * @param {object} [opts]
  * @param {() => Promise<string|null>} [opts.loadActive]
  * @param {(project:string) => Promise<Array|null>} [opts.loadDefects]
+ * @param {(onChange:(evt:{type:string,path:string})=>void, o?:object) => (()=>void)} [opts.subscribe]
+ * @param {number} [opts.debounceMs]
  * @returns {{status:'loading'|'ready'|'empty', openCount:number, defects:Array, sourceRef:string}}
  */
-export function useDefects({ loadActive = getActive, loadDefects = getDefects } = {}) {
+export function useDefects({
+  loadActive = getActive,
+  loadDefects = getDefects,
+  subscribe = subscribeEvents,
+  debounceMs = DEFAULT_DEBOUNCE_MS,
+} = {}) {
   const [state, setState] = useState({ status: 'loading', openCount: 0, defects: [] });
 
+  // Latest loaders without re-subscribing the SSE channel on each render.
+  const loadersRef = useRef({ loadActive, loadDefects });
+  loadersRef.current = { loadActive, loadDefects };
+
   const refresh = useCallback(() => {
+    const { loadActive: la, loadDefects: ld } = loadersRef.current;
     return Promise.resolve()
-      .then(loadActive)
-      .then((project) => (project ? loadDefects(project) : null))
+      .then(la)
+      .then((project) => (project ? ld(project) : null))
       .then((records) => {
         const { openCount, defects } = composeDefects(records);
+        // IN-PLACE: ready→ready on refresh — no loading flash, no remount.
         setState({ status: defects.length > 0 ? 'ready' : 'empty', openCount, defects });
       })
       .catch(() => {
         // fail-soft (AC1.6 convention): unreachable API → labelled empty state
         setState((prev) => ({ ...prev, status: 'empty' }));
       });
-  }, [loadActive, loadDefects]);
+  }, []);
 
+  // Initial load.
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // SSE live refresh (UC-S013-4) — debounce a burst of change frames into one
+  // re-fetch (the useWipItems idiom).
+  useEffect(() => {
+    let timer = null;
+    let unsubscribe = null;
+    const onChange = (evt) => {
+      if (!evt || !isRelevantChange(evt.path)) return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        refresh();
+      }, debounceMs);
+    };
+    try {
+      unsubscribe = subscribe(onChange);
+    } catch {
+      unsubscribe = null; // no EventSource (jsdom) → static data, no crash
+    }
+    return () => {
+      if (timer) clearTimeout(timer);
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }, [subscribe, debounceMs, refresh]);
 
   return { ...state, sourceRef: DEFECTS_SOURCE_REF };
 }

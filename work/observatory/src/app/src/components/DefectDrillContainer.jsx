@@ -27,9 +27,25 @@ import { useLayoutEffect, useRef } from 'preact/hooks';
 import { createPortal } from 'preact/compat';
 import { DefectDetail } from './DefectDetail.jsx';
 import { MttrCard } from './MttrCard.jsx';
+import { ContextRefreshCue } from './ContextRefreshCue.jsx';
 import './defect-drill.css';
 
-function DefectDrill({ defect, onClose, now }) {
+// UC-S013-4 — the drill's record-freeze cue (EXP-036, the ContextRefreshCue
+// idiom, second consumer): the drawer renders a SNAPSHOT of the record taken
+// at activation; when an SSE refresh changes the record underneath, the
+// container flips refreshState to 'updated' and this cue announces it — the
+// content itself NEVER silently mutates. Re-activating the originating row
+// (already focused by the return-focus contract) is the explicit refresh.
+const DRILL_CUE_TEXTS = {
+  live: 'Live',
+  updated: 'Record updated — re-open to refresh',
+};
+const DRILL_CUE_LABELS = {
+  live: 'Defect record: live',
+  updated: 'Defect record: updated — re-open to refresh',
+};
+
+function DefectDrill({ defect, onClose, now, refreshState = 'live' }) {
   const headingRef = useRef(null);
   const returnFocusRef = useRef(null);
 
@@ -71,6 +87,12 @@ function DefectDrill({ defect, onClose, now }) {
         >
           {`${defect.id} — ${defect.title}`}
         </h2>
+        <ContextRefreshCue
+          state={refreshState}
+          testId="defect-drill-cue"
+          texts={DRILL_CUE_TEXTS}
+          labels={DRILL_CUE_LABELS}
+        />
       </div>
 
       <DefectDetail defect={defect} />
@@ -103,13 +125,25 @@ function DefectDrill({ defect, onClose, now }) {
 
 /**
  * @param {object} props
- * @param {object|null} props.defect - raw UC-S013-1 record; null = closed
+ * @param {object|null} props.defect - raw UC-S013-1 record (the activation
+ *   SNAPSHOT — the container freezes it; UC-S013-4); null = closed
  * @param {() => void} props.onClose
  * @param {number} [props.now] - injectable clock for the open elapsed figure
+ * @param {'live'|'updated'} [props.refreshState] - the EXP-036 record cue state
  */
-export function DefectDrillContainer({ defect, onClose, now }) {
+export function DefectDrillContainer({ defect, onClose, now, refreshState = 'live' }) {
   if (!defect) return null;
   // key by id: drilling straight from one defect to another remounts the
-  // drawer so the heading-focus contract holds per record
-  return <DefectDrill key={defect.id} defect={defect} onClose={onClose} now={now} />;
+  // drawer so the heading-focus contract holds per record. A same-id
+  // re-activation (the explicit refresh) updates props WITHOUT remounting —
+  // heading focus is not stolen.
+  return (
+    <DefectDrill
+      key={defect.id}
+      defect={defect}
+      onClose={onClose}
+      now={now}
+      refreshState={refreshState}
+    />
+  );
 }

@@ -300,6 +300,27 @@ graph LR
   DefectRow -->|"activation (click/Enter/Space) opens the drill"| DefectDrillContainer
   DefectDrillContainer --> DefectsPanel
 
+  %% s013 / UC-S013-4 THIS commit — SSE live refresh for the defects view
+  %% (slice FINAL UC). UseDefects (the UC-S013-2 hook, now surfaced as a node —
+  %% the SSE seam must be visible) gains the useWipItems DEBOUNCED
+  %% subscribeEvents → in-place refresh; RELEVANT frames are defects/*.md AND
+  %% ledger.csv (MTTR is a ledger join), unlike the items.csv-only steer hook.
+  %% Refresh is IN-PLACE (no remount/loading flash; the polite count line in
+  %% DefectsPanel is the announce slot). DRILL FREEZE (EXP-036, the
+  %% PROMPT-FREEZE idiom): DefectsPanelContainer snapshots {id,record} at
+  %% activation; on divergence the open drawer stays FROZEN and a
+  %% ContextRefreshCue (SECOND consumer — testId/wording now injectable,
+  %% steer defaults byte-identical) flips to 'updated' ("Record updated —
+  %% re-open to refresh"); content refreshes only on explicit row
+  %% re-activation; a refresh that DROPS the selected id closes the drill
+  %% gracefully. RUNTIME ROUTING for the tester: SSE frame → useDefects
+  %% re-fetch → list + count line update live; open drawer NEVER silently
+  %% mutates (defect-drill-cue is the divergence signal).
+  UseDefects["useDefects (s013 / UC-S013-2 hook: /defects → grouped DefectVM[]; UC-S013-4: debounced SSE re-fetch on defects md / ledger.csv frames)"]
+  DefectsPanel --> UseDefects
+  UseDefects --> SubscribeEvents
+  ContextRefreshCue -->|"defect-drill-cue (UC-S013-4: frozen-record divergence signal)"| DefectDrillContainer
+
   %% s018 / UC-S018-1 THIS commit: guided cost-of-delay intake — wizard SHELL +
   %% JTBD step 1. IntakeLauncher (NEW) is a persistent primary button in the
   %% .observatory-main-col header ROW beside the ViewSwitch tablist (OUTSIDE
@@ -368,7 +389,10 @@ graph LR
   %% is s015's change — tester test-plan input for THIS slice).
   %% (StageNode moved to def014changed below — s014 delivered 2026-06-12T15:33Z;
   %% the composite source-panel reshape is DEF-014's change.)
-  class SteerMenu,TreeNode,SteerPanel,SteerContextBlock,IntentNote,UseSteerContext,PromptOutput,SubscribeEvents,CopyPromptButton,CopyToast,ContextRefreshCue s014changed;
+  %% (ContextRefreshCue moved to s013changed below — s014 delivered
+  %% 2026-06-12T15:33Z; the additive testId/wording overrides are UC-S013-4's
+  %% change — second consumer, steer defaults byte-identical.)
+  class SteerMenu,TreeNode,SteerPanel,SteerContextBlock,IntentNote,UseSteerContext,PromptOutput,SubscribeEvents,CopyPromptButton,CopyToast s014changed;
   %% s015 / UC-S015-1 nodes added + VsmContainer re-pointed (conditional
   %% mount inside the pipeline tabpanel); UC-S015-2 adds the SteerMenu --> WipRow
   %% edge (trailing steer composition; SteerMenu joins the s015 blast radius —
@@ -390,7 +414,14 @@ graph LR
   %% UC-S013-3 THIS commit — DefectDrillContainer/DefectDetail/MttrCard added;
   %% DefectRow activation edge wired (the reserved drill slot). Tester UI
   %% test-plan input; cleared at s013 delivery after the tester consumes.
-  class DefectsViewScreen,DefectsPanel,DefectRow,DefectDrillContainer,DefectDetail,MttrCard s013changed;
+  %% UC-S013-4 THIS commit — UseDefects node surfaced + UseDefects -->
+  %% SubscribeEvents edge (debounced SSE in-place refresh, defects md +
+  %% ledger.csv frames); DefectsPanelContainer gained the activation-snapshot
+  %% freeze (EXP-036); ContextRefreshCue gained additive testId/wording
+  %% overrides (second consumer: defect-drill-cue) and joins the s013 blast
+  %% radius. Tester UI test-plan input; cleared at s013 delivery after the
+  %% tester consumes.
+  class DefectsViewScreen,DefectsPanel,DefectRow,DefectDrillContainer,DefectDetail,MttrCard,UseDefects,ContextRefreshCue s013changed;
   %% s015 / UC-S015-3 THIS commit — ReslicePreviewPanel/BeforeColumn/AfterColumn/
   %% UseReslicePreview added; the ObservatoryView re-slice dispatch branch
   %% RE-POINTED to ReslicePreviewPanel (SteerMenu -- re-slice --> ReslicePreviewPanel;

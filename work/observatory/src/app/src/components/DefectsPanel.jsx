@@ -220,13 +220,32 @@ export function DefectsPanel({
  * list hook already holds (pure projection, NO extra fetch; ui-design.md
  * build contract #1). ObservatoryView needs no change (the drawer is
  * body-portalled). If a refresh drops the selected id the drill closes
- * gracefully; an in-place update of the same id updates the open drawer
- * without remounting (the UC-S013-4 SSE slot).
+ * gracefully.
+ *
+ * UC-S013-4 FREEZE DISCIPLINE (EXP-036, the PROMPT-FREEZE idiom): the
+ * selection is a SNAPSHOT {id, record} taken at activation. An SSE refresh
+ * never silently mutates the open drawer — when the live record diverges from
+ * the snapshot the drill's cue flips to 'updated' ("Record updated — re-open
+ * to refresh") and the content stays frozen; an EXPLICIT re-activation of the
+ * row re-snapshots (same id → no remount, no focus steal). This is the
+ * smaller honest behaviour: no new interactive control — the originating row
+ * trigger (already focused by the return-focus contract) is the refresh
+ * affordance.
  */
 export function DefectsPanelContainer(props) {
   const state = useDefects(props);
-  const [selectedId, setSelectedId] = useState(null);
-  const selected = state.defects.find((d) => d.id === selectedId) || null;
+  const [selected, setSelected] = useState(null); // {id, record} activation snapshot
+  const live = selected ? state.defects.find((d) => d.id === selected.id) || null : null;
+  // graceful close when the refresh dropped the id (live=null → drill closed);
+  // stale when the live record's content diverged from the frozen snapshot.
+  const isStale =
+    !!(selected && live) &&
+    live.record !== selected.record &&
+    JSON.stringify(live.record) !== JSON.stringify(selected.record);
+  const select = (id) => {
+    const d = state.defects.find((x) => x.id === id);
+    setSelected(d ? { id, record: d.record } : null);
+  };
   return (
     <>
       <DefectsPanel
@@ -234,12 +253,13 @@ export function DefectsPanelContainer(props) {
         status={state.status}
         openCount={state.openCount}
         sourceRef={state.sourceRef}
-        onSelectDefect={setSelectedId}
-        activeDefectId={selected ? selectedId : null}
+        onSelectDefect={select}
+        activeDefectId={selected && live ? selected.id : null}
       />
       <DefectDrillContainer
-        defect={selected ? selected.record : null}
-        onClose={() => setSelectedId(null)}
+        defect={selected && live ? selected.record : null}
+        onClose={() => setSelected(null)}
+        refreshState={isStale ? 'updated' : 'live'}
       />
     </>
   );

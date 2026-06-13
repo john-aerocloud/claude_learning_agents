@@ -39,24 +39,35 @@ const GLYPH = {
 const STATES = new Set(['live', 'refreshing', 'updated']);
 
 /**
+ * UC-S013-4 ADDITIVE overrides: the idiom gained a second consumer (the
+ * defect drill's record-freeze cue), so testId + per-state wording are
+ * injectable. Defaults are byte-identical to the steer values — every
+ * UC-S014-4 pin holds untouched. The idiom invariants (visible text,
+ * aria-hidden glyph, polite status region, data-state colour band) are NOT
+ * overridable: they are the component.
  * @param {object} props
  * @param {'live'|'refreshing'|'updated'} [props.state='live']
+ * @param {string} [props.testId='steer-context-live']
+ * @param {Partial<Record<'live'|'refreshing'|'updated', string>>} [props.texts]
+ * @param {Partial<Record<'live'|'refreshing'|'updated', string>>} [props.labels]
  */
-export function ContextRefreshCue({ state = 'live' }) {
+export function ContextRefreshCue({ state = 'live', testId = 'steer-context-live', texts, labels }) {
   const safe = STATES.has(state) ? state : 'live'; // fail-soft, never blank
+  const text = (texts && texts[safe]) || TEXT[safe];
+  const label = (labels && labels[safe]) || LABEL[safe];
   return (
     <span
       class="context-refresh-cue"
-      data-testid="steer-context-live"
+      data-testid={testId}
       data-state={safe}
       role="status"
       aria-live="polite"
-      aria-label={LABEL[safe]}
+      aria-label={label}
     >
       <span class="context-refresh-cue__glyph" aria-hidden="true">
         {GLYPH[safe]}
       </span>
-      <span class="context-refresh-cue__label">{TEXT[safe]}</span>
+      <span class="context-refresh-cue__label">{text}</span>
     </span>
   );
 }

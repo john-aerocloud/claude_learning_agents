@@ -63,3 +63,44 @@ describe('ContextRefreshCue (UC-S014-4, EXP-036)', () => {
     expect(cue.textContent).toMatch(/live/i);
   });
 });
+
+// @covers uc-s013-4
+// UC-S013-4 — the cue idiom gets a SECOND consumer (the defect drill's
+// PROMPT-FREEZE-style record cue), so the component gains ADDITIVE overrides:
+// testId + per-state text/label wording. Defaults are byte-identical to the
+// steer values (every pin above stays green untouched) — one idiom, one
+// component, per-surface words.
+describe('ContextRefreshCue — per-consumer overrides (UC-S013-4)', () => {
+  it('testId + texts/labels overrides render the consumer wording; idiom invariants hold', () => {
+    render(
+      <ContextRefreshCue
+        state="updated"
+        testId="defect-drill-cue"
+        texts={{ updated: 'Record updated — re-open to refresh' }}
+        labels={{ updated: 'Defect record: updated — re-open to refresh' }}
+      />,
+    );
+    const cue = screen.getByTestId('defect-drill-cue');
+    expect(cue.getAttribute('data-state')).toBe('updated');
+    expect(cue.textContent).toMatch(/record updated — re-open to refresh/i);
+    expect(cue.getAttribute('aria-label')).toMatch(/defect record: updated/i);
+    // idiom invariants: polite status region + aria-hidden glyph (never colour-only)
+    expect(cue.getAttribute('role')).toBe('status');
+    expect(cue.getAttribute('aria-live')).toBe('polite');
+    expect(cue.querySelector('[aria-hidden="true"]')).not.toBeNull();
+  });
+
+  it('states NOT overridden fall back to the default wording (partial override is safe)', () => {
+    render(
+      <ContextRefreshCue
+        state="live"
+        testId="defect-drill-cue"
+        texts={{ updated: 'Record updated — re-open to refresh' }}
+      />,
+    );
+    const cue = screen.getByTestId('defect-drill-cue');
+    expect(cue.getAttribute('data-state')).toBe('live');
+    expect(cue.textContent).toMatch(/live/i);
+    expect(cue.getAttribute('aria-label')).toMatch(/item context: live/i);
+  });
+});

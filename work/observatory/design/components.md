@@ -949,3 +949,86 @@ SourceLink convention, the tree DEF glyph "⚠", and tree-state/space/spacing to
   ≥ 4.5:1 on `--c-surface-raised`; accessible name = composed band + reason.
 - **Library:** custom (token-based; reuses `--c-text`/`--c-text-dim`/`--fs-label`;
   band-tier accent reuses `--c-state-*`/`--c-tree-state-*` redundantly; no new token).
+
+## QueueRankStep  (s018 / UC-S018-3 — step-3 content: directional rank preview; mounts into IntakeWizard step-3 slot)
+- **Role:** the queue-rank preview surface that REPLACES the surviving
+  step-3 `wizard-step-placeholder` — renders a DIRECTIONAL rank sentence (or the
+  gated/loading/empty/error state) computed from the live items.csv vs the lifted
+  `codScore.token`. Pure render of `useQueueRank`'s fetch state + the lifted
+  `CodScore` + the `rankPreview` result. Owns no drawer/step-machine/fetch-logic
+  beyond the one hook call. Does NOT regress the UC-S018-1/2 shell contract.
+- **Props (pure render of):** `{ score }` (the lifted `CodScore`); calls
+  `useQueueRank()` internally (injectable for tests, the CodStep `score`-prop idiom).
+- **States (four textually-DISTINCT, FIG-S018-3-3):**
+  - **gated** (`score.complete === false`): a prompt to finish step 2
+    (`data-testid="rank-gated"`) — NEVER a fabricated rank.
+  - **loading** (`complete && status==='loading'`): "Reading the live queue…"
+    (`data-testid="rank-loading"`).
+  - **ready-populated** (`complete && status==='ready' && total>0`): the
+    directional rank sentence (`rank-preview`).
+  - **ready-empty** (`complete && status==='ready' && total===0`): the
+    empty-queue sentence ("The queue is currently empty — your item would be
+    next.", `rank-preview` + `data-rank-total="0"`) — a valid happy state.
+  - **error** (`complete && status==='error'`): fail-soft "Couldn't read the live
+    queue…" (`data-testid="rank-error"`) — never a fabricated rank, never blank.
+- **Selector:** region `getByRole('group', { name: /queue rank/i })`,
+  `data-testid="queue-rank-step"`, `aria-labelledby` → `<h3>`
+  `data-testid="rank-step-heading"` ("Queue rank") under the wizard `<h2>` (one
+  dialog; no nested dialog). Within-step tab order: region → Back → Next (the
+  sentence is `role=status`, not a tab stop).
+- **A11y (A11Y-S018-3-1..8):** `<h3>` under the wizard `<h2>` (no skipped level);
+  the rank sentence is a labelled status region; visible focus + ≥ 24px targets on
+  step nav; contrast ≥ 4.5:1; inherited shell focus/Esc/de-emphasis NOT regressed
+  (step 3 loses its "(soon)" tag, step 4 keeps it via the colour+size+text rule,
+  NEVER alpha).
+- **Geometry (GEO-S018-3-1/2/3):** step swap = zero external reflow (the fixed
+  drawer; map bbox + main-col scrollHeight byte-identical); content STACKS
+  (heading → sentence → nav, a column not a row); drawer stays on-screen.
+- **Library:** custom (token-based; reuses the CodScoreReadout/JobSentencePreview
+  status-line idiom + `--c-text`/`--c-text-dim`/`--fs-label`; no new token).
+
+## RankPreviewSentence  (s018 / UC-S018-3 — the directional rank figure; child of QueueRankStep)
+- **Role:** the live human directional sentence — the FIG surface of this UC.
+  Renders `rankPreview.sentence`: tier as a WORD ("HIGH value"), counts WITH the
+  unit "items", a plain-language placement hint (near the top/middle/bottom), and
+  ", alongside N at the same priority" when same-tier peers exist (so the counts
+  add up). Tier-word + count form — NEVER raw machine ids (an optional detail line
+  may name ids only for a ≤2 set AND with the human job sentence).
+- **Selector:** `data-testid="rank-preview"`; `role="status"` `aria-live="polite"`;
+  numeric cross-check hooks `data-rank-ahead` / `data-rank-behind` /
+  `data-rank-total` (the tester matches these against the live items.csv
+  comparison set; absent in the gated state).
+- **FIG legibility (S018-3-FIG-1..4):** has a unit ("ahead of 6 items"); tier as a
+  word not an enum; references human-meaningful (tier-words not raw ids);
+  empty/unknown ≠ zero ≠ broken (empty-queue sentence ≠ "ahead of 0 and behind 0",
+  error ≠ a 0-rank, gated ≠ a fabricated rank); counts add up
+  (`ahead + behind + alongside === total`).
+- **Library:** custom (token-based; the status-line idiom; no new token).
+
+## useQueueRank + queueRank  (s018 / UC-S018-3 — the slice's ONLY read call + the pure directional-rank fn)
+- **`useQueueRank` (`src/app/src/hooks/useQueueRank.js`):** the slice's FIRST and
+  ONLY network call — `getActive` + `getItems(project)` (the `useWipItems` loader
+  idiom; one GET `/api/projects/:id/items`, ZERO writes). Fetches on the hook's
+  MOUNT = step-3 entry (NOT on wizard open; an operator who cancels at step 1
+  issues zero calls). NO re-fetch on a tier change (the item set is stable; only
+  the local `codScore.token` changes, and the rank RE-DERIVES locally). Returns
+  `{status:'loading'|'ready'|'error', items}`; fail-soft → error (never a throw,
+  never a fabricated rank); `items===[]` is a valid `ready` (empty-queue), not an
+  error. Injectable loaders for unit testing.
+- **`rankPreview` (`src/app/src/lib/queueRank.js`, pure total fn):**
+  `rankPreview({token, items}) -> { complete, total, ahead, behind, alongside,
+  token, sentence, empty }`. Comparison set = non-terminal items
+  (`planned|unconfirmed|in-flight|active`; EXCLUDES `done`/`dropped`) — an exported
+  named predicate. Tier normaliser HIGH→3 / MED-HIGH→2.5 / MED→2 / LOW→1 /
+  blank-or-unknown→2 (MED-equivalent; counted not dropped — the real items.csv
+  carries `MED-HIGH` + blank values). `ahead`/`behind` = strictly-greater/lesser
+  ordinal counts; `alongside` = same-tier peers. `complete` (`token!=null`),
+  `empty` (`total===0`) gate the sentence form. `sentence` authored ONCE here so
+  the step-3 readout AND the UC-S018-4 prompt rank line read identically. Total
+  pure fn — no DOM, no fetch, never throws.
+- **Output contract (UC-S018-4 consumes):** the `RankPreview` is lifted to
+  `IntakeWizard` (beside `codScore`); `intakePromptBuilder` reads `rank.sentence`
+  verbatim for the prompt's rank line, OMITS it when `!rank.complete`, and uses the
+  empty-queue sentence when `rank.empty`. Discrete `ahead/behind/alongside/total/
+  token` available for recomposition.
+- **Library:** N/A (hook + pure module; renders via QueueRankStep / RankPreviewSentence).

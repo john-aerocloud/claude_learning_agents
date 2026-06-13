@@ -271,3 +271,165 @@ NOT regress. These conditions are step-2-specific.
   draft preserved AND, on returning to step 2, the previously chosen CoD signals
   (Value, Urgency, textareas) are still set — the wizard's lifted draft is
   retained while the drawer stays open (no reset on step navigation).
+
+---
+
+## UC-S018-3 — Queue-rank preview (THIS UC)
+
+The real `QueueRankStep` + `useQueueRank` hook + the pure `queueRank.js`
+directional-rank fn, replacing step-3's `wizard-step-placeholder`. Inherits the
+UC-S018-1/2 shell contract (drawer, focus/Esc, step machine, indicator +
+de-emphasis rule, nav, lifted CoD draft + `codScore`) — those conditions are NOT
+re-stated and MUST NOT regress. These conditions are step-3-specific.
+
+### Functional (from use-cases.md — restated for the tester)
+- AC-S018-3-1: the rank preview text contains a DIRECTIONAL count — "ahead of N
+  items" AND "behind M items" (tier-word form, e.g. "Your item (HIGH value)
+  would rank ahead of N items and behind M") where N and M are non-negative
+  integers matching the comparison-set (non-terminal items) counts from the live
+  items.csv. `data-rank-ahead="N"` / `data-rank-behind="M"` cross-check the text.
+- AC-S018-3-2: `useQueueRank` issues exactly ONE GET `/api/projects/:id/items`
+  (plus the active-project resolve) and ZERO write requests during the rank
+  preview — assert via a fetch/XHR spy: exactly one items GET, no write method.
+- AC-S018-3-3: changing the Value selector (step 2) from HIGH to LOW and
+  returning to step 3 updates the rank preview counts (ahead increases, behind
+  decreases) WITHOUT a page reload AND WITHOUT a second items GET (the rank is
+  re-derived from the already-fetched items; assert the GET count is still 1).
+- AC-S018-3-4: if the items endpoint returns an empty or header-only CSV
+  (`items === []`), the preview renders the empty-queue sentence gracefully
+  ("The queue is currently empty — your item would be next."), `data-rank-total="0"`,
+  NOT "ahead of 0 and behind 0", NOT an error, NOT blank.
+
+### Rank-fn output contract (RANK) — UI-designer co-authored
+- **RANK-S018-3-1 (shape):** `rankPreview({token, items})` returns
+  `{ complete, total, ahead, behind, alongside, token, sentence, empty }` —
+  `complete` boolean, `total`/`ahead`/`behind`/`alongside` non-negative ints,
+  `token` ∈ HIGH|MED|LOW|null, `sentence` string, `empty` boolean.
+- **RANK-S018-3-2 (totality / purity):** defined for every input including
+  `token===null`, `items===[]`, and records with unknown/blank `value` strings;
+  never throws; no DOM access; no network call (assert calling the fn issues no
+  fetch — it is pure).
+- **RANK-S018-3-3 (incomplete → gated, not a rank):** with `token===null`,
+  `complete===false`, `sentence===""`, and all counts 0 — the gated case yields
+  NO fabricated rank.
+- **RANK-S018-3-4 (counts add up):** `ahead + behind + alongside === total` for
+  every input (same-tier peers are counted as `alongside`, never silently dropped).
+- **RANK-S018-3-5 (comparison set = non-terminal):** the comparison set EXCLUDES
+  `done` and `dropped` items and INCLUDES `planned|unconfirmed|in-flight|active`;
+  assert `total` equals the count of non-terminal items in a fixed fixture (and
+  that adding a `done`/`dropped` row does not change `total`).
+- **RANK-S018-3-6 (tier normalisation — real-data nuance):** a backlog record
+  with `value="MED-HIGH"` ranks AHEAD of a MED wizard item and BEHIND a HIGH one;
+  a blank/unknown `value` is counted at the MED-equivalent ordinal (NOT dropped,
+  NOT treated as 0). Assert via a fixture containing a `MED-HIGH` and a blank-value
+  record.
+
+### Accessibility (AA) — UI-designer co-authored, tester-enforced
+- **A11Y-S018-3-1 (labelled status region):** the rank preview is a
+  `role="status"` `aria-live="polite"` element (`data-testid="rank-preview"`)
+  inside a `role="group"` (`data-testid="queue-rank-step"`) with an accessible
+  name matching `/queue rank/i` (`aria-labelledby` → the `<h3>`). Assert role +
+  aria-live attributes present and the group's accessible name.
+- **A11Y-S018-3-2 (heading order):** the QueueRankStep sub-heading is an `<h3>`
+  (`data-testid="rank-step-heading"`, "Queue rank") under the wizard's `<h2>` —
+  no skipped level introduced; axe `heading-order` passes.
+- **A11Y-S018-3-3 (within-step focus order):** forward Tab order within step 3 is
+  the rank-step region (the sentence is a `role=status`, not a tab stop) → Back →
+  Next. Assert the `document.activeElement` progression reaches Back then Next; the
+  rank sentence is NOT a focus stop.
+- **A11Y-S018-3-4 (visible focus):** the step-nav buttons (Back/Next) show a
+  visible `:focus-visible` indicator (`--focus-ring`); assert a non-empty computed
+  box-shadow/outline on focus.
+- **A11Y-S018-3-5 (target size):** the Back/Next buttons are ≥ 24×24 CSS px
+  (WCAG 2.2 §2.5.8); assert bounding-box width AND height ≥ 24.
+- **A11Y-S018-3-6 (contrast):** the rank sentence text is ≥ 4.5:1 on its surface
+  (`--c-surface-raised`); axe `color-contrast` passes for the rank preview and the
+  loading/empty/error/gated copy.
+- **A11Y-S018-3-7 (live announce, not spammed):** the rank sentence updates are
+  announced via the polite live region; a tier re-derivation flips the sentence at
+  most once per change (not per keystroke — only the discrete Value/Urgency choice
+  changes the tier). Assert `role=status` + `aria-live="polite"`.
+- **A11Y-S018-3-8 (shell contract NOT regressed):** the inherited UC-S018-1 e2e
+  a11y pin (planned-step de-emphasis = colour+size+text, NO alpha/opacity keyframe)
+  STILL passes with step 3 now built (step 3 loses its "(soon)" tag; step 4
+  remains planned and de-emphasised the same way).
+
+### Geometry / visual-structural correctness — tester-enforced via bbox/computed style
+- **GEO-S018-3-1 (step swap = zero external reflow):** advancing from step 2 to
+  step 3 (placeholder/CodStep → live QueueRankStep) changes only content INSIDE the
+  fixed drawer — the value-stream map bounding box AND `.observatory-main-col`
+  scrollHeight are BYTE-IDENTICAL before vs after the swap (the drawer is
+  `position:fixed`, zero flow height — same guard as GEO-S018-1-1/2-1). Assert
+  getBoundingClientRect equality of `[data-testid="value-stream-map"]` and
+  scrollHeight equality of `.observatory-main-col` across the step-2→step-3 swap.
+- **GEO-S018-3-2 (rank-step content stacks):** the rank-step content (heading →
+  sentence → any detail line → nav) STACKS vertically — top offsets strictly
+  increase, shared left offset (a column, not a row); assert monotonic tops +
+  shared left (the s002-line guard applied to step 3).
+- **GEO-S018-3-3 (drawer stays on-screen):** with step 3 live, the wizard's
+  bounding box still sits fully within the viewport (right edge ≤ innerWidth, no
+  document horizontal scrollbar).
+
+### Figure legibility (FIG) — the directional rank sentence
+- **FIG-S018-3-1 (directional sentence legibility):** with a chosen tier and a
+  populated backlog, the rank sentence contains the wizard item's tier as a WORD
+  (e.g. "HIGH value" / "MED value" / "LOW value"), the words "ahead of" AND
+  "behind", and the unit "items" on the counts; it contains NONE of "undefined",
+  "null", "NaN", and the counts are real integers (not bare unitless numbers).
+- **FIG-S018-3-2 (tier words, not enums; no raw ids):** the ahead/behind sets are
+  summarised by tier-word + count (or the directional count), NEVER by dumping
+  raw machine ids (no `UC-S018-x` / `row:N` token appears in the primary
+  sentence); if an optional detail line names items, it does so only for a small
+  set (≤ 2) AND with the human job sentence, never a bare id.
+- **FIG-S018-3-3 (loading ≠ empty ≠ error ≠ gated — distinct states):** the four
+  states render textually-DISTINCT copy with distinct testids:
+  `rank-loading` ("Reading the live queue…") ≠ the empty-queue `rank-preview`
+  sentence (`data-rank-total="0"`) ≠ `rank-error` (fail-soft "couldn't read the
+  live queue") ≠ `rank-gated` ("finish step 2"). Assert each state renders its own
+  copy and the others are absent. The gated state shows NO rank/number; the error
+  state shows NO fabricated rank; the empty state is NOT an error.
+- **FIG-S018-3-4 (counts add up / empty ≠ zero):** when populated,
+  `data-rank-ahead + data-rank-behind + alongside === data-rank-total`; when the
+  backlog is empty the sentence is the empty-queue form (NOT "ahead of 0 and
+  behind 0"); a `done`/`dropped` item is never counted (RANK-S018-3-5 surface).
+
+### Read-only / no-write contract (READ-ONLY)
+- **NOWRITE-S018-3-1 (exactly one GET, zero writes):** across the full step-3
+  interaction (entry, a tier re-derivation, Back, Next) the network spy records
+  exactly ONE GET `/api/projects/:id/items` (plus the active-project resolve) and
+  ZERO requests with a write method (POST/PUT/PATCH/DELETE). No second GET on a
+  Value-radio change.
+- **NOWRITE-S018-3-2 (no fetch before step 3):** opening the wizard and staying on
+  steps 1–2 issues NO items GET — the read fires only on step-3 entry (assert the
+  spy records zero items GETs while `currentStep < 3`).
+- **NOWRITE-S018-3-3 (write-guard active):** the server write-guard remains active
+  (write probe → 405) — the SM-CHK7-6 regression guard still passes.
+
+### Selectors (SEL) — the build/test contract (stable, role-first)
+- **SEL-S018-3-1:** QueueRankStep resolvable by `getByRole('group', { name:
+  /queue rank/i })` and `[data-testid="queue-rank-step"]`; its sub-heading by
+  `[data-testid="rank-step-heading"]` (`<h3>`).
+- **SEL-S018-3-2:** the rank sentence resolvable by `[data-testid="rank-preview"]`
+  with `role="status"`; the numeric cross-checks `[data-rank-ahead]` /
+  `[data-rank-behind]` / `[data-rank-total]` present when a rank is shown (absent
+  in the gated state).
+- **SEL-S018-3-3:** the loading / error / gated states resolvable by
+  `[data-testid="rank-loading"]` / `[data-testid="rank-error"]` /
+  `[data-testid="rank-gated"]` respectively. No derived `nth(N)`/text-exclusion
+  selectors.
+
+### Step-navigation (step-3-specific) — observable behaviour
+- **NAV-S018-3-1:** when `currentStep` is step 3, the WizardStepIndicator marks
+  step 3 `data-step-state="current"` / `aria-current="step"`, step 3 has LOST its
+  "(soon)" tag (now built), and the live `QueueRankStep`
+  (`[data-testid="queue-rank-step"]`) renders in the step-3 slot in place of the
+  `wizard-step-placeholder` (the placeholder is gone for step 3; it survives only
+  for step 4).
+- **NAV-S018-3-2:** pressing "Back" from step 3 returns to step 2 with the CoD +
+  JTBD draft preserved; returning to step 3 re-shows the rank WITHOUT a second
+  items GET (the items set is cached for the wizard session; the rank re-derives
+  from the lifted `codScore`).
+- **NAV-S018-3-3 (gated path):** if the operator reaches step 3 with an incomplete
+  CoD step (`codScore.complete === false`), step 3 shows the `rank-gated` prompt
+  to finish step 2 (NOT a rank, NOT a crash); completing step 2 and returning shows
+  the real rank.

@@ -47,7 +47,7 @@ CHK-7,chunk,REQ-OBSERVATORY,SLC-S018,Guide a work author through JTBD + cost-of-
 SLC-S018,slice,CHK-7,UC-S018-1|UC-S018-2|UC-S018-3|UC-S018-4,Guided CoD intake — JTBD wizard + CoD scorer + queue-rank preview + intake prompt handoff (s018),active,MED,L,MED/L,2026-06-11T07:11:24Z,,
 UC-S018-1,use-case,SLC-S018,,Intake wizard shell + JTBD capture — IntakeWizard.jsx; 3-field panel + live job-sentence preview,done,MED,2,1.50,2026-06-11T07:11:24Z,2026-06-13T01:23:46Z,
 UC-S018-2,use-case,SLC-S018,,CoD signals step + value-token scorer — CodStep.jsx; codScorer.js pure fn; deterministic HIGH/MED/LOW rule; dep UC-S018-1,in-flight,MED,2,1.00,2026-06-11T07:11:24Z,,
-UC-S018-3,use-case,SLC-S018,,Queue-rank preview — useQueueRank.js; directional count from live /api/projects/:id/items; deps UC-S018-1|UC-S018-2 + items endpoint done,planned,MED,2,1.50,2026-06-11T07:11:24Z,,
+UC-S018-3,use-case,SLC-S018,,Queue-rank preview — useQueueRank.js; directional count from live /api/projects/:id/items; deps UC-S018-1|UC-S018-2 + items endpoint done,in-flight,MED,2,1.50,2026-06-11T07:11:24Z,,
 UC-S018-4,use-case,SLC-S018,,Intake prompt builder + clipboard handoff — intakePromptBuilder.js pure fn; intake-prompt.txt; SteerPanel clipboard-copy+toast reuse; deps UC-S018-1|UC-S018-2|UC-S018-3 + UC-S014-4 cross-slice hard dep,planned,HIGH,2,2.00,2026-06-11T07:11:24Z,,
 CHK-8,chunk,REQ-OBSERVATORY,SLC-S013,See all defects with status/severity/MTTR at a glance and drill into any one — defects view JTBD,done,HIGH,M,HIGH/M,2026-06-10T15:37:04Z,2026-06-13T01:27:27Z,
 SLC-S013,slice,CHK-8,UC-S013-1|UC-S013-2|UC-S013-3|UC-S013-4,Defects view — defects read endpoint + list panel + drill-down + SSE refresh (s013),done,HIGH,M,HIGH/M,2026-06-10T15:14:45Z,2026-06-13T01:27:27Z,

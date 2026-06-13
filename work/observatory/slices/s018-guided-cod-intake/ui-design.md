@@ -743,3 +743,416 @@ focus ring; the inherited shell de-emphasis/focus/Esc contract NOT regressed.
    against role+name (radiogroup/radio/textbox) + the `cod-*` testids, not
    derived selectors. `data-cod-band` is the band cross-check; `data-cod-value`/
    `data-urgency` are the input cross-checks.
+
+---
+---
+
+# UI design — UC-S018-3: Queue-rank preview
+
+Applies: **yes** — the real step-3 content surface (a `QueueRankStep` region +
+the `useQueueRank` hook) that REPLACES the surviving `wizard-step-placeholder`
+branch (the shell's `currentStep === 3` else-branch in `IntakeWizard.jsx`) with
+a live, directional rank preview computed from the live items.csv. NO new server
+route, NO write — exactly ONE GET.
+
+Mode: STRUCTURE (before the engineer). Scope of THIS UC = (a) the `useQueueRank`
+hook (the slice's FIRST and ONLY read call: GET `/api/projects/:id/items`,
+fetched on STEP ENTRY, not on wizard open), (b) a pure `rankPreview` domain fn
+that compares the wizard item's `codScore.token` tier against currently-queued/
+planned items and produces a DIRECTIONAL sentence, and (c) the `QueueRankStep`
+region that renders that sentence with distinct loading / empty / error / gated
+states. The shell's step machine, indicator, nav, drawer/focus/Esc contract, the
+de-emphasis rule, AND the delivered step-1/step-2 content are UC-S018-1/2 and
+**MUST NOT be regressed**. The prompt builder + clipboard handoff (UC-S018-4)
+CONSUMES this step's rank sentence but is NOT built here.
+
+---
+
+## What the shell already guarantees (inherited, do-no-harm)
+The delivered IntakeWizard (UC-S018-1/2) owns and this UC reuses unchanged:
+- the **4-step state machine** + `currentStep`. The mount seam for THIS UC is the
+  shell's CURRENT `else` branch (the `wizard-step-placeholder` rendered when
+  `step` is neither 1 nor 2) — i.e. `currentStep === 3` (and 4, until -4). The
+  shell change is the same shape UC-S018-2 made: extend the step ternary so
+  `step === 3` renders `<QueueRankStep …/>` and the placeholder survives only
+  for step 4.
+- the **lifted CoD draft** (`cod` + `codScore` in `IntakeWizard.jsx`,
+  lines 205–213). `codScore` is the `{token, band, complete, reason}` value this
+  UC reads. THIS UC adds NO new lifted state EXCEPT the hook's own fetch state
+  (loading/data/error) and the derived rank preview — the inputs already exist.
+- the **WizardStepIndicator** (step 3 marked `data-step-state="current"` /
+  `aria-current="step"` when active) + its **de-emphasis rule** (COLOUR + size +
+  "(soon)" text, NEVER alpha — A11Y-S018-1-12). Building step 3 flips its
+  `INTAKE_STEPS[2].built` to `true` (the "(soon)" tag disappears for step 3).
+- the **drawer/focus/Esc/×/Cancel + focus-return-to-launcher** contract and the
+  **NON-MODAL, body-portalled, zero-flow-height** drawer (GEO basis): the step
+  swap to step 3 is an internal content change inside the fixed drawer — it
+  reflows nothing outside (GEO-S018-3-1 pins this).
+
+This UC adds NO new design token and NO new drawer; it is a content component +
+a read-only data hook mounted into an existing slot.
+
+---
+
+## Surfaces touched
+- **IntakeWizard step-3 slot** (existing mount seam) — the surviving
+  `wizard-step-placeholder` for `currentStep === 3` is replaced by the live
+  `QueueRankStep`. (The placeholder remains for step 4 until UC-S018-4.)
+- **`src/app/src/hooks/useQueueRank.js`** (NEW) — the slice's only read call.
+  Wraps `getItems(project)` (existing `api/client.js` adapter — the SAME loader
+  `useWipItems` uses), exposes `{status, items}` fetch state. Fetches on STEP
+  ENTRY (mounted only when step 3 is active), NOT on wizard open.
+- **`src/app/src/lib/queueRank.js`** (NEW pure fn — no DOM, no fetch) — the
+  directional-rank domain rule + the human sentence composer. Its OUTPUT is the
+  UC-S018-4 consumption contract (spec'd below).
+- **`src/app/src/components/QueueRankStep.jsx`** (NEW) — the step-3 region: a
+  pure render of the hook's fetch state + the lifted `codScore` + the
+  `rankPreview` result. Owns NO drawer, NO step machine, NO fetch logic.
+
+---
+
+## The read call — `useQueueRank` (READ-ONLY discipline, fetch-on-step-entry)
+
+**Exactly ONE GET, zero writes.** The hook calls `getItems(project)` (which is
+`GET /api/projects/:id/items` — parsed `ItemRecord[]`, raw §4 string fields).
+This is the slice's FIRST and ONLY network call (steps 1–2 were pure
+client-side). No POST/PUT/PATCH/DELETE on entry, on a Value/Urgency change that
+re-derives the rank, on Back, or on Next.
+
+**When it fetches — on STEP ENTRY, not on wizard open (decision, recorded):**
+`useQueueRank` is invoked from `QueueRankStep`, and `QueueRankStep` is mounted by
+the shell ONLY when `currentStep === 3`. So the GET fires when the operator first
+reaches step 3 (the hook's mount), NOT when the drawer opens at step 1.
+Rationale: (a) the queue snapshot is freshest if read at the moment the operator
+wants to see their rank, not stale from minutes earlier at open; (b) an operator
+who opens the wizard and cancels at step 1 issues ZERO network calls — the
+read-only footprint is minimal; (c) it matches the slice.md/use-cases.md trigger
+("before generating the prompt, the panel calls the items endpoint"). The hook
+does NOT re-fetch on every Value-radio flip — the item set doesn't change; only
+the operator's own `codScore.token` does, and the rank is RE-DERIVED from the
+already-fetched items (no extra GET, AC-S018-3-3). A live SSE re-fetch is OUT of
+scope this UC (the wizard is a transient flow; the snapshot at step entry is the
+contract) — deferred, noted below.
+
+**Hook shape:**
+```js
+// useQueueRank({ loadActive?, loadItems? }) ->
+//   { status: 'loading' | 'ready' | 'error', items: ItemRecord[] }
+useQueueRank()
+```
+- resolves the active project (`getActive`, the `useWipItems` idiom), then
+  `getItems(project)`; fail-soft on a null project or a throw → `status:'error'`
+  (the QueueRankStep renders a distinct error state, never a fabricated rank).
+- `status:'loading'` until the GET resolves; `status:'ready'` with `items` (possibly
+  `[]` — an empty/header-only items.csv is a VALID ready state, NOT an error —
+  AC-S018-3-4); `status:'error'` on a failed/absent fetch.
+- defaulted loaders (`loadActive`/`loadItems`) so the hook is unit-testable with
+  a mock items endpoint (AC-S018-3 done-condition: "independently testable with a
+  mock items endpoint").
+
+---
+
+## The directional-rank domain fn — `lib/queueRank.js` (pure, the cross-UC contract)
+
+**Signature (pure, no DOM, no fetch — unit-testable in isolation):**
+```js
+// rankPreview({ token, items }) -> RankPreview
+rankPreview({ token, items })
+```
+
+**Input:**
+| field | type | source | notes |
+|---|---|---|---|
+| `token` | `'HIGH'\|'MED'\|'LOW'\|null` | `codScore.token` (lifted) | `null` = CoD step incomplete |
+| `items` | `ItemRecord[]` | `useQueueRank().items` | raw items.csv records (§4 strings) |
+
+**Which items count as "in the queue" (the comparison set — decision):**
+the rank is against items NOT yet delivered or dropped — i.e. items still
+competing for prioritisation. From the live items.csv `state` vocabulary
+(`active|planned|in-flight|unconfirmed|done|dropped`), the comparison set =
+records whose `state` is one of **`planned`, `unconfirmed`, `in-flight`,
+`active`** (work that is queued, being triaged, or in progress — the queue the
+new item would join), EXCLUDING `done` and `dropped` (terminal — out of the
+ranking). Type is NOT filtered (a directional count across the queued backlog;
+the slice's "Intake-queue items" maps to this not-yet-terminal set, since the
+observatory items.csv is the single live backlog). This set + the exclusion is
+exported as a named predicate so the test can pin it.
+
+**Value-tier normalisation (real-data nuance — the live items.csv carries
+`MED-HIGH`, not just HIGH/MED/LOW):** the rank orders tiers HIGH > MED > LOW.
+Real records carry intermediate/blank tiers (`MED-HIGH`, `""`). The fn maps each
+record's raw `value` to a coarse rank ordinal via a total normaliser:
+`HIGH → 3`, `MED-HIGH → 2.5` (sits between — ranks AHEAD of a MED item, BEHIND a
+HIGH item), `MED → 2`, `LOW → 1`, anything else/blank → `2` (MED-equivalent;
+unscored existing items default to the middle, NOT dropped from the count and NOT
+treated as 0). The wizard item's own `token` maps the same way (HIGH/MED/LOW →
+3/2/1). This keeps the count HONEST against the real backlog rather than silently
+ignoring the rows that don't match three exact enums.
+
+**The directional rule:**
+- `ahead` = count of comparison items whose tier ordinal is **strictly greater**
+  than the wizard item's ordinal (items that would rank ABOVE the new item).
+- `behind` = count of comparison items whose tier ordinal is **strictly less**
+  than the wizard item's ordinal (items that would rank BELOW the new item).
+- items at the SAME ordinal are neither ahead nor behind (the new item would sit
+  among its tier peers — surfaced as a third "alongside" count so the sentence is
+  truthful, see composer).
+
+**Output shape (`RankPreview`) — the UC-S018-4 consumption contract:**
+```js
+{
+  complete: boolean,   // === (token != null); false → render the gated prompt, no rank
+  total:    number,    // comparison-set size (queued, non-terminal items)
+  ahead:    number,    // items that would rank ABOVE the new item (higher tier)
+  behind:   number,    // items that would rank BELOW the new item (lower tier)
+  alongside:number,    // items in the SAME tier (peers)
+  token:    'HIGH'|'MED'|'LOW'|null, // the wizard item's tier (echoed for the sentence)
+  sentence: string,    // the human directional sentence (THE figure + UC-S018-4 input)
+  empty:    boolean    // true iff total === 0 (the queue is currently empty)
+}
+```
+
+**The sentence composer (FIG contract — directional, human, tier-words not enums):**
+- **gated** (`token === null`, CoD incomplete): `sentence: ""`, `complete:false`.
+  The step renders a PROMPT to finish step 2 — never a fabricated rank.
+- **empty queue** (`total === 0`): `"The queue is currently empty — your item
+  would be next."` (empty ≠ broken, AC-S018-3-4; NOT "ranks after 0 and before
+  0", which reads as a bug).
+- **populated**, full directional form (operator language, tier WORDS):
+  `"Your item (HIGH value) would rank ahead of 6 items and behind 0 — placing it
+  near the top of the queue."` — i.e. `ahead`/`behind` as real counts WITH the
+  unit "items", the wizard item's tier named as a WORD ("HIGH value"), and a
+  plain-language placement hint derived from the ratio (near the top / in the
+  middle / near the bottom). When `alongside > 0` the sentence appends
+  ", alongside N at the same priority" so the same-tier peers aren't silently
+  dropped (a count that doesn't add up is a FIG legibility failure).
+- **tier summary, not raw ids (FIG — "summarised by tier not raw ids unless
+  few"):** the sentence summarises the ahead/behind sets BY TIER + COUNT, never by
+  dumping machine ids. A secondary, optional detail line MAY name the ahead items
+  by tier-grouped count ("ahead: 4 HIGH, 2 MED-HIGH"); it names raw ids ONLY when
+  a set is small (≤ 2) and even then WITH the human job sentence, never a bare
+  `UC-S018-x` token (the EXP-033 / DEFECT-005 rule). For this thin slice the
+  primary sentence is the contract; the tier-grouped detail line is OPTIONAL
+  polish the engineer MAY add — the acceptance pins the tier-word + count form,
+  not raw ids.
+
+`rankPreview` is a **total pure function**: defined for `token === null`, for
+`items === []`, for `items` carrying unknown/blank `value` strings; never throws;
+no side effects. Unit-tested with a fixed `items` fixture (AC-S018-3 mock-endpoint
+done-condition).
+
+**Why this shape (contract note for UC-S018-4):**
+- `sentence` is authored ONCE here so the live step-3 readout AND the
+  UC-S018-4 intake prompt's rank line read IDENTICALLY (the operator sees in the
+  preview exactly what the generated prompt will say — the same author-once
+  discipline `codScorer.reason` uses).
+- `ahead`/`behind`/`alongside`/`total` are exposed as discrete numbers so
+  UC-S018-4 (or a future richer prompt) can recompose the line without
+  re-deriving the rank; `complete` lets UC-S018-4 gate whether a rank line is
+  included at all (an incomplete CoD → no rank line in the prompt, consistent
+  with the gated step).
+
+---
+
+## Component decomposition (component → states → stable selector)
+
+### QueueRankStep (NEW — the step-3 content; mounts into the wizard's step-3 slot)
+- **Role:** the queue-rank preview surface — renders the directional rank
+  sentence (or the gated / loading / empty / error state) from `useQueueRank`'s
+  fetch state + the lifted `codScore`. Pure render + the one hook call; owns NO
+  drawer, NO step machine.
+- **Props (pure render of):** `{ score }` (the lifted `CodScore`); the hook is
+  called INSIDE the component (it is the step's own data concern). (Engineer MAY
+  inject the hook for testability, mirroring CodStep's `score` prop pattern.)
+- **States:**
+  - **gated** (`score.complete === false`): the CoD step isn't finished → a
+    PROMPT, not a rank ("Choose a value and urgency on the previous step to see
+    where your item would rank."), with no fetch attempted (or fetched but not
+    rendered as a rank) — never a fabricated number. The hook MAY still load
+    items in the background; the rank is simply not shown until `complete`.
+  - **loading** (`score.complete && hook.status === 'loading'`): a labelled
+    "Reading the live queue…" indicator — DISTINCT from empty and from error.
+  - **ready-populated** (`complete && status==='ready' && total>0`): the
+    directional rank sentence.
+  - **ready-empty** (`complete && status==='ready' && total===0`): the
+    empty-queue sentence ("The queue is currently empty — your item would be
+    next.") — DISTINCT from loading and error; the queue genuinely has no
+    competing items, which is a valid happy state, not a fault.
+  - **error** (`complete && status==='error'`): "Couldn't read the live queue —
+    your rank preview is unavailable. You can still generate the prompt." — a
+    fail-soft message, NOT a fabricated rank, and NOT blank.
+- **Selector:** region `data-testid="queue-rank-step"`; `role="group"`
+  `aria-labelledby` → the step-3 sub-heading (`<h3>` "Queue rank",
+  `data-testid="rank-step-heading"`). NOT a second `role=dialog` (one dialog;
+  heading order: wizard `<h2>` → this `<h3>`). The rank sentence itself is
+  `data-testid="rank-preview"` `role="status"` `aria-live="polite"`
+  (re-derivation on a tier change is announced once).
+- **A11y:** logical forward tab order — (the sentence is `role=status`, not a
+  control) heading region → step nav (Back → Next); `<h3>` under the wizard
+  `<h2>` (no skipped level). The sentence is a labelled status region so a SR
+  announces the directional outcome.
+- **Library:** custom (token-based; reuses `--c-text`/`--c-text-dim`/`--fs-label`
+  + the CodScoreReadout/JobSentencePreview status-line idiom; NO new token).
+
+### RankPreviewSentence (the figure inside QueueRankStep — THE FIG surface)
+- **Role:** the live, human directional sentence — the figure of this UC. Reads
+  the `RankPreview.sentence` and renders it as a readable status line; the
+  `ahead`/`behind`/`alongside` counts carry the unit "items" and the tier is a
+  WORD, never an enum.
+- **Selector:** `data-testid="rank-preview"` (carries `data-rank-ahead` /
+  `data-rank-behind` / `data-rank-total` as numeric cross-check hooks — the
+  tester asserts these match the live items.csv comparison-set counts);
+  `role="status"` `aria-live="polite"`.
+- **FIG legibility (the standing checklist applied):**
+  1. **Has a unit / reads in human words** — counts carry "items" ("ahead of 6
+     items"); the tier is the WORD "HIGH value", never a bare enum or a bare
+     number. NO unitless count.
+  2. **References are human-meaningful** — the ahead/behind sets are summarised
+     BY TIER + count (tier-words), NOT by raw machine ids; an optional detail
+     line names ids ONLY when ≤ 2 and WITH the human job sentence.
+  3. **Empty/unknown ≠ zero ≠ broken** — `total===0` → "the queue is currently
+     empty; your item would be next" (a distinct, correct sentence), never "ranks
+     after 0 and before 0"; the error state is a distinct fail-soft message, never
+     a 0-rank; the gated state is a prompt, never a fabricated rank.
+  4. **Counts add up** — `ahead + behind + alongside === total` (the
+     same-tier peers are surfaced via "alongside N", never silently dropped).
+- **Library:** custom (token-based; the status-line idiom).
+
+---
+
+## Click-path budget (this UC, with justification)
+
+| Job (this UC) | Budget | Reality |
+|---|---|---|
+| "See where my item would rank" | **1 click from step 2** | "Next: Queue rank" advances the step machine to step 3; the rank is fetched on entry and shown with ZERO further action (no "compute rank" button). |
+| "Refine and re-check the rank" | **0 extra clicks / 0 extra GETs** | changing a Value/Urgency radio (on step 2, then Next) re-derives the rank from the already-fetched items — no page reload, no second fetch (AC-S018-3-3). |
+| "Go back, keep my draft" | **1 click** | Back returns to step 2 with the CoD draft preserved (inherited NAV-S018-2-2). |
+| "Advance to the prompt" | **1 click** | Next (toward UC-S018-4). |
+
+No step is added that a default can remove: the fetch is automatic on entry, the
+rank is live, there is no submit/compute button.
+
+---
+
+## Geometry — the step swap is an INTERNAL content change (do-no-harm)
+The wizard is a body-portalled `position:fixed` drawer with zero flow height
+(UC-S018-1 GEO basis). Replacing the step-3 placeholder with the live
+QueueRankStep is an internal content change INSIDE that fixed drawer — it reflows
+nothing on the page (map/views/tree unchanged) and must not change the drawer's
+own anchored box. GEO-S018-3-1 pins this; GEO-S018-3-2 pins that the rank-step
+content STACKS (heading → sentence → any detail line → nav, a column not a row —
+the s002-line guard applied to step 3).
+
+---
+
+## NO-WRITE / READ-ONLY contract (this UC)
+- **Exactly ONE GET** (`/api/projects/:id/items`, fetched on step-3 entry); the
+  `rankPreview` fn is a pure client-side computation. ZERO writes
+  (POST/PUT/PATCH/DELETE) on entry, on a tier re-derivation, on Back/Next.
+- The server write-guard (405) stays active (SM-CHK7-6 regression).
+- No second GET on a Value-radio change — the items set is fetched once per step
+  entry; the rank is re-derived locally (NOWRITE-S018-3-1 + the single-GET pin).
+
+---
+
+## Accessibility conditions (AA) → mirrored into acceptance.md
+See acceptance.md UC-S018-3 section for AC-S018-3-A11Y / GEO / FIG / READ-ONLY /
+NAV / SEL / RANK. Summary: the rank preview is a labelled `role=status`
+`aria-live=polite` region inside a `role=group` named `/queue rank/i`; `<h3>`
+under the wizard `<h2>` (no skipped level); logical within-step focus order;
+loading ≠ empty ≠ error states are textually distinct; the gated state is a
+prompt not a rank; target sizes ≥ 24px on the step-nav buttons; visible focus
+ring; the inherited shell focus/Esc/de-emphasis contract NOT regressed.
+
+---
+
+## Stable selectors handed to the engineer (the build contract + test hooks)
+| Element | Selector contract |
+|---|---|
+| Rank step region | `data-testid="queue-rank-step"` · `role="group"` `aria-labelledby`→`<h3>` |
+| Rank step heading | `data-testid="rank-step-heading"` (`<h3>`, "Queue rank") |
+| Rank preview sentence | `data-testid="rank-preview"` · `role="status"` `aria-live="polite"` · `data-rank-ahead` · `data-rank-behind` · `data-rank-total` (numeric cross-check; absent in gated state) |
+| Loading state | `data-testid="rank-loading"` (distinct text "Reading the live queue…") |
+| Empty-queue state | reuses `data-testid="rank-preview"` with the empty sentence + `data-rank-total="0"` |
+| Error state | `data-testid="rank-error"` (distinct fail-soft text) |
+| Gated state | `data-testid="rank-gated"` (the "finish step 2" prompt; `rank-preview` absent) |
+
+(All `rank-*` per the wizard's `<step>-<field>` testid convention; no derived
+`nth`/text-exclusion selectors.)
+
+---
+
+## Output / state contract UC-S018-4 consumes (the rank sentence joins the prompt)
+UC-S018-4's `intakePromptBuilder` reads the SAME `RankPreview` object this UC
+produces (the wizard lifts it beside `cod`/`codScore`, exactly as `codScore` is
+lifted today):
+- `rank.sentence` is the verbatim human line that joins the generated `/intake`
+  prompt's rank section (author-once: the prompt says exactly what the operator
+  saw).
+- `rank.complete === false` (CoD incomplete) → UC-S018-4 OMITS the rank line from
+  the prompt (no fabricated rank in the handoff), consistent with the gated step.
+- `rank.empty === true` → the prompt's rank line is the empty-queue sentence
+  ("the queue is currently empty — this item would be next").
+- the discrete `ahead`/`behind`/`alongside`/`total`/`token` fields are available
+  if UC-S018-4 wants to recompose rather than embed the sentence verbatim.
+
+**Lift note for the engineer:** the cleanest seam is for `IntakeWizard.jsx` to
+own the `RankPreview` the same way it owns `codScore` — but the rank depends on a
+FETCH, so the hook lives in `QueueRankStep` and the resulting `RankPreview` is
+lifted up via an `onRankChange(rank)` callback (or the shell calls the hook
+itself when `step >= 3`). Engineer's call on the exact lift mechanism; the
+CONTRACT is that UC-S018-4 can read the current `RankPreview` from the wizard's
+lifted state without re-fetching.
+
+---
+
+## Engineer needs (hand-off, UC-S018-3)
+1. **`lib/queueRank.js` is a pure total fn** — `rankPreview({token, items})` →
+   the `RankPreview` shape above. No DOM, no fetch, never throws, defined for
+   `token===null` (→ `{complete:false, sentence:'', ...zeros}`), `items===[]`
+   (→ `empty:true`, the empty-queue sentence), and unknown/blank `value` strings
+   (→ MED-equivalent ordinal, counted not dropped). Export the comparison-set
+   predicate (non-terminal states: planned|unconfirmed|in-flight|active) and the
+   tier normaliser as named functions so the tests pin them. Author the unit test
+   FIRST (red→green) with a fixed items fixture covering: a HIGH token vs a mixed
+   backlog, a LOW token, an empty backlog, a MED-HIGH record in the backlog, and
+   incomplete (token null).
+2. **`useQueueRank` is the slice's ONLY read call** — wraps `getActive` +
+   `getItems` (the `useWipItems` loader idiom; defaulted/injectable loaders for
+   tests). Exposes `{status:'loading'|'ready'|'error', items}`. Fail-soft → error
+   (never a throw, never a fabricated rank). Fetch on the hook's MOUNT (= step-3
+   entry), NOT on wizard open. NO write call, ever. NO re-fetch on a tier change.
+3. **Mount QueueRankStep into the EXISTING step-3 slot** — extend the shell's step
+   ternary so `step === 3` renders `<QueueRankStep score={codScore} …/>` (the
+   placeholder survives only for step 4); flip `INTAKE_STEPS[2].built = true`.
+   Do NOT touch the shell's step machine, indicator de-emphasis rule, nav, drawer,
+   or focus contract (UC-S018-1/2 regression surface — the e2e a11y pin + the
+   GEO-S018-1-1/2-1 reflow guards must still pass).
+4. **Loading ≠ empty ≠ error ≠ gated — four textually-distinct states.** Each has
+   its own testid + distinct copy (the FIG-S018-3-3 distinctness pin). The gated
+   state is a prompt to finish step 2, never a rank.
+5. **Lift the `RankPreview` to the wizard** (beside `cod`/`codScore`) so
+   UC-S018-4 reads it without re-fetching — via an `onRankChange` callback or by
+   calling the hook in the shell when `step >= 3`. Engineer's call on mechanism;
+   the contract above is what UC-S018-4 needs.
+6. **No new token, no new drawer, no new server route.** Reuse the
+   status-line/readout idiom + existing colour/spacing/type tokens; the data
+   comes entirely from the existing `/items` endpoint.
+7. **TDD selectors above are the contract** — author the component/e2e specs
+   against the `rank-*` testids + role+name (`role=group` name `/queue rank/i`,
+   `role=status`), not derived selectors. `data-rank-ahead`/`-behind`/`-total`
+   are the numeric cross-check hooks the tester matches against the live
+   items.csv comparison set.
+
+---
+
+## NOT designed yet (deferred to UC-S018-4 / explicitly out)
+- The intake prompt builder + clipboard/toast handoff (UC-S018-4) — its step-4
+  slot stays the planned placeholder; it CONSUMES this UC's `RankPreview`.
+- LIVE SSE re-fetch of the rank while the wizard is open — OUT this UC (the
+  wizard is a transient flow; the step-entry snapshot is the contract). A
+  follow-on if the human signals the need.
+- A precise insertion index / per-item ordered list — OUT per slice.md (the rank
+  is DIRECTIONAL only; no write-side commitment).
+- Per-type queue scoping (intake vs ready vs deploy) — the comparison set is the
+  whole non-terminal backlog; a finer queue split is a deliberate follow-on.

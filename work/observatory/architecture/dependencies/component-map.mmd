@@ -399,6 +399,47 @@ graph LR
   CodScoreReadout --> CodStep
   CodScorer --> CodScoreReadout
 
+  %% s018 / UC-S018-3 THIS commit: the real queue-rank preview step. QueueRankStep
+  %% (NEW) REPLACES the surviving step-3 wizard-step-placeholder — the content
+  %% IntakeWizard mounts when currentStep === 3 (the shell's else-branch; the step
+  %% machine / indicator de-emphasis rule / nav / drawer / focus contract are
+  %% UNTOUCHED and MUST NOT regress — A11Y-S018-3-8 re-asserts the inherited
+  %% planned-step e2e a11y pin; step 3 loses its '(soon)' tag, step 4 keeps it).
+  %% useQueueRank (NEW, hooks/useQueueRank.js) is the slice's FIRST AND ONLY read
+  %% call — getActive + getItems(project) = ONE GET /api/projects/:id/items, ZERO
+  %% writes; fetched on the hook's MOUNT (= step-3 entry, NOT on wizard open: an
+  %% operator who cancels at step 1 issues zero calls); NO re-fetch on a tier
+  %% change (the item set is stable; the rank RE-DERIVES locally). queueRank (NEW,
+  %% lib/queueRank.js) is the PURE total directional-rank fn rankPreview({token,
+  %% items}) -> {complete,total,ahead,behind,alongside,token,sentence,empty}:
+  %% comparison set = NON-TERMINAL items (planned|unconfirmed|in-flight|active;
+  %% EXCLUDES done/dropped — exported predicate); tier normaliser HIGH→3 /
+  %% MED-HIGH→2.5 / MED→2 / LOW→1 / blank→2 (the real items.csv carries MED-HIGH +
+  %% blanks — counted at MED-equivalent, never dropped); ahead/behind = strictly-
+  %% greater/lesser ordinal counts, alongside = same-tier peers (counts add up).
+  %% RankPreviewSentence (the FIG surface) = a role=status live line: tier as a
+  %% WORD ('HIGH value'), counts WITH the unit 'items', tier-words not raw ids,
+  %% data-rank-ahead/-behind/-total numeric cross-check hooks. FOUR textually-
+  %% distinct states: gated (CoD incomplete → prompt to finish step 2, NEVER a
+  %% fabricated rank) / loading ('Reading the live queue…') / ready-empty (empty
+  %% queue ≠ broken: 'your item would be next') / error (fail-soft, never a
+  %% 0-rank). NO-WRITE/READ-ONLY: exactly one GET, zero writes; the write-guard
+  %% 405 stays active. RUNTIME ROUTING for the tester: the step swap is an INTERNAL
+  %% content change inside the fixed drawer — GEO-S018-3-1 pins zero external
+  %% reflow; the resulting RankPreview is lifted to IntakeWizard (beside codScore)
+  %% so UC-S018-4's intakePromptBuilder reads rank.sentence verbatim for the prompt
+  %% rank line (OMITS it when !complete; empty-queue sentence when empty).
+  QueueRankStep["QueueRankStep (s018 / UC-S018-3: step-3 content — directional rank preview; replaces the step-3 wizard-step-placeholder; gated/loading/empty/error distinct)"]
+  RankPreviewSentence["RankPreviewSentence (s018 / UC-S018-3: the FIG line — tier as a WORD, counts with 'items' unit, tier-words not raw ids; data-rank-ahead/-behind/-total)"]
+  UseQueueRank["useQueueRank (s018 / UC-S018-3 hook: the slice's ONLY read call — ONE GET /items on step-3 entry, zero writes; fail-soft → error, items=[] is valid empty)"]
+  QueueRankLib["lib/queueRank (s018 / UC-S018-3: PURE total fn rankPreview — non-terminal comparison set, MED-HIGH/blank tier normaliser, directional ahead/behind/alongside; UC-S018-4 sentence contract)"]
+  QueueRankStep --> IntakeWizard
+  RankPreviewSentence --> QueueRankStep
+  UseQueueRank --> QueueRankStep
+  QueueRankLib --> RankPreviewSentence
+  %% the read edge: useQueueRank reuses the existing /items adapter (no new route)
+  UseQueueRank --> UseItems["getItems (api/client.js: existing GET /api/projects/:id/items — READ-ONLY reuse, no new route)"]
+
   classDef delivered fill:#d5f5e3,stroke:#1e8449,color:#000;
   %% CHK-3 (s003) DROPPED — scope absorbed into CHK-2 restated done-condition (s004 delivered).
   %% s004 DELIVERED 2026-06-10T11:00:00Z — CHK-2 done-condition MET.
@@ -496,6 +537,15 @@ graph LR
   %% test-plan input; cleared at s018 delivery after the tester consumes.
   %% (Separate class statement so parallel UC commits do not collide on one line.)
   class CodStep,CodValueSelect,CodUrgency,CodRiskOfDelay,CodScoreReadout,CodScorer s018changed;
+  %% s018 / UC-S018-3 THIS commit — QueueRankStep/RankPreviewSentence/useQueueRank/
+  %% queueRank added; QueueRankStep --> IntakeWizard is the mount-seam edge
+  %% (replaces the step-3 placeholder); UseQueueRank --> UseItems is the READ-ONLY
+  %% reuse of the existing /items endpoint (no new route). IntakeWizard keeps its
+  %% s018changed mark (still in flight) but gains the lifted RankPreview — it is in
+  %% the UC-S018-3 blast radius too. Tester UI test-plan input; cleared at s018
+  %% delivery after the tester consumes. (Separate class statement so parallel UC
+  %% commits do not collide on one line.)
+  class QueueRankStep,RankPreviewSentence,UseQueueRank,QueueRankLib s018changed;
 
   %% DEFECT-014 THIS commit — node hover/focus+Enter used to open FOUR per-figure
   %% MetricSource panels in an overlapping stack; ui-designer ruling (b): ONE

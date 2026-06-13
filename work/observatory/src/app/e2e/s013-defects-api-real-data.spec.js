@@ -148,25 +148,35 @@ test.describe('UC-S013-1 — defects read endpoint [REAL-DATA, LIVE :5173]', () 
     );
   });
 
-  test('AC-S013-1-7 DEFECT-012 (open/CONFIRMED): recovered_ts=null, mttr_s=null', async ({
+  test('AC-S013-1-7 CONFIRMED (open) defect: recovered_ts=null, mttr_s=null — using current open defect', async ({
     page,
   }) => {
-    const { body } = await fetchDefects(
-      page,
-      '/api/projects/observatory/defects?id=DEFECT-012',
-    );
-    expect(body).toHaveLength(1);
-    const d12 = body[0];
-    // DEFECT-012 has a failure row but no recovery row yet — open defect
-    expect(d12.reported_ts).toBeTruthy(); // failure row exists
-    expect(d12.recovered_ts).toBeNull();
-    expect(d12.mttr_s).toBeNull();
-    // Status should reflect open state — either from the md file or ledger fallback
-    const validOpenStatuses = ['CONFIRMED', 'OPEN'];
-    expect(validOpenStatuses.some((s) => d12.status === s || (d12.status ?? '').includes(s))).toBe(true);
+    // AC-S013-1-7: an OPEN (CONFIRMED) defect must have recovered_ts=null and mttr_s=null.
+    // Live-session note: DEFECT-012 was open at original authoring; it is now CLOSED.
+    // We derive the current open defect from the full list and skip if none exists
+    // (the fixture spec covers the open-path contract when live data has none).
+    const { body: allDefects } = await fetchDefects(page, '/api/projects/observatory/defects');
+    const openDefect = allDefects.find((d) => d.status === 'CONFIRMED');
+    if (!openDefect) {
+      // eslint-disable-next-line no-console
+      console.log('[AC-S013-1-7] no live CONFIRMED defect — open path covered by fixture spec');
+      // Verify DEFECT-012 is now correctly CLOSED with its MTTR (data drift sanity)
+      const { body: d12arr } = await fetchDefects(page, '/api/projects/observatory/defects?id=DEFECT-012');
+      expect(d12arr).toHaveLength(1);
+      expect(d12arr[0].status).toBe('CLOSED');
+      expect(d12arr[0].recovered_ts).toBeTruthy(); // now has recovery
+      expect(d12arr[0].mttr_s).not.toBeNull(); // now has MTTR
+      // eslint-disable-next-line no-console
+      console.log(`[AC-S013-1-7] DEFECT-012 now CLOSED: recovered_ts=${d12arr[0].recovered_ts}, mttr_s=${d12arr[0].mttr_s}`);
+      return;
+    }
+    // There IS a live open defect: validate AC-S013-1-7 against it
+    expect(openDefect.reported_ts).toBeTruthy(); // failure row exists
+    expect(openDefect.recovered_ts).toBeNull();
+    expect(openDefect.mttr_s).toBeNull();
     // eslint-disable-next-line no-console
     console.log(
-      `[AC-S013-1-7] DEFECT-012: status=${d12.status}, reported_ts=${d12.reported_ts}, recovered_ts=${d12.recovered_ts}, mttr_s=${d12.mttr_s}`,
+      `[AC-S013-1-7] ${openDefect.id}: status=${openDefect.status}, reported_ts=${openDefect.reported_ts}, recovered_ts=${openDefect.recovered_ts}, mttr_s=${openDefect.mttr_s}`,
     );
   });
 

@@ -1,10 +1,10 @@
 ---
 slice: s013-defects-view
 chunk: CHK-8
-uc: UC-S013-1, UC-S013-2, UC-S013-3
+uc: UC-S013-1, UC-S013-2, UC-S013-3, UC-S013-4
 produced-by: tester
-date: 2026-06-12
-sha-under-test: c7edf5a (UC-S013-3 merge; spec commits 258fec2/fc50759)
+date: 2026-06-13
+sha-under-test: 2336a4e (UC-S013-4 final UC)
 ---
 
 # Test plan — UC-S013-1 + UC-S013-2 + UC-S013-3
@@ -185,3 +185,92 @@ No uncovered changed nodes.
 
 1. `OBSERVATORY_E2E_PORT=5203 npm --prefix work/observatory/src/app run test:browser -- e2e/defect-drill.spec.js` — 10/10 pass (fixture, demo project, ephemeral :5203)
 2. `REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s013-defect-drill-real-data.spec.js` — 7/7 pass (live :5173, observatory, 15 records)
+
+---
+
+## UC-S013-4 — SSE live refresh (sha 2336a4e)
+
+### Scope
+
+Validates the SSE live-refresh contract (EXP-036): defect md changes and
+ledger recovery rows surface in the live list without manual reload; the open
+drill never silently mutates; the ContextRefreshCue (second consumer, additive
+testId/wording overrides, steer defaults byte-identical) announces divergence.
+
+### Change map (UC-S013-4 s013changed nodes)
+
+| Node | Change | Covering spec |
+|------|--------|---------------|
+| UseDefects | extended: debounced subscribeEvents SSE seam (defects/*.md + ledger.csv frames) | `e2e/defects-live.spec.js @covers SPA_DEFECTSHOOK uc-s013-4` |
+| ContextRefreshCue | extended: additive testId/texts/labels props (second consumer — defect-drill-cue); steer defaults byte-identical | `src/components/__tests__/ContextRefreshCue.test.jsx` |
+| DefectsPanel | extended: DefectsPanelContainer gains activation-snapshot freeze (EXP-036) | `e2e/defects-live.spec.js @covers SPA_DEFECTSPANEL` |
+| DefectDrillContainer | extended: refreshState prop + ContextRefreshCue (defect-drill-cue) wired | `e2e/defects-live.spec.js @covers SPA_DEFECTDRILL` |
+| SubscribeEvents | referenced: UseDefects --> SubscribeEvents edge added | `src/hooks/__tests__/useDefectsSse.test.jsx` |
+
+Waivers (advisory uncovered nodes from the wide impacted-tests window — structural model nodes with no direct spec contract):
+- ObservatoryDrawerLayer, ValueStreamScreen, WipViewScreen, SPA_CLIENT, SPA_VSMCTR: architectural model surface nodes; covered by their constituent component specs
+- MetricSourcePanel, MetricSourceSection, StageMetric, InFlightBadge: DEFECT-014 nodes; validated in prior DEFECT-014 pass (ca3826b)
+- IntentNote, JobSentenceLib: UC-S014-4 / UC-S018-1 nodes; validated in their own slice sessions
+- SteerContextBlock: UC-S014-4 node; covered by steer-copy.spec.js and steer-panel.spec.js
+
+### Impacted specs (UC-S013-4)
+
+| Spec file | Suite | Covers |
+|-----------|-------|--------|
+| `e2e/defects-live.spec.js` | 2 live-mutation e2e (LIVE_PORT isolated server, repo-live-tmp) | UseDefects SSE, DefectsPanel freeze, DefectDrillContainer cue — AC-S013-4-1/2/3 |
+| `src/hooks/__tests__/useDefectsSse.test.jsx` | 8 unit tests | UseDefects SSE re-fetch, debounce, relevant-frame filter, fail-soft |
+| `src/components/__tests__/DefectsPanelSse.test.jsx` | 5 unit tests | DefectsPanelContainer list-level refresh + drill freeze discipline |
+| `src/components/__tests__/ContextRefreshCue.test.jsx` | 2 new unit tests | Additive override contract; default fallback |
+
+### ContextRefreshCue byte-identical spot-check
+
+Steer consumer (UC-S014-4 existing pins):
+- `testId` default = `'steer-context-live'` — UNCHANGED
+- `texts.updated` default = `'Context updated — regenerate to refresh the prompt'` — UNCHANGED
+- `labels.updated` default = `'Item context: updated — regenerate to refresh the prompt'` — UNCHANGED
+- UC-S014-4 pin at steer-copy.spec.js:185 (`[data-testid="steer-context-live"]`) — still resolves
+
+Defect drill consumer (UC-S013-4 additions):
+- `testId` override = `'defect-drill-cue'`
+- `texts.updated` override = `'Record updated — re-open to refresh'`
+- `labels.updated` override = `'Defect record: updated — re-open to refresh'`
+
+The override is ADDITIVE: when props not passed, defaults are byte-identical to the steer consumer's values. Confirmed by `ContextRefreshCue.test.jsx` "per-consumer overrides" suite + visual inspection of DefectDrillContainer.jsx line 90-95.
+
+### Test plan tick-off — UC-S013-4
+
+| AC | Description | Status |
+|----|-------------|--------|
+| AC-S013-4-1 | Add temp DEFECT-011-temp-sse-probe.md → list count increments (live, no reload) | PASS |
+| AC-S013-4-2 | Remove temp file → list count returns to 3 (live, no reload) | PASS |
+| AC-S013-4-3 | Drawer open during SSE: stays open, content FROZEN, defect-drill-cue flips to 'updated'; explicit re-open refreshes | PASS |
+| EXP-036 discipline | ContextRefreshCue defaults byte-identical; UC-S014-4 pins hold | PASS |
+| AC-S013-2-A11Y-7 | Count line aria-live="polite" announces SSE changes | PASS (unit test pins + live-region attr on live server) |
+| Unit: SSE re-fetch on defects/*.md frame | useDefects re-fetches on a defects/*.md change frame (AC-S013-4-1 data path) | PASS (useDefectsSse.test.jsx) |
+| Unit: SSE re-fetch on ledger.csv frame | useDefects re-fetches on ledger.csv frame (MTTR is a ledger join) | PASS (useDefectsSse.test.jsx) |
+| Unit: SSE remove frame shrinks list | AC-S013-4-2 data path | PASS (useDefectsSse.test.jsx) |
+| Unit: Irrelevant frames ignored | items.csv / slice.md / null — defects md + ledger only | PASS (useDefectsSse.test.jsx) |
+| Unit: Debounce burst | burst of frames → ONE re-fetch (S13-2-A11Y-7 announce-once) | PASS (useDefectsSse.test.jsx) |
+| Unit: Drill freeze | drawer stays open; content frozen; cue flips updated | PASS (DefectsPanelSse.test.jsx) |
+| Unit: Explicit re-open refreshes | cue returns to live; content updated | PASS (DefectsPanelSse.test.jsx) |
+| Unit: Drop-missing-id closes drill | graceful close when SSE drops the selected defect | PASS (DefectsPanelSse.test.jsx) |
+
+### Data drift reconciliation (UC-S013-4 session)
+
+Live data at validation time:
+- Total records: **16** (DEFECT-001..016)
+- CONFIRMED (open): **0** (DEFECT-014 is now CLOSED; DEFECT-016 is UNCONFIRMED — not CONFIRMED)
+- DEFECT-012: CLOSED (recovered_ts=2026-06-11T07:43:41Z, mttr_s=2635)
+
+Stale real-data spec pins updated this session:
+1. `s013-defect-drill-real-data.spec.js`: DEFECT-014 open-path test made dynamic (derives from live endpoint; skips gracefully when all CLOSED; open path is fixture-pinned)
+2. `s013-defect-drill-real-data.spec.js`: count line test made dynamic (derives total/open from live endpoint)
+3. `s013-defects-api-real-data.spec.js`: AC-S013-1-7 made dynamic (derives open defect from live list; validates DEFECT-012 is now correctly CLOSED when no live open exists)
+4. `s013-defects-panel-real-data.spec.js`: GEO-S013-2-1 secondary height guard removed (16 defect rows legitimately taller than Pipeline view; primary guard VSM count=0 is the contract; fixture spec covers byte-identical geometry)
+
+### Suites run (UC-S013-4)
+
+1. `OBSERVATORY_E2E_PORT=5203 CI=1 npm --prefix work/observatory/src/app run test:browser -- e2e/defects-live.spec.js --workers=1` — **2/2 pass** (LIVE_PORT isolated server, repo-live-tmp, real Chromium EventSource)
+2. `npm --prefix work/observatory/src/app run test:ci` — **895/895 pass** (full vitest unit suite including UC-S013-4 unit tests)
+3. `REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s013-defects-api-real-data.spec.js e2e/s013-defects-panel-real-data.spec.js e2e/s013-defect-drill-real-data.spec.js --workers=1` — **26 pass, 2 skip** (live :5173, observatory, 16 records, 0 open; skips are correct: no live CONFIRMED defect and the `!REUSE_SERVER` guard)
+4. `OBSERVATORY_E2E_PORT=5203 CI=1 npm --prefix work/observatory/src/app run test:browser -- e2e/defects-panel.spec.js e2e/defect-drill.spec.js --workers=1` — **19/19 pass** (fixture specs, regression baseline)

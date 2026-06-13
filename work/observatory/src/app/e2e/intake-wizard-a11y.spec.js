@@ -211,8 +211,9 @@ test('@a11y @s018 A11Y-S018-1-5 — focus rings: all interactive wizard elements
     `Situation field focus ring not visible. outline="${situationStyles.outline}" box-shadow="${situationStyles.boxShadow}"`,
   ).toBe(true);
 
-  // Test focus ring on the Next button
-  const nextBtn = page.getByRole('button', { name: /next/i });
+  // Test focus ring on the Next button — use data-testid to avoid matching
+  // SteerPanel/Steer buttons whose aria-label contains the word "next" on live
+  const nextBtn = page.getByTestId('wizard-next');
   await nextBtn.focus();
   const nextStyles = await nextBtn.evaluate((el) => {
     const cs = window.getComputedStyle(el);
@@ -261,8 +262,9 @@ test('@a11y @s018 A11Y-S018-1-6 — target sizes: launcher + Close × + Next all
   expect(closeBox.width, `close × width ${closeBox.width} must be ≥ 24`).toBeGreaterThanOrEqual(24);
   expect(closeBox.height, `close × height ${closeBox.height} must be ≥ 24`).toBeGreaterThanOrEqual(24);
 
-  // Next
-  const nextBox = await page.getByRole('button', { name: /next/i }).boundingBox();
+  // Next — use data-testid (wizard-next) to avoid matching SteerPanel buttons
+  // whose aria-label may contain "next" on a live server with open steer panels
+  const nextBox = await page.getByTestId('wizard-next').boundingBox();
   expect(nextBox, 'Next button must be visible').not.toBeNull();
   expect(nextBox.width, `Next width ${nextBox.width} must be ≥ 24`).toBeGreaterThanOrEqual(24);
   expect(nextBox.height, `Next height ${nextBox.height} must be ≥ 24`).toBeGreaterThanOrEqual(24);

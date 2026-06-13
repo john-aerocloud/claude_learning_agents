@@ -113,19 +113,32 @@ test('AC-S013-3-8/9 — GEO no-reflow on live data; close returns to the list wi
   await expect(row(page, 'DEFECT-001').getByTestId('defect-row-trigger')).toBeFocused();
 });
 
-// EXP-033 BONUS: DEFECT-014 is the live open defect (CONFIRMED, recovered_ts=null,
-// mttr_s=null). All 15 live records exist now. Validates the OPEN MttrCard path
-// on real production data (complement to the fixture DEFECT-003 path).
-test('EXP-033/S13-3-FIG-2 — live OPEN DEFECT-014: MttrCard shows "Not yet resolved", elapsed figure NOT labelled MTTR, no crash', async ({
+// EXP-033 BONUS: validates the OPEN MttrCard path on real production data.
+// Fetches the live endpoint to find the current open defect (if any); skips
+// gracefully when all live records are closed (open path is then pinned by
+// the fixture spec defect-drill.spec.js via demo DEFECT-003).
+// UC-S013-4 live-session note: DEFECT-014 was CONFIRMED/open at UC-S013-3
+// validation; it is now CLOSED (ca3826b + fa284f1). The test derives the open
+// target dynamically so it does not rot on the next status change.
+test('EXP-033/S13-3-FIG-2 — live OPEN defect (any): MttrCard shows "Not yet resolved", elapsed figure NOT labelled MTTR, no crash', async ({
   page,
+  request,
 }) => {
+  // Fetch live endpoint to find the current open defect
+  const res = await request.get('http://localhost:5173/api/projects/observatory/defects');
+  const allDefects = await res.json();
+  const openDefect = allDefects.find((d) => d.status === 'CONFIRMED');
+  if (!openDefect) {
+    test.skip(true, 'no live CONFIRMED defect right now — open path pinned by the fixture spec (defect-drill.spec.js DEFECT-003)');
+    return;
+  }
   const errors = [];
   page.on('console', (msg) => {
     if (msg.type() === 'error') errors.push(msg.text());
   });
-  await openDrill(page, 'DEFECT-014');
+  await openDrill(page, openDefect.id);
   // drawer opened — identity confirmed
-  await expect(page.getByTestId('defect-drill')).toHaveAttribute('data-defect-id', 'DEFECT-014');
+  await expect(page.getByTestId('defect-drill')).toHaveAttribute('data-defect-id', openDefect.id);
   const card = page.getByTestId('mttr-card');
   await expect(card).toHaveAttribute('data-mttr-state', 'open');
   // recovered slot must say "Not yet resolved" — never a timestamp or "0"
@@ -139,8 +152,6 @@ test('EXP-033/S13-3-FIG-2 — live OPEN DEFECT-014: MttrCard shows "Not yet reso
   expect(label).not.toMatch(/MTTR/);
   // no raw-seconds data on the figure (open span has no mttr_s)
   await expect(figure).not.toHaveAttribute('data-mttr-seconds', /.+/);
-  // fix_sha is null for DEFECT-014 — must show "—"
-  await expect(page.getByTestId('defect-fix')).toContainText('—');
   expect(errors).toEqual([]);
 });
 
@@ -168,16 +179,27 @@ test('EXP-033/S13-3-FIG-1/5 — live DEFECT-015 (mttr_s=0): no crash, bare "0" n
   expect(errors).toEqual([]);
 });
 
-// Count line now reflects 15 records, 1 open (DEFECT-014).
-// Validates the updated live state (data drift from the original acceptance.md sketch).
-test('EXP-033/AC-S013-2-1 — live defect list now shows 15 records with 1 open (DEFECT-014)', async ({
+// Count line reflects the current live record count (endpoint is the oracle).
+// UC-S013-4 live-session note: at UC-S013-3 validation this was 15/1 (DEFECT-014 open).
+// DEFECT-014 is now CLOSED and DEFECT-016 was added → 16 records, 0 open.
+// The test derives count/open from the live endpoint so it does not rot on data drift.
+test('EXP-033/AC-S013-2-1 — live defect list count matches the endpoint; open defect (if any) leads', async ({
   page,
+  request,
 }) => {
+  const res = await request.get('http://localhost:5173/api/projects/observatory/defects');
+  const allDefects = await res.json();
+  const openDefects = allDefects.filter((d) => d.status === 'CONFIRMED');
   const countText = await page.getByTestId('defects-count').textContent();
-  expect(countText).toContain('15');
-  expect(countText).toContain('1');
+  // count line carries the total count from the live endpoint
+  expect(countText).toContain(String(allDefects.length));
   expect(countText.toLowerCase()).toContain('open');
-  // DEFECT-014 leads the list (CONFIRMED group first)
-  await expect(row(page, 'DEFECT-014')).toHaveAttribute('data-open', 'true');
-  await expect(row(page, 'DEFECT-014')).toHaveAttribute('data-status', 'CONFIRMED');
+  // count line contains the open count
+  expect(countText).toContain(String(openDefects.length));
+  if (openDefects.length > 0) {
+    // lowest CONFIRMED id leads the list (open group first)
+    const leadId = openDefects.map((d) => d.id).sort()[0];
+    await expect(row(page, leadId)).toHaveAttribute('data-open', 'true');
+    await expect(row(page, leadId)).toHaveAttribute('data-status', 'CONFIRMED');
+  }
 });

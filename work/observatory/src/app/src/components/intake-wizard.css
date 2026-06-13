@@ -59,6 +59,9 @@
   box-shadow: var(--drawer-elev);
 }
 
+/* Slide-in is TRANSFORM-ONLY (A11Y-S018-1-12 rework): an opacity fade made
+ * every label transiently sub-AA mid-animation — axe captured --c-text-dim
+ * compounded to 2.87:1 against the half-faded drawer over the page bg. */
 @media (prefers-reduced-motion: no-preference) {
   .intake-wizard {
     animation: intake-wizard-slide-in var(--dur-drawer) ease-out;
@@ -67,11 +70,9 @@
   @keyframes intake-wizard-slide-in {
     from {
       transform: translateX(16px);
-      opacity: 0;
     }
     to {
       transform: translateX(0);
-      opacity: 1;
     }
   }
 }
@@ -162,7 +163,12 @@
 }
 
 .wizard-step--planned {
-  opacity: 0.85; /* de-emphasised, but the "(soon)" TEXT is the cue */
+  /* De-emphasis is COLOUR + size + "(soon)" text — NEVER alpha
+   * (A11Y-S018-1-12 rework): the former opacity: 0.85 compounded with the
+   * drawer fade to 2.87:1. --c-text-dim (#a6adbb) is 6.7:1 on
+   * --c-surface-raised (#222630) — AA with margin at full alpha; the current
+   * step is distinguished by full --c-text + surface bg + focus band. */
+  color: var(--c-text-dim);
 }
 
 .wizard-step__soon {

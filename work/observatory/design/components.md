@@ -814,6 +814,18 @@ SourceLink convention, the tree DEF glyph "⚠", and tree-state/space/spacing to
   `aria-current="step"`.
 - **Library:** custom (number badge + label text authoritative; ViewSwitch
   bottom-band shape cue for current).
+- **Contrast rationale (A11Y-S018-1-12 rework — ui-designer to ratify):**
+  planned-step de-emphasis is COLOUR + size + "(soon)" text, NEVER alpha. No
+  new token was needed: labels use the existing `--c-text-dim` (#a6adbb),
+  which is 6.7:1 on the drawer surface `--c-surface-raised` (#222630) — AA
+  with margin. The 2.87:1 the tester measured was the former
+  `opacity: 0.85` on planned steps COMPOUNDED with the drawer's slide-in
+  opacity fade (axe captured the mid-animation state: #a6adbb at ~0.077
+  cumulative alpha ⇒ #626670 on #1b1f26). Both alpha layers are removed: the
+  drawer slide-in is transform-only, and a targeted e2e pin
+  (`e2e/intake-wizard-a11y.spec.js`, "targeted" test) asserts cumulative
+  opacity = 1, computed ratio ≥ 4.5:1 on steps 2/3/4 labels + "(soon)", and
+  that wizard keyframes never animate opacity.
 
 ## JtbdFields  (s018 / UC-S018-1 — the step-1 three-field capture group; child of IntakeWizard)
 - **Role:** the three prompting JTBD inputs — Situation (when…) / Motivation

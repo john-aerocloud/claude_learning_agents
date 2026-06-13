@@ -1,7 +1,7 @@
 # DEFECT-014 — Queue/stage hover opens all four metric-source panels in an overlapping stack
 
 **Reported:** 2026-06-12 (human, live board)
-**Status:** CONFIRMED → fix next (ui-designer ruling → engineer)
+**Status:** CLOSED (fix ca3826b; prod re-check 2026-06-13: hover Intake/Ready ⇒ exactly ONE sectioned panel each; D14-AC-1..6 pinned; gap-closing → EXP-042)
 **Surface:** VSM stage/queue nodes — MetricSource hover reveal (CHK-2 board)
 **Touches:** StageNode.jsx / MetricSource.jsx / metric-source.css (UC-S002-era surface, DEFECT-003/007 lineage)
 

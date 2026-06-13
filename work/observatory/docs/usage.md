@@ -4,7 +4,7 @@
 
 Observatory is a local Vite dashboard that observes and steers a multi-project delivery pipeline. It shows the full delivery value-stream in real time — every stage (Intake → Decompose → Ready → Capabilities → Build-TDD → UI-Validate → Deploy → Validate → Done) with throughput, dwell time, in-flight WIP, and rework. Navigate the work-item tree to drill into any requirement, chunk, slice, or use case; see its ledger history and dependencies in context. Steer the pipeline from the dashboard (re-prioritise, request re-slice, raise defect, custom prompts) without hand-editing files — all writes go through Claude's preview-accept gate. Browse in-flight WIP in a dedicated panel sorted by longest-waiting-first; preview before/after split proposals before handing them to Claude. Observe defect records with status, severity, and MTTR (time-to-repair) to assess quality. All data is read-only in the browser; live-refresh on file change via SSE.
 
-**Not yet in scope:** guided cost-of-delay intake (CHK-7, later), enriched re-slice prompt with context-filled before/after fields (UC-S015-4, in progress), inline artifact editing.
+**Not yet in scope:** cost-of-delay signals step in guided intake wizard (steps 2–4 visible as "(soon)" in the wizard), inline artifact editing.
 
 ---
 
@@ -58,7 +58,7 @@ Click **"Defects"** to see all known defect records. Every row shows:
 - **Severity** — HIGH, MED-HIGH, MED, or LOW
 - **MTTR** — time from when the defect was first reported to when it was fixed (e.g. "13 min", "1 h 21 min"), or "open" if still unresolved
 
-CONFIRMED defects are grouped first (these are the ones that need attention). A drill-down into the full record (problem-statement fields, root cause, resolution, MTTR timeline) is currently in build (UC-S013-3) and will appear here when it ships.
+CONFIRMED defects are grouped first (these are the ones that need attention). Click any defect row or press Enter to open a drawer with the full record: the four problem-statement fields (rendered as formatted text, not raw markdown), classification, root cause, resolution, all fix commit SHAs as code references, and an MTTR card showing the reported time, resolved time, and total duration. For open defects, the card shows "Not yet resolved" instead of a duration. The list updates live when defect files change; an open drawer never silently updates — a cue message says "Record updated — re-open to refresh" to signal a change and prompt you to close and re-open if you want the latest data.
 
 ### Steer actions
 
@@ -72,6 +72,12 @@ On every WIP chip in the value-stream map and every node in the work-item tree, 
 Select an action, type your intent note, and the steer panel shows a copy-ready prompt containing your item id, its current job sentence, the action, and your intent verbatim. Review it, click "Copy prompt", and paste it into your Claude session. The UI never writes to the repo — all writes happen through Claude's accept gate.
 
 **For "Request re-slice / split":** The panel opens a before/after preview showing the current item alongside two free-text fields for proposing Part A and Part B job sentences. When you've filled both parts, click "Looks right — generate prompt" to see a preview of the split proposal, then copy and paste to Claude.
+
+### New Work (intake wizard)
+
+Click **"+ New Work"** (a button beside the view tabs) to open the guided intake wizard. This is a multi-step form to capture a new work item:
+
+**Step 1 — Job sentence:** Three fields capture a job-to-be-done (JTBD) format: "Situation (when…)", "Motivation (I want to…)", and "Outcome (so I can…)". As you type, a live preview below builds the complete sentence: "When [situation], I want to [motivation], so I can [outcome]." Steps 2–4 are visible as "Cost of delay", "Value estimate", and "Schedule" with "(soon)" labels — they are planned but not yet available. You can click "Next" to advance (this captures step 1 and shows the next placeholder), or "Cancel" to close without saving anything. The wizard is non-modal — you can click elsewhere on the dashboard while it's open. All work happens client-side; nothing is written to the repo yet (the handoff to Claude happens in a follow-on slice).
 
 ### In-flight WIP panel
 
@@ -99,7 +105,7 @@ All figures in the map are traceable to source:
 - **Slice artifacts** — read from `work/<project>/slices/*/`
 - **Defects** — read from `work/<project>/defects/DEFECT-*.md` and matched to ledger rows for MTTR
 
-Hover over or click any metric to see the source row (coming in a follow-on pass).
+Hover over any metric label on the value-stream map or click it to see a provenance panel showing which ledger rows contributed to that number (e.g. throughput, dwell, WIP, rework). The panel shows all four metrics in one overlay, sectioned by type.
 
 ### Known limitations
 

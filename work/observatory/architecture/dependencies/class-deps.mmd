@@ -56,7 +56,7 @@ graph TD
     %% is the network, not an import) — so SPA_CLIENT depends on the deployed :3001
     %% surface (R_PROJ/R_ITEMS/R_DORA/R_EVENTS routes), drawn as a runtime call edge.
     %% S2-UC2..6 attach to SPA_MAIN/SPA_CLIENT, not to each other. ---
-    SPA_CLIENT["src/app/src/api/client.js — SPA API ADAPTER (S2-UC1; +getFlow s004-UC1; +getStagingQueue DEF-012)<br/>only module knowing :3001 base URL + endpoint shapes<br/>getActive/getProjects/getQueues/getPolicy/getBaseline/getFlow/getStageFlow/getStagingQueue/subscribeEvents<br/>fail-soft: null on net/HTTP/parse error"]:::def012changed
+    SPA_CLIENT["src/app/src/api/client.js — SPA API ADAPTER (S2-UC1; +getFlow s004-UC1; +getStagingQueue DEF-012; +getDefects UC-S013-2)<br/>only module knowing :3001 base URL + endpoint shapes<br/>getActive/getProjects/getQueues/getPolicy/getBaseline/getFlow/getStageFlow/getStagingQueue/getDefects/subscribeEvents<br/>fail-soft: null on net/HTTP/parse error"]:::delivered
     SPA_APP["src/app/src/App.jsx — app shell (S2-UC1)<br/>banner + main landmark = composition slot + build-sha stamp"]:::delivered
     SPA_MAIN["src/app/src/main.jsx — Preact entry (S2-UC1)<br/>WIRING SEAM: mounts App; UC3 mounts MapContainer as App child here"]:::delivered
 
@@ -179,7 +179,7 @@ graph TD
     %% metric; selectors/aria wiring preserved). Adapter-INTERNAL reshape — no module/
     %% port seam or data-flow change at this level; the redirected component edges are
     %% marked def014changed in component-map.mmd (tester test-plan input).
-    SPA_VSMCTR["src/app/src/components/VsmContainer.jsx — value-stream map container (s004)<br/>DEF-012: also loads the staging buffer (getActive→getStagingQueue), re-fetches on a<br/>staging.csv SSE frame (isRelevantChange now ledger.csv OR staging.csv), passes staging→map<br/>DEF-013 (StageNode within the map): coherence_warnings reasons render verbatim on the stage<br/>box (role=status + data-coherence; boolean-only payload keeps the AC-6 queue-mismatch text)<br/>DEF-014 (StageNode within the map): ONE composite MetricSource panel per node — see component-map"]:::def013changed
+    SPA_VSMCTR["src/app/src/components/VsmContainer.jsx — value-stream map container (s004)<br/>DEF-012: also loads the staging buffer (getActive→getStagingQueue), re-fetches on a<br/>staging.csv SSE frame (isRelevantChange now ledger.csv OR staging.csv), passes staging→map<br/>DEF-013 (StageNode within the map): coherence_warnings reasons render verbatim on the stage<br/>box (role=status + data-coherence; boolean-only payload keeps the AC-6 queue-mismatch text)<br/>DEF-014 (StageNode within the map): ONE composite MetricSource panel per node (ca3826b) — DELIVERED"]:::delivered
 
     SPA_MAIN -->|mounts observatory view| SPA_OBSVIEW
     SPA_OBSVIEW -->|controlled selectedId/onSelect/onItemsLoaded| SPA_TREECTR
@@ -212,9 +212,9 @@ graph TD
     %% route adapter; domain aggregation is pure (no fs/HTTP) and REUSES the shared
     %% tolerant parseLedger READ-ONLY (no second CSV parser; ledgerAggregator.js
     %% itself untouched — fresh DEFECT-011 fix preserved).
-    R_DEFECTS["server/routes/defects.js — defects route ADAPTER (UC-S013-1)<br/>GET /api/projects/:id/defects[?id=DEFECT-NNN]<br/>fs: glob work/:id/defects/DEFECT-*.md + read process/dora/ledger.csv; never throws"]:::s013changed
-    LIB_DEFECTS["server/lib/defectsAggregator.js — defects DOMAIN (UC-S013-1, pure)<br/>md-record parse (3 live shapes) ∪ ledger failure/recovery pairing by ref<br/>MTTR=first recovery−first failure (s, mttr_units); unmatched failure=OPEN; sorted by id"]:::s013changed
-    AGG_LEDGER["server/lib/ledgerAggregator.js — shared tolerant parseLedger + stage-flow domain (UC-S004-1)<br/>UC-S015-1 ADDITIVE: every stage gains wip_horizon_ms (exported WIP_STALENESS_HORIZON_MS)<br/>+ open_items[{item_id,note,opened_at,dwell_ms,stale}] — ALL unmatched opens regardless of age,<br/>stale-flagged; wip/wip_items recency headline UNCHANGED (DEFECT-010/011 preserved)<br/>DEF-013 ADDITIVE: every stage gains coherence_warnings[] (readable reasons); recent opens are<br/>cross-checked against items.csv — planned/ready state, item-shaped-but-absent, or slug-keyed id<br/>⇒ WARNING ONLY (wip count untouched); D7-AC-7 active_days basis = tpIn dates only"]:::def013changed
+    R_DEFECTS["server/routes/defects.js — defects route ADAPTER (UC-S013-1)<br/>GET /api/projects/:id/defects[?id=DEFECT-NNN]<br/>fs: glob work/:id/defects/DEFECT-*.md + read process/dora/ledger.csv; never throws"]:::delivered
+    LIB_DEFECTS["server/lib/defectsAggregator.js — defects DOMAIN (UC-S013-1, pure)<br/>md-record parse (3 live shapes) ∪ ledger failure/recovery pairing by ref<br/>MTTR=first recovery−first failure (s, mttr_units); unmatched failure=OPEN; sorted by id"]:::delivered
+    AGG_LEDGER["server/lib/ledgerAggregator.js — shared tolerant parseLedger + stage-flow domain (UC-S004-1)<br/>UC-S015-1 ADDITIVE: every stage gains wip_horizon_ms (exported WIP_STALENESS_HORIZON_MS)<br/>+ open_items[{item_id,note,opened_at,dwell_ms,stale}] — ALL unmatched opens regardless of age,<br/>stale-flagged; wip/wip_items recency headline UNCHANGED (DEFECT-010/011 preserved)<br/>DEF-013 ADDITIVE: every stage gains coherence_warnings[] (readable reasons); recent opens are<br/>cross-checked against items.csv — planned/ready state, item-shaped-but-absent, or slug-keyed id<br/>⇒ WARNING ONLY (wip count untouched); D7-AC-7 active_days basis = tpIn dates only (fixture-ledger fix 1180a4e)"]:::delivered
     R_DEFECTS -->|aggregateDefects files+ledgerCsv+projectId| LIB_DEFECTS
     LIB_DEFECTS -.->|parseLedger import (read-only reuse, no second parser)| AGG_LEDGER
 
@@ -225,8 +225,8 @@ graph TD
     %% generic queue allowlist (additive; readQueue + ledgerAggregator untouched);
     %% the board renders StagingQueueBox between the Decompose and Ready stage nodes
     %% (inside ValueStreamMap's queue lane as the staging-handoff flex item).
-    R_STAGING["server/routes/staging.js — staging buffer route ADAPTER (DEF-012)<br/>GET /api/projects/:id/queues/staging → {queue,depth,rows}<br/>missing/header-only csv → depth 0 (empty = HAPPY state, never null/error)"]:::def012changed
-    SPA_STAGINGBOX["src/app/src/components/StagingQueueBox.jsx — staging buffer box (DEF-012, pure render)<br/>'Staging / awaiting triage' between Decompose and Ready; depth always shown<br/>('N awaiting triage'); depth 0 → explicit drained empty state; rows id+job; NOT focusable"]:::def012changed
+    R_STAGING["server/routes/staging.js — staging buffer route ADAPTER (DEF-012)<br/>GET /api/projects/:id/queues/staging → {queue,depth,rows}<br/>missing/header-only csv → depth 0 (empty = HAPPY state, never null/error)"]:::delivered
+    SPA_STAGINGBOX["src/app/src/components/StagingQueueBox.jsx — staging buffer box (DEF-012, pure render)<br/>'Staging / awaiting triage' between Decompose and Ready; depth always shown<br/>('N awaiting triage'); depth 0 → explicit drained empty state; rows id+job; NOT focusable"]:::delivered
     R_STAGING -->|parseCsv reuse, §4 raw strings| P_CSV
     SPA_VSMCTR -->|staging prop via ValueStreamMap queue lane| SPA_STAGINGBOX
     SPA_VSMCTR -->|getActive/getStagingQueue| SPA_CLIENT
@@ -241,9 +241,9 @@ graph TD
     %% (job/value/cost); sort (dwell DESC, nulls last) + stale derivation live in the
     %% PURE composeWipItems domain fn. horizonMs flows server→client — never a client
     %% literal (S15-1-WIP-1). WipRow's data-item-id is UC-S015-2's SteerMenu slot.
-    SPA_VIEWSWITCH["src/app/src/components/ViewSwitch.jsx — two-view tablist (UC-S015-1)<br/>role=tablist 'Dashboard view'; roving tabindex; Arrow/Home/End move, Enter/Space activate<br/>pure fn of {active,onSelect}; aria-controls → view-panel-* tabpanels"]:::s015changed
-    SPA_WIPHOOK["src/app/src/hooks/useWipItems.js — WIP-nav data hook + PURE domain (UC-S015-1)<br/>composeWipItems(flow,items)->sorted WipItem[] (dwell DESC, nulls last; stale from LIVE horizon)<br/>formatDwell ('2 h 14 min' | '—'; unknown≠0) / formatHorizon; SSE debounced re-fetch on ledger/items.csv"]:::s015changed
-    SPA_WIPPANEL["src/app/src/components/WipPanel.jsx — WipPanel + WipRow + WipPanelContainer (UC-S015-1)<br/>region 'In-flight WIP'; role=status polite count; dt/dd labelled figures; stale badge text+⏳+band<br/>data-item-id slot (UC-S015-2 hook); empty 'No items currently in flight'; heading takes focus on mount"]:::s015changed
+    SPA_VIEWSWITCH["src/app/src/components/ViewSwitch.jsx — two-view tablist (UC-S015-1)<br/>role=tablist 'Dashboard view'; roving tabindex; Arrow/Home/End move, Enter/Space activate<br/>pure fn of {active,onSelect}; aria-controls → view-panel-* tabpanels"]:::delivered
+    SPA_WIPHOOK["src/app/src/hooks/useWipItems.js — WIP-nav data hook + PURE domain (UC-S015-1)<br/>composeWipItems(flow,items)->sorted WipItem[] (dwell DESC, nulls last; stale from LIVE horizon)<br/>formatDwell ('2 h 14 min' | '—'; unknown≠0) / formatHorizon; SSE debounced re-fetch on ledger/items.csv"]:::delivered
+    SPA_WIPPANEL["src/app/src/components/WipPanel.jsx — WipPanel + WipRow + WipPanelContainer (UC-S015-1)<br/>region 'In-flight WIP'; role=status polite count; dt/dd labelled figures; stale badge text+⏳+band<br/>data-item-id slot (UC-S015-2 hook); empty 'No items currently in flight'; heading takes focus on mount"]:::delivered
 
     SPA_OBSVIEW -->|"mounts tablist (UC-S015-1; main col now view-switched)"| SPA_VIEWSWITCH
     SPA_OBSVIEW -->|"mounts when view=wip (view=pipeline mounts VsmContainer instead)"| SPA_WIPPANEL
@@ -271,8 +271,8 @@ graph TD
     %% landing must refresh the list; differs from the items.csv-only steer
     %% hook). Refresh is IN-PLACE (ready→ready, no remount/loading flash — the
     %% polite count line announces); fail-soft without EventSource (jsdom).
-    SPA_DEFECTSHOOK["src/app/src/hooks/useDefects.js — defects-list data hook + PURE domain (UC-S013-2/4)<br/>composeDefects(records)->grouped DefectVM[] (open first, id asc; OPEN wins over drifted mttr_s)<br/>formatMttr ('13 min' | '53 s' | '—'; unknown≠0); fail-soft empty on null/malformed<br/>UC-S013-4: SSE debounced re-fetch on defects/*.md OR ledger.csv frames; in-place ready→ready; fail-soft no-EventSource"]:::s013changed
-    SPA_DEFECTSPANEL["src/app/src/components/DefectsPanel.jsx — DefectsPanel + DefectRow + DefectsPanelContainer (UC-S013-2/4)<br/>region 'Defects'; role=status polite count 'N defects, M open' (the SSE-update live region); h3 groups (open leads)<br/>dt/dd labelled figures; OPEN badge text+⚠+band; data-defect-id slot (UC-S013-3 drill); heading focus = layout effect<br/>UC-S013-4 container: selection is an activation SNAPSHOT {id,record} — EXP-036 freeze; refresh drops id → drill closes gracefully"]:::s013changed
+    SPA_DEFECTSHOOK["src/app/src/hooks/useDefects.js — defects-list data hook + PURE domain (UC-S013-2/4)<br/>composeDefects(records)->grouped DefectVM[] (open first, id asc; OPEN wins over drifted mttr_s)<br/>formatMttr ('13 min' | '53 s' | '—'; unknown≠0); fail-soft empty on null/malformed<br/>UC-S013-4: SSE debounced re-fetch on defects/*.md OR ledger.csv frames; in-place ready→ready; fail-soft no-EventSource"]:::delivered
+    SPA_DEFECTSPANEL["src/app/src/components/DefectsPanel.jsx — DefectsPanel + DefectRow + DefectsPanelContainer (UC-S013-2/4)<br/>region 'Defects'; role=status polite count 'N defects, M open' (the SSE-update live region); h3 groups (open leads)<br/>dt/dd labelled figures; OPEN badge text+⚠+band; data-defect-id slot (UC-S013-3 drill); heading focus = layout effect<br/>UC-S013-4 container: selection is an activation SNAPSHOT {id,record} — EXP-036 freeze; refresh drops id → drill closes gracefully"]:::delivered
 
     SPA_OBSVIEW -->|"mounts when view=defects (third tabpanel; UC-S013-2)"| SPA_DEFECTSPANEL
     SPA_DEFECTSPANEL -->|useDefects state| SPA_DEFECTSHOOK
@@ -296,8 +296,8 @@ graph TD
     %% idiom — testId/wording now injectable, defaults byte-identical) flips
     %% to 'updated' ("Record updated — re-open to refresh"); content refreshes
     %% only on EXPLICIT row re-activation (same id → no remount/focus steal).
-    SPA_DEFECTDRILL["src/app/src/components/DefectDrillContainer.jsx + DefectDetail.jsx + MttrCard.jsx — defect drill (UC-S013-3/4)<br/>DEFECT-006 drawer idiom (fixed, body-portal, non-modal; heading focus + Esc-return to row)<br/>labelled record body (7 md fields via shared mdToHtml; fix shas as code refs; null→'—')<br/>MttrCard: resolved=unit-bearing MTTR; open='Not yet resolved'+elapsed (never labelled MTTR); ledger data-source<br/>UC-S013-4: frozen activation snapshot + defect-drill-cue (ContextRefreshCue reuse) — no silent mutation (EXP-036)"]:::s013changed
-    SPA_MARKDOWNLIB["src/app/src/lib/markdown.js — shared md→HTML transform (UC-S013-3 extraction from ArtifactView)<br/>mdToHtml (gfm, fail-soft '') + stripFrontmatter; the ONE markdown path"]:::s013changed
+    SPA_DEFECTDRILL["src/app/src/components/DefectDrillContainer.jsx + DefectDetail.jsx + MttrCard.jsx — defect drill (UC-S013-3/4)<br/>DEFECT-006 drawer idiom (fixed, body-portal, non-modal; heading focus + Esc-return to row)<br/>labelled record body (7 md fields via shared mdToHtml; fix shas as code refs; null→'—')<br/>MttrCard: resolved=unit-bearing MTTR; open='Not yet resolved'+elapsed (never labelled MTTR); ledger data-source<br/>UC-S013-4: frozen activation snapshot + defect-drill-cue (ContextRefreshCue reuse) — no silent mutation (EXP-036)"]:::delivered
+    SPA_MARKDOWNLIB["src/app/src/lib/markdown.js — shared md→HTML transform (UC-S013-3 extraction from ArtifactView)<br/>mdToHtml (gfm, fail-soft '') + stripFrontmatter; the ONE markdown path"]:::delivered
     SPA_DEFECTSPANEL -->|"DefectsPanelContainer owns selection; renders drill (selected.record)"| SPA_DEFECTDRILL
     SPA_DEFECTDRILL -->|"mdToHtml (DefectDetail)"| SPA_MARKDOWNLIB
     SPA_DEFECTDRILL -->|"formatMttr (MttrCard duration humanisation)"| SPA_DEFECTSHOOK

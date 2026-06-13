@@ -1,25 +1,32 @@
 # Ready queue — observatory
 
 Sorted by vc_ratio descending (defects pre-empt regardless of ratio).
-Buffer: min_items=2 / wip_limit=4. Depth: 1 (BELOW floor=2 — replenishment signal ACTIVE).
+Buffer: min_items=2 / wip_limit=4. Depth: 0 (BELOW floor=2 — replenishment signal ACTIVE).
 
-_Last updated: 2026-06-12 iteration 9 sweep_
+_Last updated: 2026-06-13 iteration 9 sweep (part 2)_
 
-| pos | item_id     | value | cost | vc_ratio | enqueued_ts              | reason                                                                                                 |
-|-----|-------------|-------|------|----------|--------------------------|--------------------------------------------------------------------------------------------------------|
-|   1 | UC-S018-1   | MED   | 1.33 | 1.50     | 2026-06-12T15:36:38Z     | UC-S014-4 cross-slice gate OPEN (CHK-5 done 15:33:59Z); SPA scaffold done; DAG-ready |
+| pos | item_id | value | cost | vc_ratio | enqueued_ts | reason |
+|-----|---------|-------|------|----------|-------------|--------|
+
+Queue empty. UC-S018-2 was enqueued this sweep but already atomically pulled by the engineer (01:29:51Z, ui-designer structure pass exit triggered pull).
 
 ## In-flight (not in queue — claimed seams)
 | item_id     | state     | seams claimed                        | note                                                                                         |
 |-------------|-----------|--------------------------------------|----------------------------------------------------------------------------------------------|
-| UC-S013-3   | in-flight | DefectDrillContainer.jsx + DefectDetail.jsx + MttrCard.jsx + lib/markdown.js | Resume build (defects drill-down + MTTR card) |
-| UC-S015-4   | in-flight | promptBuilder.js re-slice path + templates/steer-prompts/re-slice.js + ReslicePreviewPanel prompt-output wiring | Enriched re-slice/split prompt — SEAM HOLD released |
-| DEF-013     | in-flight | ledgerAggregator.js (aggregator coherence warning) | Axis-2 aggregator coherence fix |
+| UC-S018-2   | in-flight | CodStep.jsx + codScorer.js + ui-design.md (CoD step) | Engineer building — TDD per ui-design.md brief; structure pass complete |
 
 ## Floor status
-Ready depth=1 < min_items=2. Replenishment signal ACTIVE.
+Ready depth=0 < min_items=2. Replenishment signal ACTIVE.
 
-Verdict-pending: UC-S013-4 (vc=1.33; SSE refresh for defects) blocked on UC-S013-3 (in-flight — cannot enqueue until tester pass).
-CHK-6 has 3 forecast slices beyond s015 but operator-usage-gated — do NOT auto-decompose; note only.
-On UC-S013-3 tester PASS: UC-S013-4 becomes DAG-ready → enqueue to ready pos=2 (below UC-S018-1 by vc_ratio 1.33 vs 1.50).
-Two items at or above floor requires product decompose of next slice OR UC-S013-3 completing + UC-S013-4 enqueue.
+Next DAG-ready item: UC-S018-3 (chain-blocked on UC-S018-2; unlocks on UC-S018-2 tester PASS).
+CHK-6 has 3 forecast slices beyond s015 but operator-usage-gated — do NOT auto-decompose.
+
+## Queue state (post-sweep)
+
+| Queue   | depth | min_items | wip_limit | status |
+|---------|-------|-----------|-----------|--------|
+| intake  | 0     | 2         | 10        | below floor — no items pending intake; no new work to decompose this cycle |
+| ready   | 0     | 2         | 4         | BELOW FLOOR — REPLENISHMENT SIGNAL ACTIVE; UC-S018-3 unlocks after UC-S018-2 pass |
+| deploy  | 0     | 0         | 1         | ok |
+| rework  | 0     | 0         | 2         | ok |
+| staging | 0     | 0         | 20        | ok (drained) |

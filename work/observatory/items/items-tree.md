@@ -4,7 +4,7 @@ Parent is canonical; this child-indexed view is rebuilt on every mutation so the
 tree traverses both ways without drift. Per-item DORA is computed from the ledger
 (keyed by id), not stored here.
 
-_Last regenerated: 2026-06-12T16:08:00Z (iteration 9 sweep — flow-manager)_
+_Last regenerated: 2026-06-13T02:01:00Z (iteration 9 sweep part 2 — flow-manager)_
 
 ```
 REQ-OBSERVATORY [requirement] state=active  value=HIGH  cost=XL  vc_ratio=HIGH/XL
@@ -20,28 +20,22 @@ REQ-OBSERVATORY [requirement] state=active  value=HIGH  cost=XL  vc_ratio=HIGH/X
   │     └── UC-S001-6 [use-case] state=done  vc=1.50  done=2026-06-09T01:20:00Z
   │
   ├── CHK-2 [chunk] state=done  value=HIGH  cost=M  vc_ratio=HIGH/M  done=2026-06-10T11:00:00Z
-  │     Render the pull system as a live value-stream map (full pipeline + stages + gates + rework
-  │     + in-flight WIP + hover traceability) — done-condition MET per restated CHK-2
+  │     Render the pull system as a live value-stream map — done-condition MET per restated CHK-2
   │     ├── UC-S002-1..6 [use-case] state=done  (all)
   │     ├── UC-S004-1..6 [use-case] state=done  (all)
-  │     ├── DEF-011 [defect] state=done  vc=3.00  done=2026-06-10T16:27:57Z
-  │     ├── DEF-012 [defect] state=done  vc=1.50  done=2026-06-11T07:35:13Z
-  │     ├── DEF-013 [defect] state=done  vc=1.50  done=2026-06-12T15:46:17Z  dora_ref=DEFECT-013
-  │     │     Atomic pull + registry-coherence warning deployed (6c038f0); recovery confirmed
-  │     │     live — UC-S018-1 drift self-surfaced. [CLOSED]
-  │     ├── DEF-014 [defect] state=in-flight  vc=3.00  created=2026-06-12T16:05:00Z  dora_ref=DEFECT-014
-  │     │     Composite hover panel fix — node-scoped single panel (ui-designer ruling b).
-  │     │     Engineer building; seams: StageNode.jsx + MetricSource.jsx + metric-source.css
-  │     ├── DEF-015 [defect] state=done  vc=2.00  created=2026-06-12T15:55:30Z  done=2026-06-12T15:55:30Z  dora_ref=DEFECT-015
-  │     │     Non-atomic orchestrator repair → transient ready incoherence; self-healed;
-  │     │     discipline codified in flow-manager.md. [CLOSED instantaneous]
+  │     ├── DEF-011 [defect] state=done  vc=3.00  done=2026-06-10T16:27:57Z  [CLOSED]
+  │     ├── DEF-012 [defect] state=done  vc=1.50  done=2026-06-11T07:35:13Z  [CLOSED]
+  │     ├── DEF-013 [defect] state=done  vc=1.50  done=2026-06-12T15:46:17Z  dora_ref=DEFECT-013  [CLOSED]
+  │     │     Atomic pull + registry-coherence warning deployed (6c038f0); recovery confirmed.
+  │     ├── DEF-014 [defect] state=done  vc=3.00  done=2026-06-13T01:16:59Z  dora_ref=DEFECT-014  [CLOSED]
+  │     │     Composite hover panel — ONE node-scoped panel (ca3826b); engineer prod re-check
+  │     │     confirmed exactly 1 panel per node. Seams released: StageNode.jsx + MetricSource.jsx.
+  │     ├── DEF-015 [defect] state=done  vc=2.00  done=2026-06-12T15:55:30Z  dora_ref=DEFECT-015  [CLOSED]
+  │     │     Non-atomic orchestrator repair → transient incoherence; self-healed; discipline codified.
   │     ├── DEF-016 [defect] state=unconfirmed  vc=1.00  created=2026-06-12T16:00:42Z  dora_ref=DEFECT-016
-  │     │     Validate card WIP under-report during dispatch→stage_enter lag (~1min).
-  │     │     EXP-041 coherence-warning watch active; no fix dispatched.
-  │     └── D7-AC-7 [defect] state=planned  vc=2.00  created=2026-06-12T15:36:38Z
-  │           ledger-aggregator.test.js D7-AC-7 asserts absolute active_days against live
-  │           ledger — broke on 4th calendar day; convert to fixture ledger.
-  │           [next-pickup-when-free; not pre-emptive]
+  │     │     Validate card WIP under-report during dispatch→stage_enter lag. EXP-041 watch active.
+  │     └── D7-AC-7 [defect] state=done  vc=2.00  done=2026-06-13T02:00:00Z  dora_ref=D7-AC-7-FIX  [CLOSED]
+  │           ledger-aggregator.test.js fixture-ledger fix delivered en route (1180a4e). [CLOSED]
   │
   ├── CHK-3 [chunk] state=dropped  (scope absorbed into CHK-2)
   │
@@ -50,8 +44,7 @@ REQ-OBSERVATORY [requirement] state=active  value=HIGH  cost=XL  vc_ratio=HIGH/X
   │     └── UC-S005-1..6 [use-case] state=done  (all)
   │
   ├── CHK-5 [chunk] state=done  value=HIGH  cost=M  vc_ratio=HIGH/M  done=2026-06-12T15:33:59Z
-  │     Compose a structured preview-first prompt for any steer action and hand it to Claude
-  │     so all writes go through the human-accept gate and never through the UI
+  │     Compose a structured preview-first prompt for any steer action
   │     └── SLC-S014 [slice] state=done  done=2026-06-12T15:33:59Z
   │           ├── UC-S014-1 [use-case] state=done  vc=2.00  done=2026-06-10T16:27:57Z
   │           ├── UC-S014-2 [use-case] state=done  vc=1.60  done=2026-06-11T10:25:14Z
@@ -59,8 +52,7 @@ REQ-OBSERVATORY [requirement] state=active  value=HIGH  cost=XL  vc_ratio=HIGH/X
   │           └── UC-S014-4 [use-case] state=done  vc=0.80  done=2026-06-12T15:33:59Z
   │
   ├── CHK-6 [chunk] state=active  value=MED-HIGH  cost=M
-  │     Navigate WIP and propose re-slice/split/merge/reprioritise/defect actions each routed
-  │     through CHK-5 with before/after preview so steering never bypasses the agents
+  │     Navigate WIP and propose re-slice/split/merge/reprioritise/defect actions
   │     FIRST SLICE DONE (SLC-S015 done 2026-06-12T16:02:33Z). 3 forecast slices remain
   │     OPERATOR-USAGE-GATED — do not auto-decompose; CHK-6 stays ACTIVE.
   │     └── SLC-S015 [slice] state=done  done=2026-06-12T16:02:33Z
@@ -74,46 +66,45 @@ REQ-OBSERVATORY [requirement] state=active  value=HIGH  cost=XL  vc_ratio=HIGH/X
   │     Guide a work author through JTBD + cost-of-delay capture; queue rank preview;
   │     CHK-5 intake prompt handoff
   │     └── SLC-S018 [slice] state=active
-  │           ├── UC-S018-1 [use-case] state=in-flight  vc=1.50  (engineer building; atomic pull 2026-06-12T15:48:07Z)
-  │           ├── UC-S018-2 [use-case] state=planned  vc=1.00  (chain-blocked on UC-S018-1)
-  │           ├── UC-S018-3 [use-case] state=planned  vc=1.50  (chain-blocked on UC-S018-1|2)
+  │           ├── UC-S018-1 [use-case] state=done  vc=1.50  done=2026-06-13T01:23:46Z
+  │           │     Rework: A11Y-S018-1-12 contrast fix (ed7848c); MTTR closed 01:22:51Z. [DONE]
+  │           ├── UC-S018-2 [use-case] state=in-flight  vc=1.00
+  │           │     Engineer building — CoD signals step + codScorer pure fn (TDD per ui-design.md)
+  │           │     Structure pass complete (ui-designer 01:29:51Z)
+  │           ├── UC-S018-3 [use-case] state=planned  vc=1.50  (chain-blocked on UC-S018-2)
   │           └── UC-S018-4 [use-case] state=planned  vc=2.00  (chain-blocked; UC-S014-4 gate OPEN)
   │
-  └── CHK-8 [chunk] state=active  value=HIGH  cost=M
+  └── CHK-8 [chunk] state=done  value=HIGH  cost=M  done=2026-06-13T01:27:27Z  [DONE THIS SWEEP]
         See all defects with status/severity/MTTR at a glance and drill into any one
-        └── SLC-S013 [slice] state=active
+        └── SLC-S013 [slice] state=done  done=2026-06-13T01:27:27Z  [DONE THIS SWEEP]
               ├── UC-S013-1 [use-case] state=done  vc=2.00  done=2026-06-11T07:43:41Z
-              ├── UC-S013-2 [use-case] state=done  vc=1.60  done=2026-06-11T10:50:24Z  [drift-repaired this sweep]
+              ├── UC-S013-2 [use-case] state=done  vc=1.60  done=2026-06-11T10:50:24Z
               ├── UC-S013-3 [use-case] state=done  vc=2.00  done=2026-06-12T16:02:11Z
-              └── UC-S013-4 [use-case] state=in-flight  vc=1.33  (engineer building SSE refresh; atomic pull verified 2026-06-12T16:03:53Z)
+              └── UC-S013-4 [use-case] state=done  vc=1.33  done=2026-06-13T01:27:27Z  [DONE THIS SWEEP]
+                    SSE live refresh; seams RELEASED: useDefects.js SSE + defects e2e surface
 ```
 
 ## Queue state (post-sweep)
 
 | Queue   | depth | min_items | wip_limit | status |
 |---------|-------|-----------|-----------|--------|
-| intake  | 0     | 2         | 10        | below floor (0 < 2) — no items pending intake; no new work to decompose this cycle |
-| ready   | 0     | 2         | 4         | BELOW FLOOR (0 < 2) — REPLENISHMENT SIGNAL ACTIVE; no DAG-ready items available (all chain-blocked or usage-gated) |
+| intake  | 0     | 2         | 10        | below floor — no items pending intake |
+| ready   | 0     | 2         | 4         | BELOW FLOOR — REPLENISHMENT SIGNAL ACTIVE; UC-S018-3 unlocks after UC-S018-2 pass |
 | deploy  | 0     | 0         | 1         | ok |
 | rework  | 0     | 0         | 2         | ok |
 | staging | 0     | 0         | 20        | ok (drained) |
 
-## In-flight (leave alone)
+## In-flight (claimed seams)
 
-- DEF-014: engineer building composite hover panel fix (seams: StageNode.jsx, MetricSource.jsx, metric-source.css)
-- UC-S018-1: engineer building intake wizard shell + JTBD capture
-- UC-S013-4: engineer building SSE live refresh for defects view
+- UC-S018-2: engineer building CoD signals step + codScorer (CodStep.jsx + codScorer.js)
 
 ## Runway to requirement-complete
 
-Remaining undecomposed work after current in-flight completes:
-- **Pull 1:** UC-S013-4 PASS → SLC-S013 DONE → CHK-8 DONE
-- **Pull 2:** UC-S018-1 PASS → UC-S018-2 enqueued Ready
-- **Pull 3:** UC-S018-2 PASS → UC-S018-3 enqueued Ready
-- **Pull 4:** UC-S018-3 PASS → UC-S018-4 enqueued Ready
-- **Pull 5:** UC-S018-4 PASS → SLC-S018 DONE → CHK-7 DONE → REQ may reach decomposed-and-done
-- **After pull 5:** Nothing undecomposed remains except CHK-6 usage-gated forecast slices (operator must confirm usage before decomposition)
+- **Pull 1 (active):** UC-S018-2 PASS → UC-S018-3 enqueued Ready
+- **Pull 2:** UC-S018-3 PASS → UC-S018-4 enqueued Ready
+- **Pull 3:** UC-S018-4 PASS → SLC-S018 DONE → CHK-7 DONE → REQ hits decomposed-and-done boundary
 
-**Estimate: ~5 more pulls to decomposed-and-done boundary.** At that boundary, per §F3(d), the loop reports STARVED + REQUIREMENT-COMPLETE and asks the human whether to proceed with CHK-6 usage-gated slices or provide new work.
+**Estimate: ~3 more pulls to decomposed-and-done boundary.** At that boundary, per §F3(d), the loop reports STARVED + REQUIREMENT-COMPLETE and asks the human whether to proceed with CHK-6 usage-gated slices or provide new work.
 
-DEF-014 and D7-AC-7 are in-flight/next-pickup respectively and do not block the chain.
+D7-AC-7 DONE (en route). DEF-016 unconfirmed (EXP-041 watch). DEF-014 DONE (ca3826b).
+CHK-8 DONE this sweep — defects view fully delivered.

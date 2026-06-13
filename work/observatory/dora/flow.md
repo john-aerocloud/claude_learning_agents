@@ -1,6 +1,6 @@
 # Flow view — observatory
 
-_Generated 2026-06-12T16:07:39Z from ledger.csv + queues/policy.csv. Do not hand-edit._
+_Generated 2026-06-13T01:36:28Z from ledger.csv + queues/policy.csv. Do not hand-edit._
 
 ## Queues — buffer control + statistical metrics
 
@@ -9,7 +9,7 @@ Buffer control per queue = **min_items** (replenish floor) + **WIP limit** (cap)
 | Queue | min_items | WIP limit | length | throughput /day | dwell median (s) | rework rate | items through |
 |-------|-----------|-----------|--------|-----------------|------------------|-------------|---------------|
 | intake | 2 | 10 | 5 | — | — | 0.00 | 0 |
-| ready | 2 | 4 | 0 | 5 | 57208 | 0.00 | 9 |
+| ready | 2 | 4 | 1 | 5 | 57208 | 0.00 | 9 |
 
 ## Time thieves (wall-clock not spent doing the work)
 
@@ -60,7 +60,7 @@ Buffer control per queue = **min_items** (replenish floor) + **WIP limit** (cap)
 | DEF-011 | — | 0 | 0 | — |
 | DEF-012 | 1182 | 0 | 2700 | 0% |
 | DEF-013 | — | 0 | 850 | — |
-| DEF-014 | — | 0 | 0 | — |
+| DEF-014 | — | 0 | 300 | — |
 | DEF-015 | — | 0 | 0 | — |
 | DEF-016 | — | 0 | 0 | — |
 | DEFECT-005 | — | 0 | 1320 | — |
@@ -72,6 +72,7 @@ Buffer control per queue = **min_items** (replenish floor) + **WIP limit** (cap)
 | FLOW-MGR-ITER9 | 162 | 0 | 0 | 0% |
 | REQ-OBSERVATORY | — | 0 | 0 | — |
 | S2-UC1 | 283 | 0 | 1860 | 0% |
+| SLC-S013 | — | 0 | 0 | — |
 | SLC-S014 | 81 | 0 | 0 | 0% |
 | SLC-S015 | — | 0 | 0 | — |
 | SLC-S018 | — | 0 | 0 | — |
@@ -105,7 +106,7 @@ Buffer control per queue = **min_items** (replenish floor) + **WIP limit** (cap)
 | UC-S013-1 | 53393 | 52921 | 721 | 99% |
 | UC-S013-2 | 10304 | 1520 | 8924 | 15% |
 | UC-S013-3 | 104730 | 0 | 1367 | 0% |
-| UC-S013-4 | — | 0 | 0 | — |
+| UC-S013-4 | — | 0 | 540 | — |
 | UC-S014-1 | 2105 | 23 | 3193 | 1% |
 | UC-S014-2 | 2255 | 2710 | 7595 | 120% |
 | UC-S014-3 | — | 0 | 700 | — |
@@ -114,7 +115,7 @@ Buffer control per queue = **min_items** (replenish floor) + **WIP limit** (cap)
 | UC-S015-2 | — | 0 | 1378 | — |
 | UC-S015-3 | — | 0 | 17215 | — |
 | UC-S015-4 | — | 0 | 1155 | — |
-| UC-S018-1 | 1627 | 526 | 2790 | 32% |
+| UC-S018-1 | 1627 | 526 | 3390 | 32% |
 | UC-S018-2 | — | 0 | 0 | — |
 | UC-S018-3 | — | 0 | 0 | — |
 | UC-S018-4 | — | 0 | 0 | — |
@@ -133,8 +134,10 @@ Buffer control per queue = **min_items** (replenish floor) + **WIP limit** (cap)
 | s013-defects-view | — | 0 | 0 | — |
 | s014-steer-prompt-handoff | — | 0 | 1320 | — |
 | s015-wip-navigate-reslice-preview | — | 0 | 1320 | — |
+| s018-guided-cod-intake | — | 0 | 0 | — |
 | s019-atomic-pull | 261 | 0 | 0 | 0% |
 | s020-hover-stack | — | 0 | 0 | — |
-| s022-sweep | — | 0 | 0 | — |
+| s022-sweep | 261 | 0 | 0 | 0% |
+| s023-sweep | — | 0 | 0 | — |
 
 _Every metric ties back to the two system numbers: Σ dwell across queues is the WAIT part of gross lead time; the throughput of the binding (lowest-throughput) queue is system throughput; rework rate inflates both. Hidden-edge rate (collisions/slice) and false-edge rate live in architecture/dependencies/edge-ledger.md._

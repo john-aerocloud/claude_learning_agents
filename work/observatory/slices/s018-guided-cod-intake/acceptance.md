@@ -129,3 +129,145 @@ text assertions, NO-WRITE via the write-guard 405 + a fetch spy.
   away, and writes nothing. (Step 2's real CodStep is UC-S018-2.)
 - **NAV-S018-1-2:** "Back" returns to step 1 with the JTBD fields' entered text
   preserved (draft retained while the drawer stays open).
+
+---
+
+## UC-S018-2 — Cost-of-delay signals step + value-token scorer (THIS UC)
+
+The real `CodStep` replacing step-2's placeholder + the pure `codScorer.js`.
+Inherits the UC-S018-1 shell contract (drawer, focus/Esc, step machine,
+indicator + de-emphasis rule, nav) — those conditions are NOT re-stated and MUST
+NOT regress. These conditions are step-2-specific.
+
+### Functional (from use-cases.md — restated for the tester)
+- AC-S018-2-1: the Value selector shows THREE labelled options with
+  plain-language descriptions (no raw token alone); selecting HIGH + Urgency =
+  Yes produces a computed band = HIGH (visible in the readout, `data-cod-band="HIGH"`).
+- AC-S018-2-2: selecting LOW + Urgency = No produces computed band = LOW.
+- AC-S018-2-3: selecting MED with EITHER urgency, AND any other combination of
+  CHOSEN values, produces computed band = MED.
+- AC-S018-2-4: `codScorer.js` unit test (no DOM): `scoreCod` returns
+  `token:'HIGH'` for `{value:'HIGH', timeCritical:true}`, `token:'LOW'` for
+  `{value:'LOW', timeCritical:false}`, `token:'MED'` for every other CHOSEN
+  combination, and `{token:null, band:null, complete:false, reason:''}` when
+  `value` OR `timeCritical` is `null` (incomplete ≠ a defaulted MED).
+
+### Scorer output contract (SCORE) — UI-designer co-authored
+- **SCORE-S018-2-1 (shape):** `scoreCod({value, timeCritical})` returns
+  `{ token, band, complete, reason }` — `token`/`band` ∈ HIGH|MED|LOW|null,
+  `complete` boolean, `reason` string. `band === token` this slice.
+- **SCORE-S018-2-2 (totality / purity):** defined for every input including
+  `null`s; never throws; no DOM access; no network call (assert via the no-write
+  spy that calling the scorer issues no fetch — it is pure).
+- **SCORE-S018-2-3 (incomplete is null, not MED):** with `value=null` OR
+  `timeCritical=null`, `token` and `band` are `null` and `complete` is `false`
+  (the empty-inputs≠score guarantee at the source).
+
+### Accessibility (AA) — UI-designer co-authored, tester-enforced
+- **A11Y-S018-2-1 (radiogroup semantics — Value):** the Value group exposes
+  `role="radiogroup"` with an accessible name matching `/value/i`; it is a
+  SINGLE tab stop; ↑/↓/←/→ change the selection within the group (assert the
+  checked radio moves with arrow keys and the group is one tab stop); each radio's
+  accessible name is its FULL plain-language description (matches the option text,
+  not the bare token). axe `aria-required-children`/`label` pass.
+- **A11Y-S018-2-2 (radiogroup semantics — Urgency):** the Urgency group exposes
+  `role="radiogroup"` name `/urgency/i`, single tab stop, arrow-key selection;
+  options' accessible names match `/time-critical/i` and `/not time-sensitive/i`.
+- **A11Y-S018-2-3 (no default selection):** on first render of step 2, NEITHER
+  the Value nor the Urgency group has a checked radio (an unset signal is real —
+  pairs with FIG-S018-2-3); assert no radio is `:checked` initially.
+- **A11Y-S018-2-4 (labelled textareas):** the "why it matters now" and
+  "risk-of-delay" textareas each have an associated programmatic `<label>` (axe
+  `label` passes; placeholder is NOT the sole label); accessible names match
+  `/why it matters now/i` and `/risk of delay|deferred/i`.
+- **A11Y-S018-2-5 (within-step focus order):** forward Tab order within step 2 is
+  Value group → Urgency group → "why now" textarea → risk-of-delay textarea →
+  band readout → Back → Next. Assert the `document.activeElement` progression.
+- **A11Y-S018-2-6 (heading order):** the CodStep sub-heading is an `<h3>`
+  (`data-testid="cod-step-heading"`) under the wizard's `<h2>` — no skipped
+  level introduced; axe `heading-order` passes.
+- **A11Y-S018-2-7 (visible focus):** every radio, textarea, and the step-nav
+  buttons show a visible `:focus-visible` indicator (`--focus-ring`); assert a
+  non-empty computed box-shadow/outline on focus.
+- **A11Y-S018-2-8 (target size):** each radio's hit box and the step-nav buttons
+  are ≥ 24×24 CSS px (WCAG 2.2 §2.5.8); assert bounding-box width AND height ≥ 24.
+- **A11Y-S018-2-9 (band readout live + non-colour):** the CodScoreReadout is
+  `role="status"` `aria-live="polite"`; the band is conveyed by the visible WORD
+  (HIGH/MED/LOW + tier sentence), NOT colour alone (assert the band word text
+  node is present; any colour accent is redundant).
+- **A11Y-S018-2-10 (contrast):** the band readout text (band word + reason) is
+  ≥ 4.5:1 on `--c-surface-raised`; axe `color-contrast` passes for the readout
+  and all three Value option labels.
+- **A11Y-S018-2-11 (shell de-emphasis NOT regressed):** the inherited UC-S018-1
+  e2e a11y pin (`e2e/intake-wizard-a11y.spec.js` "targeted" test — planned-step
+  cumulative opacity = 1, ≥ 4.5:1, no opacity keyframe) STILL passes with step 2
+  now live (CodStep introduces no opacity animation and no alpha de-emphasis).
+
+### Geometry / visual-structural correctness — tester-enforced via bbox/computed style
+- **GEO-S018-2-1 (step swap = zero external reflow):** advancing from step 1 to
+  step 2 (placeholder → live CodStep) changes only content INSIDE the fixed
+  drawer — the value-stream map bounding box AND `.observatory-main-col`
+  scrollHeight are BYTE-IDENTICAL before vs after the swap (the drawer is
+  `position:fixed`, zero flow height — same guard as GEO-S018-1-1). Assert
+  getBoundingClientRect equality of `[data-testid="value-stream-map"]` and
+  scrollHeight equality of `.observatory-main-col` across the step-1→step-2 swap.
+- **GEO-S018-2-2 (CoD signals stack):** the three signal groups (Value /
+  Urgency / Risk-of-delay) stack vertically — group top offsets strictly
+  increase, shared left offset (a form column, not a row); assert monotonic tops
+  + shared left (the s002-line guard applied to the CoD step).
+- **GEO-S018-2-3 (drawer stays on-screen):** with step 2 live, the wizard's
+  bounding box still sits fully within the viewport (right edge ≤ innerWidth, no
+  document horizontal scrollbar) — the wider CoD content does not push the
+  drawer off-screen or introduce horizontal scroll.
+
+### Figure legibility (FIG) — the live band readout
+- **FIG-S018-2-1 (band reads as words):** when both Value and Urgency are chosen,
+  the readout text contains the band WORD plus its tier sentence (e.g. "HIGH" AND
+  /top tier/i for HIGH; /middle tier/i for MED; /bottom tier/i for LOW) and the
+  next-step hint (/rank|next step/i). It contains NONE of "undefined", "null",
+  "NaN", and is NOT a bare number.
+- **FIG-S018-2-2 (value tokens never bare):** each of the three Value radio
+  options' visible label contains BOTH the token AND its plain-language sentence
+  (e.g. "HIGH" AND "directly impacts the team's ability to deliver"); the token
+  never stands alone as the label.
+- **FIG-S018-2-3 (empty inputs ≠ a score):** on first render of step 2 (nothing
+  chosen), the readout shows a NEUTRAL prompt (e.g. /choose a value and urgency/i),
+  NOT a band word, NOT "MED", NOT "0", NOT blank; `data-cod-band` is absent.
+  Selecting only Value (urgency still unchosen) still shows the neutral/incomplete
+  prompt, not a band.
+
+### No-write contract (NO-WRITE)
+- **NOWRITE-S018-2-1:** changing any Value radio, Urgency radio, "why now" or
+  risk-of-delay textarea, and pressing Back/Next on step 2 issue ZERO network
+  requests with a write method (POST/PUT/PATCH/DELETE) — assert via the fetch/XHR
+  spy across the full step-2 interaction. (Step 2, like step 1, issues no network
+  call at all; the scorer is pure client-side.)
+- **NOWRITE-S018-2-2:** the server write-guard remains active (write probe → 405)
+  — the SM-CHK7-6 regression guard still passes.
+
+### Selectors (SEL) — the build/test contract (stable, role-first)
+- **SEL-S018-2-1:** CodStep resolvable by `[data-testid="cod-step"]`; its
+  sub-heading by `[data-testid="cod-step-heading"]` (`<h3>`).
+- **SEL-S018-2-2:** Value group resolvable by `getByRole('radiogroup', { name:
+  /value/i })` and `[data-testid="cod-value"]`; options by their role+name and
+  `[data-testid="cod-value-high|cod-value-med|cod-value-low"]` /
+  `[data-value="HIGH|MED|LOW"]`.
+- **SEL-S018-2-3:** Urgency group resolvable by `getByRole('radiogroup', { name:
+  /urgency/i })` and `[data-testid="cod-urgency"]`; options by
+  `[data-testid="cod-urgency-yes|cod-urgency-no"]` / `[data-urgency="yes|no"]`.
+- **SEL-S018-2-4:** the two textareas resolvable by their role+name and
+  `[data-testid="cod-urgency-why"]` / `[data-testid="cod-risk"]`.
+- **SEL-S018-2-5:** band readout resolvable by `[data-testid="cod-score-readout"]`
+  with `role="status"`; the band word carries `[data-cod-band="HIGH|MED|LOW"]`
+  when scored (absent when incomplete). No derived `nth(N)`/text-exclusion
+  selectors.
+
+### Step-navigation (step-2-specific) — observable behaviour
+- **NAV-S018-2-1:** when `currentStep` is step 2, the WizardStepIndicator marks
+  step 2 `data-step-state="current"` / `aria-current="step"`, and the live
+  `CodStep` (`[data-testid="cod-step"]`) renders in the step-2 slot in place of
+  the `wizard-step-placeholder` (the placeholder is gone for step 2).
+- **NAV-S018-2-2:** pressing "Back" from step 2 returns to step 1 with the JTBD
+  draft preserved AND, on returning to step 2, the previously chosen CoD signals
+  (Value, Urgency, textareas) are still set — the wizard's lifted draft is
+  retained while the drawer stays open (no reset on step navigation).

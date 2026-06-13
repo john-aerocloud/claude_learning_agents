@@ -353,8 +353,6 @@ state, contrast ≥ AA, reduced-motion drawer.
 ---
 
 ## NOT designed yet (deferred to later UCs / explicitly out)
-- CoD signals step + value-token scorer UI (UC-S018-2) — only its PLANNED step
-  slot + placeholder is shown here.
 - Queue-rank preview (UC-S018-3) — its step slot is planned-not-built.
 - Intake prompt builder + copy/toast handoff (UC-S018-4) — its step slot is
   planned-not-built; reuses SteerPanel copy/toast then.
@@ -364,3 +362,384 @@ state, contrast ≥ AA, reduced-motion drawer.
   defect intake path, multi-project — all out per slice.md.
 - The drawer-registry / layer-manager refactor of ObservatoryView — RETRO
   candidate, not designed in.
+
+---
+---
+
+# UI design — UC-S018-2: Cost-of-delay signals step + value-token scorer
+
+Applies: **yes** — the real step-2 content surface (the `CodStep` component)
+that REPLACES the UC-S018-1 `wizard-step-placeholder` in the wizard's step-2
+mount slot, plus its pure `codScorer.js` scoring fn.
+
+Mode: STRUCTURE (before the engineer). Scope of THIS UC = the three CoD signal
+inputs (Value selector + Urgency + Risk-of-delay), the deterministic
+`codScorer.js` pure fn, and a live score/band readout — mounted INTO the
+existing step-2 slot the shell already owns. The shell's step state machine,
+step indicator, step nav, drawer/focus/Esc contract, and the planned-step
+de-emphasis rule are UC-S018-1 and **MUST NOT be regressed**. The queue-rank
+preview (UC-S018-3) consumes this step's scorer OUTPUT but is NOT built here.
+
+---
+
+## What the shell already guarantees (inherited, do-no-harm)
+The delivered IntakeWizard (UC-S018-1) owns and this UC reuses unchanged:
+- the **4-step state machine** + `currentStep` (the mount seam — CodStep mounts
+  where `wizard-step-placeholder` currently renders for step 2);
+- the **WizardStepIndicator** (step 2 marked `data-step-state="current"` /
+  `aria-current="step"` when active) and its **de-emphasis rule** — planned
+  steps are de-emphasised via COLOUR + size + "(soon)" text, **NEVER alpha**
+  (A11Y-S018-1-12 rework, ratified in components.md). CodStep introduces no new
+  de-emphasis channel and adds no opacity animation.
+- the **drawer/focus/Esc/×/Cancel + focus-return-to-launcher** contract;
+- the **WizardStepNav** (Next/Back); this UC adds Back→step-1 draft-preservation
+  and step-2-current as testable step-2-specific conditions (NAV-S018-2-*).
+- the **NON-MODAL, body-portalled, zero-flow-height** drawer (GEO basis): a step
+  SWAP is an internal content change inside the fixed drawer — it reflows
+  nothing outside (GEO-S018-2-1 below pins this).
+
+This UC adds NO new design token and NO new drawer; it is a content component
+mounted into an existing slot.
+
+---
+
+## Surfaces touched
+- **IntakeWizard step-2 slot** (existing mount seam) — the
+  `wizard-step-placeholder` is replaced by the live `CodStep` when `currentStep`
+  is step 2. (The placeholder remains for steps 3–4 until -3/-4 build them.)
+- **`src/app/lib/codScorer.js`** (NEW pure fn — no DOM, no fetch). The
+  deterministic value-token rule; its OUTPUT is the UC-S018-3 / UC-S018-4
+  contract (spec'd below).
+- **`src/app/components/CodStep.jsx`** (NEW) — the three CoD inputs + the live
+  band readout; pure render of lifted field state + the scorer result.
+
+---
+
+## Input idioms (accessible, design-system-consistent)
+
+The decisive idiom question for each of the three signals — radio group vs
+select vs checkbox vs textarea — resolved against the design system and WCAG:
+
+### Value — a RADIO GROUP, not a `<select>` (decision, recorded)
+- **Three mutually-exclusive options, EACH with a one-line plain-language
+  description that must be VISIBLE** (slice.md: "HIGH — directly impacts the
+  team's ability to deliver"; "MED — improves the experience but work continues
+  without it"; "LOW — nice-to-have"). A `<select>` hides those descriptions
+  behind a click and reduces each option to a bare token — violating the FIG
+  "no raw token alone" rule and adding an interaction step. A **radio group**
+  shows all three labelled options at once (0 extra clicks to read them) and is
+  the canonical single-select-from-small-labelled-set idiom.
+- **Token integrity:** the radio LABEL is the human description; the bare token
+  (HIGH/MED/LOW) is shown WITH it, never alone (FIG-S018-2-2).
+- Rejected: `<select>` (hides descriptions, +1 click, FIG violation); a custom
+  listbox (heavier ARIA than native radios buy us nothing here).
+
+### Urgency — a yes/no RADIO GROUP + a labelled "why now" textarea
+- slice.md: "time-critical? yes/no + free text 'why it matters now'". The yes/no
+  is the binary the SCORER reads → a 2-option radio group ("Yes — time-critical"
+  / "No — not time-sensitive"). The "why now" is operator prose for the prompt
+  (UC-S018-4) and does NOT affect the score → a labelled, **optional** textarea
+  reusing the `.intent-note` field treatment.
+- Rejected: a single checkbox for time-critical (a lone checkbox's
+  checked/unchecked state is less scannable than an explicit Yes/No pair, and the
+  scorer's "no urgency" branch reads more clearly off an explicit No than off an
+  unchecked box). A radio pair makes the binary an explicit, labelled choice.
+
+### Risk-of-delay — a single labelled OPTIONAL textarea
+- slice.md: "what worsens if this is deferred? free text, optional". Pure prose
+  for the prompt; does NOT feed the scorer this slice. Labelled textarea, reuses
+  `.intent-note`. Empty is valid (→ "n/a" downstream, UC-S018-4).
+
+---
+
+## The deterministic scorer — `lib/codScorer.js` (pure fn, the cross-UC contract)
+
+**Signature (pure, no DOM, no fetch — unit-testable in isolation, AC-S018-2-4):**
+```js
+// scoreCod(signals) -> CodScore
+scoreCod({ value, timeCritical })
+```
+
+**Input** (`signals`):
+| field | type | source | notes |
+|---|---|---|---|
+| `value` | `'HIGH' \| 'MED' \| 'LOW' \| null` | Value radio group | `null` = not yet chosen |
+| `timeCritical` | `boolean \| null` | Urgency yes/no radio | `null` = not yet chosen |
+
+(The `urgencyWhy` and `riskOfDelay` free-text fields are NOT scorer inputs — they
+are prompt material only, carried in the wizard's lifted state for UC-S018-4.)
+
+**Rule (verbatim from slice.md §2 / AC-S018-2):**
+- `value === 'HIGH'` AND `timeCritical === true` → token `'HIGH'`
+- `value === 'LOW'` AND `timeCritical === false` → token `'LOW'`
+- **every other combination of CHOSEN values** → token `'MED'`
+- **inputs incomplete** (`value` is `null` OR `timeCritical` is `null`) →
+  `token: null`, `complete: false` — NOT a default of MED, NOT a score (the
+  empty-inputs≠-a-score FIG rule; an unchosen signal must not silently read as
+  a real MED band).
+
+**Output shape (`CodScore`) — the UC-S018-3 + UC-S018-4 consumption contract:**
+```js
+{
+  token: 'HIGH' | 'MED' | 'LOW' | null, // the computed value token (null until complete)
+  band:  'HIGH' | 'MED' | 'LOW' | null, // === token this slice (kept as a separate
+                                        //   field so a future graded score can widen
+                                        //   without breaking consumers; equal for now)
+  complete: boolean,                    // true iff value AND timeCritical both chosen
+  reason: string                        // human one-line WHY, for the FIG readout AND
+                                        //   the UC-S018-4 "value: … with reasoning" block
+}
+```
+- `reason` examples (operator language, no enum jargon):
+  - HIGH: `"High value and time-critical — ranks with the top tier."`
+  - LOW: `"Low value and not time-sensitive — ranks in the bottom tier."`
+  - MED: `"Mixed signals — ranks in the middle tier."`
+  - incomplete: `""` (empty; the readout shows its own neutral prompt, not a
+    reason for a non-existent score).
+
+**Why this shape (contract note, mirrors the useSteerContext six-field note):**
+- `token` is what UC-S018-3's `useQueueRank` compares against the Intake-queue
+  items by tier (HIGH > MED > LOW) — a single discrete tier, exactly the value
+  the rank counter needs; no rank logic leaks into the scorer.
+- `band` duplicates `token` deliberately as the **stable readout/rank field**:
+  if a later slice adds a WSJF/CD3 numeric score (explicitly a deferred
+  follow-on per slice.md), `token` stays the coarse tier and `band` can carry
+  the graded band — consumers already read `band`, so they don't break. This UC
+  sets `band === token`.
+- `complete` lets UC-S018-3 hold the rank preview until a real token exists
+  (no "rank for a null tier") and lets UC-S018-4 gate "Generate".
+- `reason` is authored ONCE here so both the live readout (this UC) and the
+  prompt's "value: … reasoning" line (UC-S018-4) read identically — the operator
+  sees in the readout exactly what the prompt will say.
+
+`scoreCod` is a **total pure function**: defined for every input including
+`null`s; never throws; no side effects. (AC-S018-2-4 unit-tests it with no DOM.)
+
+---
+
+## Component decomposition (component → states → stable selector)
+
+### CodStep (NEW — the step-2 content; mounts into the wizard's step-2 slot)
+- **Role:** the cost-of-delay signals capture surface — Value selector + Urgency
+  (yes/no + why) + Risk-of-delay + the live band readout. Pure render of lifted
+  field state + the `scoreCod` result. Owns NO drawer, NO step machine (those are
+  the shell's) — it is the content the shell mounts when `currentStep` = 2.
+- **Props (pure):** `{ value, timeCritical, urgencyWhy, riskOfDelay, score,
+  onChange(field, value) }` where `score` is the `CodScore` the shell computed
+  by calling `scoreCod({value, timeCritical})` (the shell owns the lifted CoD
+  state so UC-S018-3/4 can read `value`/`token` from one place — same lift
+  pattern the JTBD fields use).
+- **States:** default (nothing chosen → band readout shows neutral prompt) ·
+  partial (one of value/urgency chosen → still no band) · scored (both chosen →
+  band + reason shown).
+- **Selector:** `data-testid="cod-step"`; the region wrapping the three signals
+  is `role="group"` `aria-labelledby` → the step-2 sub-heading (`<h3>` e.g.
+  "Cost of delay", `data-testid="cod-step-heading"`). NOT a second `role=dialog`
+  — it is content inside the wizard dialog (one dialog, A11Y heading order:
+  the wizard `<h2>` then this `<h3>`).
+- **A11y:** logical forward tab order WITHIN the step — Value radio group →
+  Urgency radio group → "why now" textarea → Risk-of-delay textarea → band
+  readout → step nav (Back → Next). No skipped heading level (`<h3>` under the
+  wizard `<h2>`).
+- **Library:** custom (token-based; reuses existing fieldset/radio + `.intent-note`
+  treatments; NO new token).
+
+### CodValueSelect (NEW — the Value HIGH/MED/LOW radio group; child of CodStep)
+- **Role:** the single-select value signal with VISIBLE plain-language labels.
+- **Idiom:** a native `<fieldset>` + `<legend>` "Value" wrapping three
+  `<input type="radio" name="cod-value">` each with an associated `<label>`
+  carrying the FULL description (token + dash + plain sentence).
+- **Options (labels — token NEVER bare, FIG-S018-2-2):**
+  - HIGH — "HIGH — directly impacts the team's ability to deliver"
+  - MED — "MED — improves the experience but work continues without it"
+  - LOW — "LOW — nice-to-have"
+- **States (per radio):** default · hover · focus-visible (`--focus-ring`) ·
+  checked · (group) none-selected (initial — no default selection; the operator
+  must choose, so an unchosen value reads as genuinely unset, FIG empty≠score).
+- **Selector:** group `getByRole('radiogroup', { name: /value/i })`,
+  `data-testid="cod-value"`; each option
+  `getByRole('radio', { name: /high|med|low/i })`,
+  `data-testid="cod-value-high|cod-value-med|cod-value-low"` +
+  `data-value="HIGH|MED|LOW"`; the group carries `data-cod-value` reflecting the
+  chosen token (or absent/empty when none).
+- **A11y (WAI-ARIA radiogroup semantics — A11Y-S018-2-1):** native radios in a
+  `<fieldset>`/`<legend>` give the radiogroup role + name for free; **arrow keys
+  move selection within the group, the group is a SINGLE tab stop** (native
+  radio roving behaviour — Tab enters the group at the checked/first radio, ↑/↓/
+  ←/→ change selection, Tab leaves the group). Each radio's accessible name is
+  its full description (token + sentence). Hit box ≥ `--target-min`;
+  `--focus-ring` on `:focus-visible`. No default check (an unset signal is real).
+- **Library:** custom (native radios; token-based styling; no new token).
+
+### CodUrgency (NEW — Urgency yes/no radio + "why now" textarea; child of CodStep)
+- **Role:** the time-critical binary (scorer input) + optional prose.
+- **Idiom:** a `<fieldset>`/`<legend>` "Urgency" with two radios
+  (`name="cod-urgency"`): "Yes — time-critical" / "No — not time-sensitive";
+  plus a labelled OPTIONAL `<textarea>` "Why it matters now (optional)".
+- **States:** (radios) none-selected (initial) · Yes checked · No checked ·
+  focus-visible; (textarea) empty · filled · focus-visible.
+- **Selector:** group `getByRole('radiogroup', { name: /urgency/i })`,
+  `data-testid="cod-urgency"`; options `getByRole('radio', { name:
+  /time-critical|not time-sensitive/i })`,
+  `data-testid="cod-urgency-yes|cod-urgency-no"` + `data-urgency="yes|no"`;
+  textarea `getByRole('textbox', { name: /why it matters now/i })`,
+  `data-testid="cod-urgency-why"`.
+- **A11y:** radiogroup keyboard semantics as above (single tab stop, arrows
+  select); the "why now" textarea has a real `<label for>` (placeholder is NOT
+  the label); `--focus-ring`; hit boxes ≥ `--target-min`. Maps `timeCritical`:
+  Yes→`true`, No→`false`, none→`null`.
+- **Library:** custom (native radios + `.intent-note` textarea; no new token).
+
+### CodRiskOfDelay (NEW — optional risk-of-delay textarea; child of CodStep)
+- **Role:** "what worsens if this is deferred?" — optional prose for the prompt.
+- **Idiom:** a single labelled optional `<textarea>` reusing `.intent-note`.
+- **States:** empty (valid) · filled · focus-visible.
+- **Selector:** `getByRole('textbox', { name: /risk of delay|deferred/i })`,
+  `data-testid="cod-risk"`; associated `<label for>`.
+- **A11y:** real `<label for>` (placeholder NOT the label); optional (no required
+  semantics, no error state — empty is fine); `--focus-ring`.
+- **Library:** custom (`.intent-note` reuse; no new token).
+
+### CodScoreReadout (NEW — the live band readout; THE FIG surface of this UC)
+- **Role:** the live, human-readable computed-band statement — the figure of
+  this UC. Reads the `CodScore` and renders the band AS WORDS with its reason and
+  a forward hint to the rank preview. Updates live as Value/Urgency change.
+- **Composition rule (FIG contract):**
+  - **scored** (`score.complete === true`): renders the BAND AS WORDS plus the
+    forward hint, e.g. **"HIGH — your item would rank in the top tier (see the
+    rank preview on the next step)."** The token is shown as a labelled word, the
+    `reason` sentence beneath it. NEVER a bare number, NEVER the enum alone.
+  - **incomplete** (`score.complete === false`): renders a NEUTRAL prompt, e.g.
+    **"Choose a value and urgency to see where this item would rank."** — NOT a
+    band, NOT "MED" (an unscored item must not read as a real MED), NOT blank.
+- **States:** neutral/incomplete (no band yet) · scored (band word + reason +
+  next-step hint).
+- **Selector:** `data-testid="cod-score-readout"`; `role="status"`
+  `aria-live="polite"` (each band change announced once, not per-keystroke
+  spammed — only Value/Urgency changes flip the band, so this is naturally
+  low-frequency); the band word carries `data-cod-band="HIGH|MED|LOW"` (absent
+  when incomplete) as the cross-check hook.
+- **A11y:** live region (polite); contrast ≥ 4.5:1 on `--c-surface-raised`; the
+  band is conveyed by the WORD (authoritative) — any colour accent is redundant,
+  never the sole cue. Accessible name = the composed band + reason sentence.
+- **FIG legibility (the standing checklist applied):**
+  1. **Reads as words, not a bare number** — "HIGH — top tier", never "12" or a
+     bare "HIGH" with no context.
+  2. **Empty/unknown ≠ a score** — incomplete state is a distinct neutral prompt,
+     never a defaulted MED, never "0", never blank.
+  3. **No unit/rate trap** — the band is an ordinal tier, NOT a count or a rate,
+     so it carries NO numeric unit; it is named as a tier ("top/middle/bottom
+     tier"), which is its correct dimension. (The numeric N/M counts arrive in
+     UC-S018-3, where the count/unit FIG rules apply.)
+- **Library:** custom (token-based; reuses `--c-text`/`--c-text-dim`/`--fs-label`;
+  the band-tier colour accent reuses `--c-state-*`/`--c-tree-state-*` channels
+  redundantly only — text is authoritative; no new token).
+
+---
+
+## Click-path budget (this UC, with justification)
+
+| Job (this UC) | Budget | Reality |
+|---|---|---|
+| "Record value + urgency + risk" (the CoD capture) | **≤ 3 clicks** | 1 click Value radio + 1 click Urgency radio = the two SCORED signals (2 clicks); the band appears with ZERO further action (live). Risk-of-delay + "why now" are optional prose (keystrokes, not gating clicks). Justified: radios are 1-click each and all options are visible (no menu to open); no submit step. |
+| "See the computed band" | **0 clicks after the two radios** | CodScoreReadout updates live; no compute/submit button. |
+| "Go back, keep my draft" | **1 click** | Back returns to step 1 with JTBD draft preserved (NAV-S018-2-2). |
+| "Advance to rank preview" | **1 click** | Next (toward UC-S018-3). |
+
+No step is added that a default can remove: no "compute" button (the band is
+live), no `<select>` open-click (radios are inline), no required-prose gating
+(risk/why are optional).
+
+---
+
+## Figure legibility (the band readout — applies the standing checklist)
+The CodScoreReadout is the only data-bearing figure this UC; it passes:
+1. **Band reads as words** — "HIGH — your item would rank in the top tier", with
+   the `reason` sentence; never a bare number, never the enum token alone.
+2. **Empty inputs ≠ a score** — the incomplete state is a distinct neutral prompt
+   ("Choose a value and urgency…"), NOT a defaulted MED, NOT 0, NOT blank.
+3. **Unit matches dimension** — the band is an ordinal TIER (no per-time/count
+   unit applies); it is NAMED as a tier, not mislabelled a rate or a count.
+4. **Value-radio tokens are never bare** — each HIGH/MED/LOW option carries its
+   plain-language sentence; the token alone never stands as the label.
+
+---
+
+## NO-WRITE contract (this UC)
+CodStep + codScorer issue ZERO network calls — the scorer is a pure client-side
+fn, the inputs are local field state. No `fetch`/`POST`/`PUT`/`PATCH`/`DELETE` on
+any radio change, textarea keystroke, Back, or Next. The server write-guard (405)
+stays active (SM-CHK7-6 regression). (The first READ call — GET /items for the
+rank preview — still arrives only in UC-S018-3.)
+
+---
+
+## Geometry — the step swap is an INTERNAL content change (do-no-harm)
+The wizard is a body-portalled `position:fixed` drawer with zero flow height
+(UC-S018-1 GEO basis). Replacing the step-2 placeholder with the live CodStep is
+an internal content change INSIDE that fixed drawer — it reflows nothing on the
+page (map/views/tree unchanged) and must not change the drawer's own anchored
+box. GEO-S018-2-1 pins this; GEO-S018-2-2 pins that the three CoD signal groups
+STACK (a form column, not a row — the s002-line guard applied here).
+
+---
+
+## Accessibility conditions (AA) → mirrored into acceptance.md
+See acceptance.md UC-S018-2 section for AC-S018-2-A11Y / GEO / FIG / NOWRITE /
+NAV / SEL. Summary: radiogroup keyboard semantics (single tab stop, arrows
+select, no default check) for Value + Urgency; real `<label for>` on every
+textarea (placeholder never the label); logical within-step focus order; `<h3>`
+under the wizard `<h2>` (no skipped level); live-region band readout (band as
+words); band conveyed by text not colour alone; target sizes ≥ 24px; visible
+focus ring; the inherited shell de-emphasis/focus/Esc contract NOT regressed.
+
+---
+
+## Stable selectors handed to the engineer (the build contract + test hooks)
+| Element | Selector contract |
+|---|---|
+| CodStep region | `data-testid="cod-step"` · `role="group"` `aria-labelledby`→`<h3>` |
+| CodStep heading | `data-testid="cod-step-heading"` (`<h3>`, "Cost of delay") |
+| Value radio group | `getByRole('radiogroup', { name: /value/i })` · `data-testid="cod-value"` · `data-cod-value` |
+| Value options | `getByRole('radio', { name: /high\|med\|low/i })` · `data-testid="cod-value-high\|cod-value-med\|cod-value-low"` · `data-value` |
+| Urgency radio group | `getByRole('radiogroup', { name: /urgency/i })` · `data-testid="cod-urgency"` |
+| Urgency options | `data-testid="cod-urgency-yes\|cod-urgency-no"` · `data-urgency` |
+| Urgency "why now" | `getByRole('textbox', { name: /why it matters now/i })` · `data-testid="cod-urgency-why"` |
+| Risk-of-delay | `getByRole('textbox', { name: /risk of delay\|deferred/i })` · `data-testid="cod-risk"` |
+| Band readout | `data-testid="cod-score-readout"` · `role="status"` `aria-live="polite"` · `data-cod-band` (absent when incomplete) |
+
+(All `cod-*` per the wizard's `<step>-<field>` testid convention; no derived
+`nth`/text-exclusion selectors.)
+
+---
+
+## Engineer needs (hand-off, UC-S018-2)
+1. **`lib/codScorer.js` is a pure total fn** — `scoreCod({value, timeCritical})`
+   → the `CodScore` shape above. No DOM, no fetch, never throws, defined for
+   `null` inputs (returns `{token:null, band:null, complete:false, reason:""}`).
+   Author the unit test FIRST (red→green): HIGH for (HIGH,true), LOW for
+   (LOW,false), MED for every other CHOSEN combination, and incomplete/null when
+   either input is null (AC-S018-2-4 + the new null case).
+2. **Lift the CoD field state into IntakeWizard** (alongside the JTBD fields) so
+   UC-S018-3's `useQueueRank` and UC-S018-4's prompt builder read `value`/
+   `score.token`/`urgencyWhy`/`riskOfDelay` from ONE place — the same lift the
+   JTBD fields already use. CodStep is a pure render of that lifted state +
+   `score`; the wizard calls `scoreCod` and passes the result down.
+3. **Mount CodStep into the EXISTING step-2 slot** — replace the
+   `wizard-step-placeholder` render for `currentStep === 2` with `<CodStep …/>`.
+   Do NOT touch the shell's step machine, indicator, nav, drawer, focus, or
+   de-emphasis rule (UC-S018-1 regression surface — the e2e a11y pin must still
+   pass). Steps 3–4 keep the placeholder until -3/-4.
+4. **Native radios in `<fieldset>`/`<legend>`** for Value + Urgency — do NOT
+   hand-roll ARIA radiogroups; the native elements give the radiogroup role +
+   name + roving keyboard for free and pass axe. No default `checked` (an unset
+   signal must read as genuinely unset — FIG empty≠score).
+5. **No new token, no new drawer.** Reuse `.intent-note` for the textareas and
+   the existing radio/fieldset styling; band-tier colour accents reuse
+   `--c-state-*` channels redundantly (text authoritative). If a radio/fieldset
+   style does not yet exist as a reusable rule, add it as a token-based rule (no
+   off-token literals), not a one-off.
+6. **TDD selectors above are the contract** — author the component/e2e specs
+   against role+name (radiogroup/radio/textbox) + the `cod-*` testids, not
+   derived selectors. `data-cod-band` is the band cross-check; `data-cod-value`/
+   `data-urgency` are the input cross-checks.

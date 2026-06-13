@@ -95,7 +95,7 @@ describe('IntakeWizard shell (UC-S018-1)', () => {
     expect(p.querySelectorAll('.job-sentence__slot').length).toBe(2);
   });
 
-  it('A11Y-S018-1-9: step indicator — role=list "Intake steps"; step 1 current (aria-current="step"); steps 2-4 planned with visible "(soon)" text', () => {
+  it('A11Y-S018-1-9: step indicator — role=list "Intake steps"; step 1 current (aria-current="step"); UNBUILT steps (3-4) planned with visible "(soon)" text; built step 2 upcoming (UC-S018-2)', () => {
     render(<IntakeWizard onClose={() => {}} />);
     const list = screen.getByTestId('wizard-steps');
     expect(list.getAttribute('role')).toBe('list');
@@ -103,7 +103,11 @@ describe('IntakeWizard shell (UC-S018-1)', () => {
     const s1 = screen.getByTestId('wizard-step-1');
     expect(s1.getAttribute('data-step-state')).toBe('current');
     expect(s1.getAttribute('aria-current')).toBe('step');
-    for (const n of [2, 3, 4]) {
+    // step 2 is BUILT since UC-S018-2 (CodStep) — upcoming, no "(soon)"
+    const s2 = screen.getByTestId('wizard-step-2');
+    expect(s2.getAttribute('data-step-state')).toBe('upcoming');
+    expect(s2.textContent).not.toMatch(/\(soon\)/);
+    for (const n of [3, 4]) {
       const s = screen.getByTestId(`wizard-step-${n}`);
       expect(s.getAttribute('data-step-state')).toBe('planned');
       expect(s.getAttribute('aria-current')).toBeNull();
@@ -111,7 +115,7 @@ describe('IntakeWizard shell (UC-S018-1)', () => {
     }
   });
 
-  it('NAV-S018-1-1: Next advances to step 2 — indicator current, labelled placeholder region, no crash, fields unmounted', () => {
+  it('NAV-S018-1-1: Next advances to step 2 — indicator current, no crash, fields unmounted; the planned placeholder survives for the UNBUILT step 3 (UC-S018-2: step 2 is now the live CodStep)', () => {
     render(<IntakeWizard onClose={() => {}} />);
     const next = screen.getByRole('button', { name: /next/i });
     expect(next).toBe(screen.getByTestId('wizard-next'));
@@ -123,9 +127,13 @@ describe('IntakeWizard shell (UC-S018-1)', () => {
     expect(s2.getAttribute('data-step-state')).toBe('current');
     expect(s2.getAttribute('aria-current')).toBe('step');
     expect(screen.getByTestId('wizard-step-1').getAttribute('data-step-state')).toBe('complete');
-    const ph = screen.getByTestId('wizard-step-placeholder');
-    expect(ph.textContent).toMatch(/cost-of-delay signals — coming/i);
     expect(screen.queryByTestId('jtbd-situation')).toBeNull();
+    // step 2 is LIVE (NAV-S018-2-1); planned-not-dead now pins step 3
+    expect(screen.queryByTestId('wizard-step-placeholder')).toBeNull();
+    expect(screen.getByTestId('cod-step')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('wizard-next'));
+    const ph = screen.getByTestId('wizard-step-placeholder');
+    expect(ph.textContent).toMatch(/queue-rank preview — coming/i);
   });
 
   it('NAV-S018-1-2: Back returns to step 1 with the entered draft preserved', () => {

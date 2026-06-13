@@ -111,9 +111,10 @@ test('NOWRITE-S018-1-1 — open + type + Next + Back issues ZERO write-method re
   await wizard.getByRole('textbox', { name: /situation/i }).fill('s');
   await wizard.getByRole('textbox', { name: /motivation/i }).fill('m');
   await wizard.getByRole('textbox', { name: /outcome/i }).fill('o');
-  // NAV-S018-1-1: Next is planned-not-dead — placeholder, no crash, no write
+  // NAV-S018-1-1 (migrated by UC-S018-2): Next now mounts the LIVE CodStep —
+  // no crash, no write; planned-not-dead placeholder still pins step 3+.
   await wizard.getByRole('button', { name: /next/i }).click();
-  await expect(page.getByTestId('wizard-step-placeholder')).toContainText(/cost-of-delay signals/i);
+  await expect(page.getByTestId('cod-step')).toBeVisible();
   await expect(page.getByTestId('wizard-step-2')).toHaveAttribute('data-step-state', 'current');
   // NAV-S018-1-2: Back preserves the draft (wizard-scoped — /back/i would also
   // match a steer trigger's "…slice-backed…" aria-label outside the dialog)

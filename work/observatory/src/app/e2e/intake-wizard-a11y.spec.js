@@ -91,10 +91,10 @@ test('@a11y @s018 A11Y-S018-1-12 — axe: zero color-contrast AND heading-order 
 //   (c) the drawer's slide-in keyframes never animate opacity.
 // ---------------------------------------------------------------------------
 
-test('@a11y @s018 A11Y-S018-1-12 — targeted: planned-step labels (2/3/4 label + "(soon)") compute ≥ 4.5:1 on the drawer surface with NO alpha de-emphasis', async ({
+test('@a11y @s018 A11Y-S018-1-12 — targeted: planned-step labels (label + "(soon)") compute ≥ 4.5:1 on the drawer surface with NO alpha de-emphasis (steps 3/4 — step 2 is LIVE since UC-S018-2)', async ({
   page,
 }) => {
-  for (const stepN of [2, 3, 4]) {
+  for (const stepN of [3, 4]) {
     const step = page.getByTestId(`wizard-step-${stepN}`);
     await expect(step).toHaveAttribute('data-step-state', 'planned');
 

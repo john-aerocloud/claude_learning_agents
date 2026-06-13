@@ -360,6 +360,45 @@ graph LR
   WizardStepNav --> IntakeWizard
   JobSentenceLib --> JobSentencePreview
 
+  %% s018 / UC-S018-2 THIS commit: the real CoD signals step + value-token scorer.
+  %% CodStep (NEW) REPLACES the step-2 wizard-step-placeholder — it is the content
+  %% IntakeWizard mounts when currentStep === 2 (the shell's existing mount seam;
+  %% the shell's step machine / indicator / nav / drawer / de-emphasis rule are
+  %% UNTOUCHED and MUST NOT regress — A11Y-S018-2-11 re-asserts the inherited e2e
+  %% a11y pin). CodValueSelect (NEW) = native fieldset/legend "Value" + three
+  %% radios with VISIBLE plain-language labels (NOT a select — that hides the
+  %% descriptions, +1 click, bare-token FIG violation); no default check (unset
+  %% signal is real). CodUrgency (NEW) = a yes/no radiogroup (the scorer's
+  %% timeCritical input) + an optional "why now" textarea. CodRiskOfDelay (NEW) =
+  %% one optional labelled textarea (prompt prose, NOT a scorer input this slice).
+  %% CodScoreReadout (NEW) = the live role=status band figure: band AS WORDS +
+  %% reason + a next-step hint when complete; a NEUTRAL prompt (never a defaulted
+  %% MED/0/blank) when inputs are incomplete (FIG empty≠score). codScorer (NEW,
+  %% lib/codScorer.js) = the PURE total deterministic value-token fn
+  %% scoreCod({value,timeCritical}) -> {token,band,complete,reason} — (HIGH&true)
+  %% →HIGH, (LOW&false)→LOW, every other CHOSEN combo→MED, incomplete→null (NOT
+  %% MED). Output is the UC-S018-3 (useQueueRank reads `token`) + UC-S018-4
+  %% (prompt "value: … reasoning" reads `reason`) contract; `band` is kept
+  %% separate from `token` so a future graded WSJF/CD3 score can widen without
+  %% breaking consumers. NO-WRITE: step 2 issues ZERO network calls of any kind;
+  %% the scorer is pure client-side (first read still lands in UC-S018-3).
+  %% RUNTIME ROUTING for the tester: IntakeWizard lifts the CoD field state
+  %% (alongside the JTBD draft) and calls scoreCod, passing the CodScore down to
+  %% CodStep (pure render); the step swap is an INTERNAL content change inside
+  %% the fixed drawer — GEO-S018-2-1 pins zero external reflow.
+  CodStep["CodStep (s018 / UC-S018-2: step-2 content — CoD signals + live band readout; replaces the wizard-step-placeholder)"]
+  CodValueSelect["CodValueSelect (s018 / UC-S018-2: Value HIGH/MED/LOW radiogroup — visible plain-language labels, no default check)"]
+  CodUrgency["CodUrgency (s018 / UC-S018-2: Urgency yes/no radiogroup → timeCritical + optional 'why now' textarea)"]
+  CodRiskOfDelay["CodRiskOfDelay (s018 / UC-S018-2: optional risk-of-delay textarea — prompt prose, not a scorer input)"]
+  CodScoreReadout["CodScoreReadout (s018 / UC-S018-2: live role=status band figure — words+reason+next-step hint; neutral prompt when incomplete, never defaulted MED)"]
+  CodScorer["codScorer (s018 / UC-S018-2: lib/codScorer.js PURE total fn — {token,band,complete,reason}; UC-S018-3/4 contract)"]
+  CodStep --> IntakeWizard
+  CodValueSelect --> CodStep
+  CodUrgency --> CodStep
+  CodRiskOfDelay --> CodStep
+  CodScoreReadout --> CodStep
+  CodScorer --> CodScoreReadout
+
   classDef delivered fill:#d5f5e3,stroke:#1e8449,color:#000;
   %% CHK-3 (s003) DROPPED — scope absorbed into CHK-2 restated done-condition (s004 delivered).
   %% s004 DELIVERED 2026-06-10T11:00:00Z — CHK-2 done-condition MET.
@@ -449,6 +488,14 @@ graph LR
   %% consumes. (Separate class statement — parallel UC commits do not collide.)
   classDef s018changed fill:#d6f0ff,stroke:#1c7ed6,color:#000;
   class IntakeLauncher,IntakeWizard,WizardStepIndicator,JtbdFields,JobSentencePreview,WizardStepNav,JobSentenceLib s018changed;
+  %% s018 / UC-S018-2 THIS commit — CodStep/CodValueSelect/CodUrgency/
+  %% CodRiskOfDelay/CodScoreReadout/CodScorer added; CodStep --> IntakeWizard is
+  %% the mount-seam edge (replaces the step-2 placeholder). IntakeWizard itself
+  %% keeps its s018changed mark (still in flight) but gains the lifted CoD state
+  %% + scoreCod call — it is in the UC-S018-2 blast radius too. Tester UI
+  %% test-plan input; cleared at s018 delivery after the tester consumes.
+  %% (Separate class statement so parallel UC commits do not collide on one line.)
+  class CodStep,CodValueSelect,CodUrgency,CodRiskOfDelay,CodScoreReadout,CodScorer s018changed;
 
   %% DEFECT-014 THIS commit — node hover/focus+Enter used to open FOUR per-figure
   %% MetricSource panels in an overlapping stack; ui-designer ruling (b): ONE

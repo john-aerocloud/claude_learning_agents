@@ -34,7 +34,7 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByTestId('intake-wizard')).toBeVisible();
 });
 
-test('@s018 de-emphasis: planned steps (2/3/4) have distinct dim colour, ≤ font-size, "(soon)" text, and NO alpha vs current step (1)', async ({
+test('@s018 de-emphasis: planned steps (3/4 — step 2 is LIVE since UC-S018-2) have distinct dim colour, ≤ font-size, "(soon)" text, and NO alpha vs current step (1)', async ({
   page,
 }) => {
   // Measure the current step (step 1) label properties
@@ -51,7 +51,8 @@ test('@s018 de-emphasis: planned steps (2/3/4) have distinct dim colour, ≤ fon
   });
 
   // Measure all planned steps and assert de-emphasis signals
-  for (const stepN of [2, 3, 4]) {
+  // (step 2 is the live CodStep since UC-S018-2 — only 3/4 remain planned)
+  for (const stepN of [3, 4]) {
     const plannedStep = page.getByTestId(`wizard-step-${stepN}`);
     await expect(
       plannedStep,

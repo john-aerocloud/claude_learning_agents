@@ -242,6 +242,149 @@
   color: var(--c-text-dim);
 }
 
+/* --- step 2: CoD signals (UC-S018-2) -------------------------------------
+ * The three signal groups STACK (a form column, not a row — GEO-S018-2-2);
+ * radios are native (radiogroup role + roving keyboard for free); every hit
+ * box ≥ --target-min (A11Y-S018-2-8); --focus-ring on :focus-visible
+ * (A11Y-S018-2-7). NO new token: reuses the wizard/field/state channels. */
+.cod-step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+
+.cod-step__h {
+  margin: 0;
+  font-size: var(--fs-label);
+}
+
+.cod-fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-box);
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  margin: 0;
+}
+
+.cod-fieldset__legend {
+  color: var(--c-text-dim);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0 var(--sp-1);
+}
+
+.cod-option {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* native radio, sized to the WCAG 2.2 §2.5.8 minimum target */
+.cod-radio {
+  width: var(--target-min);
+  height: var(--target-min);
+  margin: 0;
+  flex: none;
+  accent-color: var(--c-focus);
+  cursor: pointer;
+}
+
+.cod-radio:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: 50%;
+}
+
+.cod-option__label {
+  font-size: 0.9rem;
+  color: var(--c-text);
+  cursor: pointer;
+}
+
+.cod-option__token {
+  font-weight: var(--fw-label);
+}
+
+/* optional prose fields — the .intent-note / .jtbd-field__input treatment */
+.cod-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.cod-field__label {
+  color: var(--c-text-dim);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cod-field__input {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-badge);
+  color: var(--c-text);
+  font: inherit;
+  font-size: 0.9rem;
+  padding: var(--sp-2);
+  min-height: var(--target-min);
+  resize: vertical;
+}
+
+.cod-field__input:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* --- the live band readout (FIG surface — band as WORDS, text authoritative;
+ *     tier colour accents reuse the --c-state-*/--c-tree-state-* channels
+ *     REDUNDANTLY only — A11Y-S018-2-9) ---------------------------------- */
+.cod-score-readout {
+  margin: 0;
+  padding: var(--sp-3);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-box);
+  font-size: var(--fs-label);
+  line-height: 1.5;
+  color: var(--c-text);
+}
+
+.cod-score-readout:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.cod-score-neutral {
+  color: var(--c-text-dim);
+}
+
+.cod-band {
+  font-weight: 700;
+}
+
+.cod-band--high {
+  color: var(--c-state-starving); /* 4.5:1+ blue channel on --c-surface */
+}
+
+.cod-band--med {
+  color: var(--c-state-over); /* amber channel */
+}
+
+.cod-band--low {
+  color: var(--c-text-dim);
+}
+
+.cod-reason {
+  display: block;
+  color: var(--c-text-dim);
+  font-size: 0.85rem;
+}
+
 /* --- planned-step placeholder region (NAV-S018-1-1) ---------------------- */
 .wizard-step-placeholder {
   margin: 0 0 var(--sp-4);

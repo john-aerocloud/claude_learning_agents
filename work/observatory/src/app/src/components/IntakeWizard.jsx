@@ -29,21 +29,22 @@
 import { useState, useLayoutEffect, useRef, useId } from 'preact/hooks';
 import { createPortal } from 'preact/compat';
 import { composeJobSentence, EMPTY_SENTENCE_PROMPT } from '../lib/jobSentence.js';
+import { scoreCod } from '../lib/codScorer.js';
+import { CodStep } from './CodStep.jsx';
 import './intake-wizard.css';
 
-/** The four steps of the intake flow (operator language). Only step 1 is
- * built this UC; 2–4 are planned-not-dead (visible "(soon)" indicator +
- * labelled placeholder region on Next). */
+/** The four steps of the intake flow (operator language). Steps 1 (UC-S018-1)
+ * and 2 (UC-S018-2: CodStep) are built; 3–4 are planned-not-dead (visible
+ * "(soon)" indicator + labelled placeholder region on Next). */
 export const INTAKE_STEPS = [
   { n: 1, key: 'jtbd', label: 'Describe the job', built: true },
-  { n: 2, key: 'cod', label: 'Cost of delay', built: false },
+  { n: 2, key: 'cod', label: 'Cost of delay', built: true },
   { n: 3, key: 'rank', label: 'Queue rank', built: false },
   { n: 4, key: 'prompt', label: 'Generate prompt', built: false },
 ];
 
 /** Labelled placeholder copy for the planned (not-yet-built) step regions. */
 const PLANNED_STEP_COPY = {
-  2: 'Cost-of-delay signals — coming in this wizard (next use case)',
   3: 'Queue-rank preview — coming in this wizard (next use case)',
   4: 'Intake prompt + copy handoff — coming in this wizard (next use case)',
 };
@@ -198,6 +199,18 @@ export function IntakeWizard({ onClose }) {
   const [step, setStep] = useState(1);
   // Step-1 draft — lives in the shell so Back/Next preserve it (NAV-S018-1-2).
   const [fields, setFields] = useState({ situation: '', motivation: '', outcome: '' });
+  // Step-2 CoD draft (UC-S018-2) — LIFTED beside the JTBD draft so UC-S018-3's
+  // useQueueRank and UC-S018-4's prompt builder read value/token/urgencyWhy/
+  // riskOfDelay from ONE place, and step navigation preserves it (NAV-S018-2-2).
+  const [cod, setCod] = useState({
+    value: null, // 'HIGH' | 'MED' | 'LOW' | null — null = not yet chosen
+    timeCritical: null, // boolean | null
+    urgencyWhy: '', // prompt prose (UC-S018-4), NOT a scorer input
+    riskOfDelay: '', // prompt prose (UC-S018-4), NOT a scorer input
+  });
+  // The shell computes the score (pure domain fn) and passes it down —
+  // CodStep is a pure render; the CodScore is the UC-S018-3/4 contract.
+  const codScore = scoreCod({ value: cod.value, timeCritical: cod.timeCritical });
   const headingRef = useRef(null);
   const returnFocusRef = useRef(null);
   const uid = useId();
@@ -228,6 +241,7 @@ export function IntakeWizard({ onClose }) {
   };
 
   const setField = (key, value) => setFields((prev) => ({ ...prev, [key]: value }));
+  const setCodField = (key, value) => setCod((prev) => ({ ...prev, [key]: value }));
   const onNext = () => setStep((s) => Math.min(s + 1, INTAKE_STEPS.length));
   const onBack = () => setStep((s) => Math.max(s - 1, 1));
 
@@ -260,9 +274,22 @@ export function IntakeWizard({ onClose }) {
           <JtbdFields values={fields} onChange={setField} uid={uid} />
           <JobSentencePreview {...fields} />
         </div>
+      ) : step === 2 ? (
+        // UC-S018-2: the LIVE CoD signals step in the shell's step-2 slot
+        // (replaces the UC-S018-1 placeholder; the step swap is an internal
+        // content change inside the fixed drawer — GEO-S018-2-1).
+        <CodStep
+          value={cod.value}
+          timeCritical={cod.timeCritical}
+          urgencyWhy={cod.urgencyWhy}
+          riskOfDelay={cod.riskOfDelay}
+          score={codScore}
+          onChange={setCodField}
+          uid={uid}
+        />
       ) : (
         // Planned-not-dead (NAV-S018-1-1): a labelled placeholder region —
-        // UC-S018-2/3/4 replace this branch with their real steps.
+        // UC-S018-3/4 replace this branch with their real steps.
         <p class="wizard-step-placeholder" data-testid="wizard-step-placeholder">
           {PLANNED_STEP_COPY[step]}
         </p>

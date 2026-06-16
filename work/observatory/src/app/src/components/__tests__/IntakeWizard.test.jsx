@@ -95,7 +95,7 @@ describe('IntakeWizard shell (UC-S018-1)', () => {
     expect(p.querySelectorAll('.job-sentence__slot').length).toBe(2);
   });
 
-  it('A11Y-S018-1-9: step indicator — role=list "Intake steps"; step 1 current (aria-current="step"); built steps 2-3 upcoming (no "(soon)"); only the UNBUILT step 4 planned with "(soon)" (UC-S018-3)', () => {
+  it('A11Y-S018-1-9: step indicator — role=list "Intake steps"; step 1 current (aria-current="step"); ALL FOUR steps built — no step is "(soon)"/planned (UC-S018-4 closed the wizard)', () => {
     render(<IntakeWizard onClose={() => {}} />);
     const list = screen.getByTestId('wizard-steps');
     expect(list.getAttribute('role')).toBe('list');
@@ -103,21 +103,19 @@ describe('IntakeWizard shell (UC-S018-1)', () => {
     const s1 = screen.getByTestId('wizard-step-1');
     expect(s1.getAttribute('data-step-state')).toBe('current');
     expect(s1.getAttribute('aria-current')).toBe('step');
-    // steps 2 (CodStep) and 3 (QueueRankStep) are BUILT — upcoming, no "(soon)"
-    for (const n of [2, 3]) {
+    // steps 2 (CodStep), 3 (QueueRankStep), 4 (PromptStep) are ALL BUILT —
+    // upcoming, no "(soon)"; no planned step remains (A11Y-S018-4-10).
+    for (const n of [2, 3, 4]) {
       const s = screen.getByTestId(`wizard-step-${n}`);
       expect(s.getAttribute('data-step-state')).toBe('upcoming');
       expect(s.textContent).not.toMatch(/\(soon\)/);
     }
-    // only step 4 remains unbuilt — planned with the "(soon)" tag
-    const s4 = screen.getByTestId('wizard-step-4');
-    expect(s4.getAttribute('data-step-state')).toBe('planned');
-    expect(s4.getAttribute('aria-current')).toBeNull();
-    expect(s4.textContent).toMatch(/\(soon\)/);
+    expect(screen.queryByText(/\(soon\)/)).toBeNull();
   });
 
-  it('NAV-S018-1-1: Next advances to step 2 — indicator current, no crash, fields unmounted; the planned placeholder survives for the UNBUILT step 3 (UC-S018-2: step 2 is now the live CodStep)', () => {
-    render(<IntakeWizard onClose={() => {}} />);
+  it('NAV-S018-1-1: Next advances to step 2 — indicator current, no crash, fields unmounted; every step is LIVE (no placeholder anywhere — UC-S018-2/3/4 all built)', () => {
+    const loaders = { loadActive: vi.fn().mockResolvedValue('demo'), loadItems: vi.fn().mockResolvedValue([]) };
+    render(<IntakeWizard onClose={() => {}} loaders={loaders} />);
     const next = screen.getByRole('button', { name: /next/i });
     expect(next).toBe(screen.getByTestId('wizard-next'));
     expect(next.textContent).toMatch(/cost of delay/i);
@@ -129,16 +127,18 @@ describe('IntakeWizard shell (UC-S018-1)', () => {
     expect(s2.getAttribute('aria-current')).toBe('step');
     expect(screen.getByTestId('wizard-step-1').getAttribute('data-step-state')).toBe('complete');
     expect(screen.queryByTestId('jtbd-situation')).toBeNull();
-    // step 2 is LIVE (NAV-S018-2-1); step 3 is now the LIVE QueueRankStep
-    // (UC-S018-3) — planned-not-dead now pins only step 4
+    // step 2 LIVE (CodStep); step 3 LIVE (QueueRankStep); step 4 LIVE (PromptStep)
+    // — NO placeholder branch remains anywhere (UC-S018-4 closed the wizard).
     expect(screen.queryByTestId('wizard-step-placeholder')).toBeNull();
     expect(screen.getByTestId('cod-step')).toBeTruthy();
     fireEvent.click(screen.getByTestId('wizard-next')); // → step 3 (live)
     expect(screen.getByTestId('queue-rank-step')).toBeTruthy();
     expect(screen.queryByTestId('wizard-step-placeholder')).toBeNull();
-    fireEvent.click(screen.getByTestId('wizard-next')); // → step 4 (placeholder)
-    const ph = screen.getByTestId('wizard-step-placeholder');
-    expect(ph.textContent).toMatch(/intake prompt/i);
+    fireEvent.click(screen.getByTestId('wizard-next')); // → step 4 (live PromptStep)
+    expect(screen.getByTestId('prompt-step')).toBeTruthy();
+    expect(screen.queryByTestId('wizard-step-placeholder')).toBeNull();
+    // "Next" is absent on the final step (no 5th step)
+    expect(screen.queryByTestId('wizard-next')).toBeNull();
   });
 
   it('NAV-S018-1-2: Back returns to step 1 with the entered draft preserved', () => {

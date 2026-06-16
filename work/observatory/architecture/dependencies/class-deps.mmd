@@ -261,7 +261,7 @@ graph TD
     %% state. UC-S018-4 will read the SAME lifted RankPreview without re-fetching.
     %% ACTUAL runtime read path: useQueueRank → SPA_CLIENT.getActive/getItems →
     %% R_ITEMS (the existing /items route; no new route/token/drawer this UC).
-    SPA_INTAKEWIZARD["src/app/src/components/IntakeWizard.jsx — guided CoD intake drawer shell (UC-S018-1; +CodStep step 2 UC-S018-2; +QueueRankStep step 3 UC-S018-3)<br/>owns step state machine + lifted JTBD/CoD drafts; UC-S018-3 LIFTS the queue-rank read (useQueueRank enabled step>=3) and the derived RankPreview (single compute site, UC-S018-4 reads it)"]:::s018changed
+    SPA_INTAKEWIZARD["src/app/src/components/IntakeWizard.jsx — guided CoD intake drawer shell (UC-S018-1; +CodStep step 2 UC-S018-2; +QueueRankStep step 3 UC-S018-3; +PromptStep step 4 UC-S018-4 — ALL FOUR steps built, no placeholder branch)<br/>owns step state machine + lifted JTBD/CoD drafts; UC-S018-3 LIFTS the queue-rank read + derived RankPreview (single compute site); UC-S018-4 owns PROMPT-FREEZE state (prompt/genSnapshot/toastVisible) — prompt mutates ONLY on Generate; handleReset clears draft→step 1"]:::s018changed
     SPA_QUEUERANKSTEP["src/app/src/components/QueueRankStep.jsx — step-3 content (UC-S018-3)<br/>PURE render of {status,items}+codScore+RankPreview; four DISTINCT states (rank-loading/error/gated/preview); role=group /queue rank/i + role=status sentence; data-rank-ahead/-behind/-total"]:::s018changed
     SPA_QUEUERANKHOOK["src/app/src/hooks/useQueueRank.js — the slice's ONLY read call (UC-S018-3)<br/>getActive→getItems ONCE on first enable (step-3 entry); cached for the session (no re-fetch on tier change/round-trip); fail-soft→error (null project/items/throw); NO writes"]:::s018changed
     SPA_QUEUERANKLIB["src/app/src/lib/queueRank.js — PURE directional-rank domain fn (UC-S018-3)<br/>rankPreview({token,items})->{complete,total,ahead,behind,alongside,token,sentence,empty}; total/no-throw; terminal-EXCLUSION comparison set (non done/dropped — EXP-035); tier ordinals HIGH 3/MED-HIGH 2.5/MED 2/LOW 1/blank 2; author-once sentence (UC-S018-4 reads verbatim)"]:::s018changed
@@ -271,6 +271,23 @@ graph TD
     SPA_QUEUERANKSTEP -.->|"rankPreview fallback (standalone/test only; wizard supplies the lifted rank)"| SPA_QUEUERANKLIB
     SPA_QUEUERANKHOOK -->|getActive/getItems| SPA_CLIENT
     SPA_INTAKEWIZARD -->|@import intake-wizard.css| SPA_TOKENS
+
+    %% --- s018 / UC-S018-4 intake prompt builder + clipboard handoff (step 4) --
+    %% CLOSES the wizard: PromptStep mounts into the step-4 slot (last placeholder
+    %% branch GONE — all four steps built). The wizard owns PROMPT-FREEZE state
+    %% (prompt/genSnapshot/toastVisible); the prompt mutates ONLY on Generate
+    %% (EXP-036). intakePromptBuilder is a PURE total fn composing the lifted
+    %% JTBD (composeJobSentence, author-once with step 1) + codScore.reason
+    %% (author-once with step 2) + rank.sentence (author-once with step 3, GATED
+    %% off when incomplete/null) into a /intake slash-command STRING the operator
+    %% copies. NO new route/token/drawer/server-write; the clipboard is the only
+    %% write surface. REUSES the s014 handoff trio (CopyPromptButton/CopyToast/
+    %% .prompt-output slot) + the ContextRefreshCue idiom VERBATIM — no fork.
+    SPA_PROMPTSTEP["src/app/src/components/PromptStep.jsx — step-4 content (UC-S018-4)<br/>PURE render of lifted draft + frozen prompt; Generate is the ONLY mutation point; reuses prompt-output-slot + CopyPromptButton + CopyToast (byte-equal copy, polite toast) + ContextRefreshCue (intake-regenerate-cue) on divergence; visible NoWriteAffordance; terminal Done(onClose)/Start-another(onReset); role=group /generate prompt/i; NO fetch"]:::s018changed
+    SPA_INTAKEPROMPTLIB["src/app/src/lib/intakePromptBuilder.js + templates/intake-prompt.js — PURE total /intake prompt composer (UC-S018-4)<br/>buildIntakePrompt({jtbd,codScore,cod,rank})->string; first line is /intake + composeJobSentence (author-once); value line = token+codScore.reason; rank line GATED (omit if null/!complete, empty-queue sentence if empty, else rank.sentence VERBATIM); empty prose→'not stated'; no {{token}} residue/undefined/raw refs; total/no-throw/no-DOM/no-fetch"]:::s018changed
+    SPA_INTAKEWIZARD -->|"renders PromptStep at step 4; passes lifted draft + freeze state"| SPA_PROMPTSTEP
+    SPA_INTAKEWIZARD -->|"buildIntakePrompt(...) on Generate — single freeze point"| SPA_INTAKEPROMPTLIB
+    SPA_PROMPTSTEP -->|"@import steer-panel.css (.prompt-output reuse) + intake-wizard.css"| SPA_TOKENS
 
     %% --- s013 / UC-S013-2 defects list panel (THIRD routed view in the main column) ---
     %% SPA_VIEWSWITCH EXTENDED this commit (TABS grew to three — reuse, no fork;

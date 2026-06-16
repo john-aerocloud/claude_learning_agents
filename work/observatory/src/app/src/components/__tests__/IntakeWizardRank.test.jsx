@@ -47,12 +47,13 @@ describe('QueueRankStep mounted in the wizard step-3 slot (UC-S018-3)', () => {
     const s3 = screen.getByTestId('wizard-step-3');
     expect(s3.getAttribute('data-step-state')).toBe('current');
     expect(s3.getAttribute('aria-current')).toBe('step');
-    // step 3 lost its "(soon)" tag; step 4 still planned & tagged
+    // step 3 lost its "(soon)" tag; step 4 is ALSO built now (UC-S018-4) — no tag
     expect(s3.textContent).not.toMatch(/soon/i);
-    expect(screen.getByTestId('wizard-step-4').textContent).toMatch(/soon/i);
-    // step 4 still shows the labelled placeholder
+    expect(screen.getByTestId('wizard-step-4').textContent).not.toMatch(/soon/i);
+    // step 4 now mounts the LIVE PromptStep — no placeholder branch remains
     fireEvent.click(screen.getByTestId('wizard-next'));
-    expect(screen.getByTestId('wizard-step-placeholder').textContent).toMatch(/intake prompt/i);
+    expect(screen.getByTestId('prompt-step')).toBeTruthy();
+    expect(screen.queryByTestId('wizard-step-placeholder')).toBeNull();
   });
 
   it('NOWRITE-S018-3-2: NO items GET while on steps 1–2; the read fires on step-3 ENTRY', async () => {

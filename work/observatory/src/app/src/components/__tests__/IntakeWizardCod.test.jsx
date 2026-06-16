@@ -50,16 +50,15 @@ describe('CodStep mounted in the wizard step-2 slot (UC-S018-2)', () => {
     expect(screen.getAllByRole('dialog').length).toBe(1);
   });
 
-  it('step 3 is now LIVE (QueueRankStep, UC-S018-3); only step 4 KEEPS the labelled placeholder (planned-not-dead survives for the one unbuilt step)', () => {
+  it('step 3 is LIVE (QueueRankStep, UC-S018-3) and step 4 is LIVE (PromptStep, UC-S018-4) — NO placeholder branch remains anywhere', () => {
     openStep2();
     fireEvent.click(screen.getByTestId('wizard-next')); // → step 3 (live)
     expect(screen.queryByTestId('cod-step')).toBeNull();
     expect(screen.getByTestId('queue-rank-step')).toBeTruthy();
     expect(screen.queryByTestId('wizard-step-placeholder')).toBeNull();
-    fireEvent.click(screen.getByTestId('wizard-next')); // → step 4 (placeholder)
-    expect(screen.getByTestId('wizard-step-placeholder').textContent).toMatch(
-      /intake prompt \+ copy handoff — coming/i,
-    );
+    fireEvent.click(screen.getByTestId('wizard-next')); // → step 4 (live PromptStep)
+    expect(screen.getByTestId('prompt-step')).toBeTruthy();
+    expect(screen.queryByTestId('wizard-step-placeholder')).toBeNull();
   });
 
   it('A11Y-S018-2-1 / SEL-S018-2-2: Value radiogroup — name /value/i; three radios whose accessible names are the FULL plain-language descriptions; data hooks', () => {
@@ -232,7 +231,7 @@ describe('CodStep mounted in the wizard step-2 slot (UC-S018-2)', () => {
     fireEvent.input(screen.getByTestId('cod-risk'), { target: { value: 'r' } });
     fireEvent.click(screen.getByTestId('wizard-back'));
     fireEvent.click(screen.getByTestId('wizard-next'));
-    fireEvent.click(screen.getByTestId('wizard-next')); // step 3 placeholder
+    fireEvent.click(screen.getByTestId('wizard-next')); // → step 3 (live QueueRankStep)
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

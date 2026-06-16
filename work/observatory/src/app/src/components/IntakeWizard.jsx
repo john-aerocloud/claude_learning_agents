@@ -31,26 +31,39 @@ import { createPortal } from 'preact/compat';
 import { composeJobSentence, EMPTY_SENTENCE_PROMPT } from '../lib/jobSentence.js';
 import { scoreCod } from '../lib/codScorer.js';
 import { rankPreview } from '../lib/queueRank.js';
+import { buildIntakePrompt } from '../lib/intakePromptBuilder.js';
 import { useQueueRank } from '../hooks/useQueueRank.js';
 import { CodStep } from './CodStep.jsx';
 import { QueueRankStep } from './QueueRankStep.jsx';
+import { PromptStep } from './PromptStep.jsx';
+import { toastDurationMs } from './CopyToast.jsx';
 import './intake-wizard.css';
 
-/** The four steps of the intake flow (operator language). Steps 1 (UC-S018-1)
- * and 2 (UC-S018-2: CodStep) are built; 3–4 are planned-not-dead (visible
- * "(soon)" indicator + labelled placeholder region on Next). */
+/** The four steps of the intake flow (operator language). ALL FOUR are now
+ * built (UC-S018-4 mounts PromptStep into the step-4 slot) — no step remains
+ * planned-not-dead, so the WizardStepIndicator de-emphasis rule has no "(soon)"
+ * step left to render (A11Y-S018-4-10: the e2e no-alpha pin still holds). */
 export const INTAKE_STEPS = [
   { n: 1, key: 'jtbd', label: 'Describe the job', built: true },
   { n: 2, key: 'cod', label: 'Cost of delay', built: true },
   { n: 3, key: 'rank', label: 'Queue rank', built: true },
-  { n: 4, key: 'prompt', label: 'Generate prompt', built: false },
+  { n: 4, key: 'prompt', label: 'Generate prompt', built: true },
 ];
 
-/** Labelled placeholder copy for the planned (not-yet-built) step regions.
- * Step 3 is now BUILT (UC-S018-3, QueueRankStep); only step 4 remains planned. */
-const PLANNED_STEP_COPY = {
-  4: 'Intake prompt + copy handoff — coming in this wizard (next use case)',
-};
+/** A stable snapshot of the inputs the generated prompt was built from — the
+ * PROMPT-FREEZE basis (EXP-036 / FREEZE-S018-4-2/3). The displayed prompt stays
+ * frozen until Generate is pressed again; a divergence between the CURRENT
+ * inputs and this snapshot drives the RegenerateCue. */
+function genSnapshotOf({ fields, codScore, cod, rank }) {
+  return JSON.stringify({
+    jtbd: fields,
+    token: codScore.token,
+    reason: codScore.reason,
+    urgencyWhy: cod.urgencyWhy,
+    riskOfDelay: cod.riskOfDelay,
+    rankSentence: rank && rank.complete ? rank.sentence : null,
+  });
+}
 
 /** WizardStepIndicator — the 4-step progress list (A11Y-S018-1-9: state is
  * number + text + aria-current + data-step-state, never colour alone;
@@ -229,6 +242,42 @@ export function IntakeWizard({ onClose, loaders }) {
       ? rankPreview({ token: codScore.token, items: rankState.items })
       : null;
 
+  // UC-S018-4 — PROMPT-FREEZE state (EXP-036). The prompt mutates ONLY on a
+  // Generate press; `genSnapshot` records the inputs it was built from so a
+  // later divergence is signalled (never a silent live rebuild). The copy toast
+  // visibility + auto-dismiss timer live here (the SteerPanel pattern).
+  const [prompt, setPrompt] = useState(null);
+  const [genSnapshot, setGenSnapshot] = useState(null);
+  const [toastVisible, setToastVisible] = useState(false);
+  const toastTimerRef = useRef(null);
+
+  const handleGenerate = () => {
+    setPrompt(buildIntakePrompt({ jtbd: fields, codScore, cod, rank }));
+    setGenSnapshot(genSnapshotOf({ fields, codScore, cod, rank }));
+  };
+  const onCopied = () => {
+    setToastVisible(true);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => {
+      toastTimerRef.current = null;
+      setToastVisible(false);
+    }, toastDurationMs());
+  };
+  // "Start another" — clear the JTBD + CoD draft + the frozen prompt, return to
+  // step 1 (NAV-S018-4-4). Focus moves back to the heading on the next render.
+  const handleReset = () => {
+    setFields({ situation: '', motivation: '', outcome: '' });
+    setCod({ value: null, timeCritical: null, urgencyWhy: '', riskOfDelay: '' });
+    setPrompt(null);
+    setGenSnapshot(null);
+    setStep(1);
+    if (headingRef.current) headingRef.current.focus();
+  };
+  // The shown prompt is STALE iff one exists and the current inputs diverge from
+  // the snapshot it was built from (drives the RegenerateCue — FREEZE-S018-4-3).
+  const promptDirty =
+    prompt != null && genSnapshot !== genSnapshotOf({ fields, codScore, cod, rank });
+
   const headingRef = useRef(null);
   const returnFocusRef = useRef(null);
   const uid = useId();
@@ -241,6 +290,7 @@ export function IntakeWizard({ onClose, loaders }) {
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (headingRef.current) headingRef.current.focus();
     return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
       const opener = returnFocusRef.current;
       if (opener && typeof opener.focus === 'function' && document.contains(opener)) {
         opener.focus();
@@ -311,11 +361,24 @@ export function IntakeWizard({ onClose, loaders }) {
         // (above); QueueRankStep is a pure render of that state + codScore.
         <QueueRankStep score={codScore} rankState={rankState} rank={rank} uid={uid} />
       ) : (
-        // Planned-not-dead (NAV-S018-1-1): a labelled placeholder region —
-        // UC-S018-3/4 replace this branch with their real steps.
-        <p class="wizard-step-placeholder" data-testid="wizard-step-placeholder">
-          {PLANNED_STEP_COPY[step]}
-        </p>
+        // UC-S018-4: the LIVE PromptStep in the shell's step-4 slot — the last
+        // placeholder branch is GONE (all four steps built). PromptStep is a
+        // pure render of the lifted draft + the PROMPT-FREEZE state the shell
+        // owns (prompt/dirty/toastVisible); Generate is the only mutation point.
+        <PromptStep
+          jtbd={fields}
+          codScore={codScore}
+          cod={cod}
+          rank={rank}
+          prompt={prompt}
+          dirty={promptDirty}
+          toastVisible={toastVisible}
+          onGenerate={handleGenerate}
+          onCopied={onCopied}
+          onReset={handleReset}
+          onClose={close}
+          uid={uid}
+        />
       )}
 
       <WizardStepNav currentStep={step} onNext={onNext} onBack={onBack} onCancel={close} />

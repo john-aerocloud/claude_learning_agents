@@ -469,3 +469,96 @@
   outline: none;
   box-shadow: var(--focus-ring);
 }
+
+/* --- UC-S018-4: the prompt step (the cod-step / rank-step column idiom) ---- */
+/* GEO-S018-4-3: heading → nowrite note → generate → prompt → copy → terminal →
+ * nav STACK (a column, not a row; the s002-line guard applied to step 4). */
+.prompt-step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+
+.prompt-step__h {
+  margin: 0;
+  font-size: var(--fs-label);
+}
+
+/* the NOWRITE affordance — the caption idiom; AA dim text, glyph decorative */
+.intake-nowrite-note {
+  margin: 0;
+  font-size: var(--fs-label);
+  line-height: 1.5;
+  color: var(--c-text-dim);
+}
+
+.intake-nowrite-note__glyph {
+  margin-right: var(--sp-1);
+}
+
+.prompt-step__lead {
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--c-text);
+}
+
+/* generate row — the trigger + the (conditional) regenerate cue side by side */
+.prompt-step__generate-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* the Generate trigger — the SteerPanel "Generate" affordance treatment
+ * (primary outline, AA, ≥ target-min, focus ring) */
+.intake-generate {
+  background: var(--c-surface);
+  border: 1px solid var(--c-source-link);
+  border-radius: var(--radius-badge);
+  color: var(--c-text);
+  padding: var(--sp-1) var(--sp-3);
+  min-height: var(--target-min);
+  min-width: var(--target-min);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.intake-generate:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* the terminal action row (Done / Start another) */
+.prompt-step__terminal {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.intake-done,
+.intake-start-another {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-badge);
+  color: var(--c-text);
+  padding: var(--sp-1) var(--sp-3);
+  min-height: var(--target-min);
+  min-width: var(--target-min);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.intake-done {
+  border-color: var(--c-source-link);
+  font-weight: 600;
+}
+
+.intake-done:focus-visible,
+.intake-start-another:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}

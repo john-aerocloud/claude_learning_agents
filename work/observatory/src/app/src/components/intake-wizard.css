@@ -385,6 +385,47 @@
   font-size: 0.85rem;
 }
 
+/* --- UC-S018-3: the queue-rank step (the cod-step column idiom reused) ---- */
+.rank-step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+
+.rank-step__h {
+  margin: 0;
+  font-size: var(--fs-label);
+}
+
+/* the four state surfaces share the readout treatment — the rank sentence text
+ * is AA (≥4.5:1) on --c-surface-raised (A11Y-S018-3-6); loading/error/gated
+ * dim copy stays readable. Each state is textually distinct (FIG-S018-3-3). */
+.rank-preview,
+.rank-loading,
+.rank-error,
+.rank-gated {
+  margin: 0;
+  padding: var(--sp-3);
+  background: var(--c-surface-raised);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-box);
+  font-size: var(--fs-label);
+  line-height: 1.5;
+  color: var(--c-text);
+}
+
+.rank-loading,
+.rank-gated {
+  color: var(--c-text-dim);
+}
+
+/* fail-soft: distinct from the populated/empty preview, never a fabricated 0 */
+.rank-error {
+  color: var(--c-text);
+  border-color: var(--c-state-over); /* amber edge — a soft caution, AA text */
+}
+
 /* --- planned-step placeholder region (NAV-S018-1-1) ---------------------- */
 .wizard-step-placeholder {
   margin: 0 0 var(--sp-4);

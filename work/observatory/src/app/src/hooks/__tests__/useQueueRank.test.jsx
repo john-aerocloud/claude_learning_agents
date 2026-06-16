@@ -17,7 +17,7 @@ const ITEMS = [
 
 /** A probe that renders the hook's state for assertion. */
 function Probe({ opts }) {
-  const { status, items } = useQueueRank(opts);
+  const { status, items } = useQueueRank(opts || {});
   return (
     <div data-testid="probe" data-status={status} data-count={items.length}>
       {status}
@@ -98,5 +98,41 @@ describe('useQueueRank — the slice read call (UC-S018-3)', () => {
     expect(loadItems).toHaveBeenCalledTimes(1);
     expect(fetchSpy).not.toHaveBeenCalled(); // injected loaders carry the IO
     vi.unstubAllGlobals();
+  });
+
+  it('enabled gate: while enabled:false the hook stays loading and issues NO load; it fetches ONCE when first enabled (the shell-lift seam — NOWRITE-S018-3-2 / AC-S018-3-3)', async () => {
+    const loadActive = vi.fn().mockResolvedValue('demo');
+    const loadItems = vi.fn().mockResolvedValue(ITEMS);
+    // start disabled (steps 1–2)
+    const { rerender } = render(<Probe opts={{ enabled: false, loadActive, loadItems }} />);
+    await flush();
+    expect(loadActive).not.toHaveBeenCalled();
+    expect(loadItems).not.toHaveBeenCalled();
+    expect(screen.getByTestId('probe').getAttribute('data-status')).toBe('loading');
+
+    // enable (step-3 entry) → exactly one load
+    rerender(<Probe opts={{ enabled: true, loadActive, loadItems }} />);
+    await waitFor(() =>
+      expect(screen.getByTestId('probe').getAttribute('data-status')).toBe('ready'),
+    );
+    expect(loadItems).toHaveBeenCalledTimes(1);
+
+    // toggling enabled off (Back to step 2) then on (return to step 3) must NOT
+    // re-fetch — the items are cached for the wizard session.
+    rerender(<Probe opts={{ enabled: false, loadActive, loadItems }} />);
+    await flush();
+    rerender(<Probe opts={{ enabled: true, loadActive, loadItems }} />);
+    await flush();
+    expect(loadItems).toHaveBeenCalledTimes(1);
+  });
+
+  it('enabled defaults to true (the standalone hook fetches on mount)', async () => {
+    const loadActive = vi.fn().mockResolvedValue('demo');
+    const loadItems = vi.fn().mockResolvedValue(ITEMS);
+    render(<Probe opts={{ loadActive, loadItems }} />);
+    await waitFor(() =>
+      expect(screen.getByTestId('probe').getAttribute('data-status')).toBe('ready'),
+    );
+    expect(loadItems).toHaveBeenCalledTimes(1);
   });
 });

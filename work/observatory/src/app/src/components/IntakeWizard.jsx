@@ -30,7 +30,10 @@ import { useState, useLayoutEffect, useRef, useId } from 'preact/hooks';
 import { createPortal } from 'preact/compat';
 import { composeJobSentence, EMPTY_SENTENCE_PROMPT } from '../lib/jobSentence.js';
 import { scoreCod } from '../lib/codScorer.js';
+import { rankPreview } from '../lib/queueRank.js';
+import { useQueueRank } from '../hooks/useQueueRank.js';
 import { CodStep } from './CodStep.jsx';
+import { QueueRankStep } from './QueueRankStep.jsx';
 import './intake-wizard.css';
 
 /** The four steps of the intake flow (operator language). Steps 1 (UC-S018-1)
@@ -39,13 +42,13 @@ import './intake-wizard.css';
 export const INTAKE_STEPS = [
   { n: 1, key: 'jtbd', label: 'Describe the job', built: true },
   { n: 2, key: 'cod', label: 'Cost of delay', built: true },
-  { n: 3, key: 'rank', label: 'Queue rank', built: false },
+  { n: 3, key: 'rank', label: 'Queue rank', built: true },
   { n: 4, key: 'prompt', label: 'Generate prompt', built: false },
 ];
 
-/** Labelled placeholder copy for the planned (not-yet-built) step regions. */
+/** Labelled placeholder copy for the planned (not-yet-built) step regions.
+ * Step 3 is now BUILT (UC-S018-3, QueueRankStep); only step 4 remains planned. */
 const PLANNED_STEP_COPY = {
-  3: 'Queue-rank preview — coming in this wizard (next use case)',
   4: 'Intake prompt + copy handoff — coming in this wizard (next use case)',
 };
 
@@ -193,8 +196,11 @@ function WizardStepNav({ currentStep, onNext, onBack, onCancel }) {
  * @param {object} props
  * @param {() => void} props.onClose - Esc / × / Cancel; the host unmounts the
  *   drawer (closing discards the draft — no cross-session persistence).
+ * @param {{loadActive?:Function, loadItems?:Function}} [props.loaders] - the
+ *   useQueueRank loaders, injectable for tests (the production default reads the
+ *   live /api/projects/:id/items endpoint).
  */
-export function IntakeWizard({ onClose }) {
+export function IntakeWizard({ onClose, loaders }) {
   // The shell's owned step state machine (seam for UC-S018-2/3/4).
   const [step, setStep] = useState(1);
   // Step-1 draft — lives in the shell so Back/Next preserve it (NAV-S018-1-2).
@@ -211,6 +217,18 @@ export function IntakeWizard({ onClose }) {
   // The shell computes the score (pure domain fn) and passes it down —
   // CodStep is a pure render; the CodScore is the UC-S018-3/4 contract.
   const codScore = scoreCod({ value: cod.value, timeCritical: cod.timeCritical });
+
+  // UC-S018-3 — the queue-rank read is LIFTED to the shell (always mounted,
+  // enabled only when step >= 3) so the items are fetched ONCE on step-3 entry
+  // and cached across a Back→forward round trip (NOWRITE-S018-3-1/2). The
+  // resulting RankPreview is derived here, beside codScore, so UC-S018-4's
+  // prompt builder reads it without re-fetching (the lift contract).
+  const rankState = useQueueRank({ enabled: step >= 3, ...(loaders || {}) });
+  const rank =
+    codScore.complete && rankState.status === 'ready'
+      ? rankPreview({ token: codScore.token, items: rankState.items })
+      : null;
+
   const headingRef = useRef(null);
   const returnFocusRef = useRef(null);
   const uid = useId();
@@ -287,6 +305,11 @@ export function IntakeWizard({ onClose }) {
           onChange={setCodField}
           uid={uid}
         />
+      ) : step === 3 ? (
+        // UC-S018-3: the LIVE queue-rank preview in the shell's step-3 slot
+        // (replaces the UC-S018-1 placeholder). The hook is lifted to the shell
+        // (above); QueueRankStep is a pure render of that state + codScore.
+        <QueueRankStep score={codScore} rankState={rankState} rank={rank} uid={uid} />
       ) : (
         // Planned-not-dead (NAV-S018-1-1): a labelled placeholder region —
         // UC-S018-3/4 replace this branch with their real steps.

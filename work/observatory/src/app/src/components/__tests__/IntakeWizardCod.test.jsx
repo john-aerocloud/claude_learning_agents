@@ -50,14 +50,13 @@ describe('CodStep mounted in the wizard step-2 slot (UC-S018-2)', () => {
     expect(screen.getAllByRole('dialog').length).toBe(1);
   });
 
-  it('steps 3 and 4 KEEP the labelled placeholder (planned-not-dead survives for the unbuilt steps)', () => {
+  it('step 3 is now LIVE (QueueRankStep, UC-S018-3); only step 4 KEEPS the labelled placeholder (planned-not-dead survives for the one unbuilt step)', () => {
     openStep2();
-    fireEvent.click(screen.getByTestId('wizard-next')); // → step 3
+    fireEvent.click(screen.getByTestId('wizard-next')); // → step 3 (live)
     expect(screen.queryByTestId('cod-step')).toBeNull();
-    expect(screen.getByTestId('wizard-step-placeholder').textContent).toMatch(
-      /queue-rank preview — coming/i,
-    );
-    fireEvent.click(screen.getByTestId('wizard-next')); // → step 4
+    expect(screen.getByTestId('queue-rank-step')).toBeTruthy();
+    expect(screen.queryByTestId('wizard-step-placeholder')).toBeNull();
+    fireEvent.click(screen.getByTestId('wizard-next')); // → step 4 (placeholder)
     expect(screen.getByTestId('wizard-step-placeholder').textContent).toMatch(
       /intake prompt \+ copy handoff — coming/i,
     );

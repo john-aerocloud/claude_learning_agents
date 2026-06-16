@@ -95,7 +95,7 @@ describe('IntakeWizard shell (UC-S018-1)', () => {
     expect(p.querySelectorAll('.job-sentence__slot').length).toBe(2);
   });
 
-  it('A11Y-S018-1-9: step indicator — role=list "Intake steps"; step 1 current (aria-current="step"); UNBUILT steps (3-4) planned with visible "(soon)" text; built step 2 upcoming (UC-S018-2)', () => {
+  it('A11Y-S018-1-9: step indicator — role=list "Intake steps"; step 1 current (aria-current="step"); built steps 2-3 upcoming (no "(soon)"); only the UNBUILT step 4 planned with "(soon)" (UC-S018-3)', () => {
     render(<IntakeWizard onClose={() => {}} />);
     const list = screen.getByTestId('wizard-steps');
     expect(list.getAttribute('role')).toBe('list');
@@ -103,16 +103,17 @@ describe('IntakeWizard shell (UC-S018-1)', () => {
     const s1 = screen.getByTestId('wizard-step-1');
     expect(s1.getAttribute('data-step-state')).toBe('current');
     expect(s1.getAttribute('aria-current')).toBe('step');
-    // step 2 is BUILT since UC-S018-2 (CodStep) — upcoming, no "(soon)"
-    const s2 = screen.getByTestId('wizard-step-2');
-    expect(s2.getAttribute('data-step-state')).toBe('upcoming');
-    expect(s2.textContent).not.toMatch(/\(soon\)/);
-    for (const n of [3, 4]) {
+    // steps 2 (CodStep) and 3 (QueueRankStep) are BUILT — upcoming, no "(soon)"
+    for (const n of [2, 3]) {
       const s = screen.getByTestId(`wizard-step-${n}`);
-      expect(s.getAttribute('data-step-state')).toBe('planned');
-      expect(s.getAttribute('aria-current')).toBeNull();
-      expect(s.textContent).toMatch(/\(soon\)/);
+      expect(s.getAttribute('data-step-state')).toBe('upcoming');
+      expect(s.textContent).not.toMatch(/\(soon\)/);
     }
+    // only step 4 remains unbuilt — planned with the "(soon)" tag
+    const s4 = screen.getByTestId('wizard-step-4');
+    expect(s4.getAttribute('data-step-state')).toBe('planned');
+    expect(s4.getAttribute('aria-current')).toBeNull();
+    expect(s4.textContent).toMatch(/\(soon\)/);
   });
 
   it('NAV-S018-1-1: Next advances to step 2 — indicator current, no crash, fields unmounted; the planned placeholder survives for the UNBUILT step 3 (UC-S018-2: step 2 is now the live CodStep)', () => {
@@ -128,12 +129,16 @@ describe('IntakeWizard shell (UC-S018-1)', () => {
     expect(s2.getAttribute('aria-current')).toBe('step');
     expect(screen.getByTestId('wizard-step-1').getAttribute('data-step-state')).toBe('complete');
     expect(screen.queryByTestId('jtbd-situation')).toBeNull();
-    // step 2 is LIVE (NAV-S018-2-1); planned-not-dead now pins step 3
+    // step 2 is LIVE (NAV-S018-2-1); step 3 is now the LIVE QueueRankStep
+    // (UC-S018-3) — planned-not-dead now pins only step 4
     expect(screen.queryByTestId('wizard-step-placeholder')).toBeNull();
     expect(screen.getByTestId('cod-step')).toBeTruthy();
-    fireEvent.click(screen.getByTestId('wizard-next'));
+    fireEvent.click(screen.getByTestId('wizard-next')); // → step 3 (live)
+    expect(screen.getByTestId('queue-rank-step')).toBeTruthy();
+    expect(screen.queryByTestId('wizard-step-placeholder')).toBeNull();
+    fireEvent.click(screen.getByTestId('wizard-next')); // → step 4 (placeholder)
     const ph = screen.getByTestId('wizard-step-placeholder');
-    expect(ph.textContent).toMatch(/queue-rank preview — coming/i);
+    expect(ph.textContent).toMatch(/intake prompt/i);
   });
 
   it('NAV-S018-1-2: Back returns to step 1 with the entered draft preserved', () => {

@@ -46,20 +46,26 @@ describe('normaliseTier (RANK-S018-3-6 — total tier→ordinal map)', () => {
   });
 });
 
-describe('isComparisonItem (RANK-S018-3-5 — non-terminal predicate)', () => {
-  it('INCLUDES planned|unconfirmed|in-flight|active', () => {
+describe('isComparisonItem (RANK-S018-3-5 — terminal-exclusion predicate)', () => {
+  it('INCLUDES the design-named non-terminal states planned|unconfirmed|in-flight|active', () => {
     for (const state of ['planned', 'unconfirmed', 'in-flight', 'active']) {
       expect(isComparisonItem({ state })).toBe(true);
     }
   });
-  it('EXCLUDES done and dropped (terminal)', () => {
+  it('EXCLUDES done and dropped (terminal), case-insensitively', () => {
     expect(isComparisonItem({ state: 'done' })).toBe(false);
     expect(isComparisonItem({ state: 'dropped' })).toBe(false);
+    expect(isComparisonItem({ state: 'DONE' })).toBe(false);
   });
-  it('is total — null/garbage record is not a comparison item, never throws', () => {
+  it('EXP-035 robustness: a real-vocabulary non-terminal state (ready/in-progress) the named set omits is STILL counted, never silently dropped', () => {
+    expect(isComparisonItem({ state: 'ready' })).toBe(true);
+    expect(isComparisonItem({ state: 'in-progress' })).toBe(true);
+  });
+  it('is total — a blank/missing state or garbage record is NOT a comparison item (no phantom), never throws', () => {
     expect(isComparisonItem(null)).toBe(false);
     expect(isComparisonItem({})).toBe(false);
-    expect(isComparisonItem({ state: 'WHO-KNOWS' })).toBe(false);
+    expect(isComparisonItem({ state: '' })).toBe(false);
+    expect(isComparisonItem({ state: '   ' })).toBe(false);
   });
 });
 

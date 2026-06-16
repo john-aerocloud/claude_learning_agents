@@ -11,8 +11,12 @@
 //   - token: 'HIGH'|'MED'|'LOW'|null — the wizard item's tier (codScore.token).
 //     null = CoD step incomplete → gated (no fabricated rank).
 //   - the comparison set = the live items.csv NON-terminal backlog (queued work
-//     the new item would join): planned|unconfirmed|in-flight|active. done and
-//     dropped are terminal and EXCLUDED (RANK-S018-3-5).
+//     the new item would join). Defined as TERMINAL-EXCLUSION: everything that
+//     is not `done`/`dropped` counts. This INCLUDES the design's named states
+//     (planned|unconfirmed|in-flight|active — RANK-S018-3-5) AND is robust to
+//     real-vocabulary drift (a `ready`/`in-progress` row in a demo/older repo is
+//     non-terminal too — EXP-035: reconcile against truth, never silently drop
+//     a row a closed enum doesn't recognise).
 //   - tiers order HIGH > MED > LOW; the real backlog carries intermediate/blank
 //     tiers, so each record's raw `value` is normalised to a coarse ordinal:
 //     HIGH=3, MED-HIGH=2.5, MED=2, LOW=1, blank/unknown=2 (MED-equivalent — NOT
@@ -21,9 +25,11 @@
 //     readout AND the UC-S018-4 prompt rank line read it verbatim (author-once,
 //     the same discipline codScorer.reason uses).
 
-/** Non-terminal backlog states — the comparison set (the queue the new item
- * would join). Terminal (done/dropped) are out of the ranking. */
-const NON_TERMINAL_STATES = new Set(['planned', 'unconfirmed', 'in-flight', 'active']);
+/** Terminal backlog states — out of the ranking. The comparison set is the
+ * COMPLEMENT (terminal-exclusion): any non-done/non-dropped row is queued work
+ * the new item would join. Robust to real-vocabulary states the design's named
+ * set (planned|unconfirmed|in-flight|active) doesn't enumerate (EXP-035). */
+const TERMINAL_STATES = new Set(['done', 'dropped']);
 
 /** Tier → coarse ordinal (HIGH > MED > LOW). MED-HIGH sits between; blank/unknown
  * defaults to the MED-equivalent ordinal (counted, never dropped, never 0). */
@@ -38,7 +44,10 @@ const MED_EQUIVALENT = 2;
  */
 export function isComparisonItem(record) {
   const state = typeof record?.state === 'string' ? record.state.trim().toLowerCase() : '';
-  return NON_TERMINAL_STATES.has(state);
+  // A row with no recognisable state is NOT counted (garbage/blank — never a
+  // phantom comparison item); a recognised non-terminal state IS counted.
+  if (state === '') return false;
+  return !TERMINAL_STATES.has(state);
 }
 
 /**

@@ -34,7 +34,7 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByTestId('intake-wizard')).toBeVisible();
 });
 
-test('@s018 de-emphasis: planned steps (3/4 — step 2 is LIVE since UC-S018-2) have distinct dim colour, ≤ font-size, "(soon)" text, and NO alpha vs current step (1)', async ({
+test('@s018 de-emphasis (A11Y-S018-3-8): the lone planned step (4 — steps 2/3 are LIVE since UC-S018-2/3) has distinct dim colour, ≤ font-size, "(soon)" text, and NO alpha vs current step (1)', async ({
   page,
 }) => {
   // Measure the current step (step 1) label properties
@@ -51,8 +51,14 @@ test('@s018 de-emphasis: planned steps (3/4 — step 2 is LIVE since UC-S018-2) 
   });
 
   // Measure all planned steps and assert de-emphasis signals
-  // (step 2 is the live CodStep since UC-S018-2 — only 3/4 remain planned)
-  for (const stepN of [3, 4]) {
+  // (step 2 is the live CodStep since UC-S018-2, step 3 the live QueueRankStep
+  // since UC-S018-3 — only step 4 remains planned; step 3 has LOST its "(soon)")
+  await expect(
+    page.getByTestId('wizard-step-3'),
+    'step 3 is now BUILT (UC-S018-3) — no longer planned',
+  ).toHaveAttribute('data-step-state', 'upcoming');
+  await expect(page.getByTestId('wizard-step-3').locator('.wizard-step__soon')).toHaveCount(0);
+  for (const stepN of [4]) {
     const plannedStep = page.getByTestId(`wizard-step-${stepN}`);
     await expect(
       plannedStep,

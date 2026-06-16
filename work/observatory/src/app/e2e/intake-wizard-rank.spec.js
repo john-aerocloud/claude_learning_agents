@@ -140,7 +140,7 @@ test('NAV-S018-3-3 (gated path) — step 3 with an incomplete CoD shows rank-gat
   await expect(page.getByTestId('rank-gated')).toHaveCount(0);
 });
 
-test('NAV-S018-3-1 — step 3 current; QueueRankStep replaces the placeholder; step 3 lost "(soon)"; the placeholder survives only for step 4 (A11Y-S018-3-8)', async ({ page }) => {
+test('NAV-S018-3-1 — step 3 current; QueueRankStep replaces the placeholder; step 3 lost "(soon)"; step 4 is now LIVE PromptStep too (no placeholder anywhere) (A11Y-S018-3-8)', async ({ page }) => {
   await openWizard(page);
   await toStep2(page);
   await completeCod(page);
@@ -150,10 +150,12 @@ test('NAV-S018-3-1 — step 3 current; QueueRankStep replaces the placeholder; s
   await expect(s3).toHaveAttribute('aria-current', 'step');
   await expect(s3.locator('.wizard-step__soon')).toHaveCount(0);
   await expect(page.getByTestId('wizard-step-placeholder')).toHaveCount(0);
-  // step 4 still planned + placeholder
-  await expect(page.getByTestId('wizard-step-4').locator('.wizard-step__soon')).toHaveCount(1);
+  // step 4 is ALSO built now (UC-S018-4) — no "(soon)", no placeholder; it
+  // mounts the LIVE PromptStep.
+  await expect(page.getByTestId('wizard-step-4').locator('.wizard-step__soon')).toHaveCount(0);
   await page.getByTestId('wizard-next').click();
-  await expect(page.getByTestId('wizard-step-placeholder')).toContainText(/intake prompt/i);
+  await expect(page.getByTestId('prompt-step')).toBeVisible();
+  await expect(page.getByTestId('wizard-step-placeholder')).toHaveCount(0);
 });
 
 test('GEO-S018-3-1/2/3 — the step-2→step-3 swap reflows NOTHING outside the fixed drawer; the rank content stacks; the drawer stays on-screen', async ({ page }) => {

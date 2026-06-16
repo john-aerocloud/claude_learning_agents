@@ -91,14 +91,18 @@ test('@a11y @s018 A11Y-S018-1-12 — axe: zero color-contrast AND heading-order 
 //   (c) the drawer's slide-in keyframes never animate opacity.
 // ---------------------------------------------------------------------------
 
-test('@a11y @s018 A11Y-S018-1-12 — targeted: planned-step labels (label + "(soon)") compute ≥ 4.5:1 on the drawer surface with NO alpha de-emphasis (only step 4 — steps 2/3 are LIVE since UC-S018-2/3)', async ({
+test('@a11y @s018 A11Y-S018-4-10 — the step-indicator labels compute ≥ 4.5:1 on the drawer surface with NO alpha de-emphasis (all four steps BUILT since UC-S018-4 — no planned/"(soon)" step remains)', async ({
   page,
 }) => {
-  for (const stepN of [4]) {
+  // With UC-S018-4 all four steps are built — no "planned" step remains. The
+  // regression value carries forward to the BUILT upcoming-step labels: no
+  // alpha anywhere + AA contrast on the indicator (A11Y-S018-4-10 do-no-harm).
+  for (const stepN of [2, 3, 4]) {
     const step = page.getByTestId(`wizard-step-${stepN}`);
-    await expect(step).toHaveAttribute('data-step-state', 'planned');
+    await expect(step).toHaveAttribute('data-step-state', 'upcoming');
+    await expect(step.locator('.wizard-step__soon')).toHaveCount(0);
 
-    for (const sel of ['.wizard-step__label', '.wizard-step__soon']) {
+    for (const sel of ['.wizard-step__label']) {
       const measured = await step.locator(sel).first().evaluate((el) => {
         const parseRgb = (s) => {
           const m = s.match(/rgba?\(([^)]+)\)/);

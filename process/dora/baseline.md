@@ -1,15 +1,15 @@
 # DORA Baseline (computed)
 
-_Generated 2026-06-12T15:35:28Z from ledger.csv. Do not hand-edit._
+_Generated 2026-06-16T14:02:24Z from ledger.csv. Do not hand-edit._
 
 ## Four key metrics (whole pipeline)
 
 | Metric | Value | Window |
 |--------|-------|--------|
-| Gross lead time (median) | 3618 s | 25 slice(s) |
-| Deployment frequency | 7 /active-day | 9 day(s) |
-| Change failure rate | 44 % | 59 deploy(s) |
-| MTTR (median) | 842 s | 22 failure(s) |
+| Gross lead time (median) | 3618 s | 27 slice(s) |
+| Deployment frequency | 7 /active-day | 10 day(s) |
+| Change failure rate | 43 % | 67 deploy(s) |
+| MTTR (median) | 843 s | 25 failure(s) |
 
 ## Per-agent task completion (seconds)
 

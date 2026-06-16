@@ -433,3 +433,197 @@ re-stated and MUST NOT regress. These conditions are step-3-specific.
   CoD step (`codScore.complete === false`), step 3 shows the `rank-gated` prompt
   to finish step 2 (NOT a rank, NOT a crash); completing step 2 and returning shows
   the real rank.
+
+---
+
+## UC-S018-4 — Intake prompt builder + clipboard-copy handoff (THIS UC — CLOSES the wizard)
+
+The pure `intakePromptBuilder.js` + the `PromptStep` region (replacing step-4's
+surviving `wizard-step-placeholder`), REUSING the delivered s014 PromptOutput +
+CopyPromptButton + CopyToast (NOT forked). Composes the captured JTBD + CoD + rank
+into a `/intake` slash-command prompt the operator COPIES and hands to Claude — new
+work enters through the SAME human-accept gate as steer actions, never written by
+the UI. Inherits the UC-S018-1/2/3 shell contract (drawer, focus/Esc, step machine,
+indicator + de-emphasis rule, nav, lifted JTBD + `codScore` + `rank`) — those
+conditions are NOT re-stated and MUST NOT regress. These conditions are
+step-4-specific.
+
+### Functional (from slice.md / use-cases.md — restated for the tester)
+- AC-S018-4-1 (all six required fields present — SM-CHK7-4): with a full JTBD +
+  CoD capture, pressing "Generate intake prompt" renders a prompt whose text
+  contains, verbatim, ALL of: the job sentence, the situation, the motivation, the
+  outcome, the value token (`value: HIGH|MED|LOW`), and the urgency text. Assert
+  the rendered `[data-testid="prompt-output"]` text contains each field's value
+  (the four JTBD/prose strings the operator typed + the value token).
+- AC-S018-4-2 (copy = byte-equal, toast — SM-CHK7-5): pressing "Copy prompt"
+  copies the EXACT displayed prompt to the clipboard and shows the CopyToast within
+  2 s. Assert `navigator.clipboard.readText()` (or the spy) equals the `<pre>`
+  textContent byte-for-byte AND `[data-testid="copy-toast"]` appears.
+- AC-S018-4-3 (command form): the prompt's first line is the `/intake` slash
+  command with the composed job sentence as its argument
+  (`/intake When …, I want to …, so I can …`), matching `.claude/commands/intake.md`.
+- AC-S018-4-4 (real-data done-condition — EXP-033): on the LIVE running app, the
+  tester opens the wizard, completes a full JTBD + CoD capture for a real work
+  idea, confirms the rank preview reflects the live items.csv, generates the
+  prompt, and verifies all six required fields verbatim; `result.md` carries a copy
+  of the generated intake prompt for at least one live item.
+
+### Prompt-builder output contract (BUILD) — UI-designer co-authored
+- **BUILD-S018-4-1 (signature / shape):** `buildIntakePrompt({jtbd, codScore, cod,
+  rank})` returns a non-empty STRING — a `/intake` prompt with the job sentence as
+  the argument and a structured JTBD + value + urgency/risk + rank body.
+- **BUILD-S018-4-2 (totality / purity):** defined for empty JTBD fields,
+  `codScore.complete===false`, `rank===null`, and empty prose; never throws; no DOM
+  access; no network call (assert calling the fn issues no fetch — it is pure).
+- **BUILD-S018-4-3 (no token residue, no junk):** the rendered prompt contains NO
+  `{{…}}`, NO `undefined`, NO `null`, NO `NaN`; empty optional prose renders the
+  word "not stated" (or "—"), never a broken slot.
+- **BUILD-S018-4-4 (job sentence author-once):** the prompt's `/intake` argument
+  equals `composeJobSentence(jtbd)` — the SAME sentence the step-1 JobSentencePreview
+  rendered (the operator hands off exactly what they saw). Assert string equality.
+- **BUILD-S018-4-5 (value reason author-once):** the prompt's value line carries the
+  token AND `codScore.reason` (the same reason the CodScoreReadout showed) — not a
+  re-derived or bare token.
+- **BUILD-S018-4-6 (rank line gated / author-once):** with `rank===null` OR
+  `rank.complete===false` the prompt OMITS the rank line entirely (no fabricated
+  rank); with `rank.empty===true` the rank line is the empty-queue sentence; else
+  the rank line is `rank.sentence` VERBATIM (the same line step 3 showed). Assert
+  all three branches against fixtures.
+
+### PROMPT-FREEZE (FREEZE) — UI-designer co-authored (the EXP-036 lesson)
+- **FREEZE-S018-4-1 (built only on Generate):** the displayed prompt
+  (`[data-testid="prompt-output"]`) appears ONLY after a "Generate intake prompt"
+  press — it is absent before the first Generate (the slot rule). No prompt is
+  rendered on step-4 entry.
+- **FREEZE-S018-4-2 (frozen on edit):** after Generate, going Back, changing a JTBD
+  or CoD field, and returning to step 4 does NOT silently change the DISPLAYED
+  prompt — its text is byte-identical to the generated one until Generate is pressed
+  again. Assert the `<pre>` text is unchanged after an upstream edit (no live
+  rebuild).
+- **FREEZE-S018-4-3 (regenerate cue on divergence):** when the prompt exists AND the
+  current lifted inputs diverge from the Generate snapshot, the RegenerateCue
+  (`[data-testid="intake-regenerate-cue"]`, `data-state="updated"`, `role=status`)
+  is present with text instructing the operator to regenerate; pressing
+  "Re-generate prompt" rebuilds the prompt from the current inputs and clears the
+  cue. Assert the cue appears on divergence and clears on regenerate.
+
+### Accessibility (AA) — UI-designer co-authored, tester-enforced
+- **A11Y-S018-4-1 (labelled group + heading order):** the PromptStep is a
+  `role="group"` (`data-testid="prompt-step"`) with accessible name matching
+  `/generate prompt/i` (`aria-labelledby` → its `<h3>` `data-testid=
+  "prompt-step-heading"`, "Generate prompt") under the wizard's `<h2>` — no skipped
+  level; axe `heading-order` passes.
+- **A11Y-S018-4-2 (reused PromptOutput a11y):** the rendered prompt `<pre>` is
+  `[data-testid="prompt-output"]` with `aria-label="Generated prompt"` and
+  `tabindex="0"` (the s014 contract — focusable, SELECTABLE, `--focus-ring`).
+- **A11Y-S018-4-3 (copy a11y — reused):** the Copy button is resolvable by
+  `getByRole('button', { name: /copy/i })` across BOTH label states; success is the
+  TEXT "Copied ✓" + the polite toast, never colour alone; a FAILED clipboard write
+  shows NO success cue (the s014 PROMPT-COPY contract; the UI never lies).
+- **A11Y-S018-4-4 (within-step focus order):** forward Tab order within step 4 is
+  heading region → Generate (pre-generate) / prompt `<pre>` → Copy → Done → Start
+  another → Back; the nowrite note + regenerate cue are status text, NOT tab stops.
+  Assert the `document.activeElement` progression.
+- **A11Y-S018-4-5 (visible focus):** Generate / Copy / Done / Start-another show a
+  visible `:focus-visible` indicator (`--focus-ring`); assert a non-empty computed
+  box-shadow/outline on focus.
+- **A11Y-S018-4-6 (target size):** Generate / Copy / Done / Start-another are
+  ≥ 24×24 CSS px (WCAG 2.2 §2.5.8); assert bounding-box width AND height ≥ 24.
+- **A11Y-S018-4-7 (contrast):** the prompt text, the nowrite note, the regenerate
+  cue, and the terminal copy are ≥ 4.5:1 on their surface; axe `color-contrast`
+  passes for the prompt step.
+- **A11Y-S018-4-8 (non-colour cues):** the regenerate cue conveys "updated" by TEXT
+  + glyph (`--c-state-over` band redundant only); the nowrite note conveys its
+  meaning by TEXT (glyph aria-hidden) — never colour alone.
+- **A11Y-S018-4-9 (terminal focus return):** pressing "Done" closes the wizard and
+  RETURNS focus to the IntakeLauncher (the inherited drawer focus-return contract);
+  pressing "Start another" resets to step 1 and moves focus to the wizard heading.
+- **A11Y-S018-4-10 (shell contract NOT regressed):** the inherited UC-S018-1 e2e
+  a11y pin (planned-step de-emphasis = colour+size+text, NO alpha/opacity keyframe)
+  STILL passes with step 4 now built (NO planned step remains; all four are built).
+
+### Geometry / visual-structural correctness — tester-enforced via bbox/computed style
+- **GEO-S018-4-1 (step swap + prompt render = zero external reflow):** advancing to
+  step 4, mounting PromptStep, and rendering the prompt change only content INSIDE
+  the fixed drawer — the value-stream map bounding box AND `.observatory-main-col`
+  scrollHeight are BYTE-IDENTICAL before vs after (the drawer is `position:fixed`,
+  zero flow height — same guard as GEO-S018-1-1/2-1/3-1). Assert getBoundingClientRect
+  equality of `[data-testid="value-stream-map"]` and scrollHeight equality of
+  `.observatory-main-col` across the step-3→step-4 swap AND across a Generate press.
+- **GEO-S018-4-2 (prompt scrolls INTERNALLY — no drawer growth):** a LONG generated
+  prompt scrolls inside the `.prompt-output` `<pre>` (`max-height:40vh`,
+  `overflow-y:auto`) — it does NOT grow the wizard drawer past the viewport and does
+  NOT introduce a document horizontal/vertical scrollbar. Assert the `<pre>`
+  scrollHeight may exceed its clientHeight while the drawer's bounding box stays
+  within the viewport.
+- **GEO-S018-4-3 (prompt-step content stacks):** the prompt-step content (heading →
+  nowrite note → generate → prompt slot → copy → terminal row → nav) STACKS
+  vertically — top offsets strictly increase, shared left offset (a column, not a
+  row); assert monotonic tops + shared left (the s002-line guard applied to step 4).
+
+### Figure legibility (FIG) — the generated prompt
+- **FIG-S018-4-1 (no token residue / no junk):** the rendered prompt contains NONE
+  of `{{`, `undefined`, `null`, `NaN`; empty optional prose reads "not stated"
+  (or "—"), never a broken slot (BUILD-S018-4-3 surface in the DOM).
+- **FIG-S018-4-2 (all four wizard inputs present + readable):** the prompt text
+  contains the JTBD situation, motivation, and outcome (verbatim where typed), the
+  value token + its reason, the urgency prose (or "not stated"), and the risk prose
+  (or "not stated") — every captured wizard input appears and reads as a sentence,
+  none silently dropped.
+- **FIG-S018-4-3 (gated / empty states honest):** with an incomplete CoD the prompt
+  has NO rank line (no fabricated rank); with an empty queue the rank line is the
+  empty-queue sentence (NOT "ahead of 0 and behind 0"); nothing reads as a
+  fabricated 0-rank.
+- **FIG-S018-4-4 (no raw refs):** the prompt contains NO machine id / `row:N` / CSV
+  key (`vc_ratio`, `done_ts`, …) / sourceRef path — operator + Claude language only.
+
+### No-write / read-only contract (NOWRITE) — the social signal
+- **NOWRITE-S018-4-1 (zero filesystem writes, clipboard only):** across the full
+  step-4 interaction (entry, Generate, Copy, Done, Start-another) the network spy
+  records ZERO requests with a write method (POST/PUT/PATCH/DELETE); the ONLY write
+  surface exercised is the OS clipboard (the s014 path). The server write-guard
+  remains active (write probe → 405; SM-CHK7-6 regression).
+- **NOWRITE-S018-4-2 (no new GET):** step 4 issues NO new items GET — the rank is
+  read from the already-lifted `rank`; the items GET count across the whole flow
+  (steps 1–4) stays exactly 1 (the step-3-entry fetch).
+- **NOWRITE-S018-4-3 (visible NOWRITE affordance):** the NoWriteAffordance
+  (`[data-testid="intake-nowrite-note"]`) is present in step 4 with visible text
+  conveying that the dashboard writes nothing and the operator pastes the prompt to
+  Claude (assert the visible copy contains "writes nothing" / "the UI writes
+  nothing").
+
+### Selectors (SEL) — the build/test contract (stable, role-first)
+- **SEL-S018-4-1:** PromptStep resolvable by `getByRole('group', { name:
+  /generate prompt/i })` and `[data-testid="prompt-step"]`; its sub-heading by
+  `[data-testid="prompt-step-heading"]` (`<h3>`).
+- **SEL-S018-4-2 (REUSED s014 selectors — unchanged):** the prompt by
+  `[data-testid="prompt-output"]` inside `[data-testid="prompt-output-slot"]`; the
+  Copy button by `getByRole('button', { name: /copy/i })` /
+  `[data-testid="copy-prompt-btn"]`; the toast by `[data-testid="copy-toast"]`
+  (`role="status"`).
+- **SEL-S018-4-3:** Generate by `getByRole('button', { name: /generate.*prompt/i })`
+  / `[data-testid="intake-generate"]`; the nowrite note by
+  `[data-testid="intake-nowrite-note"]`; the regenerate cue by
+  `[data-testid="intake-regenerate-cue"]` (absent when not dirty); Done by
+  `getByRole('button', { name: /done/i })` / `[data-testid="intake-done"]`; Start
+  another by `getByRole('button', { name: /start another/i })` /
+  `[data-testid="intake-start-another"]`. No derived `nth(N)`/text-exclusion selectors.
+
+### Step-navigation / terminal (step-4-specific) — observable behaviour
+- **NAV-S018-4-1:** when `currentStep` is step 4, the WizardStepIndicator marks step
+  4 `data-step-state="current"` / `aria-current="step"`, step 4 has LOST its
+  "(soon)" tag (now built), and the live `PromptStep`
+  (`[data-testid="prompt-step"]`) renders in place of the `wizard-step-placeholder`
+  (NO placeholder branch remains — all four steps built). "Next" is ABSENT on step
+  4 (no 5th step); Back + Cancel remain.
+- **NAV-S018-4-2 (Back keeps the draft):** pressing "Back" from step 4 returns to
+  step 3 with the JTBD + CoD draft preserved; the rank still shows WITHOUT a second
+  items GET (the items set is cached for the wizard session).
+- **NAV-S018-4-3 (terminal — Done closes):** with a prompt generated, "Done"
+  (`[data-testid="intake-done"]`) closes the wizard (host unmounts the drawer);
+  focus returns to the IntakeLauncher.
+- **NAV-S018-4-4 (terminal — Start another resets):** with a prompt generated,
+  "Start another" (`[data-testid="intake-start-another"]`) clears the JTBD + CoD
+  draft and returns `currentStep` to 1 (the JobSentencePreview shows its all-empty
+  neutral prompt again; the frozen prompt is discarded); focus moves to the wizard
+  heading.

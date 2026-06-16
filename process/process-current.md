@@ -155,7 +155,12 @@ engineer/orchestrator builds died on dispatch). When a model is retired or
 unreachable, re-tier its agents to the next-available model that best preserves
 the validated judgment-density intent **in the same retro**, before resuming the
 loop. Prefer models with confirmed session access over nominal capability.
-[EXP-039]
+**In-session bridge:** agent `model:` frontmatter is resolved/cached at session
+start, so editing it does NOT rescue an already-running session — the dispatch
+re-resolves to the dead model and fails again. Until the session reloads, the
+orchestrator passes the Agent tool's per-call `model` override (it takes
+precedence over frontmatter) on every spawn of the affected agent; the
+frontmatter edit is the durable fix for the next session. [EXP-039]
 
 ## 8. Project classification
 Two postures the slice planning and capability work follow:

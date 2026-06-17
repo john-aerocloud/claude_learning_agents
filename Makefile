@@ -269,6 +269,103 @@ synth-infra:
 	npm --prefix $(INFRA) run cdk -- synth $(STACKS) --quiet \
 	  -c githubOrg=$(GH_ORG) -c githubRepo=$(GH_REPO)
 
+# ---------------------------------------------------------------------------
+# OagEventSource-specific targets (EXP-050 PATH bridge — process v55 retro)
+#
+# These targets export PATH internally to prepend the nvm node bin so that
+# node/npm/npx/cdk resolve in non-interactive agent shells WITHOUT depending
+# on the session-start settings.json env injection (which doesn't reach
+# mid-session subagent shells). This is leg-b of EXP-050.
+#
+# All commands use absolute paths from repo root (§IMP-001 / allowlist contract).
+#
+# OAG_INFRA := work/OagEventSource/src/infra  (aliased below for clarity)
+# ---------------------------------------------------------------------------
+OAG_APP   := work/OagEventSource/src/app
+OAG_INFRA := work/OagEventSource/src/infra
+OAG_LOCAL := work/OagEventSource/src/app/local
+NVM_NODE_BIN := $(HOME)/.nvm/versions/node/v24.12.0/bin
+
+# EXP-050 leg-b: embed PATH in every recipe line so node/npx/cdk resolve in
+# non-interactive agent shells without depending on the session env.
+# macOS GNU Make 3.81: 'export PATH :=' modifies Make's variable but does NOT
+# propagate to recipe sub-shells. The correct fix is a per-recipe PATH prefix.
+# Each recipe below starts with PATH=$(NVM_NODE_BIN):$$PATH so the correct
+# node binary is found regardless of how make was invoked.
+
+# make test-app-oag  — vitest run for the domain core (no DDB)
+test-app-oag:
+	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_APP) run test:run
+
+# make lint-app-oag
+lint-app-oag:
+	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_APP) run lint
+
+# make build-app-oag
+build-app-oag:
+	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_APP) run build
+
+# make test-infra-oag  — jest policy-check assertions on the synthesized template (offline)
+test-infra-oag:
+	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_INFRA) test
+
+# make synth-infra-oag  — CDK synth OagFeedStack (offline; no AWS creds needed)
+# OAG_BUILD_SHA optional: make synth-infra-oag OAG_BUILD_SHA=$(git rev-parse HEAD)
+OAG_BUILD_SHA ?= local
+synth-infra-oag:
+	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_INFRA) run cdk -- synth OagFeedStack --quiet \
+	  -c buildSha=$(OAG_BUILD_SHA)
+
+# make diff-oag  — CDK diff (requires live AWS creds + bootstrap complete)
+diff-oag:
+	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_INFRA) run cdk -- diff OagFeedStack \
+	  -c buildSha=$$(git rev-parse --short HEAD 2>/dev/null || echo local) \
+	  --profile $(AWS_PROFILE)
+
+# make deploy-oag  — CDK deploy OagFeedStack
+# §F5 HUMAN GATE — run this only after the human approves the first deploy.
+# Prerequisites:
+#   1. make -C work/OagEventSource/src/infra bootstrap  (CDK bootstrap in eu-west-2)
+#   2. Secrets Manager: dash0 API key secret exists in eu-west-2 (OAG_DASH0_SECRET_ARN)
+#   3. OTel layer ARNs filled in lib/oag-feed-stack.ts OTEL_LAYER_ARNS (from delta-001)
+deploy-oag:
+	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_INFRA) run cdk -- deploy OagFeedStack \
+	  --require-approval never \
+	  -c buildSha=$$(git rev-parse HEAD 2>/dev/null || echo local) \
+	  --profile $(AWS_PROFILE)
+
+# make test-adapter-oag  — UC-22 DynamoDB Local adapter test suite
+# Requires DDB Local running: make ddb-local-up
+test-adapter-oag:
+	DYNAMODB_ENDPOINT=http://localhost:8000 PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_APP) run test:adapter
+
+# make ddb-local-up  — start DynamoDB Local (detached; UC-22 prerequisite)
+ddb-local-up:
+	docker compose -f $(OAG_LOCAL)/docker-compose.yml up -d
+
+# make ddb-local-down  — stop and remove DynamoDB Local
+ddb-local-down:
+	docker compose -f $(OAG_LOCAL)/docker-compose.yml down
+
+# make ddb-local-create-table  — create the OagFeed-EventStore table in DDB Local
+# Run after ddb-local-up; the adapter test suite also does this at setup,
+# but this target is useful for manual inspection during development.
+ddb-local-create-table:
+	aws dynamodb create-table \
+	  --table-name OagFeed-EventStore \
+	  --attribute-definitions \
+	    AttributeName=PK,AttributeType=S \
+	    AttributeName=SK,AttributeType=S \
+	  --key-schema \
+	    AttributeName=PK,KeyType=HASH \
+	    AttributeName=SK,KeyType=RANGE \
+	  --billing-mode PAY_PER_REQUEST \
+	  --endpoint-url http://localhost:8000 \
+	  --region local \
+	  --no-cli-pager 2>/dev/null || echo "Table already exists — continuing"
+
+.PHONY: test-app-oag lint-app-oag build-app-oag test-infra-oag synth-infra-oag diff-oag deploy-oag test-adapter-oag ddb-local-up ddb-local-down ddb-local-create-table
+
 # s007 SHARED §11a probe (UC1+UC3): two-browser disconnect skeleton against the
 # DEPLOYED path (Playwright, two real browsers — pair, close one tab, survivor
 # sees "Your opponent disconnected." + returns to the mode selector ≤10s). NOT a

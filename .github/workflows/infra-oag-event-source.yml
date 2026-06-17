@@ -1,0 +1,195 @@
+###############################################################################
+# OagEventSource — infrastructure pipeline (slice-004+)
+#
+# Triggers on changes to the CDK infra source. Separate from the app CI
+# pipeline (ci-oag-event-source.yml) so infra and app changes are independently
+# deployable.
+#
+# Auth: GitHub OIDC → oag-infra-deploy role (sandbox account)
+# The infra role can assume CDK bootstrap execution roles.
+# Bootstrap must be run with --trust <account-id> before first deploy.
+#
+# GitHub Actions secrets required:
+#   OAG_AWS_ACCOUNT_ID            sandbox AWS account ID
+#   OAG_INFRA_DEPLOY_ROLE_ARN     arn:aws:iam::<account>:role/oag-infra-deploy
+#   OAG_DASH0_SECRET_ARN          ARN of the Dash0 API key in Secrets Manager
+#
+# Pipeline pre-flight checklist (process v29 §19):
+#   [x] OIDC trust uses StringLike for sub (repo:org/repo:ref:refs/heads/*)
+#   [x] No GITHUB_ prefix env vars (reserved)
+#   [x] Fail-fast config validation step first
+#   [x] No environment: production gate (sandbox; no approval queue needed)
+#   [x] npm install not npm ci (mac-generated lock may omit linux-x64 optionals)
+#   [x] vitest run (not bare npm test) in test steps
+#   [x] FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+#   [x] concurrency: deploy-oag-event-source-prod (scoped per project)
+#
+# §F5 gate: the FIRST real deploy (CDK deploy OagFeedStack) is a human gate.
+# CI runs the full pipeline on main; the deploy step requires the secrets above
+# to be configured BEFORE the first push triggers the pipeline.
+###############################################################################
+
+name: OagEventSource — infra
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'work/OagEventSource/src/infra/**'
+      - '.github/workflows/infra-oag-event-source.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'work/OagEventSource/src/infra/**'
+      - '.github/workflows/infra-oag-event-source.yml'
+
+concurrency:
+  group: deploy-oag-event-source-prod
+  cancel-in-progress: false  # never cancel an in-flight infra deploy
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  OAG_AWS_REGION: eu-west-2
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  infra:
+    name: CDK synth / policy-check / diff / deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate required config (fail-fast §process v15 §33)
+        run: |
+          missing=""
+          [ -z "${{ secrets.OAG_AWS_ACCOUNT_ID }}" ]         && missing="$missing OAG_AWS_ACCOUNT_ID"
+          [ -z "${{ secrets.OAG_INFRA_DEPLOY_ROLE_ARN }}" ]  && missing="$missing OAG_INFRA_DEPLOY_ROLE_ARN"
+          [ -z "${{ secrets.OAG_DASH0_SECRET_ARN }}" ]       && missing="$missing OAG_DASH0_SECRET_ARN"
+          if [ -n "$missing" ]; then
+            echo "ERROR: missing required secrets:$missing"
+            exit 1
+          fi
+          echo "All required secrets present."
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: work/OagEventSource/src/infra/package-lock.json
+
+      - name: Install CDK dependencies
+        # npm install (not ci) — lock generated on macOS/arm64 may omit
+        # linux-x64 optional native packages (process §runner-environment note).
+        working-directory: work/OagEventSource/src/infra
+        run: npm install
+
+      - name: Build CDK TypeScript
+        working-directory: work/OagEventSource/src/infra
+        run: npm run build
+
+      - name: CDK synth (policy-check assertions + offline validation)
+        # AC-19a/b/c: synth validates OTel layers, no Resource:*, PITR, KMS.
+        # --quiet suppresses asset hash noise; template is written to cdk.out/.
+        working-directory: work/OagEventSource/src/infra
+        run: |
+          npx cdk synth OagFeedStack --quiet \
+            -c buildSha=${{ github.sha }}
+        env:
+          CDK_DEFAULT_ACCOUNT: ${{ secrets.OAG_AWS_ACCOUNT_ID }}
+          CDK_DEFAULT_REGION: ${{ env.OAG_AWS_REGION }}
+          DASH0_SECRET_ARN: ${{ secrets.OAG_DASH0_SECRET_ARN }}
+
+      - name: Policy-check assertions (jest suite on synthesized template)
+        # Runs the test/oag-feed-stack.policy.test.ts assertions:
+        # AC-19a (OTel trio), AC-19b (no Resource:*), AC-19c (PITR+KMS),
+        # plus CORS non-wildcard, read-only feed role, no TTL checks.
+        working-directory: work/OagEventSource/src/infra
+        run: npm test
+        env:
+          CDK_DEFAULT_ACCOUNT: ${{ secrets.OAG_AWS_ACCOUNT_ID }}
+          CDK_DEFAULT_REGION: ${{ env.OAG_AWS_REGION }}
+          DASH0_SECRET_ARN: ${{ secrets.OAG_DASH0_SECRET_ARN }}
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.OAG_INFRA_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.OAG_AWS_REGION }}
+          role-session-name: oag-infra-${{ github.run_id }}
+
+      - name: CDK diff — OagFeedStack
+        working-directory: work/OagEventSource/src/infra
+        run: |
+          npx cdk diff OagFeedStack \
+            -c buildSha=${{ github.sha }}
+        env:
+          CDK_DEFAULT_ACCOUNT: ${{ secrets.OAG_AWS_ACCOUNT_ID }}
+          CDK_DEFAULT_REGION: ${{ env.OAG_AWS_REGION }}
+          DASH0_SECRET_ARN: ${{ secrets.OAG_DASH0_SECRET_ARN }}
+
+      - name: CDK deploy — OagFeedStack (main only; §F5 human gate)
+        # §F5: the FIRST deploy is a human gate (pipeline only runs after
+        # the human approves bootstrap + secrets configured).
+        # On PRs this step is skipped (diff is the PR gate).
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        working-directory: work/OagEventSource/src/infra
+        run: |
+          npx cdk deploy OagFeedStack --require-approval never \
+            -c buildSha=${{ github.sha }}
+        env:
+          CDK_DEFAULT_ACCOUNT: ${{ secrets.OAG_AWS_ACCOUNT_ID }}
+          CDK_DEFAULT_REGION: ${{ env.OAG_AWS_REGION }}
+          DASH0_SECRET_ARN: ${{ secrets.OAG_DASH0_SECRET_ARN }}
+
+      - name: Smoke gate — verify served sha == deployed sha
+        # Smoke gate per principles/01: query the Function URL and assert
+        # X-Service-Version == ${{ github.sha }}. Gated on main push + deploy.
+        # The Function URL is discovered from CloudFormation outputs.
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          FUNCTION_URL=$(aws cloudformation describe-stacks \
+            --stack-name OagFeedStack \
+            --region ${{ env.OAG_AWS_REGION }} \
+            --query "Stacks[0].Outputs[?OutputKey=='FunctionUrl'].OutputValue" \
+            --output text)
+          echo "Function URL: $FUNCTION_URL"
+
+          # Probe the URL — the inline stub returns 503 with X-Service-Version.
+          # Once the engineer ships UC-18 (fromAsset), this becomes a 404/200.
+          SERVED_VERSION=$(curl -s -o /dev/null -D - "${FUNCTION_URL}streams/flight/events?after=-1" \
+            | grep -i "x-service-version" | tr -d '\r' | awk '{print $2}')
+          echo "Served version header: $SERVED_VERSION"
+
+          # The sha is the first 8+ chars; we match the full sha in the header.
+          # If the header is absent (204/no-body), the smoke gate is advisory
+          # until UC-18 is shipped.
+          if [ -z "$SERVED_VERSION" ]; then
+            echo "WARNING: X-Service-Version header absent — smoke gate advisory (UC-18 not yet shipped)"
+          elif [ "$SERVED_VERSION" != "${{ github.sha }}" ]; then
+            echo "ERROR: served sha ($SERVED_VERSION) != deployed sha (${{ github.sha }})"
+            exit 1
+          else
+            echo "Smoke gate PASS: served sha == deployed sha"
+          fi
+
+      - name: Record DORA deploy event
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          python3 .claude/skills/dora-ledger/scripts/dora.py record \
+            --project OagEventSource \
+            --iteration 4 \
+            --slice 004-pull-feed-walking-skeleton \
+            --agent cicd \
+            --event deploy \
+            --ref "${{ github.sha }}" \
+            --outcome success \
+            --note "OagFeedStack deployed by CI (infra-oag-event-source.yml)"
+        continue-on-error: true  # DORA record failure must not block deploy

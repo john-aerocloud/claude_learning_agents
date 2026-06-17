@@ -151,6 +151,16 @@ reconciled; only "now" figures are. This is the second "derived metric trusted
 the raw log" defect (first: strict-CSV line drop) — reconcile against truth.
 [EXP-035]
 
+**Better than reconciling — don't have two writers (EXP-047).** Reconciliation
+is the runtime patch; the structural fix is single-source-of-truth: when the same
+fact (an item's current state, a "now" count) would live in N stores, make N−1 of
+them **projections** of the first, never independent writers. If a state field
+and a queue membership and an event log all assert the same fact, derive two from
+the third so they cannot disagree by construction. 10 of observatory's 16 defects
+were three-independent-writer disagreements (ledger / items.csv / queues) that
+reconciliation only contained, never eliminated (IMP-010). Reach for derivation
+first; reconcile only what you genuinely cannot derive.
+
 ## Failure handling — retry, classify, raise
 Every external call uses jittered exponential backoff (bounded attempts /
 timeout budget) BEFORE concluding it has failed, and every raised or propagated

@@ -1,15 +1,30 @@
 # DORA Baseline (computed)
 
-_Generated 2026-06-16T14:02:24Z from ledger.csv. Do not hand-edit._
+_Generated 2026-06-17T09:42:25Z from ledger.csv. Do not hand-edit._
 
-## Four key metrics (whole pipeline)
+## Four key metrics — CUMULATIVE (whole pipeline)
 
 | Metric | Value | Window |
 |--------|-------|--------|
 | Gross lead time (median) | 3618 s | 27 slice(s) |
-| Deployment frequency | 7 /active-day | 10 day(s) |
-| Change failure rate | 43 % | 67 deploy(s) |
-| MTTR (median) | 843 s | 25 failure(s) |
+| Deployment frequency | 6 /active-day | 11 day(s) |
+| Change failure rate (deploys only) | 20 % | 14/69 deploys |
+| Defect intake rate (separate, NOT in CFR) | 1 /active-day | 15 defect(s) |
+| MTTR (median, any prod issue) | 843 s | 25 issue(s) |
+
+> CFR counts **deploy failures only** (a shipped change that failed its validation); defect intakes raised via /defect against the standing system are reported separately and excluded from CFR (process §3, v51). MTTR spans both kinds.
+
+## Trailing window — last 12 deploys
+
+_Recent-only view, so improvement is visible inside a retro's scoring horizon rather than lost in a history-dominated median (EXP-045)._
+
+| Metric | Value | Window |
+|--------|-------|--------|
+| Gross lead time (median) | 525 s | 1 slice(s) |
+| Deployment frequency | 3 /active-day | 4 day(s) |
+| Change failure rate (deploys only) | 8 % | 1/12 deploys |
+| Defect intake rate (separate, NOT in CFR) | 1 /active-day | 3 defect(s) |
+| MTTR (median, any prod issue) | 16506 s | 4 issue(s) |
 
 ## Per-agent task completion (seconds)
 

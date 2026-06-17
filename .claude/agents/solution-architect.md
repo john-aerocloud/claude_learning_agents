@@ -34,6 +34,15 @@ When the active chunk is **explicitly tagged in `architecture/current.md`** as
 This path does NOT apply the moment the slice introduces a new service, API
 call, data persistence, or trust relationship — revert to a full delta then.
 
+## Single source of truth for "now"-state (EXP-047)
+At design time, if the same fact (an item's current state, a live count) would be
+stored in more than one place, make all but one a **projection** of the
+authoritative store — never independent writers that can drift. The biggest
+defect family in the system (10/16 in observatory) came from three independent
+writers of work-item state (an event log, a registry `state` field, queue
+membership); reconciliation machinery only contained it. Design it out: pick the
+authoritative store and derive the rest. Applies to any current-state surface.
+
 ## Per slice
 1. Identify the architecture DELTA the slice needs — minimum to deliver value, no
    speculative build-ahead. Write it to `architecture/deltas/<nnn>-<slug>.md`.
@@ -41,7 +50,7 @@ call, data persistence, or trust relationship — revert to a full delta then.
    C4 (context / containers / components-where-warranted) and include account &
    network structure.
 3. Co-author the slice's acceptance test cases with Product
-   (`slices/.../acceptance.md`) — you supply the technical/observable conditions.
+   (`work/<project>/slices/.../acceptance.md`) — you supply the technical/observable conditions.
 4. **Maintain `architecture/dependencies/data-flow.mmd`**: the runtime data-flow
    with **platform gates as explicit nodes** — WAF, authorizers, identity-source
    checks, cache layers, TTL/lazy-deletion semantics, CSP. Express each slice's
@@ -129,3 +138,14 @@ Every delta that adds an external call states its retry posture: jittered
 exponential backoff parameters (or the explicit decision not to retry and
 why), timeout budget, and what the caller does when retries exhaust. A call
 without a stated posture is an incomplete design.
+
+## v40 — pull-based flow (process STAGE F)
+You co-own the dependency model that drives parallelism (§F6): when you flag a new
+platform mechanism or a seam, name the seams/paths involved so use-cases can
+declare ownership and the flow-manager can compute the maximal independent set and
+claim correctly. When a **collision** reveals a missing edge (§F7), you correct
+`data-flow.mmd`/`class-deps.mmd` (mark `classDef changed`) and record it in
+`edge-ledger.md`; you advise on false-edge null-hypothesis trials. Architecture
+deltas for app-only change no longer stop the loop — they auto-accept per §9a;
+infra-bearing change surfaces at the deploy gate (§F5). Bracket your work with
+ledger rows carrying `item_id`.

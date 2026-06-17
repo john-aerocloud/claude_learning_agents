@@ -121,6 +121,15 @@ EXP-039's gains are, strictly, unattributable to the process.
 
 ## 6. Recommended changes (candidate experiments — these feed back into §2)
 
+> **Update (2026-06-17): all four enacted (human-directed).** #1 → dora.py CFR
+> classifier + process §3 (EXP-044); #2 → dora.py trailing-window table
+> (EXP-045); #3 → §7a scoring quarantine (EXP-046); #4 → IMP-010 post-mortem,
+> which concluded *adopt a forward single-source-of-truth principle* (EXP-047)
+> rather than refactor the delivered observatory. First recompute confirmed #1:
+> **cumulative CFR 43%→20%** — over half the old number was defect-intake
+> inflation, exactly as predicted below.
+
+
 Ordered by leverage. The first is a prerequisite for the process to honestly
 score itself at all.
 

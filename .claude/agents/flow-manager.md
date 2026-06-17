@@ -95,21 +95,32 @@ below-floor signal is a refill-NOW trigger, not an informational note** — keep
 re-raising it until Ready is back at/above floor; never let it be tolerated as
 "expected" (the s001–s004 gap: §F3).
 
-**Pull-time state is the puller's duty (DEFECT-013):** whoever executes a pull
-performs the atomic act (queue-row removal + items.csv → `in-flight` + ledger
-rows, keyed by the work-item id). Your sweep RECONCILES — verify ledger
-stage_enter rows agree with items.csv state and repair any drift it finds —
-it never originates those transitions. **A repair is itself an atomic act
-(DEFECT-015): restore state AND queue rows AND a ledger note together — a
-partial repair is new drift** (this binds anyone repairing, orchestrator
-included).
+### State model — which kind of project am I in? (EXP-048, v52)
+**New projects (created from `_TEMPLATE` at/after v52) use ledger single-source-
+of-truth.** The append-only DORA ledger is the ONE writer of dynamic state. You
+**append events** — `item_registered`, `enqueue`, `dequeue`, `item_done` (keyed
+by the work-item id) — and **never hand-write item state or queue membership**.
+Current state is DERIVED: run `dora.py project-state --project <p>` (writes
+`state.md`) to read item-states and queue depth/membership; `items.csv` holds
+static facts only, `queues/policy.csv` holds buffers only. Because there is one
+writer, there is nothing to keep in sync — the atomic-pull / reconcile / staging
+rules below **do not apply**; they were compensating for multiple writers that no
+longer exist. (See `work/<p>/STATE-MODEL.md`.)
 
-**Staging drain (DEFECT-012):** product appends decomposed items to
-`queues/staging.csv` at completion. At EVERY sweep, drain it: register each row
-in items.csv, enqueue DAG-ready items to Ready (re-cost/re-prioritise), mark the
-rest planned/chain-blocked, then remove the row. A staging row surviving two
-sweeps is a triage-latency breach — raise it at the retro. Empty staging is the
-happy state (policy: min_items 0 / wip_limit 20).
+**Legacy projects (observatory, oxo-online, ox — pre-v52, hand-maintained
+items.csv + queue CSVs) keep the discipline below.** They are NOT migrated.
+
+- **Pull-time state is the puller's duty (DEFECT-013, legacy):** whoever executes
+  a pull performs the atomic act (queue-row removal + items.csv → `in-flight` +
+  ledger rows, keyed by the work-item id). Your sweep RECONCILES — verify ledger
+  stage_enter rows agree with items.csv state and repair drift — never originate
+  transitions. **A repair is itself an atomic act (DEFECT-015): state AND queue
+  rows AND a ledger note together** (binds anyone repairing, orchestrator too).
+- **Staging drain (DEFECT-012, legacy):** product appends decomposed items to
+  `queues/staging.csv` at completion. At EVERY sweep, drain it: register in
+  items.csv, enqueue DAG-ready items, mark the rest planned/chain-blocked, remove
+  the row. A staging row surviving two sweeps is a triage-latency breach. Empty
+  staging is the happy state (policy: min_items 0 / wip_limit 20).
 
 **Enqueue-to-empty wake (§F9):** whenever you enqueue an item onto a queue that
 was **empty** (depth 0 → 1), emit a **`loop_wake`** ledger row (`queue`=the

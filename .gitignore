@@ -16,3 +16,7 @@ Thumbs.db
 # pointer), work/README.md (project index), work/_TEMPLATE/ (the /project-new scaffold).
 /work/*/
 !/work/_TEMPLATE/
+
+# python bytecode from dora.py / tests
+__pycache__/
+*.pyc

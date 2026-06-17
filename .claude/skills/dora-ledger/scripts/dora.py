@@ -356,6 +356,81 @@ def cmd_flow(a):
         f.write("\n".join(L) + "\n")
     print(f"wrote {out} | queues={len(queue_stats)} items={len(item_stats)} collisions={len(collisions)} par_eff={rr(par_eff)}")
 
+# --- single source of truth: state PROJECTED from the ledger (v52, EXP-048) ----
+# The append-only ledger is the ONE writer of dynamic state. An item's current
+# state and a queue's membership are DERIVED here, never independently stored, so
+# the three-stores-disagree defect family (10/16 of observatory's defects) cannot
+# occur by construction — there is nothing to keep in sync. New projects use this;
+# existing projects keep their hand-maintained items.csv `state` + queue CSVs.
+# Canonical lifecycle events: item_registered→planned, enqueue→<queue>,
+# dequeue→in-flight, item_done→done. Tolerant of legacy state_transition rows.
+def derive_project_state(rows):
+    """Pure projection. Returns (item_state {id:state}, queue_members {queue:[ids]})."""
+    by_item = defaultdict(list)
+    for r in rows:
+        if r["item_id"]:
+            by_item[r["item_id"]].append(r)
+    item_state = {}
+    for it, rs in by_item.items():
+        st = None
+        for r in sorted(rs, key=lambda r: r["timestamp"]):
+            e = r["event"]
+            if e == "item_registered":            st = "planned"
+            elif e == "enqueue":                  st = (r["queue"] or "queued")
+            elif e == "dequeue":                  st = "in-flight"
+            elif e == "item_done":                st = "done"
+            elif e in ("state_transition", "state-transition"):
+                o = (r["outcome"] or "").strip()
+                if o and o != "na":
+                    st = o
+                else:
+                    m = re.search(r"->\s*([A-Za-z][A-Za-z\-]*)", r["note"] or "")
+                    if m: st = m.group(1)
+        if st is not None:
+            item_state[it] = st
+    net = defaultdict(lambda: defaultdict(int))   # queue -> item -> (enqueues - dequeues)
+    for r in rows:
+        if r["queue"] and r["item_id"] and r["event"] in ("enqueue", "dequeue"):
+            net[r["queue"]][r["item_id"]] += 1 if r["event"] == "enqueue" else -1
+    queue_members = {q: sorted([it for it, n in items.items() if n > 0])
+                     for q, items in net.items()}
+    return item_state, queue_members
+
+def cmd_project_state(a):
+    rows = [r for r in read_rows() if r["project"] == a.project]
+    item_state, queue_members = derive_project_state(rows)
+    out = a.out or os.path.join(ROOT, "work", a.project, "state.md")
+    L = [f"# Derived state — {a.project}\n",
+         f"_Generated {now_iso()} by `dora.py project-state` from the ledger (the single",
+         "source of truth, EXP-048). DO NOT hand-edit — edit by appending a ledger event._\n",
+         "## Queue membership (derived)\n",
+         "| Queue | depth | items |", "|-------|-------|-------|"]
+    for q in sorted(queue_members):
+        mem = queue_members[q]
+        L.append(f"| {q} | {len(mem)} | {', '.join(mem) if mem else '—'} |")
+    L.append("\n## Item state (derived)\n")
+    L.append("| Item | state |"); L.append("|------|-------|")
+    for it in sorted(item_state):
+        L.append(f"| {it} | {item_state[it]} |")
+    # bonus coherence check against a legacy hand-maintained items.csv, if present
+    drift = []
+    ip = os.path.join(ROOT, "work", a.project, "items", "items.csv")
+    if os.path.exists(ip):
+        for row in csv.DictReader(open(ip)):
+            stated = (row.get("state") or "").strip()
+            derived = item_state.get(row.get("id", ""))
+            if stated and derived and stated != derived:
+                drift.append((row["id"], stated, derived))
+        if drift:
+            L.append("\n## ⚠ Drift vs hand-maintained items.csv (legacy projects only)\n")
+            L.append("| Item | items.csv says | ledger-derived |"); L.append("|------|----------------|----------------|")
+            for it, s, d in drift: L.append(f"| {it} | {s} | {d} |")
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    with open(out, "w") as f:
+        f.write("\n".join(L) + "\n")
+    print(f"wrote {out} | items={len(item_state)} queues={len(queue_members)} "
+          f"{'DRIFT=%d (legacy)' % len(drift) if drift else 'coherent'}")
+
 def main():
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -376,6 +451,10 @@ def main():
         ld.add_argument(f"--{n}", required=True)
     ld.add_argument("--by")
     ld.set_defaults(func=cmd_log_decision)
+    ps = sub.add_parser("project-state")
+    ps.add_argument("--project", required=True)
+    ps.add_argument("--out")
+    ps.set_defaults(func=cmd_project_state)
     a = p.parse_args()
     a.func(a)
 

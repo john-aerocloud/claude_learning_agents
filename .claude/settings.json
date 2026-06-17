@@ -1,4 +1,7 @@
 {
+  "env": {
+    "PATH": "/Users/johnnicholas/.nvm/versions/node/v24.12.0/bin:${PATH}"
+  },
   "permissions": {
     "allow": [
       "Bash(npm run *)",

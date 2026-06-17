@@ -4,6 +4,12 @@ argument-hint: <project-name> <slice-id>
 allowed-tools: Read, Write, Edit, Bash, Task
 ---
 
+> **v40 (pull mode):** `/loop-run` is the driver; this command is now the SINGLE
+> inner-loop PASS it invokes for one (or one parallel set of) pulled use-case(s).
+> Gates collapse to deploy-only-if-infra-bearing (§F5); slice planning is product's
+> just-in-time replenishment (`/slice-next`), not a human gate. The step sequence
+> below is unchanged as the per-pass recipe.
+
 _Project resolution: the project argument may be omitted. If the first argument is not an existing directory under `work/`, use the project named in `work/ACTIVE` and treat the given arguments as shifted (e.g. a lone `<slice-id>` for `/iteration-run`). If `work/ACTIVE` is `none` or stale, stop and suggest `/project-list`._
 
 Act as the **orchestrator** for project **$1**, slice **$2**. Follow the XP loop.

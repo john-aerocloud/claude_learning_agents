@@ -20,7 +20,8 @@ in `/process` may reference a specific project.
 
 ```
 orchestrator  (flow, gates, DORA, Theory of Constraints — NO product/eng calls)
-  ├── product             (Jobs to Be Done, vision, next-smallest slice)
+  ├── flow-manager        (v40: queues, per-queue buffers, pull/replenish, parallelism by independence, collisions)
+  ├── product             (Jobs to Be Done, vision, next-smallest slice, value/cost)
   ├── solution-architect  (C4 / AWS Well-Architected, arch delta, security review)
   ├── cicd                (environments-on-need, pipeline, rollback assets)
   ├── engineer            (strict TDD on trunk)
@@ -37,15 +38,31 @@ artifacts to `/work/<project>/…` and hand back paths + decisions.
 > the main session plays the orchestrator by running the slash commands below and
 > dispatching the specialists. The logic and files are identical.
 
+## Pull-based flow (v40 — current)
+
+Delivery is **pull**, not push. New work passes a single **intake** gate into a
+costed, prioritised, per-queue-buffered set of queues; a continuous inner dev loop
+pulls the **maximal independent set** of ready use-cases and runs them concurrently
+(TDD on trunk → per-UC deploy → validate-in-prod); product replenishes the Ready
+queue just-in-time so it never starves but stays shallow (penny game); completed
+requirements ask for more work. **Two blocking gates only:** requirement/defect
+intake, and deploy-to-prod for infra-bearing change. Collisions between parallel
+work teach the dependency tree. Cross-agent rules: `process/process-current.md`
+**STAGE F**. Rationale, diagrams, and a worked retro: `Version2-design/`.
+
 ## The loops (slash commands)
 
 | Command | What it does | Gates |
 |---------|--------------|-------|
-| `/project-new <name> [problem]` | Create the project, start the new-requirement workflow | 1 |
-| `/requirement-new <name>` | Vision (JTBD) → target architecture → Chunks → capabilities | vision, arch+security |
-| `/slice-next <name>` | Next smallest value slice + arch delta + acceptance tests | slice, arch+security |
-| `/iteration-run <name> <slice>` | capabilities → thin route → TDD build → deploy → validate-in-prod | go/no-go to deploy |
-| `/retro <name> [slice]` | recompute DORA, review failures, write next process version | — |
+| `/intake "<req or defect>"` | **(v40)** JTBD-frame + value/cost + register + enqueue (defects pre-empt) | **intake** |
+| `/loop-run <name>` | **(v40)** continuous pull loop: pull independent set → build/deploy/validate → replenish → retro | deploy (infra-only) |
+| `/flow-status <name>` | **(v40)** queues vs buffers, time thieves, parallelism efficiency, item tree | — |
+| `/project-new <name> [problem]` | Create the project, start the new-requirement workflow | intake |
+| `/requirement-new <name>` | (push mode) Vision → architecture → Chunks → capabilities | — |
+| `/slice-next <name>` | (v40) product's just-in-time replenishment routine — no longer a gate | — |
+| `/iteration-run <name> <slice>` | the single inner-loop pass `/loop-run` invokes | deploy (infra-only) |
+| `/retro <name> [slice]` | recompute DORA + flow, score experiments, tune buffers/N, write next process version | — |
+| `/defect …` | structured defect intake → reproduce → prioritise → fix → gap-closing retro | intake |
 | `/project-list` | All projects: status, current slice, last activity, pending gates | — |
 | `/project-switch <name>` | Set the active project and rebuild minimal resume context | — |
 | `/project-stop <name>` | Park the project; `/process` untouched | — |

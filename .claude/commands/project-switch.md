@@ -16,7 +16,7 @@ Act as the **orchestrator**. Switch the active project to **$1**.
    - the tail of `decision-log.md` (last ~10 entries: which gates are passed,
      which decision is pending),
    - `chunks.md` (which chunk is in play),
-   - the latest `slices/<nnn>-*/` dir: which of slice.md / acceptance.md /
+   - the latest `work/$1/slices/<nnn>-*/` dir: which of slice.md / acceptance.md /
      route.md / result.md exist tells you exactly where the slice stopped.
    Do NOT load architecture or full slice history — the decision log is the
    resume mechanism.

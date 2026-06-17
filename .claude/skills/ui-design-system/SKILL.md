@@ -119,7 +119,7 @@ Library: <none|name + version>  Theming: <how tokens reach the lib>
 ## Standard states (empty / loading / error / responsive breakpoints)
 ```
 
-### slices/<nnn>-<slug>/ui-design.md
+### work/<project>/slices/<nnn>-<slug>/ui-design.md
 ```
 # UI design — <slice>
 Applies: <yes UI surface | no-op + why>

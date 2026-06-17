@@ -193,3 +193,13 @@ Every push deploys. Sequence prerequisites (bootstrap, role grants, variables)
 BEFORE the first push of code that triggers the pipeline needing them — not in
 a later "deploy phase". When a build phase will push pipeline-triggering paths,
 its prerequisites are part of the capability step.
+
+## v40 — pull-based flow (process STAGE F)
+Capability work happens on PULL (when a use-case needs an environment, pipeline,
+flag, or allowlist entry it doesn't have) — nothing ahead of need, exactly as
+before, now triggered inside `/loop-run`. You **own `deploy.wip_limit`** in
+`queues/policy.csv`: it equals the pipeline's concurrency group, so same-pipeline
+deploys serialise by construction (§11a) — raise it only with §F7 evidence that
+the deploys are genuinely independent. Bracket your work with `stage_enter`/
+`stage_exit` rows and record `item_id`. New make targets / allowlist entries you
+add follow the §15/§16 contract (you own `.claude/settings.json`).

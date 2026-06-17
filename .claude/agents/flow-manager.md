@@ -51,14 +51,24 @@ Each loop cycle, compute the set the dev loop should pull:
 1. A use-case is **ready** if its parents in the DAG are `done`.
 2. Two ready UCs are **co-schedulable** iff there is no edge/path between them in
    `use-case-deps.mmd ∪ class-deps.mmd` AND their claimed seam/path sets are
-   disjoint.
+   disjoint. **Claimed paths include every source file the UC's route mutates**
+   (not just behavioural seams). Under trunk-based development with no branches
+   (§40), two UCs that claim the same source file are seam-serialised — they are
+   NOT co-schedulable, regardless of whether a behavioural edge exists between them.
 3. Greedily pick highest `vc_ratio` first, up to capacity `N`.
 Return that set to the orchestrator to dispatch as concurrent inner-loop
 instances (isolated by use-case flags, §40 — never branches/worktrees/stash).
 Emit a `parallel_dispatch` ledger row with `note="batch=… achieved=<K> max=<M>"`
-where M is the theoretical-max independent set — so parallelism efficiency is
-computable. Maintain the **claimed-seam/path registry** of in-flight UCs (each UC
-declares its owned seams/paths from its route; get them from engineer/architect).
+where M is the **achievable** theoretical-max independent set under §40 (source-file
+seams included) — so parallelism efficiency is a true signal, not phantom lost
+opportunity. When N ready UCs all claim the same source file, they form a serial
+chain: M=1 for that group, and the serial schedule is CORRECT — do NOT report the
+shared-file seam as a time-thief. The genuine remedy is a structural refactor
+(split the file so each UC owns a distinct file), tracked as a §F7 false-edge
+null-hypothesis trial; until that refactor lands, serial-on-trunk is the right
+schedule. Maintain the **claimed-seam/path registry** of in-flight UCs (each UC
+declares its owned seams/paths — behavioural AND source-file — from its route; get
+them from engineer/architect).
 
 ## Collision detection → correct the dependency tree (§F7)
 A **collision** is a declared independence proven false. Detect it mechanically:

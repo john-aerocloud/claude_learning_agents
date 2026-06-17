@@ -103,10 +103,16 @@ two contracts — preserve that split in the canonical model (a requirements dec
   the same logical event redelivered (at-least-once) must fold to the same state.
 
 ### Times — scheduled / estimated / actual + OOOI
-Departure & arrival each carry `scheduledTime`, `estimatedTime`, `actualTime` in
-`{local, utc}` (`YYYY-MM-DDTHH:mm:ss±HH:mm`). **OOOI block times:** `outGate` (pushback),
-`offGround` (wheels-off), `onGround` (touchdown), `inGate` (block-on) — these drive the
-canonical status-change events. Plus timeliness + variation per phase.
+**⚠ CORRECTED FROM LIVE CAPTURE (2026-06-17) — times are NESTED, not flat.** The
+real v2 status shape (per captured fixtures, OagEventSource `fixtures/oag-raw/`) is:
+`departure.times.{scheduled,estimated,actual}` and `arrival.times.{…}` — the OOOI
+fields (`outGate` pushback, `offGround` wheels-off, `onGround` touchdown, `inGate`
+block-on) and timeliness/variation live **inside** the `estimated`/`actual` blocks,
+each as `{local, utc}` (`YYYY-MM-DDTHH:mm:ss±HH:mm`). It is NOT the flat
+`scheduledTime`/`estimatedTime`/`actualTime` an earlier reading assumed (D-2, the
+load-bearing discrepancy). **Build the normaliser + its mapping tests against the
+captured fixtures, not against this prose.** These OOOI times drive the canonical
+status-change events.
 
 ### Fields the consumers care about
 - **Gate, Terminal** (departure + arrival) → FIDS/GIDS + Stand.
@@ -132,7 +138,32 @@ requirements assumption that it might be date-gated — appears generally availa
   `seatingCapacity`; schedule `status` → `state`.
 - **HTTP Push delivers v2 only.** Create-Alert endpoint shown is `?version=v1`; a
   `switching-from-v1-to-v2` guide exists. Build canonical mapping against **v2** and treat
-  v1 as legacy. ⚠ PORTAL: confirm the v2 Event-Hub envelope vs the v1 samples here.
+  v1 as legacy.
+
+## ✅ Live capture findings (2026-06-17 — ground truth > this prose)
+First live listen-only spike (OagEventSource `fixtures/oag-raw/`, summary in
+`fixtures/CAPTURE-SUMMARY.md`). The fixtures are authoritative; build against them.
+- **FlightStatus is v2, CONFIRMED** — camelCase, `state` (`Scheduled`/`InAir`/`Landed`),
+  no `premiumContent`, identity via `scheduleInstanceKey`/`statusKey` (64-hex SHA-256).
+- **The OAG document IS the AMQP message body** — app `properties` is null;
+  `messageId`/`messageTimestamp` live inside the body. `messageTimestamp` is a **string**
+  epoch-ms (not numeric).
+- **Times/OOOI are nested** (see the Times section — D-2, the big one).
+- **`changes[]` is NOT always present** — only when the alert has `content:changeindicator`.
+  Don't assume it; the captured (TPA-port-scoped) alert had none.
+- New fields seen beyond the doc: `operatingInstanceKey`, `marketingInstancesKeys[]`,
+  `alertId`, `serviceType`, `originationDate`, richer codeshare/wet-lease disclosure
+  (`operatingAirlineDisclosure`, `cabinCrewEmployer`, `cockpitCrewEmployer`).
+- ⏳ **`ScheduleInstance` (schedule events) NOT yet seen live** — the spike caught only
+  status events. The v2 SCHEDULE envelope is still unconfirmed; re-spike (longer window
+  or a schedule-bearing alert) before building the schedule normaliser.
+
+## Still open (need the authenticated portal / sandbox or are non-OAG)
+- ⚠ PORTAL — full v2 SCHEDULE-event sample (status now captured); precise required-field
+  validation messages; rate/quota limits. (Connection-string format: now known.)
+- ⚠ NON-OAG (out of this skill, still open in the vision): Dash0 OTLP ingestion
+  endpoint/region + `POST /api/logs` filter schema (VERIFY #4); Dash0 webhook payload +
+  target ticketing system (VERIFY #5).
 
 ## Still open (need the authenticated portal / sandbox or are non-OAG)
 - ⚠ PORTAL — exact Event-Hub connection-string format; full v2 sample JSON envelope;

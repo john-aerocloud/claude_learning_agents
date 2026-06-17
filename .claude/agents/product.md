@@ -112,7 +112,13 @@ human-gated commands: when the flow-manager signals `depth(Ready) < ready.min_it
 you replenish (§F3) — more use-cases from the current slice → next slice → next
 chunk → (requirement done) report so the human is asked for more work. **Estimate
 `value` and `cost` (time) on EVERY item you create** — this feeds queue costing and
-`vc_ratio`. For each use-case, co-declare (with engineer/architect) the seams/paths
+`vc_ratio`. **Cheap idempotency-extension UC class.** When a use-case only extends
+an EXISTING idempotency/dedup guard to new event types — i.e. (a) a dedup-before-diff
+guard keyed on a stable key already exists AND (b) the new event types reuse that
+same key — cost it as **near-zero (test-authoring only)**, not the per-event-type
+build cost: such a UC is test-only (it locks the standing regression; the guard
+already generalises). Do not over-provision a build reserve the engineer never
+spends. For each use-case, co-declare (with engineer/architect) the seams/paths
 it will own, so the flow-manager's claimed-path registry and the maximal-
 independent-set computation are correct (§F6). When a collision reveals a missing
 dependency edge (§F7), you help correct `use-case-deps.mmd` and record it in

@@ -1,0 +1,66 @@
+# CI pipeline skeleton: OagEventSource — slice-1 (offline, no deploy stage)
+#
+# Runs lint + build + test for the domain core app on every push that touches
+# work/OagEventSource/src/app/** or this workflow file.
+#
+# No deploy gate: slice-1 is pure logic with no cloud surface.
+# Equivalent local commands (allowlist-shaped, from project root):
+#   make test-app      (npm --prefix work/OagEventSource/src/app run test:run)
+#   make lint-app      (npm --prefix work/OagEventSource/src/app run lint)
+#   make build-app     (npm --prefix work/OagEventSource/src/app run build)
+#
+# Two-pipeline structure: this file is the App CI leg. Infra leg to follow
+# at the infra-bearing slice (infra-oag-event-source.yml, not yet created).
+
+name: CI — OagEventSource app
+
+on:
+  push:
+    paths:
+      - 'work/OagEventSource/src/app/**'
+      - '.github/workflows/ci-oag-event-source.yml'
+  pull_request:
+    paths:
+      - 'work/OagEventSource/src/app/**'
+      - '.github/workflows/ci-oag-event-source.yml'
+
+# v53 no-push guard: this repo has NEVER push rules; the flag below is a
+# belt-and-suspenders read-only posture for this offline slice.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-oag-event-source-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: lint + build + test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        # All commands run from repo root; npm --prefix carries the subdir.
+        working-directory: .
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: work/OagEventSource/src/app/package-lock.json
+
+      # Use npm install (not ci) — lock generated on darwin/arm64 may omit
+      # linux-x64 optional native binaries (process §runner-environment note).
+      - name: Install dependencies
+        run: npm --prefix work/OagEventSource/src/app install
+
+      - name: Build (tsc --noEmit)
+        run: npm --prefix work/OagEventSource/src/app run build
+
+      - name: Lint
+        run: npm --prefix work/OagEventSource/src/app run lint
+
+      - name: Test (vitest run)
+        run: npm --prefix work/OagEventSource/src/app run test:run

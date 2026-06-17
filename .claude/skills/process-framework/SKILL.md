@@ -22,7 +22,7 @@ at retro, into the process itself).
 ## What to read for a task (load only these)
 | Task | Read |
 |------|------|
-| Switch/resume a project | `work/ACTIVE`; target `project.md`; tail of `decision-log.md`; latest `slices/<nnn>-*/` artifact state |
+| Switch/resume a project | `work/ACTIVE`; target `project.md`; tail of `decision-log.md`; latest `work/<project>/slices/<nnn>-*/` artifact state |
 | Run a project loop | `process-current.md`; project `project.md`, `decision-log.md`, `chunks.md`; `dora/baseline.md` |
 | Define vision / slice | `principles/00-default-approaches.md` (JTBD+slicing); project `project.md`, `chunks.md` |
 | Architecture for a slice | the slice `slice.md`; `architecture/current.md`; `aws-architecture` skill |

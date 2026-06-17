@@ -6,3 +6,13 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# --- work/ project repositories (process v50) ---
+# Each work/<project>/ is its OWN independent git repository so a project can be
+# lifted out and exist standalone. The parent repo (agent structure + process)
+# does not track project output; project changes are committed inside the project
+# repo via `git -C work/<project> ...`. Future projects are auto-ignored here.
+# Kept in THIS repo (agent-system state, not project output): work/ACTIVE (active
+# pointer), work/README.md (project index), work/_TEMPLATE/ (the /project-new scaffold).
+/work/*/
+!/work/_TEMPLATE/

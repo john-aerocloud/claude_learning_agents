@@ -1,6 +1,6 @@
 # Flow view — observatory
 
-_Generated 2026-06-13T01:36:28Z from ledger.csv + queues/policy.csv. Do not hand-edit._
+_Generated 2026-06-16T15:19:32Z from ledger.csv + queues/policy.csv. Do not hand-edit._
 
 ## Queues — buffer control + statistical metrics
 
@@ -116,9 +116,9 @@ Buffer control per queue = **min_items** (replenish floor) + **WIP limit** (cap)
 | UC-S015-3 | — | 0 | 17215 | — |
 | UC-S015-4 | — | 0 | 1155 | — |
 | UC-S018-1 | 1627 | 526 | 3390 | 32% |
-| UC-S018-2 | — | 0 | 0 | — |
-| UC-S018-3 | — | 0 | 0 | — |
-| UC-S018-4 | — | 0 | 0 | — |
+| UC-S018-2 | — | 0 | 777 | — |
+| UC-S018-3 | — | 0 | 2320 | — |
+| UC-S018-4 | — | 0 | 1954 | — |
 | flow-manager-sweep | 223 | 0 | 0 | 0% |
 | s001-read-layer | — | 0 | 0 | — |
 | s002-pipeline-map | — | 0 | 0 | — |

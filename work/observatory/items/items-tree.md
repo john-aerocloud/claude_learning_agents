@@ -4,11 +4,12 @@ Parent is canonical; this child-indexed view is rebuilt on every mutation so the
 tree traverses both ways without drift. Per-item DORA is computed from the ledger
 (keyed by id), not stored here.
 
-_Last regenerated: 2026-06-13T02:01:00Z (iteration 9 sweep part 2 — flow-manager)_
+_Last regenerated: 2026-06-16T15:27:09Z (iteration 9 sweep part 3 — flow-manager; REQUIREMENT-COMPLETE boundary)_
 
 ```
 REQ-OBSERVATORY [requirement] state=active  value=HIGH  cost=XL  vc_ratio=HIGH/XL
   Observe and steer the delivery-agent pipeline from a single local read-only surface
+  NOTE: active pending CHK-6 usage-gate decision (3 forecast slices not yet decomposed)
   │
   ├── CHK-1 [chunk] state=done  value=HIGH  cost=M  vc_ratio=HIGH/M  done=2026-06-09T01:20:00Z
   │     Parse all §4 sources to typed records and serve read-only with live file-watch refresh
@@ -53,8 +54,9 @@ REQ-OBSERVATORY [requirement] state=active  value=HIGH  cost=XL  vc_ratio=HIGH/X
   │
   ├── CHK-6 [chunk] state=active  value=MED-HIGH  cost=M
   │     Navigate WIP and propose re-slice/split/merge/reprioritise/defect actions
-  │     FIRST SLICE DONE (SLC-S015 done 2026-06-12T16:02:33Z). 3 forecast slices remain
-  │     OPERATOR-USAGE-GATED — do not auto-decompose; CHK-6 stays ACTIVE.
+  │     FIRST SLICE DONE (SLC-S015 done 2026-06-12T16:02:33Z).
+  │     3 FORECAST SLICES OPERATOR-USAGE-GATED — do not auto-decompose; CHK-6 stays ACTIVE.
+  │     Operator must decide: unlock these slices OR declare CHK-6 satisfied and close REQ-OBSERVATORY.
   │     └── SLC-S015 [slice] state=done  done=2026-06-12T16:02:33Z
   │           ├── UC-S015-1 [use-case] state=done  vc=1.00  done=2026-06-11T11:03:19Z
   │           ├── UC-S015-2 [use-case] state=done  vc=2.00  done=2026-06-11T11:03:19Z
@@ -62,49 +64,48 @@ REQ-OBSERVATORY [requirement] state=active  value=HIGH  cost=XL  vc_ratio=HIGH/X
   │           └── UC-S015-4 [use-case] state=done  vc=1.25  done=2026-06-12T16:02:33Z
   │                 seams RELEASED: promptBuilder.js + re-slice.txt + ReslicePreviewPanel
   │
-  ├── CHK-7 [chunk] state=active  value=MED  cost=L
+  ├── CHK-7 [chunk] state=done  value=MED  cost=L  done=2026-06-16T15:09:17Z  [DONE THIS SWEEP]
   │     Guide a work author through JTBD + cost-of-delay capture; queue rank preview;
   │     CHK-5 intake prompt handoff
-  │     └── SLC-S018 [slice] state=active
+  │     └── SLC-S018 [slice] state=done  done=2026-06-16T15:09:17Z  [DONE THIS SWEEP]
   │           ├── UC-S018-1 [use-case] state=done  vc=1.50  done=2026-06-13T01:23:46Z
-  │           │     Rework: A11Y-S018-1-12 contrast fix (ed7848c); MTTR closed 01:22:51Z. [DONE]
-  │           ├── UC-S018-2 [use-case] state=in-flight  vc=1.00
-  │           │     Engineer building — CoD signals step + codScorer pure fn (TDD per ui-design.md)
-  │           │     Structure pass complete (ui-designer 01:29:51Z)
-  │           ├── UC-S018-3 [use-case] state=planned  vc=1.50  (chain-blocked on UC-S018-2)
-  │           └── UC-S018-4 [use-case] state=planned  vc=2.00  (chain-blocked; UC-S014-4 gate OPEN)
+  │           ├── UC-S018-2 [use-case] state=done  vc=1.00  done=2026-06-13T01:49:43Z
+  │           │     (drift-repaired by orchestrator DRIFT-S018-2; confirmed done)
+  │           ├── UC-S018-3 [use-case] state=done  vc=1.50  done=2026-06-16T15:27:00Z
+  │           └── UC-S018-4 [use-case] state=done  vc=2.00  done=2026-06-16T15:09:17Z  [DONE THIS SWEEP]
+  │                 seams RELEASED: intakePromptBuilder (SPA_INTAKEPROMPTLIB) + PromptStep (SPA_PROMPTSTEP)
   │
-  └── CHK-8 [chunk] state=done  value=HIGH  cost=M  done=2026-06-13T01:27:27Z  [DONE THIS SWEEP]
+  └── CHK-8 [chunk] state=done  value=HIGH  cost=M  done=2026-06-13T01:27:27Z  [CLOSED]
         See all defects with status/severity/MTTR at a glance and drill into any one
-        └── SLC-S013 [slice] state=done  done=2026-06-13T01:27:27Z  [DONE THIS SWEEP]
+        └── SLC-S013 [slice] state=done  done=2026-06-13T01:27:27Z
               ├── UC-S013-1 [use-case] state=done  vc=2.00  done=2026-06-11T07:43:41Z
               ├── UC-S013-2 [use-case] state=done  vc=1.60  done=2026-06-11T10:50:24Z
               ├── UC-S013-3 [use-case] state=done  vc=2.00  done=2026-06-12T16:02:11Z
-              └── UC-S013-4 [use-case] state=done  vc=1.33  done=2026-06-13T01:27:27Z  [DONE THIS SWEEP]
+              └── UC-S013-4 [use-case] state=done  vc=1.33  done=2026-06-13T01:27:27Z
                     SSE live refresh; seams RELEASED: useDefects.js SSE + defects e2e surface
 ```
 
-## Queue state (post-sweep)
+## Queue state (post-sweep — REQUIREMENT-COMPLETE boundary)
 
 | Queue   | depth | min_items | wip_limit | status |
 |---------|-------|-----------|-----------|--------|
-| intake  | 0     | 2         | 10        | below floor — no items pending intake |
-| ready   | 0     | 2         | 4         | BELOW FLOOR — REPLENISHMENT SIGNAL ACTIVE; UC-S018-3 unlocks after UC-S018-2 pass |
+| intake  | 0     | 2         | 10        | BELOW FLOOR — §F3(d) STARVED+REQUIREMENT-COMPLETE |
+| ready   | 0     | 2         | 4         | BELOW FLOOR — §F3(d) STARVED+REQUIREMENT-COMPLETE |
 | deploy  | 0     | 0         | 1         | ok |
 | rework  | 0     | 0         | 2         | ok |
 | staging | 0     | 0         | 20        | ok (drained) |
 
 ## In-flight (claimed seams)
 
-- UC-S018-2: engineer building CoD signals step + codScorer (CodStep.jsx + codScorer.js)
+None. Claimed-seam registry empty.
 
-## Runway to requirement-complete
+## Requirement-complete state
 
-- **Pull 1 (active):** UC-S018-2 PASS → UC-S018-3 enqueued Ready
-- **Pull 2:** UC-S018-3 PASS → UC-S018-4 enqueued Ready
-- **Pull 3:** UC-S018-4 PASS → SLC-S018 DONE → CHK-7 DONE → REQ hits decomposed-and-done boundary
+All decomposed UCs are terminal (done or dropped). CHK-6 has 3 forecast slices that
+are operator-usage-gated and NOT yet decomposed. REQ-OBSERVATORY remains `active`
+pending the human gate at the §F5 usage-gate boundary.
 
-**Estimate: ~3 more pulls to decomposed-and-done boundary.** At that boundary, per §F3(d), the loop reports STARVED + REQUIREMENT-COMPLETE and asks the human whether to proceed with CHK-6 usage-gated slices or provide new work.
-
-D7-AC-7 DONE (en route). DEF-016 unconfirmed (EXP-041 watch). DEF-014 DONE (ca3826b).
-CHK-8 DONE this sweep — defects view fully delivered.
+**§F3(d) STARVED + REQUIREMENT-COMPLETE raised.** The loop has exited — no DAG-ready
+work to pull. Orchestrator must dispatch human gate: operator decides whether to
+(a) unlock CHK-6 forecast slices or (b) declare REQ-OBSERVATORY done and request
+new work.

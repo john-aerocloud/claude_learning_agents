@@ -4,7 +4,7 @@
 
 Observatory is a local Vite dashboard that observes and steers a multi-project delivery pipeline. It shows the full delivery value-stream in real time — every stage (Intake → Decompose → Ready → Capabilities → Build-TDD → UI-Validate → Deploy → Validate → Done) with throughput, dwell time, in-flight WIP, and rework. Navigate the work-item tree to drill into any requirement, chunk, slice, or use case; see its ledger history and dependencies in context. Steer the pipeline from the dashboard (re-prioritise, request re-slice, raise defect, custom prompts) without hand-editing files — all writes go through Claude's preview-accept gate. Browse in-flight WIP in a dedicated panel sorted by longest-waiting-first; preview before/after split proposals before handing them to Claude. Observe defect records with status, severity, and MTTR (time-to-repair) to assess quality. All data is read-only in the browser; live-refresh on file change via SSE.
 
-**Not yet in scope:** cost-of-delay signals step in guided intake wizard (steps 2–4 visible as "(soon)" in the wizard), inline artifact editing.
+**Not yet in scope:** inline artifact editing.
 
 ---
 
@@ -73,11 +73,24 @@ Select an action, type your intent note, and the steer panel shows a copy-ready 
 
 **For "Request re-slice / split":** The panel opens a before/after preview showing the current item alongside two free-text fields for proposing Part A and Part B job sentences. When you've filled both parts, click "Looks right — generate prompt" to see a preview of the split proposal, then copy and paste to Claude.
 
-### New Work (intake wizard)
+### New Work — Guided intake wizard (full end-to-end)
 
-Click **"+ New Work"** (a button beside the view tabs) to open the guided intake wizard. This is a multi-step form to capture a new work item:
+Click **"+ New Work"** (a button beside the view tabs) to open the guided intake wizard. This is a four-step form to capture, cost, rank, and hand off a new work item to Claude — the entire intake flow without opening a text editor.
 
-**Step 1 — Job sentence:** Three fields capture a job-to-be-done (JTBD) format: "Situation (when…)", "Motivation (I want to…)", and "Outcome (so I can…)". As you type, a live preview below builds the complete sentence: "When [situation], I want to [motivation], so I can [outcome]." Steps 2–4 are visible as "Cost of delay", "Value estimate", and "Schedule" with "(soon)" labels — they are planned but not yet available. You can click "Next" to advance (this captures step 1 and shows the next placeholder), or "Cancel" to close without saving anything. The wizard is non-modal — you can click elsewhere on the dashboard while it's open. All work happens client-side; nothing is written to the repo yet (the handoff to Claude happens in a follow-on slice).
+**Step 1 — JTBD capture:** Three fields ("Situation (when…)", "Motivation (I want to…)", "Outcome (so I can…)") build a complete job-to-be-done sentence as you type: "When [situation], I want to [motivation], so I can [outcome]." The live preview updates in real time. Click "Next" to proceed to cost-of-delay signals.
+
+**Step 2 — Cost-of-delay signals:** Three inputs shape the work's priority:
+- **Value** — choose HIGH (directly impacts delivery ability), MED (improves experience but not blocking), or LOW (nice-to-have). Plain-language labels visible for each.
+- **Urgency** — is this time-critical? Yes / No.
+- **Risk of delay** — what worsens if deferred? (optional free text).
+
+As you select, a live "value band" readout shows the computed priority tier (HIGH, MED, or LOW). The rule is deterministic: HIGH + time-critical → HIGH; LOW + no urgency → LOW; all other combinations → MED. If you haven't chosen both Value and Urgency, the readout prompts you to complete the signals.
+
+**Step 3 — Queue-rank preview:** The dashboard reads the live backlog and shows exactly where your item would rank: "Your item (HIGH value) would rank ahead of N items and behind M items." This is a directional preview only — you see tiers, not absolute insertion order. No writes are made; the rank refreshes if you go back and change the value signal.
+
+**Step 4 — Generate intake prompt:** Click "Generate intake prompt" to compose a complete `/intake` slash-command prompt containing all four captured signals (job sentence, situation, motivation, outcome, value tier, urgency note, risk note, and live queue rank). The prompt is frozen — editing the wizard steps above does not silently rebuild it; a "updated" cue appears if you change inputs, and you can regenerate if needed. Click "Copy prompt" to send it to your clipboard, then paste into your Claude session. The dashboard writes nothing; all work enters the queue through Claude's accept gate.
+
+The wizard is non-modal — you can click elsewhere on the dashboard while it's open. When done, click "Done" to close (focus returns to the launcher) or "Start another" to reset to step 1 and capture another idea.
 
 ### In-flight WIP panel
 
@@ -110,8 +123,9 @@ Hover over any metric label on the value-stream map or click it to see a provena
 ### Known limitations
 
 - **WIP staleness horizon:** WIP counts (both on the map and in the WIP panel) include only tasks with events in the last 2 hours. Very old orphan items (no recent progress) self-clear from the count after 2 hours of silence. Items stale by this definition remain visible in the WIP panel and are flagged with a "stale" badge.
-- **Re-slice prompt enrichment:** The re-slice/split action currently generates a prompt with the before/after proposal fields; Claude must still structure the four /slice-next intake fields (job, scope, value, cost) from the operator's intent. Full auto-fill of those fields is landing in UC-S015-4 (follow-on).
+- **Re-slice prompt enrichment:** The re-slice/split action currently generates a prompt with the before/after proposal fields; Claude must still structure the four /slice-next intake fields (job, scope, value, cost) from the operator's intent. Full auto-fill of those fields is landing in a follow-on slice.
 - **Single project only:** The dashboard observes the active project (set via `work/ACTIVE` file). Switching projects requires editing the file and reloading the dashboard.
+- **Intake queue rank is directional only:** The queue-rank preview in step 3 of the wizard shows how many items rank ahead and behind your item by tier, not the exact insertion position. The preview reflects the current live backlog and is read-only (no commitment is made until the operator pastes the prompt to Claude).
 
 ---
 

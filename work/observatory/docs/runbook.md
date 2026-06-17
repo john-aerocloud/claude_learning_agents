@@ -112,13 +112,19 @@ Browser console (F12 → Console tab):
   2. Reload the browser.
   3. Check `process/dora/ledger.csv` for corresponding `failure` and `recovery` rows (if a defect MTTR shows "open" when it should have a duration, the recovery row is missing).
 
-#### 2c. WIP staleness: A task shows in the count even though it's been idle for >2 hours
-- **Root cause:** WIP recency horizon is 2 hours by design. Items with no events in the last 2 hours self-clear.
-- **Log evidence:** WIP count includes an item you expect to be gone; ledger shows the item's last event >2 hours ago.
-- **Diagnosis:** This is expected behaviour (shipped in DEFECT-011 fix, s012 slice). The 2-hour window prevents orphan items (stuck, silent) from inflating the WIP count. If the item should still be in-flight, add a new ledger row to re-activate it.
-- **First response:** No action needed if this is the intended behaviour. If the horizon should be different, file a feature request to adjust the constant in `server/apiMiddleware.js` (search for `DEFECT-009`).
+#### 2c. WIP staleness: A task shows in the WIP panel or value-stream map even though it's been idle for >2 hours
+- **Root cause:** WIP recency horizon is 2 hours by design. Items with no events in the last 2 hours remain visible in the WIP panel but are flagged "stale — over 2h" as a warning; in the value-stream map, very old items self-clear from the WIP count.
+- **Log evidence:** WIP panel shows an item with a "stale — over 2h" badge; ledger shows the item's last `task_start` event >2 hours ago with no matching `task_end`.
+- **Diagnosis:** This is expected behaviour (shipped in DEFECT-011 fix, s012 slice; s015 WIP panel includes stale items for visibility). The 2-hour window prevents orphan items (stuck, silent) from inflating the WIP count in the value-stream map, but the WIP panel makes them visible to the operator with a visual warning. If the item should no longer be in-flight, add a `task_end` ledger row to close it. If the item is still actively being worked, add a new `task_start` row to reset its dwell timer.
+- **First response:** No action needed if this is the intended behaviour. If the horizon should be different, file a feature request to adjust the constant in `server/apiMiddleware.js` (search for `DEFECT-009` or `DEFECT-011`).
 
-#### 2d. Defect MTTR shows wrong duration or "open" when it should show a time
+#### 2d. WIP panel shows an item but value-stream map shows it in the count as 0
+- **Root cause:** Discrepancy between the WIP panel (includes stale items >2h old) and the value-stream map WIP count (excludes stale items).
+- **Log evidence:** WIP panel lists an item with "stale — over 2h" badge; the same item's stage on the value-stream map shows WIP count that doesn't include it.
+- **Diagnosis:** This is expected behaviour. The WIP panel visibly surfaces all in-flight items (with stale warning) for operator action; the WIP count on the map is a recency metric (2h) to show active throughput. Stale items are removed from the throughput count but kept visible in the WIP panel so the operator can see and act on stuck items.
+- **First response:** No action needed. This is intentional design (shipped in s015 slice, DEFECT-011 guard). The stale badge alerts the operator to items that need intervention (re-start with a new ledger row, or close with a `task_end`).
+
+#### 2e. Defect MTTR shows wrong duration or "open" when it should show a time
 - **Root cause:** Ledger join failed — no recovery row found for the defect's failure row.
 - **Log evidence:** DEFECT-001 MTTR shows "open", but you expect "13 min".
 - **Diagnosis:**
@@ -136,14 +142,15 @@ Browser console (F12 → Console tab):
 
 **Failure subcategories:**
 
-#### 3a. Steer button (⋯) missing from WIP chips or tree nodes
+#### 3a. Steer button (⋯) missing from WIP chips, tree nodes, or WIP panel rows
 - **Root cause:** SPA failed to render the component; s014 steer-prompt-handoff not yet loaded or has a rendering error.
 - **Log evidence:** Browser console shows no errors; button is simply absent. Or, console shows a React/Preact render error.
 - **Diagnosis:**
   1. Check that you're on the latest build: Network tab → one of the JS bundles should have a recent timestamp (within minutes of last dev server restart). If it's old, clear browser cache (Ctrl+Shift+R).
-  2. Open browser console (F12) and search for `data-testid="steer-btn"`. Should find at least 1 match if the tree has items.
-  3. If console shows a render error, note the component name and stack trace.
-- **First response:** Clear browser cache and reload. If the error persists, check `src/app/src/components/SteerMenu.jsx` was committed (s014 slice should have added it).
+  2. Open browser console (F12) and search for `data-testid="steer-btn"`. Should find at least 1 match if the tree has items or the WIP panel is open.
+  3. If the button is missing from the WIP panel specifically, verify s015 is deployed (`git log --oneline | grep s015-wip-navigate`).
+  4. If console shows a render error, note the component name and stack trace.
+- **First response:** Clear browser cache and reload. If the error persists, check `src/app/src/components/SteerMenu.jsx` was committed (s014 slice should have added it) and `src/app/src/components/WipPanel.jsx` (s015 should have added it).
 - **If error persists:** Restart the dev server. If it still fails, file a defect and include the exact error from the console.
 
 #### 3b. Tree doesn't expand or drill-down doesn't open the detail panel
@@ -168,6 +175,67 @@ Browser console (F12 → Console tab):
   1. Allow clipboard access in browser settings.
   2. If running on localhost, clipboard should be permitted by default. If denied, check if the browser is running in a sandbox or restricted mode.
   3. As a workaround, the user can manually select and copy the prompt text from the panel (not ideal, but functional).
+
+#### 3d. Intake wizard (+ New Work) button missing or doesn't open
+
+- **Root cause:** s018 (guided intake wizard) not yet loaded or a rendering error occurred.
+- **Log evidence:** Button labeled "+ New Work" is absent from the header beside the view tabs. Or, clicking it does nothing.
+- **Diagnosis:**
+  1. Check that you're on the latest build: Network tab → check a JS bundle timestamp (should be recent).
+  2. Open browser console (F12) and search for `data-testid="intake-launcher"`. Should find 1 match if the header is rendered.
+  3. If present but clicking does nothing, a JavaScript error may have occurred. Check console for render errors.
+  4. Verify s018 is deployed: `git log --oneline | grep s018-guided-cod-intake`. Should appear in recent commits.
+- **First response:** Clear browser cache (Ctrl+Shift+R) and reload. If the button still doesn't appear, restart the dev server.
+
+#### 3e. Intake wizard steps 2–4 open but are blank or show "(soon)" placeholder
+
+- **Root cause:** s018 is partially loaded. Steps 1 (JTBD) is built, but steps 2–4 may still show placeholders if the slice build is incomplete.
+- **Log evidence:** Clicking "+ New Work" opens the wizard at step 1 (JTBD fields visible). Clicking "Next" advances to step 2, but step 2 shows a heading "Cost of delay — coming..." instead of the live form.
+- **Diagnosis:** This is expected behaviour during development. Steps 2–4 were added in later commits:
+  1. UC-S018-2 (Cost-of-delay signals step) — added `CodStep.jsx` + `codScorer.js`; step 2 should show Value/Urgency/Risk fields.
+  2. UC-S018-3 (Queue-rank preview) — added `QueueRankStep` + `useQueueRank`; step 3 should show rank preview.
+  3. UC-S018-4 (Prompt generation) — added `PromptStep` + `intakePromptBuilder`; step 4 should show "Generate" button and prompt output.
+  
+  If step 1 is live but steps 2–4 still show "(soon)", the build was interrupted or the commits did not merge.
+- **First response:**
+  1. Check `git log --oneline | head -30 | grep s018`. Should show recent UC-S018-4 commits.
+  2. If the commits exist, restart the dev server: `npm --prefix work/observatory/src/app run dev`. This recompiles all components.
+  3. Clear browser cache and reload.
+- **If error persists:** Check `src/app/src/components/` for the presence of `CodStep.jsx`, `QueueRankStep.jsx`, and `PromptStep.jsx`. If any are missing, the slice was not fully deployed.
+
+#### 3f. Intake wizard step 3 (queue rank) shows all items as "ahead of 0, behind 0" even when items exist in the backlog
+
+- **Root cause:** The `/api/projects/:id/items` endpoint returned successfully but the items list was empty, or the tier comparison is not working.
+- **Log evidence:** Step 3 queue-rank preview shows "Your item (MED value) would rank ahead of 0 items and behind 0 items" even though you know the items.csv has 10+ entries.
+- **Diagnosis:**
+  1. Check the items endpoint directly: `curl http://localhost:5173/api/projects/observatory/items 2>&1 | jq '. | length'`. Should return a count > 0.
+  2. Verify the active project is correct: `cat work/ACTIVE`. Should match your expected project.
+  3. Check the terminal items are excluded: `curl http://localhost:5173/api/projects/observatory/items 2>&1 | jq '.[] | select(.state=="done" or .state=="dropped") | .id' | wc -l`. The rank preview should exclude these.
+  4. Filter by non-terminal items: `curl http://localhost:5173/api/projects/observatory/items 2>&1 | jq '[.[] | select(.state!="done" and .state!="dropped")] | length'`. This is the comparison set; rank counts should sum to this total.
+- **First response:**
+  1. Verify items.csv has the expected rows and is not malformed: `head -5 work/observatory/items/items.csv`.
+  2. Reload the page to re-fetch items.
+  3. If the endpoint returns the correct count but the rank still shows 0, restart the dev server.
+
+#### 3g. Intake wizard copy-to-clipboard (step 4) doesn't work
+
+- **Root cause:** Same as 3c (clipboard API is blocked). The copy button in the prompt step uses the same mechanism as the steer panel.
+- **Log evidence:** User clicks "Copy prompt" in step 4; no toast appears ("Copied ✓").
+- **Diagnosis:** See section 3c for full diagnosis steps.
+- **First response:** See section 3c for recovery steps.
+
+#### 3i. Re-slice/split preview panel doesn't open when selecting "Request re-slice / split"
+- **Root cause:** s015 (WIP panel + re-slice preview) not yet deployed, or the dispatch routing is broken.
+- **Log evidence:** User selects "Request re-slice / split" from the steer menu; SteerPanel opens instead of ReslicePreviewPanel (the before/after two-column preview).
+- **Diagnosis:**
+  1. Check that s015 is deployed: `git log --oneline | grep s015-wip-navigate`. Should show recent commits.
+  2. If s015 is in the log, verify the dispatch routing in `src/app/src/hooks/useSteerContext.js` or the WIP row's action handler. The `re-slice` action should route to `ReslicePreviewPanel`, not `SteerPanel`.
+  3. If the old `SteerPanel` opens, the dispatch re-point was not applied.
+- **First response:**
+  1. Clear browser cache (Ctrl+Shift+R) and reload.
+  2. Restart the dev server to ensure all s015 components are hot-loaded.
+  3. If the issue persists, check the commit SHAs: the re-point should be in the s015 slice commit.
+- **If error persists:** File a defect citing the exact action taken (item id, action selected) and whether SteerPanel or an error appeared instead.
 
 ### 4. SSE live-refresh failures (changes to items.csv, ledger, defects don't auto-update)
 

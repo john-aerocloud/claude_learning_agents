@@ -305,6 +305,14 @@ lint-app-oag:
 build-app-oag:
 	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_APP) run build
 
+# make bundle-lambda-oag  — UC-18: esbuild-bundle the flight-feed-api handler
+# from src/app into src/infra/assets/feed-handler/handler.js (CommonJS,
+# @aws-sdk/* external). The CDK stack references that asset via
+# lambda.Code.fromAsset; CI runs this before synth/deploy so the deployed
+# Lambda ships the REAL handler (not the bootstrap inline 503 stub).
+bundle-lambda-oag:
+	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_APP) run bundle:lambda
+
 # make test-infra-oag  — jest policy-check assertions on the synthesized template (offline)
 test-infra-oag:
 	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_INFRA) test
@@ -364,7 +372,7 @@ ddb-local-create-table:
 	  --region local \
 	  --no-cli-pager 2>/dev/null || echo "Table already exists — continuing"
 
-.PHONY: test-app-oag lint-app-oag build-app-oag test-infra-oag synth-infra-oag diff-oag deploy-oag test-adapter-oag ddb-local-up ddb-local-down ddb-local-create-table
+.PHONY: test-app-oag lint-app-oag build-app-oag bundle-lambda-oag test-infra-oag synth-infra-oag diff-oag deploy-oag test-adapter-oag ddb-local-up ddb-local-down ddb-local-create-table
 
 # s007 SHARED §11a probe (UC1+UC3): two-browser disconnect skeleton against the
 # DEPLOYED path (Playwright, two real browsers — pair, close one tab, survivor

@@ -1,6 +1,6 @@
 {
   "env": {
-    "PATH": "/Users/johnnicholas/.nvm/versions/node/v24.12.0/bin:${PATH}"
+    "PATH": "/Users/johnnicholas/.nvm/versions/node/v24.12.0/bin:/Users/johnnicholas/.pyenv/shims:/Users/johnnicholas/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
   },
   "permissions": {
     "allow": [

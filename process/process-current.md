@@ -737,7 +737,8 @@ horizon, status. Statuses and lifecycle:
    `process/experiments-archive.md` (`EXP-NNN — <one-phrase lesson> — integrated
    <sha>`). `experiments.md` holds ONLY live experiments — `active`,
    `under-question`, `retirement-trial`; everything `integrated` / `retired` /
-   `reworked→` is pruned to the archive so the working registry (read every
+   `reworked→` is pruned to the archive, and `failed` rows are DELETED outright
+   (no archive line — §25a.6), so the working registry (read every
    retro) stays small. Provenance survives in the agent file (the behaviour),
    the one-line archive (the index), and git (the full row). The registry must
    not grow monotonically: each retro prunes the rows that reached a terminal
@@ -769,6 +770,23 @@ horizon, status. Statuses and lifecycle:
    whose failure mode is a prod outage class still open elsewhere —
    null-hypothesis tests are run where the blast radius is a metric, not a
    user.
+6. **failed (terminal — DELETED, not archived; v56 — human-directed)** — the
+   change's anticipated effect was NOT observed AND the change is being
+   abandoned or fully superseded by a re-route to a successor experiment. It is
+   neither integrated as behaviour nor a useful null result. Unlike `retired` —
+   where the null result IS the lesson and earns a one-line archive entry — a
+   `failed` row carries no folded-in behaviour and no standalone lesson worth
+   indexing (any durable lesson is carried forward by its successor experiment
+   or a `principle-failures/` note). Because failed rows are also the most
+   VERBOSE (they accrete diagnosis and re-route prose) and contribute no live
+   scoring thread, they **POLLUTE the working registry the orchestrator re-reads
+   every retro**. Therefore a `failed` experiment is **DELETED OUTRIGHT from
+   `experiments.md` with NO archive line** — git retains the full row if it is
+   ever needed. Guard: a failed experiment that has a LIVE re-route must FIRST
+   land its successor (a new experiment row or a principle note) so the thread
+   is not lost, THEN the failed row is deleted in the same change. Failed rows
+   may be deleted at ANY time they are recognised (not only at a retro) — they
+   carry no scoring obligation.
 
 Scoring honesty: a change with a confounded window (multiple changes landed on
 the same metric in the same slice) is scored against its own MECHANISM

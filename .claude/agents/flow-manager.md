@@ -120,11 +120,11 @@ longer exist. (See `work/<p>/STATE-MODEL.md`.)
 **Legacy projects (observatory, oxo-online, ox — pre-v52, hand-maintained
 items.csv + queue CSVs) keep the discipline below.** They are NOT migrated.
 
-- **Pull-time state is the puller's duty (DEFECT-013, legacy):** whoever executes
+- **Pull-time state is the puller's duty:** whoever executes
   a pull performs the atomic act (queue-row removal + items.csv → `in-flight` +
   ledger rows, keyed by the work-item id). Your sweep RECONCILES — verify ledger
   stage_enter rows agree with items.csv state and repair drift — never originate
-  transitions. **A repair is itself an atomic act (DEFECT-015): state AND queue
+  transitions. **A repair is itself an atomic act: state AND queue
   rows AND a ledger note together** (binds anyone repairing, orchestrator too).
 - **Staging drain (DEFECT-012, legacy):** product appends decomposed items to
   `queues/staging.csv` at completion. At EVERY sweep, drain it: register in

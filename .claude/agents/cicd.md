@@ -85,6 +85,25 @@ checklist — each item is a failure mode observed in practice:
 - [ ] CI test steps invoke `vitest run` (or `--run`) explicitly — a bare
       `npm test` mapped to watch mode hangs the job.
 
+## Node ESM bundling — the `Dynamic require` rule
+A Node Lambda/Fargate handler bundled as **ESM** (`"type":"module"`, esbuild
+`--format=esm`) crashes at runtime with `Dynamic require of "X" is not supported`
+when a transitive dep (`@aws-sdk/*`, `@azure/*`, and friends) does an internal
+`require()` that esbuild cannot statically resolve. It bundles clean and fails
+only when the code path runs — so it surfaces in prod, not at build. This recurred
+across fold-demo, the Fargate consumer, AND the feed-projector this session. Pin
+it at bundle time, every ESM Node bundle:
+- Inject the CommonJS shim banner so `require` exists in the ESM module scope:
+  `--banner:js='import { createRequire } from "module"; const require =
+  createRequire(import.meta.url);'` (the fix that worked, sha 6df7d79), OR bundle
+  the handler as **CJS** (`--format=cjs`) where ESM buys nothing.
+- The `bundle:<target>` npm/Make script carries the banner; a committed
+  smoke that `node`-imports the bundle (or invokes the handler offline) fails
+  until the shim is present, so the crash is a red build, never a prod surprise.
+- DynamoDB reserved-keyword crashes (`ttl`, `name`, `status`, …) are the same
+  build-clean/run-fail class: alias every attribute via `ExpressionAttributeNames`
+  (the EXP-059 `ttl` fix), pinned by the adapter's unit test. [EXP-061]
+
 ## Pipeline fail-fast config validation
 Every cloud/hosted pipeline includes a validation step as the FIRST step of
 every job that uses secrets or variables:
@@ -116,6 +135,21 @@ Never hardcode a profile name; always read from `.claude/config/aws-profile`.
     needs infrastructure + an approach — define both);
   - extra environments only for performance, UAT or research.
 - Never add an environment ahead of need; it adds gross lead time.
+
+## Framework migration completes the pipeline (process §19a)
+When a slice migrates the deploy framework (CDK→SST, Serverless→CDK, a runtime
+bump), **converting the CI/CD pipeline + deleting the dead deploy path is part of
+the migration, not a deferred follow-up.** A migration is DONE only when the
+committed pipeline deploys via the NEW framework and no workflow step still
+invokes the old one. OagEventSource migrated to SST v3 but `infra.yml` still runs
+`npx cdk synth` / "Install CDK dependencies" / "Build CDK TypeScript" — a CI
+deploy pipeline that has never run and would fail, silently non-functional
+because the project deploys by hand. Leaving the old pipeline live is a stale,
+misleading asset (the §5a "comment that describes misbehaviour" class for
+pipelines). In the migration slice: rewrite the workflow to the new framework's
+deploy command, update the path triggers + role, and delete the dead steps in
+the same change; the pre-flight (EXP-056) and the §40 walking-skeleton probe run
+through the converted pipeline so it is proven, not assumed. [EXP-062]
 
 ## Each iteration, before engineering starts
 1. Confirm/define technology choices and deployment approach for the slice.

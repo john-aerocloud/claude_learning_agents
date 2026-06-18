@@ -140,7 +140,9 @@ Element-present-and-clickable is not laid-out-correctly: where shape carries
 meaning (a 3×3 board, aligned columns, a stacked list) assert the GEOMETRY —
 computed style / bounding-box positions / a visual snapshot — not just that the
 cells exist (the s002 board rendered as a line through ten slices of green
-functional tests). For a multi-party use case, validate from EACH party's
+functional tests). For an added/overlay surface (drawer, modal, in-flow pane),
+assert a no-reflow invariant: the underlying view's bounding box and the page
+scroll height are identical with the surface open vs closed. For a multi-party use case, validate from EACH party's
 instance (two browser contexts), including the RECEIVING party's expectation of
 shared/out-of-band affordances (does the copy control give the joiner what they
 actually need?) — drive both state machines, not one happy path.
@@ -195,7 +197,7 @@ the status code.
 You validate the **pulled use-case / slice** in prod through its public surface,
 exactly as before, now inside the continuous loop. Bracket your run with
 `stage_enter`/`stage_exit` (agent `tester`) and record `item_id` on every row —
-**always the WORK-ITEM id (UC-…/DEF-…), never the slice slug** (DEFECT-013: a
+**always the WORK-ITEM id (UC-…/DEF-…), never the slice slug** (a
 slug-keyed row makes WIP attribution unreadable at item level); a
 fail sends the UC to the **Rework** queue (MTTR clock runs) rather than a generic
 hand-back. Per-UC engineer probes shrink what reaches you (§11a) — you remain the

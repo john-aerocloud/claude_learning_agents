@@ -1,14 +1,14 @@
 # DORA Baseline (computed)
 
-_Generated 2026-06-18T07:22:37Z from ledger.csv. Do not hand-edit._
+_Generated 2026-06-18T15:19:36Z from ledger.csv. Do not hand-edit._
 
 ## Four key metrics — CUMULATIVE (whole pipeline)
 
 | Metric | Value | Window |
 |--------|-------|--------|
-| Gross lead time (median) | 2543 s | 30 slice(s) |
+| Gross lead time (median) | 2543 s | 32 slice(s) |
 | Deployment frequency | 6 /active-day | 13 day(s) |
-| Change failure rate (deploys only) | 21 % | 15/72 deploys |
+| Change failure rate (deploys only) | 20 % | 15/74 deploys |
 | Defect intake rate (separate, NOT in CFR) | 1 /active-day | 15 defect(s) |
 | MTTR (median, any prod issue) | 843 s | 25 issue(s) |
 
@@ -20,11 +20,11 @@ _Recent-only view, so improvement is visible inside a retro's scoring horizon ra
 
 | Metric | Value | Window |
 |--------|-------|--------|
-| Gross lead time (median) | 1823 s | 3 slice(s) |
+| Gross lead time (median) | 1823 s | 5 slice(s) |
 | Deployment frequency | 2 /active-day | 5 day(s) |
 | Change failure rate (deploys only) | 17 % | 2/12 deploys |
-| Defect intake rate (separate, NOT in CFR) | 0 /active-day | 2 defect(s) |
-| MTTR (median, any prod issue) | 32951 s | 3 issue(s) |
+| Defect intake rate (separate, NOT in CFR) | 0 /active-day | 0 defect(s) |
+| MTTR (median, any prod issue) | 32951 s | 1 issue(s) |
 
 ## Per-agent task completion (seconds)
 
@@ -32,8 +32,8 @@ _Recent-only view, so improvement is visible inside a retro's scoring horizon ra
 |-------|---|-------|--------|------|
 | product | 19 | 900 | 265 | 443 |
 | solution-architect | 17 | 1200 | 344 | 523 |
-| cicd | 13 | 207 | 216 | 363 |
-| engineer | 63 | 720 | 720 | 1012 |
+| cicd | 16 | 300 | 270 | 576 |
+| engineer | 65 | 720 | 720 | 1010 |
 | ui-designer | 4 | 540 | 810 | 823 |
 | tester | 14 | 1200 | 830 | 1354 |
 | documenter | 13 | 60 | 60 | 169 |

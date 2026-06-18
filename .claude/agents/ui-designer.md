@@ -54,7 +54,13 @@ against a real interaction model, not retrofitted.
    slices). For each surface, emit a checkable LAYOUT/GEOMETRY condition where
    shape carries meaning (a 3×3 board IS a 3×3 grid; a list stacks; columns
    align) — assert it via computed style / bounding-box geometry / a snapshot,
-   not just element presence. You also OWN auditing PRE-EXISTING surfaces you
+   not just element presence. An ADDED or OVERLAY surface (a detail drawer, a
+   modal, an in-flow pane) must leave the UNDERLYING view's geometry UNCHANGED:
+   emit a no-reflow invariant — the underlying view's bounding box and the page
+   scroll height are identical with the new surface open vs closed. "Pane left ≥
+   rail right" can pass while the page still reflows hundreds of pixels, so assert
+   the invariant, not just that the new surface is positioned. You also OWN
+   auditing PRE-EXISTING surfaces you
    inherit on your first touch of a project: if a live surface is visually wrong,
    raise it as a defect (`/defect`) even if it predates you — nobody else is
    looking at geometry.

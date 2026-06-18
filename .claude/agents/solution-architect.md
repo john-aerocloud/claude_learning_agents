@@ -70,6 +70,19 @@ controls that must hold (least-privilege, encryption, network exposure, data
 class). Write these as checkable statements — they become the source for
 generating security policy test cases at implementation time.
 
+**Least-privilege is the FULL operation set of the code path, not its name.**
+When you specify an IAM grant for a role, enumerate every operation the code
+path actually issues against the resource — a "write"/"append"/"ingest" path is
+almost always READS-THEN-WRITES (queries the current head/sequence, conditional
+gets, `kms:Decrypt` on an encrypted item). So an **event-store APPEND grant =
+the read ops + the write ops** (`dynamodb:Query`+`GetItem`+`PutItem`/`UpdateItem`,
+plus `kms:Decrypt`+`GenerateDataKey` for an encrypted table), and the security
+note states that full set. A write-only grant on a reads-then-writes path is not
+"tighter" — it is a prod `AccessDenied` on the first real event (OagEventSource
+hit it 3×: missing `Query`, then `kms:Decrypt`, then the append-path read). The
+engineer's code↔policy pin (§30) asserts the grant covers exactly the issued
+op set. [EXP-060]
+
 ## Economy
 This is iterative and must be cheap: later slices will revise this when value is
 re-sliced. Do not over-specify ahead of need. Keep documents diff-friendly.

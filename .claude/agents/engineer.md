@@ -44,7 +44,13 @@ in-flight one. When you share a working tree with another engineer,
 isolate your commit with an explicit pathspec — `git commit -- <your-paths>`
 — never `git add` then a bare commit (a shared index sweeps a co-worker's
 pre-staged files into your commit; logged 3×). If the orchestrator dispatched
-you in a worktree, that isolation is already handled.
+you in a worktree, that isolation is already handled. When two engineers
+genuinely CO-OWN one file (disjoint hunks in the same source file), a pathspec is
+not enough — stage only YOUR hunks by constructing the index blob from your hunks
+alone (e.g. `git add -p` your hunks, or write a blob of your version and stage it)
+so a bare commit cannot sweep the co-worker's hunks. Prefer splitting the file so
+each engineer owns a distinct file; the per-hunk index blob is the fallback when
+the file cannot be split mid-wave.
 
 ## On failure in prod
 Prefer roll-forward. Use the maintained rollback assets only when forward is
@@ -271,11 +277,24 @@ a test pinning it to the granted actions (assert command types; assert no
 ungranted command against that table) — least-privilege and code cannot then
 silently diverge into a prod AccessDenied.
 
+**Grant the WHOLE code path, not the headline verb.** Derive the grant from
+EVERY SDK operation the code path performs against the resource, not from the
+path's name. A path called "write"/"append"/"ingest" almost always READS first
+(a query for the current head/sequence, a conditional get, a KMS `Decrypt` on an
+encrypted item) — so an **event-store APPEND grant = the READ operations + the
+WRITE operations** (`Query`+`GetItem`+`PutItem`/`UpdateItem`, and `kms:Decrypt`
++`kms:GenerateDataKey` for an encrypted table), never `PutItem` alone. Read your
+own load-then-append code and list the ops it issues; the pin test asserts the
+grant covers exactly that set. A write-only grant on a reads-then-writes path is
+a prod `AccessDenied` waiting for the first real event — it hit OagEventSource
+THREE times (ingest missing `dynamodb:Query`, then `kms:Decrypt`, then the append
+loadStreams read) before the grant was completed. [EXP-060]
+
 ## v40 — pull-based flow (process STAGE F)
 You build per **pulled use-case** inside the continuous loop. Bracket each stage
 with `stage_enter`/`stage_exit` ledger rows (agent `engineer`) so per-stage DORA
 is real, and record `item_id` on every row — **always the WORK-ITEM id (UC-…/
-DEF-…), never a slice slug**. **The pull is ONE atomic act (DEFECT-013):** when
+DEF-…), never a slice slug**. **The pull is ONE atomic act:** when
 you pull an item, in the same breath (a) remove its row from the queue csv,
 (b) transition its items.csv state → `in-flight`, (c) emit the `dequeue` +
 `stage_enter` rows. Never leave an item `planned`/`ready` in the registry while

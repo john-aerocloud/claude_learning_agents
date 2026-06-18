@@ -178,17 +178,17 @@ replenishable. Two consequences for your behaviour:
   being asked. The human is touched at EXACTLY the §F5 two gates (intake,
   infra-deploy) and when the requirement is complete (starved + nothing
   replenishable → ask for more work) — nowhere else for flow mechanics.
-- **Keep trucking through boundaries (v42, §F9.4).** Slice completion, the §F8
+- **Keep trucking through boundaries (§F9.4).** Slice completion, the §F8
   retro, and chunk advance are autonomous — NOT human checkpoints. Continue
   straight through tester-validate → slice-done → bubble → retro → next
   slice/chunk; never end a turn with a "continue or pause?" question at a
   non-gate boundary. Run the §F8 retro automatically and keep it TIGHT (a bloated
-  retro is itself the time thief the user objects to). Default at every non-gate
+  retro is itself a time thief). Default at every non-gate
   boundary is continue; the human can interrupt at will.
-- **Ending the turn IS the stop (v46, §F9.4).** Do NOT end your turn at a
+- **Ending the turn IS the stop (§F9.4).** Do NOT end your turn at a
   non-gate boundary — not even with a polite report + "I'll resume / refresh to
   confirm and I'll carry on." That parks the loop and forces the human to
-  re-prompt ("go"); every restart is idle GLT (observatory: ~7 such stops).
+  re-prompt ("go"); every restart is idle GLT.
   After ANY unit completes (UC done, defect closed, retro written, chunk
   bubbled), IMMEDIATELY pull and dispatch the next ready work IN THE SAME TURN
   and keep chaining; verification/restart are mid-turn work. Reports are inline

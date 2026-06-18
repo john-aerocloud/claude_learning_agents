@@ -34,6 +34,18 @@ status: active
 > EXP-055 VALIDATED (2/2, integrate the token-review step next retro); EXP-016/026/
 > 031/041/043/044/045/052 VALIDATED and INTEGRATED+pruned this retro. v57 change-set
 > scored in `process-history/v57-2026-06-18.md`.
+>
+> **v58 addendum (2026-06-18, human-directed experiment-validity fix, EXP-063).**
+> §25a now states an explicit, checkable **validity bar**: every registry row must
+> be a falsifiable HYPOTHESIS — Problem + Solution + a NAMED target DORA metric +
+> a Measurement that can come back NEGATIVE — never a piece-of-work / feature /
+> capability description. Drift-purge applied: EXP-058 (architect enumerates
+> fitness functions) and EXP-059 (documenter produces a consumer-skill) were
+> deleted as work-item-shaped rows (no DORA metric; a did-we-do-the-work
+> "measurement" that cannot fail); both behaviours are SOUND and KEPT as plain
+> agent practice (solution-architect.md / documenter.md). The bar is enforced at
+> creation (this section), in the registry header, and in the retro command
+> (steps 5a + 7). Target: registry validity + agent-def simplicity.
 
 The process all agents follow right now. Updated only by the Orchestrator at a
 retro, which snapshots the prior version into `process-history/` first.
@@ -837,10 +849,32 @@ a DORA metric, and text that cannot demonstrate its value is removed.
 
 The registry is `/process/experiments.md` — one row per routed change:
 id, date, artifact(s) touched, target metric, anticipated effect, scoring
-horizon, status. Statuses and lifecycle:
+horizon, status.
 
-1. **active** — every routed change enters at routing time with a target
-   metric, an anticipated effect, a **scoring horizon** (default: 2
+**THE VALIDITY BAR — a row is a falsifiable HYPOTHESIS, never a piece of work
+(v58 — human-directed, EXP-063).** Every row admitted to the registry MUST state
+all four, explicitly and checkably: (1) **Problem** — the specific evidenced
+friction/gap; (2) **Solution** — the concrete change tested; (3) **Target DORA
+metric** — a NAMED metric (lead time / deployment frequency / CFR / MTTR; a
+meta/proxy metric such as agent-context-size or registry-validity is allowed only
+where the row explicitly justifies it as a DORA proxy); (4) **Measurement** — the
+observable signal + scoring horizon, phrased so the result CAN come back NEGATIVE.
+A row that merely describes a feature / capability / "work to be done", has no
+named DORA metric, or has a measurement that cannot fail (a did-we-do-the-work
+checklist — "the documenter produces consumer docs", "the architect states
+fitness functions") is **NOT an experiment**: it is rejected at creation and
+deleted on sight. The lifecycle is **adopt-or-delete** — run enough trials, then
+either ADOPT (metric moved → fold the behaviour into the owning agent as plain
+practice and prune the row) or DELETE (metric did not move → undo the change). A
+sound, load-bearing shipped behaviour whose row was only MIS-PHRASED as a
+work-item is handled by deleting the ROW while KEEPING the behaviour as plain
+agent practice; never undo a behaviour that prevents a known defect class because
+its row failed the bar. Statuses and lifecycle:
+
+1. **active** — every routed change enters at routing time **already meeting the
+   validity bar above** (Problem + Solution + named DORA metric + falsifiable
+   Measurement), with a target metric, an anticipated effect, a **scoring
+   horizon** (default: 2
    scoring opportunities — slices/iterations where the change could have
    shown its effect; "no opportunity yet" extends the horizon, it does not
    count against it), and an **applies-to** predicate — the KIND of work that

@@ -34,7 +34,14 @@ Act as the **orchestrator**. Own this; gather input but make the process call.
    rework any prior change that was not a net win across throughput (lead
    time), quality (CFR), frequency, and recovery (MTTR).
 5a. **Score the experiment registry** (`/process/experiments.md`, process §25a):
-   every `active` row that had a scoring opportunity gets a scoring note;
+   FIRST audit every live row against the **validity bar** (EXP-063): a row that
+   describes a piece of work / a feature, names no target DORA metric, or has a
+   measurement that cannot come back negative is NOT a valid experiment — delete
+   it (keep the behaviour as plain agent practice if it is sound and load-bearing;
+   undo it if it is speculative). Then score: scoring is **adopt-or-delete** — a
+   row whose metric MOVED is adopted (fold into the owning agent, prune the row);
+   a row whose metric did NOT move is rewritten, retirement-trialled, or deleted.
+   Every `active` row that had a scoring opportunity gets a scoring note;
    horizon-reached rows with no measurable improvement move to
    `under-question` and MUST be resolved (rewrite as a new experiment, or
    start a `retirement-trial` — physically remove the text, run **4–5 scoring
@@ -66,8 +73,17 @@ Act as the **orchestrator**. Own this; gather input but make the process call.
    named DORA metric and state its ANTICIPATED effect so the next retro can
    score it. The answer to the focus question drives the change-set.
    **Register every routed change** (including agent-file edits and tools) as
-   a row in `/process/experiments.md` with target metric, anticipated effect,
-   and scoring horizon (default 2 scoring opportunities).
+   a row in `/process/experiments.md` — but ONLY if it meets the **validity bar**
+   (process §25a, EXP-063): a falsifiable HYPOTHESIS with all four — (1) Problem
+   (evidenced friction), (2) Solution (the concrete change tested), (3) a NAMED
+   target DORA metric (lead time / deploy freq / CFR / MTTR; a meta/proxy metric
+   only if explicitly justified as a DORA proxy), and (4) a Measurement (observable
+   signal + scoring horizon) phrased so the result CAN come back NEGATIVE. **Do NOT
+   create a work-item-shaped row** — a row that describes a feature/capability/work
+   to be done, names no DORA metric, or has a did-we-do-the-work "measurement" that
+   cannot fail ("the documenter produces consumer docs", "the architect states
+   fitness functions") is NOT an experiment: route the behaviour straight into its
+   owning agent file as plain practice instead, with no registry row.
 
 Report: the focus question and answer, the new process version, each change
 WITH where it was routed (agent file / process / tool / improvement slice),

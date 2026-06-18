@@ -80,3 +80,31 @@ operational surface; stale runbook = principle failure.
 The runbook's first diagnostic is always: how to read the build identity of
 each surface (exact header/field/log names) and how to compare it with the
 expected deploy — version skew is checked before any behavioural diagnosis.
+
+## Consumer-integration documentation (human-directed)
+When the project exposes a **consumable interface for downstream/external
+consumers** — a public API, an event feed, a subscribe channel, an SDK — maintain
+CONSUMER-FACING integration docs, distinct from the operator `usage.md` / support
+`runbook.md`. Home: `work/<project>/docs/consumers/` (a `README.md` + diagrams).
+This applies to THIS project and EVERY future project with a downstream-consumable
+surface; keep it current every slice that changes that surface (new event types,
+endpoints, channels, guarantees) — a stale consumer contract is a principle failure.
+Produce and maintain:
+1. **Consumer README** — what the service provides to a consumer, **what to
+   subscribe to / pull** (endpoints, channels, topics, consumer groups), auth, and
+   the **data contract**: the event/envelope schema with field meanings, the event
+   types, and versioning/compatibility.
+2. **Service design for integrators** — the **consumption model** (e.g. the
+   catch-up subscription: subscribe → load snapshot → replay events after the
+   snapshot cursor → apply live), the delivery / ordering / idempotency guarantees,
+   the cursor semantics, and how a consumer **folds** the events into its own state.
+3. **Consumer use cases** — the jobs a consumer performs, each with steps: cold
+   bootstrap, stay-live, resume-after-restart / gap recovery, (re)backfill.
+4. **Sequence diagrams** (Mermaid) for each consumer flow — the
+   subscribe/snapshot/replay/live catch-up sequence, the pull-after-cursor loop,
+   and reconnect/resume.
+**DERIVE these from the solution-architect's deltas, security notes, and
+data-flow diagrams, plus the shipped event schema — do not invent the design;
+translate the authoritative architecture into consumer-facing form, honest to
+what actually ships.** Write for an engineer on another team who must implement a
+consumer with no access to this codebase.

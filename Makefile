@@ -459,7 +459,15 @@ ddb-local-create-table:
 	  --region local \
 	  --no-cli-pager 2>/dev/null || echo "Table already exists — continuing"
 
-.PHONY: test-app-oag lint-app-oag build-app-oag bundle-lambda-oag test-infra-oag synth-infra-oag diff-oag deploy-oag test-adapter-oag ddb-local-up ddb-local-down ddb-local-create-table bootstrap-oag-dev deploy-oidc-oag-dev diff-oag-dev deploy-oag-dev bootstrap-oag-prod deploy-oidc-oag-prod diff-oag-prod deploy-oag-prod
+# make seed-oag — UC-20: write 2 synthetic canonical events to the sandbox event store.
+# Reads TABLE_NAME from env (default OagFeed-EventStore-s004); AWS_PROFILE defaults to
+# the project profile. Run after deploy-oag.
+OAG_SEED_TABLE ?= OagFeed-EventStore-s004
+seed-oag:
+	TABLE_NAME=$(OAG_SEED_TABLE) AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=eu-west-2 \
+	  PATH=$(NVM_NODE_BIN):$$PATH node work/OagEventSource/src/app/scripts/seed-event-store.mjs
+
+.PHONY: test-app-oag lint-app-oag build-app-oag bundle-lambda-oag test-infra-oag synth-infra-oag diff-oag deploy-oag seed-oag test-adapter-oag ddb-local-up ddb-local-down ddb-local-create-table bootstrap-oag-dev deploy-oidc-oag-dev diff-oag-dev deploy-oag-dev bootstrap-oag-prod deploy-oidc-oag-prod diff-oag-prod deploy-oag-prod
 
 # s007 SHARED §11a probe (UC1+UC3): two-browser disconnect skeleton against the
 # DEPLOYED path (Playwright, two real browsers — pair, close one tab, survivor

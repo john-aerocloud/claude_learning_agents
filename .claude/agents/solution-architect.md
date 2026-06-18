@@ -139,6 +139,24 @@ exponential backoff parameters (or the explicit decision not to retry and
 why), timeout budget, and what the caller does when retries exhaust. A call
 without a stated posture is an incomplete design.
 
+## Observability & fitness functions (per infra + connection) — human-directed
+Every delta states, for EACH piece of infrastructure AND each connection/edge it
+introduces, the observability it must emit and the **fitness functions** to
+measure — first-class design output, not an afterthought. Cover (as applicable to
+the resource): queue depth/size, queue wait time, throughput (events/sec),
+latency (p50/p95/p99), data volume / payload sizes, error & failure rate, and
+saturation (CPU/mem, connection-pool, concurrency, checkpoint lag). For each name:
+the metric, where it is emitted (OTel → Dash0 / CloudWatch), the data it carries,
+and a **sensible DEFAULT threshold** — a starting fitness budget beyond which the
+metric is RAISED as a flagged signal. Thresholds are NOT alarms yet: they are the
+measured lines an alarm gets attached to in a later slice once the real baseline
+is observed. Derive each default from the resource's expected operating envelope
+and say why. A piece of infrastructure or a connection with no stated fitness
+functions + default thresholds is an INCOMPLETE design. These notes are the source
+the cicd/engineer use to instrument and the tester uses to assert the signal
+exists. (Pairs with the per-infrastructure security notes — same per-resource
+discipline, applied to operability.)
+
 ## v40 — pull-based flow (process STAGE F)
 You co-own the dependency model that drives parallelism (§F6): when you flag a new
 platform mechanism or a seam, name the seams/paths involved so use-cases can

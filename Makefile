@@ -27,6 +27,18 @@ AWS_PROFILE ?= $(shell cat .claude/config/aws-profile 2>/dev/null)
 sso-login:
 	aws sso login --profile $(AWS_PROFILE)
 
+# Convenience SSO logins per OagEventSource environment (v56 — human-directed):
+#   local testing -> sandbox, cicd dev -> ids-dev, cicd prod -> ids-prod.
+# make sso-login-sandbox | make sso-login-dev | make sso-login-prod
+sso-login-sandbox:
+	aws sso login --profile sandbox
+
+sso-login-dev:
+	aws sso login --profile ids-dev
+
+sso-login-prod:
+	aws sso login --profile ids-prod
+
 # --- DORA ledger -------------------------------------------------------------
 # make dora-record EVENT=validation_run AGENT=tester SLICE=004-create-game \
 #      ITER=5 REF="<sha>:<suite>" OUTCOME=success NOTE="7/7 vs prod"
@@ -330,7 +342,7 @@ diff-oag:
 	  -c buildSha=$$(git rev-parse --short HEAD 2>/dev/null || echo local) \
 	  --profile $(AWS_PROFILE)
 
-# make deploy-oag  — CDK deploy OagFeedStack
+# make deploy-oag  — CDK deploy OagFeedStack (sandbox)
 # §F5 HUMAN GATE — run this only after the human approves the first deploy.
 # Prerequisites:
 #   1. make -C work/OagEventSource/src/infra bootstrap  (CDK bootstrap in eu-west-2)
@@ -341,6 +353,81 @@ deploy-oag:
 	  --require-approval never \
 	  -c buildSha=$$(git rev-parse HEAD 2>/dev/null || echo local) \
 	  --profile $(AWS_PROFILE)
+
+# ---------------------------------------------------------------------------
+# OagEventSource — dev environment targets (ids-dev account 484908302294)
+# ---------------------------------------------------------------------------
+# HARD CONSTRAINT: ids-dev SSO profile is ReadOnly. The one-time bootstrap
+# and deploy-oidc-oag-dev MUST be run with an elevated/admin profile.
+# See work/OagEventSource/runbook/dev-prod-deploy.md.
+
+# make bootstrap-oag-dev
+# One-time CDK bootstrap for ids-dev. Requires an elevated IAM role (NOT ReadOnly).
+# Pass ADMIN_PROFILE=<elevated-profile> to override.
+ADMIN_PROFILE_DEV  ?= ids-dev
+bootstrap-oag-dev:
+	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_INFRA) run cdk -- bootstrap \
+	  aws://484908302294/eu-west-2 \
+	  --trust 484908302294 \
+	  --cloudformation-execution-policies arn:aws:iam::aws:policy/AdministratorAccess \
+	  --profile $(ADMIN_PROFILE_DEV)
+
+# make deploy-oidc-oag-dev
+# One-time: deploy the OIDC role stack into ids-dev. Requires elevated credentials.
+deploy-oidc-oag-dev:
+	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_INFRA) run cdk -- deploy OagOidcStack-dev \
+	  --require-approval never \
+	  -c githubOrg=john-aerocloud \
+	  -c githubRepo=claude_learning_agents \
+	  -c accountEnv=dev \
+	  --profile $(ADMIN_PROFILE_DEV)
+
+# make diff-oag-dev
+diff-oag-dev:
+	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_INFRA) run cdk -- diff OagFeedStack-dev \
+	  -c buildSha=$$(git rev-parse --short HEAD 2>/dev/null || echo local) \
+	  --profile ids-dev
+
+# make deploy-oag-dev  — §F5 HUMAN GATE; CI uses this after OIDC role is provisioned
+deploy-oag-dev:
+	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_INFRA) run cdk -- deploy OagFeedStack-dev \
+	  --require-approval never \
+	  -c buildSha=$$(git rev-parse HEAD 2>/dev/null || echo local) \
+	  --profile ids-dev
+
+# ---------------------------------------------------------------------------
+# OagEventSource — prod environment targets (ids-prod account 716403253029)
+# ---------------------------------------------------------------------------
+# HARD CONSTRAINT: ids-prod SSO profile is ReadOnly. The one-time bootstrap
+# and deploy-oidc-oag-prod MUST be run with an elevated/admin profile.
+# See work/OagEventSource/runbook/dev-prod-deploy.md.
+
+ADMIN_PROFILE_PROD ?= ids-prod
+bootstrap-oag-prod:
+	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_INFRA) run cdk -- bootstrap \
+	  aws://716403253029/eu-west-2 \
+	  --trust 716403253029 \
+	  --cloudformation-execution-policies arn:aws:iam::aws:policy/AdministratorAccess \
+	  --profile $(ADMIN_PROFILE_PROD)
+
+deploy-oidc-oag-prod:
+	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_INFRA) run cdk -- deploy OagOidcStack-prod \
+	  --require-approval never \
+	  -c githubOrg=john-aerocloud \
+	  -c githubRepo=claude_learning_agents \
+	  -c accountEnv=prod \
+	  --profile $(ADMIN_PROFILE_PROD)
+
+diff-oag-prod:
+	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_INFRA) run cdk -- diff OagFeedStack-prod \
+	  -c buildSha=$$(git rev-parse --short HEAD 2>/dev/null || echo local) \
+	  --profile ids-prod
+
+deploy-oag-prod:
+	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_INFRA) run cdk -- deploy OagFeedStack-prod \
+	  --require-approval never \
+	  -c buildSha=$$(git rev-parse HEAD 2>/dev/null || echo local) \
+	  --profile ids-prod
 
 # make test-adapter-oag  — UC-22 DynamoDB Local adapter test suite
 # Requires DDB Local running: make ddb-local-up
@@ -372,7 +459,7 @@ ddb-local-create-table:
 	  --region local \
 	  --no-cli-pager 2>/dev/null || echo "Table already exists — continuing"
 
-.PHONY: test-app-oag lint-app-oag build-app-oag bundle-lambda-oag test-infra-oag synth-infra-oag diff-oag deploy-oag test-adapter-oag ddb-local-up ddb-local-down ddb-local-create-table
+.PHONY: test-app-oag lint-app-oag build-app-oag bundle-lambda-oag test-infra-oag synth-infra-oag diff-oag deploy-oag test-adapter-oag ddb-local-up ddb-local-down ddb-local-create-table bootstrap-oag-dev deploy-oidc-oag-dev diff-oag-dev deploy-oag-dev bootstrap-oag-prod deploy-oidc-oag-prod diff-oag-prod deploy-oag-prod
 
 # s007 SHARED §11a probe (UC1+UC3): two-browser disconnect skeleton against the
 # DEPLOYED path (Playwright, two real browsers — pair, close one tab, survivor

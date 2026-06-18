@@ -22,3 +22,6 @@ this is the index of what we've learned and folded in, not a working registry.
 - EXP-020 — push→PULL flow control (continuous loop, costed queues, JIT replenish) — validated 2/2 — integrated v48 (§F2/§F3 are the durable home; citations stripped)
 - EXP-030 — continuous background loop + parallel replenishment + enqueue-to-empty wake — validated 2/2 — integrated v48 (§F9; refined by EXP-031 rework)
 - EXP-034 — proactive replenishment: product decomposes ahead in the same parallel batch as the build wave — validated 2/2 — integrated v48 (§F3 + orchestrator/flow-manager defs)
+- EXP-039 — model tiering by judgment density + in-session per-call override bridge + availability re-tier — validated-on-opus (s014/s015/s018 CFR + SLC-002/003 mechanism) — integrated v57 (process §7a, plain assignment; fable scaffolding closed, model retired from access)
+- EXP-046 — model-tier-change scoring quarantine (model-confounded experiments can't validate on a DORA move alone) — validated 1+/2 (v49 fable→opus window opened/held/closed cleanly at SLC-003) — integrated v57 (process §7a, plain practice)
+- EXP-049 — no-git-push: agents commit LOCAL trunk only, pushing is human-gated — validated 3/3 (s001/SLC-002/SLC-003 OagEventSource, 0 push attempts) — integrated v57 (process §14, plain practice)

@@ -325,6 +325,13 @@ build-app-oag:
 bundle-lambda-oag:
 	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_APP) run bundle:lambda
 
+# make bundle-ingest-lambda-oag  — UC-25: esbuild-bundle the oag-ingest handler
+# from src/app into infra/assets/ingest-handler/handler.js (CommonJS,
+# @aws-sdk/* external, @azure/event-hubs BUNDLED — pure-JS, not AWS-provided).
+# Run before sst deploy so the ingest Lambda ships the real handler.
+bundle-ingest-lambda-oag:
+	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_APP) run bundle:ingest-lambda
+
 # make test-infra-oag  — jest policy-check assertions on the synthesized template (offline)
 test-infra-oag:
 	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_INFRA) test
@@ -336,6 +343,16 @@ synth-infra-oag:
 	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_INFRA) run cdk -- synth OagFeedStack --quiet \
 	  -c buildSha=$(OAG_BUILD_SHA)
 
+# make preflight-oag  — EXP-056 deploy pre-flight: assert all external/cross-account
+# identifiers the OagFeedStack references RESOLVE before cdk deploy is run.
+# Checks: 2 OTel layer ARNs, Dash0 secret ARN, Dash0 ingress DNS.
+# Exits nonzero if any check fails — fails cheaply before CloudFormation is touched.
+# DASH0_SECRET_ARN can be overridden via env (default: the sandbox secret ARN).
+preflight-oag:
+	AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=eu-west-2 \
+	  DASH0_SECRET_ARN=$${DASH0_SECRET_ARN:-arn:aws:secretsmanager:eu-west-2:533266989599:secret:dash0-api-key-5buL4f} \
+	  bash work/OagEventSource/infra/scripts/preflight.sh --profile $(AWS_PROFILE) --region eu-west-2
+
 # make diff-oag  — CDK diff (requires live AWS creds + bootstrap complete)
 diff-oag:
 	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_INFRA) run cdk -- diff OagFeedStack \
@@ -344,11 +361,12 @@ diff-oag:
 
 # make deploy-oag  — CDK deploy OagFeedStack (sandbox)
 # §F5 HUMAN GATE — run this only after the human approves the first deploy.
+# EXP-056: pre-flight runs automatically before deploy to assert all external ids resolve.
 # Prerequisites:
 #   1. make -C work/OagEventSource/src/infra bootstrap  (CDK bootstrap in eu-west-2)
-#   2. Secrets Manager: dash0 API key secret exists in eu-west-2 (OAG_DASH0_SECRET_ARN)
-#   3. OTel layer ARNs filled in lib/oag-feed-stack.ts OTEL_LAYER_ARNS (from delta-001)
-deploy-oag:
+#   2. Secrets Manager: dash0 API key secret exists in eu-west-2
+#   3. export DASH0_SECRET_ARN=arn:aws:secretsmanager:eu-west-2:533266989599:secret:dash0-api-key-5buL4f
+deploy-oag: preflight-oag
 	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_INFRA) run cdk -- deploy OagFeedStack \
 	  --require-approval never \
 	  -c buildSha=$$(git rev-parse HEAD 2>/dev/null || echo local) \
@@ -467,7 +485,7 @@ seed-oag:
 	TABLE_NAME=$(OAG_SEED_TABLE) AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=eu-west-2 \
 	  PATH=$(NVM_NODE_BIN):$$PATH node work/OagEventSource/src/app/scripts/seed-event-store.mjs
 
-.PHONY: test-app-oag lint-app-oag build-app-oag bundle-lambda-oag test-infra-oag synth-infra-oag diff-oag deploy-oag seed-oag test-adapter-oag ddb-local-up ddb-local-down ddb-local-create-table bootstrap-oag-dev deploy-oidc-oag-dev diff-oag-dev deploy-oag-dev bootstrap-oag-prod deploy-oidc-oag-prod diff-oag-prod deploy-oag-prod
+.PHONY: test-app-oag lint-app-oag build-app-oag bundle-lambda-oag bundle-ingest-lambda-oag test-infra-oag synth-infra-oag preflight-oag diff-oag deploy-oag seed-oag test-adapter-oag ddb-local-up ddb-local-down ddb-local-create-table bootstrap-oag-dev deploy-oidc-oag-dev diff-oag-dev deploy-oag-dev bootstrap-oag-prod deploy-oidc-oag-prod diff-oag-prod deploy-oag-prod
 
 # s007 SHARED §11a probe (UC1+UC3): two-browser disconnect skeleton against the
 # DEPLOYED path (Playwright, two real browsers — pair, close one tab, survivor

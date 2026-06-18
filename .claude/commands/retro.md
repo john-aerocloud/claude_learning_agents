@@ -19,6 +19,16 @@ Act as the **orchestrator**. Own this; gather input but make the process call.
    and per-project evidence. Be specific: name the step, duration, and the
    mechanism that drove it. Propose 1–3 concrete strategies, each stating which
    DORA metric it protects or improves and what the anticipated effect is.
+4a. **Token-efficiency review, balanced against DORA** (process §24 + §26): estimate
+   this cycle's token consumption and where it went (dominant agents/stages/ops,
+   fan-out width, whole-file reads vs targeted, re-reads of in-context material,
+   model-tier mix, the share already absorbed by scripts). Record the estimate
+   beside the DORA baseline so it trends cycle-over-cycle. Name the SINGLE
+   highest-leverage reduction and route it like any change — but score it on
+   **DORA-value-per-token, never tokens in isolation**: reject a cut that would
+   slow lead time, raise CFR, or lose quality; accept a token INCREASE that buys a
+   real DORA gain. Register the chosen optimisation (step 7) with both its token
+   target and the DORA metric it must not harm. [EXP-055]
 5. Snapshot the active process to `/process/process-history/vNN-<date>.md`, and
    fill the anticipated-vs-observed score for the PREVIOUS change. Revert or
    rework any prior change that was not a net win across throughput (lead

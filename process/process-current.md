@@ -691,6 +691,20 @@ retro scores anticipated-vs-observed. A change-set is a net win only if
 throughput, quality, frequency, and recovery improve or hold in aggregate — an
 improvement that buys one metric by degrading another is reverted or reworked.
 
+**Token cost is the explicit COST side of this economic ledger (v56 — human-
+directed).** Every run consumes tokens (the agents' compute cost); DORA
+(throughput, quality, frequency, recovery) is the VALUE side. The two are
+optimised TOGETHER, not in isolation: the goal is the most DORA value per token,
+not the fewest tokens. So a token reduction that degrades a DORA metric (slower
+lead time, higher CFR, lost quality) is rejected exactly as a one-metric win
+that degrades another is; and a token INCREASE that buys a real DORA gain (e.g.
+a capable model tier on the constraint agent, an extra verification pass that
+cuts CFR) is accepted as a deliberate, scored bet. Token spend that buys no
+DORA value — re-reading files already in context, redundant agent dispatches,
+oversized context loads, prompt scaffolding that no longer earns its place — is
+pure waste and is removed. Token efficiency is a tracked dimension, never a
+master metric that overrides quality.
+
 ## 25a. Changes are experiments (v32 — human-directed)
 
 **Every routed change — agent-file edit, process section, tool, skill note —
@@ -823,6 +837,28 @@ A mechanical op done ≥3× by hand is a script waiting to be written. First
 instances: `dora.py record` (ledger) and `dora.py log-decision` (decision-log
 append). Target: orchestrator context/overhead (the standing constraint) + lead
 time. [EXP-038]
+
+**Review token usage every retro and balance it against DORA (v56 — human-
+directed).** Token spend is the cost side of §24's economic ledger, so each retro
+runs a standing **token-efficiency review** alongside the DORA recompute:
+1. **Estimate the cycle's token consumption and where it went** — which agents /
+   stages / operations dominated. Use the signals available: agent-dispatch count
+   and fan-out width, context-load size (whole-file reads vs targeted reads, the
+   `process-framework` skill's load-only-what-you-need discipline), re-reads of
+   material already in context, model-tier mix (§15a), and the share already
+   absorbed by scripts (EXP-038). The harness reports per-run token totals; record
+   the estimate beside the DORA baseline so it is trackable cycle-over-cycle.
+2. **Name the single highest-leverage reduction** and route it like any change —
+   e.g. tighten a bloated prompt/agent-def, replace whole-file reads with targeted
+   reads or a skill, kill a redundant agent dispatch or duplicate search, scriptify
+   a repeated mechanical op, drop scaffolding that no longer earns its place.
+3. **Score it against DORA, never in isolation (§24).** Pick the change with the
+   best DORA-value-per-token: a token cut that would slow lead time, raise CFR, or
+   lose quality is REJECTED; a token *increase* that buys a real DORA gain (a
+   capable tier on the constraint agent, an extra verification pass that cuts CFR)
+   is an accepted, scored bet. The aim is maximum DORA per token, not minimum
+   tokens. Register the chosen optimisation as an experiment with both its token
+   target AND the DORA metric it must not harm. [EXP-055]
 
 ---
 

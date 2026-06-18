@@ -294,16 +294,21 @@ synth-infra:
 # OAG_INFRA := work/OagEventSource/src/infra  (aliased below for clarity)
 # ---------------------------------------------------------------------------
 OAG_APP   := work/OagEventSource/src/app
-OAG_INFRA := work/OagEventSource/src/infra
 OAG_LOCAL := work/OagEventSource/src/app/local
+OAG_ROOT  := work/OagEventSource
 NVM_NODE_BIN := $(HOME)/.nvm/versions/node/v24.12.0/bin
 
-# EXP-050 leg-b: embed PATH in every recipe line so node/npx/cdk resolve in
+# EXP-050 leg-b: embed PATH in every recipe line so node/npx resolve in
 # non-interactive agent shells without depending on the session env.
 # macOS GNU Make 3.81: 'export PATH :=' modifies Make's variable but does NOT
 # propagate to recipe sub-shells. The correct fix is a per-recipe PATH prefix.
 # Each recipe below starts with PATH=$(NVM_NODE_BIN):$$PATH so the correct
 # node binary is found regardless of how make was invoked.
+#
+# OI-007 (2026-06-18): CDK targets (synth-infra-oag, diff-oag, deploy-oag,
+# test-infra-oag, bootstrap-oag-dev/prod, deploy-oidc-oag-dev/prod,
+# diff-oag-dev/prod, deploy-oag-dev/prod) replaced with SST targets.
+# src/infra/ deleted. IaC framework = SST v3 (sst.config.ts at project root).
 
 # make test-app-oag  — vitest run for the domain core (no DDB)
 test-app-oag:
@@ -318,134 +323,52 @@ build-app-oag:
 	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_APP) run build
 
 # make bundle-lambda-oag  — UC-18: esbuild-bundle the flight-feed-api handler
-# from src/app into src/infra/assets/feed-handler/handler.js (CommonJS,
-# @aws-sdk/* external). The CDK stack references that asset via
-# lambda.Code.fromAsset; CI runs this before synth/deploy so the deployed
-# Lambda ships the REAL handler (not the bootstrap inline 503 stub).
+# from src/app into infra/assets/feed-handler/handler.js (CommonJS, @aws-sdk/* external).
+# SST reads this asset at deploy time. Run before deploy-sst-oag.
 bundle-lambda-oag:
 	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_APP) run bundle:lambda
 
 # make bundle-ingest-lambda-oag  — UC-25: esbuild-bundle the oag-ingest handler
 # from src/app into infra/assets/ingest-handler/handler.js (CommonJS,
 # @aws-sdk/* external, @azure/event-hubs BUNDLED — pure-JS, not AWS-provided).
-# Run before sst deploy so the ingest Lambda ships the real handler.
 bundle-ingest-lambda-oag:
 	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_APP) run bundle:ingest-lambda
 
-# make test-infra-oag  — jest policy-check assertions on the synthesized template (offline)
-test-infra-oag:
-	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_INFRA) test
+# make bundle-all-oag  — bundle all Lambda handlers + Fargate consumer (SST deploy prerequisite)
+bundle-all-oag:
+	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_APP) run bundle:lambda
+	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_APP) run bundle:ingest-lambda
+	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_APP) run bundle:projector
+	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_APP) run bundle:consumer
 
-# make synth-infra-oag  — CDK synth OagFeedStack (offline; no AWS creds needed)
-# OAG_BUILD_SHA optional: make synth-infra-oag OAG_BUILD_SHA=$(git rev-parse HEAD)
-OAG_BUILD_SHA ?= local
-synth-infra-oag:
-	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_INFRA) run cdk -- synth OagFeedStack --quiet \
-	  -c buildSha=$(OAG_BUILD_SHA)
-
-# make preflight-oag  — EXP-056 deploy pre-flight: assert all external/cross-account
-# identifiers the OagFeedStack references RESOLVE before cdk deploy is run.
-# Checks: 2 OTel layer ARNs, Dash0 secret ARN, Dash0 ingress DNS.
-# Exits nonzero if any check fails — fails cheaply before CloudFormation is touched.
-# DASH0_SECRET_ARN can be overridden via env (default: the sandbox secret ARN).
+# make preflight-oag  — EXP-056 deploy pre-flight: assert all external identifiers
+# that sst.config.ts references resolve before sst deploy is run.
 preflight-oag:
 	AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=eu-west-2 \
 	  DASH0_SECRET_ARN=$${DASH0_SECRET_ARN:-arn:aws:secretsmanager:eu-west-2:533266989599:secret:dash0-api-key-5buL4f} \
 	  bash work/OagEventSource/infra/scripts/preflight.sh --profile $(AWS_PROFILE) --region eu-west-2
 
-# make diff-oag  — CDK diff (requires live AWS creds + bootstrap complete)
-diff-oag:
-	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_INFRA) run cdk -- diff OagFeedStack \
-	  -c buildSha=$$(git rev-parse --short HEAD 2>/dev/null || echo local) \
-	  --profile $(AWS_PROFILE)
+# make diff-sst-oag  — SST diff (requires live AWS creds; sandbox stage)
+diff-sst-oag: bundle-all-oag
+	make -C $(OAG_ROOT) diff-sst STAGE=sandbox
 
-# make deploy-oag  — CDK deploy OagFeedStack (sandbox)
-# §F5 HUMAN GATE — run this only after the human approves the first deploy.
-# EXP-056: pre-flight runs automatically before deploy to assert all external ids resolve.
-# Prerequisites:
-#   1. make -C work/OagEventSource/src/infra bootstrap  (CDK bootstrap in eu-west-2)
-#   2. Secrets Manager: dash0 API key secret exists in eu-west-2
-#   3. export DASH0_SECRET_ARN=arn:aws:secretsmanager:eu-west-2:533266989599:secret:dash0-api-key-5buL4f
-deploy-oag: preflight-oag
-	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_INFRA) run cdk -- deploy OagFeedStack \
-	  --require-approval never \
-	  -c buildSha=$$(git rev-parse HEAD 2>/dev/null || echo local) \
-	  --profile $(AWS_PROFILE)
-
-# ---------------------------------------------------------------------------
-# OagEventSource — dev environment targets (ids-dev account 484908302294)
-# ---------------------------------------------------------------------------
-# HARD CONSTRAINT: ids-dev SSO profile is ReadOnly. The one-time bootstrap
-# and deploy-oidc-oag-dev MUST be run with an elevated/admin profile.
+# make deploy-sst-oag  — SST deploy (sandbox)
+# §F5 HUMAN GATE — run after the human approves first deploy + OAG Event Hub secret created.
+# EXP-056: run preflight-oag first to assert all external ids resolve.
 # See work/OagEventSource/runbook/dev-prod-deploy.md.
-
-# make bootstrap-oag-dev
-# One-time CDK bootstrap for ids-dev. Requires an elevated IAM role (NOT ReadOnly).
-# Pass ADMIN_PROFILE=<elevated-profile> to override.
-ADMIN_PROFILE_DEV  ?= ids-dev
-bootstrap-oag-dev:
-	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_INFRA) run cdk -- bootstrap \
-	  aws://484908302294/eu-west-2 \
-	  --trust 484908302294 \
-	  --cloudformation-execution-policies arn:aws:iam::aws:policy/AdministratorAccess \
-	  --profile $(ADMIN_PROFILE_DEV)
-
-# make deploy-oidc-oag-dev
-# One-time: deploy the OIDC role stack into ids-dev. Requires elevated credentials.
-deploy-oidc-oag-dev:
-	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_INFRA) run cdk -- deploy OagOidcStack-dev \
-	  --require-approval never \
-	  -c githubOrg=john-aerocloud \
-	  -c githubRepo=claude_learning_agents \
-	  -c accountEnv=dev \
-	  --profile $(ADMIN_PROFILE_DEV)
-
-# make diff-oag-dev
-diff-oag-dev:
-	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_INFRA) run cdk -- diff OagFeedStack-dev \
-	  -c buildSha=$$(git rev-parse --short HEAD 2>/dev/null || echo local) \
-	  --profile ids-dev
-
-# make deploy-oag-dev  — §F5 HUMAN GATE; CI uses this after OIDC role is provisioned
-deploy-oag-dev:
-	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_INFRA) run cdk -- deploy OagFeedStack-dev \
-	  --require-approval never \
-	  -c buildSha=$$(git rev-parse HEAD 2>/dev/null || echo local) \
-	  --profile ids-dev
+deploy-sst-oag: preflight-oag bundle-all-oag
+	make -C $(OAG_ROOT) deploy-sst STAGE=sandbox
 
 # ---------------------------------------------------------------------------
-# OagEventSource — prod environment targets (ids-prod account 716403253029)
+# OagEventSource — dev / prod targets (DEFERRED — ids-dev/ids-prod ReadOnly blocker)
 # ---------------------------------------------------------------------------
-# HARD CONSTRAINT: ids-prod SSO profile is ReadOnly. The one-time bootstrap
-# and deploy-oidc-oag-prod MUST be run with an elevated/admin profile.
-# See work/OagEventSource/runbook/dev-prod-deploy.md.
-
-ADMIN_PROFILE_PROD ?= ids-prod
-bootstrap-oag-prod:
-	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_INFRA) run cdk -- bootstrap \
-	  aws://716403253029/eu-west-2 \
-	  --trust 716403253029 \
-	  --cloudformation-execution-policies arn:aws:iam::aws:policy/AdministratorAccess \
-	  --profile $(ADMIN_PROFILE_PROD)
-
-deploy-oidc-oag-prod:
-	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_INFRA) run cdk -- deploy OagOidcStack-prod \
-	  --require-approval never \
-	  -c githubOrg=john-aerocloud \
-	  -c githubRepo=claude_learning_agents \
-	  -c accountEnv=prod \
-	  --profile $(ADMIN_PROFILE_PROD)
-
-diff-oag-prod:
-	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_INFRA) run cdk -- diff OagFeedStack-prod \
-	  -c buildSha=$$(git rev-parse --short HEAD 2>/dev/null || echo local) \
-	  --profile ids-prod
-
-deploy-oag-prod:
-	PATH=$(NVM_NODE_BIN):$$PATH npm --prefix $(OAG_INFRA) run cdk -- deploy OagFeedStack-prod \
-	  --require-approval never \
-	  -c buildSha=$$(git rev-parse HEAD 2>/dev/null || echo local) \
-	  --profile ids-prod
+# These targets are stubs. ids-dev (484908302294) and ids-prod (716403253029)
+# SSO profiles are ReadOnly. One-time OIDC role provisioning requires a human
+# with elevated access. See work/OagEventSource/runbook/dev-prod-deploy.md.
+#
+# Once unblocked:
+#   deploy-sst-oag-dev  → make -C $(OAG_ROOT) deploy-sst STAGE=dev
+#   deploy-sst-oag-prod → make -C $(OAG_ROOT) deploy-sst STAGE=prod
 
 # make test-adapter-oag  — UC-22 DynamoDB Local adapter test suite
 # Requires DDB Local running: make ddb-local-up
@@ -485,7 +408,7 @@ seed-oag:
 	TABLE_NAME=$(OAG_SEED_TABLE) AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=eu-west-2 \
 	  PATH=$(NVM_NODE_BIN):$$PATH node work/OagEventSource/src/app/scripts/seed-event-store.mjs
 
-.PHONY: test-app-oag lint-app-oag build-app-oag bundle-lambda-oag bundle-ingest-lambda-oag test-infra-oag synth-infra-oag preflight-oag diff-oag deploy-oag seed-oag test-adapter-oag ddb-local-up ddb-local-down ddb-local-create-table bootstrap-oag-dev deploy-oidc-oag-dev diff-oag-dev deploy-oag-dev bootstrap-oag-prod deploy-oidc-oag-prod diff-oag-prod deploy-oag-prod
+.PHONY: test-app-oag lint-app-oag build-app-oag bundle-lambda-oag bundle-ingest-lambda-oag bundle-all-oag preflight-oag diff-sst-oag deploy-sst-oag seed-oag test-adapter-oag ddb-local-up ddb-local-down ddb-local-create-table
 
 # s007 SHARED §11a probe (UC1+UC3): two-browser disconnect skeleton against the
 # DEPLOYED path (Playwright, two real browsers — pair, close one tab, survivor

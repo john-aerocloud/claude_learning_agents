@@ -81,15 +81,30 @@ The runbook's first diagnostic is always: how to read the build identity of
 each surface (exact header/field/log names) and how to compare it with the
 expected deploy — version skew is checked before any behavioural diagnosis.
 
-## Consumer-integration documentation (human-directed)
+## Consumer-integration documentation — produced as a SKILL (human-directed)
 When the project exposes a **consumable interface for downstream/external
 consumers** — a public API, an event feed, a subscribe channel, an SDK — maintain
 CONSUMER-FACING integration docs, distinct from the operator `usage.md` / support
-`runbook.md`. Home: `work/<project>/docs/consumers/` (a `README.md` + diagrams).
-This applies to THIS project and EVERY future project with a downstream-consumable
-surface; keep it current every slice that changes that surface (new event types,
-endpoints, channels, guarantees) — a stale consumer contract is a principle failure.
-Produce and maintain:
+`runbook.md`. This applies to THIS project and EVERY future project with a
+downstream-consumable surface; keep it current every slice that changes that
+surface (new event types, endpoints, channels, guarantees) — a stale consumer
+contract is a principle failure.
+
+**Produce it as a SKILL the consuming LLM/agent loads and builds from — not just
+human prose.** Home: `work/<project>/docs/consumers/` as a self-contained skill
+package: a **`SKILL.md`** with proper frontmatter (`name:` like
+`<project>-consumer`; `description:` that triggers when an LLM is *implementing a
+consumer of this service* — name the service + the trigger, e.g. "Use when building
+a downstream consumer of the OagEventSource flight-event feed…") plus the
+structured reference content below, and any companion reference files it links.
+Write it so it is **LLM-consumable and portable**: a downstream team can drop the
+folder into their own `.claude/skills/` and an agent can implement a working
+consumer from it ALONE — so it must be self-contained (no references to this
+codebase's internals or paths), explicit, and machine-processable (precise
+schemas, concrete request/response + payload examples, copy-pasteable snippets,
+exact endpoint/channel/cursor names). Progressive disclosure is fine (a tight
+`SKILL.md` that points to deeper reference files), per the skill conventions.
+The skill content must cover:
 1. **Consumer README** — what the service provides to a consumer, **what to
    subscribe to / pull** (endpoints, channels, topics, consumer groups), auth, and
    the **data contract**: the event/envelope schema with field meanings, the event

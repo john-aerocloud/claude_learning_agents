@@ -77,11 +77,19 @@ seats, aircraftType).
 ## The two event kinds (the canonical-mapping source)
 
 ### Schedule events — `documentType: "ScheduleInstance"`
-Planned/published schedule data + changes to it. **`state` ∈ `NEW` | `UPDATED` |
-`REINSTATED` | `DELETED`** (v1 used a `status` of `changed`/`deleted`, deprecated → `state`).
-Carries routing (stops, intermediate airports), aircraft, booking/freight classes,
-seating capacity, on-time-performance, codeshare. When `state = NEW` or `DELETED`,
-`changes` is always empty.
+Planned/published schedule data + changes to it. Carries routing (stops, intermediate
+airports), aircraft, booking/freight classes, seating capacity, on-time-performance,
+codeshare. **⚠ D-10 — `state` enum unconfirmed.** Earlier prose said v2 `state` ∈ `NEW` |
+`UPDATED` | `REINSTATED` | `DELETED`, but the **live v2 doc sample** (captured doc-grade to
+`OagEventSource fixtures/oag-doc-samples/v2-schedule-event.json`) shows **`state: "changed"`**
+with `version:"2"` (and `changes[]` `previousValue:"scheduled"` for `propertyName:"state"`) —
+i.e. lowercase `scheduled`/`changed`-style values. Treat the schedule `state` enum as
+**unconfirmed** until a live schedule event is captured. **Schedule times differ from
+status:** `departure.date{local,utc}` + `departure.time{local,utc}` where `time` is a bare
+`"HH:mm"` string (no seconds/offset) — NOT the nested `scheduled/estimated/actual` blocks
+of status. Body-root `sequenceNumber` here is the **leg** sequence (don't confuse with an
+event-store position). `scheduleInstanceKey` is present (64-hex) ⇒ schedule + status share
+the per-flight aggregate. When `state = NEW` or `DELETED`, `changes` is always empty.
 
 ### Status events — `documentType: "FlightStatus"`
 Operational reality. **`state` ∈ `Scheduled` | `OutGate` | `InAir` | `Landed` | `InGate`
@@ -94,13 +102,26 @@ before departure). **Delay is NOT a state** — it surfaces as `outGateTimelines
 two contracts — preserve that split in the canonical model (a requirements decision).
 
 ### Identity & idempotency keys (load-bearing)
-- **`scheduleInstanceKey`** — stable hash (SHA-256-style) **derived from flight properties;
-  consistent across updates** for the same flight instance. The per-flight aggregate id.
-- **`statusKey`** — hash of the **current status content; changes whenever the event
-  content changes**. The dedup/idempotency key for status updates.
-- `messageId` (per-delivery UUID), `messageTimestamp` (epoch ms).
-- **Idempotency rule (from requirements):** dedupe by `scheduleInstanceKey`/`statusKey`;
-  the same logical event redelivered (at-least-once) must fold to the same state.
+- **`scheduleInstanceKey`** — stable hash (SHA-256-style, 64-hex) for the flight instance,
+  **consistent across all of a flight's updates** (✅ VERIFIED 2026-06-18 against the live
+  capture: 41 flights = 41 distinct keys, every multi-message flight held ONE key across its
+  whole life; `== operatingInstanceKey` when `isOperating:true`). **The per-flight aggregate
+  id / stream key.** Equivalent to the human identity `carrierCode.iata + flightNumber +
+  originationDate + departure.airport`.
+- **`statusKey`** — ⚠️ **CORRECTED 2026-06-18 (DEFECT-OAG-004).** The earlier text ("hash of
+  current status content; changes whenever content changes") is **WRONG**. In the live feed
+  `statusKey` is **per-flight (per-status-stream) and CONSTANT across a flight's updates** —
+  it does NOT change when state/times/gate change. Proven: 19/19 repeat-`statusKey` groups in
+  the capture carried *differing* content (e.g. one `statusKey` spanned Scheduled→OutGate with
+  a 40-min ETA slip; another spanned OutGate→InAir→Landed). It is **NOT a per-update
+  fingerprint** and **must NOT be used as the dedup key** — doing so drops every real update
+  after the first (the DEFECT-OAG-004 cause: 16k single-event streams).
+- **`messageId`** (per-delivery UUID) — **the only per-delivery-unique field; the correct
+  redelivery-dedup key.** `messageTimestamp` (epoch-ms string).
+- **Idempotency rule (CORRECTED):** dedupe redeliveries by **`messageId`**, and rely on the
+  **field-diff fold** (no material change → no-op) for true idempotency. Do **NOT** dedupe by
+  `statusKey`. A new `messageId` whose content differs from the prior aggregate is a genuine
+  update and must fold into a state-change event.
 
 ### Times — scheduled / estimated / actual + OOOI
 **⚠ CORRECTED FROM LIVE CAPTURE (2026-06-17) — times are NESTED, not flat.** The
@@ -149,14 +170,43 @@ First live listen-only spike (OagEventSource `fixtures/oag-raw/`, summary in
   `messageId`/`messageTimestamp` live inside the body. `messageTimestamp` is a **string**
   epoch-ms (not numeric).
 - **Times/OOOI are nested** (see the Times section — D-2, the big one).
-- **`changes[]` is NOT always present** — only when the alert has `content:changeindicator`.
-  Don't assume it; the captured (TPA-port-scoped) alert had none.
+- **`changes[]` is NOT always present** — only when the alert's **`changeIndicator` flag is
+  `true`** (a top-level boolean alert field, distinct from `content`). The TPA alert had it
+  `false`, so none appeared. We set it `true` via the update endpoint 2026-06-17 (below);
+  a confirmation re-spike then showed **23/23 events carrying `changes[]`** (fixtures in
+  `fixtures/oag-raw-changeind/`). **TRAP:** the `changes[].propertyName` paths are
+  **PascalCase** (`Arrival.Times.Estimated.OnGround.UTC`) while the v2 body is camelCase
+  (`arrival.times.estimated…`) — they do NOT index the body directly; use `changes[]` as a
+  hint only and compute the real field diff against stored state.
 - New fields seen beyond the doc: `operatingInstanceKey`, `marketingInstancesKeys[]`,
   `alertId`, `serviceType`, `originationDate`, richer codeshare/wet-lease disclosure
   (`operatingAirlineDisclosure`, `cabinCrewEmployer`, `cockpitCrewEmployer`).
-- ⏳ **`ScheduleInstance` (schedule events) NOT yet seen live** — the spike caught only
-  status events. The v2 SCHEDULE envelope is still unconfirmed; re-spike (longer window
-  or a schedule-bearing alert) before building the schedule normaliser.
+- ⏳ **`ScheduleInstance` not yet captured live — cause is FREQUENCY, not config.**
+  Two spikes (90s → 4 events; **10min → 82 events**) caught **100% `FlightStatus`, zero
+  `ScheduleInstance`**. The live mgmt API confirms the TPA alert `b73cc4d9` has
+  **`schedules:true`** — the earlier "status-only" reading was WRONG. Schedule *changes*
+  are simply sparse vs. continuous status churn, so short daytime windows catch none. To
+  land one: a **long/overnight** listen window, or pull schedules via the reconciliation API.
+  For the envelope shape now, use the doc-grade sample
+  `flight-info-alerts-event-samples-v2-schedule-events` (saved to
+  `OagEventSource fixtures/oag-doc-samples/`; note **D-10**: that sample shows `state:"changed"`,
+  not the `NEW/UPDATED/REINSTATED/DELETED` enum — schedule `state` enum unconfirmed). The
+  10-min run also confirmed live states `OutGate` + `InGate` (corpus covers
+  Scheduled/OutGate/InAir/Landed/InGate; only Canceled/Proposed unseen).
+- 🛠 **Alert MANAGEMENT API (key = `eventApi.subscriptionKey`, header `Subscription-Key`):**
+  - **GET one:** `GET /flight-info-alerts/alerts/{alertId}?version=v1` → 200, full config
+    (`status`,`schedules`,`changeIndicator`,`statusChangeFilters`,`active`,timestamps,nulls
+    for unset create-fields). No extra header needed.
+  - **LIST:** `GET /flight-info-alerts/alerts?version=v1` requires an extra **`accountId`
+    header**.
+  - **UPDATE:** **`PATCH /flight-info-alerts/alerts?version=v1`** (collection; `alertId` in
+    the body) → 200, partial — send only the fields to change, the rest are preserved.
+    (`PATCH`/`PUT` on `/alerts/{id}` and `PUT` on the collection all **404**; only
+    collection-`PATCH` is routed.) Verified live: flipped `changeIndicator:false→true` on
+    `b73cc4d9` with `{"alertId":"…","changeIndicator":true}` 2026-06-17 21:13Z.
+  - **CREATE:** `POST /alerts?version=v1` is **rejected 400 if it overlaps** an existing
+    alert (`"already covering these events with other alert(s):<id>"`) — so you cannot run
+    a parallel alert for the same scope; PATCH the existing one instead.
 
 ## Still open (need the authenticated portal / sandbox or are non-OAG)
 - ⚠ PORTAL — full v2 SCHEDULE-event sample (status now captured); precise required-field

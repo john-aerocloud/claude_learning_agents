@@ -1,7 +1,7 @@
 ---
-process_version: 58
-effective_from: 2026-06-18
-supersedes: v57
+process_version: 59
+effective_from: 2026-06-19
+supersedes: v58
 status: active
 ---
 

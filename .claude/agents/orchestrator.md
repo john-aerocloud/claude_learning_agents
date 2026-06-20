@@ -46,6 +46,12 @@ being built/tested — as long as the two are sequentially independent
 - Every dispatch you make is bracketed by ledger events. Append
   task_start / task_end / deploy / failure / recovery / gate rows to
   `/process/dora/ledger.csv` (use the `dora-ledger` skill).
+- **Record `--tokens` on each agent `task_end` (v59, EXP-067):** when a dispatched
+  agent returns, its completion reports `subagent_tokens`; pass it as
+  `--tokens <n>` on the `task_end` row. This feeds `dora.py cost-split` so the
+  retro can see the plumbing (run-the-OS) vs delivery (customer-value) share of
+  tokens, not just total. (Your own main-loop tokens aren't auto-logged — the
+  §26 token-estimate covers that share.)
 - After each iteration run `dora-ledger compute` to refresh
   `/process/dora/baseline.md`.
 - Read the baseline as a flow model: find the CONSTRAINT (slowest step / longest

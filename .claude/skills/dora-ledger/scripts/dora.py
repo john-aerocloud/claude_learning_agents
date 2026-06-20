@@ -26,7 +26,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..",
 LEDGER = os.path.join(ROOT, "process", "dora", "ledger.csv")
 BASELINE = os.path.join(ROOT, "process", "dora", "baseline.md")
 COLS = ["timestamp","project","iteration","slice","agent","event",
-        "duration_s","outcome","ref","note","item_id","queue"]
+        "duration_s","outcome","ref","note","item_id","queue","tokens"]
 AGENTS = ["product","solution-architect","cicd","engineer","ui-designer","tester","documenter","orchestrator","flow-manager"]
 STAGES = ["cicd","ui-designer","engineer","tester"]
 
@@ -63,7 +63,7 @@ def cmd_record(a):
             w.writerow(COLS)
         w.writerow([now_iso(), a.project, a.iteration, a.slice, a.agent,
                     a.event, a.duration or "", a.outcome or "na",
-                    a.ref or "", a.note or "", item_id, a.queue or ""])
+                    a.ref or "", a.note or "", item_id, a.queue or "", a.tokens or ""])
     print(f"recorded {a.event} for {a.agent} ({a.project}/{a.slice}/{item_id})")
 
 def cmd_log_decision(a):
@@ -110,6 +110,40 @@ def is_defect_intake(r):
 def is_deploy_failure(r):
     return (r["event"] == "deploy_failure" or
             (r["event"] == "failure" and not DEFECT_REF.match(r["ref"].strip())))
+
+# --- plumbing vs delivery cost classification (v59, EXP-067) ----------------
+# "Plumbing" = the cost of RUNNING the agent OS (coordination, flow management,
+# bookkeeping, gates, retros) as opposed to producing/validating customer value
+# ("delivery"). The retro watches the plumbing SHARE of tokens + time so it can
+# target system overhead with evidence, not just total cost. Rule: a row is
+# plumbing if its agent runs the machine (orchestrator/flow-manager) OR its event
+# is a coordination/bookkeeping marker; everything else (engineer/tester/ui/
+# product/architect/cicd/documenter building, validating, designing, deploying)
+# is delivery.
+PLUMBING_AGENTS = {"orchestrator", "flow-manager"}
+PLUMBING_EVENTS = {"retro", "gate_decision", "log_decision", "enqueue", "dequeue",
+                   "item_registered", "loop_wake", "parallel_dispatch", "collision"}
+def cost_class(agent, event):
+    return "plumbing" if (agent in PLUMBING_AGENTS or event in PLUMBING_EVENTS) else "delivery"
+
+def _cost_split(rows):
+    """Sum duration_s + tokens by plumbing/delivery class over a row subset.
+    Returns (agg, token_coverage_fraction)."""
+    agg = {"plumbing": {"time": 0.0, "tokens": 0}, "delivery": {"time": 0.0, "tokens": 0}}
+    tok_rows = 0
+    for r in rows:
+        cls = cost_class(r["agent"], r["event"])
+        d = r["duration_s"].strip()
+        if d:
+            try: agg[cls]["time"] += float(d)
+            except ValueError: pass
+        t = (r.get("tokens") or "").strip()
+        if t:
+            try: agg[cls]["tokens"] += int(float(t)); tok_rows += 1
+            except ValueError: pass
+    end_rows = [r for r in rows if r["event"] == "task_end"]
+    coverage = (tok_rows / len(end_rows)) if end_rows else None
+    return agg, coverage
 
 def _metrics(rows):
     """Compute the four key metrics over an arbitrary row subset (used for both
@@ -201,6 +235,25 @@ def cmd_compute(_):
         L.append(f"| {ag} | {len(xs)} | {fmt(modal(xs))} | "
                  f"{fmt(statistics.median(xs) if xs else None)} | "
                  f"{fmt(statistics.mean(xs) if xs else None)} |")
+    # plumbing vs delivery system-overhead split (v59, EXP-067)
+    pl, cov = _cost_split(rows)
+    ptt = pl["plumbing"]["time"] + pl["delivery"]["time"]
+    ptk = pl["plumbing"]["tokens"] + pl["delivery"]["tokens"]
+    def _shr(x, tot): return ("%.0f%%" % (100 * x / tot)) if tot else "—"
+    L.append("\n## Plumbing vs delivery (system overhead — EXP-067)\n")
+    L.append("Plumbing = running the agent OS (orchestrator + flow-manager + "
+             "retro/gate/bookkeeping events); delivery = producing/validating "
+             "customer value. Watch the plumbing SHARE and its trend.\n")
+    L.append("| class | time (s) | time % | tokens | tokens % |")
+    L.append("|-------|----------|--------|--------|----------|")
+    for cls in ("plumbing", "delivery"):
+        L.append(f"| {cls} | {fmt(pl[cls]['time'])} | {_shr(pl[cls]['time'],ptt)} "
+                 f"| {pl[cls]['tokens']} | {_shr(pl[cls]['tokens'],ptk)} |")
+    L.append(f"\n_Plumbing share: time {_shr(pl['plumbing']['time'],ptt)}, "
+             f"tokens {_shr(pl['plumbing']['tokens'],ptk)} "
+             f"(token coverage {('%.0f%%' % (100*cov)) if cov is not None else '—'} of "
+             f"task_end rows — grows as dispatches log --tokens, v59)._")
+
     med = {ag: statistics.median(durs[ag]) for ag in durs if durs[ag]}
     constraint = max(med, key=med.get) if med else None
     L.append("\n## Theory-of-Constraints read\n")
@@ -431,16 +484,46 @@ def cmd_project_state(a):
     print(f"wrote {out} | items={len(item_state)} queues={len(queue_members)} "
           f"{'DRIFT=%d (legacy)' % len(drift) if drift else 'coherent'}")
 
+def cmd_cost_split(a):
+    """Show how much TIME + TOKENS go to plumbing (running the OS) vs delivery
+    (customer value) — the retro's system-overhead lens (v59, EXP-067)."""
+    rows = read_rows()
+    if a.project:
+        rows = [r for r in rows if r["project"] == a.project]
+    if a.window:
+        deploy_ts = sorted([r["timestamp"] for r in rows if r["event"] == "deploy"])
+        if len(deploy_ts) > a.window:
+            cutoff = deploy_ts[-a.window]
+            rows = [r for r in rows if r["timestamp"] >= cutoff]
+    agg, coverage = _cost_split(rows)
+    tt = agg["plumbing"]["time"] + agg["delivery"]["time"]
+    tk = agg["plumbing"]["tokens"] + agg["delivery"]["tokens"]
+    def pct(x, tot): return ("%.0f%%" % (100 * x / tot)) if tot else "—"
+    label = (a.project or "ALL") + (f" (last {a.window} deploys)" if a.window else "")
+    cov = ("%.0f%%" % (100 * coverage)) if coverage is not None else "—"
+    print(f"# Plumbing vs Delivery — {label}")
+    print(f"{'class':10}{'time_s':>10}{'time%':>7}{'tokens':>12}{'tok%':>7}")
+    for cls in ("plumbing", "delivery"):
+        print(f"{cls:10}{agg[cls]['time']:>10.0f}{pct(agg[cls]['time'],tt):>7}"
+              f"{agg[cls]['tokens']:>12}{pct(agg[cls]['tokens'],tk):>7}")
+    print(f"{'TOTAL':10}{tt:>10.0f}{'100%':>7}{tk:>12}{'100%':>7}")
+    print(f"PLUMBING SHARE: time={pct(agg['plumbing']['time'],tt)} "
+          f"tokens={pct(agg['plumbing']['tokens'],tk)} | token coverage={cov} of task_end rows")
+
 def main():
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("record")
     for n in ["project","iteration","slice","agent","event"]:
         r.add_argument(f"--{n}", required=True)
-    for n in ["duration","outcome","ref","note","item-id","queue"]:
+    for n in ["duration","outcome","ref","note","item-id","queue","tokens"]:
         r.add_argument(f"--{n}")
     r.set_defaults(func=cmd_record)
     c = sub.add_parser("compute"); c.set_defaults(func=cmd_compute)
+    cs = sub.add_parser("cost-split")
+    cs.add_argument("--project")
+    cs.add_argument("--window", type=int)
+    cs.set_defaults(func=cmd_cost_split)
     fl = sub.add_parser("flow")
     fl.add_argument("--project", required=True)
     fl.add_argument("--out")

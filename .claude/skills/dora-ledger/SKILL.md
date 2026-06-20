@@ -9,14 +9,18 @@ The shared instrument for the whole agent team. The append-only event log lives
 at `/process/dora/ledger.csv`; the computed views at `/process/dora/baseline.md`
 (whole pipeline) and `work/<project>/dora/flow.md` (per-project queues + thieves).
 
-## Schema (v40)
+## Schema (v40, +tokens v59)
 
-`timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note,item_id,queue`
+`timestamp,project,iteration,slice,agent,event,duration_s,outcome,ref,note,item_id,queue,tokens`
 
-`item_id` and `queue` were added in v40 for the pull-based flow. Rows written
-before v40 have 10 fields; the tool pads `item_id`/`queue` to empty so old data
-still computes. **Populate `item_id` on every row** (REQ-/CHK-/SLC-/UC-/DEF-);
-when omitted it defaults to `--slice` for back-compat.
+`item_id` and `queue` were added in v40 for the pull-based flow. `tokens` was
+added in v59 (EXP-067). Rows written earlier have fewer fields; the tool pads
+the trailing columns to empty so old data still computes. **Populate `item_id`
+on every row** (REQ-/CHK-/SLC-/UC-/DEF-); when omitted it defaults to `--slice`.
+**`tokens`** = the token cost of the unit of work — for a dispatched agent, the
+`subagent_tokens` reported in its completion; put it on the `task_end`. Optional
+and back-compatible (blank = unknown), but the more rows carry it, the truer the
+plumbing/delivery token split (below) becomes.
 
 ## Record an event (every agent, around every unit of work)
 
@@ -73,6 +77,30 @@ Rewrites `work/<p>/dora/flow.md`: per-queue depth + median/total wait; the
 efficiency); the collision log (→ correct the dependency tree); and per-item
 lead time with wait-share. This is the primary input the retro reads to find
 the largest contributor to gross lead time.
+
+## Plumbing vs delivery cost split (retro, v59 — EXP-067)
+
+```
+python .claude/skills/dora-ledger/scripts/dora.py cost-split [--project <p>] [--window <N>]
+```
+
+Shows how much **time** and how many **tokens** went to **plumbing** (running the
+agent OS) vs **delivery** (producing/validating customer value), with the
+**plumbing share** of each. Classification (`cost_class`): a row is **plumbing**
+if its `agent` is `orchestrator`/`flow-manager` OR its `event` is a coordination/
+bookkeeping marker (`retro`, `gate_decision`, `log_decision`, `enqueue`,
+`dequeue`, `item_registered`, `loop_wake`, `parallel_dispatch`, `collision`);
+everything else (build/validate/design/deploy by the delivery agents) is
+**delivery**. `compute` also folds a plumbing-vs-delivery section into
+`baseline.md`.
+
+**Coverage caveat:** the split sums *logged* `duration_s` + `tokens`. Inline
+orchestrator coordination that is not bracketed as a timed `task_end` is
+under-counted on TIME; main-loop (non-dispatched) tokens are not auto-logged at
+all. So the split is precise for **delegated** work and the orchestrator's own
+overhead remains an **estimate** (pair it with the EXP-055 token-estimate at the
+retro). Token coverage (% of `task_end` rows carrying `--tokens`) is printed so
+you know how much to trust the token column; it rises as dispatches log tokens.
 
 Pipeline integration: have CI call `record` for deploy/failure/recovery so those
 metrics are real and not hand-entered.

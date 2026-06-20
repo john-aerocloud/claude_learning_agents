@@ -992,6 +992,23 @@ runs a standing **token-efficiency review** alongside the DORA recompute:
    tokens. Register the chosen optimisation as an experiment with both its token
    target AND the DORA metric it must not harm.
 
+**See the plumbing share — split the cost into running-the-OS vs delivering value
+(v59 — EXP-067).** The token-efficiency review above sees *total* cost; this step
+sees *where it goes*. Run `dora.py cost-split [--project <p>] [--window N]` (it
+also lands in `baseline.md`): it splits logged **time + tokens** into **plumbing**
+(orchestrator + flow-manager + retro/gate/bookkeeping events — running the agent
+OS) vs **delivery** (engineer/tester/ui/product/architect/cicd/documenter
+producing & validating customer value), and prints the **plumbing share** of each.
+The retro reads the plumbing share AND its TREND across retros; if it rises or
+exceeds target, route the single highest-leverage overhead reduction (scriptify a
+mechanical op per EXP-038, cut a redundant dispatch, restructure a process step) —
+guarded so delivery (lead time / CFR) is not harmed. Caveat: the split is precise
+for *delegated, logged* work; inline orchestrator coordination is under-counted on
+time and main-loop tokens aren't auto-logged, so pair the cost-split with the
+token-estimate above for the orchestrator's own overhead. Token coverage is
+printed; it improves as dispatches log `--tokens` (the orchestrator records each
+agent's `subagent_tokens` on its `task_end`).
+
 ---
 
 # STAGE F — Flow & queues (pull-based, v40)
@@ -1100,6 +1117,10 @@ defect item inserted ahead), seam serialisation (the blocking UC), worker
 contention (capacity `N`), deploy-queue wait (pipeline), gate wait (the gate),
 session idle (§13). The retro reads the ranked thieves as its primary input
 (this extends §5's wait taxonomy from per-slice to per-item with attribution).
+Time-thieves also carry a **plumbing vs delivery** class (v59, EXP-067): a thief
+that is plumbing (gate wait, bookkeeping, orchestrator coordination) feeds the
+`dora.py cost-split` plumbing share §26 watches, distinct from a delivery thief
+(seam serialisation, deploy-queue) that is the cost of the work itself.
 Target: gross lead time. [EXP-028]
 
 ## F5. Two gates; defects pre-empt

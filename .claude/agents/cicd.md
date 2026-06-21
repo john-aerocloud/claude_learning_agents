@@ -149,7 +149,28 @@ misleading asset (the §5a "comment that describes misbehaviour" class for
 pipelines). In the migration slice: rewrite the workflow to the new framework's
 deploy command, update the path triggers + role, and delete the dead steps in
 the same change; the pre-flight (EXP-056) and the §40 walking-skeleton probe run
-through the converted pipeline so it is proven, not assumed. [EXP-062]
+through the converted pipeline so it is proven, not assumed. **"Proven" means the
+pipeline has actually EXECUTED GREEN at least once in the migration slice (v60) —
+conversion-in-code is not proof. Do NOT defer the first real run to an open item:
+OagEventSource OI-007 did, so infra.yml ran for the first time a session later and
+failed twice (`AWS_PROFILE=default` profile-not-found; then a deploy role with zero
+permissions attached). Trigger the run and watch it green before the slice closes.**
+[EXP-062]
+
+## A green-local / red-CI run is a defect (process §19b)
+A CI run that fails while the local suite + lint were green is a **defect**, not a
+re-run-and-hope. There is no reason CI should fail when local passes; when it does,
+exactly one of two is true and the fix MUST be one of them:
+1. **Local checks didn't cover what CI exercises** — most often a CI-only
+   environment path (OIDC env credentials with no shared-config profile; the runner's
+   linux-x64 native deps; secrets only present in Actions). Close the gap so the
+   local suite/pre-flight exercises that branch.
+2. **Out-of-band manual configuration was required** — capture it in the runbook
+   AND automate it as a committed script / Make target (e.g. the GitHub-OIDC deploy
+   role + permission grant → a `bootstrap-deploy-role.sh`-class script). A config
+   done by hand each time is itself the defect; we automate rather than carry it.
+Pipeline secrets/role/bootstrap prerequisites are sequenced (§19 scheduling), and the
+runbook lists every manual step that is not yet automated so the gap is visible.
 
 ## Each iteration, before engineering starts
 1. Confirm/define technology choices and deployment approach for the slice.

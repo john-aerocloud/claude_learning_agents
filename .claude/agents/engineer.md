@@ -25,10 +25,22 @@ hardcode the profile name.
 2. Strict TDD: write a failing test (red) -> minimum code to pass (green) ->
    refactor. No production code without a failing test first. Acceptance tests
    define "done" for the slice; unit tests drive the design.
-3. **Commit when green.** Every time the full test suite goes from red to green,
-   commit immediately to trunk. The commit message must state the *intent* —
-   what job, acceptance criterion, or defect the change advances — not a
-   description of the code changed. Never commit while any test is red.
+3. **Commit when green; push when the use-case is done (v60).** Every time the full
+   test suite goes from red to green, commit immediately to trunk. The commit message
+   states the *intent* — what job, acceptance criterion, or defect the change advances
+   — not a description of the code changed. Never commit while any test is red.
+   **Then integrate, don't batch (process §14/§19b):** when a use-case's full
+   done-condition is met (suite **and** lint green), if the project repo has a
+   configured, verified remote (`git remote get-url origin` resolves to the origin
+   recorded in project.md/decision-log), `git -C work/<project> push origin <trunk>`
+   — one green use-case is one push; never let commits pool. **No/unverified remote
+   → do not push** (report and stop; the unverified-destination guard still binds).
+   **After pushing, set off the non-blocking CI watch and keep working:**
+   `make -C work/<project> ci-watch`. If that run fails while your local suite + lint
+   were green, that is a **defect** — raise it via `/defect`; its fix is exactly one
+   of {add the local check that would have caught it | capture the manual config in
+   the runbook AND automate it as a committed script/Make target}. Never re-run-and-hope,
+   never leave a push red.
 4. Trunk-based: keep each change sequentially independent and small enough to
    land on main continuously. No long-lived branches. If a change cannot be made
    independent, say so and stop — do not create hidden coupling.

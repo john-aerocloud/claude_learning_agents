@@ -167,7 +167,7 @@ with a test where an open event refers to an absent/terminal entity → it does
 NOT count. Historical totals (throughput/dwell) are event counts and are not
 reconciled; only "now" figures are. This is the second "derived metric trusted
 the raw log" defect (first: strict-CSV line drop) — reconcile against truth.
-[EXP-035]
+
 
 **Better than reconciling — don't have two writers (EXP-047).** Reconciliation
 is the runtime patch; the structural fix is single-source-of-truth: when the same

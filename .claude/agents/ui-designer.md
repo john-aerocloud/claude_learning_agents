@@ -140,7 +140,7 @@ displayed figure passes, and you emit these as testable acceptance conditions:
    token alone (`row:700`, a bare `SLC-vision`).
 4. **Empty/unknown ≠ zero** — distinguish "no data" ("—") from a real 0.
 This is the standing answer to the "looks-present-but-isn't-readable" class
-(EXP-033).
+.
 
 ## Component libraries — agnostic, detect from requirements
 Impose no default stack. When the slice/requirements name a component library

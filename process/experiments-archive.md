@@ -35,3 +35,16 @@ this is the index of what we've learned and folded in, not a working registry.
 - EXP-052 — cheap idempotency-extension UC class: a UC extending an existing dedup-before-diff guard keyed on a stable key costs ≈ test-authoring only — validated 2/2 (UC-11 + UC-16 both zero production code) — integrated v58 (product.md cost-class, plain practice)
 - EXP-023 — two-gate model: keep only requirement/defect INTAKE + infra-bearing DEPLOY; each removed gate (vision/slice/arch) replaced by a named assurance — validated 3/3 (SLC-004 infra-deploy gate caught DEFECT-OAG-001; the 3 removed gates 0 regression) — baselined v59 (process §F5, plain practice)
 - EXP-055 — token-efficiency retro review: every retro estimates token consumption + dominant consumers and routes the single highest-leverage reduction, scored on DORA-value-per-token (never minimum tokens) — validated 2/2 (SLC-004 chose deploy pre-flight; mega-session chose build-time defect pins) — baselined v59 (process §26, plain practice)
+
+- EXP-008 — changes-as-experiments lifecycle (scoring/retirement/null-hypothesis) — core process §25a/§26; registry maintained + acted on across every retro — integrated v60
+- EXP-011 — validated-experiment INTEGRATION + prune-to-archive — core process §25a; multiple integration passes (7db8d99, v45, v48, v60) — integrated v60
+- EXP-013 — `make impacted-tests` model-diff→impacted specs — tester planning -33% (12 vs 18min, s009) — integrated v60 (tester.md)
+- EXP-018 — experiment applies-to declared + listed at work-selection — core process §25a/§10 — integrated v60
+- EXP-021 — work-item model REQ/CHK/SLC/UC/DEF + per-item DORA from ledger — core process §F1 — integrated v60
+- EXP-024 — dedicated flow-manager owns queues/costing/buffers/dispatch — core agent roster + STAGE F — integrated v60
+- EXP-028 — time-thief attribution as primary retro input — core §F4/§26 (v60 retro used it: constraint=orchestrator) — integrated v60
+- EXP-029 — retro cadence (slice-completion + event-triggered, tunable) — core process §F8 — integrated v60
+- EXP-033 — validate against live data + figure-legibility/human-meaningfulness checklist — strong pattern (DEFECT-001/002/004/005/007/008) — integrated v60 (ui-designer.md/tester.md)
+- EXP-035 — derived now-state = RECENCY-ONLY predicate (4-turn craft lesson: simplest predicate wins) — superseded by EXP-048 single-source for new projects — integrated v60 (engineer.md/product.md)
+- EXP-037 — keep ledger/items.csv/queues coherent per-UC — superseded by EXP-048 for new projects; forward principle carried by EXP-047 — integrated v60
+- EXP-038 — retro scriptifies the cycle's most-repeated MECHANICAL op (one allowlisted command, not N Read+Edit) — validated 2/2 (SLC-003) — integrated v60 (process §26 + dora.py)

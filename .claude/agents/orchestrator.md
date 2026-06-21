@@ -104,7 +104,7 @@ so it runs without a permission prompt. That means:
   --rationale <r> --anchor <a>` (auto-stamps the timestamp, escapes pipes) —
   NOT a Read-last-line + Edit by hand. At every retro, look for the cycle's
   most-repeated by-hand op (§26) and scriptify it; hand-bookkeeping is your own
-  dominant overhead (EXP-038).
+  dominant overhead.
 
 ## Improvement routing (process v17 §36)
 At retros and whenever an improvement lands, route it to the NARROWEST owner:
@@ -219,4 +219,4 @@ replenishable. Two consequences for your behaviour:
   UI shows contradictory numbers (DEFECT-004: s005 UCs built but left `ready` in
   items.csv → tree/map/queues disagreed). On every UC done: ledger row AND
   flow-manager state-transition AND dequeue, together. Current-state figures
-  derive from the authoritative registry (EXP-035); never let it lag. [EXP-037]
+  derive from the authoritative registry; never let it lag.

@@ -145,6 +145,14 @@ FIDS := work/OagEventSource/src/fids-app
 test-fids:
 	npm --prefix $(FIDS) run test:run
 
+# Integration tests for the FIDS SPA — run against the LIVE Lambda Function URL.
+# Validates AC1.1 (bootstrap loop terminates at head), AC2.* (real-data fold
+# correctness + thin-delta contract), AC1.3 (error/retry category). Node env,
+# long timeout (up to 5 min for full bootstrap). Requires network access.
+#   make test-fids-integration
+test-fids-integration:
+	npm --prefix $(FIDS) run test:integration
+
 lint-fids:
 	npm --prefix $(FIDS) run lint
 
@@ -393,7 +401,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids lint-fids run-fids
+.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids
 
 # make dora-flow PROJECT=oxo-online  -> rewrites work/<project>/dora/flow.md
 # (per-project queues + time thieves + parallelism efficiency). v40 pull-flow view.

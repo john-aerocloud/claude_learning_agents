@@ -134,6 +134,23 @@ test-app:
 lint-app:
 	npm --prefix $(APP) run lint
 
+# --- FIDS demo SPA (slice-010) self-service entry points -----------------------
+# The FIDS SPA is a SEPARATE browser package (React+TS+Vitest/jsdom) at
+# work/OagEventSource/src/fids-app — it bootstraps + folds the live category feed
+# client-side (UC1 feed-client + UC2 deep-merge fold mirroring server foldAggregate).
+#   make test-fids   -> vitest run (offline, fixture/mock-fetch)
+#   make lint-fids   -> eslint
+#   make run-fids    -> local dev server (vite) for browser-driven build/validation
+FIDS := work/OagEventSource/src/fids-app
+test-fids:
+	npm --prefix $(FIDS) run test:run
+
+lint-fids:
+	npm --prefix $(FIDS) run lint
+
+run-fids:
+	npm --prefix $(FIDS) run run-local
+
 # --- UI accessibility scan (ui-designer; design-ops, root Makefile only) -------
 # Runs the axe/Playwright a11y + geometry specs (WCAG 2.2 AA contrast +
 # visual-structural GEO assertions, ui-design.md §4) over the observatory SPA.
@@ -376,7 +393,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory
+.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids lint-fids run-fids
 
 # make dora-flow PROJECT=oxo-online  -> rewrites work/<project>/dora/flow.md
 # (per-project queues + time thieves + parallelism efficiency). v40 pull-flow view.

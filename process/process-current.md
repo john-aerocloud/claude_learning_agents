@@ -1,9 +1,23 @@
 ---
-process_version: 61
+process_version: 62
 effective_from: 2026-06-23
-supersedes: v60
+supersedes: v61
 status: active
 ---
+
+# Current Process — v62
+
+> **v62 (upstream pipelining, 2026-06-23 — human-directed).** New **§F3a**: the
+> whole planning stage runs AHEAD of the build, not just product. While the
+> engineer builds the pulled item, the orchestrator keeps **solution-architect**
+> (next architecture delta + security review), **cicd** (next item's capabilities /
+> flags / deploy-role grants), and **ui-designer** (next structure pass) working the
+> NEXT sequentially-independent item in parallel — so the engineer's next pull finds
+> design + capabilities already done and never idles waiting for an upstream
+> artifact. Bounded by §F6 independence + queue `wip_limit` + the buffer look-ahead
+> depth; agents write disjoint artifacts (no §14 collision). orchestrator.md updated
+> to dispatch this look-ahead each cycle. Target: gross lead time / throughput
+> (the engineer is the constraint; upstream never blocks it) [EXP-075].
 
 # Current Process — v61
 
@@ -1203,6 +1217,34 @@ always waiting. Operationally:
 Product estimates value+cost on every item; batch small (penny game): replenish
 more often, less each time. Target: gross lead time (no engineer-waits-for-
 decompose gap), throughput.
+
+## F3a. Upstream pipelining — the WHOLE planning stage runs ahead of the build (v62)
+Replenishment is not only product's job. While the engineer builds the pulled
+use-case(s), the orchestrator keeps **every upstream role working the NEXT
+independent item in parallel**, so by the time the engineer finishes, the next
+item is fully planned — vision/slice AND architecture AND capabilities — and can
+be pulled with zero wait. The engineer is the constraint; never let it idle
+waiting for an upstream artifact that could have been prepared during the
+previous build.
+- **product** — the next slice + use-cases + acceptance (§F3), costed and enqueued.
+- **solution-architect** — the next item's architecture delta + security review +
+  policy-test notes, produced WHILE the current item builds, so the design a
+  use-case needs is ready before it is pulled (not discovered at pull time).
+- **cicd** — the next item's capabilities provisioned ahead of the build that needs
+  them: feature flags, env/infra/pipeline prep, deploy-role grants (cicd already
+  "runs BEFORE implementation loops"; this makes it run *concurrently with the
+  prior* loop). A capability a near-future use-case requires is staged in
+  advance, never a mid-build blocker.
+- **ui-designer** — the next UI-bearing item's structure pass (IA, component
+  decomposition, a11y conditions) prepared ahead the same way.
+Bounds: only pipeline items that are **sequentially independent** of the in-flight
+build (§F6 — no shared seam/edge; if dependent, it genuinely must wait); respect
+each queue's `wip_limit`; look-ahead depth ≈ the Ready/Intake buffer (`min_items`),
+not unboundedly far. The orchestrator dispatches these upstream agents
+concurrently with the engineer in the same cycle (they write to disjoint
+artifacts — slices/ , architecture/ , infra/ — so no commit collision, §14).
+Target: gross lead time (eliminate engineer-waits-for-architecture / -capability /
+-structure gaps), throughput. [EXP-075]
 
 ## F4. Time thieves — wait, attributed to its cause
 `dora.py flow` writes `work/<project>/dora/flow.md`: per-queue length + wait,

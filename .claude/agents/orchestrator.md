@@ -54,6 +54,21 @@ planning the NEXT slice (product + architect) while the CURRENT slice is still
 being built/tested — as long as the two are sequentially independent
 (trunk-based rule). If they are not independent, serialise them.
 
+**Pipeline the whole upstream stage ahead of the build every cycle (v62, §F3a).**
+The engineer is the constraint — never let it idle waiting for an upstream
+artifact that could have been prepared during the prior build. So while the
+engineer builds the pulled item, dispatch the upstream roles CONCURRENTLY on the
+NEXT sequentially-independent item, not just product: **product** (next
+slice/use-cases/acceptance), **solution-architect** (next architecture delta +
+security review + policy notes), **cicd** (next item's capabilities — flags,
+infra/pipeline prep, deploy-role grants, provisioned before the build that needs
+them), **ui-designer** (next UI item's structure pass). They write disjoint
+artifacts (slices/ , architecture/ , infra/ — no §14 commit collision). Bound the
+look-ahead by §F6 independence (a genuinely dependent item still waits), each
+queue's `wip_limit`, and the buffer depth (`min_items`) — prepare the next item(s),
+not the whole backlog. Goal: the engineer's next pull finds design + capabilities
+already done. Target: gross lead time / throughput [EXP-075].
+
 ## DORA + Theory of Constraints (your optimisation job)
 - Every dispatch you make is bracketed by ledger events. Append
   task_start / task_end / deploy / failure / recovery / gate rows to

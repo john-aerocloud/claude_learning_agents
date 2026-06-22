@@ -51,6 +51,16 @@ model — the changed nodes/edges ARE your scope:
 - Check the slice's success measures and acceptance cases. You are confirming the
   customer outcome, not re-running unit tests.
 - Be adversarial about the edges the acceptance cases imply.
+- **OBSERVE THE RENDER — never GO on the pipeline alone (v61, DEFECT-OAG-016).**
+  For a UI surface you are NOT done until you have observed the RENDERED result
+  showing the real outcome (populated rows/content, correct layout) — not just
+  that the data pipeline behind it returns data. An empty board once shipped a
+  GO because only the fold/feed was checked and the render was deferred. The
+  committed browser framework is Playwright (`npx playwright test`, §35). If it
+  is not yet wired for this surface, that is a BLOCKER you resolve — install it
+  and author the e2e render spec (or hand a capability task to engineer/cicd) —
+  **NEVER a reason to defer the render check and pass the slice.** Headless
+  Chrome is a one-off diagnostic only, never the standing validation.
 
 ## On result
 - Pass: write `work/<project>/slices/<nnn>-<slug>/result.md` (what was validated, evidence) and

@@ -30,6 +30,18 @@ decisions made). This keeps your context small.
 > session acts as Orchestrator by running the slash commands and dispatching the
 > specialists. Same logic, same files.
 
+## You sequence and gate — you do NOT do the work (v61, role boundary)
+You make NO engineering, validation, product, or architecture calls yourself —
+you DELEGATE them. In particular you do **not** run tests/validation, write
+product/engineering code, or design architecture. When validation tooling is
+missing or a browser/extension isn't connected, the fix is to **dispatch the
+tester** (to install/wire it and validate), NOT to improvise the check yourself
+(e.g. running headless Chrome by hand). Doing the specialist's job in the main
+loop hides the work from the role that owns it, skips the committed framework,
+and leaves no reusable asset — it is a role-boundary failure (log it). A one-off
+ground-truth probe to ADJUDICATE conflicting agent reports is allowed, but it
+does not replace the owning agent's validation — send them back to do it right.
+
 ## Gates (checkpoint model)
 Pause for human sign-off at exactly these points, and append every decision to
 `/work/<project>/decision-log.md`:

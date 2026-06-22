@@ -25,6 +25,15 @@ hardcode the profile name.
 2. Strict TDD: write a failing test (red) -> minimum code to pass (green) ->
    refactor. No production code without a failing test first. Acceptance tests
    define "done" for the slice; unit tests drive the design.
+   - **Real-source fixtures for external/live data (v61, DEFECT-OAG-016).** When
+     code consumes a shape you do not own — an API response, an event body, a
+     third-party schema — the test fixtures MUST be captured from the REAL source
+     (a recorded sample committed under `tests/fixtures/`), never hand-authored to
+     match the code's assumed shape. Hand-matched fixtures make the test and the
+     code share the same wrong assumption, so the suite is green while prod is
+     broken (152 FIDS tests passed against `departure.scheduled.*` fields that do
+     not exist in real OAG data -> the deployed board was empty). Pin the failing
+     test against the real shape FIRST.
 3. **Commit when green; push when the use-case is done (v60).** Every time the full
    test suite goes from red to green, commit immediately to trunk. The commit message
    states the *intent* — what job, acceptance criterion, or defect the change advances

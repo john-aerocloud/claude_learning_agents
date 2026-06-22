@@ -46,6 +46,14 @@ Always create TWO OIDC roles:
 - App role: S3 + CloudFront only (no IAM, no CloudFormation).
 - Infra role: can assume CDK bootstrap roles; requires `cdk bootstrap --trust <account>`.
 
+**Deploy-role grants: watch the inline-policy budget (v61, DEFECT-OAG-014).** An
+IAM role's INLINE policies share a 10,240-byte hard limit. As a deploy role
+accrues per-service grants it WILL hit this and the deploy fails mid-apply
+(`LimitExceeded: Maximum policy size`). New grant blocks (especially a chunky one
+like CloudFront) go into an ATTACHED MANAGED policy (`aws.iam.Policy` +
+`RolePolicyAttachment`) — a separate, larger budget — not another inline
+`RolePolicy`. Keep least-privilege; managed vs inline is a packaging choice.
+
 ## Pipeline pre-flight checklist (work it before first push)
 Before writing or pushing a cloud/hosted pipeline for the first time, work this
 checklist — each item is a failure mode observed in practice:

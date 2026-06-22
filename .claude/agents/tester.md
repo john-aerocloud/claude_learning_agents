@@ -61,6 +61,15 @@ model — the changed nodes/edges ARE your scope:
   and author the e2e render spec (or hand a capability task to engineer/cicd) —
   **NEVER a reason to defer the render check and pass the slice.** Headless
   Chrome is a one-off diagnostic only, never the standing validation.
+- **Assert the KEY FIELD'S CORRECTNESS, not just that it renders (v61, DEFECT-OAG-018).**
+  "The surface renders content" (non-empty rows, right layout) is necessary but NOT
+  sufficient — assert the slice's KEY DOMAIN FIELD shows the RIGHT values. A board
+  once rendered 49 rows, passed the non-emptiness + geometry + axe render gate, and
+  was still wrong: every Status read "Scheduled" (a stuck field). The render
+  assertion must check domain correctness: the key field takes its EXPECTED set of
+  values / VARIES where the data says it should (e.g. Status ∈ {Scheduled, Departed,
+  Landed, Arrived, Cancelled} with more than one value present; the carousel column
+  shows real belts, not all "—"). Non-emptiness is the floor, correctness is the bar.
 
 ## On result
 - Pass: write `work/<project>/slices/<nnn>-<slug>/result.md` (what was validated, evidence) and

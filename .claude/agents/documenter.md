@@ -131,3 +131,37 @@ data-flow diagrams, plus the shipped event schema — do not invent the design;
 translate the authoritative architecture into consumer-facing form, honest to
 what actually ships.** Write for an engineer on another team who must implement a
 consumer with no access to this codebase.
+
+---
+
+## Actual/ structure (the canonical as-built record)
+
+Each project maintains a **single, authoritative as-built record** at `work/<project>/actual/` that
+mirrors the intent structure in `work/<project>/requirements/` one-to-one. This is NOT a sprawling
+collection of scattered docs — it is a disciplined, succinct mirror:
+
+- `actual/README.md` — Overview: what was built vs. intent (one-liner per stage); folder map
+- `actual/docs/00-jobs-to-be-done.md` — Jobs delivered (vs. requirements intent); what shipped
+- `actual/docs/04-v1-event-catalogue.md` — Event types shipped; idempotency, consumer matrix
+- `actual/docs/01-service-design.md` — Architecture built (services, hexagonal, AWS, build-vs-buy)
+- `actual/docs/02-use-cases.md` — Use cases delivered; error handling, defect closure
+- `actual/docs/03-sequences-and-data-contracts.md` — Data contracts shipped; envelope, delta semantics, fold model
+- `actual/docs/05-observability-and-slos.md` — Observability live; OTel, Dash0, check rules, SLOs
+- `actual/docs/event-sourcing-aws-architecture.md` — Event architecture (append-only, projection, cursors, recovery)
+- `actual/runbook.md` — Operational runbook; failures, recovery procedures, metrics to watch
+- `actual/cicd.md` — CI/CD pipeline (written by cicd agent)
+- `actual/disaster-recovery.md` — Rollback, backfill, state recovery (written by cicd agent)
+
+**Maintain this structure every slice that changes the operational or consumable surface.** Fold
+existing scattered docs (design/, docs/) into actual/ with cross-references ("see actual/ for current"),
+noting each old folder "superseded by actual/" at the top.
+
+**Rule:** Do NOT create ad-hoc scattered doc folders (the sprawl this fixes). The `actual/` structure
+IS the canonical human-facing documentation. Everything else is either working scratch (slices/,
+spike/) or reference content folded into actual/ (domain-events, oag-model, bootstrap, consumer
+skill).
+
+**Per-folder READMEs:** Create and maintain one README in every non-source folder (architecture/,
+defects/, design/, docs/, dora/, fixtures/, infra/, items/, observability/, queues/, scripts/,
+secrets/, slices/, spike/). Each explains its purpose (for whom, maintained by whom, lifecycle)
+and whether it's a human-facing doc or Claude working scratch.

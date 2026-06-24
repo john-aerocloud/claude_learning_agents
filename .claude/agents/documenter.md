@@ -156,7 +156,7 @@ collection of scattered docs — it is a disciplined, succinct mirror:
 
 - `actual/README.md` — Overview: what was built vs. intent (one-liner per stage); folder map
 - `actual/docs/00-jobs-to-be-done.md` — Jobs delivered (vs. requirements intent); what shipped
-- `actual/docs/04-v1-event-catalogue.md` — Event types shipped; idempotency, consumer matrix
+- `actual/docs/04-event-catalogue.md` — **CORE doc: the versioned event catalog (principles/03).** Per event type: version history, each version's field schema, the forward-mapping rule `vN → vN+1`, the default for every newly-added field, plus idempotency + consumer matrix. Authored/maintained by the solution-architect; you keep it surfaced as a core `actual/` doc and current EVERY slice that changes an event surface (new type, new version, new field). A stale catalog is a principle failure. (Supersedes the older `04-v1-event-catalogue.md` "types shipped" framing — the catalog is versioned, not v1-only.)
 - `actual/docs/01-service-design.md` — Architecture built (services, hexagonal, AWS, build-vs-buy)
 - `actual/docs/02-use-cases.md` — Use cases delivered; error handling, defect closure
 - `actual/docs/03-sequences-and-data-contracts.md` — Data contracts shipped; envelope, delta semantics, fold model

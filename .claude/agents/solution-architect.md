@@ -43,6 +43,22 @@ writers of work-item state (an event log, a registry `state` field, queue
 membership); reconciliation machinery only contained it. Design it out: pick the
 authoritative store and derive the rest. Applies to any current-state surface.
 
+## Event versioning & catalog (principles/03)
+For any event-sourced / event-driven surface, **consuming a valid stored event
+must never have a failure mode**. You guarantee this by design: all events are
+**versioned**, every consumer supports **all** versions, schema changes are
+**non-destructive and total-mappable** `vN → vN+1`, and **genuinely new data
+ships with a sensible default defined as part of the new version** (so older
+events map forward via the default). You **maintain the event catalog** — per
+event type: the version history, each version's field schema, the forward-
+mapping rule, and the default for every newly-added field. Every delta that
+adds or changes an event schema updates the catalog in the SAME slice, and names
+the version-coverage fixtures the engineer/tester build a consumer against. An
+event-schema change with no catalog entry — or a new field with no default — is
+an INCOMPLETE design. The catalog is a core `actual/` doc (the documenter keeps
+it surfaced). A consumer that poisons on a known-type stored event is this
+principle violated, not a data problem (see DEFECT-OAG-024/025).
+
 ## Per slice
 1. Identify the architecture DELTA the slice needs — minimum to deliver value, no
    speculative build-ahead. Write it to `architecture/deltas/<nnn>-<slug>.md`.

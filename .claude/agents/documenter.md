@@ -155,13 +155,20 @@ mirrors the intent structure in `work/<project>/requirements/` one-to-one. This 
 collection of scattered docs — it is a disciplined, succinct mirror:
 
 - `actual/README.md` — Overview: what was built vs. intent (one-liner per stage); folder map
-- `actual/docs/00-jobs-to-be-done.md` — Jobs delivered (vs. requirements intent); what shipped
-- `actual/docs/04-event-catalogue.md` — **CORE doc: the versioned event catalog (principles/03).** Per event type: version history, each version's field schema, the forward-mapping rule `vN → vN+1`, the default for every newly-added field, plus idempotency + consumer matrix. Authored/maintained by the solution-architect; you keep it surfaced as a core `actual/` doc and current EVERY slice that changes an event surface (new type, new version, new field). A stale catalog is a principle failure. (Supersedes the older `04-v1-event-catalogue.md` "types shipped" framing — the catalog is versioned, not v1-only.)
-- `actual/docs/01-service-design.md` — Architecture built (services, hexagonal, AWS, build-vs-buy)
-- `actual/docs/02-use-cases.md` — Use cases delivered; error handling, defect closure
-- `actual/docs/03-sequences-and-data-contracts.md` — Data contracts shipped; envelope, delta semantics, fold model
-- `actual/docs/05-observability-and-slos.md` — Observability live; OTel, Dash0, check rules, SLOs
-- `actual/docs/event-sourcing-aws-architecture.md` — Event architecture (append-only, projection, cursors, recovery)
+- `actual/docs/00-jobs-to-be-done.md` — Jobs delivered (vs. requirements intent); what shipped.
+
+**The technical docs follow a canonical CHAIN, each building on the prior — keep them in this order and scope:**
+**service design → use cases → architecture → components → sequence diagrams.**
+
+- `actual/docs/01-service-design.md` — Service design: the services, hexagonal ports/adapters, build-vs-buy, the system's responsibilities.
+- `actual/docs/02-use-cases.md` — Use cases delivered; error handling, defect closure.
+- `actual/docs/03-architecture.md` — Architecture: C4 context + containers, the AWS shape, and the event-sourcing model (append-only store, projections, cursors, recovery). Consolidates the former `event-sourcing-aws-architecture.md`.
+- `actual/docs/04-components.md` — Component decomposition (the C4 component level): each component (module / handler / adapter), its single responsibility, and how the components compose.
+- `actual/docs/05-sequence-diagrams.md` — **Sequence diagrams (Mermaid), one per system + consumer flow** (e.g. ingest→fold→append, pull-feed read, REST seed, cold-start bootstrap, reconnect/resume). This doc is sequence DIAGRAMS — it is NOT data contracts (those live in the event catalogue, below).
+- `actual/docs/06-event-catalogue.md` — **CORE doc: the versioned event catalog (principles/03) AND the data contracts** (envelope, delta semantics, fold model). Per event type: version history, each version's field schema, the forward-mapping rule `vN → vN+1`, the default for every newly-added field, plus idempotency + consumer matrix. Authored/maintained by the solution-architect; you keep it surfaced and current EVERY slice that changes an event surface (new type, version, field). A stale catalog is a principle failure.
+- `actual/docs/07-observability-and-slos.md` — Observability live; OTel, Dash0, check rules, SLOs.
+
+**Migration note:** a project on the old layout is reconciled to this chain on the next doc pass — `03-sequences-and-data-contracts.md` SPLITS (sequence diagrams → `05-sequence-diagrams.md`; data contracts → the event catalogue); `event-sourcing-aws-architecture.md` folds into `03-architecture.md`; add the missing `04-components.md`. Renumber to the canonical order.
 - `actual/runbook.md` — Operational runbook; failures, recovery procedures, metrics to watch
 - `actual/cicd.md` — CI/CD pipeline (written by cicd agent)
 - `actual/disaster-recovery.md` — Rollback, backfill, state recovery (written by cicd agent)

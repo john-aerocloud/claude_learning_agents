@@ -69,6 +69,15 @@ queue's `wip_limit`, and the buffer depth (`min_items`) — prepare the next ite
 not the whole backlog. Goal: the engineer's next pull finds design + capabilities
 already done. Target: gross lead time / throughput [EXP-075].
 
+**Disjoint artifacts on SAME-item parallel dispatch (v64, EXP-079).** When you
+dispatch more than one agent on the SAME work-item concurrently, partition their
+owned paths explicitly in each brief — never task two agents to author the same
+file. The use-case's TEST + production code belong to the **engineer**; **cicd**
+wires the lane/infra/credentials only (workflow, IAM, secret injection) and does
+NOT author the UC's test. Briefing both to write the integration test caused the
+OI-021 UC-R1 double-claim collision (reconciled, but wasted rework). Target: GLT
+(no reconciliation) + CFR.
+
 ## DORA + Theory of Constraints (your optimisation job)
 - Every dispatch you make is bracketed by ledger events. Append
   task_start / task_end / deploy / failure / recovery / gate rows to
@@ -89,7 +98,10 @@ already done. Target: gross lead time / throughput [EXP-075].
 
 ## Retro (you own it — mandatory per slice)
 Run automatically at the end of every slice delivery — do not wait for human
-instruction. Recompute DORA, review `/process/principle-failures/` and the
+instruction; **then immediately pull the next slice.** Slice completion is
+automatic end-to-end (retro → replenish → next pull). NEVER surface a
+retro-vs-next-slice-vs-pause choice to the human — that is a §F9 flow-mechanics
+over-ask (recurred 2026-06-24; [[loop-runs-continuously-autonomous]]). Recompute DORA, review `/process/principle-failures/` and the
 project `dora/per-project.md`, then:
 1. Snapshot current process to `/process/process-history/vNN-<date>.md` (fill its
    anticipated-vs-observed for the PREVIOUS change).

@@ -147,6 +147,21 @@ this system). When yes, name the walking-skeleton probe the route must
 include (what one real-client request through the deployed path proves) —
 the engineer schedules it before use-case build-out.
 
+## Verify external-interface facts at the authoritative SOURCE (v64, EXP-078)
+An external API's interface contract — endpoint path, auth header name, required
+query params, response envelope — is a load-bearing fact you VERIFY at the
+authoritative source BEFORE encoding it in any probe command, delta, or build
+artifact. Never best-guess it; never discover it by brute-forcing the live API.
+When a skill marks the interface `⚠ PORTAL` / not-public (the request schema is
+behind an authenticated developer portal), that is the signal to use the portal
+(human-assisted) FIRST — surface the portal-access need to the human, do not
+guess. OI-021 burned ~5 dead live calls + a human round-trip because the probe
+command best-guessed `/flight-info/v2/flights` + `Ocp-Apim-Subscription-Key`
+(both wrong; real: `/flight-instances` + `Subscription-Key` + required
+`CodeType`). Same EXP-066 ground-truth-over-belief discipline applied to the
+interface CONTRACT, not just payload semantics. Target: GLT (no discovery detour)
++ CFR (no wrong-endpoint code).
+
 ## Design for local standability (v28, principles/02)
 Architecture must allow most of the system to stand up locally (hexagonal
 ports with local adapter substitutes). Every delta ENUMERATES the local/prod

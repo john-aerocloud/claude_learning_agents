@@ -1,14 +1,14 @@
 # DORA Baseline (computed)
 
-_Generated 2026-06-24T10:18:37Z from ledger.csv. Do not hand-edit._
+_Generated 2026-06-24T14:41:36Z from ledger.csv. Do not hand-edit._
 
 ## Four key metrics — CUMULATIVE (whole pipeline)
 
 | Metric | Value | Window |
 |--------|-------|--------|
-| Gross lead time (median) | 3092 s | 38 slice(s) |
+| Gross lead time (median) | 3618 s | 39 slice(s) |
 | Deployment frequency | 5 /active-day | 19 day(s) |
-| Change failure rate (deploys only) | 19 % | 16/86 deploys |
+| Change failure rate (deploys only) | 18 % | 16/87 deploys |
 | Defect intake rate (separate, NOT in CFR) | 2 /active-day | 36 defect(s) |
 | MTTR (median, any prod issue) | 1538 s | 36 issue(s) |
 
@@ -21,10 +21,10 @@ _Recent-only view, so improvement is visible inside a retro's scoring horizon ra
 | Metric | Value | Window |
 |--------|-------|--------|
 | Gross lead time (median) | 11109 s | 5 slice(s) |
-| Deployment frequency | 2 /active-day | 7 day(s) |
+| Deployment frequency | 2 /active-day | 5 day(s) |
 | Change failure rate (deploys only) | 8 % | 1/12 deploys |
-| Defect intake rate (separate, NOT in CFR) | 3 /active-day | 20 defect(s) |
-| MTTR (median, any prod issue) | 12299 s | 10 issue(s) |
+| Defect intake rate (separate, NOT in CFR) | 4 /active-day | 18 defect(s) |
+| MTTR (median, any prod issue) | 8100 s | 8 issue(s) |
 
 ## Per-agent task completion (seconds)
 
@@ -33,7 +33,7 @@ _Recent-only view, so improvement is visible inside a retro's scoring horizon ra
 | product | 19 | 900 | 265 | 443 |
 | solution-architect | 18 | 1200 | 374 | 627 |
 | cicd | 17 | 300 | 300 | 578 |
-| engineer | 99 | 1500 | 900 | 1207 |
+| engineer | 102 | 1500 | 990 | 1217 |
 | ui-designer | 6 | 540 | 750 | 798 |
 | tester | 14 | 1200 | 830 | 1354 |
 | documenter | 15 | 60 | 135 | 247 |
@@ -47,7 +47,7 @@ Plumbing = running the agent OS (orchestrator + flow-manager + retro/gate/bookke
 | class | time (s) | time % | tokens | tokens % |
 |-------|----------|--------|--------|----------|
 | plumbing | 3660 | 1% | 0 | — |
-| delivery | 296579 | 99% | 0 | — |
+| delivery | 301199 | 99% | 0 | — |
 
 _Plumbing share: time 1%, tokens — (token coverage 0% of task_end rows — grows as dispatches log --tokens, v59)._
 

@@ -131,6 +131,15 @@ ws-skeleton:
 test-app:
 	npm --prefix $(APP) run test:run
 
+# OI-021 UC-R1 — LIVE OAG Flight Info REST validating integration test. Drives the
+# real api.oag.com/flight-instances endpoint (TPA + yesterday) through the shared
+# OagRestClient + normaliseRest. SKIPS (not fails) when no credential resolves
+# (OAG_REST_KEY env, else requirements/secrets/oag-rest.local.json). Excluded from
+# the fast offline `make test-app` run; requires network access.
+#   make test-rest-integration
+test-rest-integration:
+	npm --prefix $(APP) run test:integration
+
 lint-app:
 	npm --prefix $(APP) run lint
 
@@ -401,7 +410,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids
+.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids
 
 # make dora-flow PROJECT=oxo-online  -> rewrites work/<project>/dora/flow.md
 # (per-project queues + time thieves + parallelism efficiency). v40 pull-flow view.

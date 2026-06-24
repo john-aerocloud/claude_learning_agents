@@ -25,6 +25,7 @@ from collections import defaultdict
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 LEDGER = os.path.join(ROOT, "process", "dora", "ledger.csv")
 BASELINE = os.path.join(ROOT, "process", "dora", "baseline.md")
+STATUSLINE = os.path.join(ROOT, "process", "dora", "statusline.json")
 COLS = ["timestamp","project","iteration","slice","agent","event",
         "duration_s","outcome","ref","note","item_id","queue","tokens"]
 AGENTS = ["product","solution-architect","cicd","engineer","ui-designer","tester","documenter","orchestrator","flow-manager"]
@@ -32,6 +33,27 @@ STAGES = ["cicd","ui-designer","engineer","tester"]
 
 def now_iso():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+def write_statusline(updates):
+    """Maintain process/dora/statusline.json — a tiny pre-formatted snapshot the
+    Claude Code status line reads VERY cheaply (one small file, no markdown
+    grep, no dora.py run per refresh). dora.py is the single writer: compute()
+    and flow() each merge their own keys here right after rewriting their big
+    markdown file, so the cheap file is always in step with baseline.md/flow.md."""
+    import json
+    data = {}
+    if os.path.exists(STATUSLINE):
+        try:
+            with open(STATUSLINE) as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+    data.update(updates)   # store None as null so a metric with no data reads as "–"
+    with open(STATUSLINE, "w") as f:
+        json.dump(data, f, indent=0)
+
+def _r0(x):
+    return round(x) if isinstance(x, (int, float)) else None
 
 def parse_ts(s):
     try:
@@ -261,6 +283,11 @@ def cmd_compute(_):
     L.append("- Recommended exploit/subordinate action: _(orchestrator fills in)_")
     with open(BASELINE, "w") as f:
         f.write("\n".join(L) + "\n")
+    # cheap status-line snapshot — TRAILING WINDOW (recent-only), matches the
+    # window table written above (EXP-045).
+    write_statusline({"cfr": _r0(win["cfr"]), "freq": _r0(win["freq"]),
+                      "lead": _r0(win["lead"]), "window": win_label,
+                      "dora_updated": now_iso()})
     print(f"wrote {BASELINE} | cumulative: lead={fmt(cum['lead'])}s freq={fmt(cum['freq'])} "
           f"cfr={fmt(cum['cfr'])}% (deploys only; {cum['n_defects']} defect-intakes excluded) "
           f"mttr={fmt(cum['mttr'])}s | window({win_label}): cfr={fmt(win['cfr'])}% lead={fmt(win['lead'])}s "
@@ -407,6 +434,10 @@ def cmd_flow(a):
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w") as f:
         f.write("\n".join(L) + "\n")
+    # cheap status-line snapshot — parallelism efficiency for this project.
+    write_statusline({"project": a.project,
+                      "par": round(par_eff, 2) if par_eff is not None else None,
+                      "flow_updated": now_iso()})
     print(f"wrote {out} | queues={len(queue_stats)} items={len(item_stats)} collisions={len(collisions)} par_eff={rr(par_eff)}")
 
 # --- single source of truth: state PROJECTED from the ledger (v52, EXP-048) ----

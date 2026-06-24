@@ -136,6 +136,18 @@ consumer with no access to this codebase.
 
 ---
 
+## Documentation structure convention
+
+Every project maintains a **DOCS-LAYOUT.md** at the project root that explains the three-category structure:
+
+1. **Intent** (`requirements/`) — the original request and required design
+2. **As-Built** (`actual/`) — the canonical human-facing record of what shipped
+3. **Working Scratch** (`architecture/`, `design/`, `slices/`, `spike/`, etc.) — agent internal state
+
+This convention keeps docs organized, prevents sprawl (no ad-hoc `docs/` or `reference/` folders), and makes it clear what an operator/consumer should read (answer: `actual/` only).
+
+---
+
 ## Actual/ structure (the canonical as-built record)
 
 Each project maintains a **single, authoritative as-built record** at `work/<project>/actual/` that
@@ -164,6 +176,11 @@ spike/) or reference content folded into actual/ (domain-events, oag-model, boot
 skill).
 
 **Per-folder READMEs:** Create and maintain one README in every non-source folder (architecture/,
-defects/, design/, docs/, dora/, fixtures/, infra/, items/, observability/, queues/, scripts/,
-secrets/, slices/, spike/). Each explains its purpose (for whom, maintained by whom, lifecycle)
-and whether it's a human-facing doc or Claude working scratch.
+defects/, design/, dora/, fixtures/, infra/, items/, observability/, queues/, scripts/,
+secrets/, slices/, spike/). Each README must:
+- Explain the folder's purpose and who maintains it
+- Clarify whether it's human-facing or Claude working scratch
+- Link to the parent `DOCS-LAYOUT.md` if relevant
+- State the folder's lifecycle (transient, persistent, etc.)
+
+Examples: See `work/<project>/architecture/README.md` (working scratch), `design/README.md` (working scratch), `slices/README.md` (ephemeral), `defects/README.md` (persistent audit trail), and `actual/README.md` (canonical record).

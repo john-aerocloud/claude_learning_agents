@@ -1,16 +1,16 @@
 # DORA Baseline (computed)
 
-_Generated 2026-06-25T10:52:11Z from ledger.csv. Do not hand-edit._
+_Generated 2026-06-25T15:52:33Z from ledger.csv. Do not hand-edit._
 
 ## Four key metrics — CUMULATIVE (whole pipeline)
 
 | Metric | Value | Window |
 |--------|-------|--------|
-| Gross lead time (median) | 3092 s | 40 slice(s) |
-| Deployment frequency | 4 /active-day | 20 day(s) |
-| Change failure rate (deploys only) | 20 % | 18/89 deploys |
-| Defect intake rate (separate, NOT in CFR) | 2 /active-day | 37 defect(s) |
-| MTTR (median, any prod issue) | 1992 s | 38 issue(s) |
+| Gross lead time (median) | 2543 s | 42 slice(s) |
+| Deployment frequency | 5 /active-day | 20 day(s) |
+| Change failure rate (deploys only) | 19 % | 18/93 deploys |
+| Defect intake rate (separate, NOT in CFR) | 2 /active-day | 40 defect(s) |
+| MTTR (median, any prod issue) | 2189 s | 43 issue(s) |
 
 > CFR counts **deploy failures only** (a shipped change that failed its validation); defect intakes raised via /defect against the standing system are reported separately and excluded from CFR (process §3, v51). MTTR spans both kinds.
 
@@ -20,20 +20,20 @@ _Recent-only view, so improvement is visible inside a retro's scoring horizon ra
 
 | Metric | Value | Window |
 |--------|-------|--------|
-| Gross lead time (median) | 11109 s | 5 slice(s) |
-| Deployment frequency | 2 /active-day | 6 day(s) |
+| Gross lead time (median) | 1565 s | 5 slice(s) |
+| Deployment frequency | 4 /active-day | 3 day(s) |
 | Change failure rate (deploys only) | 25 % | 3/12 deploys |
-| Defect intake rate (separate, NOT in CFR) | 3 /active-day | 16 defect(s) |
-| MTTR (median, any prod issue) | 6150 s | 10 issue(s) |
+| Defect intake rate (separate, NOT in CFR) | 4 /active-day | 13 defect(s) |
+| MTTR (median, any prod issue) | 3373 s | 8 issue(s) |
 
 ## Per-agent task completion (seconds)
 
 | Agent | n | modal | median | mean |
 |-------|---|-------|--------|------|
-| product | 19 | 900 | 265 | 443 |
+| product | 20 | 900 | 282 | 466 |
 | solution-architect | 18 | 1200 | 374 | 627 |
-| cicd | 17 | 300 | 300 | 578 |
-| engineer | 105 | 1500 | 1020 | 1234 |
+| cicd | 18 | 600 | 300 | 579 |
+| engineer | 111 | 1500 | 960 | 1240 |
 | ui-designer | 6 | 540 | 750 | 798 |
 | tester | 14 | 1200 | 830 | 1354 |
 | documenter | 15 | 60 | 135 | 247 |
@@ -46,10 +46,10 @@ Plumbing = running the agent OS (orchestrator + flow-manager + retro/gate/bookke
 
 | class | time (s) | time % | tokens | tokens % |
 |-------|----------|--------|--------|----------|
-| plumbing | 3660 | 1% | 0 | — |
-| delivery | 307352 | 99% | 0 | — |
+| plumbing | 7710 | 2% | 0 | — |
+| delivery | 316892 | 98% | 0 | — |
 
-_Plumbing share: time 1%, tokens — (token coverage 0% of task_end rows — grows as dispatches log --tokens, v59)._
+_Plumbing share: time 2%, tokens — (token coverage 0% of task_end rows — grows as dispatches log --tokens, v59)._
 
 ## Theory-of-Constraints read
 

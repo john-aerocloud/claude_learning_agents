@@ -93,6 +93,32 @@ checklist — each item is a failure mode observed in practice:
 - [ ] CI test steps invoke `vitest run` (or `--run`) explicitly — a bare
       `npm test` mapped to watch mode hangs the job.
 
+## Deploy preflight + verified-target binding (process v67 §20a, EXP-082)
+A deploy command asserts its PREREQUISITES and ENVIRONMENT HEALTH before any
+irreversible step, and binds every CI/deploy status read to the VERIFIED target —
+never an ambient default. The §F5 FIDS deploy failed TWICE before landing (a stale
+SST state lock left by a killed loop + a Docker-daemon-down bundling failure) and
+`ci-watch` misreported "no runs" because the lookup resolved to the wrong repo
+(`john-aerocloud/claude_learning_agents`, not the real `origin`
+`AeroCloudSystems/Spike-FlightEventSource-OAG`). Both are the verify-at-source
+class (EXP-080) in the deploy ENVIRONMENT + its BINDING. The deploy target
+(`deploy-fids` / `deploy-<project>` and friends) runs a fail-fast preflight that:
+- [ ] **Releases/clears any stale state lock** (SST `sst unlock` / equivalent) so a
+      killed-loop orphan lock cannot block the deploy mid-flight.
+- [ ] **Asserts the build daemon is up** (`docker info` for bundling steps) — a
+      daemon-down is an actionable message at the top, not a crash mid-bundle.
+- [ ] **Asserts the credential is valid** (already present — the `sso-login`
+      `sts get-caller-identity` check).
+- [ ] **Asserts the CI/deploy binding resolves to the verified target** — the
+      `origin`/account recorded in project.md/decision-log, not whatever `gh`
+      defaults to. `ci-watch` passes the resolved `origin` repo EXPLICITLY
+      (`--repo <owner/repo>` from `git remote get-url origin`), never relying on the
+      ambient `gh` repo default.
+A missing prerequisite prints a clear actionable line and exits non-zero BEFORE the
+first irreversible action — it never surfaces as a mid-deploy crash inside the
+human §F5 gate. Target: gross lead time (no failed-deploy retries inside the gate)
++ CFR (no status read against the wrong target). [EXP-082]
+
 ## Node ESM bundling — the `Dynamic require` rule
 A Node Lambda/Fargate handler bundled as **ESM** (`"type":"module"`, esbuild
 `--format=esm`) crashes at runtime with `Dynamic require of "X" is not supported`

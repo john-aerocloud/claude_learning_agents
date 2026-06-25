@@ -143,6 +143,27 @@ test-rest-integration:
 lint-app:
 	npm --prefix $(APP) run lint
 
+# SLC-012 UC-S7 AC-S7.2 — LIVE Dash0 E-76 stage-funnel-loss probe.
+# Queries the Dash0 PromQL API (eu-west-1) for the
+# oag_ingest_events_appended_total / oag_ingest_events_received_total ratio over
+# a 10-min window. SKIPS (not fails) when no Dash0 API key is available. Uses the
+# same vitest integration config as test-rest-integration. Requires network access.
+#   make test-dash0-integration [ITER=1] [SLICE=012-schedule-ingestion]
+test-dash0-integration:
+	npm --prefix $(APP) run test:integration -- --reporter=verbose tests/integration/dash0-e76-funnel.integration.test.ts && \
+	$(DORA) record --project $(PROJECT) --iteration $(if $(ITER),$(ITER),1) \
+	  --slice $(if $(SLICE),$(SLICE),012-schedule-ingestion) \
+	  --agent tester --event validation_run \
+	  --ref "$$(git -C work/$(PROJECT) rev-parse --short HEAD):dash0-e76-funnel.integration.test.ts" \
+	  --outcome success --item-id UC-S7 \
+	  --note "AC-S7.2 Dash0 E-76 funnel ratio probe green via make test-dash0-integration" || \
+	( $(DORA) record --project $(PROJECT) --iteration $(if $(ITER),$(ITER),1) \
+	  --slice $(if $(SLICE),$(SLICE),012-schedule-ingestion) \
+	  --agent tester --event validation_run \
+	  --ref "$$(git -C work/$(PROJECT) rev-parse --short HEAD):dash0-e76-funnel.integration.test.ts" \
+	  --outcome fail --item-id UC-S7 \
+	  --note "AC-S7.2 Dash0 E-76 funnel ratio probe FAILED via make test-dash0-integration" ; exit 1 )
+
 # --- FIDS demo SPA (slice-010) self-service entry points -----------------------
 # The FIDS SPA is a SEPARATE browser package (React+TS+Vitest/jsdom) at
 # work/OagEventSource/src/fids-app — it bootstraps + folds the live category feed
@@ -410,7 +431,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids
+.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids
 
 # make dora-flow PROJECT=oxo-online  -> rewrites work/<project>/dora/flow.md
 # (per-project queues + time thieves + parallelism efficiency). v40 pull-flow view.

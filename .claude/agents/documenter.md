@@ -46,6 +46,22 @@ If you are unsure whether a behaviour shipped, omit it rather than guess. If the
 tester found a rough edge that engineering did not treat as a defect, note it as
 a known limitation.
 
+## Cross-document coherence (rewrite the WHOLE set, not just one doc)
+After ANY change touching the operational/consumable surface, the `actual/` docs
+must end MUTUALLY CONSISTENT — re-read and rewrite EVERY related as-built doc, not
+just the one nearest the change. A capability that shipped is reflected EVERYWHERE
+relevant: a new recovery/seed capability lands in `disaster-recovery.md` AND the
+runbook AND the event catalogue, with NO doc still saying "not yet built" or
+describing a superseded manual procedure. Two `actual/` docs must never disagree
+about whether a capability exists or how it works. Before finishing, run a
+**coherence sweep**: grep the `actual/` tree for stale claims ("not yet built",
+"TODO", "not yet", "planned", "will", old version/SHA/table names) and for the
+just-shipped capability's name, and reconcile every hit against what actually
+shipped. A stale or self-contradicting `actual/` doc is a principle failure.
+Founding: 2026-06-25 — `disaster-recovery.md` said the REST historical seed was
+"not yet built (OI-021)" and described a manual `messageId`-dedup pull, after
+`seed-from-rest` had shipped + validated and the runbook documented it.
+
 Before writing any run command (e.g. `python3 ...`, `node ...`), verify the
 referenced path exists using `ls` or `find`. For Python: check whether the
 entry point is a `.py` file or a package directory (contains `__main__.py`). If

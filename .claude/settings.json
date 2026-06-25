@@ -136,6 +136,7 @@
       "Bash(make -C work/OagEventSource ddb-local-create-table)",
       "Bash(make -C work/OagEventSource dash0-apply)",
       "Bash(make -C work/OagEventSource dash0-verify)",
+      "Bash(make -C work/OagEventSource dash0-check-state)",
       "Bash(make -C work/OagEventSource dash0-list)",
       "Bash(make -C work/OagEventSource dash0-delete-dashboard *)",
       "Bash(aws dynamodb describe-time-to-live *)",

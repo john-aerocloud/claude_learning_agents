@@ -1,9 +1,58 @@
 ---
-process_version: 69
+process_version: 70
 effective_from: 2026-06-26
-supersedes: v68
+supersedes: v69
 status: active
 ---
+
+# Current Process — v70
+
+> **v70 (LIGHT retro — clean-wave scoring, no new rule, 2026-06-26).**
+> Target: **CFR/quality** (the false-green family was the headline) confirmed by
+> a clean wave, plus the EXP-085 retro-overhead balance (this is its first
+> batched fire). Per EXP-085 this is a LIGHT retro: the SLC-026/027/028 backend
+> wave (OagFlightTakenOff / recovery+generalAviation genesis / FlightRemoved+
+> diversion-enrichment) closed CLEAN — 0 new defects, 0 MTTR pairs, 0 deploy
+> failures, 0 queue starvation, DLQ 0 — so NO new cross-agent rule is added; the
+> retro SCORES the active machinery and banks one planned experiment.
+>
+> **Headline — the v68/v69 anti-false-green machinery is VALIDATED.** This wave
+> is the direct contrast to the prior serviceType wave (DEFECT-028/030/031
+> false-greens) on the SAME surface. The bundles-current gate (DEFECT-030 fix)
+> PASSED (rebuilt+committed bundles → deployed artifact matches source); CI green
+> BOTH lanes; the consumer rolled to primary (e5587a7); and the tester validated
+> the NEW fields on events the NEW consumer ACTUALLY ingested (recovery/
+> generalAviation booleans observed on a live FlightCreated; 14 live
+> OagFlightTakenOff with correct offGround). NO false-green, NO defect.
+> **Scores:** EXP-082 (deploy preflight / verify-at-source in the deploy env)
+> **1/2 positive**; EXP-083 (mechanical retro-debt gate) **1/2 positive** (fired
+> at routine 3/3, loop did not advance, not offered to human); EXP-085 (retro
+> cadence right-sized) **1/3 positive — FIRST BATCHED FIRE** (3 clean routine
+> closes batched before RETRO DUE; incident leg unexercised, carried).
+>
+> **DORA (clean wave, CFR did NOT rise):** cumulative lead=2543s freq=5/day
+> cfr=17% mttr=2189s; window(12) cfr=0% lead=166s. Constraint computes
+> **orchestrator** (plumbing) at the cumulative level; at the build level the
+> backend SERIALIZED on `src/core/normaliser-core.ts` (par_eff=0.84) exactly as
+> the flow-manager predicted (§F6 shared-file seam). **Buffers/N UNCHANGED** — no
+> starvation, no over-WIP (backend serial-by-seam + FIDS parallel both ran as
+> scheduled).
+>
+> **The one bank — EXP-086 (planned, trial-after-SLC-029).** The
+> `normaliser-core.ts` seam-concentration is a confirmed §F7 false-edge candidate:
+> RG1/RG2/TO1/DA1 are behaviourally independent but serialize on one file. The
+> per-event-type genesis-handler split (dispatch table → one file per event-type)
+> would let the flow-manager dispatch them as a true parallel set. TRIAL DEFERRED
+> until AFTER SLC-029 (the last backend slice on the same seam) so it measures
+> real parallelism gain across the full handler set, not a synthetic one. Pure
+> structural refactor, guarded by the corpus regression suite. See EXP-086.
+>
+> **One coherence gap logged (not fixed here):** the tester reported the
+> architecture *.mmd node-marks for SLC-026/027/028 did not register a diff →
+> OI-022, routed to the documenter coherence sweep (the deltas ARE in
+> architecture/deltas + edge-ledger; only the model node-mark sync is open).
+>
+> v69 change-set scored in `process-history/v69-2026-06-26.md`.
 
 # Current Process — v69
 

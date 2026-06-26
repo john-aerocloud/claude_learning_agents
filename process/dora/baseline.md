@@ -1,6 +1,6 @@
 # DORA Baseline (computed)
 
-_Generated 2026-06-26T12:17:26Z from ledger.csv. Do not hand-edit._
+_Generated 2026-06-26T13:16:44Z from ledger.csv. Do not hand-edit._
 
 ## Four key metrics — CUMULATIVE (whole pipeline)
 
@@ -8,7 +8,7 @@ _Generated 2026-06-26T12:17:26Z from ledger.csv. Do not hand-edit._
 |--------|-------|--------|
 | Gross lead time (median) | 2543 s | 44 slice(s) |
 | Deployment frequency | 5 /active-day | 21 day(s) |
-| Change failure rate (deploys only) | 18 % | 18/100 deploys |
+| Change failure rate (deploys only) | 17 % | 18/108 deploys |
 | Defect intake rate (separate, NOT in CFR) | 2 /active-day | 42 defect(s) |
 | MTTR (median, any prod issue) | 2189 s | 43 issue(s) |
 
@@ -20,11 +20,11 @@ _Recent-only view, so improvement is visible inside a retro's scoring horizon ra
 
 | Metric | Value | Window |
 |--------|-------|--------|
-| Gross lead time (median) | 1334 s | 4 slice(s) |
-| Deployment frequency | 6 /active-day | 2 day(s) |
+| Gross lead time (median) | 166 s | 1 slice(s) |
+| Deployment frequency | 12 /active-day | 1 day(s) |
 | Change failure rate (deploys only) | 0 % | 0/12 deploys |
-| Defect intake rate (separate, NOT in CFR) | 2 /active-day | 5 defect(s) |
-| MTTR (median, any prod issue) | 80 s | 1 issue(s) |
+| Defect intake rate (separate, NOT in CFR) | 2 /active-day | 2 defect(s) |
+| MTTR (median, any prod issue) | — s | 0 issue(s) |
 
 ## Per-agent task completion (seconds)
 
@@ -33,7 +33,7 @@ _Recent-only view, so improvement is visible inside a retro's scoring horizon ra
 | product | 20 | 900 | 282 | 466 |
 | solution-architect | 18 | 1200 | 374 | 627 |
 | cicd | 18 | 600 | 300 | 579 |
-| engineer | 118 | 1500 | 900 | 1196 |
+| engineer | 127 | 1500 | 840 | 1148 |
 | ui-designer | 6 | 540 | 750 | 798 |
 | tester | 14 | 1200 | 830 | 1354 |
 | documenter | 15 | 60 | 135 | 247 |
@@ -47,11 +47,11 @@ Plumbing = running the agent OS (orchestrator + flow-manager + retro/gate/bookke
 | class | time (s) | time % | tokens | tokens % |
 |-------|----------|--------|--------|----------|
 | plumbing | 7710 | 2% | 0 | — |
-| delivery | 321215 | 98% | 0 | — |
+| delivery | 326375 | 98% | 0 | — |
 
 _Plumbing share: time 2%, tokens — (token coverage 0% of task_end rows — grows as dispatches log --tokens, v59)._
 
 ## Theory-of-Constraints read
 
-- Constraint (slowest median step): **engineer**
+- Constraint (slowest median step): **orchestrator**
 - Recommended exploit/subordinate action: _(orchestrator fills in)_

@@ -549,15 +549,21 @@ def cmd_retro_debt(a):
     of the loop machinery (a checkable gate), not a rule the orchestrator may skip.
 
     Retro-triggering events (the §F8 cadence — slice-completion + threshold events):
-      - a SLICE close   (item_done / bubble whose item_id starts SLC- or is a CHK-)
+      - a SLICE/CHUNK close (item_done / bubble whose item_id starts SLC- or CHK-)
+        — a ROUTINE event: batched against --threshold.
       - a defect resolve (defect_resolved, or a recovery whose ref is a DEFECT- id)
+        — an INCIDENT event: forces RETRO DUE immediately (effective threshold 1).
       - a deploy_failure (a shipped change that failed its own validation)
+        — an INCIDENT event: forces RETRO DUE immediately (effective threshold 1).
     A `retro` row resets the counter to zero (drains the debt).
 
-    Threshold default = 1 (retro is due the moment ANY slice closes or a defect
-    resolves — the §F8 default of "retro at slice completion"). Raise via
-    --threshold for a project that batches. Output is machine-readable so the
-    loop/flow-manager can gate on it; exit code 2 == retro DUE (debt >= threshold)."""
+    Cadence model (v69, EXP-085 — retro cadence right-sized): ROUTINE closes batch
+    up to --threshold (default 3) before a retro is due, so a clean run of small
+    slice/chunk closes does not pay per-slice retro overhead. INCIDENT events
+    (prod defect resolve, deploy failure) are NOT batched — a single one forces
+    RETRO DUE so real learning is never deferred. Exit code 2 == retro DUE
+    (routine_debt >= threshold OR any incident event present). Output is
+    machine-readable so the loop/flow-manager can gate on it."""
     rows = [r for r in read_rows() if r["project"] == a.project]
     # find the timestamp of the last retro row
     last_retro_ts = None
@@ -588,11 +594,19 @@ def cmd_retro_debt(a):
                     "defect-resolve" if is_defect_resolve else "deploy-failure")
             debt.append((r["timestamp"], kind, item or ref))
     n = len(debt)
+    routine = [d for d in debt if d[1] == "slice-close"]
+    incidents = [d for d in debt if d[1] != "slice-close"]
     thr = a.threshold
-    due = n >= thr
+    # ROUTINE closes batch up to --threshold; INCIDENT events (defect resolve /
+    # deploy failure) are never batched — a single one forces RETRO DUE (v69).
+    due = len(routine) >= thr or len(incidents) >= 1
+    reason = ("incident (immediate)" if incidents else
+              f"routine {len(routine)}>={thr}" if len(routine) >= thr else
+              f"routine {len(routine)}<{thr}")
     since = last_retro_ts.strftime("%Y-%m-%dT%H:%M:%SZ") if last_retro_ts else "(no prior retro)"
-    print(f"retro-debt[{a.project}] = {n} (threshold {thr}) since last retro {since} "
-          f"=> {'RETRO DUE — drain before advancing' if due else 'ok'}")
+    print(f"retro-debt[{a.project}] = {n} (routine {len(routine)}/{thr}, "
+          f"incidents {len(incidents)}) since last retro {since} "
+          f"=> {'RETRO DUE — drain before advancing ['+reason+']' if due else 'ok'}")
     for ts, kind, ident in debt:
         print(f"  - {ts}  {kind:14}  {ident}")
     write_statusline({f"retro_debt_{a.project}": n, f"retro_due_{a.project}": due})
@@ -628,7 +642,7 @@ def main():
     ps.set_defaults(func=cmd_project_state)
     rd = sub.add_parser("retro-debt")
     rd.add_argument("--project", required=True)
-    rd.add_argument("--threshold", type=int, default=1)
+    rd.add_argument("--threshold", type=int, default=3)
     rd.set_defaults(func=cmd_retro_debt)
     a = p.parse_args()
     a.func(a)

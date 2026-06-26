@@ -1,6 +1,6 @@
 # DORA Baseline (computed)
 
-_Generated 2026-06-26T11:51:54Z from ledger.csv. Do not hand-edit._
+_Generated 2026-06-26T12:17:26Z from ledger.csv. Do not hand-edit._
 
 ## Four key metrics — CUMULATIVE (whole pipeline)
 

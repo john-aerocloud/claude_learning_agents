@@ -1,9 +1,44 @@
 ---
-process_version: 68
+process_version: 69
 effective_from: 2026-06-26
-supersedes: v67
+supersedes: v68
 status: active
 ---
+
+# Current Process — v69
+
+> **v69 (FOCUSED retro — retro cadence right-sized, 2026-06-26).**
+> Target: **retro-overhead vs missed-learning balance** (a gross-lead-time proxy),
+> guarded by CFR/MTTR (incident learning stays immediate). LIGHT retro: no new
+> defects, no MTTR events, no queue starvation; the only closes since v68 were
+> trivial (SLC-009 — a validation-only close of pre-built observability dashboards,
+> CHK-5 done; TD-002 — dead `oag-feed.ts` deleted; the AOS alignment doc reframed
+> "prefix-is-intentional"). DORA: no regression — cumulative lead=2543s freq=5/day
+> cfr=18% mttr=2189s; window(12) cfr=0% lead=1334s. Constraint stays **engineer**;
+> buffers/N UNCHANGED.
+>
+> **The change — EXP-085 (retro cadence right-sized).** The v68 retro-debt gate
+> (EXP-083) shipped at threshold=1 (a retro DUE the moment ANY slice/chunk closes).
+> Its FIRST real firing — on SLC-009, a validation-only close — proved that too
+> aggressive: a per-slice-close cadence reintroduces the very retro-overhead/bloat
+> churn v68 fought, and treats a clean routine close (little to learn) the same as
+> a real incident (much to learn). Fix: SPLIT the gate's events by class.
+> **ROUTINE** slice/chunk closes **batch** up to `--threshold` (default raised
+> 1→3) before a retro is due; **INCIDENT** events (prod defect resolve,
+> deploy_failure) are **never batched** and force RETRO DUE immediately (effective
+> threshold 1), alongside the existing MTTR-pair / queue-wait-spike triggers.
+> **This is the v68 gate SELF-CORRECTING on its first firing — the intended
+> behaviour, not a bypass:** enforcement stays mechanical (the loop still may not
+> advance past a due retro; the retro still may NOT be offered to the human), only
+> the routine cadence is right-sized and incidents stay immediate. Routed to
+> `dora.py cmd_retro_debt` (routine/incident split, default --threshold 3) +
+> Makefile + §F8 + loop-run.md step 7 + §6. Anticipated: fewer low-yield per-slice
+> retros free the constraint while CFR/MTTR protection is unchanged. Scored over
+> the next 3 retros [EXP-085, active 0/3].
+>
+> v68 change-set scored in `process-history/v68-2026-06-26.md`: EXP-083 mechanical
+> gate VALIDATED-as-mechanism (fired correctly, the loop did not advance) — its
+> threshold is what needed tuning, not its enforcement; EXP-084 leanness held.
 
 # Current Process — v68
 
@@ -479,7 +514,8 @@ cases, validation specs, and runbooks classify on these semantics.
   new requirement on an existing project). Sequence: product vision → architecture
   + security review → chunk plan → capabilities → first slice.
 - **Per iteration (push mode)** → `/iteration-run` (ends at retro-complete, §20)
-- **Retro** → `/retro` — fires at the §F8 cadence (slice-completion + event-triggered)
+- **Retro** → `/retro` — fires at the §F8 cadence (routine slice/chunk closes batch
+  to threshold 3; prod defects / deploy failures trigger immediately — v69 EXP-085)
 - **Defect** → `/defect` — structured intake (expected/actual/intent/importance;
   prompts for anything missing), reproduce-to-confirm (no phantom fixes),
   prioritise (§38), fix defect-as-spec + prod re-check, then a gap-closing
@@ -1536,13 +1572,32 @@ to the human instead (8 un-retro'd slice/chunk closes accrued after v67 — the
 EXP-030 anti-pattern recurring), so enforcement is now mechanical, not a rule the
 orchestrator may skip. **`dora.py retro-debt --project P`** counts retro-triggering
 events (slice/chunk closes, defect resolves, deploy failures) since the last
-`retro` ledger row and **exits non-zero (code 2 = RETRO DUE)** when debt ≥
-threshold (default 1; a `retro` row resets it). `make retro-debt PROJECT=P` is the
-allowlisted wrapper. The loop (`loop-run.md` step 7) MUST run it before pulling the
-next work after any slice/chunk close or defect resolve; a non-zero exit means the
-loop **may not advance** until `/retro` drains the debt, and the retro may **never**
-be offered to the human as a choice (that is the §F9.4 over-ask the gate prevents).
-The retro stays TIGHT (§F9.4) so the gate does not become the time thief.
+`retro` ledger row and **exits non-zero (code 2 = RETRO DUE)**. `make retro-debt
+PROJECT=P` is the allowlisted wrapper. The loop (`loop-run.md` step 7) MUST run it
+before pulling the next work after any slice/chunk close or defect resolve; a
+non-zero exit means the loop **may not advance** until `/retro` drains the debt,
+and the retro may **never** be offered to the human as a choice (that is the §F9.4
+over-ask the gate prevents). The retro stays TIGHT (§F9.4) so the gate does not
+become the time thief.
+
+**Right-sized cadence — routine batches, incidents fire immediately (v69,
+EXP-085).** The v68 threshold=1 (retro after EVERY slice close) proved too
+aggressive on its FIRST real firing (SLC-009, a validation-only close of pre-built
+work): a per-slice-close cadence reintroduces the very retro-overhead/bloat churn
+v68 fought, and treats a clean routine close (little to learn) the same as a real
+incident (much to learn). The gate now **splits events by class**:
+- **ROUTINE** = a SLICE/CHUNK close. These **batch** up to `--threshold`
+  (default **3**) before a retro is due. A clean run of small closes does not pay
+  per-slice retro overhead.
+- **INCIDENT** = a prod defect resolve OR a deploy_failure. These are **never
+  batched** — a single one forces RETRO DUE immediately (effective threshold 1),
+  plus the existing event-triggers (MTTR pair, queue-wait spike above target). Real
+  learning is never deferred.
+This is the v68 gate **self-correcting on its first firing — the intended
+behaviour, not a bypass**: enforcement stays mechanical (the loop still may not
+advance past a due retro, the retro still may not be offered to the human), only
+the routine cadence is right-sized and incidents are guarded to fire at once.
+`--threshold` is per-project tunable for batchier projects.
 
 ## F9. Continuous operation & autonomous wake (v41 — human-directed)
 The loop is a **continuously-running background process**, not a command the

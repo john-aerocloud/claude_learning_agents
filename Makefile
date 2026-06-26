@@ -60,7 +60,10 @@ dora-compute:
 # — i.e. a slice closed / a defect resolved / a deploy failed since the last retro
 # row. The loop MUST run this before advancing past a slice/chunk/defect boundary;
 # a non-zero exit means "fire /retro to drain the debt before pulling next work".
-# make retro-debt PROJECT=OagEventSource [THRESHOLD=1]
+# v69 (EXP-085) cadence: ROUTINE slice/chunk closes batch up to THRESHOLD (default 3)
+# before a retro is due; INCIDENT events (defect resolve / deploy failure) are NOT
+# batched — a single one forces RETRO DUE immediately so real learning never defers.
+# make retro-debt PROJECT=OagEventSource [THRESHOLD=3]
 retro-debt:
 	$(DORA) retro-debt --project $(PROJECT) $(if $(THRESHOLD),--threshold $(THRESHOLD),)
 

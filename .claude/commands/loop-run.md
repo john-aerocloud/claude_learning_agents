@@ -57,7 +57,11 @@ Each cycle:
    judgement call**: a **non-zero exit (code 2 = RETRO DUE)** means the loop MUST
    run `/retro $1` to drain the debt BEFORE it may advance — the orchestrator may
    NOT pull next work, and may NOT offer the retro to the human as a choice, while
-   debt is outstanding. The retro itself records a `retro` ledger row, which
+   debt is outstanding. **Cadence (v69, EXP-085):** routine slice/chunk closes
+   BATCH up to `--threshold` (default 3) before the gate trips; INCIDENT events
+   (prod defect resolve / deploy failure) are never batched and trip the gate
+   immediately. So a clean run of small closes won't force a per-slice retro, but
+   a real incident always does. The retro itself records a `retro` ledger row, which
    resets the counter to zero (re-run `make retro-debt` after the retro to confirm
    `ok` before resuming pulls). This makes "the retro fires automatically at the
    §F8 cadence" a checkable property of the loop machinery rather than a rule the

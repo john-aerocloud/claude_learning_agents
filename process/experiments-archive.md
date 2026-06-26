@@ -49,3 +49,18 @@ this is the index of what we've learned and folded in, not a working registry.
 - EXP-037 — keep ledger/items.csv/queues coherent per-UC — superseded by EXP-048 for new projects; forward principle carried by EXP-047 — integrated v60
 - EXP-038 — retro scriptifies the cycle's most-repeated MECHANICAL op (one allowlisted command, not N Read+Edit) — validated 2/2 (SLC-003) — integrated v60 (process §26 + dora.py)
 - EXP-080 — verify CI/deploy/validation status at the SOURCE (gh run conclusion + job/step, deployed X-Service-Version, actual metric value); orchestrator verifies before closing a slice/gate; flow-manager never projects an in-flight item terminal — validated 2/2 (SLC-014 caught 3 spec-not-code false-fails; SLC-023 cited verified deploy sha + caught the ci-watch wrong-repo read) — integrated v67 (engineer.md/tester.md/orchestrator.md/flow-manager.md). Extended to the deploy environment by EXP-082.
+
+> **v68 GRADUATE-TO-SKILL pass (rule lifecycle, process-framework skill).** The
+> following PROVEN, STABLE, CROSS-AGENT rules graduated OUT of the active /process
+> into skills (the durable methodology layer) + their owning agent files, and
+> their EXP rows were pruned from experiments.md to keep /process lean:
+- EXP-025 — defect-as-high-value-intake (defects re-enter via /intake, costed, pre-empt Ready) — validated 2/2 (DEFECT-001, DEFECT-OAG-025) — graduated v68 to plain practice (process §F5/intake.md/defect already core)
+- EXP-062 — migration done-condition INCLUDES converting+proving the CI/CD pipeline green in-slice (never deferred) — validated 1/1 PROVEN GREEN (infra.yml SST run 27958502999) — graduated v68 to cicd.md plain practice (process §19a)
+- EXP-064 — observability validated by a span/trace ARRIVING (read-back), not "collector started" — graduated v68 → delivery-principles "validate the fitness function" (tester.md mechanics). Founding DEFECT-OAG-002.
+- EXP-065 — externally-published contract validated against a schema DERIVED FROM the frozen spec, not the implementation — graduated v68 → delivery-principles "oracle is ground truth". Founding DEFECT-OAG-003.
+- EXP-066 — external-source semantic assumptions validated against the captured corpus before encoding (assumption register + corpus-adversarial test) — graduated v68 → delivery-principles "oracle is ground truth". Founding DEFECT-OAG-004.
+- EXP-068 — a deployed processing component validated by it still DOING ITS PRIMARY JOB after deploy (core-function smoke), not "deployed + units pass" — graduated v68 → delivery-principles "gate asserts the outcome". Founding DEFECT-OAG-008 (24h projector outage).
+- EXP-072 — consumer-facing READ surface ships a stated p95 latency budget + round-trip check (flag serial dependent-less queries / scan-instead-of-counter) — graduated v68 → delivery-principles "gate asserts the outcome". Founding DEFECT-OAG-010.
+- EXP-073 — fixtures for an unowned data shape CAPTURED FROM THE REAL SOURCE, never hand-authored to match the code — graduated v68 → delivery-principles "oracle is ground truth" (engineer.md §2). Founding DEFECT-OAG-016.
+- EXP-074 — a UI surface validated only when the RENDER is observed showing real content + key-field correctness; missing tooling is a blocker to wire — graduated v68 → delivery-principles "gate asserts the outcome" (tester.md). Founding DEFECT-OAG-016/018.
+- EXP-081 — e2e/integration/contract specs assert the INVARIANT, not an incidental live-data condition (branch on data-state / derive from per-entity truth) — graduated v68 → delivery-principles "spec asserts the invariant" (tester.md/engineer.md). Founding SLC-014 batch (3 false-fails).

@@ -541,6 +541,63 @@ def cmd_cost_split(a):
     print(f"PLUMBING SHARE: time={pct(agg['plumbing']['time'],tt)} "
           f"tokens={pct(agg['plumbing']['tokens'],tk)} | token coverage={cov} of task_end rows")
 
+def cmd_retro_debt(a):
+    """MECHANICAL §F8 auto-retro gate (v68). Counts retro-triggering events since
+    the last `retro` ledger row for the project, and EXITS NON-ZERO when the debt
+    has reached the cadence threshold — so the loop cannot advance past a due retro
+    by orchestrator discretion. The retro firing automatically is thus a property
+    of the loop machinery (a checkable gate), not a rule the orchestrator may skip.
+
+    Retro-triggering events (the §F8 cadence — slice-completion + threshold events):
+      - a SLICE close   (item_done / bubble whose item_id starts SLC- or is a CHK-)
+      - a defect resolve (defect_resolved, or a recovery whose ref is a DEFECT- id)
+      - a deploy_failure (a shipped change that failed its own validation)
+    A `retro` row resets the counter to zero (drains the debt).
+
+    Threshold default = 1 (retro is due the moment ANY slice closes or a defect
+    resolves — the §F8 default of "retro at slice completion"). Raise via
+    --threshold for a project that batches. Output is machine-readable so the
+    loop/flow-manager can gate on it; exit code 2 == retro DUE (debt >= threshold)."""
+    rows = [r for r in read_rows() if r["project"] == a.project]
+    # find the timestamp of the last retro row
+    last_retro_ts = None
+    for r in rows:
+        if r["event"] == "retro":
+            ts = parse_ts(r["timestamp"])
+            if ts and (last_retro_ts is None or ts > last_retro_ts):
+                last_retro_ts = ts
+    debt = []
+    for r in rows:
+        ts = parse_ts(r["timestamp"])
+        # only events strictly AFTER the last retro count as debt; an unparseable
+        # timestamp (malformed legacy row) is treated as pre-retro, never new debt
+        if last_retro_ts is not None and (ts is None or ts <= last_retro_ts):
+            continue
+        ev, item, ref = r["event"], (r["item_id"] or ""), (r["ref"] or "")
+        is_slice_close = ev in ("item_done", "bubble") and (
+            item.startswith("SLC-") or item.startswith("CHK-")
+        ) and (r["outcome"] in ("done", "success"))
+        is_defect_resolve = ev == "defect_resolved" or (
+            ev == "recovery" and ref.startswith("DEFECT-")
+        )
+        is_deploy_failure = ev == "deploy_failure" or (
+            ev == "failure" and not ref.startswith("DEFECT-")
+        )
+        if is_slice_close or is_defect_resolve or is_deploy_failure:
+            kind = ("slice-close" if is_slice_close else
+                    "defect-resolve" if is_defect_resolve else "deploy-failure")
+            debt.append((r["timestamp"], kind, item or ref))
+    n = len(debt)
+    thr = a.threshold
+    due = n >= thr
+    since = last_retro_ts.strftime("%Y-%m-%dT%H:%M:%SZ") if last_retro_ts else "(no prior retro)"
+    print(f"retro-debt[{a.project}] = {n} (threshold {thr}) since last retro {since} "
+          f"=> {'RETRO DUE — drain before advancing' if due else 'ok'}")
+    for ts, kind, ident in debt:
+        print(f"  - {ts}  {kind:14}  {ident}")
+    write_statusline({f"retro_debt_{a.project}": n, f"retro_due_{a.project}": due})
+    sys.exit(2 if due else 0)
+
 def main():
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -569,6 +626,10 @@ def main():
     ps.add_argument("--project", required=True)
     ps.add_argument("--out")
     ps.set_defaults(func=cmd_project_state)
+    rd = sub.add_parser("retro-debt")
+    rd.add_argument("--project", required=True)
+    rd.add_argument("--threshold", type=int, default=1)
+    rd.set_defaults(func=cmd_retro_debt)
     a = p.parse_args()
     a.func(a)
 

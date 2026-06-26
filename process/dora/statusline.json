@@ -1,10 +1,12 @@
 {
-"cfr": 25,
-"freq": 4,
-"lead": 1565,
+"cfr": 0,
+"freq": 6,
+"lead": 1334,
 "window": "last 12 deploys",
-"dora_updated": "2026-06-25T15:52:33Z",
+"dora_updated": "2026-06-26T11:51:54Z",
 "project": "OagEventSource",
 "par": 0.81,
-"flow_updated": "2026-06-25T15:52:34Z"
+"flow_updated": "2026-06-25T15:52:34Z",
+"retro_debt_OagEventSource": 0,
+"retro_due_OagEventSource": false
 }

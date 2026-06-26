@@ -44,6 +44,46 @@ decisions + paths.
 3. **Per-project**: `/work/<p>/dora/per-project.md` — expected DORA per change,
    and on regression a reflection on why; graduates to `principle-failures/`.
 
+## Rule lifecycle: experiment → graduate-to-skill → prune from /process (v68)
+`/process` must stay **LEAN and on-target** — the ACTIVE process carries only what
+is still being learned or is genuinely cross-agent and live. A rule that is PROVEN
+and STABLE does not belong in the active process; it belongs in the **skills (the
+stable methodology layer)** so the active `/process` is not bloated by it. The
+lifecycle, explicit:
+
+1. **EXPERIMENT** — a new routed change is an `EXP-` row in
+   `/process/experiments.md` (the falsifiable-hypothesis bar, §25a). It lives in
+   the active process while it is being scored.
+2. **INTEGRATE (existing step)** — when it scores positive K times, the behaviour
+   is folded into its **owning agent file** (`.claude/agents/<agent>.md`) as plain
+   practice and the row is pruned to `experiments-archive.md`. This handles
+   **single-agent** behaviour.
+3. **GRADUATE-TO-SKILL (new in v68)** — when a proven rule is **cross-agent
+   methodology** (a way-of-working many roles share, not one agent's behaviour),
+   it graduates into the relevant **skill** rather than (or in addition to) an
+   agent file:
+   - delivery method / principles → `delivery-principles`
+   - repo/doc navigation, the rule lifecycle itself → `process-framework`
+   - metric/ledger mechanics → `dora-ledger`
+   - cloud architecture defaults → `aws-architecture`
+   - UI method → `ui-design-system`; OTel/OAG specifics → their skills
+   The skill becomes the durable home; the proving `EXP-`/principle-failure
+   thread is then **RETIRED/pruned from the active `/process`** (archive line
+   only). Graduation criterion: **proven (positive ≥ K, default 2, with a real
+   data point — not a single anecdote) AND stable (no open rework) AND
+   cross-agent**. A rule that is still experimental, or that is a one-agent
+   behaviour, does NOT graduate to a skill.
+4. **RETIRE** — a rule the evidence refutes is undone and deleted (failed-row
+   policy, §25a.6).
+
+Direction of flow: experiments accrue in `/process`; **proven cross-agent
+methodology drains OUT to skills**; the active process shrinks. At every retro,
+audit the active `/process` for rules that have become proven+stable+cross-agent
+and graduate them, measuring the leanness gain (line/rule count before→after).
+Skills are loaded on-demand and keep the orchestration context small, so moving a
+proven rule there is both correctness (stable home) and economy (smaller active
+process).
+
 ## When docs get heavy
 Prefer adding a skill (see `skill-creator`) that abstracts a heavy document into a
 callable procedure, rather than letting the orchestrator hold it in context.

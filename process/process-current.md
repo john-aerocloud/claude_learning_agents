@@ -1,9 +1,61 @@
 ---
-process_version: 67
-effective_from: 2026-06-25
-supersedes: v66
+process_version: 68
+effective_from: 2026-06-26
+supersedes: v67
 status: active
 ---
+
+# Current Process — v68
+
+> **v68 (OVERDUE retro + process-leanness refactor — make the auto-retro
+> MECHANICAL; graduate proven rules to skills, 2026-06-26).**
+> Target: **CFR** (the false-green family is the headline) + **process leanness**
+> (a DORA proxy: a leaner active process is faster to load/apply and removes the
+> rule-bloat that doesn't even guarantee adherence). Three linked subjects:
+>
+> **(1) META-FAILURE — the automatic §F8 retro did not run.** Since v67 a LOT
+> shipped with NO retro (SLC-021, SLC-025/serviceType, the Oag-prefix +
+> OagBagBeltSet rename delta-026, an event-store drop + clean reset, DEFECT-OAG-028/
+> 030/031, a prematurely-closed CC3) — retro-debt measured **8 slice/chunk closes**.
+> Root cause: the orchestrator repeatedly OFFERED the retro to the human instead of
+> running it (the EXP-030 / 2026-06-06 anti-pattern recurring). The §F8/§F9.4 RULE
+> already forbade this and was still violated → another rule won't fix it.
+> **Structural fix — enforcement is now MECHANICAL [EXP-083]:** a **retro-debt
+> gate** in the loop machinery — `dora.py retro-debt` counts slice/chunk closes +
+> defect resolves + deploy failures since the last `retro` ledger row and **exits
+> non-zero (code 2 = RETRO DUE)** at the threshold; `make retro-debt PROJECT=…`
+> wraps it; `loop-run.md` step 7 makes it a **hard loop-state precondition** — the
+> loop MUST run /retro to drain the debt before pulling next work and may NOT offer
+> it to the human. "Retro fires at the cadence" is now a checkable property of the
+> loop, not orchestrator discretion. Principle-failure recorded
+> (`2026-06-26-auto-retro-offered-to-human-instead-of-firing.md`).
+>
+> **(2) THE FALSE-GREEN FAMILY → graduated to a SKILL.** DEFECT-028 (FIDS header
+> false-green), 030 (stale committed bundles deployed), 031 (unpackaged
+> airports.json consumer crash-loop) + the CI-green CC3 close are ALL "green
+> build/CI ≠ running service." The durable rule — **for backend/contract/event
+> slices, validate the RUNNING service in prod (consumer UP + the field/behaviour
+> observed on a live event/response), never close on CI-green alone; the deployed
+> ARTIFACT is what runs, not the source** — is banked in the **delivery-principles
+> skill** ("Green build ≠ running service"), NOT as another standalone /process EXP.
+>
+> **(3) RULE-BLOAT → graduate-to-skill lifecycle [EXP-084].** /process was accruing
+> rules/EXPs faster than it shed them (36 active EXP rows) and (per subject 1) the
+> bloat didn't even buy adherence. Defined the explicit lifecycle in the
+> **process-framework skill**: experiment (EXP in /process) → integrate into the
+> owning agent file (single-agent) OR **GRADUATE into the relevant skill**
+> (cross-agent methodology, proven ≥K + stable) → prune from active /process. Ran
+> the FIRST PASS: graduated 10 proven cross-agent rows (EXP-025/062/064/065/066/068/
+> 072/073/074/081) into delivery-principles (the validation/fitness-function +
+> ground-truth-oracle + invariant-not-incidental families) + cicd.md + agent files,
+> pruning their EXP rows. **Leanness gain: active EXP rows 36 → 26.**
+>
+> DORA since v67 (cumulative): lead=2543s freq=5/day **cfr=18% (18/93 deploys)**
+> mttr=2189s; defect-intake 2/active-day. The **CFR headline** is the false-green
+> spike: DEFECT-OAG-030 + -031 were both prod regressions of the SLC-025 deploy
+> caught by tester live validation (UC-ST1 NO-GO → Rework), recovered same-session
+> at f8ad95c (SLC-025 GO, 25/25 green). Constraint stays **engineer**. Buffers/N
+> UNCHANGED (no queue starvation/over-WIP this window).
 
 # Current Process — v67
 
@@ -1467,7 +1519,7 @@ reinstates, none retires it and reclaims parallelism; ≤1 trial running per sea
 Driving both toward zero IS the system learning to slice and structure work for
 flow. Target: CFR (hidden edges), gross lead time (false edges). [EXP-027]
 
-## F8. Retro cadence (pull mode)
+## F8. Retro cadence (pull mode) — MECHANICALLY ENFORCED (v68)
 Default: retro at **slice completion** (preserving §20's proven per-slice
 economics — a retro is service time on the constraint, so per-use-case retros
 would dominate overhead), PLUS an **event-triggered retro** whenever flow data
@@ -1477,6 +1529,20 @@ remains the **process owner** that runs retros (§26) and owns the experiments
 registry; at every retro it tunes the per-queue buffers (§F2) and `N` (§F6) from
 the flow evidence, each tune a scored experiment. Target: meta — bound retro
 overhead without losing the learning signal. [EXP-029]
+
+**The cadence is a GATE in the loop machinery, not orchestrator discretion (v68,
+EXP-083).** "Run the retro automatically" was repeatedly violated by offering it
+to the human instead (8 un-retro'd slice/chunk closes accrued after v67 — the
+EXP-030 anti-pattern recurring), so enforcement is now mechanical, not a rule the
+orchestrator may skip. **`dora.py retro-debt --project P`** counts retro-triggering
+events (slice/chunk closes, defect resolves, deploy failures) since the last
+`retro` ledger row and **exits non-zero (code 2 = RETRO DUE)** when debt ≥
+threshold (default 1; a `retro` row resets it). `make retro-debt PROJECT=P` is the
+allowlisted wrapper. The loop (`loop-run.md` step 7) MUST run it before pulling the
+next work after any slice/chunk close or defect resolve; a non-zero exit means the
+loop **may not advance** until `/retro` drains the debt, and the retro may **never**
+be offered to the human as a choice (that is the §F9.4 over-ask the gate prevents).
+The retro stays TIGHT (§F9.4) so the gate does not become the time thief.
 
 ## F9. Continuous operation & autonomous wake (v41 — human-directed)
 The loop is a **continuously-running background process**, not a command the

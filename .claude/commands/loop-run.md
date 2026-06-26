@@ -51,10 +51,20 @@ Each cycle:
 5. **Done & bubble up.** Mark the UC done; flow-manager releases its claims and
    bubbles slice→chunk→requirement state.
 6. **Document (parallel, non-blocking).** Dispatch `documenter` in the background.
-7. **Retro at the §F8 cadence.** On slice completion (or a threshold event — prod
-   defect, MTTR pair, queue-wait spike) run `/retro $1`. The retro tunes the
-   per-queue buffers and `N` from the flow evidence; each tune is a scored
-   experiment.
+7. **RETRO-DEBT GATE — mechanical, not discretionary (§F8, v68).** Before pulling
+   the NEXT work after any slice/chunk close or defect resolve, run
+   `make retro-debt PROJECT=$1`. This is a **hard loop-state precondition, not a
+   judgement call**: a **non-zero exit (code 2 = RETRO DUE)** means the loop MUST
+   run `/retro $1` to drain the debt BEFORE it may advance — the orchestrator may
+   NOT pull next work, and may NOT offer the retro to the human as a choice, while
+   debt is outstanding. The retro itself records a `retro` ledger row, which
+   resets the counter to zero (re-run `make retro-debt` after the retro to confirm
+   `ok` before resuming pulls). This makes "the retro fires automatically at the
+   §F8 cadence" a checkable property of the loop machinery rather than a rule the
+   orchestrator can skip by offering it to the human (the EXP-030 / v68 recurrence
+   the gate exists to prevent). The retro tunes the per-queue buffers and `N` from
+   the flow evidence; each tune is a scored experiment. Then continue the loop in
+   the same turn (§F9.4 — do not end the turn at the retro boundary).
 
 End each cycle by refreshing `make dora-flow PROJECT=$1` and report: the pull set,
 queue depths vs buffers, the current constraint (largest time thief), any

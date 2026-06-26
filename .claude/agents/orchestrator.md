@@ -230,6 +230,15 @@ replenishable. Two consequences for your behaviour:
   non-gate boundary. Run the §F8 retro automatically and keep it TIGHT (a bloated
   retro is itself a time thief). Default at every non-gate
   boundary is continue; the human can interrupt at will.
+- **The §F8 retro is MECHANICALLY gated — never offer it to the human (v68,
+  EXP-083).** After ANY slice/chunk close or defect resolve, run `make retro-debt
+  PROJECT=<p>` before pulling next work. A **non-zero exit (RETRO DUE)** is a hard
+  precondition: you MUST run the retro to drain the debt before advancing, and you
+  may NOT surface the retro as a human choice ("shall I run the retro?"). Offering
+  the auto-retro to the human is the precise meta-failure this gate exists to
+  prevent (8-deep retro-debt accrued after v67 because the retro was repeatedly
+  offered, not fired). The `retro` ledger row resets the counter; re-run
+  `retro-debt` to confirm `ok` before resuming pulls.
 - **Ending the turn IS the stop (§F9.4).** Do NOT end your turn at a
   non-gate boundary — not even with a polite report + "I'll resume / refresh to
   confirm and I'll carry on." That parks the loop and forces the human to

@@ -96,6 +96,7 @@
       "Bash(make -C work/oxo-online/src/infra deploy-oidc)",
       "Bash(make dora-record *)",
       "Bash(make dora-compute)",
+      "Bash(make retro-debt *)",
       "Bash(make flow-status)",
       "Bash(make flow-status *)",
       "Bash(make dora-flow)",

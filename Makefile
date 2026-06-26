@@ -56,6 +56,14 @@ dora-record:
 dora-compute:
 	$(DORA) compute
 
+# MECHANICAL §F8 auto-retro gate (v68). Exits non-zero (code 2) when retro is DUE
+# — i.e. a slice closed / a defect resolved / a deploy failed since the last retro
+# row. The loop MUST run this before advancing past a slice/chunk/defect boundary;
+# a non-zero exit means "fire /retro to drain the debt before pulling next work".
+# make retro-debt PROJECT=OagEventSource [THRESHOLD=1]
+retro-debt:
+	$(DORA) retro-debt --project $(PROJECT) $(if $(THRESHOLD),--threshold $(THRESHOLD),)
+
 # --- Validation & smoke (run + record in one step) ----------------------------
 # make validate ITER=5 SLICE=004-create-game [PROD_URL=https://…] [AWS_PROFILE=dev-int]
 # PROD_URL and AWS_PROFILE are forwarded to the playwright test runner when set.
@@ -431,7 +439,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: sso-login dora-record dora-compute validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids
+.PHONY: sso-login dora-record dora-compute retro-debt validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids
 
 # make dora-flow PROJECT=oxo-online  -> rewrites work/<project>/dora/flow.md
 # (per-project queues + time thieves + parallelism efficiency). v40 pull-flow view.

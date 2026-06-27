@@ -54,7 +54,9 @@
       "Bash(git -C /Users/johnnicholas/Documents/Claude/Projects/Claufe_Code_agent_design commit -q -- work/observatory/src/server/lib/ledgerAggregator.js work/observatory/src/server/__tests__/ledger-aggregator.test.js -m 'UC-S004-1: ledger aggregator domain — per-stage flow from real ledger \\(tolerant line parse recovers malformed rows; engineer throughput=7\\) *)",
       "Bash(git -C /Users/johnnicholas/Documents/Claude/Projects/Claufe_Code_agent_design log --oneline -1)",
       "Bash(curl -s -o /dev/null -w '%{http_code}' http://localhost:3001/api/projects/observatory/stage-flow)",
-      "Skill(claude-api)"
+      "Skill(claude-api)",
+      "Bash(git -C work/OagEventSource log --oneline -5)",
+      "Bash(git -C work/OagEventSource status -sb)"
     ]
   }
 }

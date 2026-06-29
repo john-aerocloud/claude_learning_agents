@@ -56,7 +56,12 @@
       "Bash(curl -s -o /dev/null -w '%{http_code}' http://localhost:3001/api/projects/observatory/stage-flow)",
       "Skill(claude-api)",
       "Bash(git -C work/OagEventSource log --oneline -5)",
-      "Bash(git -C work/OagEventSource status -sb)"
+      "Bash(git -C work/OagEventSource status -sb)",
+      "Bash(/c/Users/themr/.local/bin/python .claude/skills/dora-ledger/scripts/dora.py record --project Viggo-fix --iteration 1 --slice chunk-2 --agent flow-manager --event enqueue --outcome na --item-id UC-W1 --queue ready --note 'dependency-ready: DAG root, vc=1.67')",
+      "Bash(/c/Users/themr/.local/bin/python .claude/skills/dora-ledger/scripts/dora.py record --project Viggo-fix --iteration 1 --slice chunk-2 --agent flow-manager --event enqueue --outcome na --item-id UC-W5 --queue ready --note 'dependency-ready: independent of DB-A artifact, vc=2.00')",
+      "Bash(/c/Users/themr/.local/bin/python .claude/skills/dora-ledger/scripts/dora.py record --project Viggo-fix --iteration 1 --slice chunk-2 --agent flow-manager --event enqueue --outcome na --item-id UC-W2 --queue intake --note 'blocked behind UC-W1 \\(needs DB-A\\), vc=3.00')",
+      "Bash(/c/Users/themr/.local/bin/python .claude/skills/dora-ledger/scripts/dora.py record --project Viggo-fix --iteration 1 --slice chunk-2 --agent flow-manager --event enqueue --outcome na --item-id UC-W3 --queue intake --note 'blocked behind UC-W1; OVERTURN-RISK UC for Option-5, vc=2.50')",
+      "Bash(/c/Users/themr/.local/bin/python .claude/skills/dora-ledger/scripts/dora.py record --project Viggo-fix --iteration 1 --slice chunk-2 --agent flow-manager --event enqueue --outcome na --item-id UC-W4 --queue intake --note 'blocked behind UC-W1 \\(needs DB-A index list\\), vc=1.50')"
     ]
   }
 }

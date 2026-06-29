@@ -13,6 +13,13 @@ Output, e.g.:
 """
 import sys, json, os
 
+# Windows consoles default to cp1252, which can't encode the box-drawing and
+# dash glyphs below — force UTF-8 so the bar renders under PowerShell/cmd.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 RESET = "\033[0m"
 BOLD = "\033[1m"
 DIM = "\033[2m"

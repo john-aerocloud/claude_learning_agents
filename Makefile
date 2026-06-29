@@ -17,6 +17,10 @@ APP     := work/$(PROJECT)/src/app
 INFRA   := work/$(PROJECT)/src/infra
 DORA    := python3 .claude/skills/dora-ledger/scripts/dora.py
 AWS_PROFILE ?= $(shell cat .claude/config/aws-profile 2>/dev/null)
+PY      ?= python3
+SQLCMD       ?= C:/Program Files/Microsoft SQL Server/Client SDK/ODBC/170/Tools/Binn/sqlcmd.exe
+REMED_SERVER ?= (localdb)\MSSQLLocalDB
+REMED_DB     ?= viggo_remed_test
 
 # --- AWS SSO login -------------------------------------------------------------
 # Re-authenticate the project's SSO profile when the cached token has expired
@@ -443,6 +447,27 @@ browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
 .PHONY: sso-login dora-record dora-compute retro-debt validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids
+
+# --- Viggo-fix UC-W7: Country/Nationality ID remediation (T-SQL) --------------
+# Data-driven, self-building T-SQL remediation script set + its local stand-up
+# test harness. Runs against SQL Server LocalDB ((localdb)\MSSQLLocalDB) via
+# sqlcmd; the test target rebuilds a disposable test DB (viggo_remed_test) from
+# the REAL 258 Country / 247 Nationality prod reference rows, inserts crafted
+# Passenger fixtures covering every case, and asserts analyse/apply/verify/rollback.
+# No creds, no network, no prod connection. PY defaults to python3 (override if the
+# interpreter is elsewhere, e.g. PY="$$HOME/.local/bin/python.exe").
+#   make viggo-remed-test            -> run the full TDD suite (16 cases)
+#   make viggo-remed-analyse REMED_DB=<db>  -> ANALYSE report against a target DB
+.PHONY: viggo-remed-test viggo-remed-analyse
+viggo-remed-test:
+	$(PY) work/Viggo-fix/tools/remediation/tests/test_remediation.py
+
+# Read-only ANALYSE report against an existing target DB (must already hold the
+# schema + data). REMED_DB selects the database; REMED_SERVER the instance.
+viggo-remed-analyse:
+	"$(SQLCMD)" -S "$(REMED_SERVER)" -d "$(REMED_DB)" \
+	  -v MapDtoDEU=1 -v JunkCodes=CPH|TLD|ZZZ|YYY \
+	  -i work/Viggo-fix/tools/remediation/sql/analyse.sql
 
 # make dora-flow PROJECT=oxo-online  -> rewrites work/<project>/dora/flow.md
 # (per-project queues + time thieves + parallelism efficiency). v40 pull-flow view.

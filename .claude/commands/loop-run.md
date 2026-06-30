@@ -48,6 +48,10 @@ Each cycle:
      missing edge to the model + `edge-ledger.md`, re-serialise (§19); the rework
      is a time thief.
    - tester fail → UC to **Rework**; MTTR clock; re-loop step 4 for it.
+   - **Blocked-reason (§F7a):** whenever a UC is blocked (gate hold, collision
+     stop, rework), append/update its row in `items/blocks.csv`
+     (`item,reason`); REMOVE the row when it clears. The step-5b sync mirrors the
+     why to the board (banner + comment) and posts an unblocked comment on clear.
 5. **Done & bubble up.** Mark the UC done; flow-manager releases its claims and
    bubbles slice→chunk→requirement state.
 5b. **Mirror to the human board (parallel, non-blocking).** If the project has a

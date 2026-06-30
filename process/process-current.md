@@ -806,9 +806,12 @@ statement that answers three questions, in user/beneficiary terms:
    value it unblocks and why it is on the critical path — otherwise the chunk
    reads as mechanism with no value, which is the failure this rule fixes.
 
-Product authors this (`product.md`) in `chunks.md` (CHK-keyed block); it is the
-basis for prioritisation (flow-manager costing/sequencing, §10/§F) and is
-mirrored to the chunk's human-board Project body (`process/linear-mapping.md`).
+Each block also carries a **Purpose** — a few words of WHY (not what) — that
+becomes the chunk's board title suffix (`CHK-N · <name> — <purpose>`), so the
+board reads as value at a glance, not mechanism. Product authors this
+(`product.md`) in `chunks.md` (CHK-keyed block); it is the basis for
+prioritisation (flow-manager costing/sequencing, §10/§F) and is mirrored to the
+chunk's human-board Project title + body (`process/linear-mapping.md`).
 A chunk that cannot be articulated this way is **not prioritisable** — surface it
 (the board flags `⚠ JTBD value not articulated`), do not cost or pull it until
 product states the value; **never fabricate value to make it schedulable**. If
@@ -1756,6 +1759,21 @@ dependency edge: relax it for 4–5 opportunities; an attributable collision
 reinstates, none retires it and reclaims parallelism; ≤1 trial running per seam).
 Driving both toward zero IS the system learning to slice and structure work for
 flow. Target: CFR (hidden edges), gross lead time (false edges). [EXP-027]
+
+## F7a. Blocked items must say WHY — on block and on unblock (v72 — human-directed)
+When an item moves to **Blocked** (a §F5 gate hold, a §F7 collision stop, or a
+Rework re-entry), the cause is recorded as a one-line reason in
+`work/<project>/items/blocks.csv` (`item,reason[,since]`) by whoever blocks it
+(flow-manager for collisions/gates, orchestrator/tester for rework). When the
+blocker clears, the row is **removed**. This is not bookkeeping for its own sake:
+the human board mirrors it (`process/linear-mapping.md`) — a Blocked issue shows
+a **🚫 Blocked: <why>** banner in its description and a one-time comment, and an
+**✅ Unblocked** comment is posted when the row goes away — so a human reading the
+board always knows *why* something is stuck and *when* it freed up, without
+asking. A Blocked item with no recorded reason is itself a smell (the banner says
+so). The reason is free text, not a metric (DORA stays in the ledger, §0). The
+blocking event itself is still a ledger row (`collision`/gate/rework) for metrics;
+`blocks.csv` carries only the human-readable WHY. [EXP-074]
 
 ## F8. Retro cadence (pull mode) — MECHANICALLY ENFORCED (v68)
 Default: retro at **slice completion** (preserving §20's proven per-slice

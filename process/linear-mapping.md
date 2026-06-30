@@ -89,6 +89,22 @@ explicit **`⚠ JTBD value not articulated — not prioritisable`** body and sum
 `scripts/sync-linear.py`. (Linear Projects take no labels, so the flag lives in
 the body/summary, not a label.)
 
+**Project title** = `CHK-N · <name> — <purpose>`: keep the chunk id + mechanism
+name, then append the block's **Purpose** (a few words of WHY, not what), so the
+board title conveys value, not mechanism (process §11b).
+
+## 2c. Blocked items show WHY (comment + description, both ways)
+
+When an item is **Blocked**, the board says why and says so again when it clears
+(process §F7a). Source: `items/blocks.csv` (`item,reason`), maintained by the
+flow-manager on block/unblock. The sync mirrors it:
+- **Description** gets a **🚫 Blocked: <why>** banner prepended while Blocked.
+- A one-time **🚫 Blocked** comment is posted on entering Blocked (and again if
+  the reason changes); an **✅ Unblocked — now <status>** comment when the
+  `blocks.csv` row is removed. Idempotent via the local cache (`blocked` map).
+
+Applies to UC issues and defect issues alike.
+
 ## 3. Non-tree item types → sub-issues / labelled issues
 
 | Framework | id prefix | Lives in | Linear | Rule |

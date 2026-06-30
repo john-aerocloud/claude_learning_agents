@@ -1,9 +1,104 @@
 ---
-process_version: 70
-effective_from: 2026-06-26
-supersedes: v69
+process_version: 72
+effective_from: 2026-06-30
+supersedes: v71
 status: active
 ---
+
+# Current Process — v72
+
+> **v72 (DEFECT-OAG-033 gap retro — render-validate diagrams, 2026-06-30).**
+> Target: **CFR** (silently-broken diagrams shipped as "done"). DEFECT-OAG-033: 7
+> OagEventSource Mermaid diagrams were un-renderable, and the orchestrator committed
+> a `fix(diagram)` (0f96d3e) without re-rendering. Root cause: agents emit Mermaid
+> without ever rendering it — "diagrams mandatory" had no executable check. Fix: the
+> committed `make render-diagrams` gate (mmdc; exits non-zero on any parse error) +
+> a §17 cross-agent contract — no diagram (or diagram fix) is reported done until the
+> gate is green; binds documenter, solution-architect, and the orchestrator. [EXP-088]
+
+# Current Process — v71
+
+> **v71 (SLC-029 retro — kill the build-identity-pin-drift class + action the
+> normaliser split, 2026-06-30).**
+> Target: **CFR** (the build-identity-pin-drift family is the headline) + **gross
+> lead time / throughput** (the normaliser seam-concentration). One INCIDENT drove
+> this retro: DEFECT-OAG-032 (resolved 75cedbf) — the `retro-debt` gate read
+> "RETRO DUE [incident (immediate)]" at routine 2/3, so the incident-never-batched
+> leg of EXP-085 fired for the first time.
+>
+> **Stale-ledger reconciliation (DEFECT-004 §F1 currency class).** SLC-029's
+> UC-ON2/UC-CS2/UC-SR1 shipped + validated PASS in prod 2026-06-26 (carrier.name
+> live: Delta/Virgin Atlantic/WestJet; codeshares arrays [VS,WS]/[VIR,WJA]; SR1
+> bundle-proof + 14 unit, validated UNVALIDATABLE-IN-WINDOW) and the tester GO +
+> orchestrator `item_done` rows WERE recorded — but the **flow dequeues were never
+> recorded**, and the gate items UC-ON1/UC-CS1 still showed GATED though both gates
+> were resolved by the architect (delta-030) at that ship. v71 recorded the missing
+> events (2× `gate_resolved`, 5× `dequeue`, ref `RETRO-V71-RECONCILE`) so queue
+> depths and the retro counter are honest. The recurring lapse — recording the
+> ledger `item_done` but NOT the flow-manager dequeue as a UC ships — is exactly the
+> §F1 three-views-must-stay-current rule (orchestrator.md v45); no NEW rule, the
+> existing rule was under-applied. Reinforced in this retro, not re-legislated.
+>
+> **THE HEADLINE — EXP-087: prod-smoke build-identity = injected EXPECTED_SHA,
+> never a literal.** DEFECT-OAG-032 is the THIRD sighting of one class: a prod-smoke
+> / live-integration test asserting the deployed build identity against a HARDCODED
+> expected sha goes stale every deploy and false-reds the lane on every push between
+> a source change and its redeploy (FIDS UC-FD1 stale `EXPECTED_SHA` literal → SLC-026
+> main.mjs embed-proof → the REST `serviceVersion` pin asserting `e5587a7` while the
+> service was `40ade754`). UC-SR1 is offline-pure, so the red was a pure build-identity
+> drift, NOT a functional regression — yet it false-reds CI and masks real reds. Each
+> was fixed reactively per-lane. Durable fix (routed to **cicd.md** as standing
+> practice + EXP-087): any live/prod-smoke build-identity assertion derives the
+> expected sha from an injected `EXPECTED_SHA` (defaulting to the deployed/CI
+> `github.sha`) and SKIPS when unset — never a frozen literal; plus a deploy-then-smoke
+> ordering note (the identity assertion holds only AFTER the CD redeploy lands;
+> running it against a not-yet-redeployed service is expected-skip). Generalises the
+> FIDS `e2e-fids EXPECTED_SHA ?= $(BUILD_SHA)` seam (and the DEFECT-OAG-032 fix
+> 75cedbf) to ALL prod-smoke lanes. → CFR (build-identity drift is not a deploy
+> failure; no false-red masking real reds) + GLT (no per-lane whack-a-mole / wasted
+> adjudication).
+>
+> **EXP-086 ACTIONED (the normaliser split).** v70 deferred the genesis-handler
+> split until after SLC-029 so it would measure real parallelism across the full
+> handler set. SLC-029 has now landed — and added two MORE handlers to the same
+> `src/core/normaliser-core.ts`, so par_eff stayed 0.84 across the COMPLETE handler
+> set, confirming the seam-concentration is the constraint on every backend wave.
+> Decision: **action it now** — routed to `process/improvement-slices/IMP-011-
+> normaliser-handler-split.md` (owner=engineer, pure structural refactor guarded by
+> the corpus regression suite). EXP-086 `planned`→`active`. → GLT + throughput
+> (par_eff toward 1.0 on a multi-handler pull), guarded by CFR (output must not
+> change). Scores on the first multi-event-type backend pull after the split lands.
+>
+> **UC-FR1 RETIRED.** Obsolete: its FlightRemoved-as-reuse-of-OagFlightScheduleUpdated
+> (DELETED) ruling (SLC-028, EXP-047 one-writer) was SUPERSEDED 2026-06-26 when the
+> human chose Option B = a distinct `OagScheduleRemoved` canonical event (UC-SR1,
+> delta-031, shipped). The schedule-removed semantic is now carried by UC-SR1; UC-FR1
+> never had code (decision-only). Recorded `item_retired` (ref RETRO-V71-RECONCILE).
+>
+> **Experiment scores this retro:** EXP-083 (mechanical retro-debt gate) **VALIDATED
+> 2/2** (v71 incident fire + the prior routine 3/3 fire; loop never advanced past,
+> never offered to human) → INTEGRATED as plain loop machinery + PRUNED to archive.
+> EXP-085 (cadence right-sized) **2/3 positive — INCIDENT leg now exercised** (a
+> single defect resolve forced RETRO DUE at routine 2/3, not batched; both legs now
+> confirmed) — 1 more retro then integrate. EXP-082 (deploy preflight) carries 1/2
+> (no §F5 deploy this window). Registry: active rows 33 → 33 (added EXP-087, pruned
+> EXP-083, EXP-086 planned→active = net 0 — EXP-084 leanness held).
+>
+> **DORA (cumulative, refreshed):** lead=2543s freq=5/day cfr=16% (deploys only; 43
+> defect-intakes excluded) mttr=2218s; window(12) cfr=0%. **Constraint = engineer**
+> (the build is the binding step; the normaliser seam-concentration is its dominant
+> structural time-thief, which EXP-086/IMP-011 now attacks). Buffers/N UNCHANGED — no
+> queue starvation or over-WIP this window; the only flow anomaly was the dequeue
+> currency lapse, now reconciled.
+>
+> **Token estimate (EXP-067/§26).** Retro-only cycle, ~0 build dispatches; dominant
+> cost was this orchestrator main-loop reconciliation + scoring (judgment-dense, not
+> scriptifiable). The scriptified path (`dora.py record` for the 8 reconciliation
+> rows) kept the ledger-currency fix cheap — the right shape. No plumbing cut routed
+> this cycle (the cycle was almost entirely delivery-adjacent bookkeeping that the
+> recorder already absorbs); EXP-067's plumbing/delivery split continues to trend.
+>
+> v70 change-set scored in `process-history/v70-2026-06-30.md`.
 
 # Current Process — v70
 
@@ -745,6 +840,27 @@ Product and architect co-author the slice's acceptance cases; the architect
 supplies the technical/observable conditions and security controls (which become
 policy tests at build time). Every acceptance case is tagged with its use case.
 
+## 12d. Every use-case is board-ready: title, why, acceptance (v72 — human-directed)
+The human-facing plan/progress board (the one-way Linear **state** mirror —
+mechanism in `process/linear-mapping.md`) shows ONE issue per use-case, and each
+issue MUST carry, **sourced from the use-case's own artifact and never invented
+at sync time**:
+- a **human-readable title** — the use-case heading, not a bare id;
+- a **why-it-matters** statement — the observable outcome / value the use-case
+  delivers, so a human reading the board knows why it exists;
+- its **acceptance criteria** — the AC cases it pins.
+
+These already live in `use-cases.md` / `acceptance.md` (§11, §12); the board
+**mirrors** them, it does not author them. A use-case the sync finds with **no
+acceptance criteria** is flagged **`needs-acceptance`** and is **not Ready** —
+it cannot be pulled or built until product authors them (§F definition-of-ready).
+Genuine gaps are flagged, **never back-filled with fabricated criteria**. The
+mirror stays state-only (no DORA — those live in the ledger, §0). Product owns
+the title/why/acceptance in the artifact (`product.md`); running the sync is the
+orchestrator's. Evidence: human directive 2026-06-30 — board issues had shipped
+as bare `id — job` with no rationale or acceptance; 96/101 back-filled from real
+artifacts, 5 true gaps flagged rather than invented. [EXP-072]
+
 ## 12b. Multi-party / multi-instance modelling (v38 — human-directed)
 When a use case involves MORE THAN ONE PARTY operating SEPARATE INSTANCES
 (two browsers, two devices, a sharer and a joiner), the happy-path narrative
@@ -972,6 +1088,18 @@ they are visible — not found in live validation. Standing classes:
   prod `AccessDenied`. Evidence: OagEventSource ingest hit it 3× (missing
   `dynamodb:Query`, then `kms:Decrypt`, then the append-path loadStreams read).
   Target: CFR (prod AccessDenied on the first real event) + MTTR. [EXP-060]
+- **Diagrams are render-validated before they are reported done (§17.5, v72).** A
+  Mermaid diagram (a `.mmd` file or a ` ```mermaid ` block) is NOT done until it
+  passes the committed `make -C work/<project> render-diagrams` gate (mmdc over
+  every diagram; exits non-zero on any parse error or scanned "Parse error"). This
+  binds EVERY diagram-emitting agent — **documenter, solution-architect** — AND the
+  **orchestrator**: no agent reports a diagram, or a diagram *fix*, complete without
+  a green gate run. "Diagrams are mandatory" is a content rule WITH an executable
+  check behind it; a diagram claimed fixed without re-rendering is a process
+  failure. Evidence: DEFECT-OAG-033 — 7 OagEventSource diagrams silently
+  un-renderable; a `fix(diagram)` committed without re-rendering (0f96d3e). Target:
+  CFR (silently-broken diagrams shipped as done) + GLT (no reactive per-diagram
+  defect cycles). [EXP-088]
 - **Node ESM bundles get a `Dynamic require` shim + an import-the-bundle smoke
   (§17.3, v58).** An ESM-bundled Node handler whose transitive deps (`@aws-sdk/*`,
   `@azure/*`) do an internal `require()` crashes at RUNTIME with `Dynamic require

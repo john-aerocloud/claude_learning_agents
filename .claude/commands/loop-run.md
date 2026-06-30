@@ -50,6 +50,13 @@ Each cycle:
    - tester fail → UC to **Rework**; MTTR clock; re-loop step 4 for it.
 5. **Done & bubble up.** Mark the UC done; flow-manager releases its claims and
    bubbles slice→chunk→requirement state.
+5b. **Mirror to the human board (parallel, non-blocking).** If the project has a
+   board reconciler (`work/$1/scripts/sync-linear.py` + its `secrets/`), run
+   `python3 work/$1/scripts/sync-linear.py --live` after the state change so the
+   Linear plan/progress board self-updates (process §12d, mapping in
+   `process/linear-mapping.md`). State-only mirror — **no DORA** (ledger remains
+   the metrics SSOT). Skip silently if absent. Never block the loop on it; a sync
+   failure is logged, not fatal.
 6. **Document (parallel, non-blocking).** Dispatch `documenter` in the background.
 7. **RETRO-DEBT GATE — mechanical, not discretionary (§F8, v68).** Before pulling
    the NEXT work after any slice/chunk close or defect resolve, run

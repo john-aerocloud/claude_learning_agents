@@ -71,7 +71,10 @@ work/<project>/slices/<nnn>-<slug>/use-cases.md: separately buildable, separatel
 interaction units (id UCn, actor, trigger -> observable outcome, own done
 condition, acceptance cases pinned, dependency edges on other UCs — edges only
 where genuinely required; a false edge costs parallelism). Tag every
-acceptance case with its use case. Co-decide infra enablers with the
+acceptance case with its use case. Give every use case a **human-readable
+heading title** and a clear **observable-outcome/why** line — these are what the
+human board mirrors (process §12d); a UC must have acceptance cases before it is
+Ready, or it ships to the board flagged `needs-acceptance`. Co-decide infra enablers with the
 solution-architect. A use case is done when its own acceptance cases pass
 independently of the others.
 

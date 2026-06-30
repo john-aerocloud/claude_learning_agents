@@ -794,6 +794,31 @@ genuinely sequential mutations of one seam stay sequential.
 and tester validates the slice as one increment — their defs. Chunk plans keep
 slices adding up to capability — owned in `product.md`.)
 
+## 11b. Every chunk maps to a Job-to-Be-Done with articulated value (v72 — human-directed)
+**A chunk whose value we cannot articulate cannot be prioritised.** A job *code*
+(`J0`, `J3`, …) is not a value statement. Every chunk MUST carry a JTBD value
+statement that answers three questions, in user/beneficiary terms:
+1. **Who gets value** — the named beneficiary (a specific consuming system, an
+   operator, the dev team), never "the system".
+2. **What they can now do** that they could NOT before this chunk exists.
+3. **Why this takes priority** — the value/sequencing rationale. For SECONDARY /
+   enabling chunks (e.g. most J3 "normalise+store" work), this MUST name the CORE
+   value it unblocks and why it is on the critical path — otherwise the chunk
+   reads as mechanism with no value, which is the failure this rule fixes.
+
+Product authors this (`product.md`) in `chunks.md` (CHK-keyed block); it is the
+basis for prioritisation (flow-manager costing/sequencing, §10/§F) and is
+mirrored to the chunk's human-board Project body (`process/linear-mapping.md`).
+A chunk that cannot be articulated this way is **not prioritisable** — surface it
+(the board flags `⚠ JTBD value not articulated`), do not cost or pull it until
+product states the value; **never fabricate value to make it schedulable**. If
+articulating forces the realisation that several JIT chunk-wrappers are really
+one job, consolidate them (a fragmented value is a planning smell). Evidence:
+human directive 2026-06-30 — chunk Projects shipped as bare mechanism titles with
+no who/what-now/why; 15/15 back-filled from the JTBD catalogue, and the exercise
+surfaced two chunk-consolidation actions (CHK-9-* AOS-alignment; CHK-6-SLC-016
+into CHK-6). [EXP-073]
+
 ## 11a. Use-case flow — deploy-per-UC (v33 — human-directed)
 
 Use cases do not wait for the slice to batch-deploy; each runs its own thin

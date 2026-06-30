@@ -73,6 +73,22 @@ anywhere** gets the **`needs-acceptance`** label and an honest "none found" note
 Defects carry a defect-as-spec description pointing at their `defects/<id>.md`
 (Expected/Actual/Intent), not UC acceptance.
 
+## 2b. Project content — chunk JTBD value (REQUIRED)
+
+Every chunk Project MUST carry its **JTBD value** (process §11b), mirrored from
+the CHK-keyed "## JTBD value per chunk" blocks in `chunks.md`:
+
+- **Project `content`** (markdown body) — **Job to be done** + **Who gets
+  value** / **What they can now do** / **Why this takes priority**.
+- **Project `description`** (short card summary) — the value at a glance
+  (`who: what-now`).
+
+A chunk whose value is not articulated (missing who / what-now / why) gets an
+explicit **`⚠ JTBD value not articulated — not prioritisable`** body and summary
+— surfaced, **never fabricated**. Parser: `parse_chunk_values` in
+`scripts/sync-linear.py`. (Linear Projects take no labels, so the flag lives in
+the body/summary, not a label.)
+
 ## 3. Non-tree item types → sub-issues / labelled issues
 
 | Framework | id prefix | Lives in | Linear | Rule |

@@ -101,12 +101,30 @@ def human(n):
     return f"{n / 1000:.1f}k" if n >= 1000 else str(n)
 
 
+def context_limit(model_id):
+    """Context-window size for the active model. The `[1m]` suffix is Claude Code's
+    explicit 1M-beta-variant marker; beyond that, the current Claude 4.x families
+    (Opus 4.6/4.7/4.8, Sonnet 4.6, Fable 5 / Mythos 5) ship a 1M window natively —
+    their bare ids (e.g. `claude-opus-4-8`) carry no marker. Haiku and anything
+    unrecognised stay at the conservative 200K."""
+    mid = (model_id or "").lower()
+    if "[1m]" in mid:
+        return 1_000_000
+    if "haiku" in mid:
+        return 200_000
+    if any(m in mid for m in (
+        "opus-4-8", "opus-4-7", "opus-4-6", "sonnet-4-6", "fable-5", "mythos-5",
+    )):
+        return 1_000_000
+    return 200_000
+
+
 def context_usage(transcript_path, model_id):
     """Sum the input side of the last request in the transcript = current context
     occupancy. Read only the file tail so cost stays flat regardless of length."""
     if not transcript_path or not os.path.exists(transcript_path):
         return None, None
-    limit = 1_000_000 if "[1m]" in model_id else 200_000
+    limit = context_limit(model_id)
     usage = None
     try:
         with open(transcript_path, "rb") as f:

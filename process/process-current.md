@@ -1872,3 +1872,35 @@ Three rules make this autonomous:
 Target: gross lead time (removes avoidable human-decision idle) + deployment
 frequency (the loop keeps flowing without re-invocation), guarded by CFR (the two
 real gates are untouched).
+
+## F10. Fleet — isolated per-project loops, one shared process spine (v72 — human-directed)
+Multiple projects run CONCURRENTLY, each as its own isolated loop, feeding ONE
+shared, project-agnostic process. Two layers, deliberately decoupled (design:
+IMP-013):
+
+1. **Per-project loop — isolated.** Each active project runs its own `/loop-run`
+   in its OWN background runner/context (a per-project orchestrator agent or
+   session), holding ONLY that project's `work/<project>/` — its ledger shard,
+   queues, claimed-path registry, and Linear initiative. Loops are independent:
+   different repos/domains, run in parallel, no shared mutable *work* state. One
+   project's build/deploy churn never enters another's context (context is
+   conserved). This is **isolation, not a context-inheriting fork** — a fork
+   would drag project A's context into project B, the opposite of what we want.
+
+2. **Shared spine — informed, not coupled.** `/process` (principles, rules, DORA
+   baseline, learned failures) and the orchestrator role are SHARED and **MUST
+   NOT reference any project** — the existing `/process`-vs-`/work` split. N
+   `work/` spaces feed ONE `/process`.
+
+3. **The integration seam (how project learning improves the whole without
+   coupling it).** A project retro's lesson is **abstracted — de-projected —
+   before it lands in `/process`**: the project retro records "in project X, Y
+   happened" (stays in `work/<project>`); the process change states "when
+   Y-shaped situation, do Z" as an experiment (`EXP-nnn`), rule, or
+   principle-failure. So `/process` is **INFORMED BY every project yet
+   INDEPENDENT OF any** — delete a project and the process still stands.
+   Per-project retros tune that project's own queues off its ledger shard; a
+   periodic **fleet retro** rolls the abstracted lessons up into `/process` +
+   the shared DORA baseline. The main thread is a **fleet supervisor** (launch /
+   monitor / route human decisions), not a per-UC worker; its cost is
+   O(decisions), not O(UCs × projects). [EXP-075]

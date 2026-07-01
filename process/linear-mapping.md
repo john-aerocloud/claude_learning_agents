@@ -55,10 +55,17 @@ The REQ▸CHK▸SLC▸UC tree maps 1:1 onto Linear's four nesting levels.
 
 | Framework | id prefix | Linear object | Notes |
 |---|---|---|---|
-| **requirement** | `REQ-` | **Initiative** | 1 per project; portfolio roll-up above the team |
+| **requirement** | `REQ-` | **the Team itself** | 1 requirement per project = 1 team; the team name/description IS the product. No separate object. |
 | **chunk** | `CHK-` | **Project** | groups slices; lives in the project's team |
 | **slice** | `SLC-` | **Milestone** | the shippable value unit, inside its chunk-Project |
 | **use-case** | `UC-` | **Issue** | the atomic deliverable; the unit of pull |
+
+**No Initiatives.** A Linear Initiative is a **cross-team / multi-project
+portfolio** grouping — the wrong construct here: each requirement is one
+self-contained project = one team, with nothing above it to group. We have no
+work that spans teams, so an initiative-per-project would misuse the construct
+(a portfolio of one). If a genuine cross-project programme ever exists, an
+Initiative grouping those teams' projects is the right place for it — not before.
 
 **Titling rule for composite-id chunks.** Some chunks carry a composite id from
 JIT replenishment (`CHK-5-SLC-024`, `CHK-9-SLC-026`, …) rather than a clean
@@ -68,11 +75,11 @@ e.g. `CHK-5-SLC-024` → "Master-data live adapter", read from `chunks.md` /
 `dora_ref`. Clean `CHK-N` ids keep their `CHK-N · <name>` title.
 
 ```
-Initiative: OagEventSource            (REQ)
-  Project:  CHK-3 Normalise           (CHK)
-    Milestone: SLC-008                (SLC)
-      Issue:   UC-EB5   [In Progress] (UC)
-        └─ sub-issue: DEFECT-OAG-010  (defect against UC-EB5)
+Team: OagEventSource                    (REQ — the team is the product)
+  Project:  CHK-3 Normalise             (CHK)
+    Milestone: SLC-008                  (SLC)
+      Issue:   UC-EB5   [In Progress]   (UC)
+        └─ sub-issue: DEFECT-OAG-010    (defect against UC-EB5)
 ```
 
 ## 2a. Issue content — human title, why, acceptance (REQUIRED)

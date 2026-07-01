@@ -25,6 +25,15 @@ One Linear **team per `work/<project>`**. Excluded by decision: `ox` (oxo),
 
 `_TEMPLATE` is scaffolding — not a team.
 
+**Plan constraint (single-team plan).** The current Linear plan allows only ONE
+team ("OagEventFeed", key `OAG`). Until it is upgraded, teams=projects is not
+possible; instead each project maps to its own **Initiative inside the shared
+team** (the original IMP-014 model): `OagEventSource` and `viggo-fix` are two
+Initiatives in the one team, each with its own chunk Projects. Per-project
+`.linear-config.json` sets `teamId` (shared) + `initiativeName` (distinct). To
+promote a project to a dedicated team later, create the team and point its
+`teamId` at it — the reconciler re-creates its structure there.
+
 ## 2. Hierarchy — the work-item tree (`items/items.csv`)
 
 The REQ▸CHK▸SLC▸UC tree maps 1:1 onto Linear's four nesting levels.
@@ -160,6 +169,23 @@ that crosses over; the JTBD prose stays in `project.md`/vision, not Linear.
   Canonical id (`UC-…`, `SLC-…`) is also embedded in the Linear title for humans.
 - **Script:** `scripts/sync-linear.py` (per IMP-014), generalised to take a
   `--project`/team key and to handle the `SYS` team for `IMP-*`.
+
+## 6b. Reconciliation is two-way — remove, not just create
+
+A reconciler that only *creates* lets every sync bug accumulate cruft (a bad
+run once left 15 orphan/duplicate chunk Projects). So the sync also **removes
+what the SSOT no longer connects to**:
+- **Inline (each run):** a chunk that leaves `items.csv` has its Project archived
+  and its milestones dropped (`--live` reconcile).
+- **`--prune` (one-off / periodic):** archives every Project **in this project's
+  initiative** whose id is not a current cache value — orphans/duplicates the
+  cache lost track of. Dry-run lists; `--live` archives. **Scoped to our own
+  initiative**, so a co-tenant project (another project's initiative in the
+  shared team) is never touched. Run `--prune` after any sync problem, rename,
+  or id change that could strand a Project.
+
+Principle: *connected to the SSOT* is the only reason a Linear entity should
+exist; anything else is removed.
 
 ## 7. What deliberately does NOT go to Linear
 

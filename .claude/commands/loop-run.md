@@ -52,6 +52,13 @@ Each cycle:
      stop, rework), append/update its row in `items/blocks.csv`
      (`item,reason`); REMOVE the row when it clears. The step-5b sync mirrors the
      why to the board (banner + comment) and posts an unblocked comment on clear.
+   - **Per-item board push (near-real-time):** as an agent CREATES, STARTS,
+     FINISHES or BLOCKS an item, it pushes just that item —
+     `python3 work/$1/scripts/sync-linear.py --item <id> --live` (cheap, uses
+     cached ancestors; no whole-tree pass). Step-5b's full reconcile stays the
+     backstop that also handles structure/prune. A blocks.csv row is
+     authoritative: an item with a reason shows Blocked on the board even if its
+     queue state is otherwise (e.g. gate-held while Ready).
 5. **Done & bubble up.** Mark the UC done; flow-manager releases its claims and
    bubbles slice→chunk→requirement state.
 5b. **Mirror to the human board (parallel, non-blocking).** If the project has a

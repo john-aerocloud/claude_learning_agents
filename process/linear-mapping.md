@@ -37,17 +37,18 @@ team, `viggo-fix` its own team, etc. Per-project `.linear-config.json` sets that
 project's `teamId`; the reconciler (paths resolve from its own location) builds
 the whole tree in that team.
 
-**Blocked only by API-key scope (not the plan).** Creating teams needs an API
-key with **team-admin permission** (a member-scoped key returns `Access denied`;
-a plan cap returns `limit of teams … upgrade`). Until a team-create-capable key
-is in place, a project falls back to its own **Initiative inside the shared
-team** (the IMP-014 model) — same reconciler, `teamId` = shared, distinct
-`initiativeName`. **Promote a project to its own team** (once the key allows) in
-three steps: (1) `teamCreate` the team; (2) set that project's
-`.linear-config.json` `teamId` to the new team id; (3) re-run `--live` (builds
-the tree in the new team) then `--prune` the project's old shared-team initiative
-projects. Currently: OagEventSource = team `OAG` ("OagEventFeed"); viggo-fix =
-interim initiative in that team, awaiting its own team.
+**Per-project, team-scoped API key.** Each project has its OWN Linear API key,
+scoped to its OWN team, stored in `work/<project>/secrets/linear.local.json`
+(gitignored). A project's key sees only its team — reinforcing the standalone-repo
+isolation (a project can be lifted out with its own key + team). The human creates
+the team + issues the key; the reconciler (config-driven `teamId`) builds into it.
+`teamCreate` itself needs a team-admin key, so team creation is a human UI step,
+not the reconciler's job.
+
+Current state: **OagEventSource → team `OAG`** (own key); **viggo-fix → team
+`VIG`** (own key). No initiatives, no shared team. To onboard a new project:
+human creates its team + key → drop the key in its `secrets/` → set
+`.linear-config.json` `teamId` → run `--live`.
 
 ## 2. Hierarchy — the work-item tree (`items/items.csv`)
 

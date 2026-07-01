@@ -21,7 +21,14 @@ One Linear **team per `work/<project>`**. Excluded by decision: `ox` (oxo),
 | OagEventSource | OagEventSource | `OAG` |
 | viggo-fix | Viggo-Fix | `VIG` |
 | _(future, via `/project-new`)_ | one new team each | — |
-| `IMP-*` process work | **Agent System** | `SYS` |
+
+**`IMP-*` process-improvement work is NOT on Linear** (no "Agent System" team).
+It is the agent's own self-state — SSOT is `/process` (`improvement-slices/`,
+`experiments.md`, `principle-failures/`, the DORA ledger), deliberately
+project-agnostic (the §F10 shared spine). Linear mirrors human-facing *delivery*
+per project; process improvement is the system improving itself, not delivery,
+and its metrics never go to Linear. If a specific `IMP-*` becomes a substantial
+build, it is handled as work inside a project, not a standing board.
 
 `_TEMPLATE` is scaffolding — not a team.
 
@@ -130,7 +137,7 @@ Applies to UC issues and defect issues alike.
 | **open-item** (UC-scoped) | `OI-` | `open-items.md` | **sub-issue of that UC** | label `open-item` |
 | **open-item** (slice/chunk-scoped) | `OI-` | `open-items.md` | **Issue** in the relevant Milestone/Project | label `open-item` |
 | **capability** | `CICD-`/`CAP-` | `capabilities.md` | **Issue** under the chunk-Project, Milestone = slice it enables | label `cicd` / `infra` |
-| **improvement-slice** | `IMP-` | `/process` | **Issue in the `SYS` (Agent System) team** | kept apart from product boards |
+| **improvement-slice** | `IMP-` | `/process` | **NOT mirrored to Linear** — self-state, SSOT is `/process` (§1) | — |
 
 The `defects/` folder uses `DEFECT-OAG-NNN`; the `open-items.md` `OI-NNN` rows
 carry a `slice` column — that column decides whether the open-item attaches to a
@@ -175,8 +182,9 @@ that crosses over; the JTBD prose stays in `project.md`/vision, not Linear.
 - **Idempotency:** a per-project cache mapping canonical `id → linear-id`
   (initiative/project/milestone/issue). Re-running reconciles in place — no dupes.
   Canonical id (`UC-…`, `SLC-…`) is also embedded in the Linear title for humans.
-- **Script:** `scripts/sync-linear.py` (per IMP-014), generalised to take a
-  `--project`/team key and to handle the `SYS` team for `IMP-*`.
+- **Script:** `scripts/sync-linear.py` (per IMP-014), config-driven per project
+  (`.linear-config.json`: `teamId` + `initiativeName`); paths resolve from the
+  script's own project folder. `IMP-*` is not synced (§1).
 
 ## 6b. Reconciliation is two-way — remove, not just create
 

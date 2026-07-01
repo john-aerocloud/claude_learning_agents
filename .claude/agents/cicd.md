@@ -119,6 +119,65 @@ first irreversible action — it never surfaces as a mid-deploy crash inside the
 human §F5 gate. Target: gross lead time (no failed-deploy retries inside the gate)
 + CFR (no status read against the wrong target). [EXP-082]
 
+## Prod-smoke build-identity = injected EXPECTED_SHA, never a literal (v71, EXP-087)
+A prod-smoke / live-integration test that asserts the deployed build identity
+(`serviceVersion` / `BUILD_SHA` / an embedded sha) MUST derive the EXPECTED value
+from an **injected `EXPECTED_SHA` env** — defaulting to the just-deployed / CI
+`github.sha` — and **SKIP with a clear message when it is unset**. NEVER a frozen
+literal. A hardcoded/derived expected sha goes STALE on every deploy and false-reds
+the lane on EVERY push between a source change and its redeploy — a CI-red that is
+NOT a deploy failure, masking real reds and burning adjudication. This class was hit
+THREE times on OagEventSource (FIDS UC-FD1 stale literal → SLC-026 main.mjs
+embed-proof → DEFECT-OAG-032 REST `serviceVersion` pin asserting `e5587a7` while the
+deployed service was `40ade754`; resolved 75cedbf with `EXPECTED_SHA=github.sha` +
+skip seam, mirroring the FIDS `e2e-fids EXPECTED_SHA ?= $(BUILD_SHA)` machinery).
+Make it standing practice on every prod-smoke lane:
+- [ ] The live/prod-smoke build-identity assertion reads the expected sha from an
+      injected `EXPECTED_SHA` (Make target `EXPECTED_SHA ?= $(BUILD_SHA)`; CI injects
+      `EXPECTED_SHA=${{ github.sha }}`), and **skips (not fails)** when unset.
+- [ ] A deploy-then-smoke ordering note: the build-identity assertion only holds
+      AFTER the CD redeploy lands the pushed bundle. Running it against a
+      not-yet-redeployed service is expected-SKIP, never a red.
+Target: CFR (a build-identity drift is not a deploy failure and must not false-red
+the lane) + gross lead time (no per-lane reactive whack-a-mole, no wasted
+adjudication on an independent build-identity red). [EXP-087]
+
+## BUILD_SHA must resolve in the project sub-repo (DEFECT-OAG-036, EXP-087 recurrence)
+A stamped `BUILD_SHA` that resolves to no commit in the deployed project's repo is
+UNTRACEABLE — the AC-O8-1-class "running sha == intended committed sha" preflight
+gate CANNOT be verified, blocking safety-critical migrations. This occurred when
+`Makefile` used `git -C ../..` (pointing at the parent monorepo, two levels up) instead
+of `git rev-parse --short HEAD` (the project sub-repo). The parent repo HEAD was
+`ef7a2c6` — a real parent-repo commit with zero relation to OagEventSource source;
+none of the deployed surfaces could be traced. **SAFETY-CRITICAL class.**
+
+Standing rules for every project Makefile / deploy script that stamps BUILD_SHA:
+- [ ] **Never use `git -C <relative-path>`** in a monorepo context without verifying
+      the path points to the project's own sub-repo, not an ancestor.
+- [ ] **Add `assert-build-identity`** as a Make target (or equivalent) that calls
+      `git cat-file -e $(BUILD_SHA)` and exits non-zero with an actionable message
+      if the sha does not resolve in the project repo. Call it as a prerequisite of
+      `bundle-all` and any deploy target so the check runs BEFORE any irreversible step.
+- [ ] **BUILD_SHA=local** must also fail the deploy gate — `local` is not a real
+      commit and cannot be verified post-deploy.
+- [ ] CI pipelines that inject `BUILD_SHA` should pass `github.sha` (full sha) or
+      `git rev-parse --short HEAD` resolved from the correct working directory.
+
+Example guard (Makefile):
+```makefile
+assert-build-identity:
+    @if [ "$(BUILD_SHA)" = "local" ]; then echo "BUILD_SHA=local — no provenance"; exit 1; fi
+    @if ! git cat-file -e "$(BUILD_SHA)" 2>/dev/null; then \
+      echo "BUILD_SHA=$(BUILD_SHA) does not resolve in this repo — wrong git -C path?"; \
+      exit 1; \
+    fi
+    @echo "build-identity OK: BUILD_SHA=$(BUILD_SHA)"
+
+bundle-all: assert-build-identity
+    ...
+```
+[DEFECT-OAG-036, EXP-087 recurrence #3]
+
 ## Node ESM bundling — the `Dynamic require` rule
 A Node Lambda/Fargate handler bundled as **ESM** (`"type":"module"`, esbuild
 `--format=esm`) crashes at runtime with `Dynamic require of "X" is not supported`

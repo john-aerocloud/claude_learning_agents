@@ -25,14 +25,22 @@ One Linear **team per `work/<project>`**. Excluded by decision: `ox` (oxo),
 
 `_TEMPLATE` is scaffolding — not a team.
 
-**Plan constraint (single-team plan).** The current Linear plan allows only ONE
-team ("OagEventFeed", key `OAG`). Until it is upgraded, teams=projects is not
-possible; instead each project maps to its own **Initiative inside the shared
-team** (the original IMP-014 model): `OagEventSource` and `viggo-fix` are two
-Initiatives in the one team, each with its own chunk Projects. Per-project
-`.linear-config.json` sets `teamId` (shared) + `initiativeName` (distinct). To
-promote a project to a dedicated team later, create the team and point its
-`teamId` at it — the reconciler re-creates its structure there.
+**Canonical: one Linear team per `work/` project.** `OagEventSource` is its own
+team, `viggo-fix` its own team, etc. Per-project `.linear-config.json` sets that
+project's `teamId`; the reconciler (paths resolve from its own location) builds
+the whole tree in that team.
+
+**Blocked only by API-key scope (not the plan).** Creating teams needs an API
+key with **team-admin permission** (a member-scoped key returns `Access denied`;
+a plan cap returns `limit of teams … upgrade`). Until a team-create-capable key
+is in place, a project falls back to its own **Initiative inside the shared
+team** (the IMP-014 model) — same reconciler, `teamId` = shared, distinct
+`initiativeName`. **Promote a project to its own team** (once the key allows) in
+three steps: (1) `teamCreate` the team; (2) set that project's
+`.linear-config.json` `teamId` to the new team id; (3) re-run `--live` (builds
+the tree in the new team) then `--prune` the project's old shared-team initiative
+projects. Currently: OagEventSource = team `OAG` ("OagEventFeed"); viggo-fix =
+interim initiative in that team, awaiting its own team.
 
 ## 2. Hierarchy — the work-item tree (`items/items.csv`)
 

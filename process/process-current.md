@@ -864,6 +864,23 @@ no who/what-now/why; 15/15 back-filled from the JTBD catalogue, and the exercise
 surfaced two chunk-consolidation actions (CHK-9-* AOS-alignment; CHK-6-SLC-016
 into CHK-6). [EXP-073]
 
+## 11c. Decision-debt — accepted tradeoffs with a revisit trigger (v73 — human-directed)
+Some scope decisions are **removals/acceptances we do not expect to revisit** —
+distinct from tech-debt (a shortcut *queued* to be paid back) and from the
+decision-log (the record of a decision made). A **decision-debt** entry is a
+deliberate long-term decision that **carries a known tradeoff** and a **revisit
+trigger**: we accept the tradeoff and **do not spend cost re-evaluating it until
+the trigger fires**. Recorded in `work/<project>/decision-debt.md` (append-only):
+each entry has `id (DD-nnn)`, the decision, the **tradeoff accepted**, and the
+**revisit trigger** (a concrete future condition — a new requirement pressuring
+the same axis, or a defect — NOT a cadence, NOT "someday"). When a requirement is
+descoped/removed on a tradeoff, log it here and reference it from any tech-debt
+entry it supersedes (that entry becomes `ACCEPTED → DD-nnn`, off the remediation
+queue). This keeps a settled decision from being silently relitigated and keeps
+the board/queues free of work we have decided not to do. Evidence: DD-001 removed
+the live OAG `/locations` airport-reference adapter (static is permanent; revisit
+only on a freshness-pressure requirement), reclassifying TD-001. [EXP-076]
+
 ## 11a. Use-case flow — deploy-per-UC (v33 — human-directed)
 
 Use cases do not wait for the slice to batch-deploy; each runs its own thin

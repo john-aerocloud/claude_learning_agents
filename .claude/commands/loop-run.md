@@ -48,8 +48,26 @@ Each cycle:
      missing edge to the model + `edge-ledger.md`, re-serialise (§19); the rework
      is a time thief.
    - tester fail → UC to **Rework**; MTTR clock; re-loop step 4 for it.
+   - **Blocked-reason (§F7a):** whenever a UC is blocked (gate hold, collision
+     stop, rework), append/update its row in `items/blocks.csv`
+     (`item,reason`); REMOVE the row when it clears. The step-5b sync mirrors the
+     why to the board (banner + comment) and posts an unblocked comment on clear.
+   - **Per-item board push (near-real-time):** as an agent CREATES, STARTS,
+     FINISHES or BLOCKS an item, it pushes just that item —
+     `python3 work/$1/scripts/sync-linear.py --item <id> --live` (cheap, uses
+     cached ancestors; no whole-tree pass). Step-5b's full reconcile stays the
+     backstop that also handles structure/prune. A blocks.csv row is
+     authoritative: an item with a reason shows Blocked on the board even if its
+     queue state is otherwise (e.g. gate-held while Ready).
 5. **Done & bubble up.** Mark the UC done; flow-manager releases its claims and
    bubbles slice→chunk→requirement state.
+5b. **Mirror to the human board (parallel, non-blocking).** If the project has a
+   board reconciler (`work/$1/scripts/sync-linear.py` + its `secrets/`), run
+   `python3 work/$1/scripts/sync-linear.py --live` after the state change so the
+   Linear plan/progress board self-updates (process §12d, mapping in
+   `process/linear-mapping.md`). State-only mirror — **no DORA** (ledger remains
+   the metrics SSOT). Skip silently if absent. Never block the loop on it; a sync
+   failure is logged, not fatal.
 6. **Document (parallel, non-blocking).** Dispatch `documenter` in the background.
 7. **RETRO-DEBT GATE — mechanical, not discretionary (§F8, v68).** Before pulling
    the NEXT work after any slice/chunk close or defect resolve, run

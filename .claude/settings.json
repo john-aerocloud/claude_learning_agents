@@ -123,6 +123,8 @@
       "Bash(make -C work/OagEventSource diff-sst-oag)",
       "Bash(make -C work/OagEventSource deploy-sst)",
       "Bash(make -C work/OagEventSource deploy-sst-oag)",
+      "Bash(make -C work/OagEventSource sst-unlock)",
+      "Bash(make -C work/OagEventSource sst-unlock *)",
       "Bash(make -C work/OagEventSource remove-sst)",
       "Bash(make -C work/OagEventSource seed-oag)",
       "Bash(make -C work/OagEventSource seed-from-rest)",

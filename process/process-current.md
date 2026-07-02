@@ -1,9 +1,83 @@
 ---
-process_version: 73
-effective_from: 2026-07-01
-supersedes: v72
+process_version: 74
+effective_from: 2026-07-02
+supersedes: v73
 status: active
 ---
+
+# Current Process — v74
+
+> **v74 (LIGHT retro — SLC-031/CHK-3 close + DEFECT-OAG-035/036 resolve, 2026-07-02).**
+> Target: **CFR** (the build-identity family remains the headline class) guarded by
+> **GLT/throughput** (no per-lane whack-a-mole). Fired by the mechanical retro-debt
+> gate: 2 routine closes (SLC-031, CHK-3) + 1 INCIDENT (DEFECT-OAG-035 resolve on
+> UC-EB3) = RETRO DUE [incident]. Per EXP-085 this is a LIGHT retro: the window
+> closed a MAJOR piece of value (the two-stream genesis migration + the whole
+> CHK-3 live-ingest chunk) with only a non-blocking follow-up open — so the retro
+> SCORES the active machinery and banks ONE real learning; no broad new cross-agent
+> rule is legislated.
+>
+> **Headline learning — DEFECT-OAG-036: the build-identity guard now catches its
+> own class BEFORE a destructive action, and the class had ONE more hiding place.**
+> The UC-O8 two-stream migration runbook mandated a SHA-gate before its DESTRUCTIVE
+> truncate; the gate ABORTED because the deployed `BUILD_SHA=ef7a2c6` was untraceable
+> to any commit (`HEAD=d8cda78`). This is exactly the EXP-087 build-identity class —
+> but this time it was a **stamping bug** (`BUILD_SHA` derived from the PARENT
+> monorepo via `git -C ../..` instead of the project SUB-repo), not a stale literal.
+> Two things went RIGHT and are the reason this is light, not a re-legislation:
+> (1) the runbook's SHA-gate + the safety classifier **refused the destructive
+> truncate on unverifiable provenance** — the anti-false-green / verify-at-source
+> discipline worked at the highest-stakes moment; (2) cicd landed the DURABLE fix in
+> the same window (stamp from the sub-repo; added an `assert-build-identity` guard to
+> `make bundle-all` that rejects an untraceable sha; hardened cicd.md; committed
+> f671afd..73b8aa8, redeploy landed, DEFECT-OAG-036 resolved). **Routing: none new** —
+> the fix is already banked in **cicd.md (EXP-087)** as standing practice and the
+> `assert-build-identity` guard is committed. This retro records EXP-087 as scoring
+> POSITIVE again with a NEW mechanism (build-time guard, not just runtime skip) and
+> confirms the class is now guarded at BOTH stamp-time (cicd bundle) and
+> assert-time (prod-smoke). No process-current change beyond this score.
+>
+> **DEFECT-OAG-035 (Pipe DLQ / StartingPosition swallow) resolved in-session** —
+> root cause was a Pulumi CREATE-only key silently swallowed in an UPDATE payload
+> (false "Updated"); hardened Pipe (retry=300, recordAge=7200) live + validated
+> (DLQ delta 0 on fresh insert). One NON-BLOCKING follow-up carried to open-items:
+> the Pipe DLQ backfill-surge overflow (22 stale msgs held for human purge, deferred
+> to a UC-O8 cleanup) — does NOT gate slice acceptance; scheduled, not compensated.
+>
+> **Experiment scores this retro:**
+> - **EXP-087 (build-identity = injected/derived, never a stale literal)** scores
+>   POSITIVE again — 4th sighting, now with a build-time `assert-build-identity`
+>   guard AND the runbook SHA-gate both catching it before harm. Strong toward
+>   integration; hold as active one more window to see it prevent (not just catch) a
+>   sighting, then integrate into cicd.md as plain practice.
+> - **v73 (close-drift mechanical rules)** — rule 2 (RECONCILE-FIRST / atomic close
+>   on the hot path) POSITIVE 1st evidence; rule 1 PARTIAL on cross-session offline
+>   closes (SLC-031 UC-O1..O6 closed a day late). Carry; escalate to a push-time
+>   git-hook only if the deferred-close shape recurs. (Scored in
+>   `process-history/v73-2026-07-02.md`.)
+> - **EXP-085 (retro cadence: routine batch / incident immediate)** — INCIDENT leg
+>   fired correctly again (DEFECT-OAG-035 resolve forced RETRO DUE at routine 2/3).
+>   3/3 positive → INTEGRATE next retro if the next fire is clean.
+>
+> **DORA (cumulative, refreshed 2026-07-02):** lead=3092s freq=4/day cfr=16%
+> (deploys only; 44 defect-intakes excluded) mttr=2218s; **window(12) cfr=8%
+> lead=43972s**. Computed **constraint = tester** this window — the lead-time figure
+> is inflated by the UC-O8 destructive-migration validation (a genuinely long,
+> once-off, ground-truth-heavy prod validation of a truncate+7d-reingest+feed-rebuild,
+> not a repeatable per-slice cost), NOT by a standing tester slowness. No buffer/N
+> tune warranted: no queue starvation or over-WIP this window; the only flow anomaly
+> was the day-late offline closes (a currency lapse, not a capacity problem).
+> Buffers/N UNCHANGED (`ready` min_items=2/wip_limit=4; N=4).
+>
+> **Token estimate (EXP-067/§26).** This window's dominant token cost was the cicd
+> provenance-fix + restamp-redeploy re-spawns (~123k across two dispatches) chasing
+> DEFECT-OAG-036, plus the UC-O8 migration engineer/tester ground-truth validation.
+> The `assert-build-identity` guard is the DORA-per-token win: it converts the next
+> stamping-drift from a multi-dispatch fat-cicd remediation into a build-time
+> fail-fast (the same upstream-of-deploy leverage as EXP-060/061/062). No plumbing
+> cut routed this cycle.
+>
+> v73 change-set scored in `process-history/v73-2026-07-02.md`.
 
 # Current Process — v73
 

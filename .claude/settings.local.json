@@ -63,7 +63,11 @@
       "Bash(/c/Users/themr/.local/bin/python .claude/skills/dora-ledger/scripts/dora.py record --project Viggo-fix --iteration 1 --slice chunk-2 --agent flow-manager --event enqueue --outcome na --item-id UC-W3 --queue intake --note 'blocked behind UC-W1; OVERTURN-RISK UC for Option-5, vc=2.50')",
       "Bash(/c/Users/themr/.local/bin/python .claude/skills/dora-ledger/scripts/dora.py record --project Viggo-fix --iteration 1 --slice chunk-2 --agent flow-manager --event enqueue --outcome na --item-id UC-W4 --queue intake --note 'blocked behind UC-W1 \\(needs DB-A index list\\), vc=1.50')",
       "Skill(flow-status)",
-      "Bash(docker info *)"
+      "Bash(docker info *)",
+      "Bash(git -C work/Viggo-fix status -s)",
+      "Bash(git -C work/Viggo-fix log --oneline -8)",
+      "Bash(git -C work/Viggo-fix log --oneline --graph --all -15)",
+      "Bash(git -C work/Viggo-fix branch -a --no-merged main)"
     ]
   }
 }

@@ -87,6 +87,31 @@ gh-ensure:
 gh-ci-edcs: gh-ensure
 	gh run list --repo $(GH_ORG)/eDCS --workflow build-edcs-server.yml -L 5
 
+# --- eDCS working-tree integrity -----------------------------------------------
+# Working-tree directory deletions leave NO git record — a build/clean/checkout
+# can silently rm a tracked source folder (happened to eDCSChatWebClient on
+# 2026-07-02, caught only by chance). Run the CHECK after any agent build/checkout
+# against the eDCS repo; wire it as the last step of build/run targets so a ' D'
+# deletion fails the target instead of going unnoticed.
+#   make edcs-worktree-check    -> flag tracked files missing from disk; exit 1 if any
+#   make edcs-worktree-restore  -> restore ONLY the missing files (keeps other edits)
+EDCS ?= work/Viggo-fix/eDCS
+
+edcs-worktree-check:
+	@missing=$$(git -C $(EDCS) ls-files --deleted); \
+	 if [ -n "$$missing" ]; then \
+	   nfiles=$$(printf '%s\n' "$$missing" | grep -c .); \
+	   ndirs=$$(printf '%s\n' "$$missing" | sed 's:/.*::' | sort -u | grep -c .); \
+	   echo ">> eDCS WORKTREE ALERT: $$nfiles tracked file(s) missing from disk across $$ndirs top-level path(s):"; \
+	   printf '%s\n' "$$missing" | sed 's:/.*::' | sort | uniq -c | sort -rn | sed 's/^/   /'; \
+	   echo ">> recover with: make edcs-worktree-restore"; \
+	   exit 1; \
+	 else echo "eDCS worktree OK - no tracked files missing from disk ($(EDCS))"; fi
+
+edcs-worktree-restore:
+	@git -C $(EDCS) ls-files --deleted -z | xargs -0 -r git -C $(EDCS) restore --
+	@echo "restored missing tracked files; remaining changes:"; git -C $(EDCS) status --short
+
 # --- DORA ledger -------------------------------------------------------------
 # make dora-record EVENT=validation_run AGENT=tester SLICE=004-create-game \
 #      ITER=5 REF="<sha>:<suite>" OUTCOME=success NOTE="7/7 vs prod"

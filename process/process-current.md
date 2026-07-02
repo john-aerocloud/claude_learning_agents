@@ -1,12 +1,48 @@
 ---
-process_version: 74
+process_version: 75
 effective_from: 2026-07-02
-supersedes: v73
+supersedes: v74
 status: active
 ---
 
-# Current Process — v74
+# Current Process — v75
 
+> **v75 (LIGHT retro — CHK-10 SLC-034 prod-promotion build under §F5a CD, 2026-07-02).**
+> Target: **CFR/GLT** (the same-item parallel-dispatch collision class). Fired by the
+> mechanical retro-debt gate: 3 routine closes (SLC-032 x2, SLC-033) + 1 INCIDENT
+> (DEF-OAG-038 resolve) = RETRO DUE [incident]. LIGHT retro (EXP-085): the window
+> BUILT the whole SLC-034 prod-promotion path to §F5a continuous-deployment (no
+> reviewer gate) — sandbox→dev→acceptance-dev GREEN, `deploy-prod` ACTIVE + honestly
+> RED at the prod-bootstrap §F5a gate (EXP-090). §F5a/EXP-091 read POSITIVE on first
+> real use; EXP-090 honest-RED held. So the retro SCORES the machinery and banks ONE
+> narrowly-routed learning; no broad new cross-agent principle is legislated.
+>
+> **Headline learning — cross-owner test allowlists must DERIVE from the owned
+> files, never a hand-maintained literal (routing, not principle).** SLC-034's 4th
+> collision (2nd of this class after UC-R1/AC-R1.9) was cicd's new
+> `infra/policies/sst-deploy-prod.json` tripping the engineer-owned
+> `bus-resource-access-policy` pin's hand-maintained `DEPLOY_ROLE_FILES` literal.
+> This is now a **pattern (2 sightings)** — but per § improvement-routing the
+> narrowest owner is the PROJECT test + policy files, so the fix is routed to
+> **open-item OI-BUSPOLICY-ALLOWLIST** (derive the allowlist from a glob of
+> `infra/policies/sst-deploy-*.json`), NOT a change to process-current. The general
+> cross-agent rule this reaffirms (already implied by §v64 disjoint-artifacts):
+> **when a same-item parallel dispatch partitions owned paths, any cross-owner
+> CONTRACT one lane asserts about another lane's files (an allowlist, a fixture
+> manifest, a policy inventory) must be derived from those files at test time, not
+> frozen as a literal that the other lane's next legitimate file will trip.**
+> Anticipated: same-item cross-owner allowlist collisions → 0 once the glob lands;
+> CFR/GLT no per-file whack-a-mole. Scored next retro when OI-BUSPOLICY-ALLOWLIST
+> closes.
+>
+> **v74 machinery scored (see process-history/v74-2026-07-02.md):** §F5a held on
+> first real use (only the one first-time-infra human gate touched); EXP-090
+> honest-RED held; constraint UNCHANGED and inherent (§F5 deploy-gate holds are
+> gate-bound by design); ready throughput 8/day + parallelism eff 0.90 healthy — no
+> buffer/N tune warranted.
+>
+> --- v74 retro block (retained) ---
+>
 > **v74 (LIGHT retro — SLC-031/CHK-3 close + DEFECT-OAG-035/036 resolve, 2026-07-02).**
 > Target: **CFR** (the build-identity family remains the headline class) guarded by
 > **GLT/throughput** (no per-lane whack-a-mole). Fired by the mechanical retro-debt

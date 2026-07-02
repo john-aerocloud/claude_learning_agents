@@ -1884,6 +1884,24 @@ the displacement is logged as a time thief so the cost of interrupting is visibl
 (§5a ownership semantics unchanged). Target: gross lead time (gate wait) guarded
 by CFR; MTTR (defect pre-emption). [EXP-025]
 
+## F5a. Prod promotion is continuous — no review gate; the tester validates in prod (v75 — human-directed)
+Once an established CD promotion pipeline exists, **code flows to prod
+automatically on green — there is NO human review-to-promote gate.** The gate IS
+the automated evidence: unit+integration green on trunk **and the dev acceptance
+stage passing**; the pipeline then deploys to prod and the **tester validates in
+prod** (§ Validate) as the safety net. A "someone approves the prod deploy" step
+is **explicitly rejected**: it masks upstream weakness and adds gross-lead-time
+idle. **If what lands in prod is wrong, the failure is UPSTREAM** — requirements,
+engineering, test/acceptance coverage — so fix it *there* and let the fix flow,
+never add a promotion gate to compensate (build quality in; roll-forward with
+reversible rollback). This SHARPENS §F5's deploy gate: the remaining human gate is
+only **first-time infra provisioning** (standing up the pipeline / a new
+environment / a new OIDC role) and **genuinely destructive or irreversible data
+ops** (e.g. a prod event-store truncate — cf. UC-O8) — routine code promotions are
+NOT gated. Consequence for CHK-10 SLC-034: the `prod` GitHub Environment gets NO
+required-reviewer rule; `deploy-prod` runs automatically when `acceptance-dev` is
+green, followed by tester prod-validation. [EXP-091]
+
 ## F6. Parallel dispatch by independence (the maximal independent set)
 Parallelism is the **default, not an option**. The flow-manager treats
 `use-case-deps.mmd ∪ class-deps.mmd` as a DAG and each cycle dispatches the

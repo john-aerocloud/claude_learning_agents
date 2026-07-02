@@ -1,9 +1,132 @@
 ---
-process_version: 75
+process_version: 77
 effective_from: 2026-07-02
-supersedes: v74
+supersedes: v76
 status: active
 ---
+
+# Current Process — v77
+
+> **v77 (LIGHT retro — SLC-035 secrets/config migration + CHK-10 bubble +
+> DEFECT-OAG-039 incident, 2026-07-02).** Target: **CFR** (the running-service-vs-
+> CI-green family, guarded by GLT). Fired by the mechanical retro-debt gate:
+> 3 routine closes (SLC-035, CHK-10 x2) + 1 INCIDENT (DEFECT-OAG-039 deploy_failure)
+> = RETRO DUE [incident (immediate)] — the EXP-085 incident leg firing correctly at
+> routine 3/3. LIGHT retro: SLC-035 closed a real value block (CHK-10 CI/CD
+> promotion pipeline is now COMPLETE — full dev→acceptance→prod CD live, prod
+> ingesting, all real creds in Secrets Manager) and the one incident's learning is
+> NARROW and already-known (a recurrence of the SLC-032 bare-name-vs-wildcard
+> secret-resolution class). So the retro SCORES machinery + reinforces an existing
+> route; it banks NO new broad cross-agent principle.
+>
+> **Machinery scored (see process-history/v76-2026-07-02.md):**
+> - **Anti-false-green / ground-truth-oracle discipline VALIDATED again** —
+>   DEFECT-OAG-039 was invisible to CI-green (750 tests + secrets-exist + IAM-scoped
+>   all passed) but the dev Fargate ingest consumer crash-looped in prod-like dev.
+>   The tester's LIVE AC-C12.4 validation (checkpoint=0, no event ingested) caught
+>   it; the fix (c4a794a, bare-name secret id) was verified genuine-green (task
+>   RUNNING + checkpoints advancing). This is the delivery-principles "green build ≠
+>   running service" skill working on the CFR-bearing surface. No new rule — it is
+>   the graduated skill doing its job.
+> - **EXP-085 incident leg fired correctly** (5th total fire; incident forced RETRO
+>   DUE at routine 3/3, not batched). Both legs now confirmed repeatedly → INTEGRATE
+>   next clean retro (this is the promised integration cadence).
+> - **§F5a held** — the dev fix-forward redeploy was correctly NOT gated as
+>   first-time-infra.
+>
+> **The one reinforced route (NOT a new principle):**
+> - **OI-LEDGER-DRIFT-TARGET escalated MED→HIGH.** The v76-predicted close-drift
+>   recurred TWICE this window (UC-C12/13/14 first synced to Backlog on stale
+>   state.md; UC-C1/C2 derived in-flight though item_done, from an out-of-order
+>   dequeue-repair row shadowing the terminal event in `dora.py project-state`).
+>   Both needed a manual regenerate+reconcile before the board was honest. Two
+>   mechanical gaps now named: (a) the v73 `make ledger-drift` target still does not
+>   exist; (b) `dora.py project-state` resolves an item to the LAST-recorded event's
+>   implied state, so a post-item_done non-terminal row (a repair/dequeue) can
+>   regress a done item — it should treat `item_done` as sticky-terminal unless an
+>   explicit `item_reopen`/`failure` follows. Route BOTH to **cicd/dora tooling**
+>   (implement `ledger-drift`; make item_done sticky-terminal in project-state). →
+>   CFR (derived state + board stop lying) + GLT (no manual reconcile at every
+>   close). This is the narrowest-owner implementation of the already-legislated v73
+>   rule — not a new cross-agent principle.
+>
+> **DORA (cumulative, refreshed 2026-07-02):** lead=2566s freq=4/day cfr=18%
+> (deploys only; 44 defect-intakes excluded) mttr=2189s; window(12) cfr=25%
+> lead=12931s. The window CFR uptick is DEFECT-OAG-039 (a deploy_failure recovered
+> same-session — a deploy-and-recover round, not a standing failure), correctly
+> classed. **Constraint = flow-manager** (cumulative plumbing); at the flow level the
+> engineer briefly bound (the DEFECT-039 fix gated the CHK-10 bubble). No queue
+> starvation or over-WIP. **Buffers/N UNCHANGED** (`ready` min_items=2/wip_limit=4;
+> N=4).
+>
+> **Token estimate (EXP-067/§26).** Delivery-dominant cycle: the engineer
+> DEFECT-OAG-039 fix+deploy+verify (~79k) + tester validations (~112k across two
+> passes) were the bulk — necessary CFR-bearing constraint + validation cost, not a
+> cut target. The scriptified ledger/decision paths kept bookkeeping cheap. The
+> DORA-per-token win this cycle is again UPSTREAM: OI-LEDGER-DRIFT-TARGET (once
+> wired) removes the recurring manual reconcile-at-close that this window paid in
+> orchestrator main-loop tokens.
+>
+> v75 scored in `process-history/v75-2026-07-02.md`; v76 in
+> `process-history/v76-2026-07-02.md`.
+
+# Current Process — v76
+
+> **v76 (LIGHT retro — CHK-10 promotion-pipeline closes + CHK-6 FIDS-SPA bubble,
+> 2026-07-02).** Target: **GLT/throughput** (guarded by CFR). Fired by the
+> mechanical retro-debt gate: 4 routine closes (SLC-036, CHK-6 x2, SLC-034) =
+> RETRO DUE [routine 4>=3], **zero incidents** this batch. Per EXP-085 this is a
+> LIGHT retro: the window closed a MAJOR value block (the whole SLC-032/033/034
+> dev→acceptance→prod CD promotion pipeline is live + prod ingesting, plus the
+> CHK-6 FIDS Demo SPA chunk) entirely clean — so the retro SCORES the active
+> machinery and banks NO broad new cross-agent principle. Two narrowly-routed
+> implementation follow-ups only.
+>
+> **Machinery scored (see process-history/v75-2026-07-02.md for detail):**
+> - **§F5a / EXP-090 (honest-RED) / EXP-091 (CD no-reviewer gate)** held through
+>   the ENTIRE promotion pipeline: SLC-033 acceptance-dev green (ef8176d), SLC-034
+>   prod CD (prod-validate-oag 42/42, E-76 ratio 1.0 live, item_done 181c8bd). The
+>   only human touch was the §F5a first-time-infra prod-bootstrap gate. Both
+>   experiments now read POSITIVE on 2nd real use → toward integration next retro.
+> - **EXP-085 (retro cadence)** fired correctly again: 4 clean routine closes
+>   batched to the threshold; no incident forced early. 4/4 legs sound → INTEGRATE
+>   next clean retro.
+> - **DEF-OAG-038** resolved defect-as-spec (e32260e, 5 sub-causes) — its uceb2
+>   sub-cause is the SAME hand-maintained-allowlist class as v75's
+>   OI-BUSPOLICY-ALLOWLIST; reinforces that routing, does not re-legislate.
+>
+> **The two follow-ups (routed, NOT process principles):**
+> 1. **OI-LEDGER-DRIFT-TARGET — the v73 RECONCILE-FIRST gate is unimplemented.**
+>    v73 mandated `make ledger-drift PROJECT=<p>` as a hard resume precondition,
+>    but the Makefile target was never created (this resume hit `No rule to make
+>    target 'ledger-drift'`). The rule was legislated, never wired — so derived
+>    `state.md` drift (SLC-033 shown in-flight though item_done; many done UCs
+>    shown in-flight/intake) went uncaught until manual inspection. Route to
+>    **cicd** (implement the target per the v73 spec: diff trunk UC/SLC SHAs vs
+>    ledger `item_done` refs, exit non-zero on built-but-unclosed) so the next
+>    resume is mechanically gated as v73 intended. → CFR (derived state stops
+>    lying) + GLT (no manual reconcile at resume).
+> 2. **OI-BUSPOLICY-ALLOWLIST (carried from v75)** — derive the cross-owner deploy-
+>    policy allowlist from a glob of `infra/policies/sst-deploy-*.json`. Still open;
+>    DEF-OAG-038's uceb2 sub-cause is a 3rd sighting of the class. Owner: engineer
+>    (project test + policy files). → CFR/GLT.
+>
+> **DORA (cumulative, refreshed 2026-07-02):** lead=2566s freq=4/day cfr=17%
+> (deploys only; 44 defect-intakes excluded) mttr=2189s; window(12) cfr=14%
+> lead=12931s. Computed **constraint = flow-manager** at the cumulative plumbing
+> level; at the flow level the binding time-thief remains the §F5 deploy-gate holds
+> (prod bootstrap) — gate-bound by design, not a process defect to elevate. No
+> queue starvation or over-WIP this window. **Buffers/N UNCHANGED** (`ready`
+> min_items=2/wip_limit=4; N=4).
+>
+> **Token estimate (EXP-067/§26).** Retro-only cycle at resume; dominant cost was
+> the orchestrator reconcile-at-resume inspection (the manual work that
+> OI-LEDGER-DRIFT-TARGET would scriptify — the exact upstream-plumbing cut this
+> retro routes). Scriptified paths (`dora.py` retro-debt/compute/log-decision) kept
+> bookkeeping cheap. No model-tier change; no delivery-agent cut.
+>
+> v74 change-set scored in `process-history/v74-2026-07-02.md`; v75 in
+> `process-history/v75-2026-07-02.md`.
 
 # Current Process — v75
 

@@ -1902,6 +1902,22 @@ NOT gated. Consequence for CHK-10 SLC-034: the `prod` GitHub Environment gets NO
 required-reviewer rule; `deploy-prod` runs automatically when `acceptance-dev` is
 green, followed by tester prod-validation. [EXP-091]
 
+## F5b. Feature-flagging is the escalation when CD starts failing in prod (v75 — human-directed)
+The §F5a safety net is the tester validating in prod, and its **CFR is the
+signal**. If deploys start causing **prod test failures as a PATTERN** (not a
+one-off) — changes reaching prod keep regressing it and the tester keeps catching
+them — that is the trigger to **decouple DEPLOY from RELEASE via proper
+feature-flagging**: deploy dark, release behind a flag, roll a release back
+WITHOUT a redeploy (beyond the §40 within-slice use-case flags, which isolate
+in-flight builds but do not give release-level control). **When that need is
+evidenced, RAISE it** — do not silently absorb rising prod CFR or quietly
+reintroduce a manual gate (that would undo §F5a). And **spin it up as its OWN
+separate PROJECT** — feature-flagging is a shared delivery-capability (§F10 fleet
+model), not something folded into a product project. Until the need is evidenced,
+CD-with-prod-validation stands; **premature flag infrastructure is cost without an
+evidenced need** (§F5a's whole point is to expose upstream weakness, not pre-empt
+it with machinery). [EXP-092]
+
 ## F6. Parallel dispatch by independence (the maximal independent set)
 Parallelism is the **default, not an option**. The flow-manager treats
 `use-case-deps.mmd ∪ class-deps.mmd` as a DAG and each cycle dispatches the

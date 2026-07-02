@@ -12,6 +12,18 @@
 # Agents: per v23 §33.5 you create/extend targets here yourself when your
 # role needs one — tested, documented, committed, named in your return.
 
+# make's default SHELL is sh.exe, which is NOT on PATH on this Windows host —
+# otherwise the $(shell ...) calls below and every recipe emit "The system cannot
+# find the path specified" and limp via a fallback. Set this FIRST, before any
+# $(shell): if Git's bundled sh is present, use it globally — it's a real POSIX
+# sh and every recipe in this file is sh-compatible. Guarded by wildcard so it's
+# a no-op where Git isn't at this path (override GIT_SH to move it). Uses the 8.3
+# short path to avoid spaces and the WSL bash that owns `bash` on PATH.
+GIT_SH ?= C:/PROGRA~1/Git/usr/bin/sh.exe
+ifneq ($(wildcard $(GIT_SH)),)
+SHELL := $(GIT_SH)
+endif
+
 PROJECT ?= $(shell cat work/ACTIVE 2>/dev/null)
 APP     := work/$(PROJECT)/src/app
 INFRA   := work/$(PROJECT)/src/infra
@@ -42,6 +54,38 @@ sso-login-dev:
 
 sso-login-prod:
 	aws sso login --profile ids-prod
+
+# --- GitHub CLI SSO auth -------------------------------------------------------
+# GitHub (AeroCloudSystems org) uses SAML SSO — gh must authenticate via the
+# browser web flow; a bare PAT won't carry the org SSO authorization. Mirrors
+# sso-login above. Recipes are deliberately shell-agnostic (the `||` operator
+# works in cmd.exe AND sh), so NO SHELL override is needed and they run the same
+# under make's default Windows shell — matching every other target in this file.
+# First login is interactive; run it yourself:  ! make gh-auth
+#   make gh-status  -> show current auth state on github.com
+#   make gh-auth    -> SSO browser login (web flow)
+#   make gh-ensure  -> guard: if not authed, auto-runs gh-auth (used as a prereq)
+#   make gh-ci-edcs -> list recent eDCS server CI runs (auto-auths first)
+GH_HOST ?= github.com
+GH_ORG  ?= AeroCloudSystems
+
+gh-status:
+	gh auth status -h $(GH_HOST)
+
+gh-auth:
+	@gh auth status -h $(GH_HOST) >/dev/null 2>&1 \
+	  && echo "gh already authenticated on $(GH_HOST)." \
+	  || gh auth login -h $(GH_HOST) -p https -w
+
+# Guard: auto-launch SSO login on a real terminal; fail fast with instructions
+# when non-interactive (e.g. an agent shell) so it NEVER hangs waiting on a login.
+gh-ensure:
+	@gh auth status -h $(GH_HOST) >/dev/null 2>&1 || { \
+	  if [ -t 1 ]; then echo ">> gh not authenticated — launching SSO login..."; gh auth login -h $(GH_HOST) -p https -w; \
+	  else echo ">> gh not authenticated on $(GH_HOST). Run:  ! make gh-auth" >&2; exit 1; fi; }
+
+gh-ci-edcs: gh-ensure
+	gh run list --repo $(GH_ORG)/eDCS --workflow build-edcs-server.yml -L 5
 
 # --- DORA ledger -------------------------------------------------------------
 # make dora-record EVENT=validation_run AGENT=tester SLICE=004-create-game \

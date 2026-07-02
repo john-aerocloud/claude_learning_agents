@@ -1743,6 +1743,22 @@ orchestrator:
    supersedes v71's "reinforce, not re-legislate" for this class (reinforcement
    demonstrably failed → make it executable, per the v72 render-diagrams pattern).
 
+**RED CI = NOT DONE; never fake green by guarding (v75 — human-directed).** A red
+CI run means the **engineering + cicd steps have NOT succeeded** — the item is not
+done and the loop MUST NOT advance past it. **Making CI green by skipping or
+guarding the failing job** (an `if:`-guard that no-ops it, disabling the check,
+`continue-on-error`, marking a lane allowed-to-fail) is a **false-green** and is
+forbidden — it fakes success and re-admits the DEFECT-030/032 false-green family
+the anti-false-green machinery exists to kill. The only legitimate way to clear a
+red CI is to make it **genuinely green**: do the work the red is demanding —
+finish the code, **provision the missing infra/secret**, fix the config. A job
+that is legitimately not-yet-runnable because it awaits a §F5 human provisioning
+stays **red and blocking** until provisioned; that red IS the accurate signal, and
+the fix is the provisioning, not a guard. Evidence: CHK-10 SLC-032's dev-deploy
+job went red on an unset OIDC role secret — the "guard the job so CI stays green
+until provisioned" shortcut was **rejected**; the pipeline is not done until the
+bootstrap makes CI truly green. [EXP-090]
+
 ## F2. Queues — a uniform model: two buffer knobs + four metrics
 Work is handed over through queues (`work/<project>/queues/<name>.csv` + rendered
 `.md`). The four queues are **Intake → Ready → Deploy → Rework**. Every queue is

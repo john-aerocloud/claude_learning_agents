@@ -70,6 +70,19 @@ model — the changed nodes/edges ARE your scope:
   values / VARIES where the data says it should (e.g. Status ∈ {Scheduled, Departed,
   Landed, Arrived, Cancelled} with more than one value present; the carousel column
   shows real belts, not all "—"). Non-emptiness is the floor, correctness is the bar.
+- **Validate derived state on a REAL-VOLUME window, not a hand-sized one (v78,
+  DEFECT-OAG-040, EXP-092).** When the surface derives state by folding/hydrating/
+  scanning an event stream under a windowed/paginated/recency-cutoff assumption, a
+  correct result on a small or freshly-seeded window does NOT prove correctness on
+  the real high-volume feed — a bounded scan window can silently AGE the state-
+  bearing event out. Validate the derived field against per-entity ground truth on a
+  REAL-VOLUME window (a stream/feed dense enough that intervening non-target events
+  push the target past a naive scan bound), and assert the field still resolves
+  correctly. (DEFECT-OAG-040 recurred the DEFECT-OAG-018 stuck-"Scheduled" class:
+  it re-passed on a low-volume surface but every flight read "Scheduled" on the real
+  dev feed because a page of 66 non-status events aged each OOOI event out of the
+  bounded backward-scan window; the correct `actual.*` fields were in the aggregate
+  all along.)
 
 ## On result
 - Pass: write `work/<project>/slices/<nnn>-<slug>/result.md` (what was validated, evidence) and

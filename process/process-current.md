@@ -758,7 +758,9 @@ with a dev clone) — this process file names no project.
 PII stripped.** The clone that (2b) develops against is created by a **read-only extract**
 from prod into a local/Docker DB, and **PII is stripped at the read boundary** — retain
 only the fields the work actually needs (e.g. relationship-bearing columns), drop
-non-relational PII, exclude audit logs. The local clone is where you run updates freely
+non-relational PII, exclude audit logs, and (allowed) **exclude data older than a
+project-set recency window (e.g. 90 days)** to further minimise size and surface. The
+local clone is where you run updates freely
 (point 1's opposite); prod itself stays SELECT-only. Minimise the PII surface of every
 local copy.
 

@@ -734,6 +734,12 @@ the safe target where you DO develop and run updates freely.) Defense in depth: 
 read-only DB credential for prod; the rule binds regardless of what the credential
 technically permits.
 
+**Never modify cloud infrastructure to gain access.** An agent does not create or change
+firewall/network rules, credentials, roles, tenants, or any cloud resource to reach a
+database. If a DB is unreachable (firewall, auth, wrong tenant), STOP and surface the exact
+block — the error and, where relevant, the client IP to allow-list — for the human to
+provision. Access provisioning is a human action, never an agent workaround.
+
 **2. A required production change is NOT applied by the agent — it produces a sign-off
 bundle** for a human to apply by hand:
    - **(a) the exact script / queries** — idempotent, transactional (`XACT_ABORT` or

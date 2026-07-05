@@ -1063,7 +1063,14 @@ branch; fast-forward `main`; push. Because the runtime state is partitioned (Rul
 **Derived read-models are REGENERATED after the merge, never hand-merged**: run
 `sh .claude/skills/dora-ledger/scripts/dora compute` (baseline) and `… flow --project
 <p>` (flow) from the merged ledger; `statusline.json` and each `work/<p>/state.md`
-likewise regenerate. **Reconcile latency** — wall-clock from an `instance/<project>`
+likewise regenerate. **The GLOBAL derived read-models `process/dora/baseline.md` and
+`process/dora/statusline.json` are GITIGNORED and regenerated per-machine — never
+committed** (human-approved 2026-07-05): both instances regenerating-and-committing them
+made them conflict on every reconcile (observed 3× in one reconcile). They are pure
+functions of the ledger (the SSOT), so each machine rebuilds them locally with
+`make dora-compute`; nothing is lost. One-time: the other instance drops them from
+tracking on its next pull and regenerates. (Per-project `flow.md`/`state.md` already live
+in the gitignored project repo.) **Reconcile latency** — wall-clock from an `instance/<project>`
 commit to it landing on `main` — is a component of gross lead time. The retro measures
 it and drives it down (record it as a `reconcile` ledger event: `task_start` at the
 instance-branch commit, `task_exit` when it lands on `main`, so `dora flow` surfaces it

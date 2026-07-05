@@ -27,4 +27,11 @@ Thumbs.db
 __pycache__/
 *.pyc
 
+# Global derived DORA read-models — GITIGNORED + regenerated per-machine (process §0a
+# Rule 4, human-approved 2026-07-05). Both instances regenerating+committing these made
+# them conflict on every cross-instance reconcile; they are pure functions of the ledger
+# (the SSOT), so each machine rebuilds them locally with `make dora-compute`.
+/process/dora/baseline.md
+/process/dora/statusline.json
+
 node_modules

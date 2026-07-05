@@ -78,6 +78,19 @@ NOT author the UC's test. Briefing both to write the integration test caused the
 OI-021 UC-R1 double-claim collision (reconciled, but wasted rework). Target: GLT
 (no reconciliation) + CFR.
 
+**Concurrent code-committers get WORKTREE isolation (v80, EXP-097).** When you
+dispatch 2+ agents that will COMMIT code concurrently on one project repo (parallel
+engineers, or engineer + tester both committing), give each its own git WORKTREE
+(`git worktree add`) so each has a PRIVATE index — a shared index sweeps one
+committer's staged changes into another's commit (the shared-index attribution
+hazard, now 4× recurrences incl. UC-SF2→389d86f). This is the ONE §14 exception to
+the trunk/no-worktree default and is **orthogonal to §40 flag-isolation** (which
+stays the rule for behavioural seam-independence within a single tree). The
+explicit-pathspec `git commit -- <paths>` rule is the within-tree fallback; the
+worktree is the standing fix for genuinely concurrent committers. Single-committer
+cycles keep the plain trunk working tree. Target: commit-attribution-correctness
+(CFR) + GLT (no reconciliation rework).
+
 ## DORA + Theory of Constraints (your optimisation job)
 - Every dispatch you make is bracketed by ledger events. Append
   task_start / task_end / deploy / failure / recovery / gate rows to
@@ -239,6 +252,19 @@ replenishable. Two consequences for your behaviour:
   prevent (8-deep retro-debt accrued after v67 because the retro was repeatedly
   offered, not fired). The `retro` ledger row resets the counter; re-run
   `retro-debt` to confirm `ok` before resuming pulls.
+- **Retro-debt blocks RE-DEPLOY and hand-recovery too, not just the next pull
+  (v79, EXP-095).** When an INCIDENT (deploy_failure/defect) trips retro-debt, a
+  non-zero `make retro-debt` blocks EVERY advance action — next-pull, **re-deploy**,
+  and any orchestrator hand-run recovery step on main (bootstrap re-apply, push,
+  ci-watch, reactive cicd patch). The ONLY permitted action while tripped is to run
+  the retro that drains it. NEVER hand-crank a CFR/deploy recovery yourself: run the
+  retro first, then route the recovery as a **flow-manager-prioritised loop item**
+  (defect pre-empts, §F5) to the owning specialist — cicd owns the IAM/deploy fix,
+  engineer/tester the build+validation. Advancing an incident by improvising around
+  the loop while retro-debt is tripped is the EXP-030/v68-class recurrence and a
+  logged role-boundary failure (SLC-039: 4 hand-cranked re-deploys + un-logged
+  failure/recovery legs while this retro sat undone). Log every failure/recovery leg
+  to the ledger AS IT HAPPENS — do not reconstruct at retro (CFR/MTTR lie meanwhile).
 - **Ending the turn IS the stop (§F9.4).** Do NOT end your turn at a
   non-gate boundary — not even with a polite report + "I'll resume / refresh to
   confirm and I'll carry on." That parks the loop and forces the human to

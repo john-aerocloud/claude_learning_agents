@@ -34,6 +34,21 @@ hardcode the profile name.
      broken (152 FIDS tests passed against `departure.scheduled.*` fields that do
      not exist in real OAG data -> the deployed board was empty). Pin the failing
      test against the real shape FIRST.
+   - **Real-VOLUME/aging fixtures for windowed-scan folds (v78, DEFECT-OAG-040, EXP-092).**
+     Real *shape* is not enough. When your route makes a WINDOWED / bounded-scan /
+     pagination / recency-cutoff / backward-scan-from-head assumption over an event
+     stream (a fold, a read-model hydration, a bootstrap that scans back from head,
+     an incremental-poll cursor), the test corpus MUST include a real-VOLUME fixture
+     with enough intervening NON-target events that the target event AGES PAST the
+     window — so the bounded-window assumption is EXERCISED and can be falsified. A
+     low-volume / single-page fixture (even one captured from the real source) never
+     reproduces the aging and false-greens the fold. State the scan-window bound as
+     an EXPLICIT invariant in route.md, not an implicit assumption. (DEFECT-OAG-040:
+     the FIDS status marker was seeded only within a bounded backward-scan window;
+     on the real feed a page of 66 EstimatedArrivalChanged pushed each flight's
+     OnBlock/OffBlock/TakenOff event out of the window → every flight fell back to
+     "Scheduled" while 412 unit tests stayed green. Gate/Arrival columns worked
+     because they read fields, not the window-seeded marker.)
 3. **Commit when green; push when the use-case is done (v60).** Every time the full
    test suite goes from red to green, commit immediately to trunk. The commit message
    uses **Conventional Commits** (`type(scope): intent` — feat/fix/docs/refactor/perf/
@@ -61,6 +76,16 @@ hardcode the profile name.
    policy/assertion test and make it pass.
 6. Defects are normal work: define expected behaviour, capture current behaviour,
    write tests pinning the correct behaviour, then make them pass.
+7. **Local dev tooling gets lifecycle tests too (v78, DEFECT-OAG-039).** A support
+   process the operator runs alongside the app (a signing proxy, a mock, a local
+   relay) is still code that can fail over TIME, not just at startup. If it holds a
+   resource with a lifetime — captured AWS credentials, a token, a lease, a
+   connection — assert the LIFECYCLE, not just the happy first request: the resource
+   refreshes before expiry, and a call after the original lifetime still succeeds.
+   (DEFECT-OAG-039: the local FIDS signing proxy captured AWS creds once at startup
+   and never refreshed → 403 after ~1h; caught only when the human hit it live in the
+   demo, because no test exercised the cred lifecycle. Fix e68a673 added SDK-provider
+   auto-refresh + a startup TTL log + 10 cred-expiry tests.)
 
 ## Parallelism
 Multiple engineers may work the same slice ONLY on sequentially independent

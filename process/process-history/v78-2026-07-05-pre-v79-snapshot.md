@@ -1,143 +1,37 @@
 ---
-process_version: 81
-effective_from: 2026-07-05
-supersedes: v80, v76
-status: active
+process_version: 78
+effective_from: 2026-07-03
+supersedes: v77
+status: snapshot
+snapshot_at: v79 gap-closing retro (2026-07-05)
 ---
 
-# Current Process — v81
+# Process snapshot at the v79 gap-closing retro (2026-07-05)
 
-> **v81 (RECONCILIATION — merge of two parallel-instance process lineages, 2026-07-05).**
-> Target: **gross lead time / CFR** — this is the §0a (v74 multi-instance) reconcile
-> point itself. Two Claude instances forked the shared process from the common
-> ancestor **v73** and evolved it in orthogonal directions on their own lines:
-> - **OagEventSource (Mac) lineage → v80:** build-identity guard, same-item
->   parallel-dispatch disjoint-artifacts, the CI/CD dev→acceptance→prod promotion
->   pipeline, the mechanical retro-debt gate + its extension to re-deploy/recovery
->   (EXP-095), verb-complete/service-wildcard IAM for new-service deploy grants
->   (EXP-094), CD self-heals the deploy-role policy per stage + bootstrap
->   version-prune (EXP-096), worktree isolation for concurrent committers (EXP-097),
->   and `ready` min_items 2→3 (EXP-098).
-> - **Viggo-fix (Windows) lineage → v76:** the v74 multi-instance operating model
->   (§0a — machine-local `work/ACTIVE`, project-sharded DORA ledger, per-instance
->   `instance/<project>` branch, cross-platform DORA launcher; EXP-089), v75 ISO
->   traceability + release versioning (§14 Conventional-Commits + item-reference,
->   §17a test-evidence-on-item, §18a release-versioning; EXP-090), and v76 §0b
->   production-DB read-only safety + prod→clone sign-off (EXP-091).
+> This snapshots the process as it stood entering the v79 retro — the header read
+> `v77` but the body already carried the v78 change-set (EXP-092 fold/hydration
+> real-VOLUME fixtures + EXP-093 infra-deploy-no-longer-human-gated). v78 was a
+> narrowest-owner routing with no header bump; the header/body version drift is
+> reconciled at v79 (this retro), which IS a cross-agent bump (EXP-095).
 >
-> **Reconciliation performed per §0a (v74) Rules 2 + 4 — the very protocol the
-> Viggo-fix lineage introduced:**
-> - The two lineages' operative STAGE rules are **additive / non-overlapping** (deploy
->   /IAM/retro-gate/worktree rules vs multi-instance/prod-DB/ISO rules) and merged
->   with NO textual conflict below the header — the sole content conflict was this
->   version-header + top retro-narrative block, resolved by UNION. **BOTH lineages'
->   full retro-narrative blocks are retained below** (nothing lost). The v75/v76
->   version NUMBERS collided across the fork (each instance minted its own v74/v75/v76
->   for different changes) — this v81 supersedes BOTH and the colliding blocks are
->   preserved verbatim, each labelled by its lineage, so the history stays honest.
-> - **DORA ledger (§0a Rule 2):** `process/dora/ledger.csv` kept as the frozen,
->   LF-normalised, timestamp-sorted archive from the Viggo-fix lineage; the
->   OagEventSource session's 498 new events were **sharded out** to
->   `process/dora/ledger/OagEventSource.csv` (they were previously appended to the
->   monolithic archive — this completes the migration for the OAG rows). No row
->   content mutated; the two shards + archive are disjoint and read as their
->   timestamp-merged union.
-> - **Derived read-models (§0a Rule 4):** `baseline.md`, `flow.md` and
->   `statusline.json` were **REGENERATED from the merged ledger, never hand-merged**.
-> - **NO genuine rule contradiction was found** — every difference was additive or a
->   fork-numbering artefact. Had one lineage asserted X and the other not-X, the
->   merge would have been left in-progress for human adjudication per the reconcile
->   escalation; it was not needed.
+> **Anticipated-vs-observed for v78's change-set (scored at v79):**
+> - **EXP-093 (infra-deploy no longer human-gated, replaced by automated policy
+>   assurance §F5a):** OBSERVED — SLC-039 was the first real infra-bearing deploy
+>   under EXP-093. The automated assurance did NOT block the under-scoped IAM
+>   because the grant WAS in the allowlist (`infra/policies/*.json`) — the allowlist
+>   itself was verb-incomplete (the EXP-094 gap), so §F5a point-2 ("every new IAM
+>   action is in the allowlist") passed on an incomplete allowlist. Net: EXP-093's
+>   gate-removal held (no human idle at deploy, dev-first contained blast radius,
+>   prod untouched), but it EXPOSED that the assurance is only as good as the
+>   allowlist's completeness → EXP-094. No reinstatement of the human gate: the
+>   failure was an upstream verb-completeness gap, fixed upstream (§F5a doctrine
+>   working as designed). EXP-093 continues scoring.
+> - **EXP-092 (fold/hydration real-VOLUME fixtures):** not exercised this window
+>   (no fold/hydration use-case shipped); carries forward 0/2.
 >
-> The two source version headers (v80 and v76) are retained as retro blocks below,
-> unchanged. [EXP-089 reconcile-point; scored next retro]
+> The original v77 banner + full body follow below unchanged as the snapshot.
 
----
-# --- OagEventSource lineage (→ v80) retro blocks, retained verbatim ---
-
-> **v80 (GAP-CLOSING retro — SLC-039 UC-CA-PROD-PROMOTE prod deploy incident, 2026-07-05).**
-> Target: **CFR on cross-stage promotions** + commit-attribution-correctness. Fired
-> by the mechanical retro-debt gate (2 routine closes SLC-030 + SLC-037-DECOMM, plus
-> 1 INCIDENT — the prod-promotion deploy failure → RETRO DUE [incident (immediate)]).
-> The prod `deploy-prod` job failed with `apigateway:PUT on /tags/* AccessDenied`
-> in the PROD account (842827416606) — the SAME first error the DEV deploy hit
-> (EXP-094). Two gaps, two version-bumping cross-agent rules:
-> - **A (promotion-process, CFR — §F5a + cicd):** the prod deploy-role policy
->   CONTENT was correct (`infra/policies/sst-deploy-prod.json`, `apigateway:*`
->   committed 8a425ea for dev AND prod) but `bootstrap-deploy-role.sh --stage prod`
->   was NEVER RUN — only `--stage dev`. So the `oag-sst-deploy-prod` role carried a
->   stale policy version; the correct content never reached the role. Distinct from
->   EXP-094 (which fixed policy CONTENT completeness): promoting a slice to a new
->   stage requires RE-APPLYING that stage's deploy-role policy as a pre-flight, and
->   nothing enforced/reminded it. **Fix (self-healing, chosen over a manual
->   checklist — EXP-056's lesson that a written reminder is what was missed):** the
->   CD `deploy-<stage>` job re-applies the target stage's managed deploy-role policy
->   at the top of the job so the role's policy is always current-with-source and
->   cannot go stale-per-stage; a §F5a promotion rule states the contract; plus a
->   `make promote-preflight STAGE=<s>` for orchestrator/manual promotions. Owner:
->   cicd + §F5a → **EXP-096**. dev-first HELD (dev + acceptance-dev green; failure
->   prod-only-contained — dev-first working as intended, though the promotion still
->   needed a pre-flight that was missed).
-> - **B (concurrent-committer attribution, CFR — orchestrator + engineer, deferred
->   from OI-044):** the shared-index commit-attribution hazard has now recurred 4+
->   times (UC-SF2 engineer commit swept into tester commit 389d86f). The v39
->   explicit-pathspec mitigation reduces but does not ELIMINATE it — a shared index
->   still crosses attribution. **Standing fix:** dispatch 2+ concurrent
->   code-committing agents in git WORKTREE isolation (private index per committer) —
->   the ONE §14 exception to the trunk/no-worktree default, orthogonal to §40
->   flag-isolation (which stays the rule for behavioural seam-independence in a
->   single tree). Owner: orchestrator dispatch rule + engineer → **EXP-097**.
->
-> Both A and B are cross-agent rule changes ⇒ v79→v80 (v79 snapshotted to
-> `process-history/v79-2026-07-05.md`).
->
-> **DORA at this retro (incident MTTR clock OPEN — recovery PENDING):** cumulative
-> CFR 21% (25/121 deploys), MTTR median 1794s; **trailing-window (last 12 deploys)
-> CFR 54% (7/13)** — this incident is the latest failure and the window is still
-> dominated by the SLC-039 dev-deploy family + this prod failure. This incident's
-> MTTR clock started 2026-07-05T11:30:01Z and is NOT yet closed (recovery = re-apply
-> prod policy via `bootstrap --stage prod` + re-run `deploy-prod`); it will be
-> recorded as a `deploy_recovery` leg WHEN the re-deploy goes green, not before.
-> constraint = engineer. dev-first held (failure prod-only-contained). **Per EXP-095
-> (v79): the recovery is NOT hand-cranked — it routes as a flow-manager-prioritised
-> loop item (cicd owns the bootstrap+deploy) AFTER this retro drains retro-debt.**
-
-> **v79 (GAP-CLOSING retro — SLC-039 cross-account-IAM deploy incident, 2026-07-05).**
-> Target: **CFR** (verb-incomplete new-service deploy grants) + **gross lead time**
-> (no un-logged hand-cranked recovery loop). Fired — OVERDUE — by the mechanical
-> retro-debt gate: the SLC-039 dev deploy failed FOUR times (CD runs
-> 28734040102 → 28734267920 → 28734406141 → 28734554471-green) on a succession of
-> under-scoped deploy-role IAM permissions for a NEW service (API Gateway v1). The
-> incident tripped retro-debt on the first failure, but the orchestrator kept
-> hand-cranking re-deploys instead of running THIS retro — the very meta-failure
-> the retro closes. Two gaps, two owners:
-> - **A (technical, CFR — narrowest owner cicd, NO cross-agent bump):** the deploy
->   policy ENUMERATED API GW actions and structurally could not be complete (API GW
->   v1 has HTTP-verb actions AND named actions like `UpdateRestApiPolicy`) → 3 CFR
->   hits, fixed one-verb-at-a-time then finally by `apigateway:*` region-scoped
->   (8a425ea). Plus `bootstrap-deploy-role.sh` hit AWS's 5-managed-policy-version
->   cap (no auto-prune, hand-pruned). Routed to **cicd.md** + bootstrap script →
->   **EXP-094** (new-AWS-service deploy grant = `<service>:*` region-scoped, matching
->   the ec2:*/lambda:* precedent; + bootstrap version-prune).
-> - **B (PROCESS, cross-agent — THE version bump):** the orchestrator hand-ran the
->   CFR recovery on main AND advanced the loop (4 re-deploys) while retro-debt was
->   TRIPPED, and the failure/recovery legs went un-logged until this retro. The v68
->   mechanical retro-debt gate only guarded the next PULL. **§F8 now extends the
->   SAME hard gate to RE-DEPLOY + hand-run recovery** (a non-zero `make retro-debt`
->   blocks every advance action; recovery routes as a flow-manager loop item to the
->   owning specialist, never orchestrator hand-cranking; every leg ledger-logged as
->   it happens) → **EXP-095**. This binds orchestrator + flow-manager + cicd ⇒
->   cross-agent rule change ⇒ v78→v79 (v78 snapshotted to
->   `process-history/v78-2026-07-05-pre-v79-snapshot.md`, which also reconciles the
->   header/body version drift and scores v78's EXP-093 first real firing).
->
-> **DORA at this retro (incident closed — recovery 28734554471 green):** cumulative
-> CFR 20% (24/121 deploys), MTTR median 1794s; trailing-window (last 12 deploys)
-> CFR spiked to **46%** (6/13) — this incident contributed 4 of the 6 failures;
-> par_eff 0.92; constraint = engineer. dev-first held throughout (all 4 failures
-> contained in dev; prod untouched). **SLC-039 prod deploy + tester prod-validation
-> go back to the flow-manager as prioritised loop items — NOT orchestrator
-> hand-cranking (this is EXP-095's whole point).**
+# Current Process — v77 (snapshot body)
 
 > **v77 (LIGHT retro — SLC-035 secrets/config migration + CHK-10 bubble +
 > DEFECT-OAG-039 incident, 2026-07-02).** Target: **CFR** (the running-service-vs-
@@ -369,93 +263,6 @@ status: active
 > cut routed this cycle.
 >
 > v73 change-set scored in `process-history/v73-2026-07-02.md`.
-
----
-# --- Viggo-fix lineage (→ v76) retro blocks, retained verbatim ---
-
-> **v76 (production database safety — agents are READ-ONLY on prod; state changes go
-> through a clone + evidence + two-person sign-off, 2026-07-05, human-directed).**
-> Target: **CFR / data-integrity / audit** — a state change against a production master
-> is the highest-consequence action in the system; it must be impossible for an agent to
-> make one unreviewed. Rule (§0b): an agent granted a production connection issues
-> **SELECT / read-only queries ONLY**; a required prod state change is never applied by
-> the agent — it produces a reviewable **sign-off bundle** (exact reversible script + a
-> clone of the DB + evidence of running it against the clone) that a human and a **second
-> reviewer** sign off before any manual application. Where a project has a working
-> reversible automated path (migrations/CD), change flows through that instead — still
-> never a hand-write to prod by an agent; each project records in its OWN space which
-> path applies and why. Binds every DB-touching agent. [EXP-091]
-
-# Current Process — v75
-
-> **v75 (ISO traceability + release versioning — thread requirement→commit→evidence→
-> prod-version, 2026-07-05, human-directed).**
-> Target: **CFR/MTTR** (an incident pins to an exact shipped version instantly) and
-> **audit compliance** (ISO change-control needs an unbroken requirement⇄production
-> trail). Adds three linked rules, each routed to its stage; the thread is a single
-> **item id + version + commit SHA** carried end to end:
-> 1. **Commits reference the tracked item (§14).** Every implementing commit names its
->    **Linear item id** (+ customer Jira key where one exists) in both repos, so
->    change⇄requirement is traceable. Linear is the mirror of the REQ/CHK/SLC/UC tree;
->    an item is wired to Linear before its first commit lands.
-> 2. **Test evidence attaches to the item (§17a).** The tester attaches its in-prod
->    validation evidence (surface exercised, inputs, result vs acceptance, artefacts,
->    the prod version+SHA validated) to the Linear item; no `item_done` without it.
-> 3. **Release versioning + prod-resource tagging (§18a).** On dev→prod promotion:
->    annotated version tag on the shipping repo **pushed to origin**; prod resources
->    tagged with commit SHA **and** version; the `deploy` DORA row carries version+SHA.
->    **Version scheme is per-project policy** (SemVer for APIs incl. eDCS, CalVer for
->    desktop, a release counter internally) — a versioning ADR is in progress; **default
->    SemVer for now and do NOT hardcode a scheme** (it will change per project type).
->
-> Depends on the Linear mirror being wired for the project (`process/linear-mapping.md`);
-> for Viggo-fix the VIG team exists — its sync (`sync-linear.py`) + key must be confirmed
-> live before the first traceable commit. [EXP-090]
-
-# Current Process — v74
-
-> **v74 (multi-instance operating model — run two Claude instances in parallel
-> without clobbering, 2026-07-05, human-directed).**
-> Target: **gross lead time / throughput** (two instances were fighting over shared
-> singletons; every push flipped the other's state and forced reconciliation rework)
-> **and CFR** (a merge race on derived state makes the ledger lie about what shipped).
->
-> **Evidence.** Two instances run against this one parent repo — a Windows machine
-> (Viggo-fix) and a Mac (OagEventSource) — sharing one `origin/main`. The parent
-> repo carried two GLOBAL SINGLETONS that silently assume one instance: `work/ACTIVE`
-> (a single committed "the active project" pointer) and `process/dora/ledger.csv` (one
-> append-only log both instances write every event). Result: the OAG instance commits
-> `ACTIVE=OagEventSource`, the Viggo instance pulls and is flipped off its own project;
-> both append the ledger and every push/pull conflicts. Separately, DORA was silently
-> dead on Windows — `python3` there is a Microsoft Store stub, so every `make dora-*`
-> and hand-run `dora.py` failed with no real interpreter (the process's own instrument
-> was down on one of the two machines).
->
-> **The change (four rules, routed to §0a; project OUTPUT isolation via §14 is
-> unchanged and already correct):**
-> 1. **`work/ACTIVE` is machine-local + gitignored.** Each instance owns its own
->    active-project pointer; it is never committed. `/project-switch` writes only the
->    local pointer. There is no global "active project" — active is per-instance.
-> 2. **The DORA ledger is project-sharded.** New events append to
->    `process/dora/ledger/<project>.csv` (one file per project → instances on different
->    projects write disjoint files); `ledger.csv` is the frozen pre-sharding archive;
->    reads take the union, merge-sorted by timestamp. A `.gitattributes merge=union`
->    is the backstop for the migration window.
-> 3. **Each instance works on its own branch (`instance/<project>`) and reconciles to
->    `main` CONTINUOUSLY — never batched.** Delayed reconciliation is itself a
->    gross-lead-time cost the retro measures and drives down (§0a). Derived read-models
->    are regenerated post-merge, never hand-merged.
-> 4. **Support tooling is cross-platform, resolved at start.** The DORA tool runs via
->    the launcher `sh .claude/skills/dora-ledger/scripts/dora` (real `python3` on macOS,
->    `uv`-provided Python on Windows), and all its file I/O is UTF-8. Bare `python3
->    …dora.py` is banned. A non-cross-platform support tool is a blocker to fix, not
->    to work around.
->
-> **Anticipated effect (score next retro):** zero cross-instance ACTIVE flips; zero
-> ledger push/pull conflicts on new events; DORA runs on BOTH machines; and a new
-> tracked **reconcile latency** (instance-branch commit → landed on `main`) trending
-> down. If two instances ever still conflict, it is on a genuinely shared process doc —
-> expected, rare, normal git. [EXP-089]
 
 # Current Process — v73
 
@@ -1010,137 +817,6 @@ stating — necessity and correct placement are the metric, not length.
 
 # STAGE 0 — Principles & metrics
 
-## 0a. Multi-instance operating model (v74 — human-directed)
-
-More than one Claude instance may run against this shared parent repo at once —
-today a Windows machine (Viggo-fix) and a Mac (OagEventSource), sharing one
-`origin/main`. They work **in parallel on different projects**; the model below
-lets them do so without clobbering each other. The root cause it fixes: the parent
-repo conflated *agent-system state* (rare, deliberate, genuinely shared) with
-*per-instance runtime state* (continuous, automatic, per-loop) on one branch.
-
-**What is shared vs per-instance.**
-- **Genuinely shared** (commit to `main` via reconcile): `.claude/`, `process/`
-  docs, `CLAUDE.md`, `README.md`, `_TEMPLATE/`. Changes are deliberate and rare;
-  ordinary git conflict resolution is fine.
-- **Per-instance runtime state** (never a shared singleton): the active-project
-  pointer and the running DORA event stream.
-- **Project output** is already isolated and needs no change: every `work/<project>/`
-  is its own gitignored repo (§14). Two instances on two projects touch two repos.
-
-**Rule 1 — The active-project pointer is machine-local.** `work/ACTIVE` is
-gitignored; each instance owns its own copy. `/project-switch` writes only the
-local pointer and is invisible to other instances. Flow commands that find no
-`work/ACTIVE` STOP and ask for `/project-switch` — they never fall back to another
-machine's project. There is no global "active project".
-
-**Rule 2 — The DORA ledger is project-sharded.** New events append to
-`process/dora/ledger/<project>.csv` (one file per project); `process/dora/ledger.csv`
-is the frozen pre-sharding archive (read-only). `dora.py` reads the UNION of archive
-+ all shards, merge-sorted by timestamp, so callers never choose a file. Instances on
-different projects therefore append to **disjoint files** and cannot collide.
-`.gitattributes merge=union` on the ledger paths is the backstop for the migration
-window (and for the rare two-instances-one-project case). **Only ever append your own
-rows; never rewrite or reorder existing rows** — a rewrite is what turns a union-merge
-into a conflict.
-
-**Rule 3 — Each instance works on its own branch.** Parent-repo (agent-system /
-process) commits land on `instance/<project>` (e.g. `instance/viggo-fix`,
-`instance/oag`); `main` is the reconciled baseline no loop writes directly. On its own
-branch an instance is the SOLE writer of everything, so nothing conflicts mid-flight —
-conflicts exist only at the reconcile point. (Project output still commits inside the
-project's own repo per §14; that is orthogonal to this branch, which is for the parent
-repo.) Either instance may `git fetch` the other's branch to validate or borrow an
-experiment before it lands — the branches are independent lines, not a queue.
-
-**Rule 4 — Reconcile to `main` CONTINUOUSLY (delay is a measured cost).** Merge
-`instance/<project>` → `main` as often as the work produces a stable point — at the
-latest every retro cadence (§F8) and session boundary, ideally after each closed loop
-wave. **Batching reconciliation is banned** (it repeats the v60 pooled-commit failure
-at the process layer). Mechanics: `git fetch`; rebase/merge `main` into the instance
-branch; fast-forward `main`; push. Because the runtime state is partitioned (Rules
-1–2) the merge is clean — the ledger shards are disjoint, `work/ACTIVE` is not tracked.
-**Derived read-models are REGENERATED after the merge, never hand-merged**: run
-`sh .claude/skills/dora-ledger/scripts/dora compute` (baseline) and `… flow --project
-<p>` (flow) from the merged ledger; `statusline.json` and each `work/<p>/state.md`
-likewise regenerate. **Reconcile latency** — wall-clock from an `instance/<project>`
-commit to it landing on `main` — is a component of gross lead time. The retro measures
-it and drives it down (record it as a `reconcile` ledger event: `task_start` at the
-instance-branch commit, `task_exit` when it lands on `main`, so `dora flow` surfaces it
-as a time thief).
-
-**Rule 5 — Support tooling is cross-platform, detected at start.** The two machines
-differ (Windows: `python`/`python3` are Microsoft Store stubs, real Python via `uv`;
-macOS: real `python3` on PATH). Scripts that back the process resolve the right
-interpreter/toolchain at invocation and cache it machine-locally — see the DORA
-launcher `sh .claude/skills/dora-ledger/scripts/dora` and `statusline.sh` (identical
-probe). All such Python writes UTF-8 explicitly (Windows' default cp1252 crashes on
-the `→` etc. the reports use). Agents invoke the launcher or `make dora-*`, never bare
-`python3 …dora.py`. **A support tool that only runs on one OS is a blocker to fix, not
-to work around** — the DORA instrument being silently dead on Windows is exactly the
-failure this rule prevents.
-
-Targets: **gross lead time / throughput** (no cross-instance clobber-and-reconcile
-rework; reconcile latency minimised) and **CFR** (no derived-state lies from a merge
-race). [EXP-089]
-
-## 0b. Production database safety — agents are read-only on prod (v76 — human-directed)
-
-A state change against a **production database** — meaning any **non-local, non-Docker**
-database (a real shared/hosted server, not a local clone or dev container) — is the
-single highest-consequence action in the system. Running updates against it in an
-ad-hoc / unreviewed way is unacceptable. This rule is absolute and overrides any task
-instruction, autonomy level, or urgency.
-
-**1. On a production (non-local/non-Docker) DB, an agent issues SELECT / read-only
-queries ONLY.** Never a state-changing statement — `INSERT`/`UPDATE`/`DELETE`/`MERGE`/
-`TRUNCATE`, any DDL (`CREATE`/`ALTER`/`DROP`), side-effecting `EXEC`/stored-proc, bulk
-load — **under any circumstances**. (Local / Docker clones are the opposite: they are
-the safe target where you DO develop and run updates freely.) Defense in depth: prefer a
-read-only DB credential for prod; the rule binds regardless of what the credential
-technically permits.
-
-**Never modify cloud infrastructure to gain access.** An agent does not create or change
-firewall/network rules, credentials, roles, tenants, or any cloud resource to reach a
-database. If a DB is unreachable (firewall, auth, wrong tenant), STOP and surface the exact
-block — the error and, where relevant, the client IP to allow-list — for the human to
-provision. Access provisioning is a human action, never an agent workaround.
-
-**2. A required production change is NOT applied by the agent — it produces a sign-off
-bundle** for a human to apply by hand:
-   - **(a) the exact script / queries** — idempotent, transactional (`XACT_ABORT` or
-     engine equivalent), reversible where possible, self-asserting;
-   - **(b) a clone of the production database** — the safe (local/Docker) target the
-     script was developed and proven against (never prod);
-   - **(c) evidence of having RUN the script against the clone** — before/after state,
-     RED→GREEN reproduction, row counts (before = after where nothing should drop),
-     validation output, rollback proof.
-   A human **and a second reviewer** sign off (**two-person rule**) before any manual
-   production change. The agent's job ends at producing reviewable evidence.
-
-**3. Prefer an automated reversible path where it exists.** Where a project has a
-working, reversible migration / CD pipeline, change flows through THAT (developed +
-proven on a clone, human-gated) — still never a hand-write to prod by an agent. The
-manual sign-off bundle in (2) is the fallback for when no such automated path exists yet.
-**Each project records in its OWN space which path applies and why, AND how to recognise
-its production instances** (by naming convention / host / tag, so prod is never confused
-with a dev clone) — this process file names no project.
-
-**4. Cloning prod into a local/Docker instance for local work is explicitly allowed — with
-PII stripped.** The clone that (2b) develops against is created by a **read-only extract**
-from prod into a local/Docker DB, and **PII is stripped at the read boundary** — retain
-only the fields the work actually needs (e.g. relationship-bearing columns), drop
-non-relational PII, exclude audit logs, and (allowed) **exclude data older than a
-project-set recency window (e.g. 90 days)** to further minimise size and surface. The
-local clone is where you run updates freely
-(point 1's opposite); prod itself stays SELECT-only. Minimise the PII surface of every
-local copy.
-
-This is the strict form of the develop-on-a-clone → reversible-script → human-gated-apply
-model, and it binds every DB-touching agent (engineer, tester, solution-architect, cicd,
-orchestrator). A prod state change issued by an agent is a **stop-the-line principle
-failure**, logged in `principle-failures/`. Target: CFR + data-integrity + audit. [EXP-091]
-
 ## 1. Operating principles (beliefs)
 See `principles/` for the full statements. In force: XP, always-TDD, value
 slicing, trunk-based development, continuous deployment, roll-forward-with-
@@ -1618,41 +1294,18 @@ green (lint passes inside the done-condition, not discovered post-commit).
 - **Commit when green and lint clean, never when red.**
 - **Message states intent, not mechanics.**
 - **One logical change per commit.**
-- **Conventional Commits format (v75 — human-directed; required in Viggo-fix, the
-  default elsewhere).** The subject line is `type(scope): <intent>` where `type` ∈
-  {`feat`,`fix`,`docs`,`style`,`refactor`,`perf`,`test`,`build`,`ci`,`chore`,`revert`}
-  and `scope` is the affected area; append `!` (or a `BREAKING CHANGE:` footer) for a
-  breaking change. The `<intent>` still states WHY, not the mechanics. This composes
-  with the item-reference rule below — e.g.
-  `fix(pnl): resolve issuing-State against Country.Code (VF-003, PP-127)`. Keep the
-  `Co-Authored-By` trailer.
-- **Reference the tracked item — ISO traceability (v75 — human-directed).** Every
-  commit that implements a tracked work item names its **Linear item id** in the
-  message (e.g. `VIG-12`), plus the customer ticket where one exists (e.g. Jira
-  `PP-127`), so an auditor can trace change ⇄ requirement. This binds in BOTH repos:
-  a parent-repo `instance/<project>` commit references the agent work item; a
-  project / eDCS commit references the item (+ customer ticket). Linear is the
-  mirror of the REQ/CHK/SLC/UC tree (one-way agent→Linear sync each loop cycle,
-  `process/linear-mapping.md`); an item not yet mirrored is wired to Linear **before**
-  its first commit lands (no orphan commits). A genuine chore with no item is
-  labelled `chore: …` rather than given a fabricated id. Keep the existing
-  `Co-Authored-By` trailer. Rationale: ISO change-control audit trail (requirement →
-  commit → test evidence → prod version); the same id threads all four.
 - **Commit TARGET — two separate repositories.** Each `work/<project>/`
   is its **own independent git repo** so a project can be lifted out and exist
   standalone. **Project output** (code, slices, decision-log, items.csv, queues,
   the project's DORA `per-project.md`) is committed INSIDE the project repo:
   `git -C work/<project> add <paths> && git -C work/<project> commit -m "…"`.
   **Agent-structure and process changes** (`.claude/`, `process/`, `CLAUDE.md`,
-  `README.md`) are committed in THIS parent repo — on the instance branch
-  `instance/<project>`, reconciled to `main` continuously (§0a Rules 3–4). The
-  parent repo does not track project contents (`.gitignore`: `/work/*/`). The DORA
-  ledger stays in the parent but is **project-sharded** (`process/dora/ledger/<project>.csv`;
-  `ledger.csv` = frozen archive) so parallel instances never collide (§0a Rule 2);
-  `work/ACTIVE` is **machine-local + gitignored**, not committed at all (§0a Rule 1).
-  Never mix the two repos in one commit — a project-output commit in the parent repo
-  (or vice-versa) is the cross-boundary leak this split exists to prevent (cf. the
-  bare-root-`slices/` principle failure).
+  `README.md`) are committed in THIS parent repo. The parent repo does not track
+  project contents (`.gitignore`: `/work/*/`); the shared process DORA ledger
+  (`process/dora/ledger.csv`) and `work/ACTIVE` stay in the parent (agent-system
+  state). Never mix the two in one commit — a project-output commit in the parent
+  repo (or vice-versa) is the cross-boundary leak this split exists to prevent
+  (cf. the bare-root-`slices/` principle failure).
 - **Push to a VERIFIED remote as part of the done-condition (v60 — human-directed).**
   The blanket "never push" of v59/EXP-049 is superseded: it batched work locally
   (OagEventSource reached **44 commits ahead** of `origin/main` before anything was
@@ -1673,23 +1326,14 @@ green (lint passes inside the done-condition, not discovered post-commit).
     a red run where local was green becomes a defect, never a silent failure.
   Target: deployment frequency + gross lead time (work integrates continuously
   instead of pooling), guarded by CFR (each push is already green locally). [EXP-069]
-- **Parallel-engineer commit isolation (v39; STANDING FIX = worktree, v80 EXP-097).**
-  When two+ agents COMMIT code concurrently on one project repo, a file BOUNDARY is
-  not enough — `git add` over a **shared index** sweeps a co-worker's pre-staged
-  files into your commit. This class has now recurred 4× (route-sweep, both sides of
-  the s009 split, and UC-SF2 swept into tester commit 389d86f, 2026-07-05). The v39
-  explicit-pathspec mitigation (`git commit -- <your-paths>`, never bare `git add`
-  then `git commit`) REDUCES but does not ELIMINATE it — a shared index still
-  crosses attribution. **Standing fix (EXP-097): the orchestrator dispatches 2+
-  concurrent code-committing agents (parallel engineers, or engineer + tester both
-  committing) in git WORKTREE isolation (`git worktree add`), so each committer has
-  a PRIVATE index and commits cannot cross-attribute.** This is the ONE §14
-  exception to the trunk/no-worktree default — worktree isolation here is for
-  COMMIT-ATTRIBUTION safety on concurrent committers, and is **orthogonal to §40
-  flag-isolation** (which remains the rule for behavioural seam-independence within
-  a single working tree). Single-committer cycles keep the plain trunk working tree
-  (no worktree). The explicit-pathspec rule still binds as the within-tree fallback.
-  Target: commit-attribution-correctness (CFR) + GLT (no reconciliation rework).
+- **Parallel-engineer commit isolation (v39).** When two+ engineers work the
+  same slice on one working tree, a file BOUNDARY is not enough — `git add`
+  over a shared index sweeps a co-worker's pre-staged files into your commit
+  (logged 3×: route-sweep, and both sides of the s009 split). Isolate the
+  commit: either dispatch parallel engineers in **worktree isolation** (the
+  orchestrator's wave-plan choice for genuinely concurrent seams), OR commit
+  with an explicit pathspec — `git commit -- <your-paths>` — never `git add`
+  then bare `git commit`. The orchestrator names which in the wave plan.
 - **Never `git stash` a shared tree (v61, DEFECT-OAG learning).** Do not run
   `git stash`/stash-all to clear the tree for your own rebase: it captures OTHER
   agents' uncommitted changes and flow bookkeeping, hiding their work in a stash
@@ -1867,21 +1511,6 @@ harness, re-exercising (not re-discovering) the engineer's browser flows.
 (Operational detail: `engineer.md`, `tester.md`, `solution-architect.md`,
 principles/02; capability: IMP-006.)
 
-## 17a. Test evidence attaches to the item (v75 — human-directed, ISO)
-When the tester validates a use-case **in prod** (§11a), it attaches its validation
-**evidence to the work item in Linear** — not only to the slice `result.md`. The
-evidence records: which public-facing surface was exercised (browser flow / API call),
-the inputs, the observed result vs the acceptance criteria, the captured artefacts
-(response bodies, screenshots, run logs), and the **prod version + commit SHA** it
-validated (§18a). **An item is not `item_done` until its validating evidence is
-attached** — this is the item → test-evidence link an auditor follows. On a
-validation FAILURE the tester attaches the failing evidence and hands back to
-engineering (the item stays open); the roll-forward fix re-validates and re-attaches.
-Binds **tester** (produces + attaches), **orchestrator** (won't close an item without
-it), and the Linear mirror (`process/linear-mapping.md`). Rationale: ISO — the audit
-trail requirement → commit (§14) → **test evidence** (here) → prod version (§18a) is
-unbroken only if evidence lives on the item. [EXP-090]
-
 ---
 
 # STAGE 4 — Deploy
@@ -1891,32 +1520,6 @@ unbroken only if evidence lives on the item. [EXP-090]
   passes (or cicd/engineer on pipeline success for cloud/hosted, §2).
 - Each agent brackets its work with `task_start`/`task_end` ledger rows; the
   engineer populates `duration_s` with wall-clock seconds.
-
-## 18a. Release versioning + prod-resource tagging (v75 — human-directed, ISO)
-When a change is promoted past dev **into prod**, the shipping repo and the prod
-resources are stamped so any running production artifact is traceable back to the
-exact commit, version, and requirement. On each prod promotion:
-1. **Version-tag the shipping repo.** Create an ANNOTATED git tag on the deployed
-   commit carrying the version (e.g. `v1.4.2`) and **push the tag to `origin`**
-   (`git push origin <tag>`) so the version is durable and shared, not local-only.
-2. **Tag the production resources** with BOTH the deployed **commit SHA** and the
-   **version** — whatever an operator/auditor inspects to answer "what version is
-   running here?": AWS resource tags `GitSha`/`Version`; a hosted app's assembly/build
-   version + a `Version`/`GitSha` deployment tag; a container image tag. The cicd /
-   solution-architect owns the per-platform mechanism as a **capability** (it differs
-   by infra).
-3. **The `deploy` DORA event records the version + SHA** (in `--ref`/`--note`) so the
-   ledger itself carries release identity — an incident pins to an exact shipped
-   version instantly (MTTR/CFR).
-4. **Version scheme is a PER-PROJECT policy, not a global constant.** Each project
-   declares its scheme (in `capabilities.md` / a versioning ADR): **SemVer for APIs**
-   (e.g. eDCS — with a stated bump policy), **CalVer for desktop apps**, an **internal
-   release counter** for internal tools. **Default SemVer until the project's
-   versioning ADR lands** — that ADR is in progress and the scheme WILL vary by project
-   type, so do NOT hardcode one scheme into tooling: read the project's declared scheme.
-Rationale: ISO/audit change-control — a production resource is traceable to its commit,
-its version tag, and (via §14 item id + §17 evidence) its requirement and test evidence.
-The version id threads repo tag → resource tag → DORA deploy row. [EXP-090]
 
 ## 19. Scheduling over compensation
 
@@ -2508,27 +2111,6 @@ it cannot be rolled back. EXP-093 is scored on: infra-deploy gross-lead-time (ga
 idle → 0) guarded by CFR on infra deploys; reinstate the human gate via §25a only
 if evidence shows the automated assurance let a real IAM/blast-radius defect
 through (the DEFECT-OAG-001 class the original gate caught).
-
-**Promoting to a NEW stage re-applies that stage's deploy-role policy as a
-self-healing pre-flight (v80, EXP-096).** A per-stage deploy role's policy CONTENT
-being correct in `infra/policies/*.json` is NOT enough — the content must be
-APPLIED to *that stage's* IAM role, and standing up / promoting to a new stage is
-exactly when it has not been. So the CD `deploy-<stage>` job **re-applies the
-target stage's managed deploy-role policy** (`bootstrap-deploy-role.sh --stage
-<stage>` / equivalent apply-managed-policy step) at the TOP of the job, before any
-SST/CDK deploy — the role's policy is thus always current-with-source at deploy
-time and cannot go stale-per-stage. For orchestrator/manual promotions the same
-guarantee is a committed `make promote-preflight STAGE=<s>` that applies + asserts
-the policy. This is a **self-healing check, not a written reminder** — a
-"remember to run `bootstrap --stage <target>`" note is precisely what was missed
-(cf. EXP-056: the confirmation must be an executable check that self-heals/fails,
-never a note the orchestrator must remember). Owner: cicd (the CD-job step +
-`make promote-preflight`); this §F5a rule is the contract. Distinct from EXP-094
-(policy CONTENT verb-completeness): EXP-094 makes the granted content complete;
-this makes the correct content APPLIED to each stage's role at promotion time.
-Founding: SLC-039 UC-CA-PROD-PROMOTE — prod `apigateway:PUT AccessDenied` because
-`--stage prod` was never run though the prod policy content was correct (8a425ea).
-Target: CFR on cross-stage promotions + deploy MTTR.
 
 ## F5b. Feature-flagging is the escalation when CD starts failing in prod (v75 — human-directed)
 The §F5a safety net is the tester validating in prod, and its **CFR is the

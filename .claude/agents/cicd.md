@@ -54,6 +54,50 @@ like CloudFront) go into an ATTACHED MANAGED policy (`aws.iam.Policy` +
 `RolePolicyAttachment`) — a separate, larger budget — not another inline
 `RolePolicy`. Keep least-privilege; managed vs inline is a packaging choice.
 
+**A NEW AWS service in a deploy role gets `<service>:*` region-scoped, NOT an
+enumerated verb list (v79, EXP-094).** When a slice adds a NEW AWS service to a
+deploy role's policy, grant the whole service action namespace scoped to the
+region (`Action: "<service>:*"`, `Resource` region/account-scoped ARNs), matching
+the established `ec2:*`/`lambda:*` precedent already in the policy — do NOT
+enumerate verbs. Enumeration is the DEFECT, not the fix: many services (e.g. API
+Gateway v1) have BOTH HTTP-verb actions (`GET/POST/PUT/DELETE`) AND NAMED actions
+(`apigateway:UpdateRestApiPolicy` is not an HTTP verb), so an enumerated list is
+structurally incomplete and fails the deploy one-verb-at-a-time — each miss is a
+CFR hit and a re-deploy cycle (SLC-039 failed 4× this way: apigateway:PUT /tags/*,
+iam:UpdateRoleDescription, apigateway:UpdateRestApiPolicy, before `apigateway:*`
+region-scoped landed it). A region-scoped service wildcard is the least-privilege
+UNIT for a deploy role that fully owns that service's resources in that region;
+it is verb-complete by construction. (Iterating individual verbs on an EXISTING
+service after a genuine scope discovery is still fine — this rule is specifically
+for a service the deploy role did not previously touch.) Keep `infra/policies/*.json`
+(the §F5a allowlist SSOT) in step: the automated infra-deploy assurance only
+passes on a COMPLETE allowlist, so a verb-complete grant keeps the assurance
+honest.
+
+**`bootstrap-deploy-role.sh` must PRUNE managed-policy versions (v79, EXP-094).**
+AWS caps a managed policy at **5 versions** and does NOT auto-prune; repeated
+`bootstrap`/re-apply cycles hit `LimitExceeded` on `CreatePolicyVersion`. The
+bootstrap script deletes the oldest non-default version before creating a new one
+(and sets the new version as default) so re-applies never wedge on the version
+cap — never leave this to a hand-prune during an incident.
+
+**Promoting to a NEW stage re-applies that stage's deploy-role policy (v80,
+EXP-096).** A per-stage deploy role's policy being correct in `infra/policies/*.json`
+is NOT enough — the content must be APPLIED to *that stage's* IAM role, and
+standing up / promoting to a new stage is exactly when it has not been. So the CD
+`deploy-<stage>` job **re-applies the target stage's managed deploy-role policy**
+(`bootstrap-deploy-role.sh --stage <stage>` / equivalent apply-managed-policy step)
+at the TOP of the job, before any SST/CDK deploy — the role's policy is thus always
+current-with-source at deploy time and cannot go stale-per-stage. Also expose a
+committed `make promote-preflight STAGE=<s>` that applies + asserts the policy for
+orchestrator/manual promotions. This is a **self-healing check, not a written
+reminder** — a "remember to run `bootstrap --stage <target>`" note is precisely what
+was missed. Distinct from EXP-094 (policy CONTENT verb-completeness): that makes the
+granted content complete; this makes the correct content APPLIED to each stage's
+role. Founding: SLC-039 UC-CA-PROD-PROMOTE — prod `apigateway:PUT AccessDenied`
+because `--stage prod` was never run though the prod policy content was correct
+(8a425ea). Target: CFR on cross-stage promotions + deploy MTTR.
+
 ## Release versioning & prod-resource tagging (process §18a, ISO)
 The deploy pipeline you build is what stamps release identity on every dev→prod
 promotion — this is an ISO traceability capability, not an afterthought:

@@ -1,16 +1,14 @@
 {
-"cfr": 8,
-"freq": 2,
-"lead": 43972,
+"cfr": 54,
+"freq": 1,
+"lead": 26624,
 "window": "last 12 deploys",
-"dora_updated": "2026-07-05T07:47:04Z",
-"project": "Viggo-fix",
-"par": 0.88,
-"flow_updated": "2026-07-05T08:04:03Z",
+"dora_updated": "2026-07-05T13:26:01Z",
+"project": "OagEventSource",
+"par": 0.93,
+"flow_updated": "2026-07-05T13:26:13Z",
 "retro_debt_OagEventSource": 0,
 "retro_due_OagEventSource": false,
-"retro_debt_viggo-fix": 0,
-"retro_due_viggo-fix": false,
 "retro_debt_Viggo-fix": 0,
 "retro_due_Viggo-fix": false
 }

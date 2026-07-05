@@ -282,6 +282,20 @@ lint-fids:
 run-fids:
 	npm --prefix $(FIDS) run run-local
 
+# SLC-036 UC-ES3 sandbox regression gate — Playwright e2e against a local vite
+# dev server (port 3901, ephemeral, managed by Playwright webServer lifecycle).
+# Validates AC-ES3.1..AC-ES3.4 + a11y spot-checks (A-ES1/A-ES2/A-ES5/A-ES-FIG1).
+# Requires network access to the sandbox Lambda feed URL.
+#   make e2e-fids-uc-es3
+e2e-fids-uc-es3:
+	npm --prefix $(FIDS) exec -- playwright test --config playwright.uc-es3.config.ts
+
+# Full deployed FIDS e2e suite — Playwright against the CloudFront distribution.
+# Override with FIDS_URL=https://… for a different environment.
+#   make e2e-fids [FIDS_URL=https://dxo1r5kl2dn9y.cloudfront.net]
+e2e-fids:
+	$(if $(FIDS_URL),FIDS_URL=$(FIDS_URL) ,)npm --prefix $(FIDS) run test:e2e
+
 # --- UI accessibility scan (ui-designer; design-ops, root Makefile only) -------
 # Runs the axe/Playwright a11y + geometry specs (WCAG 2.2 AA contrast +
 # visual-structural GEO assertions, ui-design.md §4) over the observatory SPA.
@@ -524,7 +538,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: sso-login dora-record dora-compute retro-debt ledger-drift validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids
+.PHONY: sso-login dora-record dora-compute retro-debt ledger-drift validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3
 
 # --- Viggo-fix UC-W7: Country/Nationality ID remediation (T-SQL) --------------
 # Data-driven, self-building T-SQL remediation script set + its local stand-up

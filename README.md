@@ -45,8 +45,10 @@ costed, prioritised, per-queue-buffered set of queues; a continuous inner dev lo
 pulls the **maximal independent set** of ready use-cases and runs them concurrently
 (TDD on trunk → per-UC deploy → validate-in-prod); product replenishes the Ready
 queue just-in-time so it never starves but stays shallow (penny game); completed
-requirements ask for more work. **Two blocking gates only:** requirement/defect
-intake, and deploy-to-prod for infra-bearing change. Collisions between parallel
+requirements ask for more work. **One blocking human gate:** requirement/defect
+intake — infra-bearing deploy auto-approves under an automated policy assurance
+(§F5/§F5a, EXP-093), leaving only a genuinely irreversible prod-DATA op (§0b)
+human-confirmed. Collisions between parallel
 work teach the dependency tree. Cross-agent rules: `process/process-current.md`
 **STAGE F**. Rationale, diagrams, and a worked retro: `Version2-design/`.
 

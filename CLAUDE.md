@@ -14,8 +14,11 @@ See `README.md` for the full system. In short:
   engineering decision; the flow-manager (v40) owns queue state and flow decisions.
 - **v40 — pull-based flow.** Delivery is pull, not push: a continuous inner dev
   loop (`/loop-run`) pulls the maximal independent set of ready use-cases from
-  costed, per-queue-buffered queues; product replenishes just-in-time; **two gates
-  only** — intake (`/intake`) and infra-bearing deploy. Cross-agent rules:
+  costed, per-queue-buffered queues; product replenishes just-in-time; **one
+  blocking human gate** — requirement/defect intake (`/intake`); infra-bearing
+  deploy auto-approves under an automated policy assurance (§F5/§F5a, EXP-093),
+  and the only residual human touch is a genuinely irreversible prod-DATA op
+  (§0b). Cross-agent rules:
   `process/process-current.md` **STAGE F**. Rationale/diagrams/worked-retro:
   `Version2-design/`. Use `/flow-status` to see queues, buffers, and time thieves.
 - Drive work with the slash commands in `.claude/commands/`: v40 `/intake`,

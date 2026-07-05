@@ -1180,6 +1180,14 @@ green (lint passes inside the done-condition, not discovered post-commit).
 - **Commit when green and lint clean, never when red.**
 - **Message states intent, not mechanics.**
 - **One logical change per commit.**
+- **Conventional Commits format (v75 — human-directed; required in Viggo-fix, the
+  default elsewhere).** The subject line is `type(scope): <intent>` where `type` ∈
+  {`feat`,`fix`,`docs`,`style`,`refactor`,`perf`,`test`,`build`,`ci`,`chore`,`revert`}
+  and `scope` is the affected area; append `!` (or a `BREAKING CHANGE:` footer) for a
+  breaking change. The `<intent>` still states WHY, not the mechanics. This composes
+  with the item-reference rule below — e.g.
+  `fix(pnl): resolve issuing-State against Country.Code (VF-003, PP-127)`. Keep the
+  `Co-Authored-By` trailer.
 - **Reference the tracked item — ISO traceability (v75 — human-directed).** Every
   commit that implements a tracked work item names its **Linear item id** in the
   message (e.g. `VIG-12`), plus the customer ticket where one exists (e.g. Jira

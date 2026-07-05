@@ -36,10 +36,12 @@ hardcode the profile name.
      test against the real shape FIRST.
 3. **Commit when green; push when the use-case is done (v60).** Every time the full
    test suite goes from red to green, commit immediately to trunk. The commit message
-   states the *intent* — what job, acceptance criterion, or defect the change advances
-   — not a description of the code changed, and **references the tracked item's Linear
-   id (+ customer Jira key where one exists), per §14 ISO traceability**. Never commit
-   while any test is red.
+   uses **Conventional Commits** (`type(scope): intent` — feat/fix/docs/refactor/perf/
+   test/build/ci/chore/revert, `!` for breaking; required in Viggo-fix, default
+   elsewhere), states the *intent* not the code changed, and **references the tracked
+   item's Linear id (+ customer Jira key where one exists), per §14 ISO traceability** —
+   e.g. `fix(pnl): resolve issuing-State against Country.Code (VF-003, PP-127)`. Never
+   commit while any test is red.
    **Then integrate, don't batch (process §14/§19b):** when a use-case's full
    done-condition is met (suite **and** lint green), if the project repo has a
    configured, verified remote (`git remote get-url origin` resolves to the origin

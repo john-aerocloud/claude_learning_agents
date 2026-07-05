@@ -753,6 +753,14 @@ manual sign-off bundle in (2) is the fallback for when no such automated path ex
 **Each project records in its OWN space which path applies and why** — this process file
 names no project.
 
+**4. Cloning prod into a local/Docker instance for local work is explicitly allowed — with
+PII stripped.** The clone that (2b) develops against is created by a **read-only extract**
+from prod into a local/Docker DB, and **PII is stripped at the read boundary** — retain
+only the fields the work actually needs (e.g. relationship-bearing columns), drop
+non-relational PII, exclude audit logs. The local clone is where you run updates freely
+(point 1's opposite); prod itself stays SELECT-only. Minimise the PII surface of every
+local copy.
+
 This is the strict form of the develop-on-a-clone → reversible-script → human-gated-apply
 model, and it binds every DB-touching agent (engineer, tester, solution-architect, cicd,
 orchestrator). A prod state change issued by an agent is a **stop-the-line principle

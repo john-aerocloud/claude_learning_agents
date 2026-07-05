@@ -1,9 +1,24 @@
 ---
-process_version: 75
+process_version: 76
 effective_from: 2026-07-05
-supersedes: v74
+supersedes: v75
 status: active
 ---
+
+# Current Process — v76
+
+> **v76 (production database safety — agents are READ-ONLY on prod; state changes go
+> through a clone + evidence + two-person sign-off, 2026-07-05, human-directed).**
+> Target: **CFR / data-integrity / audit** — a state change against a production master
+> is the highest-consequence action in the system; it must be impossible for an agent to
+> make one unreviewed. Rule (§0b): an agent granted a production connection issues
+> **SELECT / read-only queries ONLY**; a required prod state change is never applied by
+> the agent — it produces a reviewable **sign-off bundle** (exact reversible script + a
+> clone of the DB + evidence of running it against the clone) that a human and a **second
+> reviewer** sign off before any manual application. Where a project has a working
+> reversible automated path (migrations/CD), change flows through that instead — still
+> never a hand-write to prod by an agent; each project records in its OWN space which
+> path applies and why. Binds every DB-touching agent. [EXP-091]
 
 # Current Process — v75
 
@@ -702,6 +717,46 @@ failure this rule prevents.
 Targets: **gross lead time / throughput** (no cross-instance clobber-and-reconcile
 rework; reconcile latency minimised) and **CFR** (no derived-state lies from a merge
 race). [EXP-089]
+
+## 0b. Production database safety — agents are read-only on prod (v76 — human-directed)
+
+A state change against a **production database** — meaning any **non-local, non-Docker**
+database (a real shared/hosted server, not a local clone or dev container) — is the
+single highest-consequence action in the system. Running updates against it in an
+ad-hoc / unreviewed way is unacceptable. This rule is absolute and overrides any task
+instruction, autonomy level, or urgency.
+
+**1. On a production (non-local/non-Docker) DB, an agent issues SELECT / read-only
+queries ONLY.** Never a state-changing statement — `INSERT`/`UPDATE`/`DELETE`/`MERGE`/
+`TRUNCATE`, any DDL (`CREATE`/`ALTER`/`DROP`), side-effecting `EXEC`/stored-proc, bulk
+load — **under any circumstances**. (Local / Docker clones are the opposite: they are
+the safe target where you DO develop and run updates freely.) Defense in depth: prefer a
+read-only DB credential for prod; the rule binds regardless of what the credential
+technically permits.
+
+**2. A required production change is NOT applied by the agent — it produces a sign-off
+bundle** for a human to apply by hand:
+   - **(a) the exact script / queries** — idempotent, transactional (`XACT_ABORT` or
+     engine equivalent), reversible where possible, self-asserting;
+   - **(b) a clone of the production database** — the safe (local/Docker) target the
+     script was developed and proven against (never prod);
+   - **(c) evidence of having RUN the script against the clone** — before/after state,
+     RED→GREEN reproduction, row counts (before = after where nothing should drop),
+     validation output, rollback proof.
+   A human **and a second reviewer** sign off (**two-person rule**) before any manual
+   production change. The agent's job ends at producing reviewable evidence.
+
+**3. Prefer an automated reversible path where it exists.** Where a project has a
+working, reversible migration / CD pipeline, change flows through THAT (developed +
+proven on a clone, human-gated) — still never a hand-write to prod by an agent. The
+manual sign-off bundle in (2) is the fallback for when no such automated path exists yet.
+**Each project records in its OWN space which path applies and why** — this process file
+names no project.
+
+This is the strict form of the develop-on-a-clone → reversible-script → human-gated-apply
+model, and it binds every DB-touching agent (engineer, tester, solution-architect, cicd,
+orchestrator). A prod state change issued by an agent is a **stop-the-line principle
+failure**, logged in `principle-failures/`. Target: CFR + data-integrity + audit. [EXP-091]
 
 ## 1. Operating principles (beliefs)
 See `principles/` for the full statements. In force: XP, always-TDD, value

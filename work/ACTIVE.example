@@ -1,0 +1,18 @@
+This file documents work/ACTIVE — it is NOT read by any tooling.
+
+work/ACTIVE is a MACHINE-LOCAL, single-line file naming the project THIS Claude
+instance is currently working on (e.g. the single line `Viggo-fix`). It is
+gitignored on purpose: under the multi-instance operating model each machine runs
+its own active project, so a committed pointer would let two instances flip each
+other's active project on every push/pull.
+
+Set it for this machine with:
+
+    /project-switch <project-name>
+
+or, equivalently, write the bare project name into work/ACTIVE:
+
+    printf 'Viggo-fix\n' > work/ACTIVE
+
+If work/ACTIVE is missing, flow commands stop and ask you to /project-switch —
+they never fall back to another machine's project.

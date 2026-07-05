@@ -1,6 +1,6 @@
 # DORA Baseline (computed)
 
-_Generated 2026-07-05T12:21:02Z from ledger.csv. Do not hand-edit._
+_Generated 2026-07-05T13:26:01Z from ledger.csv. Do not hand-edit._
 
 ## Four key metrics — CUMULATIVE (whole pipeline)
 
@@ -31,12 +31,12 @@ _Recent-only view, so improvement is visible inside a retro's scoring horizon ra
 | Agent | n | modal | median | mean |
 |-------|---|-------|--------|------|
 | product | 24 | 300 | 300 | 445 |
-| solution-architect | 20 | 1200 | 374 | 608 |
+| solution-architect | 21 | 1200 | 344 | 588 |
 | cicd | 21 | 300 | 300 | 526 |
-| engineer | 159 | 1500 | 840 | 1060 |
+| engineer | 168 | 1500 | 826 | 1050 |
 | ui-designer | 6 | 540 | 750 | 798 |
 | tester | 14 | 1200 | 830 | 1354 |
-| documenter | 15 | 60 | 135 | 247 |
+| documenter | 16 | 60 | 126 | 239 |
 | orchestrator | 2 | 900 | 465 | 465 |
 | flow-manager | 2 | 900 | 600 | 600 |
 
@@ -46,12 +46,12 @@ Plumbing = running the agent OS (orchestrator + flow-manager + retro/gate/bookke
 
 | class | time (s) | time % | tokens | tokens % |
 |-------|----------|--------|--------|----------|
-| plumbing | 10987 | 3% | 666755 | 24% |
-| delivery | 368749 | 97% | 2152057 | 76% |
+| plumbing | 10987 | 3% | 666755 | 23% |
+| delivery | 377767 | 97% | 2285878 | 77% |
 
-_Plumbing share: time 3%, tokens 24% (token coverage 7% of task_end rows — grows as dispatches log --tokens, v59)._
+_Plumbing share: time 3%, tokens 23% (token coverage 7% of task_end rows — grows as dispatches log --tokens, v59)._
 
 ## Theory-of-Constraints read
 
-- Constraint (slowest median step): **engineer**
+- Constraint (slowest median step): **tester**
 - Recommended exploit/subordinate action: _(orchestrator fills in)_

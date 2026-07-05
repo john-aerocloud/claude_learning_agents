@@ -45,8 +45,10 @@ costed, prioritised, per-queue-buffered set of queues; a continuous inner dev lo
 pulls the **maximal independent set** of ready use-cases and runs them concurrently
 (TDD on trunk → per-UC deploy → validate-in-prod); product replenishes the Ready
 queue just-in-time so it never starves but stays shallow (penny game); completed
-requirements ask for more work. **Two blocking gates only:** requirement/defect
-intake, and deploy-to-prod for infra-bearing change. Collisions between parallel
+requirements ask for more work. **One blocking human gate:** requirement/defect
+intake — infra-bearing deploy auto-approves under an automated policy assurance
+(§F5/§F5a, EXP-093), leaving only a genuinely irreversible prod-DATA op (§0b)
+human-confirmed. Collisions between parallel
 work teach the dependency tree. Cross-agent rules: `process/process-current.md`
 **STAGE F**. Rationale, diagrams, and a worked retro: `Version2-design/`.
 
@@ -67,9 +69,12 @@ work teach the dependency tree. Cross-agent rules: `process/process-current.md`
 | `/project-switch <name>` | Set the active project and rebuild minimal resume context | — |
 | `/project-stop <name>` | Park the project; `/process` untouched | — |
 
-**Multiple projects.** Projects coexist under `work/`; `work/ACTIVE` names the
-active one and every command defaults to it when the project argument is
-omitted (`/project-new` sets it, `/project-stop` clears it). Switching is cheap
+**Multiple projects.** Projects coexist under `work/`; the machine-local
+`work/ACTIVE` pointer names the active one **for this instance** and every command
+defaults to it when the project argument is omitted (`/project-new` sets it,
+`/project-stop` clears it). `work/ACTIVE` is gitignored — under the multi-instance
+operating model each machine owns its own pointer, so two instances working
+different projects never flip each other's active project. Switching is cheap
 and lossless: each project carries its own decision log, gates and
 project-tagged DORA rows, so `/project-switch` resumes exactly where that
 project stopped — the decision log is the resume mechanism. `/process`

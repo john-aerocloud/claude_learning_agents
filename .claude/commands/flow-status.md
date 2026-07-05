@@ -4,7 +4,7 @@ argument-hint: <project-name>
 allowed-tools: Read, Bash
 ---
 
-_Project resolution: if no project is named, use `work/ACTIVE`. If stale, stop and suggest `/project-list`._
+_Project resolution: if no project is named, use the machine-local `work/ACTIVE` pointer (per-instance — never fall back to another machine's project). If it is missing or stale, stop and suggest `/project-switch <name>`._
 
 Act as the **orchestrator**/**flow-manager** (read-only). For project **$1**:
 

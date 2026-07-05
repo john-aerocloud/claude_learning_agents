@@ -98,6 +98,25 @@ role. Founding: SLC-039 UC-CA-PROD-PROMOTE — prod `apigateway:PUT AccessDenied
 because `--stage prod` was never run though the prod policy content was correct
 (8a425ea). Target: CFR on cross-stage promotions + deploy MTTR.
 
+## Release versioning & prod-resource tagging (process §18a, ISO)
+The deploy pipeline you build is what stamps release identity on every dev→prod
+promotion — this is an ISO traceability capability, not an afterthought:
+- **Version-tag the shipping repo** on the deployed commit (annotated tag) and
+  **push the tag to `origin`** (`git push origin <tag>`), so the version is durable
+  and shared.
+- **Tag the production resources** with BOTH the deployed **commit SHA** and the
+  **version** — the mechanism is per platform and is yours to define: AWS resource
+  tags `GitSha`/`Version` on every stack resource (CDK `Tags.of(app).add(...)`);
+  a hosted/.NET app's assembly/build version + a `Version`/`GitSha` deployment tag;
+  a container image tag. An operator inspecting any prod resource must be able to
+  answer "what version/commit is this?".
+- **Emit the version + SHA on the `deploy` DORA row** (§18a) so the ledger carries
+  release identity.
+- **Version scheme is per-project policy** (declared in `capabilities.md` / the
+  project's versioning ADR): SemVer for APIs (e.g. eDCS), CalVer for desktop apps,
+  a release counter internally. **Default SemVer until the ADR lands — do NOT hardcode
+  a scheme in the pipeline; read the project's declared scheme.**
+
 ## Pipeline pre-flight checklist (work it before first push)
 Before writing or pushing a cloud/hosted pipeline for the first time, work this
 checklist — each item is a failure mode observed in practice:

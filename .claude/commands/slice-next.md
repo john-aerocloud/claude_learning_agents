@@ -9,7 +9,7 @@ allowed-tools: Read, Write, Edit, Bash, Task
 > GATE 2 (slice-accepted) is removed; product values+costs each use-case and hands
 > them to the flow-manager to enqueue. Step 1's GATE 2 line is superseded by §F5.
 
-_Project resolution: the project argument may be omitted. If the first argument is not an existing directory under `work/`, use the project named in `work/ACTIVE` and treat the given arguments as shifted (e.g. a lone `<slice-id>` for `/iteration-run`). If `work/ACTIVE` is `none` or stale, stop and suggest `/project-list`._
+_Project resolution: the project argument may be omitted. If the first argument is not an existing directory under `work/`, use the project named in `work/ACTIVE` and treat the given arguments as shifted (e.g. a lone `<slice-id>` for `/iteration-run`). The machine-local `work/ACTIVE` pointer is per-instance (never another machine's); if it is missing, `none`, or stale, stop and suggest `/project-switch <name>`._
 
 Act as the **orchestrator** for project **$1**.
 

@@ -18,12 +18,21 @@ per-WORK-ITEM lead time, per-QUEUE length/wait, time-thief attribution, and
 parallelism efficiency are computable. Back-compatible: rows written before v40
 have 10 fields; read_rows() pads item_id/queue to "" so old data still computes.
 """
-import argparse, csv, os, re, statistics, sys
+import argparse, csv, os, re, statistics, subprocess, sys
 from datetime import datetime, timezone
 from collections import defaultdict
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
-LEDGER = os.path.join(ROOT, "process", "dora", "ledger.csv")
+# --- multi-instance ledger partitioning ------------------------------------
+# The ledger is PROJECT-SHARDED so two Claude instances on two machines (each
+# working a different project) never write the same file, and thus never collide
+# on push/pull. New events append to process/dora/ledger/<project>.csv; reads are
+# the UNION of every shard, merge-sorted by timestamp. `ledger.csv` is the FROZEN
+# pre-sharding archive (read-only, still unioned in). A `.gitattributes`
+# union-merge on both is the belt-and-braces backstop for the migration window
+# and for the rare case two instances ever touch the same project's shard.
+LEDGER = os.path.join(ROOT, "process", "dora", "ledger.csv")          # frozen archive (read-only)
+LEDGER_DIR = os.path.join(ROOT, "process", "dora", "ledger")          # per-project shards (append here)
 BASELINE = os.path.join(ROOT, "process", "dora", "baseline.md")
 STATUSLINE = os.path.join(ROOT, "process", "dora", "statusline.json")
 COLS = ["timestamp","project","iteration","slice","agent","event",
@@ -44,12 +53,12 @@ def write_statusline(updates):
     data = {}
     if os.path.exists(STATUSLINE):
         try:
-            with open(STATUSLINE) as f:
+            with open(STATUSLINE, encoding="utf-8") as f:
                 data = json.load(f)
         except Exception:
             data = {}
     data.update(updates)   # store None as null so a metric with no data reads as "–"
-    with open(STATUSLINE, "w") as f:
+    with open(STATUSLINE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=0)
 
 def _r0(x):
@@ -61,25 +70,45 @@ def parse_ts(s):
     except Exception:
         return None
 
+def ledger_files():
+    """Every ledger source, read-union: the frozen archive + all per-project shards."""
+    files = []
+    if os.path.exists(LEDGER):
+        files.append(LEDGER)
+    if os.path.isdir(LEDGER_DIR):
+        files += [os.path.join(LEDGER_DIR, f)
+                  for f in sorted(os.listdir(LEDGER_DIR)) if f.endswith(".csv")]
+    return files
+
+def shard_path(project):
+    """Append target for a project's events. `project` is a bare slug (no separators)."""
+    safe = (project or "_unknown").replace("/", "_").replace("\\", "_").strip()
+    return os.path.join(LEDGER_DIR, f"{safe}.csv")
+
 def read_rows():
     rows = []
-    if not os.path.exists(LEDGER):
-        return rows
-    with open(LEDGER) as f:
-        for line in f:
-            if line.startswith("#") or not line.strip():
-                continue
-            r = next(csv.reader([line]))
-            if r and r[0] == "timestamp":
-                continue
-            r += [""] * (len(COLS) - len(r))   # pad pre-v40 rows (10 -> 12)
-            rows.append(dict(zip(COLS, r)))
+    for path in ledger_files():
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("#") or not line.strip():
+                    continue
+                r = next(csv.reader([line]))
+                if r and r[0] == "timestamp":
+                    continue
+                r += [""] * (len(COLS) - len(r))   # pad pre-v40 rows (10 -> 12)
+                rows.append(dict(zip(COLS, r)))
+    # Merge-sort the unioned shards into one chronological stream. Timestamps are
+    # ISO-8601 UTC (…Z), so lexicographic == chronological; sort is stable, so
+    # rows sharing a timestamp keep their within-file order.
+    rows.sort(key=lambda d: d.get("timestamp") or "")
     return rows
 
 def cmd_record(a):
-    new = not os.path.exists(LEDGER)
+    os.makedirs(LEDGER_DIR, exist_ok=True)
+    path = shard_path(a.project)
+    new = not os.path.exists(path)
     item_id = (a.item_id or a.slice or "").strip()   # default item_id to slice for back-compat
-    with open(LEDGER, "a", newline="") as f:
+    with open(path, "a", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         if new:
             w.writerow(COLS)
@@ -97,7 +126,7 @@ def cmd_log_decision(a):
         sys.exit(f"no decision-log at {path}")
     def cell(s): return (s or "").replace("|", "\\|").replace("\n", " ").strip()
     row = f"| {now_iso()} | {cell(a.gate)} | {cell(a.decision)} | {cell(a.by or 'orchestrator')} | {cell(a.rationale)} | {cell(a.anchor)} |\n"
-    with open(path, "a") as f:
+    with open(path, "a", encoding="utf-8") as f:
         f.write(row)
     print(f"logged decision '{cell(a.gate)}' to {a.project}/decision-log.md ({cell(a.anchor)})")
 
@@ -281,7 +310,7 @@ def cmd_compute(_):
     L.append("\n## Theory-of-Constraints read\n")
     L.append(f"- Constraint (slowest median step): **{fmt(constraint)}**")
     L.append("- Recommended exploit/subordinate action: _(orchestrator fills in)_")
-    with open(BASELINE, "w") as f:
+    with open(BASELINE, "w", encoding="utf-8") as f:
         f.write("\n".join(L) + "\n")
     # cheap status-line snapshot — TRAILING WINDOW (recent-only), matches the
     # window table written above (EXP-045).
@@ -309,7 +338,7 @@ def _read_policy(project):
     pol={}
     pp=os.path.join(ROOT,"work",project,"queues","policy.csv")
     if os.path.exists(pp):
-        for row in csv.DictReader(open(pp)):
+        for row in csv.DictReader(open(pp, encoding="utf-8")):
             pol.setdefault(row["queue"],{})[row["param"]]=row["value"]
     return pol
 
@@ -432,7 +461,7 @@ def cmd_flow(a):
              "architecture/dependencies/edge-ledger.md._")
 
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    with open(out, "w") as f:
+    with open(out, "w", encoding="utf-8") as f:
         f.write("\n".join(L) + "\n")
     # cheap status-line snapshot — parallelism efficiency for this project.
     write_statusline({"project": a.project,
@@ -454,6 +483,11 @@ def derive_project_state(rows):
     for r in rows:
         if r["item_id"]:
             by_item[r["item_id"]].append(r)
+    # `done` is the TERMINAL lifecycle state (IMP-016). Once an item is done, a
+    # bare queue-bookkeeping `dequeue` (which can be timestamped AFTER item_done)
+    # must NOT resurrect it. Only an EXPLICIT re-entry — a later enqueue (rework),
+    # item_registered, or state_transition — clears terminal and reopens the item.
+    TERMINAL = {"done"}
     item_state = {}
     for it, rs in by_item.items():
         st = None
@@ -461,7 +495,10 @@ def derive_project_state(rows):
             e = r["event"]
             if e == "item_registered":            st = "planned"
             elif e == "enqueue":                  st = (r["queue"] or "queued")
-            elif e == "dequeue":                  st = "in-flight"
+            elif e == "dequeue":
+                # dequeue only opens an item that is not already terminal; a
+                # dequeue after item_done is a no-op (does not revert to in-flight).
+                if st not in TERMINAL:            st = "in-flight"
             elif e == "item_done":                st = "done"
             elif e in ("state_transition", "state-transition"):
                 o = (r["outcome"] or "").strip()
@@ -500,7 +537,7 @@ def cmd_project_state(a):
     drift = []
     ip = os.path.join(ROOT, "work", a.project, "items", "items.csv")
     if os.path.exists(ip):
-        for row in csv.DictReader(open(ip)):
+        for row in csv.DictReader(open(ip, encoding="utf-8")):
             stated = (row.get("state") or "").strip()
             derived = item_state.get(row.get("id", ""))
             if stated and derived and stated != derived:
@@ -510,10 +547,61 @@ def cmd_project_state(a):
             L.append("| Item | items.csv says | ledger-derived |"); L.append("|------|----------------|----------------|")
             for it, s, d in drift: L.append(f"| {it} | {s} | {d} |")
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    with open(out, "w") as f:
+    with open(out, "w", encoding="utf-8") as f:
         f.write("\n".join(L) + "\n")
     print(f"wrote {out} | items={len(item_state)} queues={len(queue_members)} "
           f"{'DRIFT=%d (legacy)' % len(drift) if drift else 'coherent'}")
+
+# --- reconcile-first gate (v73 §F1, IMP-016) ---------------------------------
+# The close-drift that re-dispatched already-built UCs (v73 evidence) is caught
+# mechanically here: compare the project trunk's git-log work-item ids against
+# ledger `item_done` closures and FAIL listing anything built-but-unclosed, so
+# "reconcile before dispatch" is a checkable gate, not a hand-grep.
+_ID_RE = re.compile(r"\b(?:UC|SLC|VF)-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*")
+
+def _git_log_item_ids(project):
+    """UC-/SLC-/VF- ids referenced in the project trunk's commit messages.
+    Returns a set, or None when work/<project> is not a standalone git repo
+    (e.g. the eDCS trunk is separate — we don't over-reach; caller skips)."""
+    repo = os.path.join(ROOT, "work", project)
+    if not os.path.isdir(os.path.join(repo, ".git")):
+        return None
+    try:
+        out = subprocess.run(["git", "-C", repo, "log", "--format=%B"],
+                             capture_output=True, text=True, encoding="utf-8")
+    except (FileNotFoundError, OSError):
+        return None
+    if out.returncode != 0:
+        return None
+    return set(_ID_RE.findall(out.stdout or ""))
+
+def cmd_ledger_drift(a):
+    """RECONCILE-FIRST gate: diff the project trunk's git-log work-item ids
+    against ledger item_done closures. Exit 2 listing BUILT-but-UNCLOSED items
+    (a commit references them, no item_done row closes them). Exit 0 when
+    reconciled, or when there is no standalone git trunk to reconcile against."""
+    built = _git_log_item_ids(a.project)
+    if built is None:
+        print(f"ledger-drift: no standalone git trunk at work/{a.project} - "
+              f"nothing to reconcile against (skipped, exit 0)")
+        return
+    rows = [r for r in read_rows() if r["project"] == a.project]
+    closed = set()
+    for r in rows:
+        if r["event"] == "item_done":
+            for v in (r.get("item_id", ""), r.get("ref", "")):
+                v = (v or "").strip()
+                if v:
+                    closed.add(v)
+    drift = sorted(built - closed)
+    print(f"# ledger-drift - {a.project}: built(git)={len(built)} "
+          f"closed(item_done)={len(closed)} unclosed={len(drift)}")
+    if drift:
+        print("BUILT BUT UNCLOSED (commit references it, no item_done in ledger):")
+        for it in drift:
+            print(f"  {it}")
+        sys.exit(2)
+    print("reconciled: every built work-item id has an item_done closure.")
 
 def cmd_cost_split(a):
     """Show how much TIME + TOKENS go to plumbing (running the OS) vs delivery
@@ -649,6 +737,9 @@ def main():
     rd.add_argument("--project", required=True)
     rd.add_argument("--threshold", type=int, default=3)
     rd.set_defaults(func=cmd_retro_debt)
+    dd = sub.add_parser("ledger-drift")
+    dd.add_argument("--project", required=True)
+    dd.set_defaults(func=cmd_ledger_drift)
     a = p.parse_args()
     a.func(a)
 

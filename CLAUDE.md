@@ -14,8 +14,11 @@ See `README.md` for the full system. In short:
   engineering decision; the flow-manager (v40) owns queue state and flow decisions.
 - **v40 — pull-based flow.** Delivery is pull, not push: a continuous inner dev
   loop (`/loop-run`) pulls the maximal independent set of ready use-cases from
-  costed, per-queue-buffered queues; product replenishes just-in-time; **two gates
-  only** — intake (`/intake`) and infra-bearing deploy. Cross-agent rules:
+  costed, per-queue-buffered queues; product replenishes just-in-time; **one
+  blocking human gate** — requirement/defect intake (`/intake`); infra-bearing
+  deploy auto-approves under an automated policy assurance (§F5/§F5a, EXP-093),
+  and the only residual human touch is a genuinely irreversible prod-DATA op
+  (§0b). Cross-agent rules:
   `process/process-current.md` **STAGE F**. Rationale/diagrams/worked-retro:
   `Version2-design/`. Use `/flow-status` to see queues, buffers, and time thieves.
 - Drive work with the slash commands in `.claude/commands/`: v40 `/intake`,
@@ -34,7 +37,7 @@ See `README.md` for the full system. In short:
 **All commands run from the project root** (the directory containing this file).
 
 - Use `npm --prefix work/<project>/src/app run <cmd>` instead of `cd ... && npm run <cmd>`
-- Run `python3 .claude/skills/dora-ledger/scripts/dora.py` from project root only — the path is root-relative
+- Run the DORA tool via its **cross-platform launcher** — `sh .claude/skills/dora-ledger/scripts/dora <subcommand>` (or the `make dora-*` targets) from project root only; the path is root-relative. NEVER call bare `python3 …/dora.py`: on Windows `python`/`python3` are Microsoft Store stubs that fail silently — the launcher resolves the real interpreter (real `python3` on macOS, `uv`-provided on Windows) and caches it machine-locally.
 - The committed allowlist is in `.claude/settings.json`; add novel patterns there, not in `.local.json`
 - **Slice artifacts are project output:** every `slice.md` / `use-cases.md` /
   `acceptance.md` / `route.md` / `ui-design.md` / `test-plan.md` / `result.md`
@@ -48,6 +51,17 @@ See `README.md` for the full system. In short:
   `git -C work/<project> add <paths> && git -C work/<project> commit -m "…"`.
   Commit **agent-structure / process** changes (`.claude/`, `process/`,
   `CLAUDE.md`, `README.md`) in THIS parent repo. The parent `.gitignore`s
-  `/work/*/`, so it never tracks project contents; `work/ACTIVE`,
-  `work/README.md`, and `work/_TEMPLATE/` stay in the parent as agent-system
-  state. Never mix the two in one commit (process §14).
+  `/work/*/`, so it never tracks project contents; `work/README.md` and
+  `work/_TEMPLATE/` stay in the parent as agent-system state. Never mix the two
+  in one commit (process §14).
+- **Multi-instance operating model (process §0a).** More than one Claude instance
+  may run against this shared parent repo at once (different machines, different
+  projects). Two rules keep them from clobbering each other: (1) **`work/ACTIVE`
+  is machine-local and gitignored** — each instance owns its own active-project
+  pointer; never commit it. (2) **The DORA ledger is project-sharded** —
+  `process/dora/ledger/<project>.csv`, one file per project, so instances append
+  to disjoint files (`process/dora/ledger.csv` is the frozen archive). Each
+  instance works on its **own branch** (`instance/<project>`) and reconciles to
+  `main` continuously (never batched — reconcile latency is a gross-lead-time
+  cost the retro minimises). Run DORA only via the cross-platform launcher
+  (`sh .claude/skills/dora-ledger/scripts/dora`), never bare `python3`.

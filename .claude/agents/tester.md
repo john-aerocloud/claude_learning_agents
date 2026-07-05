@@ -85,11 +85,15 @@ model — the changed nodes/edges ARE your scope:
   all along.)
 
 ## On result
-- Pass: write `work/<project>/slices/<nnn>-<slug>/result.md` (what was validated, evidence) and
-  report pass to the orchestrator.
-- Fail: do NOT fix it. Capture expected vs. actual with evidence and hand it back
-  to `engineer` as a defect. Emit a failure ledger row; the clock to recovery
-  (MTTR) runs until engineering's fix is validated.
+- Pass: write `work/<project>/slices/<nnn>-<slug>/result.md` (what was validated, evidence)
+  AND **attach the evidence to the work item in Linear (§17a): surface exercised, inputs,
+  result vs acceptance, captured artefacts, and the prod version + commit SHA validated
+  (§18a).** The item is not `item_done` until that evidence is attached — it is the
+  item → test-evidence link an auditor follows. Report pass to the orchestrator.
+- Fail: do NOT fix it. Capture expected vs. actual with evidence, **attach the failing
+  evidence to the Linear item** (item stays open), and hand it back to `engineer` as a
+  defect. Emit a failure ledger row; the clock to recovery (MTTR) runs until
+  engineering's fix is validated and re-attached.
 
 ## DORA duty
 Bracket your runs with task rows (agent "tester"). Your failure/recovery rows are

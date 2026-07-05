@@ -1,0 +1,68 @@
+#!/bin/sh
+# Cross-platform launcher for the DORA ledger tool (dora.py).
+#
+# Why this exists: dora.py is stdlib-only and portable, but the *interpreter*
+# differs per machine and the command is shared across machines (macOS + Windows):
+#   - macOS/Linux: `python3` is a real interpreter on PATH.
+#   - Windows:     `python` / `python3` are Microsoft Store ALIAS STUBS that print
+#                  a "not found" hint and exit non-zero (silently breaking every
+#                  `make dora-*` and hand-run dora.py). The real Python here is
+#                  provided by the `uv` version manager.
+# This is the SAME resolution the status line uses (statusline.sh); kept as a
+# sibling launcher so ALL dora.py subcommands run identically on either OS.
+#
+# Usage:
+#   sh .claude/skills/dora-ledger/scripts/dora <subcommand> [args...]   # run dora.py
+#   sh .claude/skills/dora-ledger/scripts/dora --python                 # print the resolved interpreter and exit
+#
+# We probe in order, run the first real interpreter found (skipping the
+# WindowsApps stub), and CACHE its path (machine-local, gitignored) so later
+# runs skip the ~200ms `uv` resolution.
+dir=$(dirname "$0")
+script="$dir/dora.py"
+cache="$dir/cache/python-path"
+
+run() {   # $1 = interpreter (may be multi-word, e.g. "uv run --no-project python")
+  interp="$1"; shift
+  case "$1" in
+    --python) printf '%s\n' "$interp"; exit 0 ;;
+  esac
+  # shellcheck disable=SC2086  # interp is intentionally word-split (may be multi-word)
+  exec $interp "$script" "$@"
+}
+
+remember() {   # $1 = single-exe interpreter to cache, then run with remaining args
+  mkdir -p "$dir/cache" 2>/dev/null
+  printf '%s\n' "$1" > "$cache" 2>/dev/null
+  interp="$1"; shift
+  run "$interp" "$@"
+}
+
+# --- fast path: reuse a previously-resolved interpreter -----------------------
+if [ -f "$cache" ]; then
+  read -r cached < "$cache"
+  if [ -n "$cached" ] && [ -x "$cached" ]; then
+    run "$cached" "$@"
+  fi
+fi
+
+# 1. A real python3 / python on PATH (macOS, Linux, genuine Windows install).
+for py in python3 python; do
+  p=$(command -v "$py" 2>/dev/null) || continue
+  case "$p" in *WindowsApps*) continue ;; esac   # skip the MS Store alias stub
+  remember "$p" "$@"
+done
+
+# 2. Version-manager Python (uv on Windows): resolve the exe once and cache it.
+if command -v uv >/dev/null 2>&1; then
+  pyexe=$(uv python find 2>/dev/null)
+  if [ -n "$pyexe" ]; then
+    command -v cygpath >/dev/null 2>&1 && pyexe=$(cygpath -u "$pyexe")
+    remember "$pyexe" "$@"
+  fi
+  run "uv run --no-project python" "$@"   # last resort if `find` failed (not cached)
+fi
+
+# Nothing usable — fail loudly instead of silently.
+echo "dora: no python interpreter found (install python3, or the 'uv' version manager)" >&2
+exit 127

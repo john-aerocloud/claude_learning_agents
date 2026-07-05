@@ -12,12 +12,24 @@
 # Agents: per v23 §33.5 you create/extend targets here yourself when your
 # role needs one — tested, documented, committed, named in your return.
 
+# make's default SHELL is sh.exe, which is NOT on PATH on this Windows host —
+# otherwise the $(shell ...) calls below and every recipe emit "The system cannot
+# find the path specified" and limp via a fallback. Set this FIRST, before any
+# $(shell): if Git's bundled sh is present, use it globally — it's a real POSIX
+# sh and every recipe in this file is sh-compatible. Guarded by wildcard so it's
+# a no-op where Git isn't at this path (override GIT_SH to move it). Uses the 8.3
+# short path to avoid spaces and the WSL bash that owns `bash` on PATH.
+GIT_SH ?= C:/PROGRA~1/Git/usr/bin/sh.exe
+ifneq ($(wildcard $(GIT_SH)),)
+SHELL := $(GIT_SH)
+endif
+
 PROJECT ?= $(shell cat work/ACTIVE 2>/dev/null)
 APP     := work/$(PROJECT)/src/app
 INFRA   := work/$(PROJECT)/src/infra
-DORA    := python3 .claude/skills/dora-ledger/scripts/dora.py
+DORA    := sh .claude/skills/dora-ledger/scripts/dora
 AWS_PROFILE ?= $(shell cat .claude/config/aws-profile 2>/dev/null)
-PY      ?= python3
+PY      ?= $(shell sh .claude/skills/dora-ledger/scripts/dora --python)
 SQLCMD       ?= C:/Program Files/Microsoft SQL Server/Client SDK/ODBC/170/Tools/Binn/sqlcmd.exe
 REMED_SERVER ?= (localdb)\MSSQLLocalDB
 REMED_DB     ?= viggo_remed_test
@@ -42,6 +54,63 @@ sso-login-dev:
 
 sso-login-prod:
 	aws sso login --profile ids-prod
+
+# --- GitHub CLI SSO auth -------------------------------------------------------
+# GitHub (AeroCloudSystems org) uses SAML SSO — gh must authenticate via the
+# browser web flow; a bare PAT won't carry the org SSO authorization. Mirrors
+# sso-login above. Recipes are deliberately shell-agnostic (the `||` operator
+# works in cmd.exe AND sh), so NO SHELL override is needed and they run the same
+# under make's default Windows shell — matching every other target in this file.
+# First login is interactive; run it yourself:  ! make gh-auth
+#   make gh-status  -> show current auth state on github.com
+#   make gh-auth    -> SSO browser login (web flow)
+#   make gh-ensure  -> guard: if not authed, auto-runs gh-auth (used as a prereq)
+#   make gh-ci-edcs -> list recent eDCS server CI runs (auto-auths first)
+GH_HOST ?= github.com
+GH_ORG  ?= AeroCloudSystems
+
+gh-status:
+	gh auth status -h $(GH_HOST)
+
+gh-auth:
+	@gh auth status -h $(GH_HOST) >/dev/null 2>&1 \
+	  && echo "gh already authenticated on $(GH_HOST)." \
+	  || gh auth login -h $(GH_HOST) -p https -w
+
+# Guard: auto-launch SSO login on a real terminal; fail fast with instructions
+# when non-interactive (e.g. an agent shell) so it NEVER hangs waiting on a login.
+gh-ensure:
+	@gh auth status -h $(GH_HOST) >/dev/null 2>&1 || { \
+	  if [ -t 1 ]; then echo ">> gh not authenticated — launching SSO login..."; gh auth login -h $(GH_HOST) -p https -w; \
+	  else echo ">> gh not authenticated on $(GH_HOST). Run:  ! make gh-auth" >&2; exit 1; fi; }
+
+gh-ci-edcs: gh-ensure
+	gh run list --repo $(GH_ORG)/eDCS --workflow build-edcs-server.yml -L 5
+
+# --- eDCS working-tree integrity -----------------------------------------------
+# Working-tree directory deletions leave NO git record — a build/clean/checkout
+# can silently rm a tracked source folder (happened to eDCSChatWebClient on
+# 2026-07-02, caught only by chance). Run the CHECK after any agent build/checkout
+# against the eDCS repo; wire it as the last step of build/run targets so a ' D'
+# deletion fails the target instead of going unnoticed.
+#   make edcs-worktree-check    -> flag tracked files missing from disk; exit 1 if any
+#   make edcs-worktree-restore  -> restore ONLY the missing files (keeps other edits)
+EDCS ?= work/Viggo-fix/eDCS
+
+edcs-worktree-check:
+	@missing=$$(git -C $(EDCS) ls-files --deleted); \
+	 if [ -n "$$missing" ]; then \
+	   nfiles=$$(printf '%s\n' "$$missing" | grep -c .); \
+	   ndirs=$$(printf '%s\n' "$$missing" | sed 's:/.*::' | sort -u | grep -c .); \
+	   echo ">> eDCS WORKTREE ALERT: $$nfiles tracked file(s) missing from disk across $$ndirs top-level path(s):"; \
+	   printf '%s\n' "$$missing" | sed 's:/.*::' | sort | uniq -c | sort -rn | sed 's/^/   /'; \
+	   echo ">> recover with: make edcs-worktree-restore"; \
+	   exit 1; \
+	 else echo "eDCS worktree OK - no tracked files missing from disk ($(EDCS))"; fi
+
+edcs-worktree-restore:
+	@git -C $(EDCS) ls-files --deleted -z | xargs -0 -r git -C $(EDCS) restore --
+	@echo "restored missing tracked files; remaining changes:"; git -C $(EDCS) status --short
 
 # --- DORA ledger -------------------------------------------------------------
 # make dora-record EVENT=validation_run AGENT=tester SLICE=004-create-game \
@@ -70,6 +139,15 @@ dora-compute:
 # make retro-debt PROJECT=OagEventSource [THRESHOLD=3]
 retro-debt:
 	$(DORA) retro-debt --project $(PROJECT) $(if $(THRESHOLD),--threshold $(THRESHOLD),)
+
+# RECONCILE-FIRST gate (v73 §F1, IMP-016). Diffs the project trunk's git-log
+# work-item ids (UC-/SLC-/VF-) against ledger item_done closures; exits non-zero
+# (code 2) listing anything BUILT-but-UNCLOSED so the loop cannot re-dispatch
+# already-built work. Run before pulling/dispatching. (eDCS's trunk is separate;
+# a project without a standalone git trunk is skipped with exit 0.)
+# make ledger-drift PROJECT=Viggo-fix
+ledger-drift:
+	$(DORA) ledger-drift --project $(PROJECT)
 
 # --- Validation & smoke (run + record in one step) ----------------------------
 # make validate ITER=5 SLICE=004-create-game [PROD_URL=https://…] [AWS_PROFILE=dev-int]
@@ -460,7 +538,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: sso-login dora-record dora-compute retro-debt validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3
+.PHONY: sso-login dora-record dora-compute retro-debt ledger-drift validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3
 
 # --- Viggo-fix UC-W7: Country/Nationality ID remediation (T-SQL) --------------
 # Data-driven, self-building T-SQL remediation script set + its local stand-up

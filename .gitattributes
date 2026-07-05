@@ -1,0 +1,14 @@
+# --- DORA ledger: concurrency-safe merge (multi-instance operating model) ----
+# The ledger is append-only and project-sharded (process/dora/ledger/<project>.csv);
+# `ledger.csv` is the frozen pre-sharding archive. Two Claude instances on two
+# machines work different projects, so they normally write different shard files
+# and never conflict. `merge=union` is the belt-and-braces backstop: if two sides
+# ever append to the SAME file (the migration window, or two instances on one
+# project), git keeps BOTH sets of appended lines instead of raising a conflict.
+# dora.py merge-sorts rows by timestamp on read, so interleaved order is harmless.
+process/dora/ledger.csv        merge=union
+process/dora/ledger/*.csv      merge=union
+
+# Normalise line endings for the shell launchers so they stay POSIX on Windows.
+*.sh    text eol=lf
+.claude/skills/dora-ledger/scripts/dora    text eol=lf

@@ -58,7 +58,11 @@
       "Bash(git -C work/OagEventSource log --oneline -5)",
       "Bash(git -C work/OagEventSource status -sb)",
       "Skill(flow-status)",
-      "Bash(docker info *)"
+      "Bash(docker info *)",
+      "Bash(git -C work/Viggo-fix status -s)",
+      "Bash(git -C work/Viggo-fix log --oneline -8)",
+      "Bash(git -C work/Viggo-fix log --oneline --graph --all -15)",
+      "Bash(git -C work/Viggo-fix branch -a --no-merged main)"
     ]
   }
 }

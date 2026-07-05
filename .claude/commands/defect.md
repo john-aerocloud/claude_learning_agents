@@ -4,7 +4,7 @@ argument-hint: "<expected> | <actual> | <what you were trying to do> | <why it m
 allowed-tools: Read, Write, Edit, Bash, Task
 ---
 
-_Project resolution: if no project is named, use `work/ACTIVE`. If stale, stop and suggest `/project-list`._
+_Project resolution: if no project is named, use the machine-local `work/ACTIVE` pointer (per-instance — never fall back to another machine's project). If it is missing or stale, stop and suggest `/project-switch <name>`._
 
 Act as the **orchestrator**. A defect is normal work (defect-as-spec); you OWN this flow end to end and make the process call. Do not skip the reproduce step and do not skip the retro.
 

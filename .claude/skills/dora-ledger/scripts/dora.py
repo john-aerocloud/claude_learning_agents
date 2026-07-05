@@ -83,7 +83,7 @@ def cmd_record(a):
         w = csv.writer(f)
         if new:
             w.writerow(COLS)
-        w.writerow([now_iso(), a.project, a.iteration, a.slice, a.agent,
+        w.writerow([(getattr(a, "timestamp", None) or now_iso()), a.project, a.iteration, a.slice, a.agent,
                     a.event, a.duration or "", a.outcome or "na",
                     a.ref or "", a.note or "", item_id, a.queue or "", a.tokens or ""])
     print(f"recorded {a.event} for {a.agent} ({a.project}/{a.slice}/{item_id})")
@@ -620,6 +620,11 @@ def main():
         r.add_argument(f"--{n}", required=True)
     for n in ["duration","outcome","ref","note","item-id","queue","tokens"]:
         r.add_argument(f"--{n}")
+    # --timestamp overrides the auto-clock stamp. Needed when the machine clock is
+    # BEHIND ledger events (e.g. forward-dated incident rows): a `retro` row must be
+    # logically AFTER the debt events it drains, so retro-debt can reset. Keep it
+    # ISO-8601 UTC (YYYY-MM-DDTHH:MM:SSZ) so parse_ts + ordering stay consistent.
+    r.add_argument("--timestamp")
     r.set_defaults(func=cmd_record)
     c = sub.add_parser("compute"); c.set_defaults(func=cmd_compute)
     cs = sub.add_parser("cost-split")

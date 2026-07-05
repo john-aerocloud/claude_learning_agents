@@ -750,8 +750,9 @@ bundle** for a human to apply by hand:
 working, reversible migration / CD pipeline, change flows through THAT (developed +
 proven on a clone, human-gated) — still never a hand-write to prod by an agent. The
 manual sign-off bundle in (2) is the fallback for when no such automated path exists yet.
-**Each project records in its OWN space which path applies and why** — this process file
-names no project.
+**Each project records in its OWN space which path applies and why, AND how to recognise
+its production instances** (by naming convention / host / tag, so prod is never confused
+with a dev clone) — this process file names no project.
 
 **4. Cloning prod into a local/Docker instance for local work is explicitly allowed — with
 PII stripped.** The clone that (2b) develops against is created by a **read-only extract**

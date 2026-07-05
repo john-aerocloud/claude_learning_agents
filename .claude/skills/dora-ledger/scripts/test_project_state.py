@@ -50,6 +50,53 @@ def test_no_independent_writer_means_no_drift():
     st2,_ = derive_project_state(list(reversed(rows)))   # read order irrelevant
     assert st1 == st2 == {"X": "ready"}, (st1, st2)
 
+def test_item_done_is_terminal_bare_dequeue_does_not_reopen():
+    # IMP-016 (the bug): a queue-bookkeeping `dequeue` timestamped AFTER `item_done`
+    # must NOT resurrect a finished item. `item_done` is terminal; a bare dequeue
+    # while terminal is a no-op.
+    rows = [
+        row("item_registered","UC-3",ts="t1"),
+        row("enqueue","UC-3",queue="ready",ts="t2"),
+        row("dequeue","UC-3",queue="ready",ts="t3"),
+        row("item_done","UC-3",ts="t4"),
+        row("dequeue","UC-3",queue="ready",ts="t5"),   # later bare dequeue — MUST be ignored
+    ]
+    st,_ = derive_project_state(rows)
+    assert st["UC-3"] == "done", st
+
+def test_genuine_rework_reopens_a_done_item():
+    # An EXPLICIT re-entry (enqueue for rework) legitimately reopens a done item;
+    # the following dequeue then correctly shows in-flight.
+    rows = [
+        row("item_registered","UC-4",ts="t1"),
+        row("enqueue","UC-4",queue="ready",ts="t2"),
+        row("dequeue","UC-4",queue="ready",ts="t3"),
+        row("item_done","UC-4",ts="t4"),
+        row("enqueue","UC-4",queue="rework",ts="t5"),   # explicit rework re-entry clears terminal
+        row("dequeue","UC-4",queue="rework",ts="t6"),
+    ]
+    st,_ = derive_project_state(rows)
+    assert st["UC-4"] == "in-flight", st
+
+def test_state_transition_reopens_a_done_item():
+    # A state_transition is an explicit re-entry and overrides terminal done.
+    rows = [
+        row("item_registered","UC-5",ts="t1"),
+        row("item_done","UC-5",ts="t2"),
+        row("state_transition","UC-5",outcome="blocked",ts="t3"),
+    ]
+    st,_ = derive_project_state(rows)
+    assert st["UC-5"] == "blocked", st
+
+def test_item_registered_reopens_a_done_item():
+    # A fresh item_registered (explicit re-entry) also clears terminal done.
+    rows = [
+        row("item_done","UC-6",ts="t1"),
+        row("item_registered","UC-6",ts="t2"),
+    ]
+    st,_ = derive_project_state(rows)
+    assert st["UC-6"] == "planned", st
+
 def test_legacy_state_transition_tolerated():
     rows = [row("item_registered","D",ts="t1"),
             row("state_transition","D",outcome="done",ts="t2")]

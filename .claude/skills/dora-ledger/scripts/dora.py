@@ -18,7 +18,7 @@ per-WORK-ITEM lead time, per-QUEUE length/wait, time-thief attribution, and
 parallelism efficiency are computable. Back-compatible: rows written before v40
 have 10 fields; read_rows() pads item_id/queue to "" so old data still computes.
 """
-import argparse, csv, os, re, statistics, sys
+import argparse, csv, os, re, statistics, subprocess, sys
 from datetime import datetime, timezone
 from collections import defaultdict
 
@@ -483,6 +483,11 @@ def derive_project_state(rows):
     for r in rows:
         if r["item_id"]:
             by_item[r["item_id"]].append(r)
+    # `done` is the TERMINAL lifecycle state (IMP-016). Once an item is done, a
+    # bare queue-bookkeeping `dequeue` (which can be timestamped AFTER item_done)
+    # must NOT resurrect it. Only an EXPLICIT re-entry — a later enqueue (rework),
+    # item_registered, or state_transition — clears terminal and reopens the item.
+    TERMINAL = {"done"}
     item_state = {}
     for it, rs in by_item.items():
         st = None
@@ -490,7 +495,10 @@ def derive_project_state(rows):
             e = r["event"]
             if e == "item_registered":            st = "planned"
             elif e == "enqueue":                  st = (r["queue"] or "queued")
-            elif e == "dequeue":                  st = "in-flight"
+            elif e == "dequeue":
+                # dequeue only opens an item that is not already terminal; a
+                # dequeue after item_done is a no-op (does not revert to in-flight).
+                if st not in TERMINAL:            st = "in-flight"
             elif e == "item_done":                st = "done"
             elif e in ("state_transition", "state-transition"):
                 o = (r["outcome"] or "").strip()
@@ -543,6 +551,57 @@ def cmd_project_state(a):
         f.write("\n".join(L) + "\n")
     print(f"wrote {out} | items={len(item_state)} queues={len(queue_members)} "
           f"{'DRIFT=%d (legacy)' % len(drift) if drift else 'coherent'}")
+
+# --- reconcile-first gate (v73 §F1, IMP-016) ---------------------------------
+# The close-drift that re-dispatched already-built UCs (v73 evidence) is caught
+# mechanically here: compare the project trunk's git-log work-item ids against
+# ledger `item_done` closures and FAIL listing anything built-but-unclosed, so
+# "reconcile before dispatch" is a checkable gate, not a hand-grep.
+_ID_RE = re.compile(r"\b(?:UC|SLC|VF)-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*")
+
+def _git_log_item_ids(project):
+    """UC-/SLC-/VF- ids referenced in the project trunk's commit messages.
+    Returns a set, or None when work/<project> is not a standalone git repo
+    (e.g. the eDCS trunk is separate — we don't over-reach; caller skips)."""
+    repo = os.path.join(ROOT, "work", project)
+    if not os.path.isdir(os.path.join(repo, ".git")):
+        return None
+    try:
+        out = subprocess.run(["git", "-C", repo, "log", "--format=%B"],
+                             capture_output=True, text=True, encoding="utf-8")
+    except (FileNotFoundError, OSError):
+        return None
+    if out.returncode != 0:
+        return None
+    return set(_ID_RE.findall(out.stdout or ""))
+
+def cmd_ledger_drift(a):
+    """RECONCILE-FIRST gate: diff the project trunk's git-log work-item ids
+    against ledger item_done closures. Exit 2 listing BUILT-but-UNCLOSED items
+    (a commit references them, no item_done row closes them). Exit 0 when
+    reconciled, or when there is no standalone git trunk to reconcile against."""
+    built = _git_log_item_ids(a.project)
+    if built is None:
+        print(f"ledger-drift: no standalone git trunk at work/{a.project} - "
+              f"nothing to reconcile against (skipped, exit 0)")
+        return
+    rows = [r for r in read_rows() if r["project"] == a.project]
+    closed = set()
+    for r in rows:
+        if r["event"] == "item_done":
+            for v in (r.get("item_id", ""), r.get("ref", "")):
+                v = (v or "").strip()
+                if v:
+                    closed.add(v)
+    drift = sorted(built - closed)
+    print(f"# ledger-drift - {a.project}: built(git)={len(built)} "
+          f"closed(item_done)={len(closed)} unclosed={len(drift)}")
+    if drift:
+        print("BUILT BUT UNCLOSED (commit references it, no item_done in ledger):")
+        for it in drift:
+            print(f"  {it}")
+        sys.exit(2)
+    print("reconciled: every built work-item id has an item_done closure.")
 
 def cmd_cost_split(a):
     """Show how much TIME + TOKENS go to plumbing (running the OS) vs delivery
@@ -673,6 +732,9 @@ def main():
     rd.add_argument("--project", required=True)
     rd.add_argument("--threshold", type=int, default=3)
     rd.set_defaults(func=cmd_retro_debt)
+    dd = sub.add_parser("ledger-drift")
+    dd.add_argument("--project", required=True)
+    dd.set_defaults(func=cmd_ledger_drift)
     a = p.parse_args()
     a.func(a)
 

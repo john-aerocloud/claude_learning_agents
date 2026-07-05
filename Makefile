@@ -140,6 +140,15 @@ dora-compute:
 retro-debt:
 	$(DORA) retro-debt --project $(PROJECT) $(if $(THRESHOLD),--threshold $(THRESHOLD),)
 
+# RECONCILE-FIRST gate (v73 §F1, IMP-016). Diffs the project trunk's git-log
+# work-item ids (UC-/SLC-/VF-) against ledger item_done closures; exits non-zero
+# (code 2) listing anything BUILT-but-UNCLOSED so the loop cannot re-dispatch
+# already-built work. Run before pulling/dispatching. (eDCS's trunk is separate;
+# a project without a standalone git trunk is skipped with exit 0.)
+# make ledger-drift PROJECT=Viggo-fix
+ledger-drift:
+	$(DORA) ledger-drift --project $(PROJECT)
+
 # --- Validation & smoke (run + record in one step) ----------------------------
 # make validate ITER=5 SLICE=004-create-game [PROD_URL=https://…] [AWS_PROFILE=dev-int]
 # PROD_URL and AWS_PROFILE are forwarded to the playwright test runner when set.
@@ -515,7 +524,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: sso-login dora-record dora-compute retro-debt validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids
+.PHONY: sso-login dora-record dora-compute retro-debt ledger-drift validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids
 
 # --- Viggo-fix UC-W7: Country/Nationality ID remediation (T-SQL) --------------
 # Data-driven, self-building T-SQL remediation script set + its local stand-up

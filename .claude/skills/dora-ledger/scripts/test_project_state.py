@@ -2,7 +2,7 @@
 """Unit test for the single-source-of-truth projection (EXP-048).
 Proves item-state and queue-membership are derived purely from ledger events,
 so the three-stores-disagree defect family cannot recur for new projects.
-Run: python3 .claude/skills/dora-ledger/scripts/test_project_state.py"""
+Run: "$(sh .claude/skills/dora-ledger/scripts/dora --python)" .claude/skills/dora-ledger/scripts/test_project_state.py"""
 import sys, os
 sys.path.insert(0, os.path.dirname(__file__))
 from dora import derive_project_state, COLS

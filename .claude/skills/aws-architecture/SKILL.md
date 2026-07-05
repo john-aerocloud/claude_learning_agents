@@ -252,7 +252,7 @@ Minimal pipeline stages, in order:
 5. deploy-infra   → cdk diff + cdk deploy (prod stack)
 6. deploy-app     → aws s3 sync + CF invalidation (SPA)
                     or: aws lambda update-function-code (Lambda)
-7. dora-record    → python .claude/skills/dora-ledger/scripts/dora.py record --event deploy
+7. dora-record    → sh .claude/skills/dora-ledger/scripts/dora record --event deploy
 8. smoke-test     → curl / playwright against prod URL
 ```
 

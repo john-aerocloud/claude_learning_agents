@@ -4,7 +4,7 @@ argument-hint: <project-name> [--max-cycles N]
 allowed-tools: Read, Write, Edit, Bash, Task
 ---
 
-_Project resolution: if no project is named, use `work/ACTIVE`. If stale, stop and suggest `/project-list`._
+_Project resolution: if no project is named, use the machine-local `work/ACTIVE` pointer (per-instance — never fall back to another machine's project). If it is missing or stale, stop and suggest `/project-switch <name>`._
 
 Act as the **orchestrator** for project **$1**, driving the v40/v41 pull loop
 (process STAGE F). You hold dispatch authority; the **flow-manager** owns queue

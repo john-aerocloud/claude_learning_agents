@@ -5,9 +5,24 @@ description: Record delivery events and compute DORA metrics for the agent pipel
 
 # DORA ledger
 
-The shared instrument for the whole agent team. The append-only event log lives
-at `/process/dora/ledger.csv`; the computed views at `/process/dora/baseline.md`
-(whole pipeline) and `work/<project>/dora/flow.md` (per-project queues + thieves).
+The shared instrument for the whole agent team. The append-only event log is
+**project-sharded** for multi-instance safety: new events append to
+`/process/dora/ledger/<project>.csv`, and `/process/dora/ledger.csv` is the frozen
+pre-sharding archive. Reads (compute/flow/project-state) take the UNION of the
+archive + every shard, merge-sorted by timestamp — so you never think about which
+file to read, only the tool does. Two instances on two machines work different
+projects → different shard files → no push/pull collision. Computed views:
+`/process/dora/baseline.md` (whole pipeline) and `work/<project>/dora/flow.md`
+(per-project queues + thieves) — both are DERIVED (regenerate them after a
+reconcile; never hand-merge).
+
+**Always invoke via the cross-platform launcher** `sh .claude/skills/dora-ledger/scripts/dora <subcommand>`
+(or the `make dora-*` targets), NEVER bare `python3 …/dora.py`. `dora.py` is
+stdlib-only and portable, but the interpreter differs per machine — real
+`python3` on macOS, `uv`-provided Python on Windows (where bare `python`/`python3`
+are Microsoft Store stubs that fail silently). The launcher resolves and caches
+the right interpreter machine-locally. `sh … dora --python` prints the resolved
+interpreter (used by the Makefile's `PY`).
 
 ## Schema (v40, +tokens v59)
 
@@ -25,7 +40,7 @@ plumbing/delivery token split (below) becomes.
 ## Record an event (every agent, around every unit of work)
 
 ```
-python .claude/skills/dora-ledger/scripts/dora.py record \
+sh .claude/skills/dora-ledger/scripts/dora record \
   --project <p> --iteration <n> --slice <id> --agent <agent> \
   --event <task_start|task_end|deploy|failure|recovery|gate|enqueue|dequeue|collision|parallel_dispatch|stage_enter|stage_exit> \
   [--duration <seconds>] [--outcome <success|fail|rolled_forward|rolled_back|na>] \
@@ -58,7 +73,7 @@ Rules:
 ## Compute the baseline (orchestrator, each iteration + at retro)
 
 ```
-python .claude/skills/dora-ledger/scripts/dora.py compute
+sh .claude/skills/dora-ledger/scripts/dora compute
 ```
 
 Rewrites `baseline.md`: per-agent modal/median/mean task time; gross lead time
@@ -69,7 +84,7 @@ median step) for Theory-of-Constraints.
 ## Compute the flow view (flow-manager / orchestrator, per project)
 
 ```
-python .claude/skills/dora-ledger/scripts/dora.py flow --project <p>
+sh .claude/skills/dora-ledger/scripts/dora flow --project <p>
 ```
 
 Rewrites `work/<p>/dora/flow.md`: per-queue depth + median/total wait; the
@@ -81,7 +96,7 @@ the largest contributor to gross lead time.
 ## Plumbing vs delivery cost split (retro, v59 — EXP-067)
 
 ```
-python .claude/skills/dora-ledger/scripts/dora.py cost-split [--project <p>] [--window <N>]
+sh .claude/skills/dora-ledger/scripts/dora cost-split [--project <p>] [--window <N>]
 ```
 
 Shows how much **time** and how many **tokens** went to **plumbing** (running the

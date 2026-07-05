@@ -59,6 +59,14 @@ an INCOMPLETE design. The catalog is a core `actual/` doc (the documenter keeps
 it surfaced). A consumer that poisons on a known-type stored event is this
 principle violated, not a data problem (see DEFECT-OAG-024/025).
 
+## Release-identity tagging on prod resources (process §18a, ISO)
+Every production resource must be traceable to the version + commit running it. In
+your per-infrastructure notes, **specify which prod resources carry the `Version` and
+`GitSha` tags and how** (AWS: tag every stack resource via `Tags.of(app)`; Azure/hosted:
+resource tags + assembly/build version; containers: image tag) — this pairs with cicd's
+tagging step so an auditor can answer "what version is this resource?" from the resource
+alone. Cheap to bake into the IaC from the first stack; expensive to retrofit.
+
 ## Per slice
 1. Identify the architecture DELTA the slice needs — minimum to deliver value, no
    speculative build-ahead. Write it to `architecture/deltas/<nnn>-<slug>.md`.

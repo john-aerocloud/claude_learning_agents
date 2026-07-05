@@ -27,9 +27,9 @@ endif
 PROJECT ?= $(shell cat work/ACTIVE 2>/dev/null)
 APP     := work/$(PROJECT)/src/app
 INFRA   := work/$(PROJECT)/src/infra
-DORA    := python3 .claude/skills/dora-ledger/scripts/dora.py
+DORA    := sh .claude/skills/dora-ledger/scripts/dora
 AWS_PROFILE ?= $(shell cat .claude/config/aws-profile 2>/dev/null)
-PY      ?= python3
+PY      ?= $(shell sh .claude/skills/dora-ledger/scripts/dora --python)
 SQLCMD       ?= C:/Program Files/Microsoft SQL Server/Client SDK/ODBC/170/Tools/Binn/sqlcmd.exe
 REMED_SERVER ?= (localdb)\MSSQLLocalDB
 REMED_DB     ?= viggo_remed_test

@@ -1,0 +1,2 @@
+# Keep the per-project ledger shard directory tracked even when empty.
+# Shards (process/dora/ledger/<project>.csv) are created on first record.

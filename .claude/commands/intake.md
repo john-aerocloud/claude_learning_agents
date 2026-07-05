@@ -4,7 +4,7 @@ argument-hint: "<requirement or defect, free text>"  | --defect "<expected> | <a
 allowed-tools: Read, Write, Edit, Bash, Task
 ---
 
-_Project resolution: if no project is named, use `work/ACTIVE`. If stale, stop and suggest `/project-list`._
+_Project resolution: if no project is named, use the machine-local `work/ACTIVE` pointer (per-instance — never fall back to another machine's project). If it is missing or stale, stop and suggest `/project-switch <name>`._
 
 Act as the **orchestrator**. This is GATE 1 (§F5) — the one upstream human gate.
 You own the flow; product frames value; flow-manager registers and enqueues.

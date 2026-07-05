@@ -10,7 +10,9 @@ Act as the **orchestrator**. Switch the active project to **$1**.
    list the projects under `work/` (excluding `_TEMPLATE`) with their status and
    stop. If status=stopped, say so and ask whether to reactivate (set
    status=active, log it) before switching.
-2. Write `$1` to `work/ACTIVE`.
+2. Write `$1` to `work/ACTIVE` (the **machine-local, gitignored** pointer — this
+   changes only THIS instance's active project; it is never committed and can
+   never affect another machine/instance).
 3. Rebuild MINIMAL resume context — read only:
    - `project.md` (vision, status),
    - the tail of `decision-log.md` (last ~10 entries: which gates are passed,
@@ -25,4 +27,6 @@ Act as the **orchestrator**. Switch the active project to **$1**.
    and any human decision that was pending when work last stopped.
 
 Switching never destroys state: the previous project keeps its files, its open
-gates, and its project-tagged DORA rows. Nothing in `/process` changes.
+gates, and its project-tagged DORA rows. Nothing in `/process` changes. Because
+`work/ACTIVE` is machine-local, switching here is invisible to any other running
+instance — each instance drives its own project independently.

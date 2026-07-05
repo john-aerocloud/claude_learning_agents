@@ -12,10 +12,16 @@ Thumbs.db
 # lifted out and exist standalone. The parent repo (agent structure + process)
 # does not track project output; project changes are committed inside the project
 # repo via `git -C work/<project> ...`. Future projects are auto-ignored here.
-# Kept in THIS repo (agent-system state, not project output): work/ACTIVE (active
-# pointer), work/README.md (project index), work/_TEMPLATE/ (the /project-new scaffold).
+# Kept in THIS repo (agent-system state, not project output): work/README.md
+# (project index), work/_TEMPLATE/ (the /project-new scaffold), work/ACTIVE.example.
 /work/*/
 !/work/_TEMPLATE/
+
+# work/ACTIVE is MACHINE-LOCAL (multi-instance operating model): each Claude
+# instance owns its own active-project pointer and must never commit it, so two
+# machines working different projects don't flip each other's ACTIVE. The tracked
+# seed is work/ACTIVE.example; `/project-switch` writes the local work/ACTIVE.
+/work/ACTIVE
 
 # python bytecode from dora.py / tests
 __pycache__/

@@ -121,8 +121,10 @@ so it runs without a permission prompt. That means:
 - Run everything from the project root. NEVER `cd … && …`, `pushd … && …`, or
   `source … && …` — compound prefixes match no allowlist pattern and always prompt.
 - Use the allowlist-shaped forms: `npm --prefix <dir> run <script>`,
-  `make -C <dir> <target>`, `git -C <dir> …`, root-relative script paths
-  (e.g. `python3 .claude/skills/dora-ledger/scripts/dora.py …`).
+  `make -C <dir> <target>`, `git -C <dir> …`, root-relative script paths. Run the
+  DORA tool via its **cross-platform launcher** (`sh .claude/skills/dora-ledger/scripts/dora …`)
+  or `make dora-*`, NEVER bare `python3 …dora.py` — on Windows `python3` is a Store
+  stub that fails silently (§0a Rule 5).
 - If a task genuinely needs a command class the allowlist lacks, that is a
   capability gap: name it in your return so the allowlist is extended in the
   same slice (cicd capability step) — do not work around it with novel one-off
@@ -135,15 +137,20 @@ so it runs without a permission prompt. That means:
   `cat >> f <<EOF` / `echo >> f` / `tee` / shell redirection (those are
   un-allowlisted shapes that prompt the human every time and were the largest
   avoidable lead-time thief in the s001–s004 run). For ledger rows use
-  `python3 .claude/skills/dora-ledger/scripts/dora.py record …` (or
-  `make dora-record …`), never `cat >> ledger.csv`. Bash is for RUNNING
-  (tests/build/git/scripts), not for writing files.
-- **Decision-log appends → `dora.py log-decision` (v47).** Append a decision-log
-  row with `dora.py log-decision --project <p> --gate <g> --decision <d>
-  --rationale <r> --anchor <a>` (auto-stamps the timestamp, escapes pipes) —
-  NOT a Read-last-line + Edit by hand. At every retro, look for the cycle's
-  most-repeated by-hand op (§26) and scriptify it; hand-bookkeeping is your own
-  dominant overhead.
+  `sh .claude/skills/dora-ledger/scripts/dora record …` (or `make dora-record …`),
+  never `cat >> ledger.csv`. Bash is for RUNNING (tests/build/git/scripts), not for
+  writing files.
+- **Decision-log appends → `dora … log-decision` (v47).** Append a decision-log
+  row with `sh .claude/skills/dora-ledger/scripts/dora log-decision --project <p>
+  --gate <g> --decision <d> --rationale <r> --anchor <a>` (auto-stamps the timestamp,
+  escapes pipes) — NOT a Read-last-line + Edit by hand. At every retro, look for the
+  cycle's most-repeated by-hand op (§26) and scriptify it; hand-bookkeeping is your
+  own dominant overhead.
+- **Multi-instance (§0a):** your parent-repo commits (process/agent-system) go on
+  the instance branch `instance/<project>` and reconcile to `main` continuously —
+  log `reconcile` ledger events so their latency is measured (§0a Rule 4). Record the
+  `deploy` row with the **version + commit SHA** (§18a), and do NOT `item_done` a
+  use-case until the tester's evidence is attached to its Linear item (§17a).
 
 ## Improvement routing (process v17 §36)
 At retros and whenever an improvement lands, route it to the NARROWEST owner:

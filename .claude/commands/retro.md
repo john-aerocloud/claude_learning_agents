@@ -4,14 +4,19 @@ argument-hint: <project-name> [slice-id] [--question "..."]
 allowed-tools: Read, Write, Edit, Bash, Task
 ---
 
-_Project resolution: the project argument may be omitted. If the first argument is not an existing directory under `work/`, use the project named in `work/ACTIVE` and treat the given arguments as shifted. If `work/ACTIVE` is `none` or stale, stop and suggest `/project-list`._
+_Project resolution: the project argument may be omitted. If the first argument is not an existing directory under `work/`, use the project named in `work/ACTIVE` and treat the given arguments as shifted. The machine-local `work/ACTIVE` pointer is per-instance (never another machine's); if it is missing, `none`, or stale, stop and suggest `/project-switch <name>`._
 
 _Question resolution: if a `--question "..."` argument is present, use that as the retro focus question. If omitted, use the default: **"What was the largest contributor to gross lead time, and what strategies can be attempted to reduce this whilst protecting DORA metrics?"**_
 
 Act as the **orchestrator**. Own this; gather input but make the process call.
 
 1. Run `dora-ledger compute` to refresh `/process/dora/baseline.md`. Identify the
-   constraint (Theory of Constraints) and record it.
+   constraint (Theory of Constraints) and record it. **Include cross-instance
+   reconcile latency** (process §0a Rule 4): from the `reconcile` ledger events,
+   report the wall-clock from an `instance/<project>` commit to it landing on `main`,
+   and treat that latency as a gross-lead-time component to drive DOWN — a rising
+   reconcile latency means the instances are batching integration (banned). If it is
+   the constraint or trending up, that IS the retro focus.
 2. Collect each agent's "what worked / what hurt" for the project and slice.
 3. Review `/process/principle-failures/` and `work/<project>/dora/per-project.md`.
    Look for PATTERNS — do not revise a principle on a single data point.

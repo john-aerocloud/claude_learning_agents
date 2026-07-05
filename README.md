@@ -67,9 +67,12 @@ work teach the dependency tree. Cross-agent rules: `process/process-current.md`
 | `/project-switch <name>` | Set the active project and rebuild minimal resume context | — |
 | `/project-stop <name>` | Park the project; `/process` untouched | — |
 
-**Multiple projects.** Projects coexist under `work/`; `work/ACTIVE` names the
-active one and every command defaults to it when the project argument is
-omitted (`/project-new` sets it, `/project-stop` clears it). Switching is cheap
+**Multiple projects.** Projects coexist under `work/`; the machine-local
+`work/ACTIVE` pointer names the active one **for this instance** and every command
+defaults to it when the project argument is omitted (`/project-new` sets it,
+`/project-stop` clears it). `work/ACTIVE` is gitignored — under the multi-instance
+operating model each machine owns its own pointer, so two instances working
+different projects never flip each other's active project. Switching is cheap
 and lossless: each project carries its own decision log, gates and
 project-tagged DORA rows, so `/project-switch` resumes exactly where that
 project stopped — the decision log is the resume mechanism. `/process`

@@ -1,9 +1,80 @@
 ---
-process_version: 73
-effective_from: 2026-07-01
-supersedes: v72
+process_version: 75
+effective_from: 2026-07-05
+supersedes: v74
 status: active
 ---
+
+# Current Process — v75
+
+> **v75 (ISO traceability + release versioning — thread requirement→commit→evidence→
+> prod-version, 2026-07-05, human-directed).**
+> Target: **CFR/MTTR** (an incident pins to an exact shipped version instantly) and
+> **audit compliance** (ISO change-control needs an unbroken requirement⇄production
+> trail). Adds three linked rules, each routed to its stage; the thread is a single
+> **item id + version + commit SHA** carried end to end:
+> 1. **Commits reference the tracked item (§14).** Every implementing commit names its
+>    **Linear item id** (+ customer Jira key where one exists) in both repos, so
+>    change⇄requirement is traceable. Linear is the mirror of the REQ/CHK/SLC/UC tree;
+>    an item is wired to Linear before its first commit lands.
+> 2. **Test evidence attaches to the item (§17a).** The tester attaches its in-prod
+>    validation evidence (surface exercised, inputs, result vs acceptance, artefacts,
+>    the prod version+SHA validated) to the Linear item; no `item_done` without it.
+> 3. **Release versioning + prod-resource tagging (§18a).** On dev→prod promotion:
+>    annotated version tag on the shipping repo **pushed to origin**; prod resources
+>    tagged with commit SHA **and** version; the `deploy` DORA row carries version+SHA.
+>    **Version scheme is per-project policy** (SemVer for APIs incl. eDCS, CalVer for
+>    desktop, a release counter internally) — a versioning ADR is in progress; **default
+>    SemVer for now and do NOT hardcode a scheme** (it will change per project type).
+>
+> Depends on the Linear mirror being wired for the project (`process/linear-mapping.md`);
+> for Viggo-fix the VIG team exists — its sync (`sync-linear.py`) + key must be confirmed
+> live before the first traceable commit. [EXP-090]
+
+# Current Process — v74
+
+> **v74 (multi-instance operating model — run two Claude instances in parallel
+> without clobbering, 2026-07-05, human-directed).**
+> Target: **gross lead time / throughput** (two instances were fighting over shared
+> singletons; every push flipped the other's state and forced reconciliation rework)
+> **and CFR** (a merge race on derived state makes the ledger lie about what shipped).
+>
+> **Evidence.** Two instances run against this one parent repo — a Windows machine
+> (Viggo-fix) and a Mac (OagEventSource) — sharing one `origin/main`. The parent
+> repo carried two GLOBAL SINGLETONS that silently assume one instance: `work/ACTIVE`
+> (a single committed "the active project" pointer) and `process/dora/ledger.csv` (one
+> append-only log both instances write every event). Result: the OAG instance commits
+> `ACTIVE=OagEventSource`, the Viggo instance pulls and is flipped off its own project;
+> both append the ledger and every push/pull conflicts. Separately, DORA was silently
+> dead on Windows — `python3` there is a Microsoft Store stub, so every `make dora-*`
+> and hand-run `dora.py` failed with no real interpreter (the process's own instrument
+> was down on one of the two machines).
+>
+> **The change (four rules, routed to §0a; project OUTPUT isolation via §14 is
+> unchanged and already correct):**
+> 1. **`work/ACTIVE` is machine-local + gitignored.** Each instance owns its own
+>    active-project pointer; it is never committed. `/project-switch` writes only the
+>    local pointer. There is no global "active project" — active is per-instance.
+> 2. **The DORA ledger is project-sharded.** New events append to
+>    `process/dora/ledger/<project>.csv` (one file per project → instances on different
+>    projects write disjoint files); `ledger.csv` is the frozen pre-sharding archive;
+>    reads take the union, merge-sorted by timestamp. A `.gitattributes merge=union`
+>    is the backstop for the migration window.
+> 3. **Each instance works on its own branch (`instance/<project>`) and reconciles to
+>    `main` CONTINUOUSLY — never batched.** Delayed reconciliation is itself a
+>    gross-lead-time cost the retro measures and drives down (§0a). Derived read-models
+>    are regenerated post-merge, never hand-merged.
+> 4. **Support tooling is cross-platform, resolved at start.** The DORA tool runs via
+>    the launcher `sh .claude/skills/dora-ledger/scripts/dora` (real `python3` on macOS,
+>    `uv`-provided Python on Windows), and all its file I/O is UTF-8. Bare `python3
+>    …dora.py` is banned. A non-cross-platform support tool is a blocker to fix, not
+>    to work around.
+>
+> **Anticipated effect (score next retro):** zero cross-instance ACTIVE flips; zero
+> ledger push/pull conflicts on new events; DORA runs on BOTH machines; and a new
+> tracked **reconcile latency** (instance-branch commit → landed on `main`) trending
+> down. If two instances ever still conflict, it is on a genuinely shared process doc —
+> expected, rare, normal git. [EXP-089]
 
 # Current Process — v73
 
@@ -558,6 +629,80 @@ stating — necessity and correct placement are the metric, not length.
 
 # STAGE 0 — Principles & metrics
 
+## 0a. Multi-instance operating model (v74 — human-directed)
+
+More than one Claude instance may run against this shared parent repo at once —
+today a Windows machine (Viggo-fix) and a Mac (OagEventSource), sharing one
+`origin/main`. They work **in parallel on different projects**; the model below
+lets them do so without clobbering each other. The root cause it fixes: the parent
+repo conflated *agent-system state* (rare, deliberate, genuinely shared) with
+*per-instance runtime state* (continuous, automatic, per-loop) on one branch.
+
+**What is shared vs per-instance.**
+- **Genuinely shared** (commit to `main` via reconcile): `.claude/`, `process/`
+  docs, `CLAUDE.md`, `README.md`, `_TEMPLATE/`. Changes are deliberate and rare;
+  ordinary git conflict resolution is fine.
+- **Per-instance runtime state** (never a shared singleton): the active-project
+  pointer and the running DORA event stream.
+- **Project output** is already isolated and needs no change: every `work/<project>/`
+  is its own gitignored repo (§14). Two instances on two projects touch two repos.
+
+**Rule 1 — The active-project pointer is machine-local.** `work/ACTIVE` is
+gitignored; each instance owns its own copy. `/project-switch` writes only the
+local pointer and is invisible to other instances. Flow commands that find no
+`work/ACTIVE` STOP and ask for `/project-switch` — they never fall back to another
+machine's project. There is no global "active project".
+
+**Rule 2 — The DORA ledger is project-sharded.** New events append to
+`process/dora/ledger/<project>.csv` (one file per project); `process/dora/ledger.csv`
+is the frozen pre-sharding archive (read-only). `dora.py` reads the UNION of archive
++ all shards, merge-sorted by timestamp, so callers never choose a file. Instances on
+different projects therefore append to **disjoint files** and cannot collide.
+`.gitattributes merge=union` on the ledger paths is the backstop for the migration
+window (and for the rare two-instances-one-project case). **Only ever append your own
+rows; never rewrite or reorder existing rows** — a rewrite is what turns a union-merge
+into a conflict.
+
+**Rule 3 — Each instance works on its own branch.** Parent-repo (agent-system /
+process) commits land on `instance/<project>` (e.g. `instance/viggo-fix`,
+`instance/oag`); `main` is the reconciled baseline no loop writes directly. On its own
+branch an instance is the SOLE writer of everything, so nothing conflicts mid-flight —
+conflicts exist only at the reconcile point. (Project output still commits inside the
+project's own repo per §14; that is orthogonal to this branch, which is for the parent
+repo.) Either instance may `git fetch` the other's branch to validate or borrow an
+experiment before it lands — the branches are independent lines, not a queue.
+
+**Rule 4 — Reconcile to `main` CONTINUOUSLY (delay is a measured cost).** Merge
+`instance/<project>` → `main` as often as the work produces a stable point — at the
+latest every retro cadence (§F8) and session boundary, ideally after each closed loop
+wave. **Batching reconciliation is banned** (it repeats the v60 pooled-commit failure
+at the process layer). Mechanics: `git fetch`; rebase/merge `main` into the instance
+branch; fast-forward `main`; push. Because the runtime state is partitioned (Rules
+1–2) the merge is clean — the ledger shards are disjoint, `work/ACTIVE` is not tracked.
+**Derived read-models are REGENERATED after the merge, never hand-merged**: run
+`sh .claude/skills/dora-ledger/scripts/dora compute` (baseline) and `… flow --project
+<p>` (flow) from the merged ledger; `statusline.json` and each `work/<p>/state.md`
+likewise regenerate. **Reconcile latency** — wall-clock from an `instance/<project>`
+commit to it landing on `main` — is a component of gross lead time. The retro measures
+it and drives it down (record it as a `reconcile` ledger event: `task_start` at the
+instance-branch commit, `task_exit` when it lands on `main`, so `dora flow` surfaces it
+as a time thief).
+
+**Rule 5 — Support tooling is cross-platform, detected at start.** The two machines
+differ (Windows: `python`/`python3` are Microsoft Store stubs, real Python via `uv`;
+macOS: real `python3` on PATH). Scripts that back the process resolve the right
+interpreter/toolchain at invocation and cache it machine-locally — see the DORA
+launcher `sh .claude/skills/dora-ledger/scripts/dora` and `statusline.sh` (identical
+probe). All such Python writes UTF-8 explicitly (Windows' default cp1252 crashes on
+the `→` etc. the reports use). Agents invoke the launcher or `make dora-*`, never bare
+`python3 …dora.py`. **A support tool that only runs on one OS is a blocker to fix, not
+to work around** — the DORA instrument being silently dead on Windows is exactly the
+failure this rule prevents.
+
+Targets: **gross lead time / throughput** (no cross-instance clobber-and-reconcile
+rework; reconcile latency minimised) and **CFR** (no derived-state lies from a merge
+race). [EXP-089]
+
 ## 1. Operating principles (beliefs)
 See `principles/` for the full statements. In force: XP, always-TDD, value
 slicing, trunk-based development, continuous deployment, roll-forward-with-
@@ -1035,18 +1180,33 @@ green (lint passes inside the done-condition, not discovered post-commit).
 - **Commit when green and lint clean, never when red.**
 - **Message states intent, not mechanics.**
 - **One logical change per commit.**
+- **Reference the tracked item — ISO traceability (v75 — human-directed).** Every
+  commit that implements a tracked work item names its **Linear item id** in the
+  message (e.g. `VIG-12`), plus the customer ticket where one exists (e.g. Jira
+  `PP-127`), so an auditor can trace change ⇄ requirement. This binds in BOTH repos:
+  a parent-repo `instance/<project>` commit references the agent work item; a
+  project / eDCS commit references the item (+ customer ticket). Linear is the
+  mirror of the REQ/CHK/SLC/UC tree (one-way agent→Linear sync each loop cycle,
+  `process/linear-mapping.md`); an item not yet mirrored is wired to Linear **before**
+  its first commit lands (no orphan commits). A genuine chore with no item is
+  labelled `chore: …` rather than given a fabricated id. Keep the existing
+  `Co-Authored-By` trailer. Rationale: ISO change-control audit trail (requirement →
+  commit → test evidence → prod version); the same id threads all four.
 - **Commit TARGET — two separate repositories.** Each `work/<project>/`
   is its **own independent git repo** so a project can be lifted out and exist
   standalone. **Project output** (code, slices, decision-log, items.csv, queues,
   the project's DORA `per-project.md`) is committed INSIDE the project repo:
   `git -C work/<project> add <paths> && git -C work/<project> commit -m "…"`.
   **Agent-structure and process changes** (`.claude/`, `process/`, `CLAUDE.md`,
-  `README.md`) are committed in THIS parent repo. The parent repo does not track
-  project contents (`.gitignore`: `/work/*/`); the shared process DORA ledger
-  (`process/dora/ledger.csv`) and `work/ACTIVE` stay in the parent (agent-system
-  state). Never mix the two in one commit — a project-output commit in the parent
-  repo (or vice-versa) is the cross-boundary leak this split exists to prevent
-  (cf. the bare-root-`slices/` principle failure).
+  `README.md`) are committed in THIS parent repo — on the instance branch
+  `instance/<project>`, reconciled to `main` continuously (§0a Rules 3–4). The
+  parent repo does not track project contents (`.gitignore`: `/work/*/`). The DORA
+  ledger stays in the parent but is **project-sharded** (`process/dora/ledger/<project>.csv`;
+  `ledger.csv` = frozen archive) so parallel instances never collide (§0a Rule 2);
+  `work/ACTIVE` is **machine-local + gitignored**, not committed at all (§0a Rule 1).
+  Never mix the two repos in one commit — a project-output commit in the parent repo
+  (or vice-versa) is the cross-boundary leak this split exists to prevent (cf. the
+  bare-root-`slices/` principle failure).
 - **Push to a VERIFIED remote as part of the done-condition (v60 — human-directed).**
   The blanket "never push" of v59/EXP-049 is superseded: it batched work locally
   (OagEventSource reached **44 commits ahead** of `origin/main` before anything was
@@ -1252,6 +1412,21 @@ harness, re-exercising (not re-discovering) the engineer's browser flows.
 (Operational detail: `engineer.md`, `tester.md`, `solution-architect.md`,
 principles/02; capability: IMP-006.)
 
+## 17a. Test evidence attaches to the item (v75 — human-directed, ISO)
+When the tester validates a use-case **in prod** (§11a), it attaches its validation
+**evidence to the work item in Linear** — not only to the slice `result.md`. The
+evidence records: which public-facing surface was exercised (browser flow / API call),
+the inputs, the observed result vs the acceptance criteria, the captured artefacts
+(response bodies, screenshots, run logs), and the **prod version + commit SHA** it
+validated (§18a). **An item is not `item_done` until its validating evidence is
+attached** — this is the item → test-evidence link an auditor follows. On a
+validation FAILURE the tester attaches the failing evidence and hands back to
+engineering (the item stays open); the roll-forward fix re-validates and re-attaches.
+Binds **tester** (produces + attaches), **orchestrator** (won't close an item without
+it), and the Linear mirror (`process/linear-mapping.md`). Rationale: ISO — the audit
+trail requirement → commit (§14) → **test evidence** (here) → prod version (§18a) is
+unbroken only if evidence lives on the item. [EXP-090]
+
 ---
 
 # STAGE 4 — Deploy
@@ -1261,6 +1436,32 @@ principles/02; capability: IMP-006.)
   passes (or cicd/engineer on pipeline success for cloud/hosted, §2).
 - Each agent brackets its work with `task_start`/`task_end` ledger rows; the
   engineer populates `duration_s` with wall-clock seconds.
+
+## 18a. Release versioning + prod-resource tagging (v75 — human-directed, ISO)
+When a change is promoted past dev **into prod**, the shipping repo and the prod
+resources are stamped so any running production artifact is traceable back to the
+exact commit, version, and requirement. On each prod promotion:
+1. **Version-tag the shipping repo.** Create an ANNOTATED git tag on the deployed
+   commit carrying the version (e.g. `v1.4.2`) and **push the tag to `origin`**
+   (`git push origin <tag>`) so the version is durable and shared, not local-only.
+2. **Tag the production resources** with BOTH the deployed **commit SHA** and the
+   **version** — whatever an operator/auditor inspects to answer "what version is
+   running here?": AWS resource tags `GitSha`/`Version`; a hosted app's assembly/build
+   version + a `Version`/`GitSha` deployment tag; a container image tag. The cicd /
+   solution-architect owns the per-platform mechanism as a **capability** (it differs
+   by infra).
+3. **The `deploy` DORA event records the version + SHA** (in `--ref`/`--note`) so the
+   ledger itself carries release identity — an incident pins to an exact shipped
+   version instantly (MTTR/CFR).
+4. **Version scheme is a PER-PROJECT policy, not a global constant.** Each project
+   declares its scheme (in `capabilities.md` / a versioning ADR): **SemVer for APIs**
+   (e.g. eDCS — with a stated bump policy), **CalVer for desktop apps**, an **internal
+   release counter** for internal tools. **Default SemVer until the project's
+   versioning ADR lands** — that ADR is in progress and the scheme WILL vary by project
+   type, so do NOT hardcode one scheme into tooling: read the project's declared scheme.
+Rationale: ISO/audit change-control — a production resource is traceable to its commit,
+its version tag, and (via §14 item id + §17 evidence) its requirement and test evidence.
+The version id threads repo tag → resource tag → DORA deploy row. [EXP-090]
 
 ## 19. Scheduling over compensation
 

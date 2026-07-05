@@ -211,6 +211,7 @@
       "Bash(aws cloudfront list-distributions *)",
       "Bash(aws cloudfront list-key-value-stores *)",
       "Bash(aws secretsmanager list-secrets *)",
+      "Bash(aws sqs get-queue-attributes *)",
       "Edit(.claude/settings.json)",
       "Write(.claude/settings.json)",
       "Edit(.claude/agents/**)",

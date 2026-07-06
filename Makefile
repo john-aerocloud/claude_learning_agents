@@ -177,6 +177,18 @@ wi-validate:
 wi-migrate:
 	$(WORKITEMS) migrate --project $(PROJECT)
 
+# --- Process-doc conformance gate (process §27.5) -----------------------------
+# Scans the LIVE process/agent/skill/root docs for a DENYLIST of RETIRED
+# QueueApproach mechanics (dora record, queues/*.csv, state.md store, blocks.csv,
+# reconcile-registry, ledger-drift, sync-linear.py, dora.py flow/compute,
+# project-state, item_done). Exits non-zero listing file:line for each hit, else
+# prints clean. Cross-project (scans the whole repo), no PROJECT needed. Uses the
+# same python the dora launcher resolves (the PY pattern). A line may carry an
+# inline <!-- doc-lint:allow --> escape for a legit archive/historical mention.
+#   make doc-lint
+doc-lint:
+	$(PY) .claude/skills/work-items/scripts/doc-lint.py
+
 # --- Validation & smoke (run + record in one step) ----------------------------
 # make validate ITER=5 SLICE=004-create-game [PROD_URL=https://…] [AWS_PROFILE=dev-int]
 # PROD_URL and AWS_PROFILE are forwarded to the playwright test runner when set.
@@ -566,7 +578,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: sso-login dora-record dora-compute retro-debt ledger-drift reconcile-registry wi-append wi-project wi-validate wi-migrate validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3
+.PHONY: sso-login dora-record dora-compute retro-debt ledger-drift reconcile-registry wi-append wi-project wi-validate wi-migrate doc-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3
 
 # --- Viggo-fix UC-W7: Country/Nationality ID remediation (T-SQL) --------------
 # Data-driven, self-building T-SQL remediation script set + its local stand-up

@@ -8,16 +8,18 @@ _Project resolution: if no project is named, use the machine-local `work/ACTIVE`
 
 Act as the **orchestrator**/**flow-manager** (read-only). For project **$1**:
 
-1. Refresh the view: `make flow-status PROJECT=$1` (runs `dora.py flow` and prints
-   queue depths + `work/$1/dora/flow.md`).
-2. Read `work/$1/queues/policy.csv` and report each queue's **length, throughput,
+1. Refresh the derived views: `make wi-project PROJECT=$1` (recomputes queues,
+   stats and the tree from the item files — pure functions, no stored queue state).
+2. Read `work/$1/views/queues.md` and the buffer knobs in `work/$1/queues/policy.csv`
+   (policy INPUT — buffer config only) and report each queue's **length, throughput,
    dwell, and rework rate against its two buffer knobs** (`min_items` floor +
    `wip_limit` cap) — flag any breach (length < min_items = starving; length ≥
    wip_limit = over-WIP/ageing).
-3. Summarise the **time thieves** (largest contributor to gross lead time first),
-   **parallelism efficiency** (achieved ÷ max independent set), and open
-   **collisions / edge trials** from `architecture/dependencies/edge-ledger.md`.
-4. Show the top of `work/$1/items/items-tree.md` (where work sits in the tree).
+3. From `work/$1/views/stats.md` summarise the **time thieves** (largest contributor
+   to gross lead time first), **parallelism efficiency** (achieved ÷ max independent
+   set), and open **collisions / edge trials** from
+   `architecture/dependencies/edge-ledger.md`.
+4. Show the top of `work/$1/views/tree.md` (where work sits in the dependency tree).
 
 Report tightly: depths-vs-buffers, the current flow constraint, and what the loop
 will do next (pull / replenish / starved). Make NO changes.

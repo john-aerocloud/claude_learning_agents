@@ -22,15 +22,16 @@ at retro, into the process itself).
 ## What to read for a task (load only these)
 | Task | Read |
 |------|------|
-| Switch/resume a project | `work/ACTIVE`; target `project.md`; tail of `decision-log.md`; latest `work/<project>/slices/<nnn>-*/` artifact state |
-| Run a project loop | `process-current.md`; project `project.md`, `decision-log.md`, `chunks.md`; `dora/baseline.md` |
+| Switch/resume a project | `work/ACTIVE`; target `project.md`; tail of `decision-log.md`; `work/<project>/views/{queues,state,tree}.md` |
+| Run a project loop | `process-current.md`; project `project.md`, `decision-log.md`, `chunks.md`; `work/<project>/views/stats.md` |
+| Understand item state / append an event | `process/machinery/CONTRACT.md` + `state-graphs.json`; `work-items` skill (the substrate) |
 | Define vision / slice | `principles/00-default-approaches.md` (JTBD+slicing); project `project.md`, `chunks.md` |
-| Architecture for a slice | the slice `slice.md`; `architecture/current.md`; `aws-architecture` skill |
-| Build a slice | `slice.md`, `acceptance.md`, `route.md`, the arch delta + security notes |
-| UI structure for a slice | the slice `slice.md`, `use-cases.md`, the arch delta, `work/<project>/design/`; `ui-design-system` skill |
-| UI polish for a slice | the slice `ui-design.md`, `work/<project>/design/`, the built UI; `ui-design-system` skill |
-| Validate a slice | `slice.md` (success measures), `acceptance.md` |
-| Retro | `dora/baseline.md`, `principle-failures/`, project `dora/per-project.md`, `process-current.md` |
+| Architecture for a slice | the slice item `work/<project>/items/active/SLC-*.md`; `architecture/current.md`; `aws-architecture` skill |
+| Build a slice | the slice + child use-case items `work/<project>/items/active/*.md` (job/value/acceptance in the body), the arch delta + security notes |
+| UI structure for a slice | the slice + use-case items `work/<project>/items/active/*.md`, the arch delta, `work/<project>/design/`; `ui-design-system` skill |
+| UI polish for a slice | the slice item, `work/<project>/design/`, the built UI; `ui-design-system` skill |
+| Validate a slice | the slice + use-case items `work/<project>/items/active/*.md` (success measures + acceptance in the body) |
+| Retro | `work/<project>/views/stats.md`, `principle-failures/`, `process-current.md` |
 
 Do NOT load full architecture/history unless a decision needs it — ask the owning
 agent for a summary instead. Specialists write detail to files and return only
@@ -64,7 +65,7 @@ lifecycle, explicit:
    agent file:
    - delivery method / principles → `delivery-principles`
    - repo/doc navigation, the rule lifecycle itself → `process-framework`
-   - metric/ledger mechanics → `dora-ledger`
+   - work-item state / metric mechanics → `work-items`
    - cloud architecture defaults → `aws-architecture`
    - UI method → `ui-design-system`; OTel/OAG specifics → their skills
    The skill becomes the durable home; the proving `EXP-`/principle-failure
@@ -87,5 +88,5 @@ process).
 ## When docs get heavy
 Prefer adding a skill (see `skill-creator`) that abstracts a heavy document into a
 callable procedure, rather than letting the orchestrator hold it in context.
-`dora-ledger` and `delivery-principles` already do this. The `ui-design-system` skill does the same for UI design
+`work-items` and `delivery-principles` already do this. The `ui-design-system` skill does the same for UI design
 method; the per-project design system lives in `/work/<project>/design/`.

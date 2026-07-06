@@ -42,9 +42,9 @@ of agent behaviour.
    change-set items must survive the refactor (carry them into the change-set
    queue section); scoring debts are never silently dropped.
 
-6. **Version it.** Snapshot the old file to
-   `process-history/vNN-<date>.md` with a retirement note containing the full
-   routing table (rule → new home). Bump `process_version`. The refactor
+6. **Version it.** Create an annotated git tag `process-v<NN>` marking the old
+   state (snapshots are git tags, not files — process §27.2), with a retirement
+   note containing the full routing table (rule → new home). Bump `process_version`. The refactor
    changes WHERE rules live, never WHAT they require — flag (don't make) any
    substantive change you think is also needed.
 

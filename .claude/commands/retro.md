@@ -10,13 +10,17 @@ _Question resolution: if a `--question "..."` argument is present, use that as t
 
 Act as the **orchestrator**. Own this; gather input but make the process call.
 
-1. Run `dora-ledger compute` to refresh `/process/dora/baseline.md`. Identify the
+1. Run `make wi-project PROJECT=$1` to recompute the derived views, then read
+   `work/$1/views/stats.md` for the current DORA + flow figures — lead time
+   (registered→done), CFR, MTTR (defect reported→resolved), and each part's
+   **contribution to gross lead time**. Metrics come from the item event
+   timestamps; the DORA ledger is FROZEN (read-only archive). Identify the
    constraint (Theory of Constraints) and record it. **Include cross-instance
-   reconcile latency** (process §0a Rule 4): from the `reconcile` ledger events,
-   report the wall-clock from an `instance/<project>` commit to it landing on `main`,
-   and treat that latency as a gross-lead-time component to drive DOWN — a rising
-   reconcile latency means the instances are batching integration (banned). If it is
-   the constraint or trending up, that IS the retro focus.
+   reconcile latency** (process §0a Rule 4): report the wall-clock from an
+   `instance/<project>` commit to it landing on `main`, and treat that latency as a
+   gross-lead-time component to drive DOWN — a rising reconcile latency means the
+   instances are batching integration (banned). If it is the constraint or trending
+   up, that IS the retro focus.
 2. Collect each agent's "what worked / what hurt" for the project and slice.
 3. Review `/process/principle-failures/` and `work/<project>/dora/per-project.md`.
    Look for PATTERNS — do not revise a principle on a single data point.
@@ -34,10 +38,11 @@ Act as the **orchestrator**. Own this; gather input but make the process call.
    slow lead time, raise CFR, or lose quality; accept a token INCREASE that buys a
    real DORA gain. Register the chosen optimisation (step 7) with both its token
    target and the DORA metric it must not harm. [EXP-055]
-5. Snapshot the active process to `/process/process-history/vNN-<date>.md`, and
-   fill the anticipated-vs-observed score for the PREVIOUS change. Revert or
-   rework any prior change that was not a net win across throughput (lead
-   time), quality (CFR), frequency, and recovery (MTTR).
+5. Snapshot the active process as the git tag `process-v<NN>` (snapshots are now
+   git tags, NOT files in `/process/process-history/`), and fill the
+   anticipated-vs-observed score for the PREVIOUS change. Revert or rework any prior
+   change that was not a net win across throughput (lead time), quality (CFR),
+   frequency, and recovery (MTTR).
 5a. **Score the experiment registry** (`/process/experiments.md`, process §25a):
    FIRST audit every live row against the **validity bar** (EXP-063): a row that
    describes a piece of work / a feature, names no target DORA metric, or has a
@@ -73,8 +78,10 @@ Act as the **orchestrator**. Own this; gather input but make the process call.
    If the process file has visibly accreted (many same-day versions,
    agent-specific detail creeping into global sections), run
    `/refactor-process` as part of this step.
-7. Write the new `/process/process-current.md` (version+1) for whatever routed
-   to the global process. Each change — wherever it routed — must target a
+7. **Before the version bump, run `make doc-lint`** (process §27) and fix any
+   flagged drift. Then write the new `/process/process-current.md` (version+1) for
+   whatever routed to the global process. Each change — wherever it routed — must
+   target a
    named DORA metric and state its ANTICIPATED effect so the next retro can
    score it. The answer to the focus question drives the change-set.
    **Register every routed change** (including agent-file edits and tools) as

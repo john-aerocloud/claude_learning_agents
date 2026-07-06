@@ -7,2306 +7,55 @@ status: active
 
 # Current Process — v82
 
-> **v82 (CUTOVER — event-sourced work-item model, 2026-07-06; human-directed).**
-> The multi-store state model (ledger + `state.md` + `items.csv` state + `queues/*.csv`
-> + `blocks.csv` + board) caused a recurring drift-defect class: one fact stored in ≥6
-> places with no invariant forcing agreement (nearly re-ran destructive work twice; the
-> phantom "35-item backlog"). **Full cutover** to a single source of truth: the **work
-> item** (design `Version2-design/04`, contract `process/machinery/CONTRACT.md`). State
-> lives ONLY in per-item files as an append-only event log; **current state =
-> `fold(events)`** through the item's type graph (`process/machinery/state-graphs.json`);
-> queues, DORA/flow metrics, dependency tree and the human boards are all **derived
-> views**, recomputed on read, never stored-and-hand-synced. The prior model is archived
-> at tag **`QueueApproach`**. See **STAGE F → F0 (CUTOVER)** for the operative rules; most
-> of §F2–§F9 (buffers, WIP, parallel dispatch, collision, retro-debt gate, deploy gate)
-> stays valid and now operates on the *derived* queues — only the state-recording
-> substrate beneath them changed. The old DORA ledger is frozen (no new `dora record`
-> rows); metrics now come from `make wi-project`, which additionally reports **each part's
-> contribution to gross lead time, its quality, and its recovery** (per `state_owners`).
+## What this file is
 
-> **v81 (RECONCILIATION — merge of two parallel-instance process lineages, 2026-07-05).**
-> Target: **gross lead time / CFR** — this is the §0a (v74 multi-instance) reconcile
-> point itself. Two Claude instances forked the shared process from the common
-> ancestor **v73** and evolved it in orthogonal directions on their own lines:
-> - **OagEventSource (Mac) lineage → v80:** build-identity guard, same-item
->   parallel-dispatch disjoint-artifacts, the CI/CD dev→acceptance→prod promotion
->   pipeline, the mechanical retro-debt gate + its extension to re-deploy/recovery
->   (EXP-095), verb-complete/service-wildcard IAM for new-service deploy grants
->   (EXP-094), CD self-heals the deploy-role policy per stage + bootstrap
->   version-prune (EXP-096), worktree isolation for concurrent committers (EXP-097),
->   and `ready` min_items 2→3 (EXP-098).
-> - **Viggo-fix (Windows) lineage → v76:** the v74 multi-instance operating model
->   (§0a — machine-local `work/ACTIVE`, project-sharded DORA ledger, per-instance
->   `instance/<project>` branch, cross-platform DORA launcher; EXP-089), v75 ISO
->   traceability + release versioning (§14 Conventional-Commits + item-reference,
->   §17a test-evidence-on-item, §18a release-versioning; EXP-090), and v76 §0b
->   production-DB read-only safety + prod→clone sign-off (EXP-091).
->
-> **Reconciliation performed per §0a (v74) Rules 2 + 4 — the very protocol the
-> Viggo-fix lineage introduced:**
-> - The two lineages' operative STAGE rules are **additive / non-overlapping** (deploy
->   /IAM/retro-gate/worktree rules vs multi-instance/prod-DB/ISO rules) and merged
->   with NO textual conflict below the header — the sole content conflict was this
->   version-header + top retro-narrative block, resolved by UNION. **BOTH lineages'
->   full retro-narrative blocks are retained below** (nothing lost). The v75/v76
->   version NUMBERS collided across the fork (each instance minted its own v74/v75/v76
->   for different changes) — this v81 supersedes BOTH and the colliding blocks are
->   preserved verbatim, each labelled by its lineage, so the history stays honest.
-> - **DORA ledger (§0a Rule 2):** `process/dora/ledger.csv` kept as the frozen,
->   LF-normalised, timestamp-sorted archive from the Viggo-fix lineage; the
->   OagEventSource session's 498 new events were **sharded out** to
->   `process/dora/ledger/OagEventSource.csv` (they were previously appended to the
->   monolithic archive — this completes the migration for the OAG rows). No row
->   content mutated; the two shards + archive are disjoint and read as their
->   timestamp-merged union.
-> - **Derived read-models (§0a Rule 4):** `baseline.md`, `flow.md` and
->   `statusline.json` were **REGENERATED from the merged ledger, never hand-merged**.
-> - **NO genuine rule contradiction was found** — every difference was additive or a
->   fork-numbering artefact. Had one lineage asserted X and the other not-X, the
->   merge would have been left in-progress for human adjudication per the reconcile
->   escalation; it was not needed.
->
-> The two source version headers (v80 and v76) are retained as retro blocks below,
-> unchanged. [EXP-089 reconcile-point; scored next retro]
+This is the system's **rulebook** — the cross-agent rules in force, and nothing
+else. It holds ONLY the rules; the story of *why* each rule exists lives in the
+retro record and git, never inline here (see §27).
 
----
-# --- OagEventSource lineage (→ v80) retro blocks, retained verbatim ---
+**The work item is the single source of truth.** Every unit of work is a typed
+item file whose state is an append-only event log; **current state = `fold(events)`**
+through the item's type graph. Queues, DORA/flow metrics, the dependency tree and
+the human boards are all **derived views**, recomputed on read — never
+stored-and-hand-synced. This kills the coherence-defect family (one fact in ≥6
+places disagreeing) by construction.
 
-> **v80 (GAP-CLOSING retro — SLC-039 UC-CA-PROD-PROMOTE prod deploy incident, 2026-07-05).**
-> Target: **CFR on cross-stage promotions** + commit-attribution-correctness. Fired
-> by the mechanical retro-debt gate (2 routine closes SLC-030 + SLC-037-DECOMM, plus
-> 1 INCIDENT — the prod-promotion deploy failure → RETRO DUE [incident (immediate)]).
-> The prod `deploy-prod` job failed with `apigateway:PUT on /tags/* AccessDenied`
-> in the PROD account (842827416606) — the SAME first error the DEV deploy hit
-> (EXP-094). Two gaps, two version-bumping cross-agent rules:
-> - **A (promotion-process, CFR — §F5a + cicd):** the prod deploy-role policy
->   CONTENT was correct (`infra/policies/sst-deploy-prod.json`, `apigateway:*`
->   committed 8a425ea for dev AND prod) but `bootstrap-deploy-role.sh --stage prod`
->   was NEVER RUN — only `--stage dev`. So the `oag-sst-deploy-prod` role carried a
->   stale policy version; the correct content never reached the role. Distinct from
->   EXP-094 (which fixed policy CONTENT completeness): promoting a slice to a new
->   stage requires RE-APPLYING that stage's deploy-role policy as a pre-flight, and
->   nothing enforced/reminded it. **Fix (self-healing, chosen over a manual
->   checklist — EXP-056's lesson that a written reminder is what was missed):** the
->   CD `deploy-<stage>` job re-applies the target stage's managed deploy-role policy
->   at the top of the job so the role's policy is always current-with-source and
->   cannot go stale-per-stage; a §F5a promotion rule states the contract; plus a
->   `make promote-preflight STAGE=<s>` for orchestrator/manual promotions. Owner:
->   cicd + §F5a → **EXP-096**. dev-first HELD (dev + acceptance-dev green; failure
->   prod-only-contained — dev-first working as intended, though the promotion still
->   needed a pre-flight that was missed).
-> - **B (concurrent-committer attribution, CFR — orchestrator + engineer, deferred
->   from OI-044):** the shared-index commit-attribution hazard has now recurred 4+
->   times (UC-SF2 engineer commit swept into tester commit 389d86f). The v39
->   explicit-pathspec mitigation reduces but does not ELIMINATE it — a shared index
->   still crosses attribution. **Standing fix:** dispatch 2+ concurrent
->   code-committing agents in git WORKTREE isolation (private index per committer) —
->   the ONE §14 exception to the trunk/no-worktree default, orthogonal to §40
->   flag-isolation (which stays the rule for behavioural seam-independence in a
->   single tree). Owner: orchestrator dispatch rule + engineer → **EXP-097**.
->
-> Both A and B are cross-agent rule changes ⇒ v79→v80 (v79 snapshotted to
-> `process-history/v79-2026-07-05.md`).
->
-> **DORA at this retro (incident MTTR clock OPEN — recovery PENDING):** cumulative
-> CFR 21% (25/121 deploys), MTTR median 1794s; **trailing-window (last 12 deploys)
-> CFR 54% (7/13)** — this incident is the latest failure and the window is still
-> dominated by the SLC-039 dev-deploy family + this prod failure. This incident's
-> MTTR clock started 2026-07-05T11:30:01Z and is NOT yet closed (recovery = re-apply
-> prod policy via `bootstrap --stage prod` + re-run `deploy-prod`); it will be
-> recorded as a `deploy_recovery` leg WHEN the re-deploy goes green, not before.
-> constraint = engineer. dev-first held (failure prod-only-contained). **Per EXP-095
-> (v79): the recovery is NOT hand-cranked — it routes as a flow-manager-prioritised
-> loop item (cicd owns the bootstrap+deploy) AFTER this retro drains retro-debt.**
+Pointers:
+- **Contract** for the machinery (write path, projections, invariants):
+  `process/machinery/CONTRACT.md`.
+- **State graphs** (per-type transitions, `state_owners`, `queue_map`):
+  `process/machinery/state-graphs.json` — edit only via the retro/version-bump gate.
+- **Design + rationale**: `Version2-design/04` (work-item state model), plus
+  `00`–`03` (pull-system design, diagrams, loops) and `02` (worked retro).
+- **Operative cutover rules**: **STAGE F → §F0**. Most of §F1–§F10 (buffers, WIP,
+  parallel dispatch, collisions, retro-debt gate, deploy gate) stay valid and now
+  operate on the *derived* queues — only the state substrate beneath them changed.
 
-> **v79 (GAP-CLOSING retro — SLC-039 cross-account-IAM deploy incident, 2026-07-05).**
-> Target: **CFR** (verb-incomplete new-service deploy grants) + **gross lead time**
-> (no un-logged hand-cranked recovery loop). Fired — OVERDUE — by the mechanical
-> retro-debt gate: the SLC-039 dev deploy failed FOUR times (CD runs
-> 28734040102 → 28734267920 → 28734406141 → 28734554471-green) on a succession of
-> under-scoped deploy-role IAM permissions for a NEW service (API Gateway v1). The
-> incident tripped retro-debt on the first failure, but the orchestrator kept
-> hand-cranking re-deploys instead of running THIS retro — the very meta-failure
-> the retro closes. Two gaps, two owners:
-> - **A (technical, CFR — narrowest owner cicd, NO cross-agent bump):** the deploy
->   policy ENUMERATED API GW actions and structurally could not be complete (API GW
->   v1 has HTTP-verb actions AND named actions like `UpdateRestApiPolicy`) → 3 CFR
->   hits, fixed one-verb-at-a-time then finally by `apigateway:*` region-scoped
->   (8a425ea). Plus `bootstrap-deploy-role.sh` hit AWS's 5-managed-policy-version
->   cap (no auto-prune, hand-pruned). Routed to **cicd.md** + bootstrap script →
->   **EXP-094** (new-AWS-service deploy grant = `<service>:*` region-scoped, matching
->   the ec2:*/lambda:* precedent; + bootstrap version-prune).
-> - **B (PROCESS, cross-agent — THE version bump):** the orchestrator hand-ran the
->   CFR recovery on main AND advanced the loop (4 re-deploys) while retro-debt was
->   TRIPPED, and the failure/recovery legs went un-logged until this retro. The v68
->   mechanical retro-debt gate only guarded the next PULL. **§F8 now extends the
->   SAME hard gate to RE-DEPLOY + hand-run recovery** (a non-zero `make retro-debt`
->   blocks every advance action; recovery routes as a flow-manager loop item to the
->   owning specialist, never orchestrator hand-cranking; every leg ledger-logged as
->   it happens) → **EXP-095**. This binds orchestrator + flow-manager + cicd ⇒
->   cross-agent rule change ⇒ v78→v79 (v78 snapshotted to
->   `process-history/v78-2026-07-05-pre-v79-snapshot.md`, which also reconciles the
->   header/body version drift and scores v78's EXP-093 first real firing).
->
-> **DORA at this retro (incident closed — recovery 28734554471 green):** cumulative
-> CFR 20% (24/121 deploys), MTTR median 1794s; trailing-window (last 12 deploys)
-> CFR spiked to **46%** (6/13) — this incident contributed 4 of the 6 failures;
-> par_eff 0.92; constraint = engineer. dev-first held throughout (all 4 failures
-> contained in dev; prod untouched). **SLC-039 prod deploy + tester prod-validation
-> go back to the flow-manager as prioritised loop items — NOT orchestrator
-> hand-cranking (this is EXP-095's whole point).**
-
-> **v77 (LIGHT retro — SLC-035 secrets/config migration + CHK-10 bubble +
-> DEFECT-OAG-039 incident, 2026-07-02).** Target: **CFR** (the running-service-vs-
-> CI-green family, guarded by GLT). Fired by the mechanical retro-debt gate:
-> 3 routine closes (SLC-035, CHK-10 x2) + 1 INCIDENT (DEFECT-OAG-039 deploy_failure)
-> = RETRO DUE [incident (immediate)] — the EXP-085 incident leg firing correctly at
-> routine 3/3. LIGHT retro: SLC-035 closed a real value block (CHK-10 CI/CD
-> promotion pipeline is now COMPLETE — full dev→acceptance→prod CD live, prod
-> ingesting, all real creds in Secrets Manager) and the one incident's learning is
-> NARROW and already-known (a recurrence of the SLC-032 bare-name-vs-wildcard
-> secret-resolution class). So the retro SCORES machinery + reinforces an existing
-> route; it banks NO new broad cross-agent principle.
->
-> **Machinery scored (see process-history/v76-2026-07-02.md):**
-> - **Anti-false-green / ground-truth-oracle discipline VALIDATED again** —
->   DEFECT-OAG-039 was invisible to CI-green (750 tests + secrets-exist + IAM-scoped
->   all passed) but the dev Fargate ingest consumer crash-looped in prod-like dev.
->   The tester's LIVE AC-C12.4 validation (checkpoint=0, no event ingested) caught
->   it; the fix (c4a794a, bare-name secret id) was verified genuine-green (task
->   RUNNING + checkpoints advancing). This is the delivery-principles "green build ≠
->   running service" skill working on the CFR-bearing surface. No new rule — it is
->   the graduated skill doing its job.
-> - **EXP-085 incident leg fired correctly** (5th total fire; incident forced RETRO
->   DUE at routine 3/3, not batched). Both legs now confirmed repeatedly → INTEGRATE
->   next clean retro (this is the promised integration cadence).
-> - **§F5a held** — the dev fix-forward redeploy was correctly NOT gated as
->   first-time-infra.
->
-> **The one reinforced route (NOT a new principle):**
-> - **OI-LEDGER-DRIFT-TARGET escalated MED→HIGH.** The v76-predicted close-drift
->   recurred TWICE this window (UC-C12/13/14 first synced to Backlog on stale
->   state.md; UC-C1/C2 derived in-flight though item_done, from an out-of-order
->   dequeue-repair row shadowing the terminal event in `dora.py project-state`).
->   Both needed a manual regenerate+reconcile before the board was honest. Two
->   mechanical gaps now named: (a) the v73 `make ledger-drift` target still does not
->   exist; (b) `dora.py project-state` resolves an item to the LAST-recorded event's
->   implied state, so a post-item_done non-terminal row (a repair/dequeue) can
->   regress a done item — it should treat `item_done` as sticky-terminal unless an
->   explicit `item_reopen`/`failure` follows. Route BOTH to **cicd/dora tooling**
->   (implement `ledger-drift`; make item_done sticky-terminal in project-state). →
->   CFR (derived state + board stop lying) + GLT (no manual reconcile at every
->   close). This is the narrowest-owner implementation of the already-legislated v73
->   rule — not a new cross-agent principle.
->
-> **DORA (cumulative, refreshed 2026-07-02):** lead=2566s freq=4/day cfr=18%
-> (deploys only; 44 defect-intakes excluded) mttr=2189s; window(12) cfr=25%
-> lead=12931s. The window CFR uptick is DEFECT-OAG-039 (a deploy_failure recovered
-> same-session — a deploy-and-recover round, not a standing failure), correctly
-> classed. **Constraint = flow-manager** (cumulative plumbing); at the flow level the
-> engineer briefly bound (the DEFECT-039 fix gated the CHK-10 bubble). No queue
-> starvation or over-WIP. **Buffers/N UNCHANGED** (`ready` min_items=2/wip_limit=4;
-> N=4).
->
-> **Token estimate (EXP-067/§26).** Delivery-dominant cycle: the engineer
-> DEFECT-OAG-039 fix+deploy+verify (~79k) + tester validations (~112k across two
-> passes) were the bulk — necessary CFR-bearing constraint + validation cost, not a
-> cut target. The scriptified ledger/decision paths kept bookkeeping cheap. The
-> DORA-per-token win this cycle is again UPSTREAM: OI-LEDGER-DRIFT-TARGET (once
-> wired) removes the recurring manual reconcile-at-close that this window paid in
-> orchestrator main-loop tokens.
->
-> v75 scored in `process-history/v75-2026-07-02.md`; v76 in
-> `process-history/v76-2026-07-02.md`.
-
-# Current Process — v76
-
-> **v76 (LIGHT retro — CHK-10 promotion-pipeline closes + CHK-6 FIDS-SPA bubble,
-> 2026-07-02).** Target: **GLT/throughput** (guarded by CFR). Fired by the
-> mechanical retro-debt gate: 4 routine closes (SLC-036, CHK-6 x2, SLC-034) =
-> RETRO DUE [routine 4>=3], **zero incidents** this batch. Per EXP-085 this is a
-> LIGHT retro: the window closed a MAJOR value block (the whole SLC-032/033/034
-> dev→acceptance→prod CD promotion pipeline is live + prod ingesting, plus the
-> CHK-6 FIDS Demo SPA chunk) entirely clean — so the retro SCORES the active
-> machinery and banks NO broad new cross-agent principle. Two narrowly-routed
-> implementation follow-ups only.
->
-> **Machinery scored (see process-history/v75-2026-07-02.md for detail):**
-> - **§F5a / EXP-090 (honest-RED) / EXP-091 (CD no-reviewer gate)** held through
->   the ENTIRE promotion pipeline: SLC-033 acceptance-dev green (ef8176d), SLC-034
->   prod CD (prod-validate-oag 42/42, E-76 ratio 1.0 live, item_done 181c8bd). The
->   only human touch was the §F5a first-time-infra prod-bootstrap gate. Both
->   experiments now read POSITIVE on 2nd real use → toward integration next retro.
-> - **EXP-085 (retro cadence)** fired correctly again: 4 clean routine closes
->   batched to the threshold; no incident forced early. 4/4 legs sound → INTEGRATE
->   next clean retro.
-> - **DEF-OAG-038** resolved defect-as-spec (e32260e, 5 sub-causes) — its uceb2
->   sub-cause is the SAME hand-maintained-allowlist class as v75's
->   OI-BUSPOLICY-ALLOWLIST; reinforces that routing, does not re-legislate.
->
-> **The two follow-ups (routed, NOT process principles):**
-> 1. **OI-LEDGER-DRIFT-TARGET — the v73 RECONCILE-FIRST gate is unimplemented.**
->    v73 mandated `make ledger-drift PROJECT=<p>` as a hard resume precondition,
->    but the Makefile target was never created (this resume hit `No rule to make
->    target 'ledger-drift'`). The rule was legislated, never wired — so derived
->    `state.md` drift (SLC-033 shown in-flight though item_done; many done UCs
->    shown in-flight/intake) went uncaught until manual inspection. Route to
->    **cicd** (implement the target per the v73 spec: diff trunk UC/SLC SHAs vs
->    ledger `item_done` refs, exit non-zero on built-but-unclosed) so the next
->    resume is mechanically gated as v73 intended. → CFR (derived state stops
->    lying) + GLT (no manual reconcile at resume).
-> 2. **OI-BUSPOLICY-ALLOWLIST (carried from v75)** — derive the cross-owner deploy-
->    policy allowlist from a glob of `infra/policies/sst-deploy-*.json`. Still open;
->    DEF-OAG-038's uceb2 sub-cause is a 3rd sighting of the class. Owner: engineer
->    (project test + policy files). → CFR/GLT.
->
-> **DORA (cumulative, refreshed 2026-07-02):** lead=2566s freq=4/day cfr=17%
-> (deploys only; 44 defect-intakes excluded) mttr=2189s; window(12) cfr=14%
-> lead=12931s. Computed **constraint = flow-manager** at the cumulative plumbing
-> level; at the flow level the binding time-thief remains the §F5 deploy-gate holds
-> (prod bootstrap) — gate-bound by design, not a process defect to elevate. No
-> queue starvation or over-WIP this window. **Buffers/N UNCHANGED** (`ready`
-> min_items=2/wip_limit=4; N=4).
->
-> **Token estimate (EXP-067/§26).** Retro-only cycle at resume; dominant cost was
-> the orchestrator reconcile-at-resume inspection (the manual work that
-> OI-LEDGER-DRIFT-TARGET would scriptify — the exact upstream-plumbing cut this
-> retro routes). Scriptified paths (`dora.py` retro-debt/compute/log-decision) kept
-> bookkeeping cheap. No model-tier change; no delivery-agent cut.
->
-> v74 change-set scored in `process-history/v74-2026-07-02.md`; v75 in
-> `process-history/v75-2026-07-02.md`.
-
-# Current Process — v75
-
-> **v75 (LIGHT retro — CHK-10 SLC-034 prod-promotion build under §F5a CD, 2026-07-02).**
-> Target: **CFR/GLT** (the same-item parallel-dispatch collision class). Fired by the
-> mechanical retro-debt gate: 3 routine closes (SLC-032 x2, SLC-033) + 1 INCIDENT
-> (DEF-OAG-038 resolve) = RETRO DUE [incident]. LIGHT retro (EXP-085): the window
-> BUILT the whole SLC-034 prod-promotion path to §F5a continuous-deployment (no
-> reviewer gate) — sandbox→dev→acceptance-dev GREEN, `deploy-prod` ACTIVE + honestly
-> RED at the prod-bootstrap §F5a gate (EXP-090). §F5a/EXP-091 read POSITIVE on first
-> real use; EXP-090 honest-RED held. So the retro SCORES the machinery and banks ONE
-> narrowly-routed learning; no broad new cross-agent principle is legislated.
->
-> **Headline learning — cross-owner test allowlists must DERIVE from the owned
-> files, never a hand-maintained literal (routing, not principle).** SLC-034's 4th
-> collision (2nd of this class after UC-R1/AC-R1.9) was cicd's new
-> `infra/policies/sst-deploy-prod.json` tripping the engineer-owned
-> `bus-resource-access-policy` pin's hand-maintained `DEPLOY_ROLE_FILES` literal.
-> This is now a **pattern (2 sightings)** — but per § improvement-routing the
-> narrowest owner is the PROJECT test + policy files, so the fix is routed to
-> **open-item OI-BUSPOLICY-ALLOWLIST** (derive the allowlist from a glob of
-> `infra/policies/sst-deploy-*.json`), NOT a change to process-current. The general
-> cross-agent rule this reaffirms (already implied by §v64 disjoint-artifacts):
-> **when a same-item parallel dispatch partitions owned paths, any cross-owner
-> CONTRACT one lane asserts about another lane's files (an allowlist, a fixture
-> manifest, a policy inventory) must be derived from those files at test time, not
-> frozen as a literal that the other lane's next legitimate file will trip.**
-> Anticipated: same-item cross-owner allowlist collisions → 0 once the glob lands;
-> CFR/GLT no per-file whack-a-mole. Scored next retro when OI-BUSPOLICY-ALLOWLIST
-> closes.
->
-> **v74 machinery scored (see process-history/v74-2026-07-02.md):** §F5a held on
-> first real use (only the one first-time-infra human gate touched); EXP-090
-> honest-RED held; constraint UNCHANGED and inherent (§F5 deploy-gate holds are
-> gate-bound by design); ready throughput 8/day + parallelism eff 0.90 healthy — no
-> buffer/N tune warranted.
->
-> --- v74 retro block (retained) ---
->
-> **v74 (LIGHT retro — SLC-031/CHK-3 close + DEFECT-OAG-035/036 resolve, 2026-07-02).**
-> Target: **CFR** (the build-identity family remains the headline class) guarded by
-> **GLT/throughput** (no per-lane whack-a-mole). Fired by the mechanical retro-debt
-> gate: 2 routine closes (SLC-031, CHK-3) + 1 INCIDENT (DEFECT-OAG-035 resolve on
-> UC-EB3) = RETRO DUE [incident]. Per EXP-085 this is a LIGHT retro: the window
-> closed a MAJOR piece of value (the two-stream genesis migration + the whole
-> CHK-3 live-ingest chunk) with only a non-blocking follow-up open — so the retro
-> SCORES the active machinery and banks ONE real learning; no broad new cross-agent
-> rule is legislated.
->
-> **Headline learning — DEFECT-OAG-036: the build-identity guard now catches its
-> own class BEFORE a destructive action, and the class had ONE more hiding place.**
-> The UC-O8 two-stream migration runbook mandated a SHA-gate before its DESTRUCTIVE
-> truncate; the gate ABORTED because the deployed `BUILD_SHA=ef7a2c6` was untraceable
-> to any commit (`HEAD=d8cda78`). This is exactly the EXP-087 build-identity class —
-> but this time it was a **stamping bug** (`BUILD_SHA` derived from the PARENT
-> monorepo via `git -C ../..` instead of the project SUB-repo), not a stale literal.
-> Two things went RIGHT and are the reason this is light, not a re-legislation:
-> (1) the runbook's SHA-gate + the safety classifier **refused the destructive
-> truncate on unverifiable provenance** — the anti-false-green / verify-at-source
-> discipline worked at the highest-stakes moment; (2) cicd landed the DURABLE fix in
-> the same window (stamp from the sub-repo; added an `assert-build-identity` guard to
-> `make bundle-all` that rejects an untraceable sha; hardened cicd.md; committed
-> f671afd..73b8aa8, redeploy landed, DEFECT-OAG-036 resolved). **Routing: none new** —
-> the fix is already banked in **cicd.md (EXP-087)** as standing practice and the
-> `assert-build-identity` guard is committed. This retro records EXP-087 as scoring
-> POSITIVE again with a NEW mechanism (build-time guard, not just runtime skip) and
-> confirms the class is now guarded at BOTH stamp-time (cicd bundle) and
-> assert-time (prod-smoke). No process-current change beyond this score.
->
-> **DEFECT-OAG-035 (Pipe DLQ / StartingPosition swallow) resolved in-session** —
-> root cause was a Pulumi CREATE-only key silently swallowed in an UPDATE payload
-> (false "Updated"); hardened Pipe (retry=300, recordAge=7200) live + validated
-> (DLQ delta 0 on fresh insert). One NON-BLOCKING follow-up carried to open-items:
-> the Pipe DLQ backfill-surge overflow (22 stale msgs held for human purge, deferred
-> to a UC-O8 cleanup) — does NOT gate slice acceptance; scheduled, not compensated.
->
-> **Experiment scores this retro:**
-> - **EXP-087 (build-identity = injected/derived, never a stale literal)** scores
->   POSITIVE again — 4th sighting, now with a build-time `assert-build-identity`
->   guard AND the runbook SHA-gate both catching it before harm. Strong toward
->   integration; hold as active one more window to see it prevent (not just catch) a
->   sighting, then integrate into cicd.md as plain practice.
-> - **v73 (close-drift mechanical rules)** — rule 2 (RECONCILE-FIRST / atomic close
->   on the hot path) POSITIVE 1st evidence; rule 1 PARTIAL on cross-session offline
->   closes (SLC-031 UC-O1..O6 closed a day late). Carry; escalate to a push-time
->   git-hook only if the deferred-close shape recurs. (Scored in
->   `process-history/v73-2026-07-02.md`.)
-> - **EXP-085 (retro cadence: routine batch / incident immediate)** — INCIDENT leg
->   fired correctly again (DEFECT-OAG-035 resolve forced RETRO DUE at routine 2/3).
->   3/3 positive → INTEGRATE next retro if the next fire is clean.
->
-> **DORA (cumulative, refreshed 2026-07-02):** lead=3092s freq=4/day cfr=16%
-> (deploys only; 44 defect-intakes excluded) mttr=2218s; **window(12) cfr=8%
-> lead=43972s**. Computed **constraint = tester** this window — the lead-time figure
-> is inflated by the UC-O8 destructive-migration validation (a genuinely long,
-> once-off, ground-truth-heavy prod validation of a truncate+7d-reingest+feed-rebuild,
-> not a repeatable per-slice cost), NOT by a standing tester slowness. No buffer/N
-> tune warranted: no queue starvation or over-WIP this window; the only flow anomaly
-> was the day-late offline closes (a currency lapse, not a capacity problem).
-> Buffers/N UNCHANGED (`ready` min_items=2/wip_limit=4; N=4).
->
-> **Token estimate (EXP-067/§26).** This window's dominant token cost was the cicd
-> provenance-fix + restamp-redeploy re-spawns (~123k across two dispatches) chasing
-> DEFECT-OAG-036, plus the UC-O8 migration engineer/tester ground-truth validation.
-> The `assert-build-identity` guard is the DORA-per-token win: it converts the next
-> stamping-drift from a multi-dispatch fat-cicd remediation into a build-time
-> fail-fast (the same upstream-of-deploy leverage as EXP-060/061/062). No plumbing
-> cut routed this cycle.
->
-> v73 change-set scored in `process-history/v73-2026-07-02.md`.
-
----
-# --- Viggo-fix lineage (→ v76) retro blocks, retained verbatim ---
-
-> **v76 (production database safety — agents are READ-ONLY on prod; state changes go
-> through a clone + evidence + two-person sign-off, 2026-07-05, human-directed).**
-> Target: **CFR / data-integrity / audit** — a state change against a production master
-> is the highest-consequence action in the system; it must be impossible for an agent to
-> make one unreviewed. Rule (§0b): an agent granted a production connection issues
-> **SELECT / read-only queries ONLY**; a required prod state change is never applied by
-> the agent — it produces a reviewable **sign-off bundle** (exact reversible script + a
-> clone of the DB + evidence of running it against the clone) that a human and a **second
-> reviewer** sign off before any manual application. Where a project has a working
-> reversible automated path (migrations/CD), change flows through that instead — still
-> never a hand-write to prod by an agent; each project records in its OWN space which
-> path applies and why. Binds every DB-touching agent. [EXP-091]
-
-# Current Process — v75
-
-> **v75 (ISO traceability + release versioning — thread requirement→commit→evidence→
-> prod-version, 2026-07-05, human-directed).**
-> Target: **CFR/MTTR** (an incident pins to an exact shipped version instantly) and
-> **audit compliance** (ISO change-control needs an unbroken requirement⇄production
-> trail). Adds three linked rules, each routed to its stage; the thread is a single
-> **item id + version + commit SHA** carried end to end:
-> 1. **Commits reference the tracked item (§14).** Every implementing commit names its
->    **Linear item id** (+ customer Jira key where one exists) in both repos, so
->    change⇄requirement is traceable. Linear is the mirror of the REQ/CHK/SLC/UC tree;
->    an item is wired to Linear before its first commit lands.
-> 2. **Test evidence attaches to the item (§17a).** The tester attaches its in-prod
->    validation evidence (surface exercised, inputs, result vs acceptance, artefacts,
->    the prod version+SHA validated) to the Linear item; no `item_done` without it.
-> 3. **Release versioning + prod-resource tagging (§18a).** On dev→prod promotion:
->    annotated version tag on the shipping repo **pushed to origin**; prod resources
->    tagged with commit SHA **and** version; the `deploy` DORA row carries version+SHA.
->    **Version scheme is per-project policy** (SemVer for APIs incl. eDCS, CalVer for
->    desktop, a release counter internally) — a versioning ADR is in progress; **default
->    SemVer for now and do NOT hardcode a scheme** (it will change per project type).
->
-> Depends on the Linear mirror being wired for the project (`process/linear-mapping.md`);
-> for Viggo-fix the VIG team exists — its sync (`sync-linear.py`) + key must be confirmed
-> live before the first traceable commit. [EXP-090]
-
-# Current Process — v74
-
-> **v74 (multi-instance operating model — run two Claude instances in parallel
-> without clobbering, 2026-07-05, human-directed).**
-> Target: **gross lead time / throughput** (two instances were fighting over shared
-> singletons; every push flipped the other's state and forced reconciliation rework)
-> **and CFR** (a merge race on derived state makes the ledger lie about what shipped).
->
-> **Evidence.** Two instances run against this one parent repo — a Windows machine
-> (Viggo-fix) and a Mac (OagEventSource) — sharing one `origin/main`. The parent
-> repo carried two GLOBAL SINGLETONS that silently assume one instance: `work/ACTIVE`
-> (a single committed "the active project" pointer) and `process/dora/ledger.csv` (one
-> append-only log both instances write every event). Result: the OAG instance commits
-> `ACTIVE=OagEventSource`, the Viggo instance pulls and is flipped off its own project;
-> both append the ledger and every push/pull conflicts. Separately, DORA was silently
-> dead on Windows — `python3` there is a Microsoft Store stub, so every `make dora-*`
-> and hand-run `dora.py` failed with no real interpreter (the process's own instrument
-> was down on one of the two machines).
->
-> **The change (four rules, routed to §0a; project OUTPUT isolation via §14 is
-> unchanged and already correct):**
-> 1. **`work/ACTIVE` is machine-local + gitignored.** Each instance owns its own
->    active-project pointer; it is never committed. `/project-switch` writes only the
->    local pointer. There is no global "active project" — active is per-instance.
-> 2. **The DORA ledger is project-sharded.** New events append to
->    `process/dora/ledger/<project>.csv` (one file per project → instances on different
->    projects write disjoint files); `ledger.csv` is the frozen pre-sharding archive;
->    reads take the union, merge-sorted by timestamp. A `.gitattributes merge=union`
->    is the backstop for the migration window.
-> 3. **Each instance works on its own branch (`instance/<project>`) and reconciles to
->    `main` CONTINUOUSLY — never batched.** Delayed reconciliation is itself a
->    gross-lead-time cost the retro measures and drives down (§0a). Derived read-models
->    are regenerated post-merge, never hand-merged.
-> 4. **Support tooling is cross-platform, resolved at start.** The DORA tool runs via
->    the launcher `sh .claude/skills/dora-ledger/scripts/dora` (real `python3` on macOS,
->    `uv`-provided Python on Windows), and all its file I/O is UTF-8. Bare `python3
->    …dora.py` is banned. A non-cross-platform support tool is a blocker to fix, not
->    to work around.
->
-> **Anticipated effect (score next retro):** zero cross-instance ACTIVE flips; zero
-> ledger push/pull conflicts on new events; DORA runs on BOTH machines; and a new
-> tracked **reconcile latency** (instance-branch commit → landed on `main`) trending
-> down. If two instances ever still conflict, it is on a genuinely shared process doc —
-> expected, rare, normal git. [EXP-089]
-
-# Current Process — v73
-
-> **v73 (DEFECT-004 ledger↔trunk close-drift — make CLOSE-ON-GREEN mechanical +
-> RECONCILE-FIRST on resume, 2026-07-01).**
-> Target: **gross lead time / throughput** (reconciliation rework + double-dispatch
-> of already-built work) **and CFR** (derived state lies about what shipped).
->
-> **Evidence (a PATTERN, not a point).** On loop resume a whole build wave built +
-> pushed to trunk in the prior (pre-wipe) session was never closed in the ledger:
-> SLC-031 UC-O1..O6/O9/O10 (8 UCs — 25c0aac/fa87cef/37112e1/e96a602/5804d32/800ff57/
-> eecf29f/ee7d483), UC-FF1 (d77b04b, prod-validated), UC-FF3 (2a72a45), UC-DA1
-> (2dccfc6) — all green on trunk, none `item_done`'d. Because item current-state is
-> DERIVED from the ledger (§F1 v52), the derived state LIED: two engineers were
-> dispatched to build UC-R3/UC-DA1 that were **already built** (both collapsed to
-> validation/pin work, dc6bdc6), the orchestrator nearly mis-routed done UCs to the
-> tester, DEFECT-OAG-032 sat as a phantom rework item though its fix (7f0aa02) was on
-> trunk, and a full flow-manager reconciliation (~85k tokens) plus one wrong-close +
-> reversal (UC-EB2) were needed to true it up.
->
-> **Why a NEW rule and not another reminder.** v71 already named this exact
-> DEFECT-004 §F1 close-drift class and chose to *"reinforce, not re-legislate."* It
-> RECURRED and worsened within one cycle. Reinforcement of a human-remembered rule
-> failed; the fix follows the v72 pattern — make the invariant **executable**, not
-> exhortatory.
->
-> **The change (two mechanical rules, routed narrowly to STAGE F §F1):**
-> 1. **CLOSE-ON-GREEN is atomic.** The agent that pushes a build green records
->    `stage_exit`+`item_done` (with the pushed SHA) **in the same turn as the push** —
->    never deferred to "a later cycle" or a batch reconcile. A push with no matching
->    `item_done` in the same turn is itself a defect (derived state now lies).
-> 2. **RECONCILE-FIRST on resume.** Before the FIRST pull of any resumed loop, the
->    orchestrator runs `make ledger-drift PROJECT=<p>` (new gate): it diffs trunk
->    `git log` UC/SLC SHAs against ledger `item_done` refs and exits non-zero listing
->    any built-but-unclosed items. The loop MUST close/repair the drift before it may
->    pull. This turns "reconcile on resume" from a thing the orchestrator might
->    remember into a checkable precondition.
->
-> **Anticipated effect (score next retro):** built-but-unclosed count at any resume
-> → **0** (mechanically enforced); zero re-dispatch of already-built UCs; the
-> per-resume reconciliation-rework token cost (~85k this cycle) → near-zero. If a
-> future resume still shows drift, rule 1 was skipped — escalate to a push-time hook.
-
-# Current Process — v72
-
-> **v72 (DEFECT-OAG-033 gap retro — render-validate diagrams, 2026-06-30).**
-> Target: **CFR** (silently-broken diagrams shipped as "done"). DEFECT-OAG-033: 7
-> OagEventSource Mermaid diagrams were un-renderable, and the orchestrator committed
-> a `fix(diagram)` (0f96d3e) without re-rendering. Root cause: agents emit Mermaid
-> without ever rendering it — "diagrams mandatory" had no executable check. Fix: the
-> committed `make render-diagrams` gate (mmdc; exits non-zero on any parse error) +
-> a §17 cross-agent contract — no diagram (or diagram fix) is reported done until the
-> gate is green; binds documenter, solution-architect, and the orchestrator. [EXP-088]
-
-# Current Process — v71
-
-> **v71 (SLC-029 retro — kill the build-identity-pin-drift class + action the
-> normaliser split, 2026-06-30).**
-> Target: **CFR** (the build-identity-pin-drift family is the headline) + **gross
-> lead time / throughput** (the normaliser seam-concentration). One INCIDENT drove
-> this retro: DEFECT-OAG-032 (resolved 75cedbf) — the `retro-debt` gate read
-> "RETRO DUE [incident (immediate)]" at routine 2/3, so the incident-never-batched
-> leg of EXP-085 fired for the first time.
->
-> **Stale-ledger reconciliation (DEFECT-004 §F1 currency class).** SLC-029's
-> UC-ON2/UC-CS2/UC-SR1 shipped + validated PASS in prod 2026-06-26 (carrier.name
-> live: Delta/Virgin Atlantic/WestJet; codeshares arrays [VS,WS]/[VIR,WJA]; SR1
-> bundle-proof + 14 unit, validated UNVALIDATABLE-IN-WINDOW) and the tester GO +
-> orchestrator `item_done` rows WERE recorded — but the **flow dequeues were never
-> recorded**, and the gate items UC-ON1/UC-CS1 still showed GATED though both gates
-> were resolved by the architect (delta-030) at that ship. v71 recorded the missing
-> events (2× `gate_resolved`, 5× `dequeue`, ref `RETRO-V71-RECONCILE`) so queue
-> depths and the retro counter are honest. The recurring lapse — recording the
-> ledger `item_done` but NOT the flow-manager dequeue as a UC ships — is exactly the
-> §F1 three-views-must-stay-current rule (orchestrator.md v45); no NEW rule, the
-> existing rule was under-applied. Reinforced in this retro, not re-legislated.
->
-> **THE HEADLINE — EXP-087: prod-smoke build-identity = injected EXPECTED_SHA,
-> never a literal.** DEFECT-OAG-032 is the THIRD sighting of one class: a prod-smoke
-> / live-integration test asserting the deployed build identity against a HARDCODED
-> expected sha goes stale every deploy and false-reds the lane on every push between
-> a source change and its redeploy (FIDS UC-FD1 stale `EXPECTED_SHA` literal → SLC-026
-> main.mjs embed-proof → the REST `serviceVersion` pin asserting `e5587a7` while the
-> service was `40ade754`). UC-SR1 is offline-pure, so the red was a pure build-identity
-> drift, NOT a functional regression — yet it false-reds CI and masks real reds. Each
-> was fixed reactively per-lane. Durable fix (routed to **cicd.md** as standing
-> practice + EXP-087): any live/prod-smoke build-identity assertion derives the
-> expected sha from an injected `EXPECTED_SHA` (defaulting to the deployed/CI
-> `github.sha`) and SKIPS when unset — never a frozen literal; plus a deploy-then-smoke
-> ordering note (the identity assertion holds only AFTER the CD redeploy lands;
-> running it against a not-yet-redeployed service is expected-skip). Generalises the
-> FIDS `e2e-fids EXPECTED_SHA ?= $(BUILD_SHA)` seam (and the DEFECT-OAG-032 fix
-> 75cedbf) to ALL prod-smoke lanes. → CFR (build-identity drift is not a deploy
-> failure; no false-red masking real reds) + GLT (no per-lane whack-a-mole / wasted
-> adjudication).
->
-> **EXP-086 ACTIONED (the normaliser split).** v70 deferred the genesis-handler
-> split until after SLC-029 so it would measure real parallelism across the full
-> handler set. SLC-029 has now landed — and added two MORE handlers to the same
-> `src/core/normaliser-core.ts`, so par_eff stayed 0.84 across the COMPLETE handler
-> set, confirming the seam-concentration is the constraint on every backend wave.
-> Decision: **action it now** — routed to `process/improvement-slices/IMP-011-
-> normaliser-handler-split.md` (owner=engineer, pure structural refactor guarded by
-> the corpus regression suite). EXP-086 `planned`→`active`. → GLT + throughput
-> (par_eff toward 1.0 on a multi-handler pull), guarded by CFR (output must not
-> change). Scores on the first multi-event-type backend pull after the split lands.
->
-> **UC-FR1 RETIRED.** Obsolete: its FlightRemoved-as-reuse-of-OagFlightScheduleUpdated
-> (DELETED) ruling (SLC-028, EXP-047 one-writer) was SUPERSEDED 2026-06-26 when the
-> human chose Option B = a distinct `OagScheduleRemoved` canonical event (UC-SR1,
-> delta-031, shipped). The schedule-removed semantic is now carried by UC-SR1; UC-FR1
-> never had code (decision-only). Recorded `item_retired` (ref RETRO-V71-RECONCILE).
->
-> **Experiment scores this retro:** EXP-083 (mechanical retro-debt gate) **VALIDATED
-> 2/2** (v71 incident fire + the prior routine 3/3 fire; loop never advanced past,
-> never offered to human) → INTEGRATED as plain loop machinery + PRUNED to archive.
-> EXP-085 (cadence right-sized) **2/3 positive — INCIDENT leg now exercised** (a
-> single defect resolve forced RETRO DUE at routine 2/3, not batched; both legs now
-> confirmed) — 1 more retro then integrate. EXP-082 (deploy preflight) carries 1/2
-> (no §F5 deploy this window). Registry: active rows 33 → 33 (added EXP-087, pruned
-> EXP-083, EXP-086 planned→active = net 0 — EXP-084 leanness held).
->
-> **DORA (cumulative, refreshed):** lead=2543s freq=5/day cfr=16% (deploys only; 43
-> defect-intakes excluded) mttr=2218s; window(12) cfr=0%. **Constraint = engineer**
-> (the build is the binding step; the normaliser seam-concentration is its dominant
-> structural time-thief, which EXP-086/IMP-011 now attacks). Buffers/N UNCHANGED — no
-> queue starvation or over-WIP this window; the only flow anomaly was the dequeue
-> currency lapse, now reconciled.
->
-> **Token estimate (EXP-067/§26).** Retro-only cycle, ~0 build dispatches; dominant
-> cost was this orchestrator main-loop reconciliation + scoring (judgment-dense, not
-> scriptifiable). The scriptified path (`dora.py record` for the 8 reconciliation
-> rows) kept the ledger-currency fix cheap — the right shape. No plumbing cut routed
-> this cycle (the cycle was almost entirely delivery-adjacent bookkeeping that the
-> recorder already absorbs); EXP-067's plumbing/delivery split continues to trend.
->
-> v70 change-set scored in `process-history/v70-2026-06-30.md`.
-
-# Current Process — v70
-
-> **v70 (LIGHT retro — clean-wave scoring, no new rule, 2026-06-26).**
-> Target: **CFR/quality** (the false-green family was the headline) confirmed by
-> a clean wave, plus the EXP-085 retro-overhead balance (this is its first
-> batched fire). Per EXP-085 this is a LIGHT retro: the SLC-026/027/028 backend
-> wave (OagFlightTakenOff / recovery+generalAviation genesis / FlightRemoved+
-> diversion-enrichment) closed CLEAN — 0 new defects, 0 MTTR pairs, 0 deploy
-> failures, 0 queue starvation, DLQ 0 — so NO new cross-agent rule is added; the
-> retro SCORES the active machinery and banks one planned experiment.
->
-> **Headline — the v68/v69 anti-false-green machinery is VALIDATED.** This wave
-> is the direct contrast to the prior serviceType wave (DEFECT-028/030/031
-> false-greens) on the SAME surface. The bundles-current gate (DEFECT-030 fix)
-> PASSED (rebuilt+committed bundles → deployed artifact matches source); CI green
-> BOTH lanes; the consumer rolled to primary (e5587a7); and the tester validated
-> the NEW fields on events the NEW consumer ACTUALLY ingested (recovery/
-> generalAviation booleans observed on a live FlightCreated; 14 live
-> OagFlightTakenOff with correct offGround). NO false-green, NO defect.
-> **Scores:** EXP-082 (deploy preflight / verify-at-source in the deploy env)
-> **1/2 positive**; EXP-083 (mechanical retro-debt gate) **1/2 positive** (fired
-> at routine 3/3, loop did not advance, not offered to human); EXP-085 (retro
-> cadence right-sized) **1/3 positive — FIRST BATCHED FIRE** (3 clean routine
-> closes batched before RETRO DUE; incident leg unexercised, carried).
->
-> **DORA (clean wave, CFR did NOT rise):** cumulative lead=2543s freq=5/day
-> cfr=17% mttr=2189s; window(12) cfr=0% lead=166s. Constraint computes
-> **orchestrator** (plumbing) at the cumulative level; at the build level the
-> backend SERIALIZED on `src/core/normaliser-core.ts` (par_eff=0.84) exactly as
-> the flow-manager predicted (§F6 shared-file seam). **Buffers/N UNCHANGED** — no
-> starvation, no over-WIP (backend serial-by-seam + FIDS parallel both ran as
-> scheduled).
->
-> **The one bank — EXP-086 (planned, trial-after-SLC-029).** The
-> `normaliser-core.ts` seam-concentration is a confirmed §F7 false-edge candidate:
-> RG1/RG2/TO1/DA1 are behaviourally independent but serialize on one file. The
-> per-event-type genesis-handler split (dispatch table → one file per event-type)
-> would let the flow-manager dispatch them as a true parallel set. TRIAL DEFERRED
-> until AFTER SLC-029 (the last backend slice on the same seam) so it measures
-> real parallelism gain across the full handler set, not a synthetic one. Pure
-> structural refactor, guarded by the corpus regression suite. See EXP-086.
->
-> **One coherence gap logged (not fixed here):** the tester reported the
-> architecture *.mmd node-marks for SLC-026/027/028 did not register a diff →
-> OI-022, routed to the documenter coherence sweep (the deltas ARE in
-> architecture/deltas + edge-ledger; only the model node-mark sync is open).
->
-> v69 change-set scored in `process-history/v69-2026-06-26.md`.
-
-# Current Process — v69
-
-> **v69 (FOCUSED retro — retro cadence right-sized, 2026-06-26).**
-> Target: **retro-overhead vs missed-learning balance** (a gross-lead-time proxy),
-> guarded by CFR/MTTR (incident learning stays immediate). LIGHT retro: no new
-> defects, no MTTR events, no queue starvation; the only closes since v68 were
-> trivial (SLC-009 — a validation-only close of pre-built observability dashboards,
-> CHK-5 done; TD-002 — dead `oag-feed.ts` deleted; the AOS alignment doc reframed
-> "prefix-is-intentional"). DORA: no regression — cumulative lead=2543s freq=5/day
-> cfr=18% mttr=2189s; window(12) cfr=0% lead=1334s. Constraint stays **engineer**;
-> buffers/N UNCHANGED.
->
-> **The change — EXP-085 (retro cadence right-sized).** The v68 retro-debt gate
-> (EXP-083) shipped at threshold=1 (a retro DUE the moment ANY slice/chunk closes).
-> Its FIRST real firing — on SLC-009, a validation-only close — proved that too
-> aggressive: a per-slice-close cadence reintroduces the very retro-overhead/bloat
-> churn v68 fought, and treats a clean routine close (little to learn) the same as
-> a real incident (much to learn). Fix: SPLIT the gate's events by class.
-> **ROUTINE** slice/chunk closes **batch** up to `--threshold` (default raised
-> 1→3) before a retro is due; **INCIDENT** events (prod defect resolve,
-> deploy_failure) are **never batched** and force RETRO DUE immediately (effective
-> threshold 1), alongside the existing MTTR-pair / queue-wait-spike triggers.
-> **This is the v68 gate SELF-CORRECTING on its first firing — the intended
-> behaviour, not a bypass:** enforcement stays mechanical (the loop still may not
-> advance past a due retro; the retro still may NOT be offered to the human), only
-> the routine cadence is right-sized and incidents stay immediate. Routed to
-> `dora.py cmd_retro_debt` (routine/incident split, default --threshold 3) +
-> Makefile + §F8 + loop-run.md step 7 + §6. Anticipated: fewer low-yield per-slice
-> retros free the constraint while CFR/MTTR protection is unchanged. Scored over
-> the next 3 retros [EXP-085, active 0/3].
->
-> v68 change-set scored in `process-history/v68-2026-06-26.md`: EXP-083 mechanical
-> gate VALIDATED-as-mechanism (fired correctly, the loop did not advance) — its
-> threshold is what needed tuning, not its enforcement; EXP-084 leanness held.
-
-# Current Process — v68
-
-> **v68 (OVERDUE retro + process-leanness refactor — make the auto-retro
-> MECHANICAL; graduate proven rules to skills, 2026-06-26).**
-> Target: **CFR** (the false-green family is the headline) + **process leanness**
-> (a DORA proxy: a leaner active process is faster to load/apply and removes the
-> rule-bloat that doesn't even guarantee adherence). Three linked subjects:
->
-> **(1) META-FAILURE — the automatic §F8 retro did not run.** Since v67 a LOT
-> shipped with NO retro (SLC-021, SLC-025/serviceType, the Oag-prefix +
-> OagBagBeltSet rename delta-026, an event-store drop + clean reset, DEFECT-OAG-028/
-> 030/031, a prematurely-closed CC3) — retro-debt measured **8 slice/chunk closes**.
-> Root cause: the orchestrator repeatedly OFFERED the retro to the human instead of
-> running it (the EXP-030 / 2026-06-06 anti-pattern recurring). The §F8/§F9.4 RULE
-> already forbade this and was still violated → another rule won't fix it.
-> **Structural fix — enforcement is now MECHANICAL [EXP-083]:** a **retro-debt
-> gate** in the loop machinery — `dora.py retro-debt` counts slice/chunk closes +
-> defect resolves + deploy failures since the last `retro` ledger row and **exits
-> non-zero (code 2 = RETRO DUE)** at the threshold; `make retro-debt PROJECT=…`
-> wraps it; `loop-run.md` step 7 makes it a **hard loop-state precondition** — the
-> loop MUST run /retro to drain the debt before pulling next work and may NOT offer
-> it to the human. "Retro fires at the cadence" is now a checkable property of the
-> loop, not orchestrator discretion. Principle-failure recorded
-> (`2026-06-26-auto-retro-offered-to-human-instead-of-firing.md`).
->
-> **(2) THE FALSE-GREEN FAMILY → graduated to a SKILL.** DEFECT-028 (FIDS header
-> false-green), 030 (stale committed bundles deployed), 031 (unpackaged
-> airports.json consumer crash-loop) + the CI-green CC3 close are ALL "green
-> build/CI ≠ running service." The durable rule — **for backend/contract/event
-> slices, validate the RUNNING service in prod (consumer UP + the field/behaviour
-> observed on a live event/response), never close on CI-green alone; the deployed
-> ARTIFACT is what runs, not the source** — is banked in the **delivery-principles
-> skill** ("Green build ≠ running service"), NOT as another standalone /process EXP.
->
-> **(3) RULE-BLOAT → graduate-to-skill lifecycle [EXP-084].** /process was accruing
-> rules/EXPs faster than it shed them (36 active EXP rows) and (per subject 1) the
-> bloat didn't even buy adherence. Defined the explicit lifecycle in the
-> **process-framework skill**: experiment (EXP in /process) → integrate into the
-> owning agent file (single-agent) OR **GRADUATE into the relevant skill**
-> (cross-agent methodology, proven ≥K + stable) → prune from active /process. Ran
-> the FIRST PASS: graduated 10 proven cross-agent rows (EXP-025/062/064/065/066/068/
-> 072/073/074/081) into delivery-principles (the validation/fitness-function +
-> ground-truth-oracle + invariant-not-incidental families) + cicd.md + agent files,
-> pruning their EXP rows. **Leanness gain: active EXP rows 36 → 26.**
->
-> DORA since v67 (cumulative): lead=2543s freq=5/day **cfr=18% (18/93 deploys)**
-> mttr=2189s; defect-intake 2/active-day. The **CFR headline** is the false-green
-> spike: DEFECT-OAG-030 + -031 were both prod regressions of the SLC-025 deploy
-> caught by tester live validation (UC-ST1 NO-GO → Rework), recovered same-session
-> at f8ad95c (SLC-025 GO, 25/25 green). Constraint stays **engineer**. Buffers/N
-> UNCHANGED (no queue starvation/over-WIP this window).
-
-# Current Process — v67
-
-> **v67 (SLC-015/023 + DEFECT-OAG-028/029 retro — the deploy hits its
-> prerequisites and binds to the verified target, 2026-06-25).**
-> Target: **gross lead time** (guarded by CFR). SLC-015 (FIDS flight-detail) +
-> SLC-023 (board fix) shipped and validated GO (e2e-fids 32-pass/4-skip, sha
-> `d45fdce` confirmed live); DEFECT-OAG-028 (FIDS deploy false-green) +
-> DEFECT-OAG-029 (11 dev-toolchain CVEs — vitest/vite/esbuild/otel-core, all
-> cleared, `npm audit` 0) resolved. Build wasn't the friction this slice — the
-> §F5 FIDS deploy was: the FIRST `deploy-fids` attempt failed TWICE before
-> landing — on a STALE SST state lock (left by the killed prior loop) AND a
-> Docker-daemon-down bundling failure — and `ci-watch` then MISREPORTED "no runs"
-> because the CI/deploy lookup resolved to the WRONG repo
-> (`john-aerocloud/claude_learning_agents`) instead of the real `origin`
-> (`AeroCloudSystems/Spike-FlightEventSource-OAG`). All three are the same class
-> as v65/EXP-080 (verify-status-at-source) but in the deploy ENVIRONMENT + its
-> BINDING, not the build artifact. Routed:
-> (1) **Deploy preflight + verified-target binding** [EXP-082 → cicd.md §20a].
-> The deploy target runs a FAIL-FAST preflight before any irreversible step:
-> (a) release/clear any stale state lock (SST), (b) assert the build daemon
-> (Docker) is up, (c) credential valid (already present), (d) the CI/deploy
-> binding resolves to the verified `origin`/account — never an ambient `gh`
-> default. A missing prerequisite is an actionable message, not a mid-deploy
-> crash; `ci-watch` passes the resolved `origin` repo explicitly. → GLT (no
-> failed-deploy retries inside the gate) + CFR (no status read against the wrong
-> target). Buffers/N UNCHANGED — the constraint stays the engineer; the flow
-> evidence (`ready` dwell, par_eff 0.81, 1 historical collision) shows no queue
-> starvation or over-WIP this slice, so `min_items=2 / wip_limit=4 / N=4` hold.
-> (2) **EXP-080 verify-at-source → INTEGRATED + pruned** (2/2: SLC-014 caught 3
-> spec-not-code false-fails; SLC-023 cited the verified deploy sha + caught the
-> ci-watch wrong-repo read). Folded into engineer.md/tester.md/orchestrator.md as
-> plain practice; row pruned to the archive. EXP-082 is its natural extension to
-> the deploy environment.
-> Scored POSITIVE this slice: **EXP-081** (specs assert the invariant — UC-FD1's
-> raw framenavigated-count spec recalibrated to the reload-sentinel invariant;
-> 1/2, toward integration), **EXP-073** (real-source fixtures — UC-BF2 validated
-> vs real-aggregate + real-schedule-event-4Y65 folded fixtures), **EXP-074**
-> (render-observed validation — board non-empty ~1.5s confirmed in prod).
-> Confirmed (1 data point, NOT yet a pattern): single-writer-per-tree held while
-> concurrent engineers on a shared tree produced an orphan unpushed commit —
-> reinforces §14, no rule change. Constraint stays **engineer**.
-
-# Current Process — v66
-
-> **v66 (SLC-014 retro — specs assert the INVARIANT, not the incidental, 2026-06-25).**
-> Target: **CFR + GLT**. SLC-014 (FIDS schedule fold) shipped + clean — but 3 e2e/contract
-> specs FALSE-FAILED this batch by asserting an incidental live-data condition instead of
-> the acceptance invariant: BIDS `rows>0` (empty board is valid per AC-B2.6), oi-020-4
-> global-feed-order (per-stream order ≠ category position; fold was correct), AC-B3.5
-> backward-REQUEST-count (real invariant = ONE bootstrap subscription). Each looked like a
-> regression/defect (DEFECT-OAG-027 raised) and burned an adjudication cycle before proving
-> to be a SPEC bug — and inflated CFR with false alarms. Routed:
-> (1) **Specs assert the invariant, not the incidental** [EXP-081 → tester.md/engineer.md]:
-> an e2e/integration/contract spec asserts the acceptance INVARIANT; where the surface
-> depends on live data it branches on the data state (assert the sanctioned empty-state) or
-> derives expected from per-entity ground truth (getFlight/OOOI) — never from incidental
-> global ordering / row-or-request counts / presence-when-absence-is-valid. Generalizes
-> EXP-074 from the render gate to ALL specs. → CFR (no false-defect inflation) + GLT (no
-> wasted adjudication).
-> (2) **cicd: committed `ci-watch` make target** — the role contract references
-> `make -C work/<project> ci-watch` but none exists; agents hand-roll `gh run watch`. → GLT.
-> Scored POSITIVE: **EXP-080** (verify-at-source — orchestrator+tester source-verification
-> caught all 3 false-fails as spec bugs, not code; gh-run + getFlight evidence cited
-> throughout), **EXP-074** (BIDS empty-tolerant gate landed; weakness #2 closed).
-> Constraint stays **engineer**.
-
-# Current Process — v65
-
-> **v65 (SLC-012/013 slice retro — verify status at the SOURCE, 2026-06-25).**
-> Target: **CFR**. The friction this slice wasn't build (DEFECT-OAG-026 was a
-> false-alarm metric artifact, 0 data lost, ~39min MTTR) — it was AGENTS
-> MISREPORTING CI/DEPLOY/VALIDATION STATUS (3 data points: a CI skip read as a live
-> pass; an auto-deploy read as "no CI runs"; a slice the flow-manager closed before
-> the tester's NO-GO). Each was caught ONLY by orchestrator verification against the
-> source. Routed:
-> (1) **Verify status at the source** [EXP-080]: any done-condition resting on
-> CI/deploy/validation cites the VERIFIED signal — the `gh run` conclusion + the
-> job/step, the deployed `X-Service-Version`, or the actual metric value — never
-> inferred ("green"/"no runs"/"deployed"). The orchestrator verifies any such claim
-> against the source before closing a slice or passing a gate. → CFR.
-> (2) **flow-manager never projects an in-flight item to a terminal state**: a slice
-> closes only on the validating agent's recorded GO, never assumed while that agent
-> runs (the SLC-012 premature-closure race). → CFR.
-> Scored POSITIVE this slice: **EXP-078** (authoritative-source — both the Flight-Info
-> AND Master-Data endpoints came from the portal, never guessed; the Master-Data 401
-> surfaced cleanly as a subscription gate), **EXP-079** (disjoint dispatch — CC1/CC5/CC4
-> seams partitioned + SLC-013 held behind the DEFECT-026 normaliser seam, 0 collisions),
-> **EXP-069** (push-on-green — verified origin recorded in decision-log, guard friction
-> removed). Constraint stays **engineer**.
-
-# Current Process — v64
-
-> **v64 (OI-021 slice retro — external-discovery + dispatch hygiene, 2026-06-24).**
-> Target: **gross lead time**. Focus answer: OI-021's biggest GLT thieves were
-> avoidable DETOURS, not build work — chiefly the external-API-spec discovery
-> detour (architect best-guessed the REST endpoint + auth header, both wrong; the
-> orchestrator then brute-forced the live API — ~5 dead calls + a human round-trip
-> before the authenticated portal gave the real contract in one shot). Routed:
-> (1) **Architect verifies external-interface facts at the authoritative source**
-> [EXP-078 → solution-architect.md]: endpoint/header/params/envelope verified at the
-> portal (human-assisted when `⚠ PORTAL`) BEFORE encoding — never guessed, never
-> brute-forced. EXP-066 ground-truth discipline extended from payload semantics to
-> the interface contract. → GLT + CFR.
-> (2) **Disjoint artifacts on same-item parallel dispatch** [EXP-079 →
-> orchestrator.md]: when >1 agent runs on one item concurrently, partition owned
-> paths — UC test+code = engineer, cicd wires lane/infra only. Fixes the UC-R1
-> cicd/engineer double-claim collision. → GLT + CFR.
-> (3) **Slice completion is automatic end-to-end** [orchestrator.md, §F9 reinforce]:
-> retro → next-slice, NEVER offered as a human choice (the over-ask recurred). → GLT.
-> (4) **documenter.md** (human-directed): as-built docs follow the canonical chain
-> service-design → use-cases → architecture → components → sequence-diagrams;
-> `05-sequence-diagrams.md` = Mermaid sequence diagrams (data contracts → the event
-> catalogue); `04-components.md` added.
-> Follow-ons → cicd: stale `OAG_EVENT_STORE_TABLE` default (→ `-v3`); write-only
-> `oag-event-store-seed` stack role (EXP-060 — grant the full reads-then-writes set).
-> Scored positive this slice: EXP-073 (real-source fixtures — UC-R4 pinned to the
-> real probe fixture; the live test caught a real-data bug), EXP-069 (push-on-green —
-> clean per-UC pushes), EXP-076 (catalog absorbed the `oag-rest` source with no
-> poison). Constraint stays **engineer**.
-
-# Current Process — v63
-
-> **v63 (DEFECT-OAG-025 retro — consumer-brittleness as a versioning failure, 2026-06-24).**
-> Target: **CFR + MTTR**. The OagEventSource defect line showed a recurring class —
-> DEFECT-OAG-024 then -025 were the SAME failure: a completeness/guard fix not
-> propagated to a sibling read path, so a consumer **poisoned on a stored event
-> shape it should have mapped** (trailing MTTR 12299s, defect-intake 3/active-day).
-> Two routed fixes:
-> (1) **principles/03 — event versioning + total mapping + event catalog** [EXP-076]:
-> consuming a valid stored event must never have a failure mode; events are
-> versioned, every consumer supports all versions, schema changes are
-> non-destructive + total-mappable vN→vN+1, and new data ships with a sensible
-> default defined in the new version. The solution-architect maintains the versioned
-> event catalog (per-type version history + forward-mapping rules + per-field
-> defaults); the documenter keeps it a CORE `actual/` doc; consumers carry
-> version-coverage tests. Reframes 024/025 from defensive-guard whack-a-mole into a
-> structural guarantee. (process/principles/03 + solution-architect.md +
-> documenter.md, committed a6f48d8.)
-> (2) **impacted-tests must see the project sub-repo** [EXP-077 → IMP-007]:
-> `make impacted-tests` is blind to project sub-repo dep-model changes because the
-> parent `.gitignore`s `/work/*/`, so DEFECT-025's `class-deps.mmd` change returned
-> "no changed nodes" — test selection under-covered the very sibling path that broke.
-> Extend the tool to diff the project sub-repo when the parent diff is empty.
-> Constraint remains the **engineer** (median 900s, n=99); attacking the defect class
-> reduces its rework load.
-
-# Current Process — v62
-
-> **v62 (upstream pipelining, 2026-06-23 — human-directed).** New **§F3a**: the
-> whole planning stage runs AHEAD of the build, not just product. While the
-> engineer builds the pulled item, the orchestrator keeps **solution-architect**
-> (next architecture delta + security review), **cicd** (next item's capabilities /
-> flags / deploy-role grants), and **ui-designer** (next structure pass) working the
-> NEXT sequentially-independent item in parallel — so the engineer's next pull finds
-> design + capabilities already done and never idles waiting for an upstream
-> artifact. Bounded by §F6 independence + queue `wip_limit` + the buffer look-ahead
-> depth; agents write disjoint artifacts (no §14 collision). orchestrator.md updated
-> to dispatch this look-ahead each cycle. Target: gross lead time / throughput
-> (the engineer is the constraint; upstream never blocks it) [EXP-075].
-
-# Current Process — v61
-
-> **v61 (SLC-010 FIDS retro — the empty-board escape, 2026-06-23).** Target metric:
-> **CFR** (a broken UI surface shipped through GATE 2 and was found only post-deploy,
-> forcing a full re-design→build→deploy→validate rework cycle — the slice's largest
-> lead-time hit). Root causes + routed fixes:
-> (1) **False-green from code-matching fixtures** — FIDS unit tests (152 green) used
-> hand-authored fixtures mirroring the code's WRONG data shape (`departure.scheduled.*`,
-> absent in real OAG data), so the board was empty while tests passed. → **engineer.md §2**:
-> external/live-data fixtures MUST be captured from the real source, never hand-authored
-> to match the code [EXP-073].
-> (2) **UI "validated" without observing the render** — the tester gave GO-for-DONE on
-> the data pipeline; the rendered board was never looked at (Playwright "not committed"
-> → checks DEFERRED). → **tester.md**: a UI surface is not validated until the RENDER is
-> observed showing real content; missing tooling is a BLOCKER to fix, never a defer; +
-> Playwright e2e render suite installed for fids-app [EXP-074].
-> (3) **Orchestrator did the tester's job** — when the browser extension wasn't connected
-> the main loop ran headless Chrome itself instead of dispatching the tester. →
-> **orchestrator.md**: never run validation/engineering yourself; route missing tooling to
-> the owning agent.
-> (4) **stash-all swept peers' WIP** — a ui-designer `git stash` captured other agents'
-> uncommitted work + the flow `edge-ledger.md` learning (nearly lost). → **§14**: never
-> stash a shared tree; explicit pathspec + `--rebase --autostash` only.
-> (5) **IAM 10KB inline-policy limit** hit on the deploy role (DEFECT-OAG-014). →
-> **cicd.md**: chunky deploy-role grants go to an attached managed policy (recurring with
-> EXP-060). Anticipated effect: the wrong-shape-fixture and unrendered-UI escape classes
-> close → lower CFR / less rework lead-time.
-
-# Current Process — v60
-
-> **v60 (push integrates, 2026-06-21 — human-directed).** Supersedes v59. The
-> blanket "never `git push`" (§14/EXP-049) batched 44 commits locally on
-> OagEventSource before anything integrated, and the first real CI run then failed
-> twice. Three reconnected changes: (1) **§14** — push trunk to a *verified* remote
-> as part of each use-case's done-condition (the unverified-destination guard
-> stays); (2) **§19b (new)** — every push sets off a non-blocking CI watch, and a
-> red CI run where local was green is a DEFECT closed by exactly one of {close the
-> local coverage gap | runbook + automate the manual config}; (3) **§19a/EXP-062
-> tightening** — a pipeline is "proven" only once it has executed green in its
-> introducing slice, never deferred to an open item. [EXP-069, EXP-070]
-
-# Current Process — v59 (superseded; notes retained)
-
-> **v59 (consolidation re-baseline, 2026-06-19).** Supersedes v58. No new rules —
-> a snapshot consolidation that resets the learning loop to a clean baseline:
-> validated experiments **EXP-023** (two-gate model → §F5) and **EXP-055**
-> (token-efficiency retro review → §26) graduated to plain practice and pruned
-> from the registry; the superseded push-mode four-gate model dropped from §9
-> (the deploy-gate auto-approve mechanics kept); the §22 carry-forward list moved
-> to `process/open-items.md`; the new-requirement workflow named once with its two
-> triggers (§6). The experiment/retro learning loop restarts from here. Prior v58
-> detail is retained below for continuity; the full v58 snapshot is in
-> `process-history/v58-2026-06-18.md`.
->
-> **v58 (mega-session retro, 2026-06-18 — OagEventSource: CDK→SST v3 migration +
-> delta-005 real Lambda ingest + delta-007 Fargate persistent consumer cutover +
-> delta-006 Streams read model).** Target metric: **CFR** (recurring prod-found
-> defect classes) guarded by **MTTR** and **token cost** (failed-prod-deploy →
-> fat-cicd-remediation re-spawn is the cycle's most expensive token + lead-time
-> sink). The session shipped a lot live but recovered THREE recurring prod defect
-> CLASSES (a pattern, not a data point), none of which v57's §17.1/§11a.1 covered:
-> **(1) IAM scoped write-only on a reads-then-writes code path** — hit 3× in prod
-> (ingest missing `dynamodb:Query`, then `kms:Decrypt`, then the append-path
-> loadStreams read). The existing code↔policy pin asserts code-matches-grant but
-> the GRANT itself was authored write-only at design time. v58 routes the
-> completeness rule to BOTH owners: an **event-store APPEND grant = the READ ops +
-> the WRITE ops** (architect derives the grant from the full SDK-op set of the code
-> path, not its name; engineer's pin asserts it) — EXP-060. **(2) ESM-bundle
-> `Dynamic require` crash** — recurred across fold-demo, the Fargate consumer, AND
-> the feed-projector when `@aws-sdk`/`@azure` were bundled as ESM; bundles clean,
-> crashes only when the path runs in prod. v58 routes a standing cicd bundling rule
-> (createRequire banner OR CJS, pinned by an import-the-bundle smoke; reserved-
-> keyword aliasing is the same build-clean/run-fail class) — EXP-061. **(3) CI
-> pipeline went stale after the framework migration** — `infra.yml` still runs
-> `npx cdk synth` though the project deploys on SST; the CI deploy pipeline has
-> never run and would fail. v58 routes a **§19a migration-completeness rule**
-> (converting the pipeline + deleting the dead path is PART of the migration, not a
-> deferred follow-up) — EXP-062. Scored this retro: EXP-049 already integrated;
-> EXP-055 VALIDATED (2/2, integrate the token-review step next retro); EXP-016/026/
-> 031/041/043/044/045/052 VALIDATED and INTEGRATED+pruned this retro. v57 change-set
-> scored in `process-history/v57-2026-06-18.md`.
->
-> **v58 addendum (2026-06-18, human-directed experiment-validity fix, EXP-063).**
-> §25a now states an explicit, checkable **validity bar**: every registry row must
-> be a falsifiable HYPOTHESIS — Problem + Solution + a NAMED target DORA metric +
-> a Measurement that can come back NEGATIVE — never a piece-of-work / feature /
-> capability description. Drift-purge applied: EXP-058 (architect enumerates
-> fitness functions) and EXP-059 (documenter produces a consumer-skill) were
-> deleted as work-item-shaped rows (no DORA metric; a did-we-do-the-work
-> "measurement" that cannot fail); both behaviours are SOUND and KEPT as plain
-> agent practice (solution-architect.md / documenter.md). The bar is enforced at
-> creation (this section), in the registry header, and in the retro command
-> (steps 5a + 7). Target: registry validity + agent-def simplicity.
-
-The process all agents follow right now. Updated only by the Orchestrator at a
-retro, which snapshots the prior version into `process-history/` first.
-
-> **v40 — pull-based flow.** Delivery moves from push (a human runs `/slice-next`
-> then `/iteration-run`, pausing at four gates) to **pull**: a continuous inner
-> dev loop pulls ready work from costed, prioritised, per-queue-buffered queues,
-> planning happens just-in-time to keep those queues from starving, parallel work
-> is dispatched by independence, collisions teach the dependency tree, and **only
-> two gates remain** (intake + deploy). The cross-agent rules are **STAGE F**
-> below; they supersede the four-gate list in §9 and the command-stepped loop in
-> §6 for pull-based projects. Rationale + diagrams + a worked retro live in
-> `Version2-design/`. Every v40 change is a registered experiment (§25a,
-> EXP-020…EXP-029) and is scored/repealed by evidence like any other.
-
-This file holds **cross-agent rules of the game** — gates, metric definitions,
-selection rules, commit and command discipline, and the improvement loop.
-Single-agent behaviour lives in `.claude/agents/<agent>.md` (the unit of agent
-improvement); heavy reference lives in skills; project facts live in `/work`.
-The file is structured by process **stage**, not by the order rules were
-invented. It is allowed to grow when a genuinely cross-agent rule needs
-stating — necessity and correct placement are the metric, not length.
+The prior multi-store model (ledger + `state.md` + `items.csv` state + `queues/*.csv` <!-- doc-lint:allow -->
++ `blocks.csv` + board) is archived at git tag **`QueueApproach`**. <!-- doc-lint:allow -->
 
 ---
 
-# STAGE 0 — Principles & metrics
+# Table of contents
 
-## 0a. Multi-instance operating model (v74 — human-directed)
-
-More than one Claude instance may run against this shared parent repo at once —
-today a Windows machine (Viggo-fix) and a Mac (OagEventSource), sharing one
-`origin/main`. They work **in parallel on different projects**; the model below
-lets them do so without clobbering each other. The root cause it fixes: the parent
-repo conflated *agent-system state* (rare, deliberate, genuinely shared) with
-*per-instance runtime state* (continuous, automatic, per-loop) on one branch.
-
-**What is shared vs per-instance.**
-- **Genuinely shared** (commit to `main` via reconcile): `.claude/`, `process/`
-  docs, `CLAUDE.md`, `README.md`, `_TEMPLATE/`. Changes are deliberate and rare;
-  ordinary git conflict resolution is fine.
-- **Per-instance runtime state** (never a shared singleton): the active-project
-  pointer and the running DORA event stream.
-- **Project output** is already isolated and needs no change: every `work/<project>/`
-  is its own gitignored repo (§14). Two instances on two projects touch two repos.
-
-**Rule 1 — The active-project pointer is machine-local.** `work/ACTIVE` is
-gitignored; each instance owns its own copy. `/project-switch` writes only the
-local pointer and is invisible to other instances. Flow commands that find no
-`work/ACTIVE` STOP and ask for `/project-switch` — they never fall back to another
-machine's project. There is no global "active project".
-
-**Rule 2 — The DORA ledger is project-sharded.** New events append to
-`process/dora/ledger/<project>.csv` (one file per project); `process/dora/ledger.csv`
-is the frozen pre-sharding archive (read-only). `dora.py` reads the UNION of archive
-+ all shards, merge-sorted by timestamp, so callers never choose a file. Instances on
-different projects therefore append to **disjoint files** and cannot collide.
-`.gitattributes merge=union` on the ledger paths is the backstop for the migration
-window (and for the rare two-instances-one-project case). **Only ever append your own
-rows; never rewrite or reorder existing rows** — a rewrite is what turns a union-merge
-into a conflict.
-
-**Rule 3 — Each instance works on its own branch.** Parent-repo (agent-system /
-process) commits land on `instance/<project>` (e.g. `instance/viggo-fix`,
-`instance/oag`); `main` is the reconciled baseline no loop writes directly. On its own
-branch an instance is the SOLE writer of everything, so nothing conflicts mid-flight —
-conflicts exist only at the reconcile point. (Project output still commits inside the
-project's own repo per §14; that is orthogonal to this branch, which is for the parent
-repo.) Either instance may `git fetch` the other's branch to validate or borrow an
-experiment before it lands — the branches are independent lines, not a queue.
-
-**Rule 4 — Reconcile to `main` CONTINUOUSLY (delay is a measured cost).** Merge
-`instance/<project>` → `main` as often as the work produces a stable point — at the
-latest every retro cadence (§F8) and session boundary, ideally after each closed loop
-wave. **Batching reconciliation is banned** (it repeats the v60 pooled-commit failure
-at the process layer). Mechanics: `git fetch`; rebase/merge `main` into the instance
-branch; fast-forward `main`; push. Because the runtime state is partitioned (Rules
-1–2) the merge is clean — the ledger shards are disjoint, `work/ACTIVE` is not tracked.
-**Derived read-models are REGENERATED after the merge, never hand-merged**: run
-`sh .claude/skills/dora-ledger/scripts/dora compute` (baseline) and `… flow --project
-<p>` (flow) from the merged ledger; `statusline.json` and each `work/<p>/state.md`
-likewise regenerate. **The GLOBAL derived read-models `process/dora/baseline.md` and
-`process/dora/statusline.json` are GITIGNORED and regenerated per-machine — never
-committed** (human-approved 2026-07-05): both instances regenerating-and-committing them
-made them conflict on every reconcile (observed 3× in one reconcile). They are pure
-functions of the ledger (the SSOT), so each machine rebuilds them locally with
-`make dora-compute`; nothing is lost. One-time: the other instance drops them from
-tracking on its next pull and regenerates. (Per-project `flow.md`/`state.md` already live
-in the gitignored project repo.) **Reconcile latency** — wall-clock from an `instance/<project>`
-commit to it landing on `main` — is a component of gross lead time. The retro measures
-it and drives it down (record it as a `reconcile` ledger event: `task_start` at the
-instance-branch commit, `task_exit` when it lands on `main`, so `dora flow` surfaces it
-as a time thief).
-
-**Rule 5 — Support tooling is cross-platform, detected at start.** The two machines
-differ (Windows: `python`/`python3` are Microsoft Store stubs, real Python via `uv`;
-macOS: real `python3` on PATH). Scripts that back the process resolve the right
-interpreter/toolchain at invocation and cache it machine-locally — see the DORA
-launcher `sh .claude/skills/dora-ledger/scripts/dora` and `statusline.sh` (identical
-probe). All such Python writes UTF-8 explicitly (Windows' default cp1252 crashes on
-the `→` etc. the reports use). Agents invoke the launcher or `make dora-*`, never bare
-`python3 …dora.py`. **A support tool that only runs on one OS is a blocker to fix, not
-to work around** — the DORA instrument being silently dead on Windows is exactly the
-failure this rule prevents.
-
-Targets: **gross lead time / throughput** (no cross-instance clobber-and-reconcile
-rework; reconcile latency minimised) and **CFR** (no derived-state lies from a merge
-race). [EXP-089]
-
-## 0b. Production database safety — agents are read-only on prod (v76 — human-directed)
-
-A state change against a **production database** — meaning any **non-local, non-Docker**
-database (a real shared/hosted server, not a local clone or dev container) — is the
-single highest-consequence action in the system. Running updates against it in an
-ad-hoc / unreviewed way is unacceptable. This rule is absolute and overrides any task
-instruction, autonomy level, or urgency.
-
-**1. On a production (non-local/non-Docker) DB, an agent issues SELECT / read-only
-queries ONLY.** Never a state-changing statement — `INSERT`/`UPDATE`/`DELETE`/`MERGE`/
-`TRUNCATE`, any DDL (`CREATE`/`ALTER`/`DROP`), side-effecting `EXEC`/stored-proc, bulk
-load — **under any circumstances**. (Local / Docker clones are the opposite: they are
-the safe target where you DO develop and run updates freely.) Defense in depth: prefer a
-read-only DB credential for prod; the rule binds regardless of what the credential
-technically permits.
-
-**Never modify cloud infrastructure to gain access.** An agent does not create or change
-firewall/network rules, credentials, roles, tenants, or any cloud resource to reach a
-database. If a DB is unreachable (firewall, auth, wrong tenant), STOP and surface the exact
-block — the error and, where relevant, the client IP to allow-list — for the human to
-provision. Access provisioning is a human action, never an agent workaround.
-
-**2. A required production change is NOT applied by the agent — it produces a sign-off
-bundle** for a human to apply by hand:
-   - **(a) the exact script / queries** — idempotent, transactional (`XACT_ABORT` or
-     engine equivalent), reversible where possible, self-asserting;
-   - **(b) a clone of the production database** — the safe (local/Docker) target the
-     script was developed and proven against (never prod);
-   - **(c) evidence of having RUN the script against the clone** — before/after state,
-     RED→GREEN reproduction, row counts (before = after where nothing should drop),
-     validation output, rollback proof.
-   A human **and a second reviewer** sign off (**two-person rule**) before any manual
-   production change. The agent's job ends at producing reviewable evidence.
-
-**3. Prefer an automated reversible path where it exists.** Where a project has a
-working, reversible migration / CD pipeline, change flows through THAT (developed +
-proven on a clone, human-gated) — still never a hand-write to prod by an agent. The
-manual sign-off bundle in (2) is the fallback for when no such automated path exists yet.
-**Each project records in its OWN space which path applies and why, AND how to recognise
-its production instances** (by naming convention / host / tag, so prod is never confused
-with a dev clone) — this process file names no project.
-
-**4. Cloning prod into a local/Docker instance for local work is explicitly allowed — with
-PII stripped.** The clone that (2b) develops against is created by a **read-only extract**
-from prod into a local/Docker DB, and **PII is stripped at the read boundary** — retain
-only the fields the work actually needs (e.g. relationship-bearing columns), drop
-non-relational PII, exclude audit logs, and (allowed) **exclude data older than a
-project-set recency window (e.g. 90 days)** to further minimise size and surface. The
-local clone is where you run updates freely
-(point 1's opposite); prod itself stays SELECT-only. Minimise the PII surface of every
-local copy.
-
-This is the strict form of the develop-on-a-clone → reversible-script → human-gated-apply
-model, and it binds every DB-touching agent (engineer, tester, solution-architect, cicd,
-orchestrator). A prod state change issued by an agent is a **stop-the-line principle
-failure**, logged in `principle-failures/`. Target: CFR + data-integrity + audit. [EXP-091]
-
-## 1. Operating principles (beliefs)
-See `principles/` for the full statements. In force: XP, always-TDD, value
-slicing, trunk-based development, continuous deployment, roll-forward-with-
-reversible-rollback, defect-as-spec, jobs-to-be-done, version-identifiable
-deployments. Treat these as defaults, not laws — deviations are allowed but
-must be logged in `principle-failures/`.
-
-## 2. Metric definitions
-- **Gross lead time = wall-clock time from idea accepted → running in prod.**
-  Includes everything: agent processing, gate waits, session idle, overnight,
-  and pipeline iteration loops.
-- **Time-to-first-deploy = kickoff → slice-001 deploy.** Tracked per project.
-  Target: < 90 min for local-only; < 3h for cloud/hosted first deploy.
-- **Delivery gap = deploy(N) → engineer task_start(N+1).** Target < 15 min
-  in-session. Recorded in `dora/per-project.md`.
-- **Deploy event by project type:** cloud/hosted — CI/CD pipeline live in
-  production (logged by cicd or engineer on pipeline success); local CLI /
-  library — tester validation passes (logged by the orchestrator after tester
-  `task_end`).
-
-## 3. CFR ledger convention (definitional)
-CFR answers one question: **what fraction of DEPLOYS broke?** A prod issue is one
-of two kinds, logged distinctly so they are never conflated (the v49 retro found
-the old single-bucket convention inflated CFR — 06-10 logged 11 "failures"
-against 2 deploys because every `/defect` counted):
-
-- **`deploy_failure` / `deploy_recovery`** (legacy alias: `failure`/`recovery`
-  whose ref is NOT a `DEFECT-` id) — a change we **just shipped** failed its own
-  validation (tester sent a just-deployed UC to Rework, failed prod smoke,
-  user-visible regression from this deploy). **These are the CFR numerator.**
-- **`defect_intake` / `defect_resolved`** (ref `DEFECT-NNN…`) — a defect raised
-  against the **standing system** via `/defect`. Real and production-impacting,
-  but not a failure *of a specific recent deploy*, so it is **excluded from CFR**
-  and reported separately as a **defect-arrival rate**. Counting it in CFR would
-  measure how diligently we report, not how often deploys break.
-- **`pipeline_failure` / `pipeline_recovery`** — CI/CD red **before** prod. Not
-  in CFR/MTTR; pipeline-iteration waits (§5), attacked via cicd pre-flight.
-
-**MTTR spans both deploy_failures and defect_intakes** — it measures recovery
-speed for *any* prod issue. `dora.py` classifies retroactively by ref, so the
-distinction holds for historical rows too; going forward agents log the explicit
-event types. The orchestrator must not use this to hide real failures: a genuine
-deploy regression is a `deploy_failure`, full stop — `defect_intake` is only for
-issues raised against already-shipped, standing work.
-
-## 4. Current DORA baseline (one source of truth)
-The orchestrator keeps exactly ONE current baseline here; older baselines live
-in `process-history/`. Recompute at each retro via `make dora-compute` (writes
-`/process/dora/baseline.md`).
-
-**As of 2026-06-18 (mega-session retro, OagEventSource — migration + ingest +
-Fargate + read-model):** cumulative `lead=2543s freq=6/day cfr=20% (15/74
-deploys) mttr=843s`; window(last 12 deploys) `cfr=17% (2/12) lead=1823s`. The
-window MTTR figure (32951s) remains history-dominated by old observatory
-overnight rework pairs (§13e), NOT this cycle — this session's recoveries were
-in-session and fast: the IAM read-then-write misses were caught + fixed inside
-UC-27's live-ingestion validation (deploy_recovery `7a31d8a` same-stage), the ESM
-bundle crash inside the Fargate cutover validation (`6df7d79`, fixed by the
-createRequire banner, no CJS switch needed), and the Fargate crossover completed
-green (Lambda poller DISABLED, kept for rollback). CFR held at 20% — the new prod
-defects were RECOVERED within their own deploy validation, so they read as
-deploy-and-recover rounds, not standing failures (the deploy_failure vs
-defect_intake classing held; none were `defect_intake` against the standing
-system).
-**Named constraint: the prod-found-defect recovery loop on infra deploys** — not
-an agent median but the deploy→prod-found-class→re-deploy round-trip, whose token
-+ lead-time cost is dominated by re-spawning a fat cicd subagent to remediate.
-The standing attack moves UPSTREAM of the deploy: pin the recurring classes at
-BUILD time so they never reach a real deploy — EXP-060 (IAM grant = full op set),
-EXP-061 (ESM bundle createRequire/CJS + import-smoke), EXP-062 (migration converts
-+ deletes the CI pipeline). Orchestrator (median 900s) and tester (830s) remain
-the medians-table constraints for app-only cycles; engineer (720s, n=65) is the
-volume agent.
-
-**Token estimate (EXP-055, cost side of §24) — mega-session cycle (≈20 subagent
-dispatches).** This was a VERY large session; where the tokens went, ranked:
-1. **The cicd subagent around infra deploy round-trips** (still the dominant
-   single consumer) — large spawns (≈80k–140k each) for the SST migration, the
-   ingest IAM remediation re-spawn, the Fargate cutover + the UC-35/38 tail, the
-   read-model UC-A3 deploy. Each prod-found defect that reached a deploy forced a
-   FRESH fat-cicd re-spawn to remediate (re-loading infra context from scratch).
-2. **Engineer dispatches** (n=65 stage rows this project; ~9 build UCs this
-   session) — necessary build cost on the CFR-bearing constraint; NOT a cut target.
-3. **Orchestration of the multi-delta sequence** — gate-holding, ledger/flow
-   recompute, registry scoring (judgment-dense, not scriptifiable).
-**Single highest-leverage reduction, scored on DORA-per-token (not tokens
-alone):** the build-time prod-defect pins (EXP-060/061) and the migration-
-completeness rule (EXP-062). Each prevented prod-found defect removes one full
-fat-cicd remediation re-spawn (the most expensive token unit in the cycle) AND
-improves CFR/MTTR — the ideal case where a token cut also helps DORA. REJECTED as
-before: any engineer/cicd model-tier downgrade (would risk CFR on the constraint);
-a cut to the consumer-skill or fitness-function design work (buys observability
-that protects MTTR). Accepted token INCREASE: the import-the-bundle smoke and the
-grant-completeness pin tests add a little build cost to remove a prod round-trip.
-
-Targets in force: lead time < 3600s wall in-session; deployment frequency
-≥ 3/active-day; CFR → 0%; MTTR < 600s validated same-session.
-
-## 5. Wait-time taxonomy (the flow model)
-The orchestrator reads the baseline as a flow model, finds the constraint, and
-attacks the dominant wait class. Recurring classes and their standing fixes:
-
-| Wait pattern | Fix (where it lives) |
-|---|---|
-| Session-boundary idle (overnight gaps) | Session continuity (§13) |
-| Pipeline iteration loop (fix-push-wait on novelty) | cicd pre-flight + fail-fast (cicd.md) |
-| Human gate wait | Auto-approve + batch gates (§9) |
-| Prod-found defect cycle | Cross-stack contract + walking-skeleton probe at synth/skeleton time (engineer.md, §17) |
-| End-of-iteration human prompt | Auto-retro at delivery (§20) |
-| Smoke regression / fragile selector | Stable selectors + surface-change done condition (engineer.md, tester.md) |
-| Permission prompts | Command-form contract + committed allowlist (§15–§16) |
+- **§F0** — CUTOVER: the work item is the single source of truth (READ FIRST)
+- **STAGE 0** — Principles & metrics (§0a–§5a)
+- **STAGE 1** — Next-work selection & gates (§6–§10)
+- **STAGE 2** — Planning: slice / use-cases / acceptance (§11–§12)
+- **STAGE 3** — Build (trunk, TDD) (§13–§17a)
+- **STAGE 4** — Deploy (§18a–§19b)
+- **STAGE 5** — Validate (§20)
+- **STAGE 6** — Document (§21)
+- **STAGE 7** — Retro & improvement (§22–§27)
+- **STAGE F** — Flow & queues (pull-based) (§F1–§F10)
 
 ---
 
-## 5a. Failure semantics — whose problem is it (v30 — human-directed)
-
-A **5xx from a call indicates the CALLED service is failing** — it may come
-back (callers use **jittered exponential backoff** before concluding failure)
-or it may be defective: **if we own the failing service, the conclusion of a
-5xx is a DEFECT TASK raised** into the open-items register / defect flow —
-never just an error log. A **4xx indicates the INPUT to the call was wrong —
-the caller owns the problem**: inbound 4xx = our caller's data; a 4xx we
-RECEIVE from a dependency = our request construction, our defect. Acceptance
-cases, validation specs, and runbooks classify on these semantics.
-(Operational detail per role: agent definitions.)
-
-# STAGE 1 — Next-work selection & gates
-
-## 6. Loops
-- **Intake (v40)** → `/intake` — requirement OR defect enters here, JTBD-framed,
-  valued/costed; the one upstream human gate (§F5).
-- **Continuous pull (v40)** → `/loop-run` — the inner dev loop pulls ready
-  use-cases (parallel by independence, §F2/§F6) until queues drain; replenishes
-  just-in-time (§F3). `/iteration-run` is now the SINGLE-use-case pass this loop
-  invokes; `/slice-next` is product's internal replenishment routine, no longer a
-  human gate.
-- **Flow status (v40)** → `/flow-status` — queues, buffers, time thieves (§F4).
-- **New-requirement workflow** — ONE workflow, two triggers: auto-kicked by
-  `/project-new` (a brand-new project) or run standalone by `/requirement-new` (a
-  new requirement on an existing project). Sequence: product vision → architecture
-  + security review → chunk plan → capabilities → first slice.
-- **Per iteration (push mode)** → `/iteration-run` (ends at retro-complete, §20)
-- **Retro** → `/retro` — fires at the §F8 cadence (routine slice/chunk closes batch
-  to threshold 3; prod defects / deploy failures trigger immediately — v69 EXP-085)
-- **Defect** → `/defect` — structured intake (expected/actual/intent/importance;
-  prompts for anything missing), reproduce-to-confirm (no phantom fixes),
-  prioritise (§38), fix defect-as-spec + prod re-check, then a gap-closing
-  retro that names the process gap and proposes a closing experiment with its
-  applies-to predicate.
-
-## 7. Agent roster
-| Agent | When dispatched |
-|-------|----------------|
-| product | vision + slice definition (and parallel N+1 per §9b) |
-| solution-architect | architecture delta + security review (and parallel N+1) |
-| cicd | capabilities (environments, pipeline, rollback, flags, allowlist) |
-| engineer | TDD build on trunk |
-| tester | in-prod / public-surface validation |
-| documenter | dispatched in parallel, in the background, at delivery (§21) |
-
-### 7a. Model tiering
-Each agent's `model:` frontmatter is a tunable lever, scored like any other
-change: match the model tier to the **judgment density** of the agent's task,
-not its prestige. Current assignment: **opus** = engineer (long-horizon TDD
-build, the CFR lever), orchestrator (the ToC constraint; boundary judgment),
-solution-architect, ui-designer (design reasoning); **sonnet** = product, cicd,
-tester, flow-manager (well-structured, procedure-led work); **haiku** =
-documenter (short rewriting tasks). On any model release the retro re-assesses;
-every tier move is a registered experiment with a named DORA metric and a
-revert condition (cost without a metric move = revert).
-**Availability resilience (v49):** an agent's `model:` must name a model the
-session can actually run — a pinned-but-unavailable model is a hard stop, not a
-degraded run (the v48→v49 trigger: Fable 5 went unavailable mid-run and the
-engineer/orchestrator builds died on dispatch). When a model is retired or
-unreachable, re-tier its agents to the next-available model that best preserves
-the validated judgment-density intent **in the same retro**, before resuming the
-loop. Prefer models with confirmed session access over nominal capability.
-**In-session bridge:** agent `model:` frontmatter is resolved/cached at session
-start, so editing it does NOT rescue an already-running session — the dispatch
-re-resolves to the dead model and fails again. Until the session reloads, the
-orchestrator passes the Agent tool's per-call `model` override (it takes
-precedence over frontmatter) on every spawn of the affected agent; the
-frontmatter edit is the durable fix for the next session.
-**Scoring quarantine.** A model-tier change is a confound for every DORA-scored
-experiment, because a metric move during the change could be the model, not the
-change. When any agent's `model:` changes, the retro **opens a quarantine window**
-(note it on the experiment registry header with the date + which agents moved).
-Experiments scored inside the window MUST flag `model-confounded` and **may not be
-marked `validated` on a DORA move alone** — they need either a mechanism-level
-confirmation (the behaviour demonstrably fired, independent of the metric) or a
-scoring opportunity after the window closes. Where feasible, hold one comparable
-agent on the prior tier as a control. The window closes when the next retro judges
-the tier stable (default: 2 slices on the new tier with no further model change).
-
-## 8. Project classification
-Two postures the slice planning and capability work follow:
-- **Cloud/hosted**: full AWS Well-Architected, IAM, the `aws-architecture` skill.
-- **Local-only** (CLI, library, script): skip cloud scaffolding.
-
-(Architect effort per posture is detailed in `solution-architect.md`.)
-
-## 9. Deploy-gate auto-approval
-
-The **two-gate model (§F5) is the baseline** — the only blocking human gates are
-requirement/defect **intake** and **infra-bearing deploy**. This section defines
-how the deploy gate *auto-approves*. (The historical push-mode four-gate sign-off
-model is retired in v59; it survives in `process-history/` and as the §F5 "each
-removed gate → a named assurance" mapping.) Every gate decision is appended to
-`work/<project>/decision-log.md`; between gates, run unattended.
-
-**a. Auto-approve where the outcome is clear:**
-- Go/no-go to deploy: orchestrator auto-approves when all tests pass AND lint is
-  clean AND build succeeds AND no blocking deviations — **application-only diffs
-  only**. Infra-bearing diffs (new stacks, IAM changes, new attack surface)
-  remain a human gate.
-- **Gate-4 timing under trunk-CD (v35):** every push deploys, so for a slice
-  whose route contains infra-bearing commits the human go/no-go is obtained
-  AT ROUTE COMPLETION — before the build wave that will push them — not after
-  build. An engineer never holds a green commit waiting on a gate (that breaks
-  §14); the ORCHESTRATOR schedules the gate ahead of the wave instead. A
-  deploy that lands before its gate answer is a gate-timing principle failure
-  even when the content was pre-approved at gate 3 (s007 evidence).
-- Arch + security for local-only projects with no new infra: architect
-  self-certifies; orchestrator confirms; no human wait.
-- **Security review auto-accept (all project types):** when the architect's
-  delta states an explicit conclusion of "no new attack surface, no new data
-  flow, no new trust boundary", the orchestrator confirms the conclusion is
-  present and auto-accepts. Gate 3 still requires human approval if the review
-  surfaces any new control, open risk, or deferred recommendation.
-
-**b. Parallel N+1 planning.** Because decisions are logged, planning the NEXT
-slice (product + architect) may begin while the CURRENT slice is built/tested,
-provided the two are sequentially independent; otherwise serialise.
-
-**c. Batch gate decisions.**
-
-## 10. Next-work selection — the open-items register
-"What runs next" is decided against the full set of unaddressed items, not just
-the chunk plan. System-learning residue lives in `/process/improvement-slices/`
-+ `process/open-items.md` (the project-agnostic carry-forward register);
-project residue lives in `work/<project>/open-items.md`.
-
-When work is selected, also identify and log which ACTIVE experiments
-(`/process/experiments.md`) it will exercise (match the work to each
-experiment's applies-to predicate, §25a) — this is the scoring opportunity set
-for that work, known up front.
-
-Selection rule, applied at every "what next" decision and logged:
-1. **DORA-helping process improvements first** — system learning is this repo's
-   goal (bounded by judgement: don't starve a real customer need).
-2. **User-value items ranked by job served** — core jobs beat secondary jobs
-   (product classifies each job core/secondary).
-3. **Risk items** (security hardening, debt) scheduled before the slice that
-   widens the surface they guard.
-
-(Register mechanics — harvesting residue from every agent return — are in
-`orchestrator.md`; job classification in `product.md`; chunk-plan ownership in
-`product.md`.)
-
----
-
-# STAGE 2 — Slice planning (slice / use-cases / acceptance)
-
-## 11. Slice → use-case hierarchy
-> chunk (capability) → slice (customer value, gated) → use case
-> (separately buildable/testable unit) → route steps (red→green commits)
-
-A slice is decomposed at planning into **use cases** so the build is not
-serialised as one lump. Each use case states actor, trigger → observable
-outcome, its own done condition, the acceptance cases it pins, and its
-**dependency edges** (only where genuinely required — a false edge costs
-parallelism). The orchestrator reads the edges as the parallelism plan;
-genuinely sequential mutations of one seam stay sequential.
-
-(Decomposition is product's craft — `product.md`; engineer routes per use case
-and tester validates the slice as one increment — their defs. Chunk plans keep
-slices adding up to capability — owned in `product.md`.)
-
-## 11b. Every chunk maps to a Job-to-Be-Done with articulated value (v72 — human-directed)
-**A chunk whose value we cannot articulate cannot be prioritised.** A job *code*
-(`J0`, `J3`, …) is not a value statement. Every chunk MUST carry a JTBD value
-statement that answers three questions, in user/beneficiary terms:
-1. **Who gets value** — the named beneficiary (a specific consuming system, an
-   operator, the dev team), never "the system".
-2. **What they can now do** that they could NOT before this chunk exists.
-3. **Why this takes priority** — the value/sequencing rationale. For SECONDARY /
-   enabling chunks (e.g. most J3 "normalise+store" work), this MUST name the CORE
-   value it unblocks and why it is on the critical path — otherwise the chunk
-   reads as mechanism with no value, which is the failure this rule fixes.
-
-Each block also carries a **Purpose** — a few words of WHY (not what) — that
-becomes the chunk's board title suffix (`CHK-N · <name> — <purpose>`), so the
-board reads as value at a glance, not mechanism. Product authors this
-(`product.md`) in `chunks.md` (CHK-keyed block); it is the basis for
-prioritisation (flow-manager costing/sequencing, §10/§F) and is mirrored to the
-chunk's human-board Project title + body (`process/linear-mapping.md`).
-A chunk that cannot be articulated this way is **not prioritisable** — surface it
-(the board flags `⚠ JTBD value not articulated`), do not cost or pull it until
-product states the value; **never fabricate value to make it schedulable**. If
-articulating forces the realisation that several JIT chunk-wrappers are really
-one job, consolidate them (a fragmented value is a planning smell). Evidence:
-human directive 2026-06-30 — chunk Projects shipped as bare mechanism titles with
-no who/what-now/why; 15/15 back-filled from the JTBD catalogue, and the exercise
-surfaced two chunk-consolidation actions (CHK-9-* AOS-alignment; CHK-6-SLC-016
-into CHK-6). [EXP-073]
-
-## 11c. Decision-debt — accepted tradeoffs with a revisit trigger (v73 — human-directed)
-Some scope decisions are **removals/acceptances we do not expect to revisit** —
-distinct from tech-debt (a shortcut *queued* to be paid back) and from the
-decision-log (the record of a decision made). A **decision-debt** entry is a
-deliberate long-term decision that **carries a known tradeoff** and a **revisit
-trigger**: we accept the tradeoff and **do not spend cost re-evaluating it until
-the trigger fires**. Recorded in `work/<project>/decision-debt.md` (append-only):
-each entry has `id (DD-nnn)`, the decision, the **tradeoff accepted**, and the
-**revisit trigger** (a concrete future condition — a new requirement pressuring
-the same axis, or a defect — NOT a cadence, NOT "someday"). When a requirement is
-descoped/removed on a tradeoff, log it here and reference it from any tech-debt
-entry it supersedes (that entry becomes `ACCEPTED → DD-nnn`, off the remediation
-queue). This keeps a settled decision from being silently relitigated and keeps
-the board/queues free of work we have decided not to do. Evidence: DD-001 removed
-the live OAG `/locations` airport-reference adapter (static is permanent; revisit
-only on a freshness-pressure requirement), reclassifying TD-001. [EXP-076]
-
-## 11a. Use-case flow — deploy-per-UC (v33 — human-directed)
-
-Use cases do not wait for the slice to batch-deploy; each runs its own thin
-build→deploy→probe loop on trunk:
-
-1. **A use case with a deployable surface is DONE only when it is deployed and
-   its committed probe is green in prod** (flag-OFF deploys count — dark code
-   deployed early is the §40 norm). The probe is ENGINEER-owned, committed,
-   parameterised (the `make ws-skeleton` pattern) — never a tester dispatch.
-   The tester still validates the SLICE exactly once (Set C); per-UC probes
-   shrink what reaches it, they do not multiply it (protects the constraint).
-2. **Deploys never overwrite each other by construction, not by coordination:**
-   same-pipeline deploys serialise via the pipeline's concurrency group
-   (cicd.md); cross-pipeline order is a §19 schedule edge in route.md (e.g.
-   infra route deploy precedes the SPA flag flip that consumes it). If a UC's
-   deploy must wait on another's, that is a route edge — never a human
-   watching two pipelines.
-3. **Builds overlap freely** wherever §37 seams allow — build start order is
-   never the constraint; deploy ORDER is. (The "start build 2 when build 1
-   begins deploying" stagger is strictly weaker than seam-based parallel
-   builds and is not used.)
-
-Targets: lead time (no end-of-slice deploy batch), deployment frequency,
-MTTR attribution (smaller blast radius per deploy). Anticipated: defects
-surface at the UC probe, not at slice validation. (Per-role detail:
-engineer.md.)
-
-**Infra-flag — defer an unconfirmed external dependency, don't block the
-skeleton (§11a.1, v57).** The §40 use-case-flag pattern extends from app code to
-INFRA: when an infra capability depends on an external resource whose identifier
-is not yet confirmed (per §17.1), the capability ships **behind a default-OFF
-infra flag** so the CORE walking skeleton deploys NOW and the unconfirmed
-dependency is deferred to an open item — never held back from deploy until the
-dependency is resolved. The flag default is OFF (the skeleton's promotion
-condition flips it once §17.1's check passes); the deferred capability and its
-confirm-check become an open-items entry. Evidence: DEFECT-OAG-001 — guarding
-OTel telemetry behind `otelEnabled=false` shipped the pull-feed skeleton (UC-21
-AC-21a-f green in prod) while AC-21g (OTel) was deferred, instead of the whole
-slice rolling back on the layer ARNs. Target: deployment frequency + lead time
-(skeleton ships) guarded by CFR (the OFF default carries no live risk). [EXP-057]
-
-## 12. Acceptance cases
-Product and architect co-author the slice's acceptance cases; the architect
-supplies the technical/observable conditions and security controls (which become
-policy tests at build time). Every acceptance case is tagged with its use case.
-
-## 12d. Every use-case is board-ready: title, why, acceptance (v72 — human-directed)
-The human-facing plan/progress board (the one-way Linear **state** mirror —
-mechanism in `process/linear-mapping.md`) shows ONE issue per use-case, and each
-issue MUST carry, **sourced from the use-case's own artifact and never invented
-at sync time**:
-- a **human-readable title** — the use-case heading, not a bare id;
-- a **why-it-matters** statement — the observable outcome / value the use-case
-  delivers, so a human reading the board knows why it exists;
-- its **acceptance criteria** — the AC cases it pins.
-
-These already live in `use-cases.md` / `acceptance.md` (§11, §12); the board
-**mirrors** them, it does not author them. A use-case the sync finds with **no
-acceptance criteria** is flagged **`needs-acceptance`** and is **not Ready** —
-it cannot be pulled or built until product authors them (§F definition-of-ready).
-Genuine gaps are flagged, **never back-filled with fabricated criteria**. The
-mirror stays state-only (no DORA — those live in the ledger, §0). Product owns
-the title/why/acceptance in the artifact (`product.md`); running the sync is the
-orchestrator's. Evidence: human directive 2026-06-30 — board issues had shipped
-as bare `id — job` with no rationale or acceptance; 96/101 back-filled from real
-artifacts, 5 true gaps flagged rather than invented. [EXP-072]
-
-## 12b. Multi-party / multi-instance modelling (v38 — human-directed)
-When a use case involves MORE THAN ONE PARTY operating SEPARATE INSTANCES
-(two browsers, two devices, a sharer and a joiner), the happy-path narrative
-of one instance is not the use case — model BOTH sides:
-1. **A state machine per instance.** Each party's instance has its own states
-   and transitions; name them. A change in one instance that must surface in
-   the other is a transition with a SYNC POINT.
-2. **Classify every sync point as in-band or out-of-band.** *In-band* =
-   the application carries it (a WS frame; a join writes Games and triggers a
-   state change visible in BOTH boards — model that fan-out). *Out-of-band* =
-   a human carries it outside the app (sharing a code by chat; reading it off
-   the screen). Out-of-band sync is still part of the use case: the affordance
-   that feeds it (copy/display) must serve the RECEIVING party's actual need
-   (the joiner who TYPES needs the code; the joiner who CLICKS needs the link —
-   serving one while labelling for the other is the s008 copy-URL defect).
-3. **Acceptance covers the cross-instance transition, not just one side.**
-   The two-browser tests already exist (skeletons); extend the THINKING to the
-   affordances and state each party sees — a defect found only by a human
-   driving two instances by hand is a modelling gap, not a test-count gap.
-(Per-role: product models both parties' state machines + sync-point table in
-use-cases.md; engineer builds to both; tester validates from each instance's
-vantage incl. the receiving party's expectation.)
-
-## 12a. Shared change-impact model (v31 — human-directed)
-
-Every project maintains a small, shared, committed dependency model in
-`work/<project>/architecture/dependencies/` — mermaid format, load-bearing:
-
-- **`use-case-deps.mmd`** — use-case / behavioural dependency graph (product
-  authors at slice planning per §11; engineer extends as use cases land).
-- **`class-deps.mmd`** — module/class dependency graph at SEAM granularity
-  (engineer-owned; node = module/port/adapter, never every class).
-- **`data-flow.mmd`** — runtime data-flow including **platform gates as
-  explicit nodes** (WAF, authorizers, identity-source checks, cache layers,
-  TTL/lazy-deletion semantics, CSP). Solution-architect-owned; each slice's
-  delta is expressed as a diagram delta. A platform gate that isn't a node is
-  how strike-class defects hide.
-
-Rules of the game:
-1. **Read-before-build** — the engineer constructs the route against the model;
-   hard edges in the model ARE §19 schedule constraints (DEFECT-H2-001's
-   mint-before-secret push is the evidence: the edge existed, no one had to
-   read it).
-2. **Updated-in-commit** — any commit that adds/removes/redirects a dependency
-   edge updates the relevant `.mmd` in the SAME commit, marking changed
-   nodes/edges (mermaid `classDef changed`). An unmarked dependency change is a
-   principle failure.
-3. **Read-before-test** — the tester derives its test plan from the model diff
-   since the last validated sha: changed nodes/edges name the areas to test.
-   The plan is a tick-off list in the slice directory, progressed as validation
-   runs. Specs are tagged to the node(s) they cover (`@covers <node-id>`) so
-   the impacted-spec set is mechanically listable, and spec VALIDITY is
-   reassessed (not just re-run) when a covered node changes.
-4. **Load-bearing or deleted** — an artifact no agent reads at decision time is
-   ornamental; keep node granularity coarse enough that updating is one minute
-   of work, not a parallel codebase.
-5. **One canonical node-id form (kebab-case)** — a mermaid node id and the
-   `@covers <node-id>` tag that points at it MUST be the identical string,
-   kebab-case (`port-game-store`, not `portGameStore`). A mismatch is a §12a
-   authoring failure: `make impacted-tests` (IMP-007) reports the node as
-   false-uncovered and will NOT fuzzy-match camelCase↔kebab — silently
-   equating them would hide exactly the drift the model exists to expose.
-
-Targets: **tester** (constraint — discovery replaced by reading a diff),
-**CFR** (impact-blind testing misses the changed area), **MTTR** (data-flow is
-the diagnosis map). Tooling: IMP-007 (`make impacted-tests`). Per-role detail:
-agent defs.
-
----
-
-# STAGE 3 — Build (trunk, TDD)
-
-## 13. Session continuity (primary wait-reduction lever for local-only)
-- **a. Start a session, finish a deliverable.**
-- **b. Requirement workflow + first slice in one session.**
-- **c. Don't dispatch the tester near end of session.**
-- **d. Retro runs in the same session as delivery — automatic (§20).**
-- **e. Never leave a defect recovery pending validation at a session boundary.**
-  If a roll-forward fix deploys, re-validate immediately in the same session
-  (an overnight re-validation gap inflated one MTTR pair to ~9h).
-
-## 14. Commit discipline
-The engineer commits to trunk every time the full test suite **and lint** go
-green (lint passes inside the done-condition, not discovered post-commit).
-- **Commit when green and lint clean, never when red.**
-- **Message states intent, not mechanics.**
-- **One logical change per commit.**
-- **Conventional Commits format (v75 — human-directed; required in Viggo-fix, the
-  default elsewhere).** The subject line is `type(scope): <intent>` where `type` ∈
-  {`feat`,`fix`,`docs`,`style`,`refactor`,`perf`,`test`,`build`,`ci`,`chore`,`revert`}
-  and `scope` is the affected area; append `!` (or a `BREAKING CHANGE:` footer) for a
-  breaking change. The `<intent>` still states WHY, not the mechanics. This composes
-  with the item-reference rule below — e.g.
-  `fix(pnl): resolve issuing-State against Country.Code (VF-003, PP-127)`. Keep the
-  `Co-Authored-By` trailer.
-- **Reference the tracked item — ISO traceability (v75 — human-directed).** Every
-  commit that implements a tracked work item names its **Linear item id** in the
-  message (e.g. `VIG-12`), plus the customer ticket where one exists (e.g. Jira
-  `PP-127`), so an auditor can trace change ⇄ requirement. This binds in BOTH repos:
-  a parent-repo `instance/<project>` commit references the agent work item; a
-  project / eDCS commit references the item (+ customer ticket). Linear is the
-  mirror of the REQ/CHK/SLC/UC tree (one-way agent→Linear sync each loop cycle,
-  `process/linear-mapping.md`); an item not yet mirrored is wired to Linear **before**
-  its first commit lands (no orphan commits). A genuine chore with no item is
-  labelled `chore: …` rather than given a fabricated id. Keep the existing
-  `Co-Authored-By` trailer. Rationale: ISO change-control audit trail (requirement →
-  commit → test evidence → prod version); the same id threads all four.
-- **Commit TARGET — two separate repositories.** Each `work/<project>/`
-  is its **own independent git repo** so a project can be lifted out and exist
-  standalone. **Project output** (code, slices, decision-log, items.csv, queues,
-  the project's DORA `per-project.md`) is committed INSIDE the project repo:
-  `git -C work/<project> add <paths> && git -C work/<project> commit -m "…"`.
-  **Agent-structure and process changes** (`.claude/`, `process/`, `CLAUDE.md`,
-  `README.md`) are committed in THIS parent repo — on the instance branch
-  `instance/<project>`, reconciled to `main` continuously (§0a Rules 3–4). The
-  parent repo does not track project contents (`.gitignore`: `/work/*/`). The DORA
-  ledger stays in the parent but is **project-sharded** (`process/dora/ledger/<project>.csv`;
-  `ledger.csv` = frozen archive) so parallel instances never collide (§0a Rule 2);
-  `work/ACTIVE` is **machine-local + gitignored**, not committed at all (§0a Rule 1).
-  Never mix the two repos in one commit — a project-output commit in the parent repo
-  (or vice-versa) is the cross-boundary leak this split exists to prevent (cf. the
-  bare-root-`slices/` principle failure).
-- **Push to a VERIFIED remote as part of the done-condition (v60 — human-directed).**
-  The blanket "never push" of v59/EXP-049 is superseded: it batched work locally
-  (OagEventSource reached **44 commits ahead** of `origin/main` before anything was
-  integrated — the entire integration+deploy risk pooled into one big-bang event
-  that then failed CI twice). Integration is part of *done*, not a deferred human
-  step. Rule:
-  - **No remote, or a remote the agent cannot verify is the project's intended
-    origin → do NOT push.** Report and stop. (The v50 local-by-default guard and
-    the 2026-06-17 unverified-push failure still bind: an unknown destination is
-    never a push target.)
-  - **A configured, verified remote exists → push trunk to it each time a use-case's
-    full done-condition is met** (suite **and** lint green, §14 commit rule
-    satisfied). Do not accumulate; one UC's green trunk is one push. "Verified"
-    means `git remote get-url origin` resolves to the project's known origin
-    (recorded in the decision-log / project.md), not a destination the agent
-    invented.
-  - **After every push, set off the non-blocking CI watch (§19b)** and keep working;
-    a red run where local was green becomes a defect, never a silent failure.
-  Target: deployment frequency + gross lead time (work integrates continuously
-  instead of pooling), guarded by CFR (each push is already green locally). [EXP-069]
-- **Parallel-engineer commit isolation (v39; STANDING FIX = worktree, v80 EXP-097).**
-  When two+ agents COMMIT code concurrently on one project repo, a file BOUNDARY is
-  not enough — `git add` over a **shared index** sweeps a co-worker's pre-staged
-  files into your commit. This class has now recurred 4× (route-sweep, both sides of
-  the s009 split, and UC-SF2 swept into tester commit 389d86f, 2026-07-05). The v39
-  explicit-pathspec mitigation (`git commit -- <your-paths>`, never bare `git add`
-  then `git commit`) REDUCES but does not ELIMINATE it — a shared index still
-  crosses attribution. **Standing fix (EXP-097): the orchestrator dispatches 2+
-  concurrent code-committing agents (parallel engineers, or engineer + tester both
-  committing) in git WORKTREE isolation (`git worktree add`), so each committer has
-  a PRIVATE index and commits cannot cross-attribute.** This is the ONE §14
-  exception to the trunk/no-worktree default — worktree isolation here is for
-  COMMIT-ATTRIBUTION safety on concurrent committers, and is **orthogonal to §40
-  flag-isolation** (which remains the rule for behavioural seam-independence within
-  a single working tree). Single-committer cycles keep the plain trunk working tree
-  (no worktree). The explicit-pathspec rule still binds as the within-tree fallback.
-  Target: commit-attribution-correctness (CFR) + GLT (no reconciliation rework).
-- **Never `git stash` a shared tree (v61, DEFECT-OAG learning).** Do not run
-  `git stash`/stash-all to clear the tree for your own rebase: it captures OTHER
-  agents' uncommitted changes and flow bookkeeping, hiding their work in a stash
-  the next agent doesn't know to restore (a ui-designer stash-all swept an
-  engineer's WIP + the flow `edge-ledger.md` learning, which was nearly lost and
-  needed manual recovery). Commit ONLY your explicit pathspec and `git pull
-  --rebase --autostash` for just your own staged change; leave every file you do
-  not own untouched. Target: gross lead time (no rework from lost work), CFR.
-
-## 15. Command form — the allowlist contract (all agents)
-Every Bash command matches the committed allowlist in `.claude/settings.json`
-so it runs without a permission prompt:
-- Run everything from the project root. NEVER `cd … && …`, `pushd … && …`, or
-  `source … && …` — compound prefixes match no allowlist pattern and always
-  prompt. Use `npm --prefix <dir> run <script>`, `make -C <dir> <target>`,
-  `git -C <dir> …`, root-relative script paths, and `make -C
-  work/<project>/src/infra <target>` instead of `cd`-ing into infra.
-- Commands must not hand-assemble env-var prefixes or long argument strings
-  inline. Defaults live in config (spec files, package.json, playwright config);
-  parameterised invocation lives in the root `Makefile` (`make dora-record …`,
-  `make validate ITER=… SLICE=…`).
-- A command class the allowlist lacks is a capability gap: name it so cicd
-  extends the allowlist in the same slice — never work around it with a novel
-  one-off command shape. A prompt caused by an avoidable command form is a
-  principle failure.
-- **Edit files with the file tools, never Bash (v43).** Mutating a file with
-  `cat >> f <<EOF`, `echo … >> f`, `tee`, `sed -i`, or any shell redirection is
-  a novel command shape that ALWAYS prompts and adds gross lead time. Use the
-  **Edit/Write tools** for every prose/markdown/CSV file (decision-log,
-  open-items, experiments, slice artifacts, project.md, …) — they need no
-  approval. For the DORA ledger use the committed recorder
-  (`python3 .claude/skills/dora-ledger/scripts/dora.py record …` / `make
-  dora-record …`), never `cat >> ledger.csv`. Reach for Bash only to RUN things
-  (tests, build, git, scripts), not to write files. A permission prompt caused
-  by editing a file through the shell is a principle failure. [EXP-032]
-
-## 16. Tools over permissions
-Human permission prompts are a wait class to engineer away, not a safety
-mechanism. Safety comes from tests, gates, scoped IAM, and committed reviewable
-tooling.
-1. **Recurring command class → committed tool + narrow allowlist** (exact path
-   or target, never an interpreter or task-runner wildcard).
-2. **Mutating actions are protected by the process, not the prompt** — `git
-   push` to trunk is allowlisted because tests+lint must be green (§14) and
-   gates precede deploys (§9).
-3. **New surface → allowlist in the same slice** — cicd OWNS
-   `.claude/settings.json` and applies the narrow read-only/scoped patterns the
-   surface needs in the capability step, before the build.
-4. **Tooling self-service** — every agent CREATES the committed tooling its role
-   depends on (make targets, scripts, spec helpers) in the same slice, tested
-   and documented. Flag-don't-fix applies only to what an agent cannot own
-   (permissions → cicd). A committed parameterised tool is the opposite of an
-   improvised workaround.
-
-5. **Session-start config-resolution rule (v55, EXP-050).** Harness config that
-   is read **at session start** — `.claude/settings.json` `env` (the agent-shell
-   PATH and other exported vars), agent `model:` frontmatter (§7a), allowlist
-   patterns — does NOT take effect for shells/dispatches already running in the
-   current session. Editing it mid-session is the **durable fix for the NEXT
-   session**, never a rescue for this one: a fresh subagent shell spawned later in
-   the SAME session still inherits the session-start snapshot (evidence: a
-   committed `env` PATH-prepend did not reach UC-16's fresh engineer shell — plain
-   `npm` still command-not-found — exactly as a `model:` edit doesn't rescue a
-   cached session, §7a). Consequences:
-   - A capability whose only mechanism is session-start config (PATH via `env`)
-     must be **bridged mid-session by a mechanism that does NOT depend on the
-     inherited shell env** — a committed wrapper / Make target whose recipe sets
-     what it needs INTERNALLY (e.g. `make -C <dir> test` exporting the toolchain
-     bin), or the per-call override where one exists (the Agent tool `model`
-     override for `model:`, §7a). The hand-typed inline `PATH=…` / env prefix is
-     NOT the bridge — it is the §15 novel-shape violation the capability exists to
-     remove.
-   - Such a config change is **scored on the FIRST relevant command of the next
-     fresh session** (where it can actually take effect), not on the session in
-     which it was applied; a same-session failure is "unvalidatable yet", not a
-     refutation.
-
-(The root `Makefile` is agent-ops; the per-project `src/infra/Makefile` is
-deploy-ops only — never conflate them.)
-
-## 17. Defect-prevention contracts (cross-agent principle)
-Defects whose root cause is detectable before production must be pinned by a
-test or probe **at the level the risk actually lives** and at the earliest point
-they are visible — not found in live validation. Standing classes:
-- **Cross-stack / cross-boundary contracts** are asserted at **synth time**
-  (synthesise both templates; assert the path/name contract between them).
-- **IAM grant = the FULL operation set of the code path, not its name (§17.2,
-  v58).** A grant scoped to a path's HEADLINE verb breaks in prod the first time
-  the path's *other* operations run. A "write"/"append"/"ingest" path is almost
-  always READS-THEN-WRITES — it queries the current head/sequence, does
-  conditional gets, and `kms:Decrypt`s encrypted items before writing. So an
-  **event-store APPEND grant = the read ops + the write ops**
-  (`dynamodb:Query`+`GetItem`+`PutItem`/`UpdateItem`, plus `kms:Decrypt`+
-  `GenerateDataKey` for an encrypted table), never `PutItem` alone. The architect
-  derives the grant from the full SDK-op set the code path issues (security note,
-  §65); the engineer's code↔policy pin asserts the grant covers exactly that set.
-  A write-only grant on a reads-then-writes path is not "tighter" — it is a latent
-  prod `AccessDenied`. Evidence: OagEventSource ingest hit it 3× (missing
-  `dynamodb:Query`, then `kms:Decrypt`, then the append-path loadStreams read).
-  Target: CFR (prod AccessDenied on the first real event) + MTTR. [EXP-060]
-- **Diagrams are render-validated before they are reported done (§17.5, v72).** A
-  Mermaid diagram (a `.mmd` file or a ` ```mermaid ` block) is NOT done until it
-  passes the committed `make -C work/<project> render-diagrams` gate (mmdc over
-  every diagram; exits non-zero on any parse error or scanned "Parse error"). This
-  binds EVERY diagram-emitting agent — **documenter, solution-architect** — AND the
-  **orchestrator**: no agent reports a diagram, or a diagram *fix*, complete without
-  a green gate run. "Diagrams are mandatory" is a content rule WITH an executable
-  check behind it; a diagram claimed fixed without re-rendering is a process
-  failure. Evidence: DEFECT-OAG-033 — 7 OagEventSource diagrams silently
-  un-renderable; a `fix(diagram)` committed without re-rendering (0f96d3e). Target:
-  CFR (silently-broken diagrams shipped as done) + GLT (no reactive per-diagram
-  defect cycles). [EXP-088]
-- **Node ESM bundles get a `Dynamic require` shim + an import-the-bundle smoke
-  (§17.3, v58).** An ESM-bundled Node handler whose transitive deps (`@aws-sdk/*`,
-  `@azure/*`) do an internal `require()` crashes at RUNTIME with `Dynamic require
-  of "X" is not supported` — it bundles clean and fails only when the path runs,
-  so it surfaces in prod. cicd's `bundle:<target>` injects the CJS shim banner
-  (`createRequire(import.meta.url)`) or bundles as CJS, and a committed smoke that
-  `node`-imports the bundle fails until the shim is present (DynamoDB
-  reserved-keyword crashes — `ttl`, `name`, `status` — are the same
-  build-clean/run-fail class, aliased via `ExpressionAttributeNames`). Evidence:
-  the crash recurred across fold-demo, the Fargate consumer, AND the
-  feed-projector this session. Target: CFR + MTTR. [EXP-061]
-- **External / cross-account resource identifiers (§17.1, v57).** A resource
-  identifier the stack does NOT create — a Lambda layer ARN, a resource shared
-  from another AWS account, a third-party endpoint or token reference — must be
-  **asserted to resolve BEFORE the first real `cdk deploy`**, never discovered by
-  a deploy rollback. A written "CONFIRM at build: <id>" note is **not** a
-  confirmation; the confirmation is a committed check that FAILS until the
-  identifier actually resolves (a synth-time existence/permission probe —
-  `lambda:GetLayerVersion`, `sts:GetCallerIdentity` on the owning account, a
-  cheap describe — or a `--require-approval` diff a human reads). Evidence:
-  DEFECT-OAG-001 — the first OagFeedStack deploy rolled back on `dash0-*` layer
-  ARNs that do not exist in the OTel-community account; the delta-001 confirm-note
-  was written but never executed, so the un-confirmed cross-account dependency
-  reached a real deploy. Target: CFR (first-deploy rollback) + MTTR. [EXP-056]
-- **New platform-integration mechanisms** (first WebSocket, first CDN behaviour
-  class, first auth flow, first queue) get an early **walking-skeleton probe**:
-  one real request through the full deployed path with the REAL client
-  technology, BEFORE use cases are built on top.
-- **Wire-on-deploy hand-offs** ("the deploy/app wires X"): the receiving role
-  lands a contract test that FAILS until X is wired — an un-pinned hand-off is
-  undetectable until a human watches a browser.
-
-**"Real client" for a web surface means a real BROWSER, never a node probe.**
-A node `ws`/`fetch` probe runs below the browser's security/transport layer and
-returns a FALSE GREEN — it bypasses CSP `connect-src`, runtime-config injection
-ordering, mixed-content rules, and browser event ordering (the s-defect class:
-4 of 6 root causes were browser-only, invisible to node). Drive the probe in a
-browser via committed Playwright; use an interactive browser (Playwright MCP)
-for exploratory DISCOVERY before a spec exists, then convert each finding into a
-committed spec for REGRESSION. Discovery and committed specs are complementary,
-not redundant: you cannot write the regression assertion for a failure mode you
-have not yet discovered. **A defect is not closed until the end-to-end USER
-symptom is reproduced and pinned** — not just the first true-but-secondary cause.
-
-This is the lever on the **tester constraint**: the tester is the slowest step,
-and its cost is driven by the QUALITY of work arriving at it. Surfacing
-browser/transport/policy breaks at skeleton time keeps them out of the tester's
-hand-off and out of re-validation rounds.
-
-**Local standability (v28, principles/02).** Most of the system can stand up
-locally (a committed `run-local` class entry point; hexagonal adapters with
-local substitutes), and the ENGINEER builds real-browser Playwright tests in
-the BUILD phase against that stand-up — browser behaviour is developed with a
-browser, not discovered by the tester in prod. What cannot stand locally is
-enumerated in the delta, each gap mapped to its covering control (skeleton
-probe / synth contract / policy pin / prod validation).
-
-The architect's delta names when a mechanism is new AND what stands locally
-vs cloud-only; the engineer's route places the contract test / browser probe,
-builds the local stand-up + browser suite, and schedules the thin early
-deploy it implies; the tester carries ≥1 browser-transport spec and an honest
-harness, re-exercising (not re-discovering) the engineer's browser flows.
-(Operational detail: `engineer.md`, `tester.md`, `solution-architect.md`,
-principles/02; capability: IMP-006.)
-
-## 17a. Test evidence attaches to the item (v75 — human-directed, ISO)
-When the tester validates a use-case **in prod** (§11a), it attaches its validation
-**evidence to the work item in Linear** — not only to the slice `result.md`. The
-evidence records: which public-facing surface was exercised (browser flow / API call),
-the inputs, the observed result vs the acceptance criteria, the captured artefacts
-(response bodies, screenshots, run logs), and the **prod version + commit SHA** it
-validated (§18a). **An item is not `item_done` until its validating evidence is
-attached** — this is the item → test-evidence link an auditor follows. On a
-validation FAILURE the tester attaches the failing evidence and hands back to
-engineering (the item stays open); the roll-forward fix re-validates and re-attaches.
-Binds **tester** (produces + attaches), **orchestrator** (won't close an item without
-it), and the Linear mirror (`process/linear-mapping.md`). Rationale: ISO — the audit
-trail requirement → commit (§14) → **test evidence** (here) → prod version (§18a) is
-unbroken only if evidence lives on the item. [EXP-090]
-
----
-
-# STAGE 4 — Deploy
-
-## 18. Deploy logging & duration
-- The orchestrator logs the `deploy` event row immediately when the tester
-  passes (or cicd/engineer on pipeline success for cloud/hosted, §2).
-- Each agent brackets its work with `task_start`/`task_end` ledger rows; the
-  engineer populates `duration_s` with wall-clock seconds.
-
-## 18a. Release versioning + prod-resource tagging (v75 — human-directed, ISO)
-When a change is promoted past dev **into prod**, the shipping repo and the prod
-resources are stamped so any running production artifact is traceable back to the
-exact commit, version, and requirement. On each prod promotion:
-1. **Version-tag the shipping repo.** Create an ANNOTATED git tag on the deployed
-   commit carrying the version (e.g. `v1.4.2`) and **push the tag to `origin`**
-   (`git push origin <tag>`) so the version is durable and shared, not local-only.
-2. **Tag the production resources** with BOTH the deployed **commit SHA** and the
-   **version** — whatever an operator/auditor inspects to answer "what version is
-   running here?": AWS resource tags `GitSha`/`Version`; a hosted app's assembly/build
-   version + a `Version`/`GitSha` deployment tag; a container image tag. The cicd /
-   solution-architect owns the per-platform mechanism as a **capability** (it differs
-   by infra).
-3. **The `deploy` DORA event records the version + SHA** (in `--ref`/`--note`) so the
-   ledger itself carries release identity — an incident pins to an exact shipped
-   version instantly (MTTR/CFR).
-4. **Version scheme is a PER-PROJECT policy, not a global constant.** Each project
-   declares its scheme (in `capabilities.md` / a versioning ADR): **SemVer for APIs**
-   (e.g. eDCS — with a stated bump policy), **CalVer for desktop apps**, an **internal
-   release counter** for internal tools. **Default SemVer until the project's
-   versioning ADR lands** — that ADR is in progress and the scheme WILL vary by project
-   type, so do NOT hardcode one scheme into tooling: read the project's declared scheme.
-Rationale: ISO/audit change-control — a production resource is traceable to its commit,
-its version tag, and (via §14 item id + §17 evidence) its requirement and test evidence.
-The version id threads repo tag → resource tag → DORA deploy row. [EXP-090]
-
-## 19. Scheduling over compensation
-
-**Trunk-CD corollary (v29, from s005-h1):** in continuous deployment EVERY
-push is a deploy attempt — a prerequisite (role grant, bootstrap, variable)
-must be in place before the FIRST PUSH of code that needs it, not before a
-notional later "deploy phase". Route deploy-prereq steps ahead of the build
-steps whose pushes will trigger the pipeline. (Original section follows.)
-A hard sequential dependency is a scheduling constraint, not an error to
-tolerate. **Configuration follows its resource** (set a value that references a
-resource in the step AFTER the resource exists — capture-output-then-set), and
-**no compensating logic** for out-of-order execution (no sentinels,
-exists-checks-that-skip, retry-until-created, or tolerant guards absorbing an
-order designed never to occur). Graceful degradation for genuine runtime
-conditions remains correct. A hidden hard edge found during parallel work is a
-scheduling finding: re-serialise and record the edge. (Pipeline detail:
-`cicd.md`; orchestration: `orchestrator.md`.)
-
-## 19a. A framework migration completes its pipeline (v58)
-When a slice MIGRATES the deploy framework (CDK→SST, Serverless→CDK, a runtime
-or IaC change), **converting the CI/CD pipeline and DELETING the dead deploy path
-is part of the migration's done-condition — never a deferred follow-up.** A
-migration that re-platforms the deploy mechanism but leaves the old pipeline
-running the old commands produces a CI deploy pipeline that has never run and
-would FAIL, silently non-functional because all deploys are now by hand. That
-stale pipeline is a misleading asset of the same class as a comment describing
-misbehaviour (EXP-042): it asserts a capability the system does not have.
-Evidence: OagEventSource migrated to SST v3 (CDK `OagFeedStack` destroyed, SST
-deployed) yet `infra.yml` still runs `npx cdk synth` / "Install CDK dependencies"
-/ "Build CDK TypeScript". Rule: in the migration slice the cicd agent rewrites the
-workflow to the new framework's deploy command, updates path triggers + role, and
-deletes the dead steps IN THE SAME CHANGE; the architect's migration delta names
-the pipeline conversion as part of the delta; the EXP-056 pre-flight and the §40
-walking-skeleton probe run THROUGH the converted pipeline so it is proven, not
-assumed. Target: CFR (a non-functional CI deploy path is a latent failure) +
-deployment frequency (a working pipeline replaces by-hand deploys). (Per-role:
-`cicd.md` migration-completeness; `solution-architect.md` migration delta.)
-**A converted/new pipeline is "proven" only once it has actually EXECUTED GREEN
-at least once in the slice that introduced it (v60).** Conversion-in-code is not
-proof; deferring the first real run to an open item (OagEventSource OI-007 deferred
-the infra.yml proof, so it ran for the first time a session later and failed twice
-— `AWS_PROFILE=default` profile-not-found, then a deploy role with zero permissions
-attached) is the deferral §19a forbids, applied to the *proof* rather than the
-conversion. The migration slice triggers the pipeline and watches it green (§19b).
-[EXP-062]
-
-## 19b. Push integrates; a green-local / red-CI run is a DEFECT (v60 — human-directed)
-A CI/CD run is the integration truth; a local green is a prediction of it. The two
-must agree.
-- **Every push sets off a non-blocking CI watch.** The push (§14) does not block
-  the loop, but a committed watcher tails the triggered run to completion. Use the
-  parameterised tool, never hand-assembly: `make -C work/<project> ci-watch`
-  (wraps `gh run watch <id> --exit-status` and returns *only* the failing step's
-  error on red — a token-minimal summary, not the whole log).
-- **A run that fails while the local suite + lint were green is a DEFECT** (raised
-  via `/defect`, JTBD-framed, pre-empts per §F5). "There is no reason a CI run
-  should fail when local passes" — when it does, exactly one of two things is true,
-  and the defect's fix MUST be one of them (never a re-run-and-hope):
-  1. **Local checks did not cover what CI exercised** → close the coverage gap so
-     the local suite would have caught it (the CI-only credential path that broke
-     this session — local always has an AWS profile, CI uses OIDC env creds — is
-     this class: add a check that exercises the env-cred branch).
-  2. **Out-of-band manual configuration was required** → capture it in the runbook
-     AND automate it as a committed script / Make target. We prefer automation over
-     a recurring manual step; a config that must be done by hand each time is itself
-     the defect (the deploy-role permission grant this session → `bootstrap-deploy-role.sh`).
-- A red CI run is never left red and never silently abandoned: it is closed by
-  category 1 or 2, which permanently removes that divergence class.
-Target: MTTR (a red push is caught and raised within one watch-cycle, not discovered
-later) + CFR (each divergence permanently removes a local/CI gap). (Per-role:
-`engineer.md` push+watch+raise; `cicd.md` divergence dichotomy.) [EXP-070]
-
----
-
-# STAGE 5 — Validate
-
-## 20. Tester scope & auto-retro
-The tester validates **customer-observable outcomes** through the public surface
-(browser for web, public API for backend); it does not re-implement exhaustive
-correctness checks. Target for frontend-only validation < 300s; first-backend
-slices may run longer. (How the tester validates — validation-as-code, run
-provenance, identity-before-behaviour, stable selectors — lives in `tester.md`.)
-
-**Auto-retro at delivery:** when a slice is marked `delivered` (validation
-passed, decision-log row written), the orchestrator runs the retro immediately
-and automatically in the same session — no human prompt, no wait. The human may
-interrupt or redirect, but their absence must not delay it.
-
----
-
-# STAGE 6 — Document
-
-## 21. Documenter runs in parallel
-Nothing in the process depends on documentation output. At delivery the
-orchestrator dispatches the documenter **in the background, in parallel** with
-the retro (and with N+1 planning). No gate, agent, or loop step waits on it. The
-documenter commits its own changes and documents what shipped, not what was
-planned. (Doc + runbook detail: `documenter.md`.)
-
----
-
-# STAGE 7 — Retro & improvement
-
-## 22. Change-set queued for next iteration
-The project-agnostic carry-forward register (unscored anticipated effects + queued
-obligations) lives in **`process/open-items.md`** as of the v59 consolidation —
-held outside this rulebook so the file stays rules, not a work queue. It is
-referenced by §10 (next-work selection) and §24 (improvement slices); the retro
-harvests and re-prioritises it each cycle.
-
-## 23. per-project.md discipline
-The orchestrator updates `work/<project>/dora/per-project.md` at the end of each
-slice retro: slice, change, expected DORA effect, actual, regression flag,
-reflection, time-to-first-deploy (s001 only), delivery gap.
-
-## 24. Improvement slices
-Process, tooling, and automation improvements are specified and delivered as
-slices, exactly like product work, in
-`/process/improvement-slices/IMP-NNN-<name>.md` (project-agnostic). Each states
-its **job** (the delivery friction it removes, evidenced from the ledger /
-principle-failures / observed waits), its **DORA target** (named metric +
-anticipated measurable effect), its **done condition** (observable, testable —
-not "agents try harder"), and its **protection** (the test, gate, or committed
-artifact that protects it once human approval leaves the path). The orchestrator
-queues them alongside product slices and picks by best expected DORA return.
-Retro change-sets either land as immediate process-text changes (pure rules) or
-graduate into improvement slices (when they need tooling/tests built).
-
-## 25. Improvement routing — narrowest owner
-The retro and orchestrator route every improvement to the **narrowest artifact
-that owns the behaviour**:
-
-| Learning concerns | Lands in |
-|---|---|
-| One agent's behaviour | `.claude/agents/<agent>.md` |
-| Cross-agent rules of the game (gates, commit discipline, command form, metric defs) | `process-current.md` |
-| A repeated manual action | a committed tool: Makefile target, script, or skill — parameterised |
-| A heavy reference document | a skill (abstract it; don't make agents hold it) |
-| Project-specific facts | the project's `/work` artifacts — never `/process` |
-
-The process file may grow when a genuinely cross-agent rule needs stating;
-content earns its place by being general and load-bearing and is removed only
-for being misplaced or redundant, never for being long. **The DORA baseline is
-the control loop:** every routed change names its target metric and the next
-retro scores anticipated-vs-observed. A change-set is a net win only if
-throughput, quality, frequency, and recovery improve or hold in aggregate — an
-improvement that buys one metric by degrading another is reverted or reworked.
-
-**Token cost is the explicit COST side of this economic ledger (v56 — human-
-directed).** Every run consumes tokens (the agents' compute cost); DORA
-(throughput, quality, frequency, recovery) is the VALUE side. The two are
-optimised TOGETHER, not in isolation: the goal is the most DORA value per token,
-not the fewest tokens. So a token reduction that degrades a DORA metric (slower
-lead time, higher CFR, lost quality) is rejected exactly as a one-metric win
-that degrades another is; and a token INCREASE that buys a real DORA gain (e.g.
-a capable model tier on the constraint agent, an extra verification pass that
-cuts CFR) is accepted as a deliberate, scored bet. Token spend that buys no
-DORA value — re-reading files already in context, redundant agent dispatches,
-oversized context loads, prompt scaffolding that no longer earns its place — is
-pure waste and is removed. Token efficiency is a tracked dimension, never a
-master metric that overrides quality.
-
-## 25a. Changes are experiments (v32 — human-directed)
-
-**Every routed change — agent-file edit, process section, tool, skill note —
-is an EXPERIMENT**, not a permanent acquisition. The goal is agents that are as
-simple and effective as possible: text earns its place by measurably improving
-a DORA metric, and text that cannot demonstrate its value is removed.
-
-The registry is `/process/experiments.md` — one row per routed change:
-id, date, artifact(s) touched, target metric, anticipated effect, scoring
-horizon, status.
-
-**THE VALIDITY BAR — a row is a falsifiable HYPOTHESIS, never a piece of work
-(v58 — human-directed, EXP-063).** Every row admitted to the registry MUST state
-all four, explicitly and checkably: (1) **Problem** — the specific evidenced
-friction/gap; (2) **Solution** — the concrete change tested; (3) **Target DORA
-metric** — a NAMED metric (lead time / deployment frequency / CFR / MTTR; a
-meta/proxy metric such as agent-context-size or registry-validity is allowed only
-where the row explicitly justifies it as a DORA proxy); (4) **Measurement** — the
-observable signal + scoring horizon, phrased so the result CAN come back NEGATIVE.
-A row that merely describes a feature / capability / "work to be done", has no
-named DORA metric, or has a measurement that cannot fail (a did-we-do-the-work
-checklist — "the documenter produces consumer docs", "the architect states
-fitness functions") is **NOT an experiment**: it is rejected at creation and
-deleted on sight. The lifecycle is **adopt-or-delete** — run enough trials, then
-either ADOPT (metric moved → fold the behaviour into the owning agent as plain
-practice and prune the row) or DELETE (metric did not move → undo the change). A
-sound, load-bearing shipped behaviour whose row was only MIS-PHRASED as a
-work-item is handled by deleting the ROW while KEEPING the behaviour as plain
-agent practice; never undo a behaviour that prevents a known defect class because
-its row failed the bar. Statuses and lifecycle:
-
-1. **active** — every routed change enters at routing time **already meeting the
-   validity bar above** (Problem + Solution + named DORA metric + falsifiable
-   Measurement), with a target metric, an anticipated effect, a **scoring
-   horizon** (default: 2
-   scoring opportunities — slices/iterations where the change could have
-   shown its effect; "no opportunity yet" extends the horizon, it does not
-   count against it), and an **applies-to** predicate — the KIND of work that
-   exercises it (e.g. "UI-bearing slices", "multi-party use cases", "any
-   slice with a model diff", "new-platform-mechanism slices"). Not all work
-   tests all experiments: an experiment is a scoring opportunity ONLY for work
-   matching its applies-to. At work selection (§10/§38) the orchestrator reads
-   the registry, lists which active experiments THIS work will exercise, and
-   records that list with the selection — so scoring is honest (a UI slice is
-   not "no opportunity" for a backend-only experiment; it simply doesn't
-   apply) and the agents know up front which experiments their work feeds.
-2. **validated** — anticipated effect observed at retro scoring. The change is
-   then **INTEGRATED (v34 — human-directed)**: the owning agent file(s) are
-   REWRITTEN so the validated behaviour becomes part of the agent's core
-   working instructions — woven into "How you work"/the relevant craft
-   section, phrased as plain operating practice — rather than remaining a
-   bolted-on dated section carrying experiment scaffolding ("process vNN",
-   EXP references, trial caveats). Provenance lives in the registry row and
-   git, not in the agent's prompt. Integration is a SIMPLIFICATION pass — but simplicity is measured as
-   SCAFFOLDING-FREEDOM and NON-ACCRETION, not raw line count (EXP-011 finding:
-   integrating 8 validated experiments removed citations/EXP-ids/caveats and
-   merged overlapping sections, yet net lines barely moved because genuine
-   new behaviour also lands each slice). The bar: no experiment scaffolding
-   (vNN/EXP/trial caveats) remains in the prose the agent reads; overlapping
-   sections are merged; the file does not grow monotonically retro-over-retro
-   from accretion alone; and the behaviour survives intact (next retro
-   spot-checks the mechanism still fires). A file may legitimately grow when a
-   slice adds real new craft — that is not an integration failure. **After
-   integration the row is PHYSICALLY REMOVED from `experiments.md` (v45 —
-   human-directed)** and replaced by a single terse line in
-   `process/experiments-archive.md` (`EXP-NNN — <one-phrase lesson> — integrated
-   <sha>`). `experiments.md` holds ONLY live experiments — `active`,
-   `under-question`, `retirement-trial`; everything `integrated` / `retired` /
-   `reworked→` is pruned to the archive, and `failed` rows are DELETED outright
-   (no archive line — §25a.6), so the working registry (read every
-   retro) stays small. Provenance survives in the agent file (the behaviour),
-   the one-line archive (the index), and git (the full row). The registry must
-   not grow monotonically: each retro prunes the rows that reached a terminal
-   state. Spot re-check an integrated mechanism only if its metric later
-   regresses (recover its row from git). The integration policy is
-   itself an experiment (EXP-011): if integrated agents do not perform at
-   least as well (per-agent median task time, mechanism compliance), the
-   policy is questioned like anything else.
-3. **under-question** — horizon reached with no measurable improvement. The
-   retro must do one of: REWRITE (sharper mechanism → new experiment, new
-   horizon) or mark for **retirement-trial**.
-4. **retirement-trial (null-hypothesis test)** — the text is physically
-   REMOVED from its artifact (git + the registry row keep it recoverable; a
-   removal that "feels risky" is exactly the experiment) and the system runs
-   **4–5 scoring opportunities** without it — one or two opportunities is not
-   a sample, it's an anecdote; "retired" may only be concluded on the full
-   window:
-   - targeted metric DROPS attributably → the change was load-bearing:
-     **reinstate**, mark validated-by-null-hypothesis. A clear, attributable
-     drop may trigger EARLY reinstatement before the window completes (the
-     safety valve) — but early reinstatement on a noisy signal voids the
-     trial; re-run it later rather than half-conclude.
-   - no drop across the full 4–5 opportunities → the text was ornament:
-     **retired** permanently (registry row records the evidence; the artifact
-     stays simpler).
-5. Concurrency guard (NOT a sample-size statement): at most ONE
-   retirement-trial RUNNING per agent artifact at a time — two simultaneous
-   removals from the same artifact confound attribution. Never trial a rule
-   whose failure mode is a prod outage class still open elsewhere —
-   null-hypothesis tests are run where the blast radius is a metric, not a
-   user.
-6. **failed (terminal — DELETED, not archived; v56 — human-directed)** — the
-   change's anticipated effect was NOT observed AND the change is being
-   abandoned or fully superseded by a re-route to a successor experiment. It is
-   neither integrated as behaviour nor a useful null result. Unlike `retired` —
-   where the null result IS the lesson and earns a one-line archive entry — a
-   `failed` row carries no folded-in behaviour and no standalone lesson worth
-   indexing (any durable lesson is carried forward by its successor experiment
-   or a `principle-failures/` note). Because failed rows are also the most
-   VERBOSE (they accrete diagnosis and re-route prose) and contribute no live
-   scoring thread, they **POLLUTE the working registry the orchestrator re-reads
-   every retro**. Therefore a `failed` experiment is **DELETED OUTRIGHT from
-   `experiments.md` with NO archive line** — git retains the full row if it is
-   ever needed. Guard: a failed experiment that has a LIVE re-route must FIRST
-   land its successor (a new experiment row or a principle note) so the thread
-   is not lost, THEN the failed row is deleted in the same change. Failed rows
-   may be deleted at ANY time they are recognised (not only at a retro) — they
-   carry no scoring obligation.
-
-Scoring honesty: a change with a confounded window (multiple changes landed on
-the same metric in the same slice) is scored against its own MECHANISM
-(did the behaviour it prescribes actually occur and visibly help?), not just
-the aggregate metric. The §22 queue remains the list of obligations queued for
-NEXT work; the registry is the scoring view over everything already routed.
-
-## 26. Retro mechanics
-At each retro the orchestrator: recomputes DORA; reviews `principle-failures/`
-and `dora/per-project.md`; **updates `/process/experiments.md`** — scores every
-active experiment that had a scoring opportunity, advances under-question /
-retirement-trial states per §25a; snapshots the current process to
-`process-history/vNN-<date>.md` (filling its anticipated-vs-observed scoring for
-the previous change-set); writes a new `process-current.md` (version+1) whose
-changes target a specific DORA metric justified by evidence; and states the
-anticipated DORA effect of each change so the next retro can score it — **and
-registers every routed change (including agent-file edits) as an experiment row
-at routing time**. A principle is never changed on a single data point —
-require a pattern across principle-failures.
-
-When the process file has visibly accreted (many same-day versions,
-agent-specific detail creeping in), run `/refactor-process`.
-
-**Scriptify the cycle's mechanical operations to save context (v47 — human-
-directed).** Every retro, the orchestrator names the operations it performed
-REPEATEDLY by hand this cycle — bookkeeping, record-writing, file appends,
-verify/restart sequences — and builds or extends a committed script for the
-most-repeated one, so that mechanical work leaves the context window (it becomes
-one allowlisted command, not N Read+Edit cycles). This is §36's "repeated manual
-action → committed tool" made a STANDING retro step, because hand-bookkeeping is
-the orchestrator's own dominant overhead (e.g. observatory: 272 ledger rows + 21
-decision-log appends + 9 defect records in one project, constraint=orchestrator).
-A mechanical op done ≥3× by hand is a script waiting to be written. First
-instances: `dora.py record` (ledger) and `dora.py log-decision` (decision-log
-append). Target: orchestrator context/overhead (the standing constraint) + lead
-time. [EXP-038]
-
-**Review token usage every retro and balance it against DORA (v56 — human-
-directed).** Token spend is the cost side of §24's economic ledger, so each retro
-runs a standing **token-efficiency review** alongside the DORA recompute:
-1. **Estimate the cycle's token consumption and where it went** — which agents /
-   stages / operations dominated. Use the signals available: agent-dispatch count
-   and fan-out width, context-load size (whole-file reads vs targeted reads, the
-   `process-framework` skill's load-only-what-you-need discipline), re-reads of
-   material already in context, model-tier mix (§15a), and the share already
-   absorbed by scripts (EXP-038). The harness reports per-run token totals; record
-   the estimate beside the DORA baseline so it is trackable cycle-over-cycle.
-2. **Name the single highest-leverage reduction** and route it like any change —
-   e.g. tighten a bloated prompt/agent-def, replace whole-file reads with targeted
-   reads or a skill, kill a redundant agent dispatch or duplicate search, scriptify
-   a repeated mechanical op, drop scaffolding that no longer earns its place.
-3. **Score it against DORA, never in isolation (§24).** Pick the change with the
-   best DORA-value-per-token: a token cut that would slow lead time, raise CFR, or
-   lose quality is REJECTED; a token *increase* that buys a real DORA gain (a
-   capable tier on the constraint agent, an extra verification pass that cuts CFR)
-   is an accepted, scored bet. The aim is maximum DORA per token, not minimum
-   tokens. Register the chosen optimisation as an experiment with both its token
-   target AND the DORA metric it must not harm.
-
-**See the plumbing share — split the cost into running-the-OS vs delivering value
-(v59 — EXP-067).** The token-efficiency review above sees *total* cost; this step
-sees *where it goes*. Run `dora.py cost-split [--project <p>] [--window N]` (it
-also lands in `baseline.md`): it splits logged **time + tokens** into **plumbing**
-(orchestrator + flow-manager + retro/gate/bookkeeping events — running the agent
-OS) vs **delivery** (engineer/tester/ui/product/architect/cicd/documenter
-producing & validating customer value), and prints the **plumbing share** of each.
-The retro reads the plumbing share AND its TREND across retros; if it rises or
-exceeds target, route the single highest-leverage overhead reduction (scriptify a
-mechanical op per EXP-038, cut a redundant dispatch, restructure a process step) —
-guarded so delivery (lead time / CFR) is not harmed. Caveat: the split is precise
-for *delegated, logged* work; inline orchestrator coordination is under-counted on
-time and main-loop tokens aren't auto-logged, so pair the cost-split with the
-token-estimate above for the orchestrator's own overhead. Token coverage is
-printed; it improves as dispatches log `--tokens` (the orchestrator records each
-agent's `subagent_tokens` on its `task_end`).
-
----
-
-# STAGE F — Flow & queues (pull-based, v40)
-
-The cross-agent rules of the pull system. They supersede §6's command-stepped
-loop and §9's four-gate list for pull-based projects. Full rationale, diagrams,
-and a worked retro are in `Version2-design/`; this is the rulebook the agents
-follow. Each rule names the DORA metric it targets, per §25a.
+# STAGE F — §F0 first (the substrate every later section runs on)
 
 ## F0. CUTOVER — the work item is the single source of truth (v82)
+<!-- doc-lint:allow-begin — §F0 is the sanctioned anchor that defines old→new; it must name the retired mechanics (§27.3) -->
+
 
 **State lives ONLY in the per-item file.** One file per item at
 `work/<project>/items/active/<ID>.md` (terminal items move verbatim to `items/done/<ID>.md`).
@@ -2346,489 +95,1139 @@ pull. This replaces `make ledger-drift` and `reconcile-registry`.
 and/or `jira` projection agent for that one id (idempotent, independent, non-blocking); a
 full-sweep run is the backstop. Boards are projections — the item always wins.
 
-**Command mapping (old → new):** `dora record … --event enqueue/dequeue/item_done` →
-`wi-append … --event made_ready/pulled/built_green/validated/…`; `queues/*.csv` + `state.md` →
-`views/` (derived); `make ledger-drift` + `reconcile-registry` → `make wi-validate`;
-`dora.py flow`/`compute` → `make wi-project` (stats.*); `sync-linear.py --item` → the `linear`
-agent. **Applies to** OagEventSource (migrated) and every NEW project; the rules in §F1's
-"Single source of truth (v52)" and the CSV/ledger mechanics in §F2–§F9 are **superseded by F0**
-wherever they conflict — the flow *intent* of those rules stands, the *substrate* is F0.
+**Command mapping (old → new)** — the ONE sanctioned place naming retired mechanics (§27.3): <!-- doc-lint:allow -->
+`dora record … --event enqueue/dequeue/item_done` → <!-- doc-lint:allow -->
+`wi-append … --event made_ready/pulled/built_green/validated/…`; `queues/*.csv` + `state.md` → `views/` (derived); <!-- doc-lint:allow -->
+`make ledger-drift` + `reconcile-registry` → `make wi-validate`; `dora.py flow`/`compute` → `make wi-project` (stats.*); `sync-linear.py --item` → the `linear` agent. <!-- doc-lint:allow --> **Applies to** OagEventSource (migrated) and every NEW project; the flow *intent* of the
+later STAGE F rules stands, the *substrate* is F0.
 
-## F1. Work items — hierarchy with two-way links
-Every unit of work is a typed item — `REQ-`/`CHK-`/`SLC-`/`UC-`/`DEF-` — in
-`work/<project>/items/items.csv` (canonical; `items-tree.md` is the rendered
-view, flow-manager-regenerated). Hierarchy: requirement → chunk → slice →
-use-case (→ route steps). **Parent is canonical; the `children` index is rebuilt
-from parents on every mutation**, so the tree traverses both ways without drift.
-`value`/`cost` are product estimates; per-item DORA is COMPUTED from the ledger
-(keyed by `id`), never stored. Done bubbles UP: a slice is done when all its
-use-cases are done; a chunk when its done-condition is met; a requirement when
-all chunks are done (→ ask for more work, §F3d). Target: measurement granularity
-(GLT decomposable down the tree). [EXP-021]
+---
 
-**Single source of truth (v52, EXP-048) — new projects.** The append-only
-ledger is the ONE writer of dynamic state. **Item current-state and queue
-membership are DERIVED** from ledger events via `dora.py project-state`
-(→ `state.md`), never independently written: `items.csv` holds static facts only
-(no `state` column — state, `vc_ratio`, `done_ts` are all derived), and
-`queues/` holds only `policy.csv` (buffers). To change state, append a ledger
-event — never edit a CSV. One writer ⇒ nothing to keep in sync ⇒ the
-coherence-defect family (multiple stores of one fact disagreeing — 10/16 of
-observatory's defects) cannot occur, and the atomic-pull/reconcile/staging
-discipline (EXP-037/041) is unnecessary. **Existing pre-v52 projects keep their
-hand-maintained `items.csv` + queue CSVs and that discipline — they are not
-migrated.**
+# STAGE 0 — Principles & metrics
 
-**CLOSE-ON-GREEN is atomic + RECONCILE-FIRST on resume (v73, EXP-089 — the
-DEFECT-004 close-drift kill).** Since item current-state is DERIVED from the
-ledger, an unrecorded close makes the derived state LIE — and a lying state
-double-dispatches already-built work (the v73 evidence: a whole trunk build wave
-never `item_done`'d). Two mechanical rules, binding on engineer + flow-manager +
-orchestrator:
-1. **Atomic close.** The agent that pushes a build green appends
-   `stage_exit`+`item_done` (with the pushed SHA in `--ref`) **in the same turn as
-   the push** — never deferred. A green push with no same-turn `item_done` is
-   itself a defect. Slice/chunk bubble-up (§F1 "done bubbles up") is recorded in
-   that same turn once the last child closes.
-2. **Reconcile-first on resume.** Before the FIRST pull of a resumed loop the
-   orchestrator runs `make ledger-drift PROJECT=<p>` — diffs trunk `git log`
-   UC/SLC SHAs against ledger `item_done` refs; non-zero (drift) is a hard pull
-   precondition: close/repair every built-but-unclosed item BEFORE pulling. This
-   supersedes v71's "reinforce, not re-legislate" for this class (reinforcement
-   demonstrably failed → make it executable, per the v72 render-diagrams pattern).
+## 0a. Multi-instance operating model
+More than one Claude instance may run against this shared parent repo at once (a Windows
++ a Mac, sharing one `origin/main`), **in parallel on different projects**. Genuinely
+shared state (commit to `main` via reconcile): `.claude/`, `process/` docs, `CLAUDE.md`,
+`README.md`, `_TEMPLATE/`. Project output is already isolated — every `work/<project>/`
+is its own gitignored repo (§14) and **work items are inherently per-file / per-project**
+(§F0), so two instances on two projects touch disjoint file sets; there is no shared
+append-only log to merge-race — per-item files ARE the isolation. Four rules:
 
-**RED CI = NOT DONE; never fake green by guarding (v75 — human-directed).** A red
-CI run means the **engineering + cicd steps have NOT succeeded** — the item is not
-done and the loop MUST NOT advance past it. **Making CI green by skipping or
-guarding the failing job** (an `if:`-guard that no-ops it, disabling the check,
-`continue-on-error`, marking a lane allowed-to-fail) is a **false-green** and is
-forbidden — it fakes success and re-admits the DEFECT-030/032 false-green family
-the anti-false-green machinery exists to kill. The only legitimate way to clear a
-red CI is to make it **genuinely green**: do the work the red is demanding —
-finish the code, **provision the missing infra/secret**, fix the config. A job
-that is legitimately not-yet-runnable because it awaits a §F5 human provisioning
-stays **red and blocking** until provisioned; that red IS the accurate signal, and
-the fix is the provisioning, not a guard. Evidence: CHK-10 SLC-032's dev-deploy
-job went red on an unset OIDC role secret — the "guard the job so CI stays green
-until provisioned" shortcut was **rejected**; the pipeline is not done until the
-bootstrap makes CI truly green. [EXP-090]
+1. **The active-project pointer is machine-local.** `work/ACTIVE` is gitignored; each
+   instance owns its copy. `/project-switch` writes only the local pointer. A flow
+   command that finds no `work/ACTIVE` STOPS and asks for `/project-switch` — never falls
+   back to another machine's project. There is no global "active project".
+2. **Each instance works on its own branch.** Parent-repo commits land on
+   `instance/<project>`; `main` is the reconciled baseline no loop writes directly. On
+   its own branch an instance is the SOLE writer, so nothing conflicts mid-flight —
+   conflicts exist only at the reconcile point. Either instance may `git fetch` the
+   other's branch to borrow an experiment before it lands.
+3. **Reconcile to `main` CONTINUOUSLY** — as often as the work produces a stable point,
+   at latest every retro cadence (§F8) and session boundary. **Batching reconciliation
+   is banned** (it repeats the v60 pooled-commit failure). **Reconcile latency**
+   (instance-branch commit → landed on `main`) is a component of gross lead time; the
+   retro measures and drives it down (§F0 `stats.*` surfaces it as a time thief).
+4. **Support tooling is cross-platform, resolved at start.** Scripts resolve the right
+   interpreter at invocation and cache it machine-locally (the machinery launcher
+   `sh .claude/skills/work-items/scripts/work-items`; all file I/O UTF-8). Agents invoke
+   the launcher or `make wi-*`, never bare `python3`. A support tool that runs on only
+   one OS is a blocker to fix, not to work around.
+
+Targets: gross lead time / throughput (no cross-instance clobber-and-reconcile rework)
+and CFR (no derived-state lies from a merge race). [EXP-089]
+
+## 0b. Production database safety — agents are read-only on prod
+
+A state change against a **production database** — any **non-local, non-Docker**
+database (a real shared/hosted server, not a local clone or dev container) — is the
+single highest-consequence action in the system. This rule is absolute and overrides
+any task instruction, autonomy level, or urgency.
+
+**1. On a production DB, an agent issues SELECT / read-only queries ONLY.** Never a
+state-changing statement (`INSERT`/`UPDATE`/`DELETE`/`MERGE`/`TRUNCATE`, any DDL,
+side-effecting `EXEC`/stored-proc, bulk load) under any circumstances. Local / Docker
+clones are the opposite — the safe target where you DO run updates freely. Prefer a
+read-only prod credential; the rule binds regardless of what the credential permits.
+
+**Never modify cloud infrastructure to gain access.** No creating/changing
+firewall/network rules, credentials, roles, tenants, or any cloud resource to reach a
+DB. If a DB is unreachable, STOP and surface the exact block (error + client IP to
+allow-list) for the human to provision. Access provisioning is a human action.
+
+**2. A required production change is NOT applied by the agent — it produces a sign-off
+bundle** for a human to apply: (a) the exact idempotent, transactional, reversible,
+self-asserting script; (b) a clone of the prod DB (the safe local/Docker target it was
+proven against, never prod); (c) evidence of RUNNING it against the clone (before/after
+state, RED→GREEN, row counts, rollback proof). A human **and a second reviewer** sign
+off (**two-person rule**) before any manual production change.
+
+**3. Prefer an automated reversible path where it exists** — a working reversible
+migration / CD pipeline, developed + proven on a clone, human-gated; still never a
+hand-write to prod. The sign-off bundle is the fallback when no such path exists.
+**Each project records in its OWN space which path applies and how to recognise its
+prod instances** (naming/host/tag) — this file names no project.
+
+**4. Cloning prod into a local/Docker instance for local work is allowed — PII
+stripped at the read boundary** (retain only fields the work needs; drop non-relational
+PII; exclude audit logs; optionally exclude data older than a project-set recency
+window). The local clone is where you run updates freely; prod stays SELECT-only.
+
+A prod state change issued by an agent is a **stop-the-line principle failure**, logged
+in `principle-failures/`. Binds every DB-touching agent. Target: CFR + data-integrity
++ audit. [EXP-091]
+
+## 1. Operating principles (beliefs)
+See `principles/` for the full statements. In force: XP, always-TDD, value
+slicing, trunk-based development, continuous deployment, roll-forward-with-
+reversible-rollback, defect-as-spec, jobs-to-be-done, version-identifiable
+deployments. Treat these as defaults, not laws — deviations are allowed but must
+be logged in `principle-failures/`.
+
+## 2. Metric definitions
+All figures are computed from item event timestamps by `make wi-project` (§F0);
+`stats.*` is the one source.
+- **Gross lead time = wall-clock from idea accepted (`registered`) → running in
+  prod (`done`).** Includes everything: agent-work time, `queue` wait, `external`
+  blocked-time, session idle, overnight, and pipeline iteration loops. `stats.*`
+  splits it by `state_owners`, so every part's contribution is visible.
+- **Time-to-first-deploy = kickoff → slice-001 done.** Target: < 90 min local-only;
+  < 3h for cloud/hosted first deploy.
+- **Delivery gap = deploy(N) → engineer `pulled`(N+1).** Target < 15 min in-session.
+- **Deploy event by project type:** cloud/hosted — CI/CD pipeline live in
+  production (the `built_green`/deploy leg logged by cicd/engineer); local CLI /
+  library — tester validation passes (the `validated` event).
+
+## 3. CFR convention (definitional)
+CFR answers one question: **what fraction of DEPLOYS broke?** A prod issue is one of
+two kinds, kept distinct so they are never conflated (the single-bucket convention
+inflated CFR — every `/defect` used to count):
+
+- **deploy-failure / deploy-recovery** — a change we **just shipped** failed its own
+  validation (a just-deployed item `rejected` back to `reworking`, failed prod smoke,
+  user-visible regression from this deploy). **These are the CFR numerator.**
+- **defect-intake / defect-resolved** (a `defect` item, `DEF-`) — a defect raised
+  against the **standing system** via `/defect`. Real and production-impacting, but
+  not a failure *of a specific recent deploy*, so it is **excluded from CFR** and
+  reported separately as a **defect-arrival rate**. Counting it in CFR would measure
+  how diligently we report, not how often deploys break.
+- **pipeline-failure / pipeline-recovery** — CI/CD red **before** prod. Not in
+  CFR/MTTR; a pipeline-iteration wait (§5), attacked via cicd pre-flight.
+
+**MTTR spans both deploy-failures and defect-intakes** — recovery speed for *any*
+prod issue. `wi-project` classifies by item type and event, so the distinction holds.
+A genuine deploy regression is a deploy-failure, full stop — a defect item is only for
+issues raised against already-shipped, standing work.
+
+## 5. Wait-time taxonomy (the flow model)
+The orchestrator reads `stats.*` as a flow model, finds the constraint (the
+lowest-throughput stage / largest lead-time contributor via `state_owners`), and
+attacks the dominant wait class. Recurring classes and their standing fixes:
+
+| Wait pattern | Fix (where it lives) |
+|---|---|
+| Session-boundary idle (overnight gaps) | Session continuity (§13) |
+| Pipeline iteration loop (fix-push-wait on novelty) | cicd pre-flight + fail-fast (cicd.md) |
+| Human gate wait | Auto-approve + one intake gate (§F5) |
+| Prod-found defect cycle | Cross-stack contract + walking-skeleton probe at skeleton time (engineer.md, §17) |
+| End-of-iteration human prompt | Auto-retro at delivery (§20) |
+| Smoke regression / fragile selector | Stable selectors + surface-change done condition (engineer.md, tester.md) |
+| Permission prompts | Command-form contract + committed allowlist (§15–§16) |
+
+## 5a. Failure semantics — whose problem is it
+A **5xx from a call indicates the CALLED service is failing** — it may recover
+(callers use **jittered exponential backoff** before concluding failure) or be
+defective: **if we own the failing service, a 5xx concludes as a DEFECT item raised**,
+never just an error log. A **4xx indicates the INPUT to the call was wrong — the caller
+owns the problem**: inbound 4xx = our caller's data; a 4xx we RECEIVE from a dependency
+= our request construction, our defect. Acceptance cases, validation specs, and runbooks
+classify on these semantics. (Operational detail per role: agent definitions.)
+
+---
+
+# STAGE 1 — Next-work selection & gates
+
+## 6. Loops
+- **Intake** → `/intake` — requirement OR defect enters here, JTBD-framed,
+  valued/costed; the one upstream human gate (§F5).
+- **Continuous pull** → `/loop-run` — the inner dev loop pulls ready use-cases
+  (parallel by independence, §F2/§F6) until queues drain; replenishes just-in-time
+  (§F3). `/slice-next` is product's internal replenishment routine, not a human gate.
+- **Flow status** → `/flow-status` — queues, buffers, time thieves (§F4), read from
+  the derived `views/`.
+- **New-requirement workflow** — one workflow, two triggers: auto-kicked by
+  `/project-new` or run standalone by `/requirement-new`. Sequence: product vision →
+  architecture + security review → chunk plan → capabilities → first slice.
+- **Retro** → `/retro` — fires at the §F8 cadence (routine slice/chunk closes batch
+  to threshold 3; prod defects / deploy failures trigger immediately).
+- **Defect** → `/defect` — structured intake (expected/actual/intent/importance),
+  reproduce-to-confirm (no phantom fixes), prioritise (§10), fix defect-as-spec +
+  prod re-check, then a gap-closing retro that names the process gap and proposes a
+  closing experiment with its applies-to predicate.
+
+## 7. Agent roster
+| Agent | When dispatched |
+|-------|----------------|
+| product | vision + slice definition (and parallel N+1 per §9b) |
+| solution-architect | architecture delta + security review (and parallel N+1) |
+| cicd | capabilities (environments, pipeline, rollback, flags, allowlist) |
+| engineer | TDD build on trunk |
+| tester | in-prod / public-surface validation |
+| documenter | dispatched in parallel, in the background, at delivery (§21) |
+| linear / jira | per-item board projection, non-blocking (§F0) |
+
+### 7a. Model tiering
+Each agent's `model:` frontmatter is a tunable lever, scored like any other change:
+match the tier to the **judgment density** of the agent's task, not its prestige.
+Current: **opus** = engineer (long-horizon TDD build, the CFR lever), orchestrator
+(the ToC constraint), solution-architect, ui-designer; **sonnet** = product, cicd,
+tester, flow-manager; **haiku** = documenter. On any model release the retro
+re-assesses; every tier move is a registered experiment with a named DORA metric and
+a revert condition (cost without a metric move = revert).
+
+**Availability resilience.** An agent's `model:` must name a model the session can
+actually run — a pinned-but-unavailable model is a hard stop, not a degraded run
+(a mid-run unavailable model killed engineer/orchestrator builds on dispatch). When a
+model is retired/unreachable, re-tier its agents to the next-available model that best
+preserves the judgment-density intent **in the same retro**, before resuming.
+
+**In-session bridge.** Agent `model:` is resolved/cached at session start, so editing
+it does NOT rescue a running session — pass the Agent tool's per-call `model` override
+(it takes precedence) on every spawn of the affected agent; the frontmatter edit is
+the durable fix for the next session.
+
+**Scoring quarantine.** A model-tier change confounds every DORA-scored experiment.
+When any agent's `model:` changes, the retro opens a quarantine window (note it on the
+registry header with date + agents moved). Experiments scored inside the window flag
+`model-confounded` and may not be `validated` on a DORA move alone — they need a
+mechanism-level confirmation or a scoring opportunity after the window closes. The
+window closes when the next retro judges the tier stable (default: 2 slices, no
+further model change).
+
+## 8. Project classification
+- **Cloud/hosted**: full AWS Well-Architected, IAM, the `aws-architecture` skill.
+- **Local-only** (CLI, library, script): skip cloud scaffolding.
+
+(Architect effort per posture: `solution-architect.md`.)
+
+## 9. Gate auto-approval (the deploy gate is automated)
+The **two-gate model (§F5) is the baseline**; the deploy gate now auto-approves
+(§F5a). Every gate decision is appended to `work/<project>/decision-log.md`; between
+gates, run unattended.
+
+**a. Auto-approve where the outcome is clear:**
+- Go/no-go to deploy: auto-approve when tests pass AND lint clean AND build succeeds
+  AND no blocking deviations. App-only diffs auto-approve directly; infra-bearing
+  diffs auto-approve under the §F5a automated policy assurance.
+- **Gate timing under trunk-CD:** every push deploys, so for a route containing
+  infra-bearing commits the go/no-go answer is settled AT ROUTE COMPLETION — before
+  the build wave that pushes them — not after build. An engineer never holds a green
+  commit waiting on a gate (that breaks §14); the orchestrator schedules the gate
+  ahead of the wave.
+- Arch + security for local-only projects with no new infra: architect
+  self-certifies; orchestrator confirms; no human wait.
+- **Security review auto-accept (all project types):** when the architect's delta
+  states an explicit "no new attack surface, no new data flow, no new trust boundary"
+  conclusion, the orchestrator confirms it is present and auto-accepts. A review that
+  surfaces any new control, open risk, or deferred recommendation is not auto-accepted.
+
+**b. Parallel N+1 planning.** Because decisions are logged, planning the NEXT slice
+(product + architect) may begin while the CURRENT slice is built/tested, provided the
+two are sequentially independent; otherwise serialise.
+
+## 10. Next-work selection — the open-items register
+"What runs next" is decided against the full set of unaddressed items, not just the
+chunk plan. System-learning residue lives in `/process/improvement-slices/` +
+`process/open-items.md` (project-agnostic carry-forward); project residue lives in
+`work/<project>/open-items.md`.
+
+When work is selected, also identify and log which ACTIVE experiments
+(`/process/experiments.md`) it will exercise (match to each experiment's applies-to
+predicate, §25a) — the known-up-front scoring opportunity set.
+
+Selection rule, applied at every "what next" decision and logged:
+1. **DORA-helping process improvements first** — system learning is this repo's goal
+   (bounded by judgement: don't starve a real customer need).
+2. **User-value items ranked by job served** — core jobs beat secondary jobs.
+3. **Risk items** (security hardening, debt) scheduled before the slice that widens
+   the surface they guard.
+
+(Register mechanics: `orchestrator.md`; job classification: `product.md`; chunk-plan
+ownership: `product.md`.)
+
+---
+
+# STAGE 2 — Planning (slice / use-cases / acceptance)
+
+## 11. Slice → use-case hierarchy
+> chunk (capability) → slice (customer value, gated) → use case
+> (separately buildable/testable unit) → route steps (red→green commits)
+
+A slice is decomposed at planning into **use cases** so the build is not serialised as
+one lump. Each use case states actor, trigger → observable outcome, its own done
+condition, the acceptance cases it pins, and its **dependency edges** (only where
+genuinely required — a false edge costs parallelism). The flow-manager reads the edges
+as the parallelism plan; genuinely sequential mutations of one seam stay sequential.
+(Decomposition is product's craft — `product.md`; engineer routes per use case,
+tester validates the slice as one increment.)
+
+## 11a. Every chunk maps to a Job-to-Be-Done with articulated value
+**A chunk whose value we cannot articulate cannot be prioritised.** A job *code* is
+not a value statement. Every chunk MUST carry a JTBD value statement answering, in
+user/beneficiary terms: (1) **who gets value** — the named beneficiary, never "the
+system"; (2) **what they can now do** they could not before; (3) **why this takes
+priority** — for secondary/enabling chunks this MUST name the CORE value it unblocks
+and why it is on the critical path. Each also carries a **Purpose** (a few words of
+WHY) that becomes the chunk's board title suffix (`CHK-N · <name> — <purpose>`).
+Product authors this in the chunk's definition; it is the basis for prioritisation.
+A chunk that cannot be articulated this way is **not prioritisable** — surface it, do
+not cost or pull it; **never fabricate value to make it schedulable**. If articulating
+reveals several JIT chunk-wrappers are really one job, consolidate them. [EXP-073]
+
+## 11b. Use-case flow — deploy-per-UC
+Use cases do not wait for the slice to batch-deploy; each runs its own thin
+build→deploy→probe loop on trunk:
+1. **A use case with a deployable surface is DONE only when it is deployed and its
+   committed probe is green in prod** (flag-OFF deploys count — dark code deployed
+   early is the §40 norm). The probe is ENGINEER-owned, committed, parameterised —
+   never a tester dispatch. The tester still validates the SLICE exactly once; per-UC
+   probes shrink what reaches it, they do not multiply it (protects the constraint).
+2. **Deploys never overwrite each other by construction:** same-pipeline deploys
+   serialise via the pipeline's concurrency group; cross-pipeline order is a §19
+   schedule edge in the route. A UC deploy that must wait on another's is a route
+   edge — never a human watching two pipelines.
+3. **Builds overlap freely** wherever seams allow — build start order is never the
+   constraint; deploy ORDER is.
+
+**Infra-flag — defer an unconfirmed external dependency, don't block the skeleton.**
+The §40 use-case-flag pattern extends to INFRA: when an infra capability depends on an
+external resource whose identifier is not yet confirmed (§17.1), the capability ships
+**behind a default-OFF infra flag** so the CORE walking skeleton deploys NOW and the
+unconfirmed dependency defers to an open item — never held back until the dependency
+resolves. The flag default is OFF (promotion flips it once §17.1's check passes).
+Target: deployment frequency + lead time, guarded by CFR. [EXP-057]
+
+## 11c. Decision-debt — accepted tradeoffs with a revisit trigger
+Some scope decisions are **removals/acceptances we do not expect to revisit** —
+distinct from tech-debt (a shortcut *queued* to be paid back) and the decision-log (a
+record of a decision made). A **decision-debt** entry is a deliberate long-term
+decision carrying a known tradeoff and a **revisit trigger**: we accept the tradeoff
+and do not spend cost re-evaluating it until the trigger fires. Recorded in
+`work/<project>/decision-debt.md` (append-only): `id (DD-nnn)`, the decision, the
+tradeoff accepted, and the revisit trigger (a concrete future condition — a new
+requirement pressuring the same axis, or a defect — NOT a cadence, NOT "someday").
+This keeps a settled decision from being silently relitigated and keeps the queues
+free of work we have decided not to do. [EXP-076]
+
+## 12. Acceptance cases
+Product and architect co-author the slice's acceptance cases; the architect supplies
+the technical/observable conditions and security controls (which become policy tests
+at build time). Every acceptance case is tagged with its use case.
+
+## 12a. Every use-case is board-ready: title, why, acceptance
+The human-facing board (one issue per use-case, mirrored per item by the `linear`/`jira`
+projection agent, §F0) shows, **sourced from the use-case's own item definition and
+never invented at sync time**: a human-readable title; a why-it-matters statement (the
+observable outcome/value); and its acceptance criteria. These live in the item's
+`## Definition` (§11, §12); the board **mirrors** them. A use-case the sync finds with
+**no acceptance criteria** is flagged **`needs-acceptance`** and is **not Ready** — it
+cannot be pulled or built until product authors them (§F definition-of-ready). Genuine
+gaps are flagged, **never back-filled with fabricated criteria**. [EXP-072]
+
+## 12b. Multi-party / multi-instance modelling
+When a use case involves MORE THAN ONE PARTY operating SEPARATE INSTANCES (two
+browsers, two devices, a sharer and a joiner), the happy-path of one instance is not
+the use case — model BOTH sides:
+1. **A state machine per instance.** Name each party's states/transitions. A change in
+   one that must surface in the other is a transition with a SYNC POINT.
+2. **Classify every sync point as in-band or out-of-band.** *In-band* = the app carries
+   it (a WS frame; a join that triggers a state change visible in both boards — model
+   the fan-out). *Out-of-band* = a human carries it outside the app (a code by chat).
+   Out-of-band sync is still part of the use case: the affordance that feeds it
+   (copy/display) must serve the RECEIVING party's actual need.
+3. **Acceptance covers the cross-instance transition, not just one side.** A defect
+   found only by a human driving two instances by hand is a modelling gap, not a
+   test-count gap.
+(Per-role: product models both parties' state machines + sync-point table; engineer
+builds to both; tester validates from each instance's vantage.)
+
+## 12c. Shared change-impact model
+Every project maintains a small, shared, committed dependency model in
+`work/<project>/architecture/dependencies/` — mermaid, load-bearing:
+- **`use-case-deps.mmd`** — use-case/behavioural dependency graph (product at slice
+  planning per §11; engineer extends as use cases land).
+- **`class-deps.mmd`** — module/class dependency at SEAM granularity (engineer-owned;
+  node = module/port/adapter, never every class).
+- **`data-flow.mmd`** — runtime data-flow with **platform gates as explicit nodes**
+  (WAF, authorizers, cache layers, TTL semantics, CSP). Solution-architect-owned; each
+  slice's delta is a diagram delta. A platform gate that isn't a node is how
+  strike-class defects hide.
+
+Rules: (1) **read-before-build** — engineer routes against the model; hard edges ARE
+§19 schedule constraints. (2) **updated-in-commit** — any commit that adds/removes/
+redirects an edge updates the `.mmd` in the SAME commit, marking changed nodes/edges;
+an unmarked change is a principle failure. (3) **read-before-test** — the tester
+derives its plan from the model diff since the last validated sha; specs are tagged
+`@covers <node-id>` so the impacted set is mechanically listable and spec VALIDITY is
+reassessed when a covered node changes. (4) **load-bearing or deleted** — an artifact
+no agent reads at decision time is ornamental; keep node granularity coarse. (5) **one
+canonical node-id form (kebab-case)** — a node id and its `@covers` tag must be the
+identical string; `make impacted-tests` will NOT fuzzy-match camelCase↔kebab.
+Targets: tester (constraint), CFR (impact-blind testing misses the changed area), MTTR
+(data-flow is the diagnosis map).
+
+---
+
+# STAGE 3 — Build (trunk, TDD)
+
+## 13. Session continuity (primary wait-reduction lever for local-only)
+- **a.** Start a session, finish a deliverable.
+- **b.** Requirement workflow + first slice in one session.
+- **c.** Don't dispatch the tester near end of session.
+- **d.** Retro runs in the same session as delivery — automatic (§20).
+- **e.** Never leave a defect recovery pending validation at a session boundary — if a
+  roll-forward fix deploys, re-validate immediately in the same session (an overnight
+  gap once inflated one MTTR pair to ~9h).
+
+## 14. Commit discipline
+The engineer commits to trunk every time the full test suite **and lint** go green
+(lint passes inside the done-condition, not discovered post-commit).
+- **Commit when green and lint clean, never when red.**
+- **Message states intent, not mechanics. One logical change per commit.**
+- **Conventional Commits format** (required in Viggo-fix, default elsewhere): subject
+  `type(scope): <intent>` where `type` ∈ {feat,fix,docs,style,refactor,perf,test,build,
+  ci,chore,revert}; append `!` (or a `BREAKING CHANGE:` footer) for a breaking change.
+  Keep the `Co-Authored-By` trailer.
+- **Reference the tracked item — ISO traceability.** Every implementing commit names
+  its **work-item id** (the board id it is mirrored to, e.g. `VIG-12`), plus the
+  customer ticket where one exists (e.g. Jira `PP-127`), so an auditor can trace change
+  ⇄ requirement — e.g. `fix(pnl): resolve issuing-State against Country.Code (VF-003,
+  PP-127)`. This binds in BOTH repos. The board is a projection of the item (§F0); an
+  item not yet mirrored is wired to its board **before** its first commit lands (no
+  orphan commits). A genuine chore with no item is `chore: …`, never a fabricated id.
+- **Commit TARGET — two separate repositories.** Each `work/<project>/` is its own
+  independent git repo so a project can be lifted out standalone. **Project output** —
+  code, the project's **items** (`items/active/`, `items/done/`), the derived
+  **`views/`**, slices, decision-log — is committed INSIDE the project repo:
+  `git -C work/<project> add <paths> && git -C work/<project> commit -m "…"`.
+  **Agent-structure and process changes** (`.claude/`, `process/`, `CLAUDE.md`,
+  `README.md`) are committed in THIS parent repo on `instance/<project>`, reconciled
+  to `main` continuously (§0a Rules 2–3). The parent repo does not track project
+  contents (`.gitignore: /work/*/`); `work/ACTIVE` is machine-local + gitignored (§0a
+  Rule 1). **Never mix the two repos in one commit** — a project-output commit in the
+  parent repo (or vice-versa) is the cross-boundary leak this split exists to prevent
+  (cf. the bare-root-`slices/` principle failure).
+- **Push to a VERIFIED remote as part of the done-condition** — integration is part of
+  *done*, not deferred (batching once reached 44 commits ahead, then failed CI twice). No
+  remote, or one the agent cannot verify is the project's intended origin → do NOT push,
+  report and stop. A verified remote (`git remote get-url origin` resolves to the known
+  origin) → push trunk each time a use-case's full done-condition is met (suite + lint
+  green); one UC's green trunk is one push, never accumulate. After every push set off the
+  non-blocking CI watch (§19b) and keep working; a red run where local was green becomes a
+  defect (§19b), never a silent failure.
+- **Parallel-committer isolation = worktree.** When 2+ agents COMMIT code concurrently on
+  one project repo, a file boundary is not enough — `git add` over a shared index sweeps a
+  co-worker's staged files into your commit (recurred 4×). The orchestrator dispatches
+  such committers in git WORKTREE isolation (`git worktree add`) so each has a private
+  index. This is the ONE §14 exception to the trunk/no-worktree default, **orthogonal to
+  §40 flag-isolation** (which stays the rule for behavioural seam-independence in a single
+  tree). Single-committer cycles keep the plain trunk tree; the explicit-pathspec rule
+  (`git commit -- <your-paths>`) is the within-tree fallback. [EXP-097]
+- **Never `git stash` a shared tree** — stash-all captures OTHER agents' uncommitted work
+  and hides it. Commit ONLY your explicit pathspec and `git pull --rebase --autostash` for
+  just your own staged change; leave every file you do not own untouched.
+
+## 15. Command form — the allowlist contract (all agents)
+Every Bash command matches the committed allowlist in `.claude/settings.json` so it
+runs without a prompt:
+- Run everything from the project root. NEVER `cd … && …`, `pushd`, or `source … && …`
+  — compound prefixes match no allowlist pattern and always prompt. Use
+  `npm --prefix <dir> run <script>`, `make -C <dir> <target>`, `git -C <dir> …`, and
+  root-relative script paths.
+- Commands must not hand-assemble env-var prefixes or long argument strings inline.
+  Defaults live in config; parameterised invocation lives in the root `Makefile`
+  (`make wi-append …`, `make validate ITER=… SLICE=…`).
+- A command class the allowlist lacks is a capability gap: name it so cicd extends the
+  allowlist in the same slice — never work around it with a novel one-off shape.
+- **Edit files with the file tools, never Bash.** Mutating a file with `cat >> f`,
+  `echo … >>`, `tee`, `sed -i`, or any shell redirection always prompts. Use Edit/Write
+  for every prose/markdown file (decision-log, open-items, experiments, item
+  definitions, project.md). For item STATE use the committed writer
+  (`make wi-append …`), never a hand-edit of an item's `events:`. Reach for Bash only
+  to RUN things. A prompt caused by editing a file through the shell is a principle
+  failure. [EXP-032]
+
+## 16. Tools over permissions
+Permission prompts are a wait class to engineer away, not a safety mechanism. Safety
+comes from tests, gates, scoped IAM, and committed reviewable tooling.
+1. **Recurring command class → committed tool + narrow allowlist** (exact path/target,
+   never an interpreter or task-runner wildcard).
+2. **Mutating actions are protected by the process, not the prompt** — `git push` to
+   trunk is allowlisted because tests+lint must be green (§14) and gates precede
+   deploys (§9).
+3. **New surface → allowlist in the same slice** — cicd OWNS `.claude/settings.json`
+   and applies the narrow scoped patterns the surface needs in the capability step.
+4. **Tooling self-service** — every agent CREATES the committed tooling its role
+   depends on in the same slice, tested and documented. Flag-don't-fix applies only to
+   what an agent cannot own (permissions → cicd).
+5. **Session-start config-resolution rule.** Harness config read at session start —
+   `.claude/settings.json` `env`, agent `model:` frontmatter (§7a), allowlist patterns
+   — does NOT take effect for shells/dispatches already running. Editing it mid-session
+   is the durable fix for the NEXT session, never a rescue for this one. A capability
+   whose only mechanism is session-start config must be bridged mid-session by a
+   mechanism that does NOT depend on the inherited shell env (a committed wrapper /
+   Make target whose recipe sets what it needs internally, or the per-call override).
+   The hand-typed inline `PATH=…` prefix is NOT the bridge — it is the §15
+   novel-shape violation. Such a change is scored on the FIRST relevant command of the
+   next fresh session. [EXP-050]
+
+(The root `Makefile` is agent-ops; the per-project `src/infra/Makefile` is deploy-ops
+only — never conflate them.)
+
+## 17. Defect-prevention contracts (cross-agent principle)
+Defects whose root cause is detectable before production must be pinned by a test/probe
+**at the level the risk lives** and at the earliest point visible — not found in live
+validation. Standing classes (each pinned as an executable check, never a written note):
+- **Cross-stack / cross-boundary contracts** — asserted at **synth time** (synth both
+  templates; assert the path/name contract between them).
+- **IAM grant = the FULL operation set of the code path, not its name.** A write/append/
+  ingest path is almost always READS-THEN-WRITES — an event-store APPEND grant = the read
+  ops + write ops (`dynamodb:Query`+`GetItem`+`PutItem`, +`kms:Decrypt`+`GenerateDataKey`
+  for an encrypted table), never `PutItem` alone. Architect derives it from the full
+  SDK-op set; the engineer's code↔policy pin asserts it. Evidence: ingest hit it 3×.
+  CFR + MTTR. [EXP-060]
+- **Diagrams are render-validated before reported done.** A Mermaid diagram is NOT done
+  until the committed `make -C work/<project> render-diagrams` gate is green (mmdc). Binds
+  documenter, solution-architect, orchestrator. Evidence: a `fix(diagram)` committed
+  without re-rendering. CFR + GLT. [EXP-088]
+- **Node ESM bundles get a CJS-require shim + an import-the-bundle smoke.** An ESM handler
+  whose transitive deps `require()` internally crashes at RUNTIME (`Dynamic require`) —
+  clean bundle, fails on run. cicd injects the `createRequire` banner (or bundles CJS); a
+  smoke that `node`-imports the bundle fails until present. (DynamoDB reserved-keyword
+  crashes are the same class, aliased via `ExpressionAttributeNames`.) CFR + MTTR. [EXP-061]
+- **External / cross-account resource identifiers** the stack does NOT create (a layer
+  ARN, a shared cross-account resource, a third-party endpoint) — asserted to resolve
+  BEFORE the first real deploy by a committed check that FAILS until it resolves, never a
+  "CONFIRM at build" note. Evidence: first deploy rolled back on non-existent layer ARNs.
+  CFR + MTTR. [EXP-056]
+- **New platform-integration mechanisms** (first WebSocket, CDN behaviour, auth flow,
+  queue) get an early **walking-skeleton probe**: one real request through the full
+  deployed path with the REAL client technology, BEFORE use cases build on top.
+- **Wire-on-deploy hand-offs**: the receiving role lands a contract test that FAILS until
+  X is wired.
+
+**"Real client" for a web surface means a real BROWSER, never a node probe.** A node
+`ws`/`fetch` probe runs below the browser's security/transport layer and returns a FALSE
+GREEN (bypasses CSP `connect-src`, config-injection ordering, mixed-content, event
+ordering — 4 of 6 root causes of one defect class were browser-only). Drive it via
+committed Playwright; use interactive-browser DISCOVERY before a spec exists, then convert
+each finding into a committed REGRESSION spec. **A defect is not closed until the
+end-to-end USER symptom is reproduced and pinned** — not just the first secondary cause.
+
+This is the lever on the **tester constraint**: the tester is the slowest step and its
+cost is driven by the QUALITY of work arriving. Surfacing browser/transport/policy breaks
+at skeleton time keeps them out of re-validation rounds. **Local standability:** most of
+the system stands up locally (a committed `run-local` entry point; hexagonal adapters with
+local substitutes) and the ENGINEER builds real-browser Playwright tests against it in the
+BUILD phase; what cannot stand locally is enumerated in the delta, each gap mapped to its
+covering control. The tester re-exercises (not re-discovers) those flows.
+
+## 17a. Test evidence attaches to the item
+When the tester validates a use-case **in prod** (§11b), it attaches its validation
+evidence **to the work item** (`## Definition`/evidence block, and mirrored to the
+board by the projection agent) — not only to the slice `result.md`. Evidence records:
+the public-facing surface exercised (browser flow / API call), the inputs, the observed
+result vs the acceptance criteria, the captured artefacts, and the **prod version +
+commit SHA** validated (§18a). **The `validated` event carries the evidence ref** —
+an item cannot reach `done`/`resolved` without it, so the item → test-evidence link an
+auditor follows is enforced by the write path (§F0), not by a checklist. On a
+validation FAILURE the tester attaches the failing evidence and appends `rejected`
+(item returns to `reworking`); the roll-forward fix re-validates and re-attaches. Binds
+tester (produces + attaches) and the board projection. [EXP-090]
+
+---
+
+# STAGE 4 — Deploy
+
+## 18a. Release versioning + prod-resource tagging (ISO)
+When a change is promoted past dev **into prod**, the shipping repo and prod resources
+are stamped so any running production artifact traces back to the exact commit,
+version, and requirement. On each prod promotion:
+1. **Version-tag the shipping repo.** Annotated git tag on the deployed commit carrying
+   the version (e.g. `v1.4.2`), pushed to `origin` so it is durable and shared.
+2. **Tag the production resources** with BOTH the deployed **commit SHA** and the
+   **version** — whatever an operator/auditor inspects to answer "what version is
+   running here?" (AWS `GitSha`/`Version` tags; a container image tag; an assembly
+   build version). cicd / solution-architect owns the per-platform mechanism as a
+   capability (it differs by infra).
+3. **The deploy event records version + SHA** (in the `built_green`/deploy leg's `--ref`
+   / `--note`) so `stats.*` carries release identity — an incident pins to an exact
+   shipped version instantly (MTTR/CFR).
+4. **Version scheme is a PER-PROJECT policy.** Each project declares its scheme (in
+   `capabilities.md` / a versioning ADR): SemVer for APIs, CalVer for desktop, an
+   internal release counter for internal tools. **Default SemVer until the project's
+   versioning ADR lands** — do NOT hardcode one scheme into tooling; read the project's
+   declared scheme.
+Rationale: ISO/audit change-control — the version id threads repo tag → resource tag →
+deploy event; combined with §14 (item id) and §17a (evidence) the trail requirement →
+commit → test evidence → prod version is unbroken. [EXP-090]
+
+## 19. Scheduling over compensation
+**Trunk-CD corollary:** every push is a deploy attempt — a prerequisite (role grant,
+bootstrap, variable) must be in place before the FIRST PUSH of code that needs it, not
+before a notional later "deploy phase". Route deploy-prereq steps ahead of the build
+steps whose pushes trigger the pipeline. A hard sequential dependency is a scheduling
+constraint, not an error to tolerate. **Configuration follows its resource**
+(capture-output-then-set), and **no compensating logic** for out-of-order execution
+(no sentinels, exists-checks-that-skip, retry-until-created, or tolerant guards
+absorbing an order designed never to occur). Graceful degradation for genuine runtime
+conditions remains correct. A hidden hard edge found during parallel work is a
+scheduling finding: re-serialise and record the edge (§F7). (Detail: `cicd.md`,
+`orchestrator.md`.)
+
+## 19a. A framework migration completes its pipeline
+When a slice MIGRATES the deploy framework (CDK→SST, a runtime or IaC change),
+**converting the CI/CD pipeline and DELETING the dead deploy path is part of the
+migration's done-condition — never a deferred follow-up.** A migration that
+re-platforms the deploy mechanism but leaves the old pipeline running the old commands
+produces a CI deploy pipeline that has never run and would FAIL — silently
+non-functional because all deploys are now by hand. In the migration slice cicd
+rewrites the workflow to the new framework's command, updates path triggers + role, and
+deletes the dead steps IN THE SAME CHANGE; the architect's migration delta names the
+pipeline conversion. **A converted/new pipeline is "proven" only once it has actually
+EXECUTED GREEN at least once in the slice that introduced it** — conversion-in-code is
+not proof; deferring the first real run to an open item is the deferral this rule
+forbids, applied to the *proof*. The migration slice triggers the pipeline and watches
+it green (§19b). Target: CFR + deployment frequency. [EXP-062]
+
+## 19b. Push integrates; a green-local / red-CI run is a DEFECT
+A CI/CD run is the integration truth; a local green is a prediction of it. The two must
+agree.
+- **Every push sets off a non-blocking CI watch.** The push does not block the loop,
+  but a committed watcher tails the run to completion: `make -C work/<project> ci-watch`
+  (wraps `gh run watch <id> --exit-status`, returns only the failing step's error on
+  red).
+- **A run that fails while the local suite + lint were green is a DEFECT** (raised via
+  `/defect`, pre-empts per §F5). Exactly one of two things is true, and the fix MUST be
+  one of them (never re-run-and-hope): (1) **local checks did not cover what CI
+  exercised** → close the coverage gap so the local suite would have caught it (e.g. the
+  CI-only OIDC-cred path — add a check exercising the env-cred branch); (2) **out-of-band
+  manual configuration was required** → capture it in the runbook AND automate it as a
+  committed script / Make target (a config done by hand each time is itself the defect).
+- A red CI run is never left red and never silently abandoned: it is closed by category
+  1 or 2, permanently removing that divergence class.
+Target: MTTR + CFR. (Per-role: `engineer.md`, `cicd.md`.) [EXP-070]
+
+---
+
+# STAGE 5 — Validate
+
+## 20. Tester scope & auto-retro
+The tester validates **customer-observable outcomes** through the public surface
+(browser for web, public API for backend); it does not re-implement exhaustive
+correctness checks. Target for frontend-only validation < 300s; first-backend slices
+may run longer. (How the tester validates — validation-as-code, run provenance,
+identity-before-behaviour, stable selectors — lives in `tester.md`.)
+
+**Auto-retro at delivery:** when a slice is `done` (validation passed, decision-log row
+written), the orchestrator runs the retro immediately and automatically in the same
+session — no human prompt, no wait. The human may interrupt or redirect, but their
+absence must not delay it.
+
+---
+
+# STAGE 6 — Document
+
+## 21. Documenter runs in parallel
+Nothing in the process depends on documentation output. At delivery the orchestrator
+dispatches the documenter **in the background, in parallel** with the retro (and with
+N+1 planning). No gate, agent, or loop step waits on it. The documenter commits its own
+changes and documents what shipped, not what was planned. (Detail: `documenter.md`.)
+
+---
+
+# STAGE 7 — Retro & improvement
+
+## 22. Change-set queued for next iteration
+The project-agnostic carry-forward register (unscored anticipated effects + queued
+obligations) lives in **`process/open-items.md`** — held outside this rulebook so the
+file stays rules, not a work queue. Referenced by §10 (next-work) and §24 (improvement
+slices); the retro harvests and re-prioritises it each cycle.
+
+## 23. per-project.md discipline
+The orchestrator updates `work/<project>/dora/per-project.md` at the end of each slice
+retro: slice, change, expected DORA effect, actual, regression flag, reflection,
+time-to-first-deploy (s001 only), delivery gap. The numbers are read from `stats.*`
+(§F0), not recomputed by hand.
+
+## 24. Improvement slices
+Process, tooling, and automation improvements are specified and delivered as slices,
+exactly like product work, in `/process/improvement-slices/IMP-NNN-<name>.md`
+(project-agnostic). Each states its **job** (the delivery friction it removes,
+evidenced from `stats.*` / principle-failures / observed waits), its **DORA target**
+(named metric + anticipated effect), its **done condition** (observable, testable — not
+"agents try harder"), and its **protection** (the test, gate, or committed artifact
+that protects it once human approval leaves the path). Retro change-sets either land as
+immediate process-text changes (pure rules) or graduate into improvement slices (when
+they need tooling/tests built).
+
+## 25. Improvement routing — narrowest owner
+The retro and orchestrator route every improvement to the **narrowest artifact that
+owns the behaviour**:
+
+| Learning concerns | Lands in |
+|---|---|
+| One agent's behaviour | `.claude/agents/<agent>.md` |
+| Cross-agent rules of the game (gates, commit discipline, command form, metric defs) | `process-current.md` |
+| A repeated manual action | a committed tool: Makefile target, script, or skill — parameterised |
+| A heavy reference document | a skill (abstract it; don't make agents hold it) |
+| Project-specific facts | the project's `/work` artifacts — never `/process` |
+
+Content earns its place by being general and load-bearing (and is removed for being
+misplaced or redundant — see §27's ceiling). **The DORA metrics are the control loop:**
+every routed change names its target metric and the next retro scores
+anticipated-vs-observed. A change-set is a net win only if throughput, quality,
+frequency, and recovery improve or hold in aggregate — an improvement that buys one
+metric by degrading another is reverted or reworked.
+
+**Token cost is the explicit COST side of this economic ledger.** Every run consumes
+tokens (the VALUE side is DORA). The two are optimised TOGETHER: the goal is the most
+DORA value per token, not the fewest tokens. A token reduction that degrades a DORA
+metric is rejected exactly as a one-metric win that degrades another is; a token
+INCREASE that buys a real DORA gain (a capable tier on the constraint agent, a
+verification pass that cuts CFR) is an accepted, scored bet. Spend that buys no DORA
+value — re-reading files already in context, redundant dispatches, oversized context
+loads, dead scaffolding — is pure waste and is removed.
+
+## 25a. Changes are experiments
+**Every routed change — agent-file edit, process section, tool, skill note — is an
+EXPERIMENT**, not a permanent acquisition. Text earns its place by measurably improving
+a DORA metric; text that cannot demonstrate its value is removed. The registry is
+`/process/experiments.md` — one row per routed change.
+
+**THE VALIDITY BAR — a row is a falsifiable HYPOTHESIS, never a piece of work.** Every
+row MUST state, explicitly and checkably: (1) **Problem** — the specific evidenced
+friction; (2) **Solution** — the concrete change tested; (3) **Target DORA metric** — a
+NAMED metric (lead time / deployment frequency / CFR / MTTR; a proxy such as
+agent-context-size is allowed only where the row justifies it as a DORA proxy); (4)
+**Measurement** — the observable signal + scoring horizon, phrased so the result CAN
+come back NEGATIVE. A row that merely describes a feature, has no named metric, or has a
+measurement that cannot fail is NOT an experiment: rejected at creation, deleted on
+sight. The lifecycle is **adopt-or-delete**. A sound shipped behaviour whose row was
+only MIS-PHRASED is handled by deleting the ROW while KEEPING the behaviour as plain
+agent practice; never undo a defect-preventing behaviour because its row failed the bar.
+
+Statuses:
+1. **active** — enters at routing time meeting the bar, with a target metric,
+   anticipated effect, a **scoring horizon** (default 2 scoring opportunities; "no
+   opportunity yet" extends it, does not count against it), and an **applies-to**
+   predicate (the KIND of work that exercises it). At work selection the orchestrator
+   lists which active experiments THIS work exercises and records that with the
+   selection, so scoring is honest.
+2. **validated** — anticipated effect observed at retro. The change is then
+   **INTEGRATED**: the owning agent file(s) are rewritten so the behaviour becomes
+   plain operating practice (no `vNN`/EXP/trial scaffolding in the prose the agent
+   reads; overlapping sections merged). Provenance lives in the registry row and git.
+   **After integration the row is PHYSICALLY REMOVED from `experiments.md`** and
+   replaced by a one-line entry in `process/experiments-archive.md`
+   (`EXP-NNN — <lesson> — integrated <sha>`). The working registry holds ONLY live rows.
+3. **under-question** — horizon reached with no improvement. Retro must REWRITE
+   (sharper mechanism → new experiment) or mark for retirement-trial.
+4. **retirement-trial (null-hypothesis test)** — the text is physically REMOVED (git +
+   the row keep it recoverable) and the system runs **4–5 scoring opportunities** without
+   it. A targeted-metric DROP attributable to the removal → the change was load-bearing:
+   reinstate (validated-by-null-hypothesis). No drop across the full window → ornament:
+   retired permanently (row records the evidence). One or two opportunities is an
+   anecdote, not a sample.
+5. **Concurrency guard:** at most ONE retirement-trial running per agent artifact.
+   Never trial a rule whose failure mode is an open prod-outage class.
+6. **failed (terminal — DELETED, not archived)** — anticipated effect NOT observed AND
+   the change is abandoned/superseded. Neither integrated behaviour nor a useful null
+   result, and failed rows are the most verbose, so they POLLUTE the working registry:
+   **deleted outright from `experiments.md`, no archive line** (git retains the row).
+   Guard: a failed experiment with a live re-route must FIRST land its successor, THEN
+   the failed row is deleted in the same change. Failed rows may be deleted at any time.
+
+Scoring honesty: a change with a confounded window (multiple changes on the same metric
+in the same slice) is scored against its own MECHANISM (did the behaviour it prescribes
+occur and visibly help?), not just the aggregate metric.
+
+## 26. Retro mechanics
+At each retro the orchestrator: recomputes the metrics via `make wi-project` (§F0);
+reviews `principle-failures/` and `dora/per-project.md`; **updates
+`/process/experiments.md`** — scores every active experiment that had a scoring
+opportunity, advances under-question / retirement-trial states per §25a; tags the
+current process (§27.2) and writes a new `process-current.md` (version+1) whose changes
+target a specific DORA metric justified by evidence, stating the anticipated effect so
+the next retro can score it — **and registers every routed change as an experiment row
+at routing time**. A principle is never changed on a single data point — require a
+pattern across principle-failures. When the process file has visibly accreted, run
+`/refactor-process` (§27.6).
+
+**Scriptify the cycle's mechanical operations to save context.** Every retro, the
+orchestrator names the operations it performed REPEATEDLY by hand this cycle and builds
+or extends a committed script for the most-repeated one, so that mechanical work leaves
+the context window (one allowlisted command, not N Read+Edit cycles). A mechanical op
+done ≥3× by hand is a script waiting to be written. [EXP-038]
+
+**Review token usage every retro and balance it against DORA.** Alongside the metric
+recompute, run a standing token-efficiency review: (1) estimate the cycle's token
+consumption and where it went (dispatch count/fan-out, context-load size, re-reads,
+model-tier mix, the share already absorbed by scripts); (2) name the single
+highest-leverage reduction and route it like any change; (3) score it against DORA,
+never in isolation — a token cut that would slow lead time or raise CFR is REJECTED; a
+token increase that buys a real DORA gain is an accepted, scored bet. Register the
+chosen optimisation as an experiment with both its token target and the DORA metric it
+must not harm.
+
+**See the plumbing share — running-the-OS vs delivering value.** `stats.*` (§F0) splits
+logged time + tokens via `state_owners` into **plumbing** (orchestrator + flow-manager +
+retro/gate/bookkeeping — running the agent OS) vs **delivery** (engineer/tester/ui/
+product/architect/cicd/documenter producing & validating value), and prints the
+**plumbing share** of each. The retro reads the share AND its trend; if it rises or
+exceeds target, route the single highest-leverage overhead reduction (scriptify per
+EXP-038, cut a redundant dispatch, restructure a step), guarded so delivery (lead time /
+CFR) is not harmed. [EXP-067]
+
+## 27. Process-doc discipline — keep the rulebook precise (prevents rot)
+The v82 cutover was needed partly because the docs themselves rotted (2834 lines, ~990 of retro-narrative already in git, one mechanic named in 50 places, overlapping registers). These rules are to the docs what `wi-validate` is to the items.
+1. **Rules, not narrative.** `process-current.md` holds ONLY the rules in force. Rationale/retro-stories/"why we changed" live in the retro record + git, never as inline `>` blocks. A retro EDITS the rule and records its story in the retro artifact; it does not paste narrative into the rulebook.
+2. **Snapshots are git tags, not files.** Each version bump is an annotated tag `process-v<NN>`; `process-history/` holds only its README. No per-version copy files — git keeps every state losslessly.
+3. **Name a mechanic once.** Tool/command/file names live in ONE place (§F0's command-map + the command index); rules refer to capabilities by ROLE ("append a state event", "regenerate the views"), so a substrate change is a few edits, not a scatter hunt.
+4. **One register per concern.** Each obligation lives in exactly one register (experiment→`experiments.md`; improvement build-item→`improvement-slices/`; learned failure→`principle-failures/`). No cross-posting.
+5. **Conformance is checkable — `make doc-lint`.** A denylist gate fails if any live doc names a retired mechanic. Run it in the rationalization gate and before every version bump.
+6. **Rationalization gate.** At every major cutover, and at least every 10 versions, run `/refactor-process`: doc-conformance audit + prune. The rulebook has a soft ~800-line ceiling; exceeding it signals narrative crept back.
+
+---
+
+# STAGE F — Flow & queues (pull-based)
+
+The cross-agent rules of the pull system. **§F0 (above) is the substrate**; the rules
+below name flow behaviour and now operate on the *derived* views (§F0). Full rationale,
+diagrams, and a worked retro are in `Version2-design/`. Each rule names the DORA metric
+it targets, per §25a.
+
+<!-- doc-lint:allow-end -->
+
+## F1. Work items — hierarchy, links, and honest closes
+Every unit of work is a typed item — `REQ-`/`CHK-`/`SLC-`/`UC-`/`DEF-` — as a per-item
+file (§F0). Hierarchy: requirement → chunk → slice → use-case (→ route steps). **Edges
+are stored one-directional (`parents`+`deps` up); `children`, ancestors, and the whole
+tree are DERIVED**, so the tree traverses both ways without drift. `value`/`cost` are
+product estimates; per-item DORA is COMPUTED from the item's event timestamps (§F0),
+never stored.
+
+**Done bubbles UP.** Aggregate state (slice/chunk/requirement) is a fold over children:
+a slice is done when all its use-cases are done; a chunk when all its slices are done; a
+requirement when all its chunks are done (→ ask for more work, §F3). The aggregate has
+no independent state event to keep in sync — its state is recomputed by `wi-project`
+from the children the moment the last one closes. There is no "close-drift" to reconcile
+because the close is not a separate stored fact: **the atomic close is `wi-append` on
+the last child, by construction** — the child's `validated`/`built_green` event is the
+only write, and the parent's done-ness follows on the next `wi-project`. A green push
+with no matching `built_green`/`validated` event on the item is the defect (the derived
+state would otherwise lie), and `wi-validate` catches it before the next pull.
+
+**RED CI = NOT DONE; never fake green by guarding.** A red CI run means the engineering
++ cicd steps have NOT succeeded — the item is not done and the loop MUST NOT advance past
+it. **Making CI green by skipping or guarding the failing job** (an `if:`-guard that
+no-ops it, disabling the check, `continue-on-error`, marking a lane allowed-to-fail) is a
+**false-green** and is forbidden — it re-admits the false-green defect family. The only
+legitimate way to clear a red CI is to make it genuinely green: do the work the red is
+demanding — finish the code, provision the missing infra/secret, fix the config. A job
+that is legitimately not-yet-runnable because it awaits §F5 human provisioning stays red
+and blocking until provisioned; that red IS the accurate signal. [EXP-090]
 
 ## F2. Queues — a uniform model: two buffer knobs + four metrics
-Work is handed over through queues (`work/<project>/queues/<name>.csv` + rendered
-`.md`). The four queues are **Intake → Ready → Deploy → Rework**. Every queue is
-modelled IDENTICALLY — same two buffer knobs, same four metrics — so they compose
-and compare; only the configured numbers differ.
+Work is handed over through queues. Queue **membership is a derived view**
+(`views/queues.{md,json}`, computed from item state via the graph `queue_map`, §F0) —
+never a stored CSV. The queues are **Intake → Ready → Deploy → Rework**; every queue is
+modelled IDENTICALLY (same two buffer knobs, same four metrics) so they compose and
+compare.
 
-**Buffer control = `min_items` + `wip_limit`** (both per queue, both in
-`queues/policy.csv`, both owned and tuned by the retro, never hardcoded):
-- `min_items` — the replenish/pull FLOOR: below it, signal upstream to refill so
-  the queue never starves the stage it feeds. Targets **throughput**.
-- `wip_limit` — the CAP: the queue never holds more than this, so work cannot age
-  and WIP stays small (penny game). Targets **gross lead time**.
-Defaults seed (retro tunes from evidence): intake 2/10, ready 2/4, deploy 0/1
-(WIP = pipeline concurrency group, §11a), rework 0/2.
+**Buffer control = `min_items` + `wip_limit`** (both per queue, owned and tuned by the
+retro, never hardcoded — held in the project's queue-policy config, applied over the
+derived membership):
+- `min_items` — the replenish/pull FLOOR: below it, signal upstream to refill so the
+  queue never starves the stage it feeds. Targets **throughput**.
+- `wip_limit` — the CAP: the queue never holds more than this, so work cannot age and
+  WIP stays small. Targets **gross lead time**.
+Defaults seed (retro tunes from evidence): intake 2/10, ready 3/4, deploy 0/1 (WIP =
+pipeline concurrency group, §11b), rework 0/2.
 
-**Statistical metrics (uniform, computed by `dora.py flow` → `dora/flow.md`):**
-- **queue length** — depth now;
-- **throughput frequency** — dequeues per active-day;
-- **dwell time** — enqueue→dequeue per item (the time to be taken off the queue);
-  this is the queue's slice of gross lead time;
-- **rework rate** — re-entries ÷ items (how many times items came BACK to this
-  queue — a quality/flow signal).
-**Every metric ties back to the two system numbers:** Σ dwell across queues is the
-WAIT part of GLT; the throughput of the binding (lowest-throughput) queue is
-system throughput; rework rate inflates both. The retro reads these to size
-`min_items`/`wip_limit` per queue.
+**Statistical metrics (uniform, from `wi-project` `stats.*`):** queue length (depth
+now); throughput frequency (dequeues per active-day); dwell time (the queue's slice of
+gross lead time, from state entry→exit timestamps); rework rate (re-entries ÷ items).
+Every metric ties back to the two system numbers — Σ dwell across queues is the WAIT
+part of GLT; the throughput of the binding queue is system throughput; rework inflates
+both. The retro reads these to size `min_items`/`wip_limit`.
 
-On EVERY insertion the flow-manager re-costs `vc_ratio` (= value ÷ cost) and
-re-sorts (defects pre-empt, §F5). The ranking function is isolated so Cost of
-Delay can replace it later with no structural change (CoD is out of scope for
-v40). Target: gross lead time + throughput. [EXP-022]
+On every insertion the flow-manager re-costs `vc_ratio` (= value ÷ cost) and re-sorts
+(defects pre-empt, §F5). The ranking function is isolated so Cost of Delay can replace
+it later with no structural change. Target: gross lead time + throughput. [EXP-022]
 
 ## F3. The pull loop & replenishment (`/loop-run`)
-The inner dev loop runs continuously: each cycle the flow-manager selects the
-**maximal independent set** of ready use-cases (§F6) up to capacity `N` and the
-orchestrator dispatches them as concurrent inner-loop instances —
-cicd? → ui-structure? → engineer (TDD on trunk) → ui-validate? → deploy
-(gate only if infra-bearing) → tester (validate in prod). Pass → done, bubble
-up; fail → Rework. **Replenishment is a PROACTIVE, CONTINUOUS, parallel process
-— it works AHEAD of the engineer, not at boundaries (§F9, v44).** Product is
-never idle while engineers build: it runs concurrently and keeps the Ready
-buffer **at or above `min_items` AT ALL TIMES** so the next broken-down work is
-always waiting. Operationally:
-- **Look ahead, don't wait for empty.** The trigger is `depth(Ready) <
-  min_items` **OR projected-below-floor after the next pull** — replenish the
-  moment the buffer would dip, not when it hits zero. The very FIRST build wave
-  of a slice is dispatched together with a product look-ahead for the NEXT
-  work, so decomposition and building overlap from the start.
-- **Across chunk boundaries.** Product decomposes the next slice — and the next
-  chunk's first slice — WHILE the current chunk is still building, so when the
-  current Ready drains the next chunk's use-cases are already costed and
-  enqueued. There is no decompose-gap at a chunk edge.
-  Order: (a) more use-cases from the current slice; (b) next slice from the
-  chunk (unattended — no slice gate); (c) advance to the next chunk; (d) only
-  when the WHOLE requirement is decomposed-and-done does the loop report
-  *starved + requirement complete* and ask the human for more work.
-- **Below-floor is never "expected" or tolerated.** A `depth(Ready) < min_items`
-  signal is a hard call to replenish NOW, in parallel — the orchestrator must
-  NOT rationalise it away ("scaffold-constrained", "will refill after this UC")
-  and let the engineer's next work go un-prepared (a logged principle failure,
-  `principle-failures/2026-06-09-replenishment-boundary-reactive-not-proactive.md`).
-Product estimates value+cost on every item; batch small (penny game): replenish
-more often, less each time. Target: gross lead time (no engineer-waits-for-
-decompose gap), throughput.
+The inner dev loop runs continuously: each cycle the flow-manager selects the **maximal
+independent set** of ready use-cases (§F6) up to capacity `N` and the orchestrator
+dispatches them as concurrent inner-loop instances — cicd? → ui-structure? → engineer
+(TDD on trunk) → ui-validate? → deploy (gate only if infra-bearing) → tester (validate
+in prod). Pass → `validated` (bubbles up); fail → `rejected` (Rework). **Replenishment
+is PROACTIVE, CONTINUOUS, parallel — it works AHEAD of the engineer, not at boundaries.**
+Product is never idle while engineers build; it keeps the Ready buffer **at or above
+`min_items` AT ALL TIMES**. Operationally:
+- **Look ahead, don't wait for empty.** Trigger is `depth(Ready) < min_items` OR
+  projected-below-floor after the next pull — replenish the moment the buffer would dip.
+  The very FIRST build wave of a slice is dispatched together with a product look-ahead
+  for the NEXT work.
+- **Across chunk boundaries.** Product decomposes the next slice — and the next chunk's
+  first slice — WHILE the current chunk is still building, so there is no decompose-gap
+  at a chunk edge. Order: (a) more use-cases from the current slice; (b) next slice from
+  the chunk (unattended — no slice gate); (c) advance to the next chunk; (d) only when
+  the WHOLE requirement is decomposed-and-done does the loop report *starved +
+  requirement complete* and ask the human for more work.
+- **Below-floor is never "expected" or tolerated.** A `depth(Ready) < min_items` signal
+  is a hard call to replenish NOW, in parallel — the orchestrator must NOT rationalise
+  it away ("scaffold-constrained", "will refill after this UC") and let the engineer's
+  next work go un-prepared (a logged principle failure).
+Product estimates value+cost on every item; batch small: replenish more often, less each
+time. Target: gross lead time (no engineer-waits-for-decompose gap), throughput.
 
-## F3a. Upstream pipelining — the WHOLE planning stage runs ahead of the build (v62)
-Replenishment is not only product's job. While the engineer builds the pulled
-use-case(s), the orchestrator keeps **every upstream role working the NEXT
-independent item in parallel**, so by the time the engineer finishes, the next
-item is fully planned — vision/slice AND architecture AND capabilities — and can
-be pulled with zero wait. The engineer is the constraint; never let it idle
-waiting for an upstream artifact that could have been prepared during the
+## F3a. Upstream pipelining — the WHOLE planning stage runs ahead of the build
+While the engineer builds the pulled use-case(s), the orchestrator keeps **every
+upstream role working the NEXT independent item in parallel**, so by the time the
+engineer finishes, the next item is fully planned — vision/slice AND architecture AND
+capabilities — and can be pulled with zero wait. The engineer is the constraint; never
+let it idle waiting for an upstream artifact that could have been prepared during the
 previous build.
-- **product** — the next slice + use-cases + acceptance (§F3), costed and enqueued.
+- **product** — the next slice + use-cases + acceptance (§F3), costed and made ready.
 - **solution-architect** — the next item's architecture delta + security review +
-  policy-test notes, produced WHILE the current item builds, so the design a
-  use-case needs is ready before it is pulled (not discovered at pull time).
-- **cicd** — the next item's capabilities provisioned ahead of the build that needs
-  them: feature flags, env/infra/pipeline prep, deploy-role grants (cicd already
-  "runs BEFORE implementation loops"; this makes it run *concurrently with the
-  prior* loop). A capability a near-future use-case requires is staged in
-  advance, never a mid-build blocker.
-- **ui-designer** — the next UI-bearing item's structure pass (IA, component
-  decomposition, a11y conditions) prepared ahead the same way.
-Bounds: only pipeline items that are **sequentially independent** of the in-flight
-build (§F6 — no shared seam/edge; if dependent, it genuinely must wait); respect
-each queue's `wip_limit`; look-ahead depth ≈ the Ready/Intake buffer (`min_items`),
-not unboundedly far. The orchestrator dispatches these upstream agents
-concurrently with the engineer in the same cycle (they write to disjoint
-artifacts — slices/ , architecture/ , infra/ — so no commit collision, §14).
-Target: gross lead time (eliminate engineer-waits-for-architecture / -capability /
--structure gaps), throughput. [EXP-075]
+  policy-test notes, produced WHILE the current item builds.
+- **cicd** — the next item's capabilities provisioned ahead of the build that needs them
+  (flags, env/infra/pipeline prep, deploy-role grants).
+- **ui-designer** — the next UI-bearing item's structure pass (IA, decomposition, a11y
+  conditions) prepared the same way.
+Bounds: only pipeline items **sequentially independent** of the in-flight build (§F6);
+respect each queue's `wip_limit`; look-ahead depth ≈ the buffer (`min_items`). These
+upstream agents write to disjoint artifacts (items/ , architecture/ , infra/), so no
+commit collision (§14). Target: gross lead time (eliminate engineer-waits-for-upstream
+gaps), throughput. [EXP-075]
 
 ## F4. Time thieves — wait, attributed to its cause
-`dora.py flow` writes `work/<project>/dora/flow.md`: per-queue length + wait,
-per-item lead time (service vs wait split), and the time-thief table. A time
-thief is wall-clock on item A's lead time spent waiting on something else; each
-is attributed: queue wait (depth/batch), displacement (the higher-priority or
-defect item inserted ahead), seam serialisation (the blocking UC), worker
-contention (capacity `N`), deploy-queue wait (pipeline), gate wait (the gate),
-session idle (§13). The retro reads the ranked thieves as its primary input
-(this extends §5's wait taxonomy from per-slice to per-item with attribution).
-Time-thieves also carry a **plumbing vs delivery** class (v59, EXP-067): a thief
-that is plumbing (gate wait, bookkeeping, orchestrator coordination) feeds the
-`dora.py cost-split` plumbing share §26 watches, distinct from a delivery thief
-(seam serialisation, deploy-queue) that is the cost of the work itself.
-Target: gross lead time. [EXP-028]
+`wi-project` `stats.*` reports per-queue length + wait, per-item lead time (service vs
+wait split via `state_owners`), and the time-thief table. A time thief is wall-clock on
+item A's lead time spent waiting on something else, each attributed to its cause: `queue`
+wait (depth/batch), displacement (the higher-priority or defect item inserted ahead),
+seam serialisation (the blocking UC), worker contention (capacity `N`), deploy-queue
+wait (pipeline), gate wait (the gate), session idle (§13), `external` blocked-time. The
+retro reads the ranked thieves as its primary input (extends §5's taxonomy from
+per-slice to per-item with attribution). Each thief also carries a **plumbing vs
+delivery** class feeding the plumbing-share view §26 watches. Target: gross lead time.
+[EXP-028]
 
 ## F5. One human gate; the deploy gate is automated; defects pre-empt
-**The blocking human gate is exactly one:** requirement/defect **INTAKE** (JTBD
-value framed before anything enters). The former second gate — **DEPLOY-to-prod
-for infra-bearing change** — is **no longer a human gate** (v78, human-directed):
-it auto-approves under an **automated policy assurance** (§F5a, EXP-093); app-only
-diffs already auto-approve per §9a. The human is no longer touched at deploy at
-all — the only residual human touch is a genuinely destructive/irreversible **data**
-op (not a deploy), see §F5a. Each removed gate is replaced by
-a named assurance, not dropped: vision → folded into intake; slice-accepted →
-just-in-time slicing against the chunk plan + §10 selection, human leverage moved
-to intake/deploy; arch+security → §9a security auto-accept + the §12a data-flow
-gate-node discipline + synth-time contract tests, with infra-bearing deltas
-surfacing at the deploy gate. The two-gate model is the baseline (validated
-across SLC-001..004, v59); if evidence shows a removed gate was load-bearing,
-reinstate it via §25a. **Defects re-enter
-through intake**, are JTBD-framed/costed, and **pre-empt** (a defect on delivered
-value is a failure in something of higher value than anything merely queued);
-the displacement is logged as a time thief so the cost of interrupting is visible
-(§5a ownership semantics unchanged). Target: gross lead time (gate wait) guarded
-by CFR; MTTR (defect pre-emption). [EXP-025]
+**The blocking human gate is exactly one:** requirement/defect **INTAKE** (JTBD value
+framed before anything enters). The former second gate — DEPLOY-to-prod for
+infra-bearing change — is **no longer a human gate**: it auto-approves under an
+automated policy assurance (§F5a); app-only diffs already auto-approve per §9a. The human
+is not touched at deploy at all — the only residual human touch is a genuinely
+destructive/irreversible **data** op (not a deploy), see §F5a. Each removed gate is
+replaced by a named assurance, not dropped: vision → folded into intake; slice-accepted
+→ just-in-time slicing + §10 selection; arch+security → §9a security auto-accept + the
+§12c data-flow gate-node discipline + synth-time contract tests. **Defects re-enter
+through intake**, are JTBD-framed/costed, and **pre-empt** (a defect on delivered value
+is a failure in something of higher value than anything merely queued); the displacement
+is logged as a time thief so the cost of interrupting is visible (§5a ownership semantics
+unchanged). Target: gross lead time (gate wait) guarded by CFR; MTTR. [EXP-025]
 
-## F5a. Prod promotion is continuous — no review gate; the tester validates in prod (v75 — human-directed)
-Once an established CD promotion pipeline exists, **code flows to prod
-automatically on green — there is NO human review-to-promote gate.** The gate IS
-the automated evidence: unit+integration green on trunk **and the dev acceptance
-stage passing**; the pipeline then deploys to prod and the **tester validates in
-prod** (§ Validate) as the safety net. A "someone approves the prod deploy" step
-is **explicitly rejected**: it masks upstream weakness and adds gross-lead-time
-idle. **If what lands in prod is wrong, the failure is UPSTREAM** — requirements,
-engineering, test/acceptance coverage — so fix it *there* and let the fix flow,
-never add a promotion gate to compensate (build quality in; roll-forward with
-reversible rollback). This SHARPENS §F5's deploy gate: routine code promotions are NOT gated. Consequence
-for CHK-10 SLC-034: the `prod` GitHub Environment gets NO required-reviewer rule;
-`deploy-prod` runs automatically when `acceptance-dev` is green, followed by tester
-prod-validation. [EXP-091]
+## F5a. Prod promotion is continuous — no review gate; the tester validates in prod
+Once an established CD promotion pipeline exists, **code flows to prod automatically on
+green — there is NO human review-to-promote gate.** The gate IS the automated evidence:
+unit+integration green on trunk **and the dev acceptance stage passing**; the pipeline
+deploys to prod and the **tester validates in prod** (§20) as the safety net. A "someone
+approves the prod deploy" step is explicitly rejected — it masks upstream weakness and
+adds idle. **If what lands in prod is wrong, the failure is UPSTREAM** (requirements,
+engineering, test coverage) — fix it *there* and let the fix flow; never add a promotion
+gate to compensate (build quality in; roll-forward with reversible rollback). [EXP-091]
 
-**Infra-bearing deploys are no longer human-gated either (v78, EXP-093 — human-directed).**
-The former human gate on infra-bearing change — new stacks, **new IAM grants**,
-first-time provisioning (pipeline / new environment / new OIDC role) — is replaced,
-not dropped, by an **automated policy assurance** the pipeline asserts before it
-deploys (the §F5 "each removed gate → a named assurance" discipline). An
-infra-bearing deploy **auto-approves** when ALL hold, else it fails RED (a real
-signal, not a human queue):
+**Infra-bearing deploys auto-approve under an automated policy assurance** (§9a → this
+is where infra-bearing goes). The former human gate on new stacks, new IAM grants, and
+first-time provisioning is replaced, not dropped, by an assurance the pipeline asserts
+before it deploys. An infra-bearing deploy **auto-approves** when ALL hold, else it
+fails RED (a real signal, not a human queue):
   1. tests + lint + build are green;
   2. **every new IAM action is in the least-privilege allowlist** (`infra/policies/*.json`
      is the SSOT) — a grant outside it fails the check;
-  3. **every IAM `Resource` is ARN-scoped** — no `Resource:"*"` except the
-     documented platform-global exceptions (e.g. `ecr:GetAuthorizationToken`,
-     CloudFront) which must carry an inline justification;
-  4. the change is **reversibly rollable** (roll-forward with reversible rollback, §F5b).
-The tester still validates in prod as the safety net; if an infra deploy regresses
-prod as a PATTERN, that is the §F5b feature-flagging trigger, NOT a reason to
-reintroduce a human gate. **The one residual human touch is a genuinely
-destructive or irreversible DATA op** (e.g. a prod event-store truncate — cf.
-UC-O8) — that is data-safety, not a deploy gate, and stays human-confirmed because
-it cannot be rolled back. EXP-093 is scored on: infra-deploy gross-lead-time (gate
-idle → 0) guarded by CFR on infra deploys; reinstate the human gate via §25a only
-if evidence shows the automated assurance let a real IAM/blast-radius defect
-through (the DEFECT-OAG-001 class the original gate caught).
+  3. **every IAM `Resource` is ARN-scoped** — no `Resource:"*"` except documented
+     platform-global exceptions (e.g. `ecr:GetAuthorizationToken`, CloudFront) carrying
+     an inline justification;
+  4. the change is **reversibly rollable** (§F5b).
+The tester still validates in prod; if an infra deploy regresses prod as a PATTERN, that
+is the §F5b feature-flagging trigger, NOT a reason to reintroduce a human gate.
+**The one residual human touch is a genuinely destructive or irreversible DATA op**
+(e.g. a prod event-store truncate) — that is data-safety (§0b), not a deploy gate, and
+stays human-confirmed because it cannot be rolled back. Reinstate the human deploy gate
+via §25a only if evidence shows the automated assurance let a real IAM/blast-radius
+defect through. [EXP-093]
 
-**Promoting to a NEW stage re-applies that stage's deploy-role policy as a
-self-healing pre-flight (v80, EXP-096).** A per-stage deploy role's policy CONTENT
-being correct in `infra/policies/*.json` is NOT enough — the content must be
-APPLIED to *that stage's* IAM role, and standing up / promoting to a new stage is
-exactly when it has not been. So the CD `deploy-<stage>` job **re-applies the
-target stage's managed deploy-role policy** (`bootstrap-deploy-role.sh --stage
-<stage>` / equivalent apply-managed-policy step) at the TOP of the job, before any
-SST/CDK deploy — the role's policy is thus always current-with-source at deploy
-time and cannot go stale-per-stage. For orchestrator/manual promotions the same
-guarantee is a committed `make promote-preflight STAGE=<s>` that applies + asserts
-the policy. This is a **self-healing check, not a written reminder** — a
-"remember to run `bootstrap --stage <target>`" note is precisely what was missed
-(cf. EXP-056: the confirmation must be an executable check that self-heals/fails,
-never a note the orchestrator must remember). Owner: cicd (the CD-job step +
-`make promote-preflight`); this §F5a rule is the contract. Distinct from EXP-094
-(policy CONTENT verb-completeness): EXP-094 makes the granted content complete;
-this makes the correct content APPLIED to each stage's role at promotion time.
-Founding: SLC-039 UC-CA-PROD-PROMOTE — prod `apigateway:PUT AccessDenied` because
-`--stage prod` was never run though the prod policy content was correct (8a425ea).
-Target: CFR on cross-stage promotions + deploy MTTR.
+**Promoting to a NEW stage re-applies that stage's deploy-role policy as a self-healing
+pre-flight.** A per-stage deploy role's policy CONTENT being correct in
+`infra/policies/*.json` is not enough — it must be APPLIED to *that stage's* IAM role,
+and promoting to a new stage is exactly when it has not been. So the CD `deploy-<stage>`
+job **re-applies the target stage's managed deploy-role policy** at the TOP of the job,
+before any deploy — the role's policy is always current-with-source and cannot go
+stale-per-stage. For manual promotions the same guarantee is a committed
+`make promote-preflight STAGE=<s>` that applies + asserts the policy. This is a
+self-healing check, not a written reminder (a "remember to run bootstrap" note is
+precisely what was missed). Owner: cicd; this §F5a rule is the contract. Distinct from
+the IAM verb-completeness rule (§17) which makes the granted CONTENT complete; this makes
+the correct content APPLIED to each stage's role. Target: CFR on cross-stage promotions +
+deploy MTTR. [EXP-096]
 
-## F5b. Feature-flagging is the escalation when CD starts failing in prod (v75 — human-directed)
-The §F5a safety net is the tester validating in prod, and its **CFR is the
-signal**. If deploys start causing **prod test failures as a PATTERN** (not a
-one-off) — changes reaching prod keep regressing it and the tester keeps catching
-them — that is the trigger to **decouple DEPLOY from RELEASE via proper
-feature-flagging**: deploy dark, release behind a flag, roll a release back
-WITHOUT a redeploy (beyond the §40 within-slice use-case flags, which isolate
-in-flight builds but do not give release-level control). **When that need is
-evidenced, RAISE it** — do not silently absorb rising prod CFR or quietly
-reintroduce a manual gate (that would undo §F5a). And **spin it up as its OWN
-separate PROJECT** — feature-flagging is a shared delivery-capability (§F10 fleet
-model), not something folded into a product project. Until the need is evidenced,
-CD-with-prod-validation stands; **premature flag infrastructure is cost without an
-evidenced need** (§F5a's whole point is to expose upstream weakness, not pre-empt
-it with machinery). [EXP-092]
+## F5b. Feature-flagging is the escalation when CD starts failing in prod
+The §F5a safety net is the tester validating in prod, and its **CFR is the signal**. If
+deploys start causing **prod test failures as a PATTERN** (not a one-off), that is the
+trigger to **decouple DEPLOY from RELEASE via proper feature-flagging**: deploy dark,
+release behind a flag, roll a release back WITHOUT a redeploy (beyond the §40
+within-slice use-case flags, which isolate in-flight builds but give no release-level
+control). **When that need is evidenced, RAISE it** — do not silently absorb rising prod
+CFR or quietly reintroduce a manual gate. And **spin it up as its OWN separate PROJECT**
+— feature-flagging is a shared delivery-capability (§F10), not folded into a product
+project. Until evidenced, CD-with-prod-validation stands; **premature flag infrastructure
+is cost without an evidenced need**. [EXP-092]
 
 ## F6. Parallel dispatch by independence (the maximal independent set)
 Parallelism is the **default, not an option**. The flow-manager treats
 `use-case-deps.mmd ∪ class-deps.mmd` as a DAG and each cycle dispatches the
-highest-priority set of *ready* use-cases that are mutually independent — **no
-edge/path between them AND disjoint claimed seams/paths** — up to capacity `N`,
-isolated by use-case flags in code (§40 — never branches/worktrees/stash). Each
-use-case declares the seams/paths it will own (engineer + architect, from the
-route); the flow-manager holds the **claimed-path registry** of in-flight UCs.
-`achieved` and `theoretical-max` concurrency are logged (`parallel_dispatch`) so
-**parallelism efficiency** is visible. Target: build wall-clock = the slowest
-dependency chain, not the sum of steps; gross lead time.
+highest-priority set of *ready* use-cases that are mutually independent — **no edge/path
+between them AND disjoint claimed seams/paths** — up to capacity `N`, isolated by
+use-case flags in code (§40 — never branches/worktrees/stash for behavioural isolation).
+Each use-case declares the seams/paths it will own; the flow-manager holds the
+**claimed-path registry** of in-flight UCs. `achieved` and `theoretical-max` concurrency
+are recorded so **parallelism efficiency** is visible. Target: build wall-clock = the
+slowest dependency chain, not the sum of steps; gross lead time.
 
-**A claimed path includes every SOURCE FILE a UC's route mutates (v54, EXP-051).**
-The independence test has two halves and both bind: no behavioural edge in
-`use-case-deps.mmd` AND disjoint claimed paths. A shared SOURCE FILE is a shared
-claimed path — under §40 (trunk, no branches) two UCs editing one working-tree
-file collide, so they are seam-serialised and NOT co-schedulable even when no
-behavioural edge exists. `theoretical-max` is the achievable set under §40, so N
-ready UCs all claiming one source file form a serial chain (M=1 for that group)
-and that serial schedule is CORRECT — the flow-manager must NOT report the
-shared-file seam as a parallelism time-thief (reporting a forbidden parallelism as
-lost opportunity is the SLC-001/002/003 phantom-max failure). The genuine remedy
-for wanting the parallelism is a STRUCTURAL refactor — split the file so each UC
-owns a distinct file — pursued as a §F7 false-edge null-hypothesis lever, not by
-inflating the max. [EXP-051]
+**A claimed path includes every SOURCE FILE a UC's route mutates.** The independence
+test has two halves and both bind: no behavioural edge in `use-case-deps.mmd` AND
+disjoint claimed paths. A shared SOURCE FILE is a shared claimed path — under §40 (trunk,
+no branches) two UCs editing one working-tree file collide, so they are seam-serialised
+and NOT co-schedulable even with no behavioural edge. `theoretical-max` is the achievable
+set under §40, so N ready UCs all claiming one file form a serial chain (M=1) and that
+schedule is CORRECT — the flow-manager must NOT report the shared-file seam as a
+parallelism time-thief (reporting a forbidden parallelism as lost opportunity is the
+phantom-max failure). The genuine remedy is a STRUCTURAL refactor — split the file so
+each UC owns a distinct file — pursued as a §F7 false-edge trial, not by inflating the
+max. [EXP-051]
 
-## F7. Collisions teach the dependency tree (learn to structure dependencies)
+## F7. Collisions teach the dependency tree
 A **collision** = concurrent work proving a declared independence false, detected
-mechanically: a claimed-path violation (build/commit time, the registry is the
-guard), a composition failure (a flag-ON-green UC goes red when another
-integrates), or a §19 hidden hard edge at deploy. On a collision the flow-manager
-emits a `collision` ledger row, **stops the pair**, hands the missing edge to
+mechanically: a claimed-path violation (build/commit time), a composition failure (a
+flag-ON-green UC goes red when another integrates), or a §19 hidden hard edge at deploy.
+On a collision the flow-manager records it, **stops the pair**, hands the missing edge to
 product/architect/engineer to ADD to the model (`classDef changed`, recorded in
 `architecture/dependencies/edge-ledger.md`), re-serialises (§19, scheduling not
-compensating logic), and bills the rework as a hidden-edge time thief. The system
-attacks **both** error classes: **hidden edges** (false independence — collisions
-per slice → 0) and **false edges** (false dependency — needless serialisation),
-the latter found by an **edge null-hypothesis trial** (§25a applied to a
-dependency edge: relax it for 4–5 opportunities; an attributable collision
-reinstates, none retires it and reclaims parallelism; ≤1 trial running per seam).
-Driving both toward zero IS the system learning to slice and structure work for
-flow. Target: CFR (hidden edges), gross lead time (false edges). [EXP-027]
+compensating logic), and bills the rework as a hidden-edge time thief. The system attacks
+**both** error classes: **hidden edges** (false independence — collisions per slice → 0)
+and **false edges** (false dependency — needless serialisation), the latter found by an
+**edge null-hypothesis trial** (§25a on a dependency edge: relax it for 4–5
+opportunities; an attributable collision reinstates, none retires it and reclaims
+parallelism; ≤1 trial per seam). Driving both toward zero IS the system learning to slice
+and structure work for flow. Target: CFR (hidden edges), gross lead time (false edges).
+[EXP-027]
 
-## F7a. Blocked items must say WHY — on block and on unblock (v72 — human-directed)
-When an item moves to **Blocked** (a §F5 gate hold, a §F7 collision stop, or a
-Rework re-entry), the cause is recorded as a one-line reason in
-`work/<project>/items/blocks.csv` (`item,reason[,since]`) by whoever blocks it
-(flow-manager for collisions/gates, orchestrator/tester for rework). When the
-blocker clears, the row is **removed**. This is not bookkeeping for its own sake:
-the human board mirrors it (`process/linear-mapping.md`) — a Blocked issue shows
-a **🚫 Blocked: <why>** banner in its description and a one-time comment, and an
-**✅ Unblocked** comment is posted when the row goes away — so a human reading the
-board always knows *why* something is stuck and *when* it freed up, without
-asking. A Blocked item with no recorded reason is itself a smell (the banner says
-so). The reason is free text, not a metric (DORA stays in the ledger, §0). The
-blocking event itself is still a ledger row (`collision`/gate/rework) for metrics;
-`blocks.csv` carries only the human-readable WHY. [EXP-074]
+## F7a. Blocked items must say WHY — on block and on unblock
+When an item moves to **blocked** (a §F5 gate hold, a §F7 collision stop, or a Rework
+re-entry), the cause is recorded **as the `note` on the `blocked` event** appended via
+`wi-append` (§F0) — no separate blocked-reason file. The board projection reads that note and
+shows a **🚫 Blocked: <why>** banner; when the item leaves blocked (an `unblocked`
+event), an **✅ Unblocked** comment is posted. So a human reading the board always knows
+*why* something is stuck and *when* it freed up, without asking. A blocked item whose
+event carries no reason note is itself a smell (the banner says so). The reason is free
+text on the event; the metrics come from the event itself (§F0). [EXP-074]
 
-## F8. Retro cadence (pull mode) — MECHANICALLY ENFORCED (v68)
-Default: retro at **slice completion** (preserving §20's proven per-slice
-economics — a retro is service time on the constraint, so per-use-case retros
-would dominate overhead), PLUS an **event-triggered retro** whenever flow data
-breaches a threshold (a prod defect, an MTTR pair, or a queue-wait spike above
-target). Cadence is itself a tunable the system experiments on. The orchestrator
-remains the **process owner** that runs retros (§26) and owns the experiments
-registry; at every retro it tunes the per-queue buffers (§F2) and `N` (§F6) from
-the flow evidence, each tune a scored experiment. Target: meta — bound retro
-overhead without losing the learning signal. [EXP-029]
+## F8. Retro cadence (pull mode) — MECHANICALLY ENFORCED
+Default: retro at **slice completion** (a retro is service time on the constraint, so
+per-use-case retros would dominate overhead), PLUS an **event-triggered retro** whenever
+flow data breaches a threshold (a prod defect, an MTTR pair, a queue-wait spike). Cadence
+is itself a tunable the system experiments on. At every retro the orchestrator tunes the
+per-queue buffers (§F2) and `N` (§F6) from the flow evidence, each tune a scored
+experiment. Target: meta — bound retro overhead without losing the learning signal.
+[EXP-029]
 
-**The cadence is a GATE in the loop machinery, not orchestrator discretion (v68,
-EXP-083).** "Run the retro automatically" was repeatedly violated by offering it
-to the human instead (8 un-retro'd slice/chunk closes accrued after v67 — the
-EXP-030 anti-pattern recurring), so enforcement is now mechanical, not a rule the
-orchestrator may skip. **`dora.py retro-debt --project P`** counts retro-triggering
-events (slice/chunk closes, defect resolves, deploy failures) since the last
-`retro` ledger row and **exits non-zero (code 2 = RETRO DUE)**. `make retro-debt
-PROJECT=P` is the allowlisted wrapper. The loop (`loop-run.md` step 7) MUST run it
-before pulling the next work after any slice/chunk close or defect resolve; a
-non-zero exit means the loop **may not advance** until `/retro` drains the debt,
-and the retro may **never** be offered to the human as a choice (that is the §F9.4
-over-ask the gate prevents). The retro stays TIGHT (§F9.4) so the gate does not
-become the time thief.
+**The cadence is a GATE in the loop machinery, not orchestrator discretion.** "Run the
+retro automatically" was repeatedly violated by offering it to the human instead, so
+enforcement is mechanical. **Retro-debt is counted over the ITEM EVENTS** — the
+retro-triggering events (slice/chunk closes = aggregate `done`, defect `resolved`,
+deploy-failures) since the last retro, computed by `wi-project`, not by scanning ledger
+rows. `make retro-debt PROJECT=P` exits non-zero (code 2 = RETRO DUE) at the threshold.
+The loop (`loop-run.md`) MUST run it before pulling the next work after any close or
+defect resolve; a non-zero exit means the loop **may not advance** until `/retro` drains
+the debt, and the retro may **never** be offered to the human as a choice. [EXP-083]
 
-**Retro-debt gates EVERY advance action, not just the next PULL — including
-RE-DEPLOY and hand-run recovery (v79, EXP-095 — cross-agent).** The v68 gate as
-written guarded only the next PULL, so during the SLC-039 deploy-failure
-recovery the orchestrator hand-cranked FOUR re-deploys, bootstrap re-applies, git
-pushes and reactive one-verb cicd patches on `main` WHILE retro-debt was already
-tripped (incident threshold crossed at the first deploy failure) and THIS
-gap-closing retro sat undone — the EXP-030/v68-class recurrence: a gate skipped by
-improvising around it. So a non-zero `make retro-debt` now **BLOCKS every advance
-action** — next-pull, **RE-DEPLOY**, and any orchestrator **hand-run recovery step
-on main** (bootstrap re-apply, push, ci-watch, reactive patch). When retro-debt is
-tripped the ONLY permitted orchestrator action is to run the retro that drains it.
-Two consequences bind all three roles:
-- **The orchestrator (§role-boundary) does NOT hand-crank a CFR/deploy recovery.**
-  The moment an incident trips retro-debt, run the retro FIRST; then the recovery
-  itself is dispatched as a **flow-manager-prioritised LOOP item** (a defect
-  pre-empts per §F5), routed to the owning specialist — **cicd** owns the IAM/deploy
-  fix, **engineer/tester** the build+validation. The orchestrator sequences and
-  gates; it does not do the specialist's job in the main loop (that hides the work,
-  skips the framework, leaves no reusable asset — a logged role-boundary failure).
-- **Every failure/recovery leg is ledger-logged as it happens** — hand-cranking
-  bypassed the instrument too (SLC-039 failure legs 2-4 + the recovery were
-  un-logged until this retro), so CFR/MTTR lied while the loop advanced. `deploy`,
-  `failure`, `recovery` rows are recorded at the moment each occurs, by the
-  flow-manager/cicd, not reconstructed at retro.
-This extends the SAME hard mechanical gate to the whole advance surface so the
-orchestrator cannot advance an incident by improvising. [EXP-095]
+**Retro-debt gates EVERY advance action, not just the next PULL — including RE-DEPLOY and
+hand-run recovery.** A non-zero `make retro-debt` blocks next-pull, RE-DEPLOY, and any
+orchestrator hand-run recovery step on main; the ONLY permitted action is the retro that
+drains it. So the orchestrator does NOT hand-crank a CFR/deploy recovery: run the retro
+FIRST, then dispatch the recovery as a **flow-manager-prioritised LOOP item** (a defect
+pre-empts, §F5) to the owning specialist — cicd the IAM/deploy fix, engineer/tester the
+build+validation. Every failure/recovery leg is appended (§F0) as it happens, so CFR/MTTR
+never lie while the loop advances. [EXP-095]
 
-**Right-sized cadence — routine batches, incidents fire immediately (v69,
-EXP-085).** The v68 threshold=1 (retro after EVERY slice close) proved too
-aggressive on its FIRST real firing (SLC-009, a validation-only close of pre-built
-work): a per-slice-close cadence reintroduces the very retro-overhead/bloat churn
-v68 fought, and treats a clean routine close (little to learn) the same as a real
-incident (much to learn). The gate now **splits events by class**:
-- **ROUTINE** = a SLICE/CHUNK close. These **batch** up to `--threshold`
-  (default **3**) before a retro is due. A clean run of small closes does not pay
-  per-slice retro overhead.
-- **INCIDENT** = a prod defect resolve OR a deploy_failure. These are **never
-  batched** — a single one forces RETRO DUE immediately (effective threshold 1),
-  plus the existing event-triggers (MTTR pair, queue-wait spike above target). Real
-  learning is never deferred.
-This is the v68 gate **self-correcting on its first firing — the intended
-behaviour, not a bypass**: enforcement stays mechanical (the loop still may not
-advance past a due retro, the retro still may not be offered to the human), only
-the routine cadence is right-sized and incidents are guarded to fire at once.
-`--threshold` is per-project tunable for batchier projects.
+**Right-sized cadence — routine batches, incidents fire immediately.** **ROUTINE** (a
+slice/chunk close) batches up to `--threshold` (default **3**) before a retro is due — a
+clean run of small closes does not pay per-slice overhead. **INCIDENT** (a prod defect
+resolve or a deploy-failure) is **never batched** — a single one forces RETRO DUE
+immediately, plus the existing MTTR/queue-spike triggers. Enforcement stays mechanical
+(no advance past a due retro; never offered to the human); `--threshold` is per-project
+tunable. [EXP-085]
 
-## F9. Continuous operation & autonomous wake (v41 — human-directed)
-The loop is a **continuously-running background process**, not a command the
-human starts on demand. It runs while there is ANY work to do — any queue
-non-empty OR anything replenishable against the chunk plan — and only EXITS when
-**all queues are empty AND nothing is replenishable** (requirement complete).
-Three rules make this autonomous:
+## F9. Continuous operation & autonomous wake
+The loop is a **continuously-running background process**, not a command the human starts
+on demand. It runs while there is ANY work to do (any queue non-empty OR anything
+replenishable against the chunk plan) and only EXITS when **all queues are empty AND
+nothing is replenishable** (requirement complete). Four rules make this autonomous:
+1. **Two processes, both automatic, both parallel.** (a) the dev loop pulls and builds
+   ready work; (b) replenishment breaks work down to lift any below-floor queue above its
+   floor (§F3). Independent, concurrent — neither waits on the other. The orchestrator
+   runs BOTH; it never makes the operator choose between them.
+2. **Enqueue-to-empty wakes the loop.** When an item is made ready onto a queue that was
+   empty (e.g. intake adds the first ready item while the loop has drained), the
+   flow-manager (re)starts the loop — without being asked. An enqueue is an event, not a
+   prompt for a human decision.
+3. **The orchestrator never asks the human a flow-mechanics question.** "Start the
+   loop?", "replenish or pull?" are NOT human decisions — they run automatically. The
+   human is touched at **exactly** the §F5 intake gate and when the requirement is
+   **complete**. Presenting parallel flow processes as an exclusive human choice is a
+   principle failure.
+4. **Keep trucking through boundaries.** Slice completion, the §F8 retro, and chunk
+   advance are autonomous boundaries, not human checkpoints. **ENDING THE TURN *IS* the
+   stop, even with a polite report** — parking the loop with "I'll resume / refresh to
+   confirm" still forces the human to re-prompt, and every restart is idle gross lead
+   time. **RULE: do not end the turn at a non-gate boundary.** After ANY unit completes (a
+   UC done, a defect closed, the §F8 retro written, a chunk bubbled) IMMEDIATELY pull and
+   dispatch the next ready work in the same turn, and keep chaining. A report is INLINE
+   and terse; it never replaces the next dispatch. The turn ends ONLY at: the §F5 intake
+   gate, requirement-complete, or a genuine blocker needing a human answer.
+Target: gross lead time (removes avoidable human-decision idle) + deployment frequency,
+guarded by CFR.
 
-1. **Two processes, both automatic, both parallel.** (a) the dev loop pulls and
-   builds ready work; (b) replenishment breaks work down to lift any below-floor
-   queue above its floor (§F3). They are **independent and run concurrently** —
-   neither waits on the other. The orchestrator runs BOTH; it never makes the
-   operator choose between them.
-2. **Enqueue-to-empty wakes the loop.** When an item is enqueued onto a queue
-   that was empty (e.g. intake adds the first ready item while the loop has
-   drained/exited), the flow-manager emits a **`loop_wake`** ledger row and the
-   orchestrator **(re)starts the loop** — without being asked. An enqueue is an
-   event, not a prompt for a human decision.
-3. **The orchestrator never asks the human a flow-mechanics question.** "Start
-   the loop?", "replenish or pull?", "keep the queue above floor or build?" are
-   NOT human decisions — they are autonomous flow and run automatically. The
-   human is touched at **exactly** the §F5 two gates (intake, infra-deploy) and
-   when the requirement is **complete** (starved + nothing replenishable → ask
-   for more work). Presenting independent parallel flow processes as an exclusive
-   human choice is a principle failure (see
-   `principle-failures/2026-06-09-orchestrator-asked-human-to-choose-between-parallel-processes.md`).
-4. **Keep trucking through boundaries.** Slice completion, the §F8 retro,
-   and chunk advance are **autonomous boundaries, not human checkpoints**. The
-   loop continues straight through tester-validation → slice-done → bubble →
-   §F8 retro → next slice/chunk WITHOUT the orchestrator ending its turn to ask
-   "continue or pause?". Stopping at a slice/chunk boundary to hand control back
-   adds gross lead time and is a principle failure (see
-   `principle-failures/2026-06-09-orchestrator-stopped-at-slice-boundary-to-ask.md`).
-   The §F8 retro RUNS automatically and must be **tight** — a retro that becomes
-   the time thief defeats its purpose. The default at every non-gate boundary is
-   **continue**; the human can always interrupt. The only stops remain the §F5
-   two gates and requirement-complete.
-   **ENDING THE TURN *IS* the stop, even with a polite report.** Not asking
-   "continue or pause?" is not enough: ending the turn with a status report +
-   "I'll resume / refresh to confirm and I'll carry on" parks the loop just the
-   same — the human must re-prompt ("go") to restart it, and every restart is
-   idle gross lead time. **RULE: do not end the turn at a non-gate boundary.**
-   After ANY unit completes — a UC done, a defect closed, the §F8 retro written,
-   a chunk bubbled — IMMEDIATELY pull and dispatch the next ready work **in the
-   same turn**, and keep chaining. A report is INLINE and terse; it never
-   replaces the next dispatch. The turn ends ONLY at: a §F5 gate (intake /
-   infra-deploy), requirement-complete (queue empty AND nothing replenishable),
-   or a genuine blocker that needs a human answer. Verification/restart steps
-   are mid-turn work, not a stopping point. "Refresh to confirm and I'll carry
-   on" is banned — carry on, then the human confirms if they wish.
-
-Target: gross lead time (removes avoidable human-decision idle) + deployment
-frequency (the loop keeps flowing without re-invocation), guarded by CFR (the two
-real gates are untouched).
-
-## F10. Fleet — isolated per-project loops, one shared process spine (v72 — human-directed)
-Multiple projects run CONCURRENTLY, each as its own isolated loop, feeding ONE
-shared, project-agnostic process. Two layers, deliberately decoupled (design:
-IMP-013):
-
-1. **Per-project loop — isolated.** Each active project runs its own `/loop-run`
-   in its OWN background runner/context (a per-project orchestrator agent or
-   session), holding ONLY that project's `work/<project>/` — its ledger shard,
-   queues, claimed-path registry, and Linear initiative. Loops are independent:
-   different repos/domains, run in parallel, no shared mutable *work* state. One
-   project's build/deploy churn never enters another's context (context is
-   conserved). This is **isolation, not a context-inheriting fork** — a fork
-   would drag project A's context into project B, the opposite of what we want.
-
-2. **Shared spine — informed, not coupled.** `/process` (principles, rules, DORA
-   baseline, learned failures) and the orchestrator role are SHARED and **MUST
-   NOT reference any project** — the existing `/process`-vs-`/work` split. N
-   `work/` spaces feed ONE `/process`.
-
-3. **The integration seam (how project learning improves the whole without
-   coupling it).** A project retro's lesson is **abstracted — de-projected —
-   before it lands in `/process`**: the project retro records "in project X, Y
-   happened" (stays in `work/<project>`); the process change states "when
-   Y-shaped situation, do Z" as an experiment (`EXP-nnn`), rule, or
-   principle-failure. So `/process` is **INFORMED BY every project yet
-   INDEPENDENT OF any** — delete a project and the process still stands.
-   Per-project retros tune that project's own queues off its ledger shard; a
-   periodic **fleet retro** rolls the abstracted lessons up into `/process` +
-   the shared DORA baseline. The main thread is a **fleet supervisor** (launch /
-   monitor / route human decisions), not a per-UC worker; its cost is
-   O(decisions), not O(UCs × projects). [EXP-075]
+## F10. Fleet — isolated per-project loops, one shared process spine
+Multiple projects run CONCURRENTLY, each as its own isolated loop, feeding ONE shared,
+project-agnostic process. Two layers, deliberately decoupled:
+1. **Per-project loop — isolated.** Each active project runs its own `/loop-run` in its
+   OWN background runner/context, holding ONLY that project's `work/<project>/` — its
+   items, derived views, claimed-path registry, and board initiative. Loops are
+   independent: different repos/domains, parallel, no shared mutable *work* state. One
+   project's churn never enters another's context. This is **isolation, not a
+   context-inheriting fork**.
+2. **Shared spine — informed, not coupled.** `/process` (principles, rules, learned
+   failures) and the orchestrator role are SHARED and **MUST NOT reference any project**.
+   N `work/` spaces feed ONE `/process`.
+3. **The integration seam.** A project retro's lesson is **abstracted — de-projected —
+   before it lands in `/process`**: the project retro records "in project X, Y happened"
+   (stays in `work/<project>`); the process change states "when Y-shaped situation, do Z"
+   as an experiment, rule, or principle-failure. So `/process` is INFORMED BY every
+   project yet INDEPENDENT OF any — delete a project and the process still stands.
+   Per-project retros tune that project's own queues off its own items; a periodic
+   **fleet retro** rolls the abstracted lessons up into `/process`. The main thread is a
+   **fleet supervisor** (launch / monitor / route human decisions), not a per-UC worker;
+   its cost is O(decisions), not O(UCs × projects). [EXP-075]

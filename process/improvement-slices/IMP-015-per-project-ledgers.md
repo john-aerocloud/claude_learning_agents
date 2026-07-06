@@ -1,5 +1,9 @@
 # IMP-015 — Per-project DORA ledgers (raw log lives in the project, not /process)
 
+**Status:** CLOSED — the DORA ledger is FROZEN under v82; delivery metrics are now
+DERIVED per-project by `wi-project` from each project's per-item event logs (raw
+event data already lives in the project's own item files), so a per-project raw
+ledger split is moot.
 **Owner:** cicd/engineer on the dora-ledger skill. **Decision:** human — "push the ledgers for each project into the project; the shared ledger.csv is getting very large."
 
 ## Problem

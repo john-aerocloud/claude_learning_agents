@@ -24,9 +24,9 @@ _Moved out of process-current.md §22 at the v59 consolidation (2026-06-19)._
   when IMP-004 is built. Target: CFR.
 - **Use-case flags — SCORED MET at v31** (H2_ENFORCE ran the full §40 lifecycle
   on a real shared seam; two-phase rollout prevented enforcement-before-
-  credentials breakage by design). Remaining related item: **IMP-005 per-agent
-  ledger shards** (the ledger is the one shared append-file causing rebase
-  friction).
+  credentials breakage by design). (The former IMP-005 per-agent-ledger-shards
+  follow-on is CLOSED — the DORA ledger is frozen and items are inherently
+  per-file disjoint under v82.)
 - **Shared change-impact model (§12a, v31)** — author the initial model for
   each live project (oxo-online retrofit = OI-31, scheduled with the OI-17
   hexagonal refactor at s006 — same archaeology, one pass). Score at the next
@@ -46,15 +46,12 @@ _Moved out of process-current.md §22 at the v59 consolidation (2026-06-19)._
   touches each surface; tester then gains identity-before-behaviour for real.
 
 ## Re-baseline follow-ups (v59, 2026-06-19)
-- **Legacy-project coherence retrofit** — observatory + oxo-online predate the
-  EXP-048 single-source-of-truth model (items.csv/queues/ledger three-writer
-  drift). Retrofit or accept-and-flag; same class as the OagEventSource UC-id
-  collision that triggered the v59 re-baseline.
 - **settings.json allowlist factoring** — ~160 global + ~60 local patterns,
   heavily project-specific (work/OagEventSource, oxo-online, observatory). Factor
   project-scoped patterns so the global allowlist stays a reviewable core. Not a
   failure source; low priority.
-- **Full retroactive per-event ledger for OagEventSource historical UCs** — the
-  delta-era UCs (UC-12..A4) are now registered in items.csv but lack per-event
-  ledger history (lead-time data incomplete). Optional reconstruction from git
-  timestamps.
+
+_(v82 slim: the three-writer coherence-retrofit item and the per-event
+historical-ledger backfill item were removed — both were made moot by the F0
+event-sourced cutover: state is fold(events) in one store, and the frozen DORA
+CSV is no longer the metrics source.)_

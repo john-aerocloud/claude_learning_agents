@@ -4,7 +4,7 @@ argument-hint: <project-name>
 allowed-tools: Read, Edit, Bash
 ---
 
-_Project resolution: the project argument may be omitted. If the first argument is not an existing directory under `work/`, use the project named in `work/ACTIVE` and treat the given arguments as shifted (e.g. a lone `<slice-id>` for `/iteration-run`). The machine-local `work/ACTIVE` pointer is per-instance (never another machine's); if it is missing, `none`, or stale, stop and suggest `/project-switch <name>`._
+_Project resolution: the project argument may be omitted. If the first argument is not an existing directory under `work/`, use the project named in `work/ACTIVE` and treat the given arguments as shifted (e.g. a lone `<slice-id>` for `/loop-run`). The machine-local `work/ACTIVE` pointer is per-instance (never another machine's); if it is missing, `none`, or stale, stop and suggest `/project-switch <name>`._
 
 Act as the **orchestrator**. Set `work/$1/project.md` status=stopped and
 stopped=today. Append a closing entry to `decision-log.md` summarising where the

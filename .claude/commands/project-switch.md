@@ -18,13 +18,15 @@ Act as the **orchestrator**. Switch the active project to **$1**.
    - the tail of `decision-log.md` (last ~10 entries: which gates are passed,
      which decision is pending),
    - `chunks.md` (which chunk is in play),
-   - the latest `work/$1/slices/<nnn>-*/` dir: which of slice.md / acceptance.md /
-     route.md / result.md exist tells you exactly where the slice stopped.
-   Do NOT load architecture or full slice history — the decision log is the
-   resume mechanism.
-4. Report: where the project stands (gate state, slice state), the next
-   recommended command (`/slice-next`, `/iteration-run <slice>`, or `/retro`),
-   and any human decision that was pending when work last stopped.
+   - the DERIVED work state — `work/$1/views/state.md` (each item's folded state)
+     and `work/$1/views/queues.md` (what is in flight / ready / rework) tell you
+     exactly where work stopped. Prefer these over inferring progress from which
+     slice artifact files happen to exist.
+   Do NOT load architecture or full slice history — the decision log plus the
+   derived views are the resume mechanism.
+4. Report: where the project stands (gate state, work state), the next
+   recommended command (`/slice-next`, `/loop-run`, or `/retro`), and any human
+   decision that was pending when work last stopped.
 
 Switching never destroys state: the previous project keeps its files, its open
 gates, and its project-tagged DORA rows. Nothing in `/process` changes. Because

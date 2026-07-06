@@ -1,5 +1,12 @@
 # IMP-014 — Linear plan/progress board (state mirror, NOT metrics)
 
+**Status:** SUPERSEDED by the `linear` projection agent + the per-item event-sourced
+model (v82). The board is now a pure per-item projection (one agent mirrors one
+item, reads `derived.state`, upserts, never writes back); the `sync-linear.py`
+whole-tree reconciler and its items.csv/state.md/queues reads are retired. The
+current canonical map is `process/linear-mapping.md` (serves both `linear` and
+`jira`). Record retained.
+
 > **Canonical mapping now lives in `process/linear-mapping.md`** — it generalises
 > the single-team mapping below to **one team per project** (excluding ox /
 > oxo-online / observatory), defects/UC-open-items as **sub-issues of their UC**,

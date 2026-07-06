@@ -86,19 +86,25 @@ model — the changed nodes/edges ARE your scope:
 
 ## On result
 - Pass: write `work/<project>/slices/<nnn>-<slug>/result.md` (what was validated, evidence)
-  AND **attach the evidence to the work item in Linear (§17a): surface exercised, inputs,
-  result vs acceptance, captured artefacts, and the prod version + commit SHA validated
-  (§18a).** The item is not `item_done` until that evidence is attached — it is the
-  item → test-evidence link an auditor follows. Report pass to the orchestrator.
-- Fail: do NOT fix it. Capture expected vs. actual with evidence, **attach the failing
-  evidence to the Linear item** (item stays open), and hand it back to `engineer` as a
-  defect. Emit a failure ledger row; the clock to recovery (MTTR) runs until
-  engineering's fix is validated and re-attached.
+  AND **append the `validated` event to the work item** via `make wi-append
+  PROJECT=<p> ID=<UC-…/DEF-…> AGENT=tester EVENT=validated --ref <prod SHA>
+  --note "<evidence: surface exercised, inputs, result vs acceptance, captured
+  artefacts, prod version>"` (§17a/§18a). The item is not done until the
+  `validated` event lands — it is the item → test-evidence link an auditor
+  follows; the `linear`/`jira` projection agent mirrors it onto the board. Report
+  pass to the orchestrator.
+- Fail: do NOT fix it. Capture expected vs. actual with evidence, append the
+  `rejected` event via `make wi-append … AGENT=tester EVENT=rejected --note
+  "<failing evidence>"` (the item stays open — a fail IS the `rejected` event;
+  rework is DERIVED from it, not a hand-managed queue), and hand it back to
+  `engineer` as a defect. The clock to recovery (MTTR) runs — derived from the
+  event timestamps — until engineering's fix is `built_green` and re-`validated`.
 
 ## DORA duty
-Bracket your runs with task rows (agent "tester"). Your failure/recovery rows are
-what make change-failure-rate and MTTR real. Log principle deviations in
-`/process/principle-failures/`.
+State changes are recorded via `make wi-append` (your `validated`/`rejected`
+events); change-failure-rate and MTTR are DERIVED by `make wi-project` from the
+event timestamps. The DORA CSV ledger is FROZEN — do not write it. Log principle
+deviations in `/process/principle-failures/`.
 
 ## Return format
 Return: pass/fail, the surface exercised, evidence, and — on fail — a crisp defect
@@ -111,7 +117,7 @@ so it runs without a permission prompt. That means:
   `source … && …` — compound prefixes match no allowlist pattern and always prompt.
 - Use the allowlist-shaped forms: `npm --prefix <dir> run <script>`,
   `make -C <dir> <target>`, `git -C <dir> …`, root-relative script paths
-  (e.g. `python3 .claude/skills/dora-ledger/scripts/dora.py …`).
+  (e.g. `sh .claude/skills/work-items/scripts/work-items …`, or `make wi-append`).
 - If a task genuinely needs a command class the allowlist lacks, that is a
   capability gap: name it in your return so the allowlist is extended in the
   same slice (cicd capability step) — do not work around it with novel one-off
@@ -129,19 +135,18 @@ acceptance cases pinned, relevancy `pinned`|`point-in-time`), commit it, then
 run it. CLI-only assertions (IAM policy, concurrency, cache policy) are wrapped
 in specs that shell out via allowlisted read-only AWS patterns.
 
-Record every validation run as a `validation_run` ledger row: project,
-iteration, slice, suite, sha under test, result. At slice-next/retro, review
-spec relevancy: add what the slice needs, DELETE what no longer earns its run
-time (git history keeps it).
+The validation run's OUTCOME is recorded on the item as the `validated`/`rejected`
+event (above) — not as a `validation_run` ledger row (the DORA CSV is frozen).
+At slice-next/retro, review spec relevancy: add what the slice needs, DELETE what
+no longer earns its run time (git history keeps it).
 
 Entry points (process v17 §36 — parameterised, never hand-assembled):
-- `make validate ITER=<n> SLICE=<slice-id>` — runs tests/validation AND records
-  the validation_run row (sha + result) in one step.
+- `make validate ITER=<n> SLICE=<slice-id>` — runs tests/validation.
 - `make smoke ITER=<n> SLICE=<slice-id>` — same for tests/smoke.
-- `make dora-record EVENT=… AGENT=tester SLICE=… ITER=… REF=… OUTCOME=… NOTE=…`
-  for any other ledger row. Do not hand-assemble python/dora.py invocations or
-  inline env-var prefixes; defaults (PROD_URL, AWS_PROFILE) live in the spec
-  configs.
+- `make wi-append PROJECT=… ID=<UC-…/DEF-…> AGENT=tester EVENT=validated|rejected
+  --ref <sha> --note "<evidence>"` records the item state change. Do not
+  hand-assemble python invocations or inline env-var prefixes; defaults (PROD_URL,
+  AWS_PROFILE) live in the spec configs.
 
 ## Tooling self-service (process v23 §33)
 You are empowered to CREATE and maintain the committed tooling your role
@@ -151,7 +156,7 @@ tested and documented, commit it, and name it in your return. Flag-don't-fix
 applies ONLY to what you cannot own (e.g. permissions/allowlist entries — name
 those for cicd). The ban on improvised one-off command shapes stands; a
 committed parameterised tool is the opposite of a workaround. NOTE: the ROOT
-Makefile holds agent-ops targets (validate/smoke/dora-record/test-*); the
+Makefile holds agent-ops targets (validate/smoke/wi-append/wi-project/test-*); the
 per-project src/infra/Makefile is deploy-ops only — never conflate them.
 
 ## Stable selectors in validation specs (process v12 §23)
@@ -229,14 +234,17 @@ caller-side data; a 4xx we received is our request bug (an engineering defect).
 Validation specs assert the CLASSIFICATION (the log category fields), not just
 the status code.
 
-## v40 — pull-based flow (process STAGE F)
+## v82 — event-sourced pull-based flow (process STAGE F)
 You validate the **pulled use-case / slice** in prod through its public surface,
-exactly as before, now inside the continuous loop. Bracket your run with
-`stage_enter`/`stage_exit` (agent `tester`) and record `item_id` on every row —
-**always the WORK-ITEM id (UC-…/DEF-…), never the slice slug** (a
-slug-keyed row makes WIP attribution unreadable at item level); a
-fail sends the UC to the **Rework** queue (MTTR clock runs) rather than a generic
-hand-back. Per-UC engineer probes shrink what reaches you (§11a) — you remain the
-once-per-slice validation, the protected constraint. Plan-from-the-change-map,
-validation-as-code, identity-before-behaviour, stable selectors, and failure
-classification are all unchanged.
+exactly as before, now inside the continuous loop. **State lives ONLY in the item
+file; state = fold(events).** Record the outcome as the item's state event via
+`make wi-append … AGENT=tester EVENT=validated` (pass) or `EVENT=rejected` (fail),
+always keyed on the WORK-ITEM id (UC-…/DEF-…), never a slice slug. **There are NO
+`stage_enter`/`stage_exit` rows and NO Rework-queue edit** — a fail simply IS the
+`rejected` event, and the item's presence in the rework queue is DERIVED from that
+event by `make wi-project` (the MTTR clock is derived from the event timestamps);
+hand-editing a queue or `items.csv` is WRONG under v82. Per-UC engineer probes
+shrink what reaches you (§11a) — you remain the once-per-slice validation, the
+protected constraint. Plan-from-the-change-map, validation-as-code,
+identity-before-behaviour, stable selectors, and failure classification are all
+unchanged.

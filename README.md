@@ -20,14 +20,20 @@ in `/process` may reference a specific project.
 
 ```
 orchestrator  (flow, gates, DORA, Theory of Constraints — NO product/eng calls)
-  ├── flow-manager        (v40: queues, per-queue buffers, pull/replenish, parallelism by independence, collisions)
+  ├── flow-manager        (derives flow decisions — pull/replenish/parallelism/collisions — from item event-logs)
   ├── product             (Jobs to Be Done, vision, next-smallest slice, value/cost)
   ├── solution-architect  (C4 / AWS Well-Architected, arch delta, security review)
   ├── cicd                (environments-on-need, pipeline, rollback assets)
   ├── engineer            (strict TDD on trunk)
   ├── ui-designer         (wraps engineer on UI slices: structure before, polish after; a11y)
-  └── tester              (validate the deployed system through its public surface)
+  ├── tester              (validate the deployed system through its public surface)
+  ├── linear              (per-item, idempotent projection of the item file onto its Linear issue)
+  └── jira                (per-item, idempotent projection of the item file onto its Jira issue)
 ```
+
+The `linear` and `jira` agents are **pure projections**: each reads one item file
+(the SSOT) and upserts that one board issue — they make no flow/product/eng
+decisions and never write back to the item, so any number of them run in parallel.
 
 The orchestrator only regulates delivery. Every product, architecture and
 implementation decision is delegated to the specialist and returned as a tight
@@ -38,31 +44,57 @@ artifacts to `/work/<project>/…` and hand back paths + decisions.
 > the main session plays the orchestrator by running the slash commands below and
 > dispatching the specialists. The logic and files are identical.
 
-## Pull-based flow (v40 — current)
+> **How to use it, step by step:** see [`USER-MANUAL.md`](USER-MANUAL.md) (root).
+> This README describes *what the system is*; the manual is the operating guide.
 
-Delivery is **pull**, not push. New work passes a single **intake** gate into a
-costed, prioritised, per-queue-buffered set of queues; a continuous inner dev loop
-pulls the **maximal independent set** of ready use-cases and runs them concurrently
-(TDD on trunk → per-UC deploy → validate-in-prod); product replenishes the Ready
-queue just-in-time so it never starves but stays shallow (penny game); completed
-requirements ask for more work. **One blocking human gate:** requirement/defect
-intake — infra-bearing deploy auto-approves under an automated policy assurance
-(§F5/§F5a, EXP-093), leaving only a genuinely irreversible prod-DATA op (§0b)
-human-confirmed. Collisions between parallel
-work teach the dependency tree. Cross-agent rules: `process/process-current.md`
-**STAGE F**. Rationale, diagrams, and a worked retro: `Version2-design/`.
+## Event-sourced work items (v82 — current)
+
+The **work item is the single source of truth**. Each item is one self-contained
+file holding its definition, its dependency edges, and an **append-only event
+log**; its current state is not stored but **computed** — `state = fold(events)`
+through the item's per-type state graph. Because the fact "what state is X in?"
+lives in exactly one place, the drift class that plagued the old multi-store model
+is **unrepresentable**.
+
+Everything else is a **derived view**, recomputed on read, never
+persisted-and-hand-synced:
+
+- **Queues** ("what's ready to pull?") are a query over the item set. Delivery is
+  still **pull**: the loop reads the derived Ready view and pulls the **maximal
+  independent set** of use-cases, runs them concurrently (TDD on trunk → per-UC
+  deploy → validate-in-prod), and product replenishes just-in-time (penny game).
+- **The board** (Linear / Jira) is a projection — the `linear`/`jira` agents
+  mirror each item file to its issue.
+- **DORA + flow metrics** fall out of the event timestamps that are already in the
+  item.
+
+The write path is a single edge-checked appender; an event that isn't a legal
+transition from the item's current folded state is **rejected**, and wanting an
+undefined move becomes a governed amendment (an `EXP-NNN` experiment) rather than a
+silent half-transition. **Drift is a construction gate**, not an after-the-fact
+reconcile: `make wi-validate` fails the build if any invariant is violated. One
+blocking human gate remains — requirement/defect intake; infra-bearing deploy
+auto-approves under an automated policy assurance (§F5/§F5a, EXP-093), leaving only
+a genuinely irreversible prod-DATA op (§0b) human-confirmed. Collisions between
+parallel work teach the dependency tree. Build contract:
+`process/machinery/CONTRACT.md`; cross-agent rules: `process/process-current.md`
+**STAGE F**. Rationale, diagrams, and a worked retro: `Version2-design/`. The prior
+QueueApproach model is archived at git tag `QueueApproach`.
 
 ## The loops (slash commands)
 
+The machinery underneath is three targets — `make wi-append` (the sole state
+writer, edge-checked), `make wi-project` (recompute all derived views + stats),
+`make wi-validate` (the drift gate).
+
 | Command | What it does | Gates |
 |---------|--------------|-------|
-| `/intake "<req or defect>"` | **(v40)** JTBD-frame + value/cost + register + enqueue (defects pre-empt) | **intake** |
-| `/loop-run <name>` | **(v40)** continuous pull loop: pull independent set → build/deploy/validate → replenish → retro | deploy (infra-only) |
-| `/flow-status <name>` | **(v40)** queues vs buffers, time thieves, parallelism efficiency, item tree | — |
+| `/intake "<req or defect>"` | **(v82)** JTBD-frame + value/cost + register item + `wi-append registered/made_ready` (defects pre-empt) | **intake** |
+| `/loop-run <name>` | **(v82)** continuous pull loop: read derived Ready view → pull independent set → build/deploy/validate (`wi-append` per stage) → `wi-project` → replenish → retro | deploy (infra-only) |
+| `/flow-status <name>` | **(v82)** derived queues vs buffers, time thieves, parallelism efficiency, item tree (from `wi-project`) | — |
 | `/project-new <name> [problem]` | Create the project, start the new-requirement workflow | intake |
 | `/requirement-new <name>` | (push mode) Vision → architecture → Chunks → capabilities | — |
 | `/slice-next <name>` | (v40) product's just-in-time replenishment routine — no longer a gate | — |
-| `/iteration-run <name> <slice>` | the single inner-loop pass `/loop-run` invokes | deploy (infra-only) |
 | `/retro <name> [slice]` | recompute DORA + flow, score experiments, tune buffers/N, write next process version | — |
 | `/defect …` | structured defect intake → reproduce → prioritise → fix → gap-closing retro | intake |
 | `/project-list` | All projects: status, current slice, last activity, pending gates | — |
@@ -89,36 +121,50 @@ decisions are logged, planning the *next* slice can run in parallel with the
 
 ## DORA + Theory of Constraints
 
-Every agent brackets its work with events in `/process/dora/ledger.csv` via the
-`dora-ledger` skill. `dora.py compute` rebuilds `/process/dora/baseline.md` with
-per-agent modal/median/mean task times and the four metrics (gross lead time,
-deployment frequency, change failure rate, MTTR), and names the current
-**constraint**. The orchestrator optimises the *whole* pipeline against that
-constraint, not local agent speed.
+Every agent brackets its work by appending events to the relevant item file via
+`make wi-append` (the sole, edge-checked state writer). `make wi-project` then
+folds those event timestamps into `work/<project>/views/stats.json` — the four
+DORA metrics (gross lead time, deployment frequency, change failure rate, MTTR)
+plus **gross-lead-time contribution by owner**, **quality by stage**, and
+**recovery/MTTR by class** — and names the current **constraint**. Nothing is
+recorded by hand and nothing is stored twice: the metrics are a pure function of
+the same events that carry state. The old `process/dora/ledger*.csv` is a **frozen
+QueueApproach archive** (read-only, never extended). The orchestrator optimises the
+*whole* pipeline against the constraint, not local agent speed.
 
 The self-improvement loop: **act → measure → reflect → revise process → repeat.**
 Three document sets carry it: `process-current.md` (now), `process-history/`
-(superseded versions with anticipated-vs-observed improvement), and per-project
-`dora/per-project.md` (expected vs actual per change, with regression reflections).
+(superseded versions with anticipated-vs-observed improvement), and each project's
+derived `views/stats.*`.
 
 ## Skills (context protection)
 
+- `work-items` — the event-sourced substrate: how to register/pull items, append
+  events, and read derived queues/tree/metrics. Read this before touching item
+  state.
 - `process-framework` — the doc map: what to read for each task, the `/process`
   vs `/work` rules. Read this instead of crawling directories.
-- `dora-ledger` — record events + compute metrics.
 - `delivery-principles` — XP/TDD/slicing/trunk/CD/JTBD reference + the deviation
   procedure (loaded on demand, not held in context).
 - `ui-design-system` — the UI Designer's method (tokens, component-driven
   decomposition, nav/click-reduction heuristics, WCAG 2.2 AA checklist, library
   mapping, spec templates), loaded on demand.
+- `aws-architecture` — AWS Well-Architected reference for solution-architect/cicd.
+- `otel-*` bundle — OpenTelemetry collector / instrumentation / OTTL / semantic
+  conventions, loaded on demand for observability work.
+- `dora-ledger` — now a **frozen-archive stub** that only reads the retired CSV
+  ledger; for anything live use `work-items`.
 
 ## Layout
 
 ```
-.claude/agents/        orchestrator, product, solution-architect, cicd, engineer, ui-designer, tester, documenter
-.claude/commands/      the six workflow commands above
-.claude/skills/        process-framework, dora-ledger, delivery-principles
+.claude/agents/        orchestrator, flow-manager, product, solution-architect, cicd,
+                       engineer, ui-designer, tester, documenter, linear, jira
+.claude/commands/      the workflow commands above (13)
+.claude/skills/        work-items, process-framework, delivery-principles, ui-design-system,
+                       aws-architecture, otel-* bundle, dora-ledger (frozen stub)
 process/               persistent self-state (see process/README.md)
+process/machinery/     the work-item build contract (CONTRACT.md) + type state-graphs.json
 work/                  projects + _TEMPLATE/ (see work/README.md)
 ```
 
@@ -126,5 +172,8 @@ work/                  projects + _TEMPLATE/ (see work/README.md)
 
 1. `/project-new my-thing "the problem in one line"`
 2. Walk the gates; sign off when asked.
-3. `/slice-next my-thing` → `/iteration-run my-thing <slice>` → `/retro my-thing`.
-4. Read `process/dora/baseline.md` to see the constraint to attack next.
+3. `/intake "<req>"` → `/loop-run my-thing` → `/retro my-thing`.
+4. `make wi-project PROJECT=my-thing` then read `work/my-thing/views/stats.md`
+   to see the constraint to attack next.
+
+For the full operating guide, read [`USER-MANUAL.md`](USER-MANUAL.md).

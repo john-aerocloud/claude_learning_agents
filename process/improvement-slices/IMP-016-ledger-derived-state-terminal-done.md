@@ -1,9 +1,12 @@
 # IMP-016 — DORA derived-state correctness: `item_done` is terminal + a mechanical reconcile-first gate
 
-**Status:** registered 2026-07-05 (human-directed, HIGH priority — "a bug in these
-things corrupts data; we need to understand how we are working"). Active project at
-registration: Viggo-fix (ledger events tagged accordingly; this is agent-system
-improvement work, NOT a VF-* project item and NOT mirrored to Linear).
+**Status:** RESOLVED by the v82 cutover. `item_done`-in-no-queue is now invariant
+I2 in `process/machinery/state-graphs.json` (a terminal item in a non-null queue
+is unrepresentable and caught by `make wi-validate`); ledger-drift is superseded
+by the fold-state single-store model + `wi-validate`. This IMP is the evidence
+that justified F0 — retained as the record. (Registered 2026-07-05, human-directed,
+HIGH priority — "a bug in these things corrupts data; we need to understand how we
+are working"; active project at registration: Viggo-fix.)
 
 ## Problem (data-integrity bug in the SSOT)
 

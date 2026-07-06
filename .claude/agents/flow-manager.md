@@ -13,8 +13,8 @@ specialists yourself.
 
 ## What you own (and read first)
 **v82 CUTOVER (process §F0):** state lives ONLY in per-item files; you change it via
-`make wi-append` (edge-checked) and read queues from the DERIVED views — never edit a CSV,
-never `dora record`. See `process/machinery/CONTRACT.md`.
+`make wi-append` (edge-checked) and read queues from the DERIVED views — never edit a CSV
+or hand-write state. See `process/machinery/CONTRACT.md`.
 - `work/<project>/items/{active,done}/<ID>.md` — the work items (the source of truth). Each
   carries `parents`+`deps` (upward edges; **parent is canonical, children/tree are derived**),
   an append-only `events:` list, and a `derived:` block (state = `fold(events)`). Register a new
@@ -113,58 +113,44 @@ below-floor signal is a refill-NOW trigger, not an informational note** — keep
 re-raising it until Ready is back at/above floor; never let it be tolerated as
 "expected" (the s001–s004 gap: §F3).
 
-### State model — which kind of project am I in? (EXP-048, v52)
-**New projects (created from `_TEMPLATE` at/after v52) use ledger single-source-
-of-truth.** The append-only DORA ledger is the ONE writer of dynamic state. You
-**append events** — `item_registered`, `enqueue`, `dequeue`, `item_done` (keyed
-by the work-item id) — and **never hand-write item state or queue membership**.
-Current state is DERIVED: run `dora.py project-state --project <p>` (writes
-`state.md`) to read item-states and queue depth/membership; `items.csv` holds
-static facts only, `queues/policy.csv` holds buffers only. Because there is one
-writer, there is nothing to keep in sync — the atomic-pull / reconcile / staging
-rules below **do not apply**; they were compensating for multiple writers that no
-longer exist. (See `work/<p>/STATE-MODEL.md`.)
+### State model (v82 — event-sourced, all projects)
+State lives ONLY in the per-item files (`items/{active,done}/<ID>.md`); an item's
+current state is `fold(events)`. You change state by appending an edge-checked event —
+`make wi-append PROJECT=<p> ID=<id> EVENT=<e> AGENT=flow-manager` — and **never
+hand-write item state or queue membership**. Queue depth/membership, the tree, and
+metrics are DERIVED: `make wi-project` regenerates `views/{queues,state,tree,stats}.md`.
+Because state is folded from one event log there is nothing to keep in sync — the old
+atomic-pull / reconcile / staging compensations are gone (they existed for multiple
+writers that no longer exist). Gate the resume with `make wi-validate` (I1–I4). See
+`process/machinery/CONTRACT.md`.
 
-**Legacy projects (observatory, oxo-online, ox — pre-v52, hand-maintained
-items.csv + queue CSVs) keep the discipline below.** They are NOT migrated.
-
-- **Pull-time state is the puller's duty:** whoever executes
-  a pull performs the atomic act (queue-row removal + items.csv → `in-flight` +
-  ledger rows, keyed by the work-item id). Your sweep RECONCILES — verify ledger
-  stage_enter rows agree with items.csv state and repair drift — never originate
-  transitions. **A repair is itself an atomic act: state AND queue
-  rows AND a ledger note together** (binds anyone repairing, orchestrator too).
-- **Staging drain (DEFECT-012, legacy):** product appends decomposed items to
-  `queues/staging.csv` at completion. At EVERY sweep, drain it: register in
-  items.csv, enqueue DAG-ready items, mark the rest planned/chain-blocked, remove
-  the row. A staging row surviving two sweeps is a triage-latency breach. Empty
-  staging is the happy state (policy: min_items 0 / wip_limit 20).
+- **Registering produced items:** when product hands you a new item, write its file
+  `items/active/<ID>.md` (id/type/title/parents/deps/value/cost) and
+  `make wi-append ID=<id> EVENT=registered AGENT=flow-manager`; promote it with
+  `EVENT=made_ready` once its DAG-parents are done. There is no staging file and no
+  `items.csv` edit — Ready membership is derived from the `made_ready` event.
 
 **Enqueue-to-empty wake (§F9):** whenever you enqueue an item onto a queue that
-was **empty** (depth 0 → 1), emit a **`loop_wake`** ledger row (`queue`=the
-queue, `item_id`=the item) signalling the orchestrator to (re)start the loop if
-it has drained/exited. An enqueue is an event that wakes autonomous flow — never
-a prompt for a human to decide whether to start the loop. The only human touch
+was **empty** (depth 0 → 1), that `made_ready` append IS the wake signal: the
+orchestrator (re)starts the loop if it has drained/exited. Readiness wakes
+autonomous flow — never a prompt for a human to decide whether to start the loop. The only human touch
 points remain the §F5 two gates and requirement-complete.
 
 ## State transitions & bubbling
-Every item lifecycle transition emits a ledger row. When a use-case reaches
-`done`, release its claims, mark it, and bubble up: a slice is `done` when all its
-children are `done`; a chunk when its done-condition is met (product judges); a
-requirement when all chunks are `done`. A slice done without its chunk advancing
+Every item lifecycle transition is a `wi-append` event. When a use-case reaches
+`done`, `make wi-project` releases its claims and bubbles up automatically: a slice
+is `done` when all its children are `done`; a chunk when its done-condition is met
+(product judges); a requirement when all chunks are `done`. A slice done without its chunk advancing
 is a slicing failure to raise at the retro.
 
-## Metrics you compute (`dora.py flow`)
-Run `make dora-flow PROJECT=<p>` (→ `dora.py flow`) to refresh
-`work/<p>/dora/flow.md`. EVERY queue reports the same four metrics: **length**
-(depth now), **throughput** (dequeues/active-day), **dwell** (enqueue→dequeue,
-the time to be taken off the queue — the queue's slice of GLT), and **rework
-rate** (re-entries ÷ items). Plus the time-thief table, the collision log,
-per-item lead time/wait-share, and parallelism efficiency. These tie back to the
-two system numbers — Σ dwell = the wait part of GLT; the binding queue's
-throughput = system throughput; rework inflates both. This is the retro's primary
-input. Bracket your own work with task ledger rows
-(agent `flow-manager`).
+## Metrics you read (`make wi-project` → `views/stats.md`)
+Run `make wi-project PROJECT=<p>` to regenerate `views/stats.{json,md}` from the item
+event-logs. It reports the four DORA metrics AND, via `state_owners`, **each part's
+contribution to gross lead time** (agent-work vs `queue` wait-latency vs `external`
+blocked), **quality** (failure/rework rate by stage) and **recovery** (MTTR by class).
+Read the by-owner / by-state breakdown to name the current constraint (the largest
+time thief) — Σ queue-wait = the wait part of GLT; the binding stage's throughput =
+system throughput; rework inflates both. This is the retro's primary input.
 
 ## Command form — allowlist contract (§15)
 Every Bash command matches the committed allowlist so it runs without a prompt.

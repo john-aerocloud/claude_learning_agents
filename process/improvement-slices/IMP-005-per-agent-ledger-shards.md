@@ -1,6 +1,9 @@
 # IMP-005 — Per-agent ledger shards
 
-**Status:** queued (specced at s005 retro, 2026-06-06)
+**Status:** CLOSED — the DORA ledger is FROZEN under v82 and work items are
+inherently per-file disjoint (one file per item), so the shared-append-file
+contention this proposed to shard no longer exists. (Specced at s005 retro,
+2026-06-06.)
 **Owner:** orchestrator (spec) / engineer (dora.py change)
 
 ## Job

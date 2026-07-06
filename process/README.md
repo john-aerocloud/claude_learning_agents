@@ -17,7 +17,7 @@ describes process, not product.
 | `experiments.md` | The LIVE experiment registry — every routed change as a falsifiable hypothesis (problem/solution/target-metric/measurement), scored at each retro. | Orchestrator (via `/retro`) |
 | `experiments-archive.md` | Terse one-line index of experiments that reached a terminal state (integrated / retired / superseded) and were pruned from the registry. | Orchestrator (via `/retro`) |
 | `improvement-slices/` | `IMP-NNN` records — self-improvement work items too substantial to be a one-line experiment (tooling, refactors, build work). Status headers track their disposition. | Any agent proposing one |
-| `open-items.md` | The §22 carry-forward register — project-agnostic system-learning obligations and queued items that survive every refactor. Referenced by orchestrator + `/defect`. | Retro + any agent adding an obligation |
+| `open-items.md` | The §22 carry-forward register — project-agnostic system-learning obligations and queued items that survive every refactor. Referenced by orchestrator + retro (§22). | Retro + any agent adding an obligation |
 | `linear-mapping.md` | The id→board-object map + `derived.state → board status` table used by BOTH the `linear` and `jira` projection agents. | Orchestrator (rarely) |
 | `principles/` | The default delivery approaches (XP, TDD, slicing, trunk-based, roll-forward, JTBD). The beliefs agents act on. | Orchestrator (rarely; via `/retro`) |
 | `principle-failures/` | Logged cases where following a principle harmed DORA metrics, with a reflection on why. The corpus that lets agents reason about *when principles fail*. | Any agent that hits one |

@@ -5,9 +5,9 @@ allowed-tools: Read, Write, Edit, Bash, Task
 ---
 
 > **v40 (pull mode):** this is now product's **just-in-time replenishment routine**
-> (§F3), invoked by `/loop-run` when `depth(Ready) < ready.min_items` — NOT a human gate.
-> GATE 2 (slice-accepted) is removed; product values+costs each use-case and hands
-> them to the flow-manager to enqueue. Step 1's GATE 2 line is superseded by §F5.
+> (§F3), invoked by `/loop-run` when `depth(Ready) < ready.min_items`. There is no
+> human gate here; the only human gate is intake (§F5). Product values+costs each
+> use-case and hands them to the flow-manager to enqueue.
 
 _Project resolution: the project argument may be omitted. If the first argument is not an existing directory under `work/`, use the project named in `work/ACTIVE` and treat the given arguments as shifted (e.g. a lone `<slice-id>` for `/retro`). The machine-local `work/ACTIVE` pointer is per-instance (never another machine's); if it is missing, `none`, or stale, stop and suggest `/project-switch <name>`._
 
@@ -15,8 +15,8 @@ Act as the **orchestrator** for project **$1**.
 
 1. Dispatch `product` to propose the NEXT SMALLEST slice (Killick-style) from the
    current chunk, tied to a job, with success measures. Writes
-   `work/$1/slices/<nnn>-<slug>/slice.md`. (No human gate — per the v40 header
-   above, GATE 2 is removed; product values+costs and hands off to the
+   `work/$1/slices/<nnn>-<slug>/slice.md`. (No human gate here — the only human
+   gate is intake (§F5); product values+costs and hands off to the
    flow-manager. Log the slice to `decision-log.md`.)
 2. Dispatch `solution-architect` to write the architecture delta
    (`architecture/deltas/<nnn>-<slug>.md`), update `architecture/current.md`, and

@@ -10,8 +10,9 @@ task, which protects the context window.
 
 ## Two spaces (never mix them)
 - `/process` — PERSISTENT self-state: how the agents work. Survives any project
-  reset. Holds `process-current.md`, `process-history/`, `principles/`,
-  `principle-failures/`, `dora/`.
+  reset. Holds `process-current.md`, `process-history/` (README only — snapshots
+  are git tags `process-v<NN>`), `principles/`, `principle-failures/`, `dora/`
+  (the FROZEN QueueApproach CSV archive; live metrics are derived by `make wi-project`).
 - `/work/<project>` — RESETTABLE project artifacts. Can be wiped without harming
   what the agents learned.
 
@@ -40,10 +41,14 @@ decisions + paths.
 ## Three document sets the self-state maintains (the user's spec)
 1. **Current**: `process-current.md` — current process + DORA + expected
    improvement + the change-set queued next.
-2. **History**: `process-history/vNN-*.md` — old process, its DORA, the change
-   made, anticipated-vs-observed improvement.
-3. **Per-project**: `/work/<p>/dora/per-project.md` — expected DORA per change,
-   and on regression a reflection on why; graduates to `principle-failures/`.
+2. **History**: process snapshots are annotated git tags `process-v<NN>` (NOT
+   files); `process-history/` holds only its README. Each tag captures the old
+   process, its DORA, the change made, and anticipated-vs-observed improvement
+   (recorded in the retro).
+3. **Per-change DORA note** (process §23): expected DORA per change, actual, and
+   on regression a reflection on why — recorded in the retro record / `process-v<NN>`
+   tag (numbers DERIVED from `views/stats.md`, not a hand-written file); a regression
+   graduates to `principle-failures/`.
 
 ## Rule lifecycle: experiment → graduate-to-skill → prune from /process (v68)
 `/process` must stay **LEAN and on-target** — the ACTIVE process carries only what

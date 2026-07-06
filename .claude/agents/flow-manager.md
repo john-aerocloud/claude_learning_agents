@@ -66,8 +66,10 @@ Each loop cycle, compute the set the dev loop should pull:
 3. Greedily pick highest `vc_ratio` first, up to capacity `N`.
 Return that set to the orchestrator to dispatch as concurrent inner-loop
 instances (isolated by use-case flags, §40 — never branches/worktrees/stash).
-Emit a `parallel_dispatch` ledger row with `note="batch=… achieved=<K> max=<M>"`
-where M is the **achievable** theoretical-max independent set under §40 (source-file
+Report parallelism as `achieved=<K> max=<M>` in your return — this is NOT a graph
+event and the DORA ledger is frozen; parallelism efficiency is a `make wi-project`-derived
+metric, not a ledger row.
+Here M is the **achievable** theoretical-max independent set under §40 (source-file
 seams included) — so parallelism efficiency is a true signal, not phantom lost
 opportunity. When N ready UCs all claim the same source file, they form a serial
 chain: M=1 for that group, and the serial schedule is CORRECT — do NOT report the
@@ -84,8 +86,9 @@ A **collision** is a declared independence proven false. Detect it mechanically:
   claimed. The registry makes this a hard signal at the moment of the write.
 - **Composition failure** — a flag-ON-green UC goes red when another integrates.
 - **Schedule violation** — a hidden hard edge surfaces at deploy (§19).
-On any collision: emit a `collision` ledger row (`ref`=the other UC, `note`=the
-shared seam); STOP the pair; hand the missing edge to product/architect/engineer
+On any collision: record it in `edge-ledger.md` (the other UC + the shared seam) —
+NOT a ledger row (the DORA ledger is frozen and a collision is not a graph event);
+STOP the pair; hand the missing edge to product/architect/engineer
 to ADD to `*.mmd` (mark `classDef changed`) and record it in `edge-ledger.md`;
 re-serialise the pair (scheduling, not compensating logic — §19); attribute the
 rework as a hidden-edge time thief. Track the two error classes in `edge-ledger.md`:
@@ -134,7 +137,7 @@ writers that no longer exist). Gate the resume with `make wi-validate` (I1–I4)
 was **empty** (depth 0 → 1), that `made_ready` append IS the wake signal: the
 orchestrator (re)starts the loop if it has drained/exited. Readiness wakes
 autonomous flow — never a prompt for a human to decide whether to start the loop. The only human touch
-points remain the §F5 two gates and requirement-complete.
+points remain the §F5 intake gate and requirement-complete.
 
 ## State transitions & bubbling
 Every item lifecycle transition is a `wi-append` event. When a use-case reaches

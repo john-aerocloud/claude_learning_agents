@@ -100,6 +100,15 @@ DENYLIST = [
     ("sync-linear.py", re.compile(r"\bsync-linear\.py\b", re.I)),
     ("project-state (retired dora subcmd)", re.compile(r"\bproject-state\b", re.I)),
     ("item_done (old event name)", re.compile(r"\bitem_done\b")),
+    # --- retired FILE artifacts (v82 re-audit) — replaced by derived views / git tags.
+    ("dora/flow.md (retired dora output)", re.compile(r"\bdora/flow\.md\b", re.I)),
+    ("baseline.md (retired dora output)", re.compile(r"\bbaseline\.md\b", re.I)),
+    ("per-project.md (retired dora output)", re.compile(r"\bper-project\.md\b", re.I)),
+    # items-tree.md is retired (derived into views/tree.md); the DERIVED view is fine.
+    ("items-tree.md (retired store)", re.compile(r"(?<!views/)\bitems-tree\.md\b", re.I)),
+    ("STATE-MODEL.md (retired doc)", re.compile(r"\bSTATE-MODEL\.md\b")),
+    # per-version process-history files are retired — snapshots are git tags process-v<NN>.
+    ("process-history/v<NN> per-version file", re.compile(r"process-history/v\d")),
 ]
 
 

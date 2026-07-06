@@ -29,9 +29,12 @@ See `README.md` for the full system. In short:
   cross-agent rules: `process/process-current.md` **STAGE F**.
   Rationale/diagrams/worked-retro: `Version2-design/`. Use `/flow-status` to see
   the derived queues, buffers, and time thieves.
-- Drive work with the slash commands in `.claude/commands/`: v40 `/intake`,
-  `/loop-run`, `/flow-status`; plus `/project-new`, `/slice-next` (JIT
-  replenishment), `/retro`, `/defect`, `/project-stop`.
+- Drive work with the slash commands in `.claude/commands/`. The drivers are
+  `/intake`, `/loop-run`, `/flow-status`. Full set (13): `/intake`, `/loop-run`,
+  `/flow-status` (the drivers); `/requirement-new`, `/slice-next` (JIT
+  replenishment), `/retro`, `/defect`, `/refactor-process` (planning &
+  improvement); `/project-new`, `/project-switch`, `/project-list`,
+  `/project-stop`, `/aws-profile` (project & config).
 - `/process` is PERSISTENT agent self-state (process, principles, DORA, learned
   failures) and must never reference a specific project. `/work` is RESETTABLE
   project output.

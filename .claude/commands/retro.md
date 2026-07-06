@@ -22,7 +22,8 @@ Act as the **orchestrator**. Own this; gather input but make the process call.
    instances are batching integration (banned). If it is the constraint or trending
    up, that IS the retro focus.
 2. Collect each agent's "what worked / what hurt" for the project and slice.
-3. Review `/process/principle-failures/` and `work/<project>/dora/per-project.md`.
+3. Review `/process/principle-failures/` and the per-change DORA note (process §23 —
+   in the retro record, derived from `views/stats.md`, not a hand-written file).
    Look for PATTERNS — do not revise a principle on a single data point.
 4. **Answer the retro focus question** using the DORA data, principle-failures,
    and per-project evidence. Be specific: name the step, duration, and the

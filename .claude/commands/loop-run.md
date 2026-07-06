@@ -27,7 +27,7 @@ ask the human for more work). It is NOT started on demand by the human: an
 **enqueue-to-empty** (`loop_wake`, e.g. intake adding the first ready item)
 restarts it without being asked. **Never** ask the human "start the loop?" or
 "replenish or pull?" — those are autonomous (§F9). The human is touched only at
-the §F5 two gates and at requirement-complete.
+the §F5 intake gate (deploys auto-approve, §F5a) and at requirement-complete.
 
 Each cycle:
 
@@ -52,8 +52,8 @@ Each cycle:
 4. **Run the inner dev loop for each pulled UC, concurrently** (isolated by §40
    flags, never branches): `cicd` (if capability needed) → `ui-designer`
    structure (if UI) → `engineer` (TDD red→green→refactor on trunk) →
-   `ui-designer` validate (if UI) → deploy (per-UC; **GATE 2 only if
-   infra-bearing**, §9a/§F5) → `tester` (validate in prod). Append the stage events
+   `ui-designer` validate (if UI) → deploy (per-UC; **auto-approves under the §F5a
+   policy assurance** — no human gate, §9a/§F5) → `tester` (validate in prod). Append the stage events
    via `make wi-append` as each completes: `built_green` (engineer), `validated` (tester);
    `build_failed`/`rejected` on failure.
    - **Collision** (a UC needs a seam/path another in-flight UC claimed, or a
@@ -90,8 +90,8 @@ Each cycle:
    BATCH up to `--threshold` (default 3) before the gate trips; INCIDENT events
    (prod defect resolve / deploy failure) are never batched and trip the gate
    immediately. So a clean run of small closes won't force a per-slice retro, but
-   a real incident always does. The retro itself records a `retro` ledger row, which
-   resets the counter to zero (re-run `make retro-debt` after the retro to confirm
+   a real incident always does. The retro drains the debt (recomputed by
+   `make retro-debt` over item events; re-run it after the retro to confirm
    `ok` before resuming pulls). This makes "the retro fires automatically at the
    §F8 cadence" a checkable property of the loop machinery rather than a rule the
    orchestrator can skip by offering it to the human (the EXP-030 / v68 recurrence
@@ -102,4 +102,4 @@ Each cycle:
 End each cycle by refreshing `make wi-project PROJECT=$1` and report from `views/stats.md`:
 the pull set, queue depths vs buffers, **the current constraint (largest contributor to gross
 lead time — the `by_owner`/`by_state` time-thief)**, quality/recovery at the binding stage, any
-collision + edge added, and any human decision needed (intake / infra deploy).
+collision + edge added, and any human decision needed (intake — the sole §F5 gate).

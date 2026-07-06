@@ -67,8 +67,13 @@ There is no other way to change item state. No hand-editing of `derived:`; no se
   `queue_map[state]`. This is the queue generation, derived; no `queues/*.csv` stored state.
 - `work/<p>/views/state.md` — every item's current folded state (replaces the old hand-run cache).
 - `work/<p>/views/tree.md` — the dependency tree (parents/children/deps), derived.
-- `work/<p>/views/stats.json` + `.md` — DORA + flow from event timestamps: throughput, lead time
-  (registered→done), cycle time (pulled→done), MTTR (defect reported→resolved), WIP, rework rate.
+- `work/<p>/views/stats.json` + `.md` — DORA + flow from event timestamps. Reports:
+  - the **4 DORA metrics**: throughput (deploy frequency), lead time (registered→done),
+    change-failure rate, MTTR (defect reported→resolved); plus WIP.
+  - **(a) gross-lead-time decomposition** — `by_state` and `by_owner`: time attributed to
+    agent-work vs `queue` wait-latency vs `external` blocked, so the largest time thief is named.
+  - **(b) quality** — failure / rework rate **by stage** (which stage red-flags most).
+  - **(c) recovery** — **MTTR by failure class** (deploy failure vs prod defect vs collision).
   Aggregate (slice/chunk/requirement) state bubbles from children per the graph `bubble` rule.
 - Re-renders each active item's `derived:` block (state, queue, children, ancestors).
 

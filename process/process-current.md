@@ -105,6 +105,8 @@ later STAGE F rules stands, the *substrate* is F0.
 
 # STAGE 0 — Principles & metrics
 
+<!-- doc-lint:allow-end -->
+
 ## 0a. Multi-instance operating model
 More than one Claude instance may run against this shared parent repo at once (a Windows
 + a Mac, sharing one `origin/main`), **in parallel on different projects**. Genuinely
@@ -754,11 +756,12 @@ obligations) lives in **`process/open-items.md`** — held outside this rulebook
 file stays rules, not a work queue. Referenced by §10 (next-work) and §24 (improvement
 slices); the retro harvests and re-prioritises it each cycle.
 
-## 23. per-project.md discipline
-The orchestrator updates `work/<project>/dora/per-project.md` at the end of each slice
-retro: slice, change, expected DORA effect, actual, regression flag, reflection,
-time-to-first-deploy (s001 only), delivery gap. The numbers are read from `stats.*`
-(§F0), not recomputed by hand.
+## 23. Per-change DORA discipline
+At the end of each slice retro the orchestrator records, in the retro record (and
+the `process-v<NN>` tag annotation): slice, change, expected DORA effect, actual,
+regression flag, reflection, time-to-first-deploy (s001 only), delivery gap. The
+numbers are DERIVED — read from `views/stats.{json,md}` (§F0, `make wi-project`),
+never recomputed by hand. A regression graduates to a `principle-failures/` entry.
 
 ## 24. Improvement slices
 Process, tooling, and automation improvements are specified and delivered as slices,
@@ -854,7 +857,7 @@ occur and visibly help?), not just the aggregate metric.
 
 ## 26. Retro mechanics
 At each retro the orchestrator: recomputes the metrics via `make wi-project` (§F0);
-reviews `principle-failures/` and `dora/per-project.md`; **updates
+reviews `principle-failures/` and the per-change DORA note (§23); **updates
 `/process/experiments.md`** — scores every active experiment that had a scoring
 opportunity, advances under-question / retirement-trial states per §25a; tags the
 current process (§27.2) and writes a new `process-current.md` (version+1) whose changes
@@ -906,8 +909,6 @@ The cross-agent rules of the pull system. **§F0 (above) is the substrate**; the
 below name flow behaviour and now operate on the *derived* views (§F0). Full rationale,
 diagrams, and a worked retro are in `Version2-design/`. Each rule names the DORA metric
 it targets, per §25a.
-
-<!-- doc-lint:allow-end -->
 
 ## F1. Work items — hierarchy, links, and honest closes
 Every unit of work is a typed item — `REQ-`/`CHK-`/`SLC-`/`UC-`/`DEF-` — as a per-item

@@ -27,6 +27,7 @@ orchestrator  (flow, gates, DORA, Theory of Constraints — NO product/eng calls
   ├── engineer            (strict TDD on trunk)
   ├── ui-designer         (wraps engineer on UI slices: structure before, polish after; a11y)
   ├── tester              (validate the deployed system through its public surface)
+  ├── documenter          (after a slice validates, updates user-facing docs to what shipped)
   ├── linear              (per-item, idempotent projection of the item file onto its Linear issue)
   └── jira                (per-item, idempotent projection of the item file onto its Jira issue)
 ```

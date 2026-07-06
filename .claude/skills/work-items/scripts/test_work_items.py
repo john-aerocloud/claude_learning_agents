@@ -403,5 +403,247 @@ class TestMigrate(Base):
         self.assertEqual(v, [], v)
 
 
+# --------------------------------------------------------------------------- #
+# Enhanced stats: time-in-state, by_owner attribution, DORA, MTTR-by-class,
+# lead-time percentiles. Deterministic fixed timestamps + explicit --now.
+# --------------------------------------------------------------------------- #
+def _dt(day, hour=0, minute=0):
+    return f"2026-06-{day:02d}T{hour:02d}:{minute:02d}:00Z"
+
+
+NOW = "2026-06-30T00:00:00Z"
+import datetime as _pydt
+NOW_DT = _pydt.datetime(2026, 6, 30, tzinfo=_pydt.timezone.utc)
+
+
+class TestStats(Base):
+    def _clean_uc(self, iid):
+        """A UC with well-spaced timestamps so each interval is a round number.
+        registered@d10 00:00 -> ready (made_ready@d10 01:00) so 1h in registered.
+        ready -> building (pulled@d10 03:00) so 2h in ready.
+        building -> validating (built_green@d10 06:00) so 3h in building.
+        validating -> done (validated@d10 10:00) so 4h in validating.
+        gross lead time = 10h; lead_time_for_changes (built_green->validated)=4h."""
+        return [
+            {"ts": _dt(10, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(10, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(10, 3), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(10, 6), "event": "built_green", "agent": "engineer"},
+            {"ts": _dt(10, 10), "event": "validated", "agent": "tester"},
+        ]
+
+    def _rework_uc(self, iid):
+        """A UC that gets rejected once then re-passes.
+        registered@d11 00:00; ready@01:00; building@02:00; validating@04:00 (2h build);
+        rejected@05:00 (1h validating) -> reworking; retried@06:00 (1h reworking)
+        -> building; built_green@08:00 (2h building); validated@09:00 (1h validating).
+        Recovery(validation rejection): rejected@05 -> next validated@09 = 4h."""
+        return [
+            {"ts": _dt(11, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(11, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(11, 2), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(11, 4), "event": "built_green", "agent": "engineer"},
+            {"ts": _dt(11, 5), "event": "rejected", "agent": "tester"},
+            {"ts": _dt(11, 6), "event": "retried", "agent": "engineer"},
+            {"ts": _dt(11, 8), "event": "built_green", "agent": "engineer"},
+            {"ts": _dt(11, 9), "event": "validated", "agent": "tester"},
+        ]
+
+    def _stats(self, items=None):
+        it = items if items is not None else wi.load_all_items(self.project)[0]
+        st = wi.compute_states(self.graphs, it)
+        return wi.compute_stats(self.graphs, it, st, now=NOW_DT)
+
+    # ---- time-in-state math ----
+    def test_time_in_state_exact(self):
+        self.write_item("done", "UC-1", "use-case", self._clean_uc("UC-1"))
+        s = self._stats()["overall"]["gross_lead_time"]
+        by_state = s["by_state"]
+        self.assertAlmostEqual(by_state["registered"]["total_s"], 3600, places=1)
+        self.assertAlmostEqual(by_state["ready"]["total_s"], 7200, places=1)
+        self.assertAlmostEqual(by_state["building"]["total_s"], 10800, places=1)
+        self.assertAlmostEqual(by_state["validating"]["total_s"], 14400, places=1)
+        # gross lead time = 10h = 36000s
+        self.assertAlmostEqual(s["gross_lead_time_total_s"], 36000, places=1)
+        self.assertAlmostEqual(s["gross_lead_time_median_s"], 36000, places=1)
+
+    def test_in_flight_uses_now(self):
+        # a UC still building since d20 06:00; now=d30 00:00 => open segment counted
+        self.write_item("active", "UC-IF", "use-case", [
+            {"ts": _dt(20, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(20, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(20, 3), "event": "pulled", "agent": "orchestrator"},
+        ])
+        s = self._stats()["overall"]["gross_lead_time"]
+        # building entered d20 03:00, now d30 00:00 => 9d 21h open in `building`
+        expected = (NOW_DT - _pydt.datetime(2026, 6, 20, 3, tzinfo=_pydt.timezone.utc)).total_seconds()
+        self.assertAlmostEqual(s["by_state"]["building"]["total_s"], expected, places=1)
+
+    # ---- by_owner attribution incl. queue vs external ----
+    def test_by_owner_attribution(self):
+        self.write_item("done", "UC-1", "use-case", self._clean_uc("UC-1"))
+        by_owner = self._stats()["overall"]["gross_lead_time"]["by_owner"]
+        # registered+ready => queue (1h+2h=3h=10800); building=>engineer(3h); validating=>tester(4h)
+        self.assertAlmostEqual(by_owner["queue"]["total_s"], 10800, places=1)
+        self.assertAlmostEqual(by_owner["engineer"]["total_s"], 10800, places=1)
+        self.assertAlmostEqual(by_owner["tester"]["total_s"], 14400, places=1)
+        # percentages sum to ~100
+        total_pct = sum(d["pct_of_glt"] for d in by_owner.values())
+        self.assertAlmostEqual(total_pct, 100.0, places=0)
+
+    def test_by_owner_external_blocked(self):
+        # a UC that gets blocked (external) then unblocked
+        self.write_item("done", "UC-B", "use-case", [
+            {"ts": _dt(12, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(12, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(12, 2), "event": "blocked", "agent": "flow-manager"},   # ready->blocked
+            {"ts": _dt(12, 7), "event": "unblocked", "agent": "flow-manager"},  # 5h external
+            {"ts": _dt(12, 8), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(12, 9), "event": "built_green", "agent": "engineer"},
+            {"ts": _dt(12, 10), "event": "validated", "agent": "tester"},
+        ])
+        by_owner = self._stats()["overall"]["gross_lead_time"]["by_owner"]
+        self.assertAlmostEqual(by_owner["external"]["total_s"], 5 * 3600, places=1)
+
+    # ---- CFR ----
+    def test_change_failure_rate(self):
+        self.write_item("done", "UC-1", "use-case", self._clean_uc("UC-1"))  # 1 validated, 0 reject
+        self.write_item("done", "UC-2", "use-case", self._rework_uc("UC-2"))  # 1 reject then 1 validated
+        at = self._stats()["overall"]["dora"]["all_time"]
+        # exits from validating: UC-1 {validated:1}; UC-2 {rejected:1, validated:1}
+        # cfr = rejected/(validated+rejected) = 1/(2+1) = 0.333...
+        self.assertAlmostEqual(at["change_failure_rate"], 1 / 3, places=4)
+        self.assertEqual(at["n_validations"], 3)
+        self.assertEqual(at["n_validation_failures"], 1)
+
+    def test_cfr_null_when_no_validations(self):
+        self.write_item("active", "UC-R", "use-case", [
+            {"ts": _dt(10, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(10, 1), "event": "made_ready", "agent": "flow-manager"},
+        ])
+        at = self._stats()["overall"]["dora"]["all_time"]
+        self.assertIsNone(at["change_failure_rate"])
+
+    # ---- lead-time percentiles ----
+    def test_lead_time_percentiles(self):
+        # three UCs with built_green->validated spans of 1h, 2h, 4h
+        for i, hrs in enumerate([1, 2, 4], start=1):
+            self.write_item("done", f"UC-L{i}", "use-case", [
+                {"ts": _dt(10 + i, 0), "event": "registered", "agent": "flow-manager"},
+                {"ts": _dt(10 + i, 1), "event": "made_ready", "agent": "flow-manager"},
+                {"ts": _dt(10 + i, 2), "event": "pulled", "agent": "orchestrator"},
+                {"ts": _dt(10 + i, 3), "event": "built_green", "agent": "engineer"},
+                {"ts": _dt(10 + i, 3 + hrs), "event": "validated", "agent": "tester"},
+            ])
+        at = self._stats()["overall"]["dora"]["all_time"]
+        self.assertEqual(at["lead_time_n"], 3)
+        self.assertAlmostEqual(at["lead_time_for_changes_median_s"], 2 * 3600, places=1)
+        # p85 of [3600,7200,14400] via linear interp: k=(3-1)*0.85=1.7 -> 7200+(14400-7200)*0.7
+        self.assertAlmostEqual(at["lead_time_for_changes_p85_s"], 7200 + 7200 * 0.7, places=1)
+
+    # ---- MTTR by class ----
+    def test_mttr_by_class(self):
+        # defect: reported@d15 00:00 -> validated@d15 05:00 = 5h
+        self.write_item("done", "DEF-1", "defect", [
+            {"ts": _dt(15, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(15, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(15, 2), "event": "confirmed", "agent": "engineer"},
+            {"ts": _dt(15, 3), "event": "fixed", "agent": "engineer"},
+            {"ts": _dt(15, 5), "event": "validated", "agent": "tester"},
+        ])
+        # UC rework: validation-rejection recovery = 4h (see _rework_uc)
+        self.write_item("done", "UC-2", "use-case", self._rework_uc("UC-2"))
+        r = self._stats()["overall"]["recovery_by_class"]
+        self.assertAlmostEqual(r["defect"]["median_s"], 5 * 3600, places=1)
+        self.assertEqual(r["defect"]["n"], 1)
+        self.assertAlmostEqual(r["validation_rejection"]["median_s"], 4 * 3600, places=1)
+        self.assertEqual(r["validation_rejection"]["n"], 1)
+        # no build_failed events => build_failure class is null/0
+        self.assertIsNone(r["build_failure"]["median_s"])
+        self.assertEqual(r["build_failure"]["n"], 0)
+
+    def test_build_failure_recovery(self):
+        # build_failed@d16 02:00 -> retried@d16 03:00 = 1h recovery
+        self.write_item("active", "UC-BF", "use-case", [
+            {"ts": _dt(16, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(16, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(16, 1, 30), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(16, 2), "event": "build_failed", "agent": "engineer"},
+            {"ts": _dt(16, 3), "event": "retried", "agent": "engineer"},
+        ])
+        r = self._stats()["overall"]["recovery_by_class"]
+        self.assertAlmostEqual(r["build_failure"]["median_s"], 3600, places=1)
+        self.assertEqual(r["build_failure"]["n"], 1)
+
+    # ---- quality by stage ----
+    def test_quality_by_stage_and_rework(self):
+        self.write_item("done", "UC-1", "use-case", self._clean_uc("UC-1"))
+        self.write_item("done", "UC-2", "use-case", self._rework_uc("UC-2"))
+        q = self._stats()["overall"]["quality"]["all_time"]
+        # validating exits: UC-1 validated; UC-2 rejected+validated => fail 1/3
+        self.assertAlmostEqual(q["by_stage"]["validating"]["failure_rate"], 1 / 3, places=4)
+        self.assertEqual(q["by_stage"]["validating"]["owner"], "tester")
+        # rework rate: 1 of 2 items entered rework (UC-2)
+        self.assertAlmostEqual(q["rework_rate"], 0.5, places=4)
+
+    # ---- windowing ----
+    def test_defect_arrival_window(self):
+        # one defect reported inside 30d, one outside (d01 is >30d before d30? d30-30=May31)
+        self.write_item("done", "DEF-IN", "defect", [
+            {"ts": _dt(20, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(20, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(20, 2), "event": "confirmed", "agent": "engineer"},
+            {"ts": _dt(20, 3), "event": "fixed", "agent": "engineer"},
+            {"ts": _dt(20, 4), "event": "validated", "agent": "tester"},
+        ])
+        self.write_item("done", "DEF-OLD", "defect", [
+            {"ts": "2026-05-01T00:00:00Z", "event": "reported", "agent": "orchestrator"},
+            {"ts": "2026-05-01T01:00:00Z", "event": "triaged", "agent": "orchestrator"},
+            {"ts": "2026-05-01T02:00:00Z", "event": "confirmed", "agent": "engineer"},
+            {"ts": "2026-05-01T03:00:00Z", "event": "fixed", "agent": "engineer"},
+            {"ts": "2026-05-01T04:00:00Z", "event": "validated", "agent": "tester"},
+        ])
+        overall = self._stats()["overall"]
+        self.assertEqual(overall["quality"]["all_time"]["defect_arrivals_in_window"], 2)
+        self.assertEqual(overall["quality"]["trailing_30d"]["defect_arrivals_in_window"], 1)
+
+    # ---- by-type slicing ----
+    def test_by_type_slicing(self):
+        self.write_item("done", "UC-1", "use-case", self._clean_uc("UC-1"))
+        self.write_item("done", "DEF-1", "defect", [
+            {"ts": _dt(15, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(15, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(15, 2), "event": "confirmed", "agent": "engineer"},
+            {"ts": _dt(15, 3), "event": "fixed", "agent": "engineer"},
+            {"ts": _dt(15, 5), "event": "validated", "agent": "tester"},
+        ])
+        stats = self._stats()
+        self.assertIn("use-case", stats["by_type"])
+        self.assertIn("defect", stats["by_type"])
+        self.assertEqual(stats["by_type"]["use-case"]["n_items"], 1)
+        self.assertEqual(stats["by_type"]["defect"]["n_items"], 1)
+        # defect MTTR only in the defect slice
+        self.assertEqual(stats["by_type"]["defect"]["recovery_by_class"]["defect"]["n"], 1)
+        self.assertEqual(stats["by_type"]["use-case"]["recovery_by_class"]["defect"]["n"], 0)
+
+    # ---- empty / divide-by-zero safety ----
+    def test_empty_project_no_crash(self):
+        stats = self._stats()
+        g = stats["overall"]["gross_lead_time"]
+        self.assertIsNone(g["gross_lead_time_median_s"])
+        self.assertEqual(g["by_state"], {})
+        at = stats["overall"]["dora"]["all_time"]
+        self.assertIsNone(at["change_failure_rate"])
+        self.assertIsNone(at["deployment_frequency_per_active_day"])
+        self.assertIsNone(at["mttr_median_s"])
+
+    def test_stats_md_renders(self):
+        self.write_item("done", "UC-1", "use-case", self._clean_uc("UC-1"))
+        md = wi._render_stats_md(self._stats())
+        self.assertIn("Contribution to gross lead time", md)
+        self.assertIn("A. DORA four key metrics", md)
+        self.assertIn("D. Recovery (MTTR) by failure class", md)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

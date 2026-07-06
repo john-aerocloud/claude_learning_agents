@@ -52,7 +52,15 @@ class Graphs:
     def __init__(self, data):
         self.version = data.get("version")
         self.queue_map = data.get("queue_map", {})
+        self.state_owners = data.get("state_owners", {})
         self.types = data.get("types", {})
+
+    def owner_of(self, state):
+        """Who is accountable for time spent in `state` — an agent name, or the
+        classes 'queue' (pure wait) / 'external' (blocked outside the system).
+        Terminal/aggregate states have no owner (None)."""
+        v = self.state_owners.get(state)
+        return v if v and not v.startswith("_") else None
 
     @classmethod
     def load(cls, path=GRAPHS_PATH):
@@ -630,7 +638,8 @@ def cmd_project(a):
     _write_tree(vd, items, children, states)
 
     # 5. stats view
-    stats = compute_stats(graphs, items, states)
+    now = parse_ts(getattr(a, "now", None)) if getattr(a, "now", None) else None
+    stats = compute_stats(graphs, items, states, now=now)
     _write_stats(vd, stats)
 
     qcounts = {q: len(v) for q, v in sorted(queues.items())}
@@ -685,8 +694,20 @@ def _write_tree(vd, items, children, states):
 
 
 # ---------------------------------------------------------------------------
-# Stats — pure functions of event timestamps
+# Stats — pure functions of event timestamps (SOLE record; cutover from ledger).
+#
+# Everything here reads ONLY the items' `events:` streams. The design idea: fold
+# gives the state BETWEEN two consecutive events, so time-in-state[S] = Σ of the
+# intervals whose leading event lands the item in S. state_owners maps each state
+# to who is accountable for that time (an agent, or the classes 'queue' = pure
+# wait latency / 'external' = blocked outside the system) — that is how each part
+# of the process reads its own contribution to gross lead time.
 # ---------------------------------------------------------------------------
+TERMINAL_STATES = {"done", "resolved", "wontfix"}
+GENESIS_EVENTS = ("registered", "reported", "open")
+REWORK_ENTRY_EVENTS = {"build_failed", "rejected", "retried", "reopened"}
+
+
 def _first_ts(item, event_names):
     for ev in item.events:
         if ev.get("event") in event_names:
@@ -711,78 +732,417 @@ def _median(xs):
     return s[mid] if n % 2 else (s[mid - 1] + s[mid]) / 2
 
 
-def compute_stats(graphs, items, states):
-    flow = [it for it in items.values() if graphs.kind(it.type) == "flow"]
-    done_ids = [it for it in flow if states.get(it.id) in ("done", "resolved")]
+def _mean(xs):
+    return (sum(xs) / len(xs)) if xs else None
 
-    lead_times, cycle_times = [], []
-    for it in done_ids:
-        reg = _first_ts(it, ("registered", "reported", "open"))
-        done = _last_ts(it, ("validated", "closed"))
-        if reg and done and done >= reg:
-            lead_times.append((done - reg).total_seconds())
-        pulled = _first_ts(it, ("pulled",))
-        if pulled and done and done >= pulled:
-            cycle_times.append((done - pulled).total_seconds())
 
-    # MTTR: defects only (reported -> resolved)
-    mttrs = []
-    for it in items.values():
-        if it.type != "defect":
+def _percentile(xs, p):
+    """Linear-interpolation percentile (p in [0,1]). None on empty."""
+    if not xs:
+        return None
+    s = sorted(xs)
+    if len(s) == 1:
+        return s[0]
+    k = (len(s) - 1) * p
+    lo = int(k)
+    hi = min(lo + 1, len(s) - 1)
+    return s[lo] + (s[hi] - s[lo]) * (k - lo)
+
+
+def _ratio(num, den):
+    return (num / den) if den else None
+
+
+def walk_states(graphs, item, now):
+    """Replay an item's events, yielding (state, entered_ts, exited_ts) segments.
+
+    fold gives the state BETWEEN consecutive events; a segment runs from the ts of
+    the event that ENTERED a state to the ts of the next (transition) event. The
+    genesis event enters the item's initial state. The final open segment runs to
+    `now` (for a still-in-flight item) OR is closed by the terminal event. Illegal
+    events (I1 territory) are skipped for the walk so a bad hand-edit can't crash
+    stats. Returns [] for aggregates (no own stream)."""
+    if graphs.kind(item.type) != "flow":
+        return []
+    trans = graphs.transitions(item.type)
+    state = graphs.initial(item.type)
+    entered = None
+    segments = []
+    for ev in item.events:
+        name = ev.get("event")
+        ts = parse_ts(ev.get("ts"))
+        if entered is None:
+            # genesis: this event establishes the initial state
+            if name == graphs.initial(item.type):
+                entered = ts
+                continue
+            # tolerate a missing genesis marker: first event still starts the clock
+            entered = ts
+        nxt = None
+        for t in trans:
+            if t["from"] == state and t["event"] == name:
+                nxt = t["to"]
+                break
+        if nxt is None:
+            continue  # illegal-from-here; ignore for the walk
+        if ts and entered and ts >= entered:
+            segments.append((state, entered, ts))
+        state = nxt
+        entered = ts
+    # trailing open segment (item still in `state`); close at `now` unless terminal
+    if entered is not None and state not in TERMINAL_STATES and now and now >= entered:
+        segments.append((state, entered, now))
+    return segments
+
+
+def _exits_from(graphs, item):
+    """Count exits from each state by event, for quality (fail-exit) ratios.
+    Returns {state: {event: count}} over the LEGAL walk of transitions."""
+    trans = graphs.transitions(item.type)
+    state = graphs.initial(item.type)
+    exits = defaultdict(lambda: defaultdict(int))
+    first = True
+    for ev in item.events:
+        name = ev.get("event")
+        if first:
+            first = False
+            if name == graphs.initial(item.type):
+                continue
+        nxt = None
+        for t in trans:
+            if t["from"] == state and t["event"] == name:
+                nxt = t["to"]
+                break
+        if nxt is None:
             continue
-        rep = _first_ts(it, ("reported",))
-        res = _last_ts(it, ("validated",))
-        if rep and res and res >= rep and states.get(it.id) == "resolved":
-            mttrs.append((res - rep).total_seconds())
+        exits[state][name] += 1
+        state = nxt
+    return exits
 
-    # rework rate: flow items with any rework re-entry event / total flow items
-    rework_events = {"build_failed", "rejected", "retried", "reopened"}
-    reworked = sum(1 for it in flow
-                   if any(ev.get("event") in rework_events for ev in it.events))
-    rework_rate = (reworked / len(flow)) if flow else None
 
-    wip = sum(1 for it in flow if graphs.queue_for(states.get(it.id)) == "wip")
+def _duration_after(item, trigger_events, resolve_events):
+    """List of (seconds) from each `trigger` event to the NEXT `resolve` event
+    that follows it in the stream (recovery timing). Used for MTTR-by-class."""
+    out = []
+    pending = None
+    for ev in item.events:
+        name = ev.get("event")
+        ts = parse_ts(ev.get("ts"))
+        if name in trigger_events:
+            pending = ts
+        elif name in resolve_events and pending is not None and ts and ts >= pending:
+            out.append((ts - pending).total_seconds())
+            pending = None
+    return out
+
+
+def _in_window(ts, now, days):
+    if days is None:
+        return True
+    if not ts or not now:
+        return False
+    return ts >= (now - timedelta(days=days))
+
+
+def _compute_dora(graphs, flow_items, states, now, window_days):
+    """Section A — the four DORA metrics over a set of flow items, windowed by
+    the TERMINAL event's timestamp for rate metrics (frequency, CFR)."""
+    # deployment_frequency: terminal validated/done/deploy events per active-day
+    terminal_ts = []
+    for it in flow_items:
+        t = _last_ts(it, ("validated", "closed", "deploy"))
+        if t is None and states.get(it.id) in TERMINAL_STATES:
+            t = _last_ts(it, ("not_reproduced", "declined"))
+        if t and _in_window(t, now, window_days):
+            terminal_ts.append(t)
+    days = {t.date() for t in terminal_ts}
+    freq = _ratio(len(terminal_ts), len(days))
+
+    # lead_time_for_changes: built_green -> validated per item (median + p85)
+    lts = []
+    for it in flow_items:
+        bg = _first_ts(it, ("built_green", "fixed"))
+        vd_ts = _last_ts(it, ("validated",))
+        if bg and vd_ts and vd_ts >= bg and _in_window(vd_ts, now, window_days):
+            lts.append((vd_ts - bg).total_seconds())
+
+    # change_failure_rate: rejected / (validated + rejected) over exits from validating
+    validated = rejected = 0
+    for it in flow_items:
+        for st, evc in _exits_from(graphs, it).items():
+            if st != "validating":
+                continue
+            for name, c in evc.items():
+                if name == "validated":
+                    validated += c
+                elif name == "rejected":
+                    rejected += c
+    cfr = _ratio(rejected, validated + rejected)
+
+    # mttr: any failure event -> its recovery (aggregated across the classes in D)
+    all_recoveries = []
+    for it in flow_items:
+        all_recoveries += _duration_after(it, {"build_failed"}, {"built_green", "retried", "done", "validated"})
+        all_recoveries += _duration_after(it, {"rejected"}, {"validated", "resolved", "done"})
+        all_recoveries += _duration_after(it, {"reported"}, {"validated", "resolved"})
 
     return {
-        "throughput_done": len(done_ids),
-        "lead_time_median_s": _median(lead_times),
-        "lead_time_n": len(lead_times),
-        "cycle_time_median_s": _median(cycle_times),
-        "cycle_time_n": len(cycle_times),
-        "mttr_median_s": _median(mttrs),
-        "mttr_n": len(mttrs),
-        "current_wip": wip,
-        "rework_rate": rework_rate,
-        "n_flow_items": len(flow),
+        "deployment_frequency_per_active_day": freq,
+        "n_terminal_events": len(terminal_ts),
+        "n_active_days": len(days),
+        "lead_time_for_changes_median_s": _median(lts),
+        "lead_time_for_changes_p85_s": _percentile(lts, 0.85),
+        "lead_time_n": len(lts),
+        "change_failure_rate": cfr,
+        "n_validations": validated + rejected,
+        "n_validation_failures": rejected,
+        "mttr_median_s": _median(all_recoveries),
+        "mttr_mean_s": _mean(all_recoveries),
+        "mttr_n": len(all_recoveries),
     }
 
 
-def _fmt(x):
+def _compute_glt(graphs, flow_items, now):
+    """Section B — gross-lead-time decomposition. by_state (time thieves) and
+    by_owner (each part's contribution via state_owners). Only DONE items have a
+    real gross lead time (genesis->terminal); in-flight items contribute their
+    partial time-in-state so 'now' cost is visible too."""
+    by_state = defaultdict(float)
+    by_owner = defaultdict(float)
+    gross_totals = []  # per-DONE-item gross lead time
+    for it in flow_items:
+        segs = walk_states(graphs, it, now)
+        for state, a, b in segs:
+            dur = (b - a).total_seconds()
+            if dur < 0:
+                continue
+            by_state[state] += dur
+            owner = graphs.owner_of(state) or "unowned"
+            by_owner[owner] += dur
+        # gross lead time for terminal items = terminal ts - genesis ts
+        gen = _first_ts(it, GENESIS_EVENTS)
+        term = _last_ts(it, ("validated", "closed", "not_reproduced", "declined"))
+        if gen and term and term >= gen:
+            gross_totals.append((term - gen).total_seconds())
+    total_time = sum(by_state.values())
+    by_state_out = {
+        s: {"total_s": round(t, 2), "pct_of_glt": (round(100 * t / total_time, 2) if total_time else None)}
+        for s, t in sorted(by_state.items(), key=lambda kv: -kv[1])
+    }
+    by_owner_out = {
+        o: {"total_s": round(t, 2), "pct_of_glt": (round(100 * t / total_time, 2) if total_time else None)}
+        for o, t in sorted(by_owner.items(), key=lambda kv: -kv[1])
+    }
+    return {
+        "gross_lead_time_total_s": round(total_time, 2),
+        "gross_lead_time_median_s": _median(gross_totals),
+        "gross_lead_time_p85_s": _percentile(gross_totals, 0.85),
+        "n_completed_items": len(gross_totals),
+        "by_state": by_state_out,
+        "by_owner": by_owner_out,
+    }
+
+
+def _compute_quality(graphs, flow_items, now, window_days):
+    """Section C — quality per stage/owner. building.build_failed rate,
+    validating.rejection rate (each attributed to the state owner); overall
+    rework rate; defect arrival rate over the window."""
+    stage_exits = defaultdict(lambda: {"total": 0, "fail": 0})
+    FAIL_EXIT = {"building": "build_failed", "validating": "rejected",
+                 "reproducing": "not_reproduced"}
+    for it in flow_items:
+        for st, evc in _exits_from(graphs, it).items():
+            if st not in FAIL_EXIT:
+                continue
+            tot = sum(evc.values())
+            fail = evc.get(FAIL_EXIT[st], 0)
+            stage_exits[st]["total"] += tot
+            stage_exits[st]["fail"] += fail
+    by_stage = {}
+    for st, d in stage_exits.items():
+        by_stage[st] = {
+            "owner": graphs.owner_of(st),
+            "failure_rate": _ratio(d["fail"], d["total"]),
+            "n_exits": d["total"],
+            "n_failures": d["fail"],
+        }
+    reworked = sum(1 for it in flow_items
+                   if any(ev.get("event") in REWORK_ENTRY_EVENTS for ev in it.events))
+    rework_rate = _ratio(reworked, len(flow_items))
+    # defect arrival: defects whose `reported` falls in the window
+    defect_arrivals = 0
+    for it in flow_items:
+        if it.type != "defect":
+            continue
+        rep = _first_ts(it, ("reported",))
+        if rep and _in_window(rep, now, window_days):
+            defect_arrivals += 1
+    return {
+        "by_stage": by_stage,
+        "rework_rate": rework_rate,
+        "n_reworked": reworked,
+        "n_flow_items": len(flow_items),
+        "defect_arrivals_in_window": defect_arrivals,
+    }
+
+
+def _compute_recovery(graphs, flow_items):
+    """Section D — MTTR split by failure class (median + mean each)."""
+    build_fail, val_reject, defect = [], [], []
+    for it in flow_items:
+        build_fail += _duration_after(it, {"build_failed"},
+                                      {"built_green", "retried", "done", "validated"})
+        val_reject += _duration_after(it, {"rejected"},
+                                      {"validated", "resolved", "done"})
+        defect += _duration_after(it, {"reported"}, {"validated", "resolved"})
+
+    def pack(xs):
+        return {"median_s": _median(xs), "mean_s": _mean(xs), "n": len(xs)}
+    return {"build_failure": pack(build_fail),
+            "validation_rejection": pack(val_reject),
+            "defect": pack(defect)}
+
+
+def _stats_for_set(graphs, flow_items, states, now):
+    """All four sections + windowed rate metrics for one set of flow items."""
+    return {
+        "n_items": len(flow_items),
+        "dora": {
+            "all_time": _compute_dora(graphs, flow_items, states, now, None),
+            "trailing_30d": _compute_dora(graphs, flow_items, states, now, 30),
+        },
+        "gross_lead_time": _compute_glt(graphs, flow_items, now),
+        "quality": {
+            "all_time": _compute_quality(graphs, flow_items, now, None),
+            "trailing_30d": _compute_quality(graphs, flow_items, now, 30),
+        },
+        "recovery_by_class": _compute_recovery(graphs, flow_items),
+    }
+
+
+def compute_stats(graphs, items, states, now=None):
+    """Enhanced stats: DORA + gross-lead-time decomposition (by_state / by_owner)
+    + quality-by-stage + recovery-by-class, sliced overall and by item type.
+    `now` (datetime, UTC) is the reference for in-flight open segments + windows;
+    defaults to datetime.now(utc)."""
+    if now is None:
+        now = datetime.now(timezone.utc)
+    flow = [it for it in items.values() if graphs.kind(it.type) == "flow"]
+    by_type = defaultdict(list)
+    for it in flow:
+        by_type[it.type].append(it)
+
+    result = {
+        "generated": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "reference_now": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "note": "SOLE record: computed from item event-logs (ledger cutover). "
+                "state_owners attributes gross-lead-time to each part of the process.",
+        "overall": _stats_for_set(graphs, flow, states, now),
+        "by_type": {t: _stats_for_set(graphs, its, states, now)
+                    for t, its in sorted(by_type.items())},
+    }
+    return result
+
+
+def _fmt(x, unit=""):
     if x is None:
         return "—"
     if isinstance(x, float):
-        return f"{x:.2f}" if x < 100 else f"{x:.0f}"
-    return str(x)
+        s = f"{x:.2f}" if abs(x) < 100 else f"{x:.0f}"
+    else:
+        s = str(x)
+    return f"{s}{unit}"
+
+
+def _pct(x):
+    return "—" if x is None else f"{100 * x:.1f}%"
 
 
 def _write_stats(vd, stats):
     with open(os.path.join(vd, "stats.json"), "w", encoding="utf-8") as f:
         json.dump(stats, f, indent=2)
-    L = [f"# Flow + DORA stats (derived) — generated {now_iso()}\n",
-         "_Computed from item event timestamps. Substrate reset accepted "
-         "(CONTRACT §4). Do not hand-edit._\n",
-         "| Metric | Value | n |", "|--------|-------|---|",
-         f"| Throughput (done) | {stats['throughput_done']} | — |",
-         f"| Lead time median (registered→done) | {_fmt(stats['lead_time_median_s'])} s | "
-         f"{stats['lead_time_n']} |",
-         f"| Cycle time median (pulled→done) | {_fmt(stats['cycle_time_median_s'])} s | "
-         f"{stats['cycle_time_n']} |",
-         f"| MTTR median (defect reported→resolved) | {_fmt(stats['mttr_median_s'])} s | "
-         f"{stats['mttr_n']} |",
-         f"| Current WIP | {stats['current_wip']} | — |",
-         f"| Rework rate | {_fmt(stats['rework_rate'])} | {stats['n_flow_items']} flow items |"]
     with open(os.path.join(vd, "stats.md"), "w", encoding="utf-8") as f:
-        f.write("\n".join(L) + "\n")
+        f.write(_render_stats_md(stats))
+
+
+def _render_stats_md(stats):
+    L = [f"# Flow + DORA stats (derived) — generated {stats['generated']}\n",
+         "_SOLE record: computed from each item's `events:` stream (ledger "
+         "cutover). Reference now = " f"`{stats['reference_now']}`. "
+         "Substrate reset accepted (CONTRACT §4). Do not hand-edit._\n"]
+
+    def section(title, s):
+        L.append(f"\n## {title} ({s['n_items']} flow items)\n")
+        # A. DORA
+        at, w = s["dora"]["all_time"], s["dora"]["trailing_30d"]
+        L.append("### A. DORA four key metrics\n")
+        L.append("| Metric | All-time | Trailing 30d |")
+        L.append("|--------|----------|--------------|")
+        L.append(f"| Deployment frequency (/active-day) | {_fmt(at['deployment_frequency_per_active_day'])} "
+                 f"| {_fmt(w['deployment_frequency_per_active_day'])} |")
+        L.append(f"| Lead time for changes — median (s) | {_fmt(at['lead_time_for_changes_median_s'])} "
+                 f"| {_fmt(w['lead_time_for_changes_median_s'])} |")
+        L.append(f"| Lead time for changes — p85 (s) | {_fmt(at['lead_time_for_changes_p85_s'])} "
+                 f"| {_fmt(w['lead_time_for_changes_p85_s'])} |")
+        L.append(f"| Change failure rate | {_pct(at['change_failure_rate'])} "
+                 f"| {_pct(w['change_failure_rate'])} |")
+        L.append(f"| MTTR — median (s) | {_fmt(at['mttr_median_s'])} | {_fmt(w['mttr_median_s'])} |")
+        L.append(f"| MTTR — mean (s) | {_fmt(at['mttr_mean_s'])} | {_fmt(w['mttr_mean_s'])} |")
+
+        # B. GLT decomposition
+        g = s["gross_lead_time"]
+        L.append("\n### B. Gross lead time — decomposition\n")
+        L.append(f"- Total time-in-flight (all segments): **{_fmt(g['gross_lead_time_total_s'])} s**")
+        L.append(f"- Per-item gross lead time: median **{_fmt(g['gross_lead_time_median_s'])} s**, "
+                 f"p85 **{_fmt(g['gross_lead_time_p85_s'])} s** "
+                 f"({g['n_completed_items']} completed items)\n")
+        L.append("**Time thieves — by state (ranked)**\n")
+        L.append("| State | total time (s) | % of GLT |")
+        L.append("|-------|----------------|----------|")
+        for st, d in g["by_state"].items():
+            L.append(f"| {st} | {_fmt(d['total_s'])} | {_fmt(d['pct_of_glt'], '%')} |")
+        if not g["by_state"]:
+            L.append("| _(no timed segments)_ | — | — |")
+        L.append("\n**Contribution to gross lead time — by owner**  "
+                 "_(each part of the process reads its own share here; "
+                 "`queue` = pure wait latency, `external` = blocked outside the system)_\n")
+        L.append("| Owner | total time (s) | % of GLT |")
+        L.append("|-------|----------------|----------|")
+        for o, d in g["by_owner"].items():
+            L.append(f"| {o} | {_fmt(d['total_s'])} | {_fmt(d['pct_of_glt'], '%')} |")
+        if not g["by_owner"]:
+            L.append("| _(no timed segments)_ | — | — |")
+
+        # C. quality
+        q = s["quality"]["all_time"]
+        L.append("\n### C. Quality by stage / owner\n")
+        L.append("| Stage | owner | failure rate | fails / exits |")
+        L.append("|-------|-------|--------------|---------------|")
+        for st, d in sorted(q["by_stage"].items()):
+            L.append(f"| {st} | {d['owner']} | {_pct(d['failure_rate'])} "
+                     f"| {d['n_failures']} / {d['n_exits']} |")
+        if not q["by_stage"]:
+            L.append("| _(no fail-path exits)_ | — | — | — |")
+        L.append(f"\n- Overall rework rate: **{_pct(q['rework_rate'])}** "
+                 f"({q['n_reworked']}/{q['n_flow_items']} items ever entered rework)")
+        L.append(f"- Defect arrivals — all-time: **{q['defect_arrivals_in_window']}**, "
+                 f"trailing 30d: **{s['quality']['trailing_30d']['defect_arrivals_in_window']}**")
+
+        # D. recovery by class
+        r = s["recovery_by_class"]
+        L.append("\n### D. Recovery (MTTR) by failure class\n")
+        L.append("| Class | median (s) | mean (s) | n |")
+        L.append("|-------|------------|----------|---|")
+        for cls, label in (("build_failure", "Build failure"),
+                           ("validation_rejection", "Validation rejection"),
+                           ("defect", "Defect (reported→resolved)")):
+            d = r[cls]
+            L.append(f"| {label} | {_fmt(d['median_s'])} | {_fmt(d['mean_s'])} | {d['n']} |")
+
+    section("Overall", stats["overall"])
+    for t, s in stats["by_type"].items():
+        section(f"By type — {t}", s)
+    return "\n".join(L) + "\n"
 
 
 # ---------------------------------------------------------------------------
@@ -1251,6 +1611,8 @@ def main(argv=None):
 
     pr = sub.add_parser("project")
     pr.add_argument("--project", required=True)
+    pr.add_argument("--now", help="reference 'now' (ISO-8601 UTC) for in-flight "
+                                  "time-in-state + rate windows; default: real now")
     pr.set_defaults(func=cmd_project)
 
     va = sub.add_parser("validate")

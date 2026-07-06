@@ -168,7 +168,7 @@ wi-append:
 # Recompute ALL views (queues + stats + tree + re-render each item's derived block). Run after each loop.
 # make wi-project PROJECT=OagEventSource
 wi-project:
-	$(WORKITEMS) project --project $(PROJECT)
+	$(WORKITEMS) project --project $(PROJECT) $(if $(NOW),--now "$(NOW)",)
 # Drift GATE by construction (invariants I1-I4). Exit non-zero on any violation. Run before pulling.
 # make wi-validate PROJECT=OagEventSource
 wi-validate:

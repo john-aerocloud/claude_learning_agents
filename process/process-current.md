@@ -1,11 +1,28 @@
 ---
-process_version: 81
-effective_from: 2026-07-05
-supersedes: v80, v76
+process_version: 82
+effective_from: 2026-07-06
+supersedes: v81, v80, v76
 status: active
 ---
 
-# Current Process — v81
+# Current Process — v82
+
+> **v82 (CUTOVER — event-sourced work-item model, 2026-07-06; human-directed).**
+> The multi-store state model (ledger + `state.md` + `items.csv` state + `queues/*.csv`
+> + `blocks.csv` + board) caused a recurring drift-defect class: one fact stored in ≥6
+> places with no invariant forcing agreement (nearly re-ran destructive work twice; the
+> phantom "35-item backlog"). **Full cutover** to a single source of truth: the **work
+> item** (design `Version2-design/04`, contract `process/machinery/CONTRACT.md`). State
+> lives ONLY in per-item files as an append-only event log; **current state =
+> `fold(events)`** through the item's type graph (`process/machinery/state-graphs.json`);
+> queues, DORA/flow metrics, dependency tree and the human boards are all **derived
+> views**, recomputed on read, never stored-and-hand-synced. The prior model is archived
+> at tag **`QueueApproach`**. See **STAGE F → F0 (CUTOVER)** for the operative rules; most
+> of §F2–§F9 (buffers, WIP, parallel dispatch, collision, retro-debt gate, deploy gate)
+> stays valid and now operates on the *derived* queues — only the state-recording
+> substrate beneath them changed. The old DORA ledger is frozen (no new `dora record`
+> rows); metrics now come from `make wi-project`, which additionally reports **each part's
+> contribution to gross lead time, its quality, and its recovery** (per `state_owners`).
 
 > **v81 (RECONCILIATION — merge of two parallel-instance process lineages, 2026-07-05).**
 > Target: **gross lead time / CFR** — this is the §0a (v74 multi-instance) reconcile
@@ -2288,6 +2305,54 @@ The cross-agent rules of the pull system. They supersede §6's command-stepped
 loop and §9's four-gate list for pull-based projects. Full rationale, diagrams,
 and a worked retro are in `Version2-design/`; this is the rulebook the agents
 follow. Each rule names the DORA metric it targets, per §25a.
+
+## F0. CUTOVER — the work item is the single source of truth (v82)
+
+**State lives ONLY in the per-item file.** One file per item at
+`work/<project>/items/active/<ID>.md` (terminal items move verbatim to `items/done/<ID>.md`).
+Each file carries an **append-only `events:` list**; the item's **current state is
+`fold(events)`** through its type's graph in `process/machinery/state-graphs.json`. There is
+NO stored `state` field, NO `queues/*.csv`, NO hand-run `state.md`, NO `dora record`. Because
+each fact is stored once and every other view is computed from it, the coherence-defect family
+(multiple stores of one fact disagreeing) **cannot occur** — this is the v52 "single writer"
+principle taken to completion.
+
+**Changing state = `make wi-append` (the only writer, edge-checked).**
+`make wi-append PROJECT=<p> ID=<id> EVENT=<name> AGENT=<role> [REF=<sha>] [NOTE="…"]`.
+The append folds the item to its current state and **rejects** any event that is not a legal
+transition from that state for that agent (the half-transition that caused the drift — e.g.
+`item_done` with no dequeue — is now unrepresentable). Needing a transition the graph lacks is
+NOT something an agent may improvise: it opens a **graph amendment = a process experiment**
+(EXP-NNN, retro/version-bump gate). Edges are stored **one-directional** (`parents`+`deps` up);
+`children`/ancestors/tree are derived, so an edge can't disagree with itself.
+
+**Views are derived, never stored — `make wi-project` after each loop pass.** It recomputes,
+from the item set: `views/queues.{md,json}` (the Ready/Rework/Intake/Waiting membership §F2's
+buffers now read), `views/state.md`, `views/tree.md`, and `views/stats.{json,md}`. Read the
+derived queue views where §F2–§F9 say "queue".
+
+**Metrics come from `wi-project` (the DORA ledger is frozen).** `stats.*` reports the four DORA
+metrics AND — via `state_owners` in the graph — **every part of the process's contribution to
+gross lead time**, its **quality** (failure/rework rate at its stage), and its **recovery**
+(MTTR by failure class): agent-work-time vs `queue` wait-latency vs `external` blocked-time,
+each as a share of gross lead time. This replaces `dora.py flow`/`compute`; the old
+`process/dora/ledger/*.csv` is retained read-only as the QueueApproach archive.
+
+**Drift gate by construction — `make wi-validate` before every pull.** Invariants I1–I4
+(legal history; done ⇒ in no queue; edge consistency; one file per id). Non-zero exit blocks the
+pull. This replaces `make ledger-drift` and `reconcile-registry`.
+
+**Boards mirror per item, in parallel.** When an item's events change, dispatch the `linear`
+and/or `jira` projection agent for that one id (idempotent, independent, non-blocking); a
+full-sweep run is the backstop. Boards are projections — the item always wins.
+
+**Command mapping (old → new):** `dora record … --event enqueue/dequeue/item_done` →
+`wi-append … --event made_ready/pulled/built_green/validated/…`; `queues/*.csv` + `state.md` →
+`views/` (derived); `make ledger-drift` + `reconcile-registry` → `make wi-validate`;
+`dora.py flow`/`compute` → `make wi-project` (stats.*); `sync-linear.py --item` → the `linear`
+agent. **Applies to** OagEventSource (migrated) and every NEW project; the rules in §F1's
+"Single source of truth (v52)" and the CSV/ledger mechanics in §F2–§F9 are **superseded by F0**
+wherever they conflict — the flow *intent* of those rules stands, the *substrate* is F0.
 
 ## F1. Work items — hierarchy with two-way links
 Every unit of work is a typed item — `REQ-`/`CHK-`/`SLC-`/`UC-`/`DEF-` — in

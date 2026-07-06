@@ -105,12 +105,12 @@ cycles keep the plain trunk working tree. Target: commit-attribution-correctness
 - Every dispatch you make is bracketed by ledger events. Append
   task_start / task_end / deploy / failure / recovery / gate rows to
   `/process/dora/ledger.csv` (use the `dora-ledger` skill).
-- **Record `--tokens` on each agent `task_end` (v59, EXP-067):** when a dispatched
-  agent returns, its completion reports `subagent_tokens`; pass it as
-  `--tokens <n>` on the `task_end` row. This feeds `dora.py cost-split` so the
-  retro can see the plumbing (run-the-OS) vs delivery (customer-value) share of
-  tokens, not just total. (Your own main-loop tokens aren't auto-logged — the
-  §26 token-estimate covers that share.)
+- **Token cost awareness (v59, EXP-067):** when a dispatched agent returns, note its
+  reported `subagent_tokens` for the retro's cost review (§26) — the plumbing (run-the-OS)
+  vs delivery (customer-value) token share. (The automated plumbing-vs-delivery cost-split
+  over item events is not yet reimplemented in `make wi-project` — a known gap; review tokens
+  at the retro for now. Your own main-loop tokens aren't auto-logged — the §26 token-estimate
+  covers that share.)
 - After each iteration run `make wi-project` — the baseline is DERIVED, not a
   hand-written file: read `work/<project>/views/stats.md`.
 - Read the baseline as a flow model: find the CONSTRAINT (slowest step / longest
@@ -146,8 +146,8 @@ so it runs without a permission prompt. That means:
   `source … && …` — compound prefixes match no allowlist pattern and always prompt.
 - Use the allowlist-shaped forms: `npm --prefix <dir> run <script>`,
   `make -C <dir> <target>`, `git -C <dir> …`, root-relative script paths. Run the
-  DORA tool via its **cross-platform launcher** (`sh .claude/skills/dora-ledger/scripts/dora …`)
-  or `make dora-*`, NEVER bare `python3 …dora.py` — on Windows `python3` is a Store
+  work-items tool via its **cross-platform launcher** (`sh .claude/skills/work-items/scripts/work-items …`)
+  or `make wi-*`, NEVER bare `python3 …` — on Windows `python3` is a Store
   stub that fails silently (§0a Rule 5).
 - If a task genuinely needs a command class the allowlist lacks, that is a
   capability gap: name it in your return so the allowlist is extended in the
@@ -163,12 +163,12 @@ so it runs without a permission prompt. That means:
   avoidable lead-time thief in the s001–s004 run). For item-state changes use
   `make wi-append` (never edit a CSV or the frozen ledger). Bash is for RUNNING
   (tests/build/git/scripts), not for writing files.
-- **Decision-log appends → `dora … log-decision` (v47).** Append a decision-log
-  row with `sh .claude/skills/dora-ledger/scripts/dora log-decision --project <p>
-  --gate <g> --decision <d> --rationale <r> --anchor <a>` (auto-stamps the timestamp,
-  escapes pipes) — NOT a Read-last-line + Edit by hand. At every retro, look for the
-  cycle's most-repeated by-hand op (§26) and scriptify it; hand-bookkeeping is your
-  own dominant overhead.
+- **Decision-log appends (v47).** The per-project decision log
+  (`work/<p>/decision-log.md`) stays a distinct artifact (the cross-item narrative of *why*
+  choices were made — separate from item event-logs). Append a row (gate / decision /
+  rationale / anchor / timestamp) with the Edit/Write tool. At every retro, look for the
+  cycle's most-repeated by-hand op (§26) and scriptify it; hand-bookkeeping is your own
+  dominant overhead.
 - **Multi-instance (§0a):** your parent-repo commits (process/agent-system) go on
   the instance branch `instance/<project>` and reconcile to `main` continuously —
   reconcile latency stays low (§0a). Do NOT append a use-case's `validated` event

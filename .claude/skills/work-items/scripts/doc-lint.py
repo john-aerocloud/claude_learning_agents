@@ -87,6 +87,9 @@ DENYLIST = [
     ("dora.py record", re.compile(r"\bdora\.py\s+record\b", re.I)),
     ("dora.py flow", re.compile(r"\bdora\.py\s+flow\b", re.I)),
     ("dora.py compute", re.compile(r"\bdora\.py\s+compute\b", re.I)),
+    ("dora.py cost-split/log-decision (retired subcmd)",
+     re.compile(r"\bdora(?:\.py)?[ \-]?(?:cost-split|log-decision)\b", re.I)),
+    ("retired dora-* make target", re.compile(r"\bdora-(?:record|compute|flow)\b", re.I)),
     # membership queues are retired (derived into views/queues.*); queues/policy.csv is a
     # LIVE retro-owned buffer-config INPUT and is deliberately NOT flagged.
     ("queues/*.csv membership store",

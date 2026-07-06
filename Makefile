@@ -28,6 +28,7 @@ PROJECT ?= $(shell cat work/ACTIVE 2>/dev/null)
 APP     := work/$(PROJECT)/src/app
 INFRA   := work/$(PROJECT)/src/infra
 DORA    := sh .claude/skills/dora-ledger/scripts/dora
+WORKITEMS := sh .claude/skills/work-items/scripts/work-items
 AWS_PROFILE ?= $(shell cat .claude/config/aws-profile 2>/dev/null)
 PY      ?= $(shell sh .claude/skills/dora-ledger/scripts/dora --python)
 SQLCMD       ?= C:/Program Files/Microsoft SQL Server/Client SDK/ODBC/170/Tools/Binn/sqlcmd.exe
@@ -155,6 +156,26 @@ ledger-drift:
 # make reconcile-registry PROJECT=OagEventSource
 reconcile-registry:
 	python3 work/$(PROJECT)/scripts/reconcile-registry.py --project $(PROJECT) $(FIX)
+
+# --- Event-sourced work-item machinery (Version2-design/04, process/machinery/CONTRACT.md) ---
+# State lives ONLY in the per-item files (work/$(PROJECT)/items/{active,done}/<ID>.md);
+# queues, stats and the dependency tree are DERIVED here, never stored-and-hand-synced.
+# Append an edge-checked event (the ONLY way to change item state; rejects illegal transitions):
+# make wi-append PROJECT=P ID=UC-1 EVENT=made_ready AGENT=flow-manager [REF=<sha>] [NOTE="..."]
+wi-append:
+	$(WORKITEMS) append --project $(PROJECT) --id $(ID) --event $(EVENT) --agent $(AGENT) \
+	  $(if $(REF),--ref "$(REF)",) $(if $(NOTE),--note "$(NOTE)",)
+# Recompute ALL views (queues + stats + tree + re-render each item's derived block). Run after each loop.
+# make wi-project PROJECT=OagEventSource
+wi-project:
+	$(WORKITEMS) project --project $(PROJECT) $(if $(NOW),--now "$(NOW)",)
+# Drift GATE by construction (invariants I1-I4). Exit non-zero on any violation. Run before pulling.
+# make wi-validate PROJECT=OagEventSource
+wi-validate:
+	$(WORKITEMS) validate --project $(PROJECT)
+# One-shot migration from items.csv + ledger into per-item files.
+wi-migrate:
+	$(WORKITEMS) migrate --project $(PROJECT)
 
 # --- Validation & smoke (run + record in one step) ----------------------------
 # make validate ITER=5 SLICE=004-create-game [PROD_URL=https://…] [AWS_PROFILE=dev-int]
@@ -545,7 +566,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: sso-login dora-record dora-compute retro-debt ledger-drift reconcile-registry validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3
+.PHONY: sso-login dora-record dora-compute retro-debt ledger-drift reconcile-registry wi-append wi-project wi-validate wi-migrate validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3
 
 # --- Viggo-fix UC-W7: Country/Nationality ID remediation (T-SQL) --------------
 # Data-driven, self-building T-SQL remediation script set + its local stand-up

@@ -351,6 +351,10 @@ def _render_event(ev):
              f"agent: {_q(ev.get('agent'))}"]
     if ev.get("ref") not in (None, ""):
         parts.append(f"ref: {_q(ev.get('ref'))}")
+    # tokens: OPTIONAL subagent token cost of producing this transition. Rendered
+    # only when present (absent ⇒ unknown, treated as 0 by the cost-split fold).
+    if ev.get("tokens") not in (None, ""):
+        parts.append(f"tokens: {_q(ev.get('tokens'))}")
     if ev.get("note") not in (None, ""):
         parts.append(f"note: {_q(ev.get('note'))}")
     return "{" + ", ".join(parts) + "}"
@@ -593,6 +597,10 @@ def cmd_append(a):
     new_event = {"ts": ts, "event": a.event, "agent": a.agent}
     if a.ref:
         new_event["ref"] = a.ref
+    # tokens: the subagent_tokens the dispatched specialist spent producing this
+    # transition. Optional — rides the state event so cost-split is a pure fold.
+    if getattr(a, "tokens", None) is not None:
+        new_event["tokens"] = a.tokens
     if a.note:
         new_event["note"] = a.note
     item.fm.setdefault("events", [])
@@ -750,6 +758,69 @@ def _write_tree(vd, items, children, states):
 TERMINAL_STATES = {"done", "resolved", "wontfix"}
 GENESIS_EVENTS = ("registered", "reported", "open")
 REWORK_ENTRY_EVENTS = {"build_failed", "rejected", "retried", "reopened"}
+
+# --- plumbing vs delivery cost classification (ported verbatim from dora.py's
+# cost-split, v59/EXP-067; the ledger it read is now frozen, so the SAME rule is
+# reimplemented here over item EVENTS so the metric stays continuous) -----------
+# "Plumbing" = the cost of RUNNING the agent OS (coordination, flow management,
+# bookkeeping, gates) vs producing/validating customer value ("delivery"). Rule
+# (identical to dora.py:cost_class): an event is plumbing if its agent runs the
+# machine (orchestrator/flow-manager) OR its event is a coordination/bookkeeping
+# marker; everything else (engineer/tester/ui/product/architect/cicd/documenter
+# building, validating, designing, deploying) is delivery.
+PLUMBING_AGENTS = {"orchestrator", "flow-manager"}
+# dora.py's PLUMBING_EVENTS were ledger bookkeeping rows (enqueue/dequeue/retro/
+# item_registered/loop_wake/parallel_dispatch/collision/gate_decision/
+# log_decision). In the work-item event vocabulary the equivalent coordination/
+# bookkeeping transitions are the flow-manager/orchestrator markers below; the
+# agent rule already subsumes them (they are all fired by a plumbing agent), so
+# the split is identical whether keyed on agent or event.
+PLUMBING_EVENTS = {"registered", "made_ready", "pulled", "blocked", "unblocked",
+                   "scheduled", "reported", "triaged"}
+
+
+def cost_class(agent, event):
+    """plumbing iff agent runs the OS OR the event is a coordination/bookkeeping
+    marker; else delivery. Verbatim rule from dora.py:cost_class."""
+    return "plumbing" if (agent in PLUMBING_AGENTS or event in PLUMBING_EVENTS) else "delivery"
+
+
+def _compute_token_cost(flow_items):
+    """Token-cost section: total, by_owner (fold each event's `tokens` through the
+    event's AGENT — the owner that produced the transition), and the
+    plumbing-vs-delivery split (dora.py's classification, ported). An event with
+    no `tokens` contributes 0 and is not counted toward coverage. `token_coverage`
+    = fraction of events that carried a `tokens` value (mirrors dora.py's coverage
+    over task_end rows), so a project whose events pre-date `--tokens` reads 0."""
+    total = 0
+    by_owner = defaultdict(int)
+    split = {"plumbing": 0, "delivery": 0}
+    n_events = 0
+    n_with_tokens = 0
+    for it in flow_items:
+        for ev in it.events:
+            n_events += 1
+            tk = ev.get("tokens")
+            if not isinstance(tk, (int, float)):
+                continue
+            tk = int(tk)
+            n_with_tokens += 1
+            total += tk
+            by_owner[ev.get("agent") or "unowned"] += tk
+            split[cost_class(ev.get("agent"), ev.get("event"))] += tk
+    coverage = (n_with_tokens / n_events) if n_events else None
+    return {
+        "total_tokens": total,
+        "by_owner": {o: by_owner[o] for o in sorted(by_owner, key=lambda k: -by_owner[k])},
+        "plumbing_vs_delivery": {
+            "plumbing_tokens": split["plumbing"],
+            "delivery_tokens": split["delivery"],
+            "plumbing_share": _ratio(split["plumbing"], total),
+        },
+        "token_coverage": coverage,
+        "n_events_with_tokens": n_with_tokens,
+        "n_events": n_events,
+    }
 
 
 def _first_ts(item, event_names):
@@ -1061,6 +1132,7 @@ def _stats_for_set(graphs, flow_items, states, now):
             "trailing_30d": _compute_quality(graphs, flow_items, now, 30),
         },
         "recovery_by_class": _compute_recovery(graphs, flow_items),
+        "token_cost": _compute_token_cost(flow_items),
     }
 
 
@@ -1182,6 +1254,35 @@ def _render_stats_md(stats):
                            ("defect", "Defect (reported→resolved)")):
             d = r[cls]
             L.append(f"| {label} | {_fmt(d['median_s'])} | {_fmt(d['mean_s'])} | {d['n']} |")
+
+        # E. token cost — plumbing vs delivery
+        tc = s["token_cost"]
+        pvd = tc["plumbing_vs_delivery"]
+        cov = tc["token_coverage"]
+        L.append("\n### E. Token cost — plumbing vs delivery\n")
+        L.append("_Plumbing = running the agent OS (orchestrator + flow-manager + "
+                 "coordination/bookkeeping transitions); delivery = producing / "
+                 "validating customer value (classification ported from dora.py "
+                 "cost-split, EXP-067). Token cost rides each state event's optional "
+                 "`tokens`. Watch the plumbing SHARE and its trend._\n")
+        if not tc["total_tokens"]:
+            L.append("_No event tokens recorded (coverage "
+                     f"{_pct(cov)}) — nothing to split yet._")
+        else:
+            L.append("| class | tokens | share |")
+            L.append("|-------|--------|-------|")
+            L.append(f"| plumbing | {pvd['plumbing_tokens']} | {_pct(pvd['plumbing_share'])} |")
+            L.append(f"| delivery | {pvd['delivery_tokens']} "
+                     f"| {_pct(_ratio(pvd['delivery_tokens'], tc['total_tokens']))} |")
+            L.append(f"| **TOTAL** | **{tc['total_tokens']}** | 100.0% |")
+            L.append(f"\n_Plumbing share: **{_pct(pvd['plumbing_share'])}** "
+                     f"(token coverage {_pct(cov)} of "
+                     f"{tc['n_events']} events — grows as dispatches carry `--tokens`)._")
+            L.append("\n**By owner**\n")
+            L.append("| owner | tokens |")
+            L.append("|-------|--------|")
+            for o, tk in tc["by_owner"].items():
+                L.append(f"| {o} | {tk} |")
 
     section("Overall", stats["overall"])
     for t, s in stats["by_type"].items():
@@ -1784,6 +1885,10 @@ def main(argv=None):
     ap.add_argument("--ref")
     ap.add_argument("--note")
     ap.add_argument("--ts")
+    ap.add_argument("--tokens", type=int,
+                    help="subagent_tokens the dispatched specialist spent producing "
+                         "this transition (optional; feeds the plumbing-vs-delivery "
+                         "cost-split in `project` stats)")
     ap.set_defaults(func=cmd_append)
 
     pr = sub.add_parser("project")

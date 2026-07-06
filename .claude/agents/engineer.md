@@ -348,7 +348,8 @@ You build per **pulled use-case** inside the continuous loop. **State lives ONLY
 in the item file; state = fold(events).** Your role's state events are appended
 via `make wi-append PROJECT=<p> ID=<UC-…/DEF-…> AGENT=engineer EVENT=<e>`: fire
 `pulled` if you perform the pull, and `built_green` when the UC's suite+lint go
-green (`--ref <sha>`). **There are NO queue-csv or items.csv edits, no `dequeue`/
+green (`--ref <sha>`). Record `TOKENS=<n>` (your reported subagent_tokens) on your
+state event so the cost-split is computed from event tokens. **There are NO queue-csv or items.csv edits, no `dequeue`/
 `stage_enter`/`stage_exit` rows** — queue membership and state are DERIVED by
 `make wi-project` from the event log; hand-editing a queue or `items.csv` state
 is WRONG under v82 (it can drift from the fold and `make wi-validate` rejects it).

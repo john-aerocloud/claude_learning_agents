@@ -876,5 +876,127 @@ class TestProjectStatusline(Base):
         self.assertEqual(d["retro_debt_TestProj"], 7)
 
 
+# --------------------------------------------------------------------------- #
+# token cost — plumbing vs delivery (cost-split ported from dora.py, EXP-067)
+# --------------------------------------------------------------------------- #
+class TestTokenCost(Base):
+    def _append(self, iid, event, agent, tokens=None):
+        ns = argparse.Namespace(project=self.project, id=iid, event=event, agent=agent,
+                                ref=None, note=None, ts="2026-06-18T00:00:00Z",
+                                tokens=tokens)
+        with contextlib.redirect_stdout(io.StringIO()):
+            wi.cmd_append(ns)
+
+    def _stats(self):
+        it = wi.load_all_items(self.project)[0]
+        st = wi.compute_states(self.graphs, it)
+        return wi.compute_stats(self.graphs, it, st, now=NOW_DT)
+
+    # ---- classification is verbatim from dora.py:cost_class ----
+    def test_cost_class_plumbing_agents(self):
+        # orchestrator/flow-manager => plumbing regardless of event
+        self.assertEqual(wi.cost_class("orchestrator", "pulled"), "plumbing")
+        self.assertEqual(wi.cost_class("flow-manager", "made_ready"), "plumbing")
+
+    def test_cost_class_delivery_agents(self):
+        # engineer/tester/cicd building/validating/deploying => delivery
+        self.assertEqual(wi.cost_class("engineer", "built_green"), "delivery")
+        self.assertEqual(wi.cost_class("tester", "validated"), "delivery")
+        self.assertEqual(wi.cost_class("cicd", "deployed"), "delivery")
+
+    # ---- append records --tokens on the event ----
+    def test_append_records_tokens(self):
+        self.write_item("active", "UC-T", "use-case",
+                        [{"ts": "1", "event": "registered", "agent": "flow-manager"}])
+        self._append("UC-T", "made_ready", "flow-manager", tokens=1234)
+        item = wi.load_item(os.path.join(self._items("active"), "UC-T.md"))
+        self.assertEqual(item.events[-1]["tokens"], 1234)
+
+    def test_append_without_tokens_has_no_tokens_key(self):
+        self.write_item("active", "UC-N", "use-case",
+                        [{"ts": "1", "event": "registered", "agent": "flow-manager"}])
+        self._append("UC-N", "made_ready", "flow-manager")  # no tokens
+        item = wi.load_item(os.path.join(self._items("active"), "UC-N.md"))
+        self.assertNotIn("tokens", item.events[-1])
+
+    # ---- deterministic fixture: exact total / by_owner / split ----
+    def _fixture_uc(self):
+        # a clean UC with a known token on each event. plumbing = flow-manager +
+        # orchestrator events; delivery = engineer/cicd/tester events.
+        #   registered  flow-manager  1000  (plumbing)
+        #   made_ready  flow-manager  2000  (plumbing)
+        #   pulled      orchestrator  4000  (plumbing)
+        #   built_green engineer      50000 (delivery)
+        #   deployed    cicd          3000  (delivery)
+        #   validated   tester        6000  (delivery)
+        # total=66000; plumbing=7000; delivery=59000; share=7000/66000
+        return [
+            {"ts": _dt(10, 0), "event": "registered", "agent": "flow-manager", "tokens": 1000},
+            {"ts": _dt(10, 1), "event": "made_ready", "agent": "flow-manager", "tokens": 2000},
+            {"ts": _dt(10, 3), "event": "pulled", "agent": "orchestrator", "tokens": 4000},
+            {"ts": _dt(10, 6), "event": "built_green", "agent": "engineer", "tokens": 50000},
+            {"ts": _dt(10, 8), "event": "deployed", "agent": "cicd", "tokens": 3000},
+            {"ts": _dt(10, 12), "event": "validated", "agent": "tester", "tokens": 6000},
+        ]
+
+    def test_total_by_owner_and_split_exact(self):
+        self.write_item("done", "UC-1", "use-case", self._fixture_uc())
+        tc = self._stats()["overall"]["token_cost"]
+        self.assertEqual(tc["total_tokens"], 66000)
+        # by_owner folds tokens through the event's agent
+        self.assertEqual(tc["by_owner"]["engineer"], 50000)
+        self.assertEqual(tc["by_owner"]["tester"], 6000)
+        self.assertEqual(tc["by_owner"]["cicd"], 3000)
+        self.assertEqual(tc["by_owner"]["flow-manager"], 3000)   # 1000+2000
+        self.assertEqual(tc["by_owner"]["orchestrator"], 4000)
+        # plumbing vs delivery — the EXACT split
+        pvd = tc["plumbing_vs_delivery"]
+        self.assertEqual(pvd["plumbing_tokens"], 7000)   # fm 3000 + orch 4000
+        self.assertEqual(pvd["delivery_tokens"], 59000)  # eng 50000 + cicd 3000 + tester 6000
+        self.assertAlmostEqual(pvd["plumbing_share"], 7000 / 66000, places=6)
+        # full coverage: every event carried tokens
+        self.assertEqual(tc["n_events_with_tokens"], 6)
+        self.assertEqual(tc["token_coverage"], 1.0)
+
+    # ---- absent tokens degrade gracefully (no crash, zero/empty) ----
+    def test_absent_tokens_zero_and_no_crash(self):
+        # the standard clean UC carries NO tokens
+        self.write_item("done", "UC-1", "use-case",
+                        TestStats._clean_uc(self, "UC-1"))
+        tc = self._stats()["overall"]["token_cost"]
+        self.assertEqual(tc["total_tokens"], 0)
+        self.assertEqual(tc["by_owner"], {})
+        self.assertEqual(tc["plumbing_vs_delivery"]["plumbing_tokens"], 0)
+        self.assertEqual(tc["plumbing_vs_delivery"]["delivery_tokens"], 0)
+        self.assertIsNone(tc["plumbing_vs_delivery"]["plumbing_share"])
+        self.assertEqual(tc["token_coverage"], 0.0)
+
+    def test_partial_coverage(self):
+        # only some events carry tokens => coverage is a fraction, split over present
+        evs = TestStats._clean_uc(self, "UC-1")
+        evs[3]["tokens"] = 50000   # built_green (engineer, delivery)
+        evs[2]["tokens"] = 4000    # pulled (orchestrator, plumbing)
+        self.write_item("done", "UC-1", "use-case", evs)
+        tc = self._stats()["overall"]["token_cost"]
+        self.assertEqual(tc["total_tokens"], 54000)
+        self.assertEqual(tc["plumbing_vs_delivery"]["plumbing_tokens"], 4000)
+        self.assertEqual(tc["plumbing_vs_delivery"]["delivery_tokens"], 50000)
+        self.assertEqual(tc["n_events_with_tokens"], 2)
+        self.assertAlmostEqual(tc["token_coverage"], 2 / 6, places=6)
+
+    def test_stats_md_renders_token_section(self):
+        self.write_item("done", "UC-1", "use-case", self._fixture_uc())
+        md = wi._render_stats_md(self._stats())
+        self.assertIn("E. Token cost — plumbing vs delivery", md)
+        self.assertIn("plumbing", md)
+
+    def test_stats_md_token_section_empty_no_crash(self):
+        self.write_item("done", "UC-1", "use-case",
+                        TestStats._clean_uc(self, "UC-1"))
+        md = wi._render_stats_md(self._stats())
+        self.assertIn("E. Token cost — plumbing vs delivery", md)
+        self.assertIn("No event tokens recorded", md)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

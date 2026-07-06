@@ -89,7 +89,8 @@ model — the changed nodes/edges ARE your scope:
   AND **append the `validated` event to the work item** via `make wi-append
   PROJECT=<p> ID=<UC-…/DEF-…> AGENT=tester EVENT=validated --ref <prod SHA>
   --note "<evidence: surface exercised, inputs, result vs acceptance, captured
-  artefacts, prod version>"` (§17a/§18a). The item is not done until the
+  artefacts, prod version>"` (§17a/§18a). Record `TOKENS=<n>` (your reported
+  subagent_tokens) on the event so the cost-split is computed from event tokens. The item is not done until the
   `validated` event lands — it is the item → test-evidence link an auditor
   follows; the `linear`/`jira` projection agent mirrors it onto the board. Report
   pass to the orchestrator.

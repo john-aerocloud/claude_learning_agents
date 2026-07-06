@@ -417,7 +417,8 @@ fires `built_green` (building→deploying), YOU fire `deployed` (deploying→val
 once the UC's deploy lands green, then the tester fires `validated`
 (validating→done). After a successful per-UC deploy, append the event:
 `make wi-append ID=<uc> EVENT=deployed AGENT=cicd` (optionally `REF=<sha>`
-`NOTE="<version>"` carrying the release identity, §18a). This is the ONLY way the
+`NOTE="<version>"` carrying the release identity, §18a; record `TOKENS=<n>` — your
+reported subagent_tokens — so the cost-split is computed from event tokens). This is the ONLY way the
 item leaves `deploying`; it is edge-checked, so a deploy that did not land cannot
 advance the item.
 

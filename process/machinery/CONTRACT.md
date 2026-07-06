@@ -23,11 +23,14 @@ parents: [SLC-032]        # UPWARD edges only: hierarchical container(s). REQUIR
 deps: [UC-C0]             # peer prerequisites (DAG edges the pull uses for the independent set). may be empty.
 created_ts: 2026-06-17T21:30:00Z
 events:                   # append-only. state = fold(events) through the type graph. NEVER store a `state:` field.
+                          # each event MAY carry an OPTIONAL `tokens: <int>` — the subagent_tokens the
+                          # dispatched specialist spent producing that transition. Absent ⇒ unknown/0
+                          # (parsing is tolerant). Feeds the plumbing-vs-delivery cost-split in stats.
   - {ts: 2026-06-17T21:30:00Z, event: registered, agent: flow-manager}
   - {ts: 2026-06-18T09:00:00Z, event: made_ready, agent: flow-manager, note: "vc=6.0"}
   - {ts: 2026-06-18T12:00:00Z, event: pulled,      agent: orchestrator}
-  - {ts: 2026-06-18T15:30:00Z, event: built_green, agent: engineer, ref: <sha>}
-  - {ts: 2026-06-18T16:10:00Z, event: validated,   agent: tester,   ref: <sha>}
+  - {ts: 2026-06-18T15:30:00Z, event: built_green, agent: engineer, ref: <sha>, tokens: 48000}
+  - {ts: 2026-06-18T16:10:00Z, event: validated,   agent: tester,   ref: <sha>, tokens: 12000}
 # --- everything below this line is DERIVED (rendered by the machinery). do not hand-edit. ---
 derived:
   state: done
@@ -74,6 +77,9 @@ There is no other way to change item state. No hand-editing of `derived:`; no se
     agent-work vs `queue` wait-latency vs `external` blocked, so the largest time thief is named.
   - **(b) quality** — failure / rework rate **by stage** (which stage red-flags most).
   - **(c) recovery** — **MTTR by failure class** (deploy failure vs prod defect vs collision).
+  - **(d) token cost** — `token_cost`: total, `by_owner` (event `tokens` folded through the event's
+    agent), and the **plumbing-vs-delivery split** (running-the-OS vs customer-value; classification
+    ported from dora.py cost-split, EXP-067). Computed from each event's optional `tokens`.
   Aggregate (slice/chunk/requirement) state bubbles from children per the graph `bubble` rule.
 - Re-renders each active item's `derived:` block (state, queue, children, ancestors).
 

@@ -499,52 +499,42 @@ Targets: tester (constraint), CFR (impact-blind testing misses the changed area)
   gap once inflated one MTTR pair to ~9h).
 
 ## 14. Commit discipline
-The engineer commits to trunk every time the full test suite **and lint** go green
-(lint passes inside the done-condition, not discovered post-commit).
-- **Commit when green and lint clean, never when red.**
-- **Message states intent, not mechanics. One logical change per commit.**
-- **Conventional Commits format** (required in Viggo-fix, default elsewhere): subject
-  `type(scope): <intent>` where `type` ∈ {feat,fix,docs,style,refactor,perf,test,build,
-  ci,chore,revert}; append `!` (or a `BREAKING CHANGE:` footer) for a breaking change.
-  Keep the `Co-Authored-By` trailer.
-- **Reference the tracked item — ISO traceability.** Every implementing commit names
-  its **work-item id** (the board id it is mirrored to, e.g. `VIG-12`), plus the
-  customer ticket where one exists (e.g. Jira `PP-127`), so an auditor can trace change
-  ⇄ requirement — e.g. `fix(pnl): resolve issuing-State against Country.Code (VF-003,
-  PP-127)`. This binds in BOTH repos. The board is a projection of the item (§F0); an
-  item not yet mirrored is wired to its board **before** its first commit lands (no
-  orphan commits). A genuine chore with no item is `chore: …`, never a fabricated id.
+The engineer commits to trunk every time the full test suite **and lint** go green (lint
+passes inside the done-condition, not discovered post-commit).
+- **Commit when green and lint clean, never when red.** One logical change per commit;
+  the message states intent, not mechanics.
+- **Conventional Commits format.** Subject `type(scope): <intent>`, `type` ∈ {feat,fix,
+  docs,style,refactor,perf,test,build,ci,chore,revert}; append `!` / `BREAKING CHANGE:`
+  footer for a breaking change; keep the `Co-Authored-By` trailer.
+- **Reference the tracked item — ISO traceability.** Every implementing commit names its
+  **work-item id** (the board id it is mirrored to) plus the customer ticket where one
+  exists, so an auditor can trace change ⇄ requirement (e.g. `fix(pnl): … (VF-003,
+  PP-127)`); binds in BOTH repos. An item not yet mirrored is wired to its board before
+  its first commit lands (no orphan commits); a genuine chore with no item is `chore: …`,
+  never a fabricated id.
 - **Commit TARGET — two separate repositories.** Each `work/<project>/` is its own
-  independent git repo so a project can be lifted out standalone. **Project output** —
-  code, the project's **items** (`items/active/`, `items/done/`), the derived
-  **`views/`**, slices, decision-log — is committed INSIDE the project repo:
-  `git -C work/<project> add <paths> && git -C work/<project> commit -m "…"`.
-  **Agent-structure and process changes** (`.claude/`, `process/`, `CLAUDE.md`,
-  `README.md`) are committed in THIS parent repo on `instance/<project>`, reconciled
-  to `main` continuously (§0a Rules 2–3). The parent repo does not track project
-  contents (`.gitignore: /work/*/`); `work/ACTIVE` is machine-local + gitignored (§0a
-  Rule 1). **Never mix the two repos in one commit** — a project-output commit in the
-  parent repo (or vice-versa) is the cross-boundary leak this split exists to prevent
-  (cf. the bare-root-`slices/` principle failure).
+  independent git repo (liftable standalone). **Project output** — code, `items/active/`,
+  `items/done/`, derived `views/`, slices, decision-log — commits INSIDE the project repo
+  (`git -C work/<project> …`). **Agent-structure / process** (`.claude/`, `process/`,
+  `CLAUDE.md`, `README.md`) commits in THIS parent repo on `instance/<project>`, reconciled
+  to `main` continuously (§0a Rules 2–3). Parent `.gitignore`s `/work/*/`; `work/ACTIVE` is
+  machine-local + gitignored (§0a Rule 1). **Never mix the two repos in one commit** — the
+  cross-boundary leak this split exists to prevent.
 - **Push to a VERIFIED remote as part of the done-condition** — integration is part of
-  *done*, not deferred (batching once reached 44 commits ahead, then failed CI twice). No
-  remote, or one the agent cannot verify is the project's intended origin → do NOT push,
-  report and stop. A verified remote (`git remote get-url origin` resolves to the known
-  origin) → push trunk each time a use-case's full done-condition is met (suite + lint
-  green); one UC's green trunk is one push, never accumulate. After every push set off the
-  non-blocking CI watch (§19b) and keep working; a red run where local was green becomes a
-  defect (§19b), never a silent failure.
-- **Parallel-committer isolation = worktree.** When 2+ agents COMMIT code concurrently on
-  one project repo, a file boundary is not enough — `git add` over a shared index sweeps a
-  co-worker's staged files into your commit (recurred 4×). The orchestrator dispatches
-  such committers in git WORKTREE isolation (`git worktree add`) so each has a private
-  index. This is the ONE §14 exception to the trunk/no-worktree default, **orthogonal to
-  §40 flag-isolation** (which stays the rule for behavioural seam-independence in a single
-  tree). Single-committer cycles keep the plain trunk tree; the explicit-pathspec rule
-  (`git commit -- <your-paths>`) is the within-tree fallback. [EXP-097]
-- **Never `git stash` a shared tree** — stash-all captures OTHER agents' uncommitted work
-  and hides it. Commit ONLY your explicit pathspec and `git pull --rebase --autostash` for
-  just your own staged change; leave every file you do not own untouched.
+  *done*, not deferred (batching once reached 44-ahead then failed CI). No verifiable
+  origin (`git remote get-url origin` resolves to the known origin) → do NOT push, report
+  and stop. Verified → push trunk each time a UC's full done-condition is met (suite + lint
+  green); one UC's green trunk is one push, never accumulate. Each push sets off the
+  non-blocking CI watch (§19b); a green-local / red-CI run is a defect (§19b), never silent.
+- **Parallel-committer isolation = worktree.** When 2+ agents COMMIT concurrently on one
+  repo, a file boundary is not enough — `git add` over a shared index sweeps a co-worker's
+  staged files into your commit. Dispatch such committers in git WORKTREE isolation
+  (`git worktree add`, private index). The ONE §14 exception to the no-worktree default,
+  orthogonal to §40 flag-isolation; single-committer cycles keep the plain trunk tree with
+  explicit-pathspec (`git commit -- <your-paths>`) as the fallback. [EXP-097]
+- **Never `git stash` a shared tree** — stash-all hides OTHER agents' uncommitted work.
+  Commit ONLY your explicit pathspec; `git pull --rebase --autostash` for just your own
+  staged change; leave every file you do not own untouched.
 
 ## 15. Command form — the allowlist contract (all agents)
 Every Bash command matches the committed allowlist in `.claude/settings.json` so it
@@ -594,52 +584,15 @@ comes from tests, gates, scoped IAM, and committed reviewable tooling.
 only — never conflate them.)
 
 ## 17. Defect-prevention contracts (cross-agent principle)
-Defects whose root cause is detectable before production must be pinned by a test/probe
-**at the level the risk lives** and at the earliest point visible — not found in live
-validation. Standing classes (each pinned as an executable check, never a written note):
-- **Cross-stack / cross-boundary contracts** — asserted at **synth time** (synth both
-  templates; assert the path/name contract between them).
-- **IAM grant = the FULL operation set of the code path, not its name.** A write/append/
-  ingest path is almost always READS-THEN-WRITES — an event-store APPEND grant = the read
-  ops + write ops (`dynamodb:Query`+`GetItem`+`PutItem`, +`kms:Decrypt`+`GenerateDataKey`
-  for an encrypted table), never `PutItem` alone. Architect derives it from the full
-  SDK-op set; the engineer's code↔policy pin asserts it. Evidence: ingest hit it 3×.
-  CFR + MTTR. [EXP-060]
-- **Diagrams are render-validated before reported done.** A Mermaid diagram is NOT done
-  until the committed `make -C work/<project> render-diagrams` gate is green (mmdc). Binds
-  documenter, solution-architect, orchestrator. Evidence: a `fix(diagram)` committed
-  without re-rendering. CFR + GLT. [EXP-088]
-- **Node ESM bundles get a CJS-require shim + an import-the-bundle smoke.** An ESM handler
-  whose transitive deps `require()` internally crashes at RUNTIME (`Dynamic require`) —
-  clean bundle, fails on run. cicd injects the `createRequire` banner (or bundles CJS); a
-  smoke that `node`-imports the bundle fails until present. (DynamoDB reserved-keyword
-  crashes are the same class, aliased via `ExpressionAttributeNames`.) CFR + MTTR. [EXP-061]
-- **External / cross-account resource identifiers** the stack does NOT create (a layer
-  ARN, a shared cross-account resource, a third-party endpoint) — asserted to resolve
-  BEFORE the first real deploy by a committed check that FAILS until it resolves, never a
-  "CONFIRM at build" note. Evidence: first deploy rolled back on non-existent layer ARNs.
-  CFR + MTTR. [EXP-056]
-- **New platform-integration mechanisms** (first WebSocket, CDN behaviour, auth flow,
-  queue) get an early **walking-skeleton probe**: one real request through the full
-  deployed path with the REAL client technology, BEFORE use cases build on top.
-- **Wire-on-deploy hand-offs**: the receiving role lands a contract test that FAILS until
-  X is wired.
-
-**"Real client" for a web surface means a real BROWSER, never a node probe.** A node
-`ws`/`fetch` probe runs below the browser's security/transport layer and returns a FALSE
-GREEN (bypasses CSP `connect-src`, config-injection ordering, mixed-content, event
-ordering — 4 of 6 root causes of one defect class were browser-only). Drive it via
-committed Playwright; use interactive-browser DISCOVERY before a spec exists, then convert
-each finding into a committed REGRESSION spec. **A defect is not closed until the
-end-to-end USER symptom is reproduced and pinned** — not just the first secondary cause.
-
-This is the lever on the **tester constraint**: the tester is the slowest step and its
-cost is driven by the QUALITY of work arriving. Surfacing browser/transport/policy breaks
-at skeleton time keeps them out of re-validation rounds. **Local standability:** most of
-the system stands up locally (a committed `run-local` entry point; hexagonal adapters with
-local substitutes) and the ENGINEER builds real-browser Playwright tests against it in the
-BUILD phase; what cannot stand locally is enumerated in the delta, each gap mapped to its
-covering control. The tester re-exercises (not re-discovers) those flows.
+Defects whose root cause is detectable before production must be pinned by an executable
+test/probe **at the level the risk lives** and at the earliest point visible — never a
+written note, never found in live validation. Each standing defect class is a scored
+experiment graduated from a real prod defect. The **catalogue of standing classes** (cross-
+stack/synth-time contracts, IAM verb-completeness, ESM require-shim, external-resource-ARN
+resolution, walking-skeleton probe with a REAL browser, wire-on-deploy contract tests, and
+the "defect not closed until the end-to-end USER symptom is reproduced" rule) lives in the
+**`delivery-principles` skill** — load it before synth/build/validate design. Per-role
+mechanics live in the agent files. Target: tester constraint, CFR, MTTR.
 
 ## 17a. Test evidence attaches to the item
 When the tester validates a use-case **in prod** (§11b), it attaches its validation
@@ -827,40 +780,11 @@ sight. The lifecycle is **adopt-or-delete**. A sound shipped behaviour whose row
 only MIS-PHRASED is handled by deleting the ROW while KEEPING the behaviour as plain
 agent practice; never undo a defect-preventing behaviour because its row failed the bar.
 
-Statuses:
-1. **active** — enters at routing time meeting the bar, with a target metric,
-   anticipated effect, a **scoring horizon** (default 2 scoring opportunities; "no
-   opportunity yet" extends it, does not count against it), and an **applies-to**
-   predicate (the KIND of work that exercises it). At work selection the orchestrator
-   lists which active experiments THIS work exercises and records that with the
-   selection, so scoring is honest.
-2. **validated** — anticipated effect observed at retro. The change is then
-   **INTEGRATED**: the owning agent file(s) are rewritten so the behaviour becomes
-   plain operating practice (no `vNN`/EXP/trial scaffolding in the prose the agent
-   reads; overlapping sections merged). Provenance lives in the registry row and git.
-   **After integration the row is PHYSICALLY REMOVED from `experiments.md`** and
-   replaced by a one-line entry in `process/experiments-archive.md`
-   (`EXP-NNN — <lesson> — integrated <sha>`). The working registry holds ONLY live rows.
-3. **under-question** — horizon reached with no improvement. Retro must REWRITE
-   (sharper mechanism → new experiment) or mark for retirement-trial.
-4. **retirement-trial (null-hypothesis test)** — the text is physically REMOVED (git +
-   the row keep it recoverable) and the system runs **4–5 scoring opportunities** without
-   it. A targeted-metric DROP attributable to the removal → the change was load-bearing:
-   reinstate (validated-by-null-hypothesis). No drop across the full window → ornament:
-   retired permanently (row records the evidence). One or two opportunities is an
-   anecdote, not a sample.
-5. **Concurrency guard:** at most ONE retirement-trial running per agent artifact.
-   Never trial a rule whose failure mode is an open prod-outage class.
-6. **failed (terminal — DELETED, not archived)** — anticipated effect NOT observed AND
-   the change is abandoned/superseded. Neither integrated behaviour nor a useful null
-   result, and failed rows are the most verbose, so they POLLUTE the working registry:
-   **deleted outright from `experiments.md`, no archive line** (git retains the row).
-   Guard: a failed experiment with a live re-route must FIRST land its successor, THEN
-   the failed row is deleted in the same change. Failed rows may be deleted at any time.
-
-Scoring honesty: a change with a confounded window (multiple changes on the same metric
-in the same slice) is scored against its own MECHANISM (did the behaviour it prescribes
-occur and visibly help?), not just the aggregate metric.
+**The status-lifecycle mechanics** (active → validated/integrated → under-question →
+retirement-trial → failed, the null-hypothesis retirement test, the concurrency guard,
+and scoring-honesty under a confounded window) live in the **`process-framework` skill** —
+load it to run the registry. This section keeps ONLY the validity bar above; the mechanics
+of moving rows through their statuses are the skill's.
 
 ## 26. Retro mechanics
 At each retro the orchestrator: recomputes the metrics via `make wi-project` (§F0);
@@ -1153,40 +1077,27 @@ event carries no reason note is itself a smell (the banner says so). The reason 
 text on the event; the metrics come from the event itself (§F0). [EXP-074]
 
 ## F8. Retro cadence (pull mode) — MECHANICALLY ENFORCED
-Default: retro at **slice completion** (a retro is service time on the constraint, so
-per-use-case retros would dominate overhead), PLUS an **event-triggered retro** whenever
-flow data breaches a threshold (a prod defect, an MTTR pair, a queue-wait spike). Cadence
-is itself a tunable the system experiments on. At every retro the orchestrator tunes the
-per-queue buffers (§F2) and `N` (§F6) from the flow evidence, each tune a scored
-experiment. Target: meta — bound retro overhead without losing the learning signal.
-[EXP-029]
+**ROUTINE** closes (slice/chunk `done`) batch to `--threshold` (default **3**) before a
+retro is due — a clean run of small closes does not pay per-slice overhead. **INCIDENTS**
+(a prod defect `resolved`, a deploy-failure; plus MTTR-pair / queue-wait-spike triggers)
+are **never batched** — a single one forces RETRO DUE immediately. `--threshold` is
+per-project tunable; retro-debt is counted over the ITEM EVENTS since the last retro,
+computed by `wi-project` (never by scanning rows). At every retro the orchestrator tunes
+the per-queue buffers (§F2) and `N` (§F6) from the flow evidence, each tune a scored
+experiment.
 
-**The cadence is a GATE in the loop machinery, not orchestrator discretion.** "Run the
-retro automatically" was repeatedly violated by offering it to the human instead, so
-enforcement is mechanical. **Retro-debt is counted over the ITEM EVENTS** — the
-retro-triggering events (slice/chunk closes = aggregate `done`, defect `resolved`,
-deploy-failures) since the last retro, computed by `wi-project`, not by scanning ledger
-rows. `make retro-debt PROJECT=P` exits non-zero (code 2 = RETRO DUE) at the threshold.
-The loop (`loop-run.md`) MUST run it before pulling the next work after any close or
-defect resolve; a non-zero exit means the loop **may not advance** until `/retro` drains
-the debt, and the retro may **never** be offered to the human as a choice. [EXP-083]
+**The gate is MECHANICAL, never orchestrator discretion or a human choice.** `make
+retro-debt PROJECT=P` exits non-zero (code 2 = RETRO DUE) at the threshold. A non-zero
+exit blocks **EVERY advance action** — next-pull, RE-DEPLOY, and any orchestrator hand-run
+recovery step on main; the ONLY permitted action is the `/retro` that drains it (via
+`make retro-mark`). The retro may **never** be offered to the human as a choice. Recovery
+is therefore not hand-cranked: run the retro FIRST, then dispatch the fix as a
+flow-manager-prioritised LOOP item (a defect pre-empts, §F5) to the owning specialist,
+appending each failure/recovery leg (§F0) so CFR/MTTR never lie while the loop advances.
 
-**Retro-debt gates EVERY advance action, not just the next PULL — including RE-DEPLOY and
-hand-run recovery.** A non-zero `make retro-debt` blocks next-pull, RE-DEPLOY, and any
-orchestrator hand-run recovery step on main; the ONLY permitted action is the retro that
-drains it. So the orchestrator does NOT hand-crank a CFR/deploy recovery: run the retro
-FIRST, then dispatch the recovery as a **flow-manager-prioritised LOOP item** (a defect
-pre-empts, §F5) to the owning specialist — cicd the IAM/deploy fix, engineer/tester the
-build+validation. Every failure/recovery leg is appended (§F0) as it happens, so CFR/MTTR
-never lie while the loop advances. [EXP-095]
-
-**Right-sized cadence — routine batches, incidents fire immediately.** **ROUTINE** (a
-slice/chunk close) batches up to `--threshold` (default **3**) before a retro is due — a
-clean run of small closes does not pay per-slice overhead. **INCIDENT** (a prod defect
-resolve or a deploy-failure) is **never batched** — a single one forces RETRO DUE
-immediately, plus the existing MTTR/queue-spike triggers. Enforcement stays mechanical
-(no advance past a due retro; never offered to the human); `--threshold` is per-project
-tunable. [EXP-085]
+Pointers: cadence + gate operation in `loop-run.md` / `retro.md`. Citations: cadence is a
+tunable meta-experiment [EXP-029]; mechanical enforcement [EXP-083]; gates every advance
+incl. re-deploy/recovery [EXP-095]; routine-batches / incidents-immediate [EXP-085].
 
 ## F9. Continuous operation & autonomous wake
 The loop is a **continuously-running background process**, not a command the human starts

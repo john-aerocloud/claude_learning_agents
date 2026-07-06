@@ -57,6 +57,9 @@ Each cycle:
    via `make wi-append` as each completes: `built_green` (engineer, building→deploying),
    `deployed` (cicd, deploying→validating — fired after the per-UC deploy lands green),
    `validated` (tester, validating→done); `build_failed`/`rejected` on failure.
+   Each stage `wi-append` carries `TOKENS=<n>` — the `subagent_tokens` the dispatched
+   specialist reported for that transition — so the plumbing-vs-delivery cost-split
+   (§E `token_cost`) is computed automatically by `make wi-project` from event tokens.
    - **Collision** (a UC needs a seam/path another in-flight UC claimed, or a
      flag-compose failure): flow-manager emits `collision`, STOP the pair, add the
      missing edge to the model + `edge-ledger.md`, re-serialise (§19); the rework

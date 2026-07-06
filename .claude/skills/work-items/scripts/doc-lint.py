@@ -103,6 +103,7 @@ DENYLIST = [
     ("sync-linear.py", re.compile(r"\bsync-linear\.py\b", re.I)),
     ("project-state (retired dora subcmd)", re.compile(r"\bproject-state\b", re.I)),
     ("item_done (old event name)", re.compile(r"\bitem_done\b")),
+    ("task_start/task_end (retired ledger rows)", re.compile(r"\btask_(?:start|end)\b")),
     # --- retired FILE artifacts (v82 re-audit) — replaced by derived views / git tags.
     ("dora/flow.md (retired dora output)", re.compile(r"\bdora/flow\.md\b", re.I)),
     ("baseline.md (retired dora output)", re.compile(r"\bbaseline\.md\b", re.I)),

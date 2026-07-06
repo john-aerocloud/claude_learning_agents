@@ -90,6 +90,48 @@ Skills are loaded on-demand and keep the orchestration context small, so moving 
 proven rule there is both correctness (stable home) and economy (smaller active
 process).
 
+## Experiment status lifecycle (the full mechanics — graduated from process §25a)
+The registry is `/process/experiments.md` — one row per routed change, each row a
+falsifiable hypothesis meeting the **validity bar** (process §25a keeps that bar; it is
+the admissibility rule, not repeated here). The lifecycle is **adopt-or-delete**. A sound
+shipped behaviour whose row was only MIS-PHRASED is handled by deleting the ROW while
+KEEPING the behaviour as plain agent practice; never undo a defect-preventing behaviour
+because its row failed the bar. The statuses:
+
+1. **active** — enters at routing time meeting the bar, with a target metric, anticipated
+   effect, a **scoring horizon** (default 2 scoring opportunities; "no opportunity yet"
+   extends it, does not count against it), and an **applies-to** predicate (the KIND of
+   work that exercises it). At work selection the orchestrator lists which active
+   experiments THIS work exercises and records that with the selection, so scoring is
+   honest.
+2. **validated** — anticipated effect observed at retro. The change is then **INTEGRATED**:
+   the owning agent file(s) are rewritten so the behaviour becomes plain operating practice
+   (no `vNN`/EXP/trial scaffolding in the prose the agent reads; overlapping sections
+   merged). Provenance lives in the registry row and git. **After integration the row is
+   PHYSICALLY REMOVED from `experiments.md`** and replaced by a one-line entry in
+   `process/experiments-archive.md` (`EXP-NNN — <lesson> — integrated <sha>`). The working
+   registry holds ONLY live rows.
+3. **under-question** — horizon reached with no improvement. Retro must REWRITE (sharper
+   mechanism → new experiment) or mark for retirement-trial.
+4. **retirement-trial (null-hypothesis test)** — the text is physically REMOVED (git + the
+   row keep it recoverable) and the system runs **4–5 scoring opportunities** without it. A
+   targeted-metric DROP attributable to the removal → the change was load-bearing:
+   reinstate (validated-by-null-hypothesis). No drop across the full window → ornament:
+   retired permanently (row records the evidence). One or two opportunities is an anecdote,
+   not a sample.
+5. **Concurrency guard:** at most ONE retirement-trial running per agent artifact. Never
+   trial a rule whose failure mode is an open prod-outage class.
+6. **failed (terminal — DELETED, not archived)** — anticipated effect NOT observed AND the
+   change is abandoned/superseded. Neither integrated behaviour nor a useful null result,
+   and failed rows are the most verbose, so they POLLUTE the working registry: **deleted
+   outright from `experiments.md`, no archive line** (git retains the row). Guard: a failed
+   experiment with a live re-route must FIRST land its successor, THEN the failed row is
+   deleted in the same change. Failed rows may be deleted at any time.
+
+**Scoring honesty:** a change with a confounded window (multiple changes on the same metric
+in the same slice) is scored against its own MECHANISM (did the behaviour it prescribes
+occur and visibly help?), not just the aggregate metric.
+
 ## When docs get heavy
 Prefer adding a skill (see `skill-creator`) that abstracts a heavy document into a
 callable procedure, rather than letting the orchestrator hold it in context.

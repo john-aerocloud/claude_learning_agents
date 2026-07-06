@@ -102,15 +102,17 @@ cycles keep the plain trunk working tree. Target: commit-attribution-correctness
 (CFR) + GLT (no reconciliation rework).
 
 ## DORA + Theory of Constraints (your optimisation job)
-- Every dispatch you make is bracketed by ledger events. Append
-  task_start / task_end / deploy / failure / recovery / gate rows to
-  `/process/dora/ledger.csv` (use the `dora-ledger` skill).
-- **Token cost awareness (v59, EXP-067):** when a dispatched agent returns, note its
-  reported `subagent_tokens` for the retro's cost review (§26) — the plumbing (run-the-OS)
-  vs delivery (customer-value) token share. (The automated plumbing-vs-delivery cost-split
-  over item events is not yet reimplemented in `make wi-project` — a known gap; review tokens
-  at the retro for now. Your own main-loop tokens aren't auto-logged — the §26 token-estimate
-  covers that share.)
+- Every state change is a `wi-append` event (carrying `--tokens`/`TOKENS=` from the
+  returning agent, per below); all metrics derive from `make wi-project`. There is no
+  per-dispatch ledger bracketing — the DORA ledger is frozen (§F0).
+- **Token cost awareness (v59, EXP-067):** when a dispatched agent returns its reported
+  `subagent_tokens`, carry that count on the `wi-append` for the state event it produced
+  (`--tokens <n>` / `TOKENS=<n>`), so the token cost rides the event. The
+  plumbing (run-the-OS) vs delivery (customer-value) cost-split is then computed
+  automatically by `make wi-project` from event `tokens` (stats §E `token_cost`,
+  and `stats.json`) — read it there for the retro's cost review (§26), no longer a
+  hand gap. Your own main-loop tokens aren't auto-logged — the §26 token-estimate
+  covers that share.
 - After each iteration run `make wi-project` — the baseline is DERIVED, not a
   hand-written file: read `work/<project>/views/stats.md`.
 - Read the baseline as a flow model: find the CONSTRAINT (slowest step / longest

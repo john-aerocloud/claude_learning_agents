@@ -41,11 +41,15 @@ class Base(unittest.TestCase):
         shutil.copy(self.real_graphs, os.path.join(self.tmp, "process", "machinery", "state-graphs.json"))
         wi.GRAPHS_PATH = os.path.join(self.tmp, "process", "machinery", "state-graphs.json")
         self.graphs = wi.Graphs.load(wi.GRAPHS_PATH)
+        # never touch the REAL statusline.json from a test — redirect into tmp
+        self._orig_statusline = wi.STATUSLINE
+        wi.STATUSLINE = os.path.join(self.tmp, "process", "dora", "statusline.json")
         os.makedirs(self._items("active"), exist_ok=True)
         os.makedirs(self._items("done"), exist_ok=True)
 
     def tearDown(self):
         wi.ROOT = self._orig_root
+        wi.STATUSLINE = self._orig_statusline
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def _items(self, sub):
@@ -75,9 +79,22 @@ class TestFold(Base):
             {"ts": "2", "event": "made_ready", "agent": "flow-manager"},
             {"ts": "3", "event": "pulled", "agent": "orchestrator"},
             {"ts": "4", "event": "built_green", "agent": "engineer"},
-            {"ts": "5", "event": "validated", "agent": "tester"},
+            {"ts": "5", "event": "deployed", "agent": "cicd"},
+            {"ts": "6", "event": "validated", "agent": "tester"},
         ]
         self.assertEqual(wi.fold_state(self.graphs, "use-case", evs), "done")
+
+    def test_use_case_fold_deploying(self):
+        # v3: built_green now lands in `deploying`, not `validating`
+        evs = [
+            {"ts": "1", "event": "registered", "agent": "flow-manager"},
+            {"ts": "2", "event": "made_ready", "agent": "flow-manager"},
+            {"ts": "3", "event": "pulled", "agent": "orchestrator"},
+            {"ts": "4", "event": "built_green", "agent": "engineer"},
+        ]
+        self.assertEqual(wi.fold_state(self.graphs, "use-case", evs), "deploying")
+        evs.append({"ts": "5", "event": "deployed", "agent": "cicd"})
+        self.assertEqual(wi.fold_state(self.graphs, "use-case", evs), "validating")
 
     def test_use_case_fold_partial(self):
         evs = [
@@ -153,15 +170,42 @@ class TestAppend(Base):
         self.assertIn("not for agent", err.getvalue())
 
     def test_append_relocates_to_done(self):
+        # v3: built_green -> deploying; deploying --deployed(cicd)--> validating
         self.write_item("active", "UC-D", "use-case",
+                        [{"ts": "1", "event": "registered", "agent": "flow-manager"},
+                         {"ts": "2", "event": "made_ready", "agent": "flow-manager"},
+                         {"ts": "3", "event": "pulled", "agent": "orchestrator"},
+                         {"ts": "4", "event": "built_green", "agent": "engineer"},
+                         {"ts": "5", "event": "deployed", "agent": "cicd"}])
+        with contextlib.redirect_stdout(io.StringIO()):
+            self._run_append("UC-D", "validated", "tester")
+        self.assertFalse(os.path.exists(os.path.join(self._items("active"), "UC-D.md")))
+        self.assertTrue(os.path.exists(os.path.join(self._items("done"), "UC-D.md")))
+
+    def test_append_deployed_by_cicd(self):
+        # cicd deploys a UC sitting in `deploying`
+        self.write_item("active", "UC-DP", "use-case",
                         [{"ts": "1", "event": "registered", "agent": "flow-manager"},
                          {"ts": "2", "event": "made_ready", "agent": "flow-manager"},
                          {"ts": "3", "event": "pulled", "agent": "orchestrator"},
                          {"ts": "4", "event": "built_green", "agent": "engineer"}])
         with contextlib.redirect_stdout(io.StringIO()):
-            self._run_append("UC-D", "validated", "tester")
-        self.assertFalse(os.path.exists(os.path.join(self._items("active"), "UC-D.md")))
-        self.assertTrue(os.path.exists(os.path.join(self._items("done"), "UC-D.md")))
+            self._run_append("UC-DP", "deployed", "cicd")
+        item = wi.load_item(os.path.join(self._items("active"), "UC-DP.md"))
+        self.assertEqual(wi.fold_state(self.graphs, "use-case", item.events), "validating")
+
+    def test_append_deployed_wrong_agent_rejected(self):
+        # only cicd may fire `deployed`
+        self.write_item("active", "UC-DW", "use-case",
+                        [{"ts": "1", "event": "registered", "agent": "flow-manager"},
+                         {"ts": "2", "event": "made_ready", "agent": "flow-manager"},
+                         {"ts": "3", "event": "pulled", "agent": "orchestrator"},
+                         {"ts": "4", "event": "built_green", "agent": "engineer"}])
+        with self.assertRaises(SystemExit) as cm:
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                self._run_append("UC-DW", "deployed", "engineer")
+        self.assertNotEqual(cm.exception.code, 0)
+        self.assertIn("not for agent", err.getvalue())
 
 
 # --------------------------------------------------------------------------- #
@@ -203,7 +247,8 @@ class TestBubble(Base):
             {"ts": "2", "event": "made_ready", "agent": "flow-manager"},
             {"ts": "3", "event": "pulled", "agent": "orchestrator"},
             {"ts": "4", "event": "built_green", "agent": "engineer"},
-            {"ts": "5", "event": "validated", "agent": "tester"},
+            {"ts": "5", "event": "deployed", "agent": "cicd"},
+            {"ts": "6", "event": "validated", "agent": "tester"},
         ]
 
     def test_slice_planned_when_no_child_progress(self):
@@ -248,7 +293,8 @@ class TestInvariants(Base):
             {"ts": "2", "event": "made_ready", "agent": "flow-manager"},
             {"ts": "3", "event": "pulled", "agent": "orchestrator"},
             {"ts": "4", "event": "built_green", "agent": "engineer"},
-            {"ts": "5", "event": "validated", "agent": "tester"},
+            {"ts": "5", "event": "deployed", "agent": "cicd"},
+            {"ts": "6", "event": "validated", "agent": "tester"},
         ] if sub == "done" else [
             {"ts": "1", "event": "registered", "agent": "flow-manager"},
         ]
@@ -282,7 +328,8 @@ class TestInvariants(Base):
                          {"ts": "2", "event": "made_ready", "agent": "flow-manager"},
                          {"ts": "3", "event": "pulled", "agent": "orchestrator"},
                          {"ts": "4", "event": "built_green", "agent": "engineer"},
-                         {"ts": "5", "event": "validated", "agent": "tester"}])
+                         {"ts": "5", "event": "deployed", "agent": "cicd"},
+                         {"ts": "6", "event": "validated", "agent": "tester"}])
         v = wi.validate_items(self.graphs, self.project)
         self.assertTrue(any("(I4)" in x for x in v), v)
 
@@ -418,35 +465,39 @@ NOW_DT = _pydt.datetime(2026, 6, 30, tzinfo=_pydt.timezone.utc)
 
 class TestStats(Base):
     def _clean_uc(self, iid):
-        """A UC with well-spaced timestamps so each interval is a round number.
+        """A UC with well-spaced timestamps so each interval is a round number (v3).
         registered@d10 00:00 -> ready (made_ready@d10 01:00) so 1h in registered.
         ready -> building (pulled@d10 03:00) so 2h in ready.
-        building -> validating (built_green@d10 06:00) so 3h in building.
-        validating -> done (validated@d10 10:00) so 4h in validating.
-        gross lead time = 10h; lead_time_for_changes (built_green->validated)=4h."""
+        building -> deploying (built_green@d10 06:00) so 3h in building.
+        deploying -> validating (deployed@d10 08:00) so 2h in deploying (cicd).
+        validating -> done (validated@d10 12:00) so 4h in validating.
+        gross lead time = 12h; lead_time_for_changes (built_green->validated)=6h."""
         return [
             {"ts": _dt(10, 0), "event": "registered", "agent": "flow-manager"},
             {"ts": _dt(10, 1), "event": "made_ready", "agent": "flow-manager"},
             {"ts": _dt(10, 3), "event": "pulled", "agent": "orchestrator"},
             {"ts": _dt(10, 6), "event": "built_green", "agent": "engineer"},
-            {"ts": _dt(10, 10), "event": "validated", "agent": "tester"},
+            {"ts": _dt(10, 8), "event": "deployed", "agent": "cicd"},
+            {"ts": _dt(10, 12), "event": "validated", "agent": "tester"},
         ]
 
     def _rework_uc(self, iid):
-        """A UC that gets rejected once then re-passes.
-        registered@d11 00:00; ready@01:00; building@02:00; validating@04:00 (2h build);
-        rejected@05:00 (1h validating) -> reworking; retried@06:00 (1h reworking)
-        -> building; built_green@08:00 (2h building); validated@09:00 (1h validating).
-        Recovery(validation rejection): rejected@05 -> next validated@09 = 4h."""
+        """A UC that gets rejected once then re-passes (v3 path via deploying).
+        registered@00; ready@01; building@02; built_green@04 -> deploying;
+        deployed@05 -> validating; rejected@06 -> reworking; retried@07 -> building;
+        built_green@09 -> deploying; deployed@10 -> validating; validated@10 -> done.
+        Recovery(validation rejection): rejected@06 -> next validated@10 = 4h."""
         return [
             {"ts": _dt(11, 0), "event": "registered", "agent": "flow-manager"},
             {"ts": _dt(11, 1), "event": "made_ready", "agent": "flow-manager"},
             {"ts": _dt(11, 2), "event": "pulled", "agent": "orchestrator"},
             {"ts": _dt(11, 4), "event": "built_green", "agent": "engineer"},
-            {"ts": _dt(11, 5), "event": "rejected", "agent": "tester"},
-            {"ts": _dt(11, 6), "event": "retried", "agent": "engineer"},
+            {"ts": _dt(11, 5), "event": "deployed", "agent": "cicd"},
+            {"ts": _dt(11, 6), "event": "rejected", "agent": "tester"},
+            {"ts": _dt(11, 7), "event": "retried", "agent": "engineer"},
             {"ts": _dt(11, 8), "event": "built_green", "agent": "engineer"},
-            {"ts": _dt(11, 9), "event": "validated", "agent": "tester"},
+            {"ts": _dt(11, 9, 30), "event": "deployed", "agent": "cicd"},
+            {"ts": _dt(11, 10, 0), "event": "validated", "agent": "tester"},
         ]
 
     def _stats(self, items=None):
@@ -462,10 +513,16 @@ class TestStats(Base):
         self.assertAlmostEqual(by_state["registered"]["total_s"], 3600, places=1)
         self.assertAlmostEqual(by_state["ready"]["total_s"], 7200, places=1)
         self.assertAlmostEqual(by_state["building"]["total_s"], 10800, places=1)
+        self.assertAlmostEqual(by_state["deploying"]["total_s"], 7200, places=1)   # 2h cicd
         self.assertAlmostEqual(by_state["validating"]["total_s"], 14400, places=1)
-        # gross lead time = 10h = 36000s
-        self.assertAlmostEqual(s["gross_lead_time_total_s"], 36000, places=1)
-        self.assertAlmostEqual(s["gross_lead_time_median_s"], 36000, places=1)
+        # gross lead time = 12h = 43200s
+        self.assertAlmostEqual(s["gross_lead_time_total_s"], 43200, places=1)
+        self.assertAlmostEqual(s["gross_lead_time_median_s"], 43200, places=1)
+
+    def test_deploying_attributed_to_cicd(self):
+        self.write_item("done", "UC-1", "use-case", self._clean_uc("UC-1"))
+        by_owner = self._stats()["overall"]["gross_lead_time"]["by_owner"]
+        self.assertAlmostEqual(by_owner["cicd"]["total_s"], 7200, places=1)   # 2h deploying
 
     def test_in_flight_uses_now(self):
         # a UC still building since d20 06:00; now=d30 00:00 => open segment counted
@@ -483,9 +540,11 @@ class TestStats(Base):
     def test_by_owner_attribution(self):
         self.write_item("done", "UC-1", "use-case", self._clean_uc("UC-1"))
         by_owner = self._stats()["overall"]["gross_lead_time"]["by_owner"]
-        # registered+ready => queue (1h+2h=3h=10800); building=>engineer(3h); validating=>tester(4h)
+        # queue = registered(1h)+ready(2h) = 3h = 10800; engineer = building(3h) = 10800;
+        # cicd = deploying(2h) = 7200; tester = validating(4h) = 14400
         self.assertAlmostEqual(by_owner["queue"]["total_s"], 10800, places=1)
         self.assertAlmostEqual(by_owner["engineer"]["total_s"], 10800, places=1)
+        self.assertAlmostEqual(by_owner["cicd"]["total_s"], 7200, places=1)
         self.assertAlmostEqual(by_owner["tester"]["total_s"], 14400, places=1)
         # percentages sum to ~100
         total_pct = sum(d["pct_of_glt"] for d in by_owner.values())
@@ -500,7 +559,8 @@ class TestStats(Base):
             {"ts": _dt(12, 7), "event": "unblocked", "agent": "flow-manager"},  # 5h external
             {"ts": _dt(12, 8), "event": "pulled", "agent": "orchestrator"},
             {"ts": _dt(12, 9), "event": "built_green", "agent": "engineer"},
-            {"ts": _dt(12, 10), "event": "validated", "agent": "tester"},
+            {"ts": _dt(12, 10), "event": "deployed", "agent": "cicd"},
+            {"ts": _dt(12, 11), "event": "validated", "agent": "tester"},
         ])
         by_owner = self._stats()["overall"]["gross_lead_time"]["by_owner"]
         self.assertAlmostEqual(by_owner["external"]["total_s"], 5 * 3600, places=1)
@@ -533,6 +593,7 @@ class TestStats(Base):
                 {"ts": _dt(10 + i, 1), "event": "made_ready", "agent": "flow-manager"},
                 {"ts": _dt(10 + i, 2), "event": "pulled", "agent": "orchestrator"},
                 {"ts": _dt(10 + i, 3), "event": "built_green", "agent": "engineer"},
+                {"ts": _dt(10 + i, 3, 30), "event": "deployed", "agent": "cicd"},
                 {"ts": _dt(10 + i, 3 + hrs), "event": "validated", "agent": "tester"},
             ])
         at = self._stats()["overall"]["dora"]["all_time"]
@@ -643,6 +704,176 @@ class TestStats(Base):
         self.assertIn("Contribution to gross lead time", md)
         self.assertIn("A. DORA four key metrics", md)
         self.assertIn("D. Recovery (MTTR) by failure class", md)
+
+
+# --------------------------------------------------------------------------- #
+# retro-debt (§F8 cadence gate) + retro-mark + statusline — reimplemented over
+# item events (dora.py cutover). Deterministic --now.
+# --------------------------------------------------------------------------- #
+class TestRetro(Base):
+    def _done_uc(self, day, parents):
+        # a UC that bubbles a slice done; terminal (validated) at `day` 12:00
+        return [
+            {"ts": _dt(day, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(day, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(day, 2), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(day, 3), "event": "built_green", "agent": "engineer"},
+            {"ts": _dt(day, 4), "event": "deployed", "agent": "cicd"},
+            {"ts": _dt(day, 12), "event": "validated", "agent": "tester"},
+        ]
+
+    def _done_defect(self, day):
+        return [
+            {"ts": _dt(day, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(day, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(day, 2), "event": "confirmed", "agent": "engineer"},
+            {"ts": _dt(day, 3), "event": "fixed", "agent": "engineer"},
+            {"ts": _dt(day, 5), "event": "validated", "agent": "tester"},
+        ]
+
+    def _make_done_slice(self, slc, uc_days):
+        """Write a slice with N done UC children (each terminal at its day)."""
+        for i, day in enumerate(uc_days):
+            self.write_item("done", f"{slc}-UC{i}", "use-case",
+                            self._done_uc(day, [slc]), parents=[slc])
+        self.write_item("active", slc, "slice", [
+            {"ts": _dt(uc_days[0], 0), "event": "registered", "agent": "flow-manager"}])
+
+    def _debt(self, threshold=3, now=NOW):
+        g = self.graphs
+        return wi.compute_retro_debt(g, self.project, threshold, wi.parse_ts(now))
+
+    def _run(self, threshold=3, now=NOW):
+        ns = argparse.Namespace(project=self.project, threshold=threshold, now=now)
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            try:
+                wi.cmd_retro_debt(ns)
+                code = 0
+            except SystemExit as e:
+                code = e.code
+        return code, out.getvalue()
+
+    # ---- routine batching to threshold ----
+    def test_routine_below_threshold_not_due(self):
+        self._make_done_slice("SLC-1", [10, 11, 12])   # bubbles done @ d12 12:00
+        self._make_done_slice("SLC-2", [13, 14])        # bubbles done @ d14 12:00
+        routine, incidents, due, detail, _m = self._debt(threshold=3)
+        self.assertEqual(len(routine), 2)
+        self.assertEqual(len(incidents), 0)
+        self.assertFalse(due)
+
+    def test_routine_at_threshold_due(self):
+        self._make_done_slice("SLC-1", [10])
+        self._make_done_slice("SLC-2", [11])
+        self._make_done_slice("SLC-3", [12])
+        routine, incidents, due, detail, _m = self._debt(threshold=3)
+        self.assertEqual(len(routine), 3)
+        self.assertTrue(due)
+        code, _ = self._run(threshold=3)
+        self.assertEqual(code, 2)
+
+    # ---- incident fires immediately ----
+    def test_incident_defect_fires_immediately(self):
+        self._make_done_slice("SLC-1", [10])          # 1 routine
+        self.write_item("done", "DEF-1", "defect", self._done_defect(15))
+        routine, incidents, due, detail, _m = self._debt(threshold=3)
+        self.assertEqual(len(routine), 1)
+        self.assertEqual(len(incidents), 1)
+        self.assertTrue(due)   # single incident forces due despite routine < threshold
+
+    def test_incident_uc_rejection_fires(self):
+        # a use-case with a rejected event (an incident) since the marker
+        self.write_item("active", "UC-REJ", "use-case", [
+            {"ts": _dt(16, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(16, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(16, 2), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(16, 3), "event": "built_green", "agent": "engineer"},
+            {"ts": _dt(16, 4), "event": "deployed", "agent": "cicd"},
+            {"ts": _dt(16, 5), "event": "rejected", "agent": "tester"},
+        ])
+        routine, incidents, due, detail, _m = self._debt(threshold=3)
+        self.assertEqual(len(incidents), 1)
+        self.assertTrue(due)
+
+    # ---- marker resets the count ----
+    def test_marker_resets_count(self):
+        self._make_done_slice("SLC-1", [10])
+        self._make_done_slice("SLC-2", [11])
+        self._make_done_slice("SLC-3", [12])   # 3 routine, would be DUE
+        # set the marker to AFTER all three bubbled (d12 12:00) -> debt drains to 0
+        wi.cmd_retro_mark(argparse.Namespace(project=self.project, now="2026-06-13T00:00:00Z"))
+        routine, incidents, due, detail, _m = self._debt(threshold=3)
+        self.assertEqual(len(routine), 0)
+        self.assertFalse(due)
+        code, _ = self._run(threshold=3)
+        self.assertEqual(code, 0)
+
+    def test_marker_partial_reset(self):
+        self._make_done_slice("SLC-1", [10])   # done @ d10 12:00
+        self._make_done_slice("SLC-2", [14])   # done @ d14 12:00
+        # marker between the two -> only the later one counts
+        wi.cmd_retro_mark(argparse.Namespace(project=self.project, now="2026-06-12T00:00:00Z"))
+        routine, incidents, due, detail, _m = self._debt(threshold=3)
+        self.assertEqual(len(routine), 1)
+
+    # ---- retro-mark writes the marker file ----
+    def test_retro_mark_writes_file(self):
+        wi.cmd_retro_mark(argparse.Namespace(project=self.project, now="2026-06-20T00:00:00Z"))
+        p = os.path.join(self.tmp, "process", "dora", "retro-marker", f"{self.project}.txt")
+        self.assertTrue(os.path.exists(p))
+        with open(p) as f:
+            self.assertEqual(f.read().strip(), "2026-06-20T00:00:00Z")
+
+    def test_retro_debt_writes_statusline(self):
+        self._make_done_slice("SLC-1", [10])
+        os.makedirs(os.path.join(self.tmp, "process", "dora"), exist_ok=True)
+        wi.STATUSLINE = os.path.join(self.tmp, "process", "dora", "statusline.json")
+        self._run(threshold=3)
+        with open(wi.STATUSLINE) as f:
+            d = json.load(f)
+        self.assertEqual(d[f"retro_debt_{self.project}"], 1)
+        self.assertIn(f"retro_due_{self.project}", d)
+
+    def test_statusline_merge_preserves_keys(self):
+        wi.STATUSLINE = os.path.join(self.tmp, "process", "dora", "statusline.json")
+        os.makedirs(os.path.dirname(wi.STATUSLINE), exist_ok=True)
+        with open(wi.STATUSLINE, "w") as f:
+            json.dump({"cfr": 5, "par": 0.25, "keep_me": "x"}, f)
+        wi.write_statusline({"retro_debt_X": 2})
+        with open(wi.STATUSLINE) as f:
+            d = json.load(f)
+        self.assertEqual(d["cfr"], 5)        # not clobbered
+        self.assertEqual(d["par"], 0.25)     # not clobbered
+        self.assertEqual(d["keep_me"], "x")
+        self.assertEqual(d["retro_debt_X"], 2)
+
+
+class TestProjectStatusline(Base):
+    def test_project_writes_dora_statusline_keys(self):
+        wi.STATUSLINE = os.path.join(self.tmp, "process", "dora", "statusline.json")
+        # a done UC so freq/lead compute; keep existing retro key
+        os.makedirs(os.path.dirname(wi.STATUSLINE), exist_ok=True)
+        with open(wi.STATUSLINE, "w") as f:
+            json.dump({"retro_debt_TestProj": 7}, f)
+        self.write_item("done", "UC-1", "use-case", [
+            {"ts": _dt(10, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(10, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(10, 2), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(10, 3), "event": "built_green", "agent": "engineer"},
+            {"ts": _dt(10, 4), "event": "deployed", "agent": "cicd"},
+            {"ts": _dt(10, 12), "event": "validated", "agent": "tester"},
+        ])
+        with contextlib.redirect_stdout(io.StringIO()):
+            wi.cmd_project(argparse.Namespace(project=self.project, now=NOW))
+        with open(wi.STATUSLINE) as f:
+            d = json.load(f)
+        # DORA keys the statusline consumes
+        self.assertIn("cfr", d)
+        self.assertIn("freq", d)
+        self.assertIn("lead", d)
+        self.assertEqual(d["project"], self.project)
+        # merge preserved the retro key
+        self.assertEqual(d["retro_debt_TestProj"], 7)
 
 
 if __name__ == "__main__":

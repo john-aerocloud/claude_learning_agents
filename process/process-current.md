@@ -97,7 +97,7 @@ full-sweep run is the backstop. Boards are projections — the item always wins.
 
 **Command mapping (old → new)** — the ONE sanctioned place naming retired mechanics (§27.3): <!-- doc-lint:allow -->
 `dora record … --event enqueue/dequeue/item_done` → <!-- doc-lint:allow -->
-`wi-append … --event made_ready/pulled/built_green/validated/…`; `queues/*.csv` + `state.md` → `views/` (derived); <!-- doc-lint:allow -->
+`wi-append … --event made_ready/pulled/built_green/deployed/validated/…`; `queues/*.csv` + `state.md` → `views/` (derived); <!-- doc-lint:allow -->
 `make ledger-drift` + `reconcile-registry` → `make wi-validate`; `dora.py flow`/`compute` → `make wi-project` (stats.*); `sync-linear.py --item` → the `linear` agent. <!-- doc-lint:allow --> **Applies to** OagEventSource (migrated) and every NEW project; the flow *intent* of the
 later STAGE F rules stands, the *substrate* is F0.
 
@@ -197,8 +197,9 @@ All figures are computed from item event timestamps by `make wi-project` (§F0);
   < 3h for cloud/hosted first deploy.
 - **Delivery gap = deploy(N) → engineer `pulled`(N+1).** Target < 15 min in-session.
 - **Deploy event by project type:** cloud/hosted — CI/CD pipeline live in
-  production (the `built_green`/deploy leg logged by cicd/engineer); local CLI /
-  library — tester validation passes (the `validated` event).
+  production (the `deployed` event fired by cicd after the per-UC deploy lands, on
+  the engineer's `built_green` build); local CLI / library — tester validation
+  passes (the `validated` event).
 
 ## 3. CFR convention (definitional)
 CFR answers one question: **what fraction of DEPLOYS broke?** A prod issue is one of
@@ -400,6 +401,12 @@ build→deploy→probe loop on trunk:
    edge — never a human watching two pipelines.
 3. **Builds overlap freely** wherever seams allow — build start order is never the
    constraint; deploy ORDER is.
+4. **Event sequence (state-graphs v3):** `building → deploying → validating → done`.
+   The engineer fires `built_green` (building→deploying) on the green build; **cicd
+   fires `deployed` (deploying→validating) once the per-UC deploy lands green**; the
+   tester fires `validated` (validating→done) on the prod probe. Each is an edge-checked
+   `make wi-append`, so a UC cannot reach `validating` without a real deploy nor `done`
+   without a real prod validation.
 
 **Infra-flag — defer an unconfirmed external dependency, don't block the skeleton.**
 The §40 use-case-flag pattern extends to INFRA: when an infra capability depends on an
@@ -662,9 +669,9 @@ version, and requirement. On each prod promotion:
    running here?" (AWS `GitSha`/`Version` tags; a container image tag; an assembly
    build version). cicd / solution-architect owns the per-platform mechanism as a
    capability (it differs by infra).
-3. **The deploy event records version + SHA** (in the `built_green`/deploy leg's `--ref`
-   / `--note`) so `stats.*` carries release identity — an incident pins to an exact
-   shipped version instantly (MTTR/CFR).
+3. **The deploy event records version + SHA** (cicd's `deployed` event `--ref` /
+   `--note`, the deploying→validating leg — §11b state-graphs v3) so `stats.*` carries
+   release identity — an incident pins to an exact shipped version instantly (MTTR/CFR).
 4. **Version scheme is a PER-PROJECT policy.** Each project declares its scheme (in
    `capabilities.md` / a versioning ADR): SemVer for APIs, CalVer for desktop, an
    internal release counter for internal tools. **Default SemVer until the project's

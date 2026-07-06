@@ -411,6 +411,16 @@ BEFORE the first push of code that triggers the pipeline needing them — not in
 a later "deploy phase". When a build phase will push pipeline-triggering paths,
 its prerequisites are part of the capability step.
 
+## Fire the `deployed` event after a successful per-UC deploy (v82, state-graphs v3)
+The per-UC state path is `building → deploying → validating → done`: the engineer
+fires `built_green` (building→deploying), YOU fire `deployed` (deploying→validating)
+once the UC's deploy lands green, then the tester fires `validated`
+(validating→done). After a successful per-UC deploy, append the event:
+`make wi-append ID=<uc> EVENT=deployed AGENT=cicd` (optionally `REF=<sha>`
+`NOTE="<version>"` carrying the release identity, §18a). This is the ONLY way the
+item leaves `deploying`; it is edge-checked, so a deploy that did not land cannot
+advance the item.
+
 ## v82 — event-sourced pull-based flow (process STAGE F)
 Capability work happens on PULL (when a use-case needs an environment, pipeline,
 flag, or allowlist entry it doesn't have) — nothing ahead of need, exactly as

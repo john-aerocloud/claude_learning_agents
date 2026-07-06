@@ -44,6 +44,38 @@ def parse_ts(s):
 
 
 # ---------------------------------------------------------------------------
+# Statusline snapshot — the cheap pre-formatted file .claude/statusline.py reads.
+# work-items.py is now the writer (ledger cutover: dora.py is retiring). We
+# MERGE-update (read existing JSON, set keys, write back) so retro-debt keys and
+# the DORA keys never clobber each other. Schema matched from .claude/statusline.py:
+# flat top-level keys `project`, `cfr` (int %), `freq` (/active-day), `lead` (s),
+# `par` (2dp float), plus `retro_debt_<project>` / `retro_due_<project>`.
+# ---------------------------------------------------------------------------
+STATUSLINE = os.path.join(ROOT, "process", "dora", "statusline.json")
+
+
+def write_statusline(updates):
+    """Merge `updates` into process/dora/statusline.json (mirrors dora.py). None
+    values are stored as JSON null so a metric with no data renders as '–'."""
+    data = {}
+    if os.path.exists(STATUSLINE):
+        try:
+            with open(STATUSLINE, encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+    data.update(updates)
+    os.makedirs(os.path.dirname(STATUSLINE), exist_ok=True)
+    with open(STATUSLINE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=0)
+
+
+def _r0(x):
+    """Round to int for the statusline (matches dora.py's _r0); None passes through."""
+    return round(x) if isinstance(x, (int, float)) else None
+
+
+# ---------------------------------------------------------------------------
 # State-graph loader
 # ---------------------------------------------------------------------------
 class Graphs:
@@ -642,6 +674,18 @@ def cmd_project(a):
     stats = compute_stats(graphs, items, states, now=now)
     _write_stats(vd, stats)
 
+    # 6. statusline snapshot — the DORA keys .claude/statusline.py renders.
+    # Merge (not overwrite) so retro_debt_*/retro_due_* keys survive. Uses the
+    # ALL-TIME DORA figures; cfr as an integer percent (statusline prints "<cfr>%").
+    dora = stats["overall"]["dora"]["all_time"]
+    cfr = dora["change_failure_rate"]
+    write_statusline({
+        "project": a.project,
+        "cfr": _r0(cfr * 100) if cfr is not None else None,
+        "freq": _r0(dora["deployment_frequency_per_active_day"]),
+        "lead": _r0(dora["lead_time_for_changes_median_s"]),
+    })
+
     qcounts = {q: len(v) for q, v in sorted(queues.items())}
     print(f"project: {len(items)} items | queues={qcounts} | "
           f"done={sum(1 for s in states.values() if s in ('done','resolved'))}")
@@ -1146,6 +1190,137 @@ def _render_stats_md(stats):
 
 
 # ---------------------------------------------------------------------------
+# Subcommands: retro-debt (the §F8 cadence GATE) + retro-mark (drain the debt)
+#
+# Reimplemented over ITEM EVENTS (ledger cutover: replaces `dora.py retro-debt`,
+# which counted frozen-ledger rows). The "last retro" marker is a one-line ISO
+# timestamp at process/dora/retro-marker/<project>.txt, written by retro-mark.
+#
+# Debt since the marker:
+#   ROUTINE   = slice/chunk aggregates that BUBBLED to done after the marker.
+#               An aggregate's bubble time = the ts of its last child's terminal
+#               event (the moment the final child closing made it done).
+#   INCIDENT  = defect items whose terminal validated/resolved event is after the
+#               marker, OR use-cases with a build_failed / rejected event after it.
+# DUE iff routine >= threshold OR incidents >= 1. Routine batches to the
+# threshold; a single incident fires immediately (mirrors dora.py:v69 cadence).
+# ---------------------------------------------------------------------------
+def _retro_marker_path(project):
+    return os.path.join(ROOT, "process", "dora", "retro-marker", f"{project}.txt")
+
+
+def _read_retro_marker(project):
+    """Return the last-retro datetime (UTC), or epoch (all-time) if absent."""
+    p = _retro_marker_path(project)
+    if os.path.exists(p):
+        try:
+            with open(p, encoding="utf-8") as f:
+                ts = parse_ts(f.readline().strip())
+                if ts:
+                    return ts
+        except OSError:
+            pass
+    return datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def _terminal_ts(item):
+    """The ts an item reached a terminal state (its last validated/closed/
+    not_reproduced/declined event), or None."""
+    return _last_ts(item, ("validated", "closed", "not_reproduced", "declined"))
+
+
+def _aggregate_bubble_ts(graphs, items, iid, children):
+    """When aggregate `iid` bubbled to done = the ts of its LAST child's terminal
+    event (the moment the final closing child made the parent done). None unless
+    every child is terminal-done."""
+    kids = children.get(iid, [])
+    if not kids:
+        # childless done aggregate (decommission slice): use its own `closed` marker
+        own = _last_ts(items[iid], ("closed",))
+        return own
+    kid_terms = []
+    for k in kids:
+        child = items.get(k)
+        if not child:
+            return None
+        if graphs.kind(child.type) == "aggregate":
+            t = _aggregate_bubble_ts(graphs, items, k, children)
+        else:
+            t = _terminal_ts(child)
+        if t is None:
+            return None  # a child not yet done => aggregate not bubbled
+        kid_terms.append(t)
+    return max(kid_terms) if kid_terms else None
+
+
+def compute_retro_debt(graphs, project, threshold, now):
+    """Pure computation. Returns (routine, incidents, due, detail[])."""
+    items, _dup = load_all_items(project)
+    states = compute_states(graphs, items)
+    children = compute_children(items)
+    marker = _read_retro_marker(project)
+
+    routine, incidents, detail = [], [], []
+    for iid, it in items.items():
+        kind = graphs.kind(it.type)
+        if kind == "aggregate" and it.type in ("slice", "chunk"):
+            if states.get(iid) == "done":
+                bt = _aggregate_bubble_ts(graphs, items, iid, children)
+                if bt and bt > marker and (now is None or bt <= now):
+                    routine.append((iid, bt))
+                    detail.append((bt, "slice-close", iid))
+        elif it.type == "defect":
+            if states.get(iid) in ("resolved", "done"):
+                t = _terminal_ts(it)
+                if t and t > marker and (now is None or t <= now):
+                    incidents.append((iid, t))
+                    detail.append((t, "defect-resolve", iid))
+        elif it.type == "use-case":
+            for ev in it.events:
+                if ev.get("event") in ("build_failed", "rejected"):
+                    t = parse_ts(ev.get("ts"))
+                    if t and t > marker and (now is None or t <= now):
+                        incidents.append((iid, t))
+                        detail.append((t, "build/reject-fail", iid))
+                        break
+    due = (len(routine) >= threshold) or (len(incidents) >= 1)
+    detail.sort(key=lambda d: d[0] or datetime(1970, 1, 1, tzinfo=timezone.utc))
+    return routine, incidents, due, detail, marker
+
+
+def cmd_retro_debt(a):
+    graphs = Graphs.load()
+    now = parse_ts(getattr(a, "now", None)) if getattr(a, "now", None) else None
+    threshold = a.threshold
+    routine, incidents, due, detail, marker = compute_retro_debt(
+        graphs, a.project, threshold, now)
+    n = len(routine) + len(incidents)
+    reason = ("incident (immediate)" if incidents else
+              f"routine {len(routine)}>={threshold}" if len(routine) >= threshold else
+              f"routine {len(routine)}<{threshold}")
+    since = marker.strftime("%Y-%m-%dT%H:%M:%SZ")
+    print(f"retro-debt[{a.project}] = {n} (routine {len(routine)}/{threshold}, "
+          f"incidents {len(incidents)}) since last retro {since} "
+          f"=> {'RETRO DUE — drain before advancing ['+reason+']' if due else 'ok'}")
+    for ts, kind, ident in detail:
+        tss = ts.strftime("%Y-%m-%dT%H:%M:%SZ") if ts else "—"
+        print(f"  - {tss}  {kind:18}  {ident}")
+    write_statusline({f"retro_debt_{a.project}": n, f"retro_due_{a.project}": due})
+    sys.exit(2 if due else 0)
+
+
+def cmd_retro_mark(a):
+    """Write the last-retro marker = now — the reset `/retro` calls at close to
+    drain the debt."""
+    ts = a.now or now_iso()
+    p = _retro_marker_path(a.project)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(ts.strip() + "\n")
+    print(f"retro-mark: {a.project} last-retro set to {ts.strip()}")
+
+
+# ---------------------------------------------------------------------------
 # Subcommand: validate — the drift GATE (invariants I1–I4)
 # ---------------------------------------------------------------------------
 def cmd_validate(a):
@@ -1266,9 +1441,11 @@ def _find_dep_cycle(items):
 _FLOW_PATHS = {
     "use-case": {
         "ready": [("registered", "flow-manager"), ("made_ready", "flow-manager")],
+        # v3: `deployed` (cicd) sits between built_green and validated so cicd's
+        # deploy time is attributable in the gross-lead-time breakdown.
         "done": [("registered", "flow-manager"), ("made_ready", "flow-manager"),
                  ("pulled", "orchestrator"), ("built_green", "engineer"),
-                 ("validated", "tester")],
+                 ("deployed", "cicd"), ("validated", "tester")],
         "blocked": [("registered", "flow-manager"), ("made_ready", "flow-manager"),
                     ("blocked", "flow-manager")],
     },
@@ -1622,6 +1799,17 @@ def main(argv=None):
     mi = sub.add_parser("migrate")
     mi.add_argument("--project", required=True)
     mi.set_defaults(func=cmd_migrate)
+
+    rd = sub.add_parser("retro-debt")
+    rd.add_argument("--project", required=True)
+    rd.add_argument("--threshold", type=int, default=3)
+    rd.add_argument("--now", help="reference 'now' (ISO-8601 UTC) for deterministic tests")
+    rd.set_defaults(func=cmd_retro_debt)
+
+    rm = sub.add_parser("retro-mark")
+    rm.add_argument("--project", required=True)
+    rm.add_argument("--now", help="marker timestamp (ISO-8601 UTC); default: real now")
+    rm.set_defaults(func=cmd_retro_mark)
 
     a = p.parse_args(argv)
     a.func(a)

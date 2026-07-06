@@ -98,6 +98,12 @@ Act as the **orchestrator**. Own this; gather input but make the process call.
    fitness functions") is NOT an experiment: route the behaviour straight into its
    owning agent file as plain practice instead, with no registry row.
 
+8. **CLOSE — drain the retro-debt counter.** Run `make retro-mark PROJECT=$1`.
+   This writes the last-retro marker that `make retro-debt` reads, so the §F8 gate
+   returns `ok` again and the loop may resume pulls. (This is the v82 replacement
+   for the old "record a `retro` ledger row" reset — there is no DORA CSV write.)
+   Re-run `make retro-debt PROJECT=$1` to confirm the debt is drained (exit 0).
+
 Report: the focus question and answer, the new process version, each change
 WITH where it was routed (agent file / process / tool / improvement slice),
 the metric each targets, the anticipated effect, and the constraint to attack next.

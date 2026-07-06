@@ -21,6 +21,23 @@ Act as the **orchestrator**. Own this; gather input but make the process call.
    gross-lead-time component to drive DOWN — a rising reconcile latency means the
    instances are batching integration (banned). If it is the constraint or trending
    up, that IS the retro focus.
+1a. **WALK the full Theory-of-Constraints loop (process §5b) — do not stop at
+   identify.** Against `views/stats.md` §B `by_owner`/`by_stage`:
+   - **IDENTIFY** the constraint (top GLT-share owner) — already recorded in step 1.
+   - **EXPLOIT** — name the constraint's WASTE and REWORK to remove FIRST: its
+     `failure_rate`/rework-rate at its stage, re-reads, redundant dispatches, avoidable
+     waits. This is the first lever, before any capacity add.
+   - **SUBORDINATE** — decide which UPSTREAM queue `wip_limit` (§F2) to CAP so
+     non-constraint stages stop piling inventory on the constraint.
+   - **ELEVATE** — only if exploit+subordinate are exhausted: raise `N` (§F6) or move
+     the constraint agent to a stronger model tier (§7a), each a scored experiment with
+     a revert condition.
+   Record an explicit **root-cause WHY-CHAIN of ≥3 levels** for the constraint's
+   DOMINANT GLT contribution in the retro artifact (why is this owner the top share →
+   why → why …), so the change-set attacks the root cause, not the symptom.
+   **A RECURRING root cause opens a `principle-failures/` entry even when nothing
+   "failed"** — a chronic wait/constraint that recurs across retros is a system failure
+   to smooth it, and is logged as such.
 2. Collect each agent's "what worked / what hurt" for the project and slice.
 3. Review `/process/principle-failures/` and the per-change DORA note (process §23 —
    in the retro record, derived from `views/stats.md`, not a hand-written file).
@@ -76,6 +93,12 @@ Act as the **orchestrator**. Own this; gather input but make the process call.
      `/process/improvement-slices/` (§32), queued with product work
    Identify frictions proactively (prompts, inline assembly, throwaway checks,
    missing records); ask the human only where the call is genuinely theirs.
+   **GATE the change-set on the constraint (process §5b).** Every routed change must
+   target the CURRENT constraint (its exploit/subordinate/elevate move per step 1a). A
+   routed change that does NOT target the constraint must justify itself as EITHER a
+   subordinate/exploit move that serves it OR a genuine safety fix (a defect-preventing
+   or data-safety change) — otherwise DEFER it to `open-items.md`. Do not spend the
+   cycle's change budget away from the binding constraint.
    If the process file has visibly accreted (many same-day versions,
    agent-specific detail creeping into global sections), run
    `/refactor-process` as part of this step.

@@ -78,6 +78,18 @@ Each cycle:
    (same turn as the green push), then `make wi-project PROJECT=$1` — the item moves to
    `items/done/`, releases its claims, and slice→chunk→requirement done bubbles automatically
    from children (aggregate fold). Nothing to hand-transition.
+   - **Note (dev-then-prod, §11b):** the `validated` (→done) event fires from
+     `prod-validating` after the tester prod-validates; earlier the tester fired
+     `dev_validated` (dev AC green) which AUTOMATICALLY triggered cicd's `promoted` prod
+     deploy — the whole dev→prod promotion is unattended (no human gate, §F5a).
+5a. **PARTS-CHECK — cheap per-close constraint read (process §5b, ToC).** After every
+   slice/chunk bubble, read `views/stats.md` `by_owner`/`by_stage` and log ONE line:
+   `constraint = <top owner/stage>; shifted since last close? y/n`. This is the
+   after-every-piece review of the parts — no version bump, no full retro. It is cheap
+   by design (one read, one line). **Escalate to a full §F8 retro (step 7) ONLY when the
+   constraint SHIFTS**, or when the routine-batch/incident threshold fires (§F8). A
+   stable constraint on a clean run does not pay full-retro overhead; a shifted
+   constraint is real learning that a retro must walk (exploit/subordinate/elevate).
 5b. **Mirror to the human board (parallel, non-blocking).** Dispatch the `linear` and/or
    `jira` projection agent in full-sweep mode after the state change so the board self-updates
    from the item files (mapping in `process/linear-mapping.md`). State-only mirror. Skip

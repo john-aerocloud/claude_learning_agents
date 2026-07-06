@@ -84,6 +84,38 @@ model — the changed nodes/edges ARE your scope:
   bounded backward-scan window; the correct `actual.*` fields were in the aggregate
   all along.)
 
+## Validate in dev first, then prod (dev-then-prod path, v82 state-graphs)
+A use-case is validated in DEV before it reaches prod — you fire TWO validations on
+the locked path `deploying(deploy-to-dev) → dev-validating → prod-deploying →
+prod-validating → done` (§11b). Both are unattended; there is NO human gate between
+them (intake is the only human gate, §F5). Dev-first is about validating in dev BEFORE
+prod (de-risking), never a human approving the promotion.
+- **On `deployed` (item enters `dev-validating`):** validate the DEV surface against
+  the ORIGINAL FROZEN `acceptance.md` — the **dev-validation oracle** (the slice's
+  acceptance cases as authored, not re-derived at promotion time). Pass →
+  `make wi-append ID=<uc> AGENT=tester EVENT=dev_validated --ref <dev SHA> --note
+  "<dev evidence>"`; this is the automated promotion assurance — it AUTOMATICALLY
+  triggers cicd's prod deploy (`promoted`), no human approves it. Fail → `rejected`
+  (item → `reworking`); see the defect-vs-rework fork below.
+- **On `promoted` (item enters `prod-validating`):** run the existing prod validation
+  (below — observe the render, assert key-field correctness, real-volume window). Pass
+  → `make wi-append ID=<uc> AGENT=tester EVENT=validated --ref <prod SHA> --note
+  "<prod evidence>"` (→ done). Fail → `rejected`.
+- **Local-only collapse (dev==prod, §8):** when the dev surface IS the running surface,
+  fire `validated` directly from `dev-validating` — one validation, no separate prod
+  deploy. This is the ONLY straight-to-prod case; dev-first is otherwise the default.
+
+## Defect vs rework — which fork on a failure (cross-ref §3)
+When a validation fails, classify BEFORE you file:
+- **The failing behaviour belongs to the UC currently under validation** (dev or prod)
+  → append `rejected` (rework — the item returns to `reworking`). This is a
+  **deploy-failure**, NOT a `DEF-` item — no defect is raised for a UC that never
+  reached `done`. Hand it back to `engineer` (below).
+- **You find a failure in behaviour previously `validated`/`done`** — a REGRESSION in
+  shipped work — → raise a `DEF-` via `/intake` (a `reported` event), a **defect against
+  the standing system** (§3). It is not a failure of the current deploy; it enters
+  intake JTBD-framed/costed and pre-empts (§F5).
+
 ## On result
 - Pass: write `work/<project>/slices/<nnn>-<slug>/result.md` (what was validated, evidence)
   AND **append the `validated` event to the work item** via `make wi-append
@@ -236,11 +268,12 @@ Validation specs assert the CLASSIFICATION (the log category fields), not just
 the status code.
 
 ## v82 — event-sourced pull-based flow (process STAGE F)
-You validate the **pulled use-case / slice** in prod through its public surface,
-exactly as before, now inside the continuous loop. **State lives ONLY in the item
-file; state = fold(events).** Record the outcome as the item's state event via
-`make wi-append … AGENT=tester EVENT=validated` (pass) or `EVENT=rejected` (fail),
-always keyed on the WORK-ITEM id (UC-…/DEF-…), never a slice slug. **There are NO
+You dev-validate then prod-validate the **pulled use-case / slice** through its public
+surface (see "Validate in dev first, then prod" above), now inside the continuous loop.
+**State lives ONLY in the item file; state = fold(events).** Record each outcome as the
+item's state event via `make wi-append … AGENT=tester EVENT=dev_validated` (dev pass) /
+`EVENT=validated` (prod pass) or `EVENT=rejected` (either fail), always keyed on the
+WORK-ITEM id (UC-…/DEF-…), never a slice slug. **There are NO
 `stage_enter`/`stage_exit` rows and NO Rework-queue edit** — a fail simply IS the
 `rejected` event, and the item's presence in the rework queue is DERIVED from that
 event by `make wi-project` (the MTTR clock is derived from the event timestamps);

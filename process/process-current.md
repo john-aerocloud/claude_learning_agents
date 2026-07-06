@@ -246,6 +246,33 @@ owns the problem**: inbound 4xx = our caller's data; a 4xx we RECEIVE from a dep
 = our request construction, our defect. Acceptance cases, validation specs, and runbooks
 classify on these semantics. (Operational detail per role: agent definitions.)
 
+## 5b. Theory of Constraints — the full five-step loop, not just "identify"
+Identifying the constraint is step one of FIVE; the system runs the whole loop every
+close/retro against `views/stats.md` §B `by_owner` (and `by_stage`). Do not stop at
+naming it.
+1. **IDENTIFY** — the constraint is the top GLT-share owner (largest contribution to
+   gross lead time) in `stats.*` `by_owner`. Record it.
+2. **EXPLOIT** — get more out of the constraint WITHOUT adding capacity: remove that
+   owner's WASTE and REWORK first. Attack its `failure_rate`/rework-rate at its stage,
+   its re-reads and redundant dispatches (§25/§26 token waste), its avoidable waits —
+   everything that makes the constraint do work it should not. This is always the FIRST
+   move after identify.
+3. **SUBORDINATE** — make the non-constraint stages serve the constraint: cap the
+   UPSTREAM queues' `wip_limit` (§F2) so non-constraint stages do not pile inventory on
+   the constraint (WIP ages in front of it, inflating dwell). Non-constraints run at the
+   constraint's pace, not their own.
+4. **ELEVATE** — ONLY after exploit+subordinate are exhausted, add capacity: raise `N`
+   (§F6), move the constraint agent to a stronger model tier (§7a). Elevation is the
+   last resort because it costs (tokens/tier) and every tier move is a scored experiment
+   with a revert condition.
+5. **REPEAT** — the constraint moves once elevated; re-run from step 1 at the next
+   close/retro. A constraint that has NOT shifted after a change targeting it is
+   evidence the change did not exploit/subordinate/elevate the RIGHT thing.
+The retro WALKS these steps (retro.md); a routed change-set that does not target the
+current constraint must justify itself (a subordinate/exploit move or a safety fix) or
+be deferred. Per-close, the loop does a cheap parts-check (loop-run.md) and escalates to
+a full retro only when the constraint SHIFTS. Target: gross lead time. [EXP-100]
+
 ---
 
 # STAGE 1 — Next-work selection & gates
@@ -348,6 +375,12 @@ When work is selected, also identify and log which ACTIVE experiments
 (`/process/experiments.md`) it will exercise (match to each experiment's applies-to
 predicate, §25a) — the known-up-front scoring opportunity set.
 
+**A finding that is new customer value or newly-discovered scope** (not a defect, not a
+collision, not process/system residue) is framed by product as a JTBD and REGISTERED as
+a requirement/chunk/UC item via the intake path (`registered`), so it enters costing +
+prioritisation here — distinct from `open-items.md` (process/system residue); a finding
+needing a human value-judgement routes through the `/intake` human gate (§F5, product.md).
+
 Selection rule, applied at every "what next" decision and logged:
 1. **DORA-helping process improvements first** — system learning is this repo's goal
    (bounded by judgement: don't starve a real customer need).
@@ -401,12 +434,31 @@ build→deploy→probe loop on trunk:
    edge — never a human watching two pipelines.
 3. **Builds overlap freely** wherever seams allow — build start order is never the
    constraint; deploy ORDER is.
-4. **Event sequence (state-graphs v3):** `building → deploying → validating → done`.
-   The engineer fires `built_green` (building→deploying) on the green build; **cicd
-   fires `deployed` (deploying→validating) once the per-UC deploy lands green**; the
-   tester fires `validated` (validating→done) on the prod probe. Each is an edge-checked
-   `make wi-append`, so a UC cannot reach `validating` without a real deploy nor `done`
-   without a real prod validation.
+4. **Event sequence (state-graphs — dev-then-prod path):** a UC is validated in DEV
+   BEFORE it reaches prod, and the whole path is UNATTENDED (no human touch after
+   intake — dev-AC-green is an automated promotion assurance, §F5a, not a checkpoint):
+   `building --built_green(engineer)--> deploying(deploy-to-dev) --deployed(cicd)-->
+   dev-validating --dev_validated(tester)--> prod-deploying --promoted(cicd)-->
+   prod-validating --validated(tester)--> done`.
+   - The engineer fires `built_green` (building→deploying) on the green build.
+   - **cicd deploys to DEV and fires `deployed` (deploying→dev-validating)** once the
+     per-UC dev deploy lands green.
+   - **The tester dev-validates against the ORIGINAL FROZEN `acceptance.md`** (the
+     dev-validation oracle) and fires `dev_validated` (dev-validating→prod-deploying)
+     on pass — dev AC green is the automated promotion gate to prod.
+   - **`dev_validated` AUTOMATICALLY triggers the prod deploy** (like §F5a's infra
+     auto-approve): **cicd deploys to PROD and fires `promoted` (prod-deploying→
+     prod-validating)** — no human approves the promotion.
+   - **The tester prod-validates and fires `validated` (prod-validating→done)** on the
+     prod probe.
+   Each is an edge-checked `make wi-append`, so a UC cannot reach a validating state
+   without a real deploy, cannot promote to prod without dev AC green, and cannot reach
+   `done` without a real prod validation. A failing validation appends `rejected`
+   (either validating state → `reworking`, §5b/tester.md). **LOCAL-ONLY collapse
+   (dev==prod, §8):** on a local-only project the dev surface IS the running surface, so
+   the tester fires `validated` directly from `dev-validating` (→done) and there is no
+   separate prod deploy; dev-first is the DEFAULT and straight-to-prod only this explicit
+   local-only exception.
 
 **Infra-flag — defer an unconfirmed external dependency, don't block the skeleton.**
 The §40 use-case-flag pattern extends to INFRA: when an infra capability depends on an
@@ -895,8 +947,12 @@ part of GLT; the throughput of the binding queue is system throughput; rework in
 both. The retro reads these to size `min_items`/`wip_limit`.
 
 On every insertion the flow-manager re-costs `vc_ratio` (= value ÷ cost) and re-sorts
-(defects pre-empt, §F5). The ranking function is isolated so Cost of Delay can replace
-it later with no structural change. Target: gross lead time + throughput. [EXP-022]
+(defects pre-empt, §F5). **`vc_ratio` sorts WITHIN a §10 tier, never across tiers:**
+selection is LEXICOGRAPHIC — first by §10 tier (process-improvement > core-job value >
+secondary-job value > risk), then by `vc_ratio` inside that tier — so a core-job item is
+never out-ranked by a high-`vc_ratio` secondary-job item. The ranking function is
+isolated so Cost of Delay can replace `vc_ratio` later with no structural change. Target:
+gross lead time + throughput. [EXP-022]
 
 ## F3. The pull loop & replenishment (`/loop-run`)
 The inner dev loop runs continuously: each cycle the flow-manager selects the **maximal
@@ -974,12 +1030,18 @@ unchanged). Target: gross lead time (gate wait) guarded by CFR; MTTR. [EXP-025]
 ## F5a. Prod promotion is continuous — no review gate; the tester validates in prod
 Once an established CD promotion pipeline exists, **code flows to prod automatically on
 green — there is NO human review-to-promote gate.** The gate IS the automated evidence:
-unit+integration green on trunk **and the dev acceptance stage passing**; the pipeline
-deploys to prod and the **tester validates in prod** (§20) as the safety net. A "someone
-approves the prod deploy" step is explicitly rejected — it masks upstream weakness and
-adds idle. **If what lands in prod is wrong, the failure is UPSTREAM** (requirements,
-engineering, test coverage) — fix it *there* and let the fix flow; never add a promotion
-gate to compensate (build quality in; roll-forward with reversible rollback). [EXP-091]
+unit+integration green on trunk **and the DEV-VALIDATION stage passing** — the item
+reaches the `dev-validating` state (cicd's `deployed` deploys it to DEV) and the tester
+validates the dev surface against the ORIGINAL FROZEN `acceptance.md`; a pass fires
+`dev_validated` (§11b), which is the automated promotion assurance. `dev_validated`
+**AUTOMATICALLY triggers the prod deploy** — cicd deploys to prod (`promoted`) and the
+**tester prod-validates** (`validated`, §20) as the safety net — all UNATTENDED. A
+"someone approves the prod deploy" step is explicitly rejected — it masks upstream
+weakness and adds idle. Dev-first is about VALIDATING in dev BEFORE prod (de-risking),
+NOT a human approving the promotion. **If what lands in prod is wrong, the failure is
+UPSTREAM** (requirements, engineering, test coverage) — fix it *there* and let the fix
+flow; never add a promotion gate to compensate (build quality in; roll-forward with
+reversible rollback). [EXP-091]
 
 **Infra-bearing deploys auto-approve under an automated policy assurance** (§9a → this
 is where infra-bearing goes). The former human gate on new stacks, new IAM grants, and

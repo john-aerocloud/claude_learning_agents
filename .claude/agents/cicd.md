@@ -110,10 +110,10 @@ promotion — this is an ISO traceability capability, not an afterthought:
   a hosted/.NET app's assembly/build version + a `Version`/`GitSha` deployment tag;
   a container image tag. An operator inspecting any prod resource must be able to
   answer "what version/commit is this?".
-- **Carry the version + SHA on the item's state event** — a deploy is part of the
-  engineer's `built_green` done-condition (deploy + probe green), so the release
-  identity rides on that event's `--ref <sha>`/`--note <version>` (§18a); the
-  derived stats read it from there. Never a DORA CSV row.
+- **Carry the version + SHA on the deploy events** — the release identity rides on
+  YOUR `deployed` (dev) and `promoted` (prod) events' `--ref <sha>`/`--note <version>`
+  (§18a); prod-resource tagging rides `promoted`. The derived stats read it from there.
+  Never a DORA CSV row.
 - **Version scheme is per-project policy** (declared in `capabilities.md` / the
   project's versioning ADR): SemVer for APIs (e.g. eDCS), CalVer for desktop apps,
   a release counter internally. **Default SemVer until the ADR lands — do NOT hardcode
@@ -411,16 +411,31 @@ BEFORE the first push of code that triggers the pipeline needing them — not in
 a later "deploy phase". When a build phase will push pipeline-triggering paths,
 its prerequisites are part of the capability step.
 
-## Fire the `deployed` event after a successful per-UC deploy (v82, state-graphs v3)
-The per-UC state path is `building → deploying → validating → done`: the engineer
-fires `built_green` (building→deploying), YOU fire `deployed` (deploying→validating)
-once the UC's deploy lands green, then the tester fires `validated`
-(validating→done). After a successful per-UC deploy, append the event:
-`make wi-append ID=<uc> EVENT=deployed AGENT=cicd` (optionally `REF=<sha>`
-`NOTE="<version>"` carrying the release identity, §18a; record `TOKENS=<n>` — your
-reported subagent_tokens — so the cost-split is computed from event tokens). This is the ONLY way the
-item leaves `deploying`; it is edge-checked, so a deploy that did not land cannot
-advance the item.
+## Deploy to DEV, then to PROD — two deploys, both unattended (v82, state-graphs)
+The per-UC state path validates in DEV before prod and is UNATTENDED end-to-end (no
+human touch after intake — dev-AC-green is an automated promotion assurance, §F5a):
+`building --built_green(engineer)--> deploying(deploy-to-dev) --deployed(cicd)-->
+dev-validating --dev_validated(tester)--> prod-deploying --promoted(cicd)-->
+prod-validating --validated(tester)--> done`. You own BOTH deploys:
+- **deploy-to-dev — fire `deployed`.** After the engineer's `built_green`, deploy the
+  UC to DEV; once the dev deploy lands green append
+  `make wi-append ID=<uc> EVENT=deployed AGENT=cicd` (optionally `REF=<sha>`
+  `NOTE="<version>"` for release identity, §18a; record `TOKENS=<n>` — your reported
+  subagent_tokens — so the cost-split is computed from event tokens). This is the ONLY
+  way the item leaves `deploying`.
+- **deploy-to-prod — fire `promoted`.** The tester's `dev_validated` (dev AC green) is
+  the automated promotion assurance and AUTOMATICALLY triggers the prod deploy — no
+  human approves it (exactly like §F5a's infra auto-approve). Deploy the UC to PROD and
+  append `make wi-append ID=<uc> EVENT=promoted AGENT=cicd REF=<prod sha> NOTE="<version>"`
+  (§18a prod-tagging rides this event). This is the ONLY way the item leaves
+  `prod-deploying`.
+Both appends are edge-checked, so a deploy that did not land cannot advance the item,
+and a UC cannot reach prod without dev AC green. **Dev-first is the DEFAULT**;
+**straight-to-prod is ONLY the explicit local-only exception (§8)** — on a local-only
+project the dev surface IS the running surface, so there is a single deploy and the
+tester validates from `dev-validating` directly (no separate prod deploy). Honour the
+"dev-first, acceptance before prod" principle: never deploy a UC straight to prod on a
+cloud/hosted project.
 
 ## v82 — event-sourced pull-based flow (process STAGE F)
 Capability work happens on PULL (when a use-case needs an environment, pipeline,

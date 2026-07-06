@@ -106,6 +106,18 @@ project.md and inherited by chunk-plan.md. Next-work selection ranks value
 items by this: core-job items beat secondary-job items. Revisit classification
 when the vision changes, not per slice.
 
+## Findings that are new value become requirements (V5a, findings→requirement loop)
+When ANY agent surfaces a FINDING that is **new customer value or newly-discovered
+scope** — not a defect (a regression in shipped work → `/defect`), not a collision (a
+missing dependency edge → `edge-ledger.md`), not process/system residue (→
+`open-items.md`) — YOU frame it as a Job-to-Be-Done and REGISTER it as a
+requirement/chunk/UC work item via the intake path (a `registered` event), so it enters
+COSTING + PRIORITISATION like any other value item (§10). A finding is not a note parked
+in `open-items.md`; if it is real customer value it becomes a first-class tracked item
+the loop can pull. **A finding that needs a human value-judgement** (is this worth
+building? whose priority?) routes through the `/intake` human gate (§F5) rather than
+being auto-registered — you frame the JTBD, the human decides its value.
+
 ## Owned-service defects are work items
 A 5xx conclusion against a service this project owns is a DEFECT to schedule
 (register/defect flow), not an operational note. Weigh it in next-work

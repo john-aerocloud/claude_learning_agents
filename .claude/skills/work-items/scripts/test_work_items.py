@@ -41,11 +41,15 @@ class Base(unittest.TestCase):
         shutil.copy(self.real_graphs, os.path.join(self.tmp, "process", "machinery", "state-graphs.json"))
         wi.GRAPHS_PATH = os.path.join(self.tmp, "process", "machinery", "state-graphs.json")
         self.graphs = wi.Graphs.load(wi.GRAPHS_PATH)
+        # never touch the REAL statusline.json from a test — redirect into tmp
+        self._orig_statusline = wi.STATUSLINE
+        wi.STATUSLINE = os.path.join(self.tmp, "process", "dora", "statusline.json")
         os.makedirs(self._items("active"), exist_ok=True)
         os.makedirs(self._items("done"), exist_ok=True)
 
     def tearDown(self):
         wi.ROOT = self._orig_root
+        wi.STATUSLINE = self._orig_statusline
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def _items(self, sub):
@@ -75,9 +79,22 @@ class TestFold(Base):
             {"ts": "2", "event": "made_ready", "agent": "flow-manager"},
             {"ts": "3", "event": "pulled", "agent": "orchestrator"},
             {"ts": "4", "event": "built_green", "agent": "engineer"},
-            {"ts": "5", "event": "validated", "agent": "tester"},
+            {"ts": "5", "event": "deployed", "agent": "cicd"},
+            {"ts": "6", "event": "validated", "agent": "tester"},
         ]
         self.assertEqual(wi.fold_state(self.graphs, "use-case", evs), "done")
+
+    def test_use_case_fold_deploying(self):
+        # v4: built_green lands in `deploying`; deployed lands in `dev-validating`
+        evs = [
+            {"ts": "1", "event": "registered", "agent": "flow-manager"},
+            {"ts": "2", "event": "made_ready", "agent": "flow-manager"},
+            {"ts": "3", "event": "pulled", "agent": "orchestrator"},
+            {"ts": "4", "event": "built_green", "agent": "engineer"},
+        ]
+        self.assertEqual(wi.fold_state(self.graphs, "use-case", evs), "deploying")
+        evs.append({"ts": "5", "event": "deployed", "agent": "cicd"})
+        self.assertEqual(wi.fold_state(self.graphs, "use-case", evs), "dev-validating")
 
     def test_use_case_fold_partial(self):
         evs = [
@@ -110,6 +127,45 @@ class TestFold(Base):
     def test_initial_state_empty_events(self):
         self.assertEqual(wi.fold_state(self.graphs, "use-case", []), "registered")
         self.assertEqual(wi.fold_state(self.graphs, "defect", []), "reported")
+
+    # ---- v4 dev-then-prod validation fold ----
+    def _base(self):
+        return [
+            {"ts": "1", "event": "registered", "agent": "flow-manager"},
+            {"ts": "2", "event": "made_ready", "agent": "flow-manager"},
+            {"ts": "3", "event": "pulled", "agent": "orchestrator"},
+            {"ts": "4", "event": "built_green", "agent": "engineer"},
+            {"ts": "5", "event": "deployed", "agent": "cicd"},
+        ]
+
+    def test_v4_full_cloud_path(self):
+        # built_green->deploying, deployed->dev-validating, dev_validated->
+        # prod-deploying, promoted->prod-validating, validated->done
+        evs = self._base()
+        self.assertEqual(wi.fold_state(self.graphs, "use-case", evs), "dev-validating")
+        evs.append({"ts": "6", "event": "dev_validated", "agent": "tester"})
+        self.assertEqual(wi.fold_state(self.graphs, "use-case", evs), "prod-deploying")
+        evs.append({"ts": "7", "event": "promoted", "agent": "cicd"})
+        self.assertEqual(wi.fold_state(self.graphs, "use-case", evs), "prod-validating")
+        evs.append({"ts": "8", "event": "validated", "agent": "tester"})
+        self.assertEqual(wi.fold_state(self.graphs, "use-case", evs), "done")
+
+    def test_v4_local_only_collapse(self):
+        # dev==prod (one env): validated straight from dev-validating -> done
+        evs = self._base() + [{"ts": "6", "event": "validated", "agent": "tester"}]
+        self.assertEqual(wi.fold_state(self.graphs, "use-case", evs), "done")
+
+    def test_v4_reject_from_dev_validating(self):
+        evs = self._base() + [{"ts": "6", "event": "rejected", "agent": "tester"}]
+        self.assertEqual(wi.fold_state(self.graphs, "use-case", evs), "reworking")
+
+    def test_v4_reject_from_prod_validating(self):
+        evs = self._base() + [
+            {"ts": "6", "event": "dev_validated", "agent": "tester"},
+            {"ts": "7", "event": "promoted", "agent": "cicd"},
+            {"ts": "8", "event": "rejected", "agent": "tester"},
+        ]
+        self.assertEqual(wi.fold_state(self.graphs, "use-case", evs), "reworking")
 
 
 # --------------------------------------------------------------------------- #
@@ -153,15 +209,84 @@ class TestAppend(Base):
         self.assertIn("not for agent", err.getvalue())
 
     def test_append_relocates_to_done(self):
+        # v3: built_green -> deploying; deploying --deployed(cicd)--> validating
         self.write_item("active", "UC-D", "use-case",
+                        [{"ts": "1", "event": "registered", "agent": "flow-manager"},
+                         {"ts": "2", "event": "made_ready", "agent": "flow-manager"},
+                         {"ts": "3", "event": "pulled", "agent": "orchestrator"},
+                         {"ts": "4", "event": "built_green", "agent": "engineer"},
+                         {"ts": "5", "event": "deployed", "agent": "cicd"}])
+        with contextlib.redirect_stdout(io.StringIO()):
+            self._run_append("UC-D", "validated", "tester")
+        self.assertFalse(os.path.exists(os.path.join(self._items("active"), "UC-D.md")))
+        self.assertTrue(os.path.exists(os.path.join(self._items("done"), "UC-D.md")))
+
+    def test_append_deployed_by_cicd(self):
+        # cicd deploys a UC sitting in `deploying`; lands in dev-validating (v4)
+        self.write_item("active", "UC-DP", "use-case",
                         [{"ts": "1", "event": "registered", "agent": "flow-manager"},
                          {"ts": "2", "event": "made_ready", "agent": "flow-manager"},
                          {"ts": "3", "event": "pulled", "agent": "orchestrator"},
                          {"ts": "4", "event": "built_green", "agent": "engineer"}])
         with contextlib.redirect_stdout(io.StringIO()):
-            self._run_append("UC-D", "validated", "tester")
-        self.assertFalse(os.path.exists(os.path.join(self._items("active"), "UC-D.md")))
-        self.assertTrue(os.path.exists(os.path.join(self._items("done"), "UC-D.md")))
+            self._run_append("UC-DP", "deployed", "cicd")
+        item = wi.load_item(os.path.join(self._items("active"), "UC-DP.md"))
+        self.assertEqual(wi.fold_state(self.graphs, "use-case", item.events), "dev-validating")
+
+    def test_append_deployed_wrong_agent_rejected(self):
+        # only cicd may fire `deployed`
+        self.write_item("active", "UC-DW", "use-case",
+                        [{"ts": "1", "event": "registered", "agent": "flow-manager"},
+                         {"ts": "2", "event": "made_ready", "agent": "flow-manager"},
+                         {"ts": "3", "event": "pulled", "agent": "orchestrator"},
+                         {"ts": "4", "event": "built_green", "agent": "engineer"}])
+        with self.assertRaises(SystemExit) as cm:
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                self._run_append("UC-DW", "deployed", "engineer")
+        self.assertNotEqual(cm.exception.code, 0)
+        self.assertIn("not for agent", err.getvalue())
+
+    # ---- v4 dev-then-prod append legs ----
+    def _at_dev_validating(self, iid):
+        self.write_item("active", iid, "use-case",
+                        [{"ts": "1", "event": "registered", "agent": "flow-manager"},
+                         {"ts": "2", "event": "made_ready", "agent": "flow-manager"},
+                         {"ts": "3", "event": "pulled", "agent": "orchestrator"},
+                         {"ts": "4", "event": "built_green", "agent": "engineer"},
+                         {"ts": "5", "event": "deployed", "agent": "cicd"}])
+
+    def test_v4_dev_validated_promotes(self):
+        self._at_dev_validating("UC-PV")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self._run_append("UC-PV", "dev_validated", "tester")
+        item = wi.load_item(os.path.join(self._items("active"), "UC-PV.md"))
+        self.assertEqual(wi.fold_state(self.graphs, "use-case", item.events), "prod-deploying")
+
+    def test_v4_promoted_by_cicd(self):
+        self._at_dev_validating("UC-PR")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self._run_append("UC-PR", "dev_validated", "tester")
+            self._run_append("UC-PR", "promoted", "cicd")
+        item = wi.load_item(os.path.join(self._items("active"), "UC-PR.md"))
+        self.assertEqual(wi.fold_state(self.graphs, "use-case", item.events), "prod-validating")
+
+    def test_v4_dev_validated_wrong_agent_rejected(self):
+        # cicd may NOT fire dev_validated (tester-only)
+        self._at_dev_validating("UC-WA2")
+        with self.assertRaises(SystemExit) as cm:
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                self._run_append("UC-WA2", "dev_validated", "cicd")
+        self.assertNotEqual(cm.exception.code, 0)
+        self.assertIn("not for agent", err.getvalue())
+
+    def test_v4_full_prod_path_relocates_to_done(self):
+        self._at_dev_validating("UC-FP")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self._run_append("UC-FP", "dev_validated", "tester")
+            self._run_append("UC-FP", "promoted", "cicd")
+            self._run_append("UC-FP", "validated", "tester")
+        self.assertFalse(os.path.exists(os.path.join(self._items("active"), "UC-FP.md")))
+        self.assertTrue(os.path.exists(os.path.join(self._items("done"), "UC-FP.md")))
 
 
 # --------------------------------------------------------------------------- #
@@ -203,7 +328,8 @@ class TestBubble(Base):
             {"ts": "2", "event": "made_ready", "agent": "flow-manager"},
             {"ts": "3", "event": "pulled", "agent": "orchestrator"},
             {"ts": "4", "event": "built_green", "agent": "engineer"},
-            {"ts": "5", "event": "validated", "agent": "tester"},
+            {"ts": "5", "event": "deployed", "agent": "cicd"},
+            {"ts": "6", "event": "validated", "agent": "tester"},
         ]
 
     def test_slice_planned_when_no_child_progress(self):
@@ -248,7 +374,8 @@ class TestInvariants(Base):
             {"ts": "2", "event": "made_ready", "agent": "flow-manager"},
             {"ts": "3", "event": "pulled", "agent": "orchestrator"},
             {"ts": "4", "event": "built_green", "agent": "engineer"},
-            {"ts": "5", "event": "validated", "agent": "tester"},
+            {"ts": "5", "event": "deployed", "agent": "cicd"},
+            {"ts": "6", "event": "validated", "agent": "tester"},
         ] if sub == "done" else [
             {"ts": "1", "event": "registered", "agent": "flow-manager"},
         ]
@@ -282,7 +409,8 @@ class TestInvariants(Base):
                          {"ts": "2", "event": "made_ready", "agent": "flow-manager"},
                          {"ts": "3", "event": "pulled", "agent": "orchestrator"},
                          {"ts": "4", "event": "built_green", "agent": "engineer"},
-                         {"ts": "5", "event": "validated", "agent": "tester"}])
+                         {"ts": "5", "event": "deployed", "agent": "cicd"},
+                         {"ts": "6", "event": "validated", "agent": "tester"}])
         v = wi.validate_items(self.graphs, self.project)
         self.assertTrue(any("(I4)" in x for x in v), v)
 
@@ -418,35 +546,39 @@ NOW_DT = _pydt.datetime(2026, 6, 30, tzinfo=_pydt.timezone.utc)
 
 class TestStats(Base):
     def _clean_uc(self, iid):
-        """A UC with well-spaced timestamps so each interval is a round number.
+        """A UC with well-spaced timestamps so each interval is a round number (v3).
         registered@d10 00:00 -> ready (made_ready@d10 01:00) so 1h in registered.
         ready -> building (pulled@d10 03:00) so 2h in ready.
-        building -> validating (built_green@d10 06:00) so 3h in building.
-        validating -> done (validated@d10 10:00) so 4h in validating.
-        gross lead time = 10h; lead_time_for_changes (built_green->validated)=4h."""
+        building -> deploying (built_green@d10 06:00) so 3h in building.
+        deploying -> validating (deployed@d10 08:00) so 2h in deploying (cicd).
+        validating -> done (validated@d10 12:00) so 4h in validating.
+        gross lead time = 12h; lead_time_for_changes (built_green->validated)=6h."""
         return [
             {"ts": _dt(10, 0), "event": "registered", "agent": "flow-manager"},
             {"ts": _dt(10, 1), "event": "made_ready", "agent": "flow-manager"},
             {"ts": _dt(10, 3), "event": "pulled", "agent": "orchestrator"},
             {"ts": _dt(10, 6), "event": "built_green", "agent": "engineer"},
-            {"ts": _dt(10, 10), "event": "validated", "agent": "tester"},
+            {"ts": _dt(10, 8), "event": "deployed", "agent": "cicd"},
+            {"ts": _dt(10, 12), "event": "validated", "agent": "tester"},
         ]
 
     def _rework_uc(self, iid):
-        """A UC that gets rejected once then re-passes.
-        registered@d11 00:00; ready@01:00; building@02:00; validating@04:00 (2h build);
-        rejected@05:00 (1h validating) -> reworking; retried@06:00 (1h reworking)
-        -> building; built_green@08:00 (2h building); validated@09:00 (1h validating).
-        Recovery(validation rejection): rejected@05 -> next validated@09 = 4h."""
+        """A UC that gets rejected once then re-passes (v3 path via deploying).
+        registered@00; ready@01; building@02; built_green@04 -> deploying;
+        deployed@05 -> validating; rejected@06 -> reworking; retried@07 -> building;
+        built_green@09 -> deploying; deployed@10 -> validating; validated@10 -> done.
+        Recovery(validation rejection): rejected@06 -> next validated@10 = 4h."""
         return [
             {"ts": _dt(11, 0), "event": "registered", "agent": "flow-manager"},
             {"ts": _dt(11, 1), "event": "made_ready", "agent": "flow-manager"},
             {"ts": _dt(11, 2), "event": "pulled", "agent": "orchestrator"},
             {"ts": _dt(11, 4), "event": "built_green", "agent": "engineer"},
-            {"ts": _dt(11, 5), "event": "rejected", "agent": "tester"},
-            {"ts": _dt(11, 6), "event": "retried", "agent": "engineer"},
+            {"ts": _dt(11, 5), "event": "deployed", "agent": "cicd"},
+            {"ts": _dt(11, 6), "event": "rejected", "agent": "tester"},
+            {"ts": _dt(11, 7), "event": "retried", "agent": "engineer"},
             {"ts": _dt(11, 8), "event": "built_green", "agent": "engineer"},
-            {"ts": _dt(11, 9), "event": "validated", "agent": "tester"},
+            {"ts": _dt(11, 9, 30), "event": "deployed", "agent": "cicd"},
+            {"ts": _dt(11, 10, 0), "event": "validated", "agent": "tester"},
         ]
 
     def _stats(self, items=None):
@@ -462,10 +594,17 @@ class TestStats(Base):
         self.assertAlmostEqual(by_state["registered"]["total_s"], 3600, places=1)
         self.assertAlmostEqual(by_state["ready"]["total_s"], 7200, places=1)
         self.assertAlmostEqual(by_state["building"]["total_s"], 10800, places=1)
-        self.assertAlmostEqual(by_state["validating"]["total_s"], 14400, places=1)
-        # gross lead time = 10h = 36000s
-        self.assertAlmostEqual(s["gross_lead_time_total_s"], 36000, places=1)
-        self.assertAlmostEqual(s["gross_lead_time_median_s"], 36000, places=1)
+        self.assertAlmostEqual(by_state["deploying"]["total_s"], 7200, places=1)   # 2h cicd
+        # v4: deployed lands in dev-validating; validated (local-only) -> done
+        self.assertAlmostEqual(by_state["dev-validating"]["total_s"], 14400, places=1)
+        # gross lead time = 12h = 43200s
+        self.assertAlmostEqual(s["gross_lead_time_total_s"], 43200, places=1)
+        self.assertAlmostEqual(s["gross_lead_time_median_s"], 43200, places=1)
+
+    def test_deploying_attributed_to_cicd(self):
+        self.write_item("done", "UC-1", "use-case", self._clean_uc("UC-1"))
+        by_owner = self._stats()["overall"]["gross_lead_time"]["by_owner"]
+        self.assertAlmostEqual(by_owner["cicd"]["total_s"], 7200, places=1)   # 2h deploying
 
     def test_in_flight_uses_now(self):
         # a UC still building since d20 06:00; now=d30 00:00 => open segment counted
@@ -483,9 +622,11 @@ class TestStats(Base):
     def test_by_owner_attribution(self):
         self.write_item("done", "UC-1", "use-case", self._clean_uc("UC-1"))
         by_owner = self._stats()["overall"]["gross_lead_time"]["by_owner"]
-        # registered+ready => queue (1h+2h=3h=10800); building=>engineer(3h); validating=>tester(4h)
+        # queue = registered(1h)+ready(2h) = 3h = 10800; engineer = building(3h) = 10800;
+        # cicd = deploying(2h) = 7200; tester = validating(4h) = 14400
         self.assertAlmostEqual(by_owner["queue"]["total_s"], 10800, places=1)
         self.assertAlmostEqual(by_owner["engineer"]["total_s"], 10800, places=1)
+        self.assertAlmostEqual(by_owner["cicd"]["total_s"], 7200, places=1)
         self.assertAlmostEqual(by_owner["tester"]["total_s"], 14400, places=1)
         # percentages sum to ~100
         total_pct = sum(d["pct_of_glt"] for d in by_owner.values())
@@ -500,7 +641,8 @@ class TestStats(Base):
             {"ts": _dt(12, 7), "event": "unblocked", "agent": "flow-manager"},  # 5h external
             {"ts": _dt(12, 8), "event": "pulled", "agent": "orchestrator"},
             {"ts": _dt(12, 9), "event": "built_green", "agent": "engineer"},
-            {"ts": _dt(12, 10), "event": "validated", "agent": "tester"},
+            {"ts": _dt(12, 10), "event": "deployed", "agent": "cicd"},
+            {"ts": _dt(12, 11), "event": "validated", "agent": "tester"},
         ])
         by_owner = self._stats()["overall"]["gross_lead_time"]["by_owner"]
         self.assertAlmostEqual(by_owner["external"]["total_s"], 5 * 3600, places=1)
@@ -533,6 +675,7 @@ class TestStats(Base):
                 {"ts": _dt(10 + i, 1), "event": "made_ready", "agent": "flow-manager"},
                 {"ts": _dt(10 + i, 2), "event": "pulled", "agent": "orchestrator"},
                 {"ts": _dt(10 + i, 3), "event": "built_green", "agent": "engineer"},
+                {"ts": _dt(10 + i, 3, 30), "event": "deployed", "agent": "cicd"},
                 {"ts": _dt(10 + i, 3 + hrs), "event": "validated", "agent": "tester"},
             ])
         at = self._stats()["overall"]["dora"]["all_time"]
@@ -580,9 +723,10 @@ class TestStats(Base):
         self.write_item("done", "UC-1", "use-case", self._clean_uc("UC-1"))
         self.write_item("done", "UC-2", "use-case", self._rework_uc("UC-2"))
         q = self._stats()["overall"]["quality"]["all_time"]
-        # validating exits: UC-1 validated; UC-2 rejected+validated => fail 1/3
-        self.assertAlmostEqual(q["by_stage"]["validating"]["failure_rate"], 1 / 3, places=4)
-        self.assertEqual(q["by_stage"]["validating"]["owner"], "tester")
+        # v4: exits are from dev-validating (local-only path). UC-1 validated;
+        # UC-2 rejected+validated => fail 1/3; owner tester.
+        self.assertAlmostEqual(q["by_stage"]["dev-validating"]["failure_rate"], 1 / 3, places=4)
+        self.assertEqual(q["by_stage"]["dev-validating"]["owner"], "tester")
         # rework rate: 1 of 2 items entered rework (UC-2)
         self.assertAlmostEqual(q["rework_rate"], 0.5, places=4)
 
@@ -643,6 +787,437 @@ class TestStats(Base):
         self.assertIn("Contribution to gross lead time", md)
         self.assertIn("A. DORA four key metrics", md)
         self.assertIn("D. Recovery (MTTR) by failure class", md)
+
+
+# --------------------------------------------------------------------------- #
+# retro-debt (§F8 cadence gate) + retro-mark + statusline — reimplemented over
+# item events (dora.py cutover). Deterministic --now.
+# --------------------------------------------------------------------------- #
+class TestRetro(Base):
+    def _done_uc(self, day, parents):
+        # a UC that bubbles a slice done; terminal (validated) at `day` 12:00
+        return [
+            {"ts": _dt(day, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(day, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(day, 2), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(day, 3), "event": "built_green", "agent": "engineer"},
+            {"ts": _dt(day, 4), "event": "deployed", "agent": "cicd"},
+            {"ts": _dt(day, 12), "event": "validated", "agent": "tester"},
+        ]
+
+    def _done_defect(self, day):
+        return [
+            {"ts": _dt(day, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(day, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(day, 2), "event": "confirmed", "agent": "engineer"},
+            {"ts": _dt(day, 3), "event": "fixed", "agent": "engineer"},
+            {"ts": _dt(day, 5), "event": "validated", "agent": "tester"},
+        ]
+
+    def _make_done_slice(self, slc, uc_days):
+        """Write a slice with N done UC children (each terminal at its day)."""
+        for i, day in enumerate(uc_days):
+            self.write_item("done", f"{slc}-UC{i}", "use-case",
+                            self._done_uc(day, [slc]), parents=[slc])
+        self.write_item("active", slc, "slice", [
+            {"ts": _dt(uc_days[0], 0), "event": "registered", "agent": "flow-manager"}])
+
+    def _debt(self, threshold=3, now=NOW):
+        g = self.graphs
+        return wi.compute_retro_debt(g, self.project, threshold, wi.parse_ts(now))
+
+    def _run(self, threshold=3, now=NOW):
+        ns = argparse.Namespace(project=self.project, threshold=threshold, now=now)
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            try:
+                wi.cmd_retro_debt(ns)
+                code = 0
+            except SystemExit as e:
+                code = e.code
+        return code, out.getvalue()
+
+    # ---- routine batching to threshold ----
+    def test_routine_below_threshold_not_due(self):
+        self._make_done_slice("SLC-1", [10, 11, 12])   # bubbles done @ d12 12:00
+        self._make_done_slice("SLC-2", [13, 14])        # bubbles done @ d14 12:00
+        routine, incidents, due, detail, _m = self._debt(threshold=3)
+        self.assertEqual(len(routine), 2)
+        self.assertEqual(len(incidents), 0)
+        self.assertFalse(due)
+
+    def test_routine_at_threshold_due(self):
+        self._make_done_slice("SLC-1", [10])
+        self._make_done_slice("SLC-2", [11])
+        self._make_done_slice("SLC-3", [12])
+        routine, incidents, due, detail, _m = self._debt(threshold=3)
+        self.assertEqual(len(routine), 3)
+        self.assertTrue(due)
+        code, _ = self._run(threshold=3)
+        self.assertEqual(code, 2)
+
+    # ---- incident fires immediately ----
+    def test_incident_defect_fires_immediately(self):
+        self._make_done_slice("SLC-1", [10])          # 1 routine
+        self.write_item("done", "DEF-1", "defect", self._done_defect(15))
+        routine, incidents, due, detail, _m = self._debt(threshold=3)
+        self.assertEqual(len(routine), 1)
+        self.assertEqual(len(incidents), 1)
+        self.assertTrue(due)   # single incident forces due despite routine < threshold
+
+    def test_incident_uc_rejection_fires(self):
+        # a use-case with a rejected event (an incident) since the marker
+        self.write_item("active", "UC-REJ", "use-case", [
+            {"ts": _dt(16, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(16, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(16, 2), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(16, 3), "event": "built_green", "agent": "engineer"},
+            {"ts": _dt(16, 4), "event": "deployed", "agent": "cicd"},
+            {"ts": _dt(16, 5), "event": "rejected", "agent": "tester"},
+        ])
+        routine, incidents, due, detail, _m = self._debt(threshold=3)
+        self.assertEqual(len(incidents), 1)
+        self.assertTrue(due)
+
+    # ---- marker resets the count ----
+    def test_marker_resets_count(self):
+        self._make_done_slice("SLC-1", [10])
+        self._make_done_slice("SLC-2", [11])
+        self._make_done_slice("SLC-3", [12])   # 3 routine, would be DUE
+        # set the marker to AFTER all three bubbled (d12 12:00) -> debt drains to 0
+        wi.cmd_retro_mark(argparse.Namespace(project=self.project, now="2026-06-13T00:00:00Z"))
+        routine, incidents, due, detail, _m = self._debt(threshold=3)
+        self.assertEqual(len(routine), 0)
+        self.assertFalse(due)
+        code, _ = self._run(threshold=3)
+        self.assertEqual(code, 0)
+
+    def test_marker_partial_reset(self):
+        self._make_done_slice("SLC-1", [10])   # done @ d10 12:00
+        self._make_done_slice("SLC-2", [14])   # done @ d14 12:00
+        # marker between the two -> only the later one counts
+        wi.cmd_retro_mark(argparse.Namespace(project=self.project, now="2026-06-12T00:00:00Z"))
+        routine, incidents, due, detail, _m = self._debt(threshold=3)
+        self.assertEqual(len(routine), 1)
+
+    # ---- retro-mark writes the marker file ----
+    def test_retro_mark_writes_file(self):
+        wi.cmd_retro_mark(argparse.Namespace(project=self.project, now="2026-06-20T00:00:00Z"))
+        p = os.path.join(self.tmp, "process", "dora", "retro-marker", f"{self.project}.txt")
+        self.assertTrue(os.path.exists(p))
+        with open(p) as f:
+            self.assertEqual(f.read().strip(), "2026-06-20T00:00:00Z")
+
+    def test_retro_debt_writes_statusline(self):
+        self._make_done_slice("SLC-1", [10])
+        os.makedirs(os.path.join(self.tmp, "process", "dora"), exist_ok=True)
+        wi.STATUSLINE = os.path.join(self.tmp, "process", "dora", "statusline.json")
+        self._run(threshold=3)
+        with open(wi.STATUSLINE) as f:
+            d = json.load(f)
+        self.assertEqual(d[f"retro_debt_{self.project}"], 1)
+        self.assertIn(f"retro_due_{self.project}", d)
+
+    def test_statusline_merge_preserves_keys(self):
+        wi.STATUSLINE = os.path.join(self.tmp, "process", "dora", "statusline.json")
+        os.makedirs(os.path.dirname(wi.STATUSLINE), exist_ok=True)
+        with open(wi.STATUSLINE, "w") as f:
+            json.dump({"cfr": 5, "par": 0.25, "keep_me": "x"}, f)
+        wi.write_statusline({"retro_debt_X": 2})
+        with open(wi.STATUSLINE) as f:
+            d = json.load(f)
+        self.assertEqual(d["cfr"], 5)        # not clobbered
+        self.assertEqual(d["par"], 0.25)     # not clobbered
+        self.assertEqual(d["keep_me"], "x")
+        self.assertEqual(d["retro_debt_X"], 2)
+
+
+class TestProjectStatusline(Base):
+    def test_project_writes_dora_statusline_keys(self):
+        wi.STATUSLINE = os.path.join(self.tmp, "process", "dora", "statusline.json")
+        # a done UC so freq/lead compute; keep existing retro key
+        os.makedirs(os.path.dirname(wi.STATUSLINE), exist_ok=True)
+        with open(wi.STATUSLINE, "w") as f:
+            json.dump({"retro_debt_TestProj": 7}, f)
+        self.write_item("done", "UC-1", "use-case", [
+            {"ts": _dt(10, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(10, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(10, 2), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(10, 3), "event": "built_green", "agent": "engineer"},
+            {"ts": _dt(10, 4), "event": "deployed", "agent": "cicd"},
+            {"ts": _dt(10, 12), "event": "validated", "agent": "tester"},
+        ])
+        with contextlib.redirect_stdout(io.StringIO()):
+            wi.cmd_project(argparse.Namespace(project=self.project, now=NOW))
+        with open(wi.STATUSLINE) as f:
+            d = json.load(f)
+        # DORA keys the statusline consumes
+        self.assertIn("cfr", d)
+        self.assertIn("freq", d)
+        self.assertIn("lead", d)
+        self.assertEqual(d["project"], self.project)
+        # merge preserved the retro key
+        self.assertEqual(d["retro_debt_TestProj"], 7)
+
+
+# --------------------------------------------------------------------------- #
+# token cost — plumbing vs delivery (cost-split ported from dora.py, EXP-067)
+# --------------------------------------------------------------------------- #
+class TestTokenCost(Base):
+    def _append(self, iid, event, agent, tokens=None):
+        ns = argparse.Namespace(project=self.project, id=iid, event=event, agent=agent,
+                                ref=None, note=None, ts="2026-06-18T00:00:00Z",
+                                tokens=tokens)
+        with contextlib.redirect_stdout(io.StringIO()):
+            wi.cmd_append(ns)
+
+    def _stats(self):
+        it = wi.load_all_items(self.project)[0]
+        st = wi.compute_states(self.graphs, it)
+        return wi.compute_stats(self.graphs, it, st, now=NOW_DT)
+
+    # ---- classification is verbatim from dora.py:cost_class ----
+    def test_cost_class_plumbing_agents(self):
+        # orchestrator/flow-manager => plumbing regardless of event
+        self.assertEqual(wi.cost_class("orchestrator", "pulled"), "plumbing")
+        self.assertEqual(wi.cost_class("flow-manager", "made_ready"), "plumbing")
+
+    def test_cost_class_delivery_agents(self):
+        # engineer/tester/cicd building/validating/deploying => delivery
+        self.assertEqual(wi.cost_class("engineer", "built_green"), "delivery")
+        self.assertEqual(wi.cost_class("tester", "validated"), "delivery")
+        self.assertEqual(wi.cost_class("cicd", "deployed"), "delivery")
+
+    # ---- append records --tokens on the event ----
+    def test_append_records_tokens(self):
+        self.write_item("active", "UC-T", "use-case",
+                        [{"ts": "1", "event": "registered", "agent": "flow-manager"}])
+        self._append("UC-T", "made_ready", "flow-manager", tokens=1234)
+        item = wi.load_item(os.path.join(self._items("active"), "UC-T.md"))
+        self.assertEqual(item.events[-1]["tokens"], 1234)
+
+    def test_append_without_tokens_has_no_tokens_key(self):
+        self.write_item("active", "UC-N", "use-case",
+                        [{"ts": "1", "event": "registered", "agent": "flow-manager"}])
+        self._append("UC-N", "made_ready", "flow-manager")  # no tokens
+        item = wi.load_item(os.path.join(self._items("active"), "UC-N.md"))
+        self.assertNotIn("tokens", item.events[-1])
+
+    # ---- deterministic fixture: exact total / by_owner / split ----
+    def _fixture_uc(self):
+        # a clean UC with a known token on each event. plumbing = flow-manager +
+        # orchestrator events; delivery = engineer/cicd/tester events.
+        #   registered  flow-manager  1000  (plumbing)
+        #   made_ready  flow-manager  2000  (plumbing)
+        #   pulled      orchestrator  4000  (plumbing)
+        #   built_green engineer      50000 (delivery)
+        #   deployed    cicd          3000  (delivery)
+        #   validated   tester        6000  (delivery)
+        # total=66000; plumbing=7000; delivery=59000; share=7000/66000
+        return [
+            {"ts": _dt(10, 0), "event": "registered", "agent": "flow-manager", "tokens": 1000},
+            {"ts": _dt(10, 1), "event": "made_ready", "agent": "flow-manager", "tokens": 2000},
+            {"ts": _dt(10, 3), "event": "pulled", "agent": "orchestrator", "tokens": 4000},
+            {"ts": _dt(10, 6), "event": "built_green", "agent": "engineer", "tokens": 50000},
+            {"ts": _dt(10, 8), "event": "deployed", "agent": "cicd", "tokens": 3000},
+            {"ts": _dt(10, 12), "event": "validated", "agent": "tester", "tokens": 6000},
+        ]
+
+    def test_total_by_owner_and_split_exact(self):
+        self.write_item("done", "UC-1", "use-case", self._fixture_uc())
+        tc = self._stats()["overall"]["token_cost"]
+        self.assertEqual(tc["total_tokens"], 66000)
+        # by_owner folds tokens through the event's agent
+        self.assertEqual(tc["by_owner"]["engineer"], 50000)
+        self.assertEqual(tc["by_owner"]["tester"], 6000)
+        self.assertEqual(tc["by_owner"]["cicd"], 3000)
+        self.assertEqual(tc["by_owner"]["flow-manager"], 3000)   # 1000+2000
+        self.assertEqual(tc["by_owner"]["orchestrator"], 4000)
+        # plumbing vs delivery — the EXACT split
+        pvd = tc["plumbing_vs_delivery"]
+        self.assertEqual(pvd["plumbing_tokens"], 7000)   # fm 3000 + orch 4000
+        self.assertEqual(pvd["delivery_tokens"], 59000)  # eng 50000 + cicd 3000 + tester 6000
+        self.assertAlmostEqual(pvd["plumbing_share"], 7000 / 66000, places=6)
+        # full coverage: every event carried tokens
+        self.assertEqual(tc["n_events_with_tokens"], 6)
+        self.assertEqual(tc["token_coverage"], 1.0)
+
+    # ---- absent tokens degrade gracefully (no crash, zero/empty) ----
+    def test_absent_tokens_zero_and_no_crash(self):
+        # the standard clean UC carries NO tokens
+        self.write_item("done", "UC-1", "use-case",
+                        TestStats._clean_uc(self, "UC-1"))
+        tc = self._stats()["overall"]["token_cost"]
+        self.assertEqual(tc["total_tokens"], 0)
+        self.assertEqual(tc["by_owner"], {})
+        self.assertEqual(tc["plumbing_vs_delivery"]["plumbing_tokens"], 0)
+        self.assertEqual(tc["plumbing_vs_delivery"]["delivery_tokens"], 0)
+        self.assertIsNone(tc["plumbing_vs_delivery"]["plumbing_share"])
+        self.assertEqual(tc["token_coverage"], 0.0)
+
+    def test_partial_coverage(self):
+        # only some events carry tokens => coverage is a fraction, split over present
+        evs = TestStats._clean_uc(self, "UC-1")
+        evs[3]["tokens"] = 50000   # built_green (engineer, delivery)
+        evs[2]["tokens"] = 4000    # pulled (orchestrator, plumbing)
+        self.write_item("done", "UC-1", "use-case", evs)
+        tc = self._stats()["overall"]["token_cost"]
+        self.assertEqual(tc["total_tokens"], 54000)
+        self.assertEqual(tc["plumbing_vs_delivery"]["plumbing_tokens"], 4000)
+        self.assertEqual(tc["plumbing_vs_delivery"]["delivery_tokens"], 50000)
+        self.assertEqual(tc["n_events_with_tokens"], 2)
+        self.assertAlmostEqual(tc["token_coverage"], 2 / 6, places=6)
+
+    def test_stats_md_renders_token_section(self):
+        self.write_item("done", "UC-1", "use-case", self._fixture_uc())
+        md = wi._render_stats_md(self._stats())
+        self.assertIn("E. Token cost — plumbing vs delivery", md)
+        self.assertIn("plumbing", md)
+
+    def test_stats_md_token_section_empty_no_crash(self):
+        self.write_item("done", "UC-1", "use-case",
+                        TestStats._clean_uc(self, "UC-1"))
+        md = wi._render_stats_md(self._stats())
+        self.assertIn("E. Token cost — plumbing vs delivery", md)
+        self.assertIn("No event tokens recorded", md)
+
+
+# --------------------------------------------------------------------------- #
+# Per-item metrics — the single-item projection of the flow/DORA quantities.
+# Deterministic fixed timestamps + explicit --now. Full v4 prod path.
+# --------------------------------------------------------------------------- #
+class TestPerItemMetrics(Base):
+    def _full_prod_uc(self):
+        """A UC walked the full v4 cloud path with round-number intervals:
+        registered@d10 00:00 -> ready (made_ready@01:00)     1h registered
+        ready -> building (pulled@03:00)                      2h ready
+        building -> deploying (built_green@06:00)             3h building
+        deploying -> dev-validating (deployed@08:00)          2h deploying   (cicd)
+        dev-validating -> prod-deploying (dev_validated@12:00) 4h dev-validating (tester)
+        prod-deploying -> prod-validating (promoted@13:00)    1h prod-deploying (cicd)
+        prod-validating -> done (validated@16:00)             3h prod-validating (tester)
+        gross lead time = 16h = 57600s; cycle (pulled->done) = 13h = 46800s.
+        tokens: built_green engineer 50000 (delivery), pulled orch 4000 (plumbing)."""
+        return [
+            {"ts": _dt(10, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(10, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(10, 3), "event": "pulled", "agent": "orchestrator", "tokens": 4000},
+            {"ts": _dt(10, 6), "event": "built_green", "agent": "engineer", "tokens": 50000},
+            {"ts": _dt(10, 8), "event": "deployed", "agent": "cicd"},
+            {"ts": _dt(10, 12), "event": "dev_validated", "agent": "tester"},
+            {"ts": _dt(10, 13), "event": "promoted", "agent": "cicd"},
+            {"ts": _dt(10, 16), "event": "validated", "agent": "tester"},
+        ]
+
+    def _metrics(self, iid):
+        it = wi.load_all_items(self.project)[0][iid]
+        return wi.per_item_metrics(self.graphs, it, NOW_DT)
+
+    def test_gross_lead_time_and_cycle_exact(self):
+        self.write_item("done", "UC-1", "use-case", self._full_prod_uc())
+        m = self._metrics("UC-1")
+        self.assertEqual(m["state"], "done")
+        self.assertAlmostEqual(m["gross_lead_time_s"], 57600, places=1)
+        self.assertAlmostEqual(m["cycle_time_s"], 46800, places=1)
+        self.assertEqual(m["rework_count"], 0)
+
+    def test_time_in_each_state_exact(self):
+        self.write_item("done", "UC-1", "use-case", self._full_prod_uc())
+        tis = self._metrics("UC-1")["time_in_state"]
+        self.assertAlmostEqual(tis["registered"], 3600, places=1)
+        self.assertAlmostEqual(tis["ready"], 7200, places=1)
+        self.assertAlmostEqual(tis["building"], 10800, places=1)
+        self.assertAlmostEqual(tis["deploying"], 7200, places=1)
+        self.assertAlmostEqual(tis["dev-validating"], 14400, places=1)
+        self.assertAlmostEqual(tis["prod-deploying"], 3600, places=1)
+        self.assertAlmostEqual(tis["prod-validating"], 10800, places=1)
+        # time-in-state sums to gross lead time
+        self.assertAlmostEqual(sum(tis.values()), 57600, places=1)
+
+    def test_time_by_owner(self):
+        self.write_item("done", "UC-1", "use-case", self._full_prod_uc())
+        tbo = self._metrics("UC-1")["time_by_owner"]
+        # queue = registered(1h)+ready(2h) = 3h; engineer = building(3h) = 3h;
+        # cicd = deploying(2h)+prod-deploying(1h) = 3h;
+        # tester = dev-validating(4h)+prod-validating(3h) = 7h
+        self.assertAlmostEqual(tbo["queue"], 10800, places=1)
+        self.assertAlmostEqual(tbo["engineer"], 10800, places=1)
+        self.assertAlmostEqual(tbo["cicd"], 10800, places=1)
+        self.assertAlmostEqual(tbo["tester"], 25200, places=1)
+
+    def test_tokens_split(self):
+        self.write_item("done", "UC-1", "use-case", self._full_prod_uc())
+        tok = self._metrics("UC-1")["tokens"]
+        self.assertEqual(tok["total"], 54000)
+        self.assertEqual(tok["plumbing"], 4000)   # orchestrator pulled
+        self.assertEqual(tok["delivery"], 50000)  # engineer built_green
+
+    def test_rework_count_and_recovery(self):
+        # a UC rejected once at dev-validating then re-passes (recovery = rejected
+        # @d11 06:00 -> next validated @d11 10:00 = 4h). rework_count counts the
+        # rejected + retried entries = 2.
+        self.write_item("done", "UC-2", "use-case", [
+            {"ts": _dt(11, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(11, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(11, 2), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(11, 4), "event": "built_green", "agent": "engineer"},
+            {"ts": _dt(11, 5), "event": "deployed", "agent": "cicd"},
+            {"ts": _dt(11, 6), "event": "rejected", "agent": "tester"},
+            {"ts": _dt(11, 7), "event": "retried", "agent": "engineer"},
+            {"ts": _dt(11, 8), "event": "built_green", "agent": "engineer"},
+            {"ts": _dt(11, 9), "event": "deployed", "agent": "cicd"},
+            {"ts": _dt(11, 10), "event": "validated", "agent": "tester"},
+        ])
+        m = self._metrics("UC-2")
+        self.assertEqual(m["rework_count"], 2)   # rejected + retried
+        self.assertEqual(m["recovery"]["n"], 1)
+        self.assertAlmostEqual(m["recovery"]["mttr_median_s"], 4 * 3600, places=1)
+
+    def test_in_flight_uses_now(self):
+        # a UC still in dev-validating since d20 08:00; now=d30 -> open segment
+        self.write_item("active", "UC-IF", "use-case", [
+            {"ts": _dt(20, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(20, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(20, 3), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(20, 6), "event": "built_green", "agent": "engineer"},
+            {"ts": _dt(20, 8), "event": "deployed", "agent": "cicd"},
+        ])
+        m = self._metrics("UC-IF")
+        self.assertEqual(m["state"], "dev-validating")
+        self.assertIsNone(m["gross_lead_time_s"])   # not terminal
+        self.assertIsNone(m["cycle_time_s"])
+        expected = (NOW_DT - _pydt.datetime(2026, 6, 20, 8, tzinfo=_pydt.timezone.utc)).total_seconds()
+        self.assertAlmostEqual(m["time_in_state"]["dev-validating"], expected, places=1)
+
+    def test_aggregate_has_no_per_item_metrics(self):
+        self.write_item("active", "SLC-1", "slice",
+                        [{"ts": "1", "event": "registered", "agent": "flow-manager"}])
+        it = wi.load_all_items(self.project)[0]["SLC-1"]
+        self.assertIsNone(wi.per_item_metrics(self.graphs, it, NOW_DT))
+
+    def test_metrics_rendered_into_derived_block(self):
+        self.write_item("done", "UC-1", "use-case", self._full_prod_uc())
+        with contextlib.redirect_stdout(io.StringIO()):
+            wi.cmd_project(argparse.Namespace(project=self.project, now=NOW, item=None))
+        text = open(os.path.join(self._items("done"), "UC-1.md")).read()
+        self.assertIn("metrics:", text)
+        self.assertIn("gross_lead_time_s: 57600", text)
+        self.assertIn("cycle_time_s: 46800", text)
+        # the metrics sub-block is discarded on re-parse (it lives under derived:)
+        item = wi.load_item(os.path.join(self._items("done"), "UC-1.md"))
+        self.assertNotIn("metrics", item.fm)
+
+    def test_project_item_prints_metrics(self):
+        self.write_item("done", "UC-1", "use-case", self._full_prod_uc())
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            wi.cmd_project(argparse.Namespace(project=self.project, now=NOW, item="UC-1"))
+        s = out.getvalue()
+        self.assertIn("Per-item metrics: UC-1", s)
+        self.assertIn("gross lead time", s)
+        self.assertIn("57600", s)
+
+    def test_project_item_unknown_id_errors(self):
+        with self.assertRaises(SystemExit):
+            wi.cmd_project(argparse.Namespace(project=self.project, now=NOW, item="UC-NOPE"))
 
 
 if __name__ == "__main__":

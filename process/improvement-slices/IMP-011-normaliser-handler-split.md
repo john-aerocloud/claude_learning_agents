@@ -1,5 +1,13 @@
 # IMP-011 — split `normaliser-core.ts` into per-event-type handlers (EXP-086 trial)
 
+**Status:** live build item, NOT yet delivered. NOTE (v82): its justifying
+experiment EXP-086 was retired at the v82 cutover (the par_eff-via-`dora.py flow`
+signal it scored against no longer exists — flow metrics now come from
+`wi-project`). The structural refactor itself (disjoint handler files → true
+parallel dispatch on the seam) may still stand on its gross-lead-time/throughput
+merit; re-justify against the derived flow metric before scheduling. Record
+retained.
+
 **Owner:** engineer (pure structural refactor, TDD on trunk).
 **Routed by:** v71 retro (2026-06-30). Trial-after-SLC-029 condition now SATISFIED
 (SLC-029, the last backend slice on the shared seam, shipped + validated PASS

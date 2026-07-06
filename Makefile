@@ -8,7 +8,7 @@
 #
 # DO NOT CONFUSE with work/<project>/src/infra/Makefile — that one is
 # DEPLOY-OPS only (bootstrap/deploy-oidc/deploy/diff/destroy). The agent-ops
-# targets (validate/smoke/dora-record/test-*) live HERE and only here.
+# targets (validate/smoke/wi-*/test-*) live HERE and only here.
 # Agents: per v23 §33.5 you create/extend targets here yourself when your
 # role needs one — tested, documented, committed, named in your return.
 
@@ -27,7 +27,6 @@ endif
 PROJECT ?= $(shell cat work/ACTIVE 2>/dev/null)
 APP     := work/$(PROJECT)/src/app
 INFRA   := work/$(PROJECT)/src/infra
-DORA    := sh .claude/skills/dora-ledger/scripts/dora
 WORKITEMS := sh .claude/skills/work-items/scripts/work-items
 AWS_PROFILE ?= $(shell cat .claude/config/aws-profile 2>/dev/null)
 PY      ?= $(shell sh .claude/skills/dora-ledger/scripts/dora --python)
@@ -113,23 +112,6 @@ edcs-worktree-restore:
 	@git -C $(EDCS) ls-files --deleted -z | xargs -0 -r git -C $(EDCS) restore --
 	@echo "restored missing tracked files; remaining changes:"; git -C $(EDCS) status --short
 
-# --- DORA ledger -------------------------------------------------------------
-# make dora-record EVENT=validation_run AGENT=tester SLICE=004-create-game \
-#      ITER=5 REF="<sha>:<suite>" OUTCOME=success NOTE="7/7 vs prod"
-# Optional: DURATION=<seconds>
-dora-record:
-	$(DORA) record --project $(PROJECT) --iteration $(ITER) --slice $(SLICE) \
-	  --agent $(AGENT) --event $(EVENT) \
-	  $(if $(DURATION),--duration $(DURATION),) \
-	  $(if $(OUTCOME),--outcome $(OUTCOME),) \
-	  $(if $(REF),--ref "$(REF)",) \
-	  $(if $(NOTE),--note "$(NOTE)",) \
-	  $(if $(ITEM_ID),--item-id $(ITEM_ID),) \
-	  $(if $(QUEUE),--queue $(QUEUE),)
-
-dora-compute:
-	$(DORA) compute
-
 # MECHANICAL §F8 auto-retro gate (v68). Exits non-zero (code 2) when retro is DUE
 # — i.e. a slice closed / a defect resolved / a deploy failed since the last retro
 # row. The loop MUST run this before advancing past a slice/chunk/defect boundary;
@@ -139,32 +121,23 @@ dora-compute:
 # batched — a single one forces RETRO DUE immediately so real learning never defers.
 # make retro-debt PROJECT=OagEventSource [THRESHOLD=3]
 retro-debt:
-	$(DORA) retro-debt --project $(PROJECT) $(if $(THRESHOLD),--threshold $(THRESHOLD),)
+	$(WORKITEMS) retro-debt --project $(PROJECT) $(if $(THRESHOLD),--threshold $(THRESHOLD),)
 
-# RECONCILE-FIRST gate (v73 §F1, IMP-016). Diffs the project trunk's git-log
-# work-item ids (UC-/SLC-/VF-) against ledger item_done closures; exits non-zero
-# (code 2) listing anything BUILT-but-UNCLOSED so the loop cannot re-dispatch
-# already-built work. Run before pulling/dispatching. (eDCS's trunk is separate;
-# a project without a standalone git trunk is skipped with exit 0.)
-# make ledger-drift PROJECT=Viggo-fix
-ledger-drift:
-	$(DORA) ledger-drift --project $(PROJECT)
-
-# Registry reconciliation gate (OI-045) — §F3 pre-pull check.
-# Cross-checks items.csv dora_ref states against ledger item_done rows.
-# Exit 0 = clean. Exit 1 = drift (blocks pull). FIX=--fix to auto-fix.
-# make reconcile-registry PROJECT=OagEventSource
-reconcile-registry:
-	python3 work/$(PROJECT)/scripts/reconcile-registry.py --project $(PROJECT) $(FIX)
+# Drain the retro-debt counter: write the last-retro marker (v82). The retro's
+# CLOSE step runs this — it replaces the old "record a `retro` ledger row" reset.
+# make retro-mark PROJECT=OagEventSource
+retro-mark:
+	$(WORKITEMS) retro-mark --project $(PROJECT)
 
 # --- Event-sourced work-item machinery (Version2-design/04, process/machinery/CONTRACT.md) ---
 # State lives ONLY in the per-item files (work/$(PROJECT)/items/{active,done}/<ID>.md);
 # queues, stats and the dependency tree are DERIVED here, never stored-and-hand-synced.
 # Append an edge-checked event (the ONLY way to change item state; rejects illegal transitions):
-# make wi-append PROJECT=P ID=UC-1 EVENT=made_ready AGENT=flow-manager [REF=<sha>] [NOTE="..."]
+# make wi-append PROJECT=P ID=UC-1 EVENT=made_ready AGENT=flow-manager [REF=<sha>] [NOTE="..."] [TOKENS=<n>]
+# TOKENS = subagent_tokens the dispatched specialist spent producing this transition (optional).
 wi-append:
 	$(WORKITEMS) append --project $(PROJECT) --id $(ID) --event $(EVENT) --agent $(AGENT) \
-	  $(if $(REF),--ref "$(REF)",) $(if $(NOTE),--note "$(NOTE)",)
+	  $(if $(REF),--ref "$(REF)",) $(if $(NOTE),--note "$(NOTE)",) $(if $(TOKENS),--tokens "$(TOKENS)",)
 # Recompute ALL views (queues + stats + tree + re-render each item's derived block). Run after each loop.
 # make wi-project PROJECT=OagEventSource
 wi-project:
@@ -177,32 +150,30 @@ wi-validate:
 wi-migrate:
 	$(WORKITEMS) migrate --project $(PROJECT)
 
-# --- Validation & smoke (run + record in one step) ----------------------------
-# make validate ITER=5 SLICE=004-create-game [PROD_URL=https://…] [AWS_PROFILE=dev-int]
+# --- Process-doc conformance gate (process §27.5) -----------------------------
+# Scans the LIVE process/agent/skill/root docs for a DENYLIST of RETIRED
+# QueueApproach mechanics (dora record, queues/*.csv, state.md store, blocks.csv,
+# reconcile-registry, ledger-drift, sync-linear.py, dora.py flow/compute,
+# project-state, item_done). Exits non-zero listing file:line for each hit, else
+# prints clean. Cross-project (scans the whole repo), no PROJECT needed. Uses the
+# same python the dora launcher resolves (the PY pattern). A line may carry an
+# inline <!-- doc-lint:allow --> escape for a legit archive/historical mention.
+#   make doc-lint
+doc-lint:
+	$(PY) .claude/skills/work-items/scripts/doc-lint.py
+
+# --- Validation & smoke --------------------------------------------------------
+# The validation event now rides on the work-item via `make wi-append` (tester's
+# job), NOT a DORA ledger row — these targets just RUN the suite (v82).
+# make validate [PROD_URL=https://…] [AWS_PROFILE=dev-int]
 # PROD_URL and AWS_PROFILE are forwarded to the playwright test runner when set.
 validate:
-	$(if $(PROD_URL),PROD_URL=$(PROD_URL) ,)$(if $(AWS_PROFILE),AWS_PROFILE=$(AWS_PROFILE) ,)npm --prefix $(APP) run test:validation && \
-	$(DORA) record --project $(PROJECT) --iteration $(ITER) --slice $(SLICE) \
-	  --agent tester --event validation_run \
-	  --ref "$$(git rev-parse --short HEAD):validation" --outcome success \
-	  --note "tests/validation green via make validate" || \
-	( $(DORA) record --project $(PROJECT) --iteration $(ITER) --slice $(SLICE) \
-	  --agent tester --event validation_run \
-	  --ref "$$(git rev-parse --short HEAD):validation" --outcome fail \
-	  --note "tests/validation FAILED via make validate" ; exit 1 )
+	$(if $(PROD_URL),PROD_URL=$(PROD_URL) ,)$(if $(AWS_PROFILE),AWS_PROFILE=$(AWS_PROFILE) ,)npm --prefix $(APP) run test:validation
 
-# make smoke ITER=5 SLICE=004-create-game [PROD_URL=https://…]
+# make smoke [PROD_URL=https://…]
 # PROD_URL is forwarded to the playwright test runner when set.
 smoke:
-	$(if $(PROD_URL),PROD_URL=$(PROD_URL) ,)npm --prefix $(APP) run test:smoke && \
-	$(DORA) record --project $(PROJECT) --iteration $(ITER) --slice $(SLICE) \
-	  --agent tester --event validation_run \
-	  --ref "$$(git rev-parse --short HEAD):smoke" --outcome success \
-	  --note "tests/smoke green via make smoke" || \
-	( $(DORA) record --project $(PROJECT) --iteration $(ITER) --slice $(SLICE) \
-	  --agent tester --event validation_run \
-	  --ref "$$(git rev-parse --short HEAD):smoke" --outcome fail \
-	  --note "tests/smoke FAILED via make smoke" ; exit 1 )
+	$(if $(PROD_URL),PROD_URL=$(PROD_URL) ,)npm --prefix $(APP) run test:smoke
 
 # --- WAF walking-skeleton probe (s005-h1-waf Step 9) --------------------------
 # Drives the deployed CloudFront global WAFv2 ACL: HTTP burst past the rate-rule
@@ -238,15 +209,7 @@ waf-sustained:
 #   API_BASE=https://d3pf3kcvzpau1x.cloudfront.net \
 #   WS_URL=wss://ylbzjuo8lf.execute-api.eu-west-2.amazonaws.com/prod
 ws-skeleton:
-	node work/$(PROJECT)/scripts/ws-skeleton-probe.js --api-base $(API_BASE) --ws-url $(WS_URL) && \
-	$(DORA) record --project $(PROJECT) --iteration $(ITER) --slice $(SLICE) \
-	  --agent engineer --event validation_run \
-	  --ref "$$(git rev-parse --short HEAD):ws-skeleton" --outcome success \
-	  --note "T6 WS \$$connect authorizer probe green (4/4 paths) via make ws-skeleton" || \
-	( $(DORA) record --project $(PROJECT) --iteration $(ITER) --slice $(SLICE) \
-	  --agent engineer --event validation_run \
-	  --ref "$$(git rev-parse --short HEAD):ws-skeleton" --outcome fail \
-	  --note "T6 WS \$$connect authorizer probe FAILED via make ws-skeleton" ; exit 1 )
+	node work/$(PROJECT)/scripts/ws-skeleton-probe.js --api-base $(API_BASE) --ws-url $(WS_URL)
 
 # --- App / infra test entry points --------------------------------------------
 test-app:
@@ -271,19 +234,7 @@ lint-app:
 # same vitest integration config as test-rest-integration. Requires network access.
 #   make test-dash0-integration [ITER=1] [SLICE=012-schedule-ingestion]
 test-dash0-integration:
-	npm --prefix $(APP) run test:integration -- --reporter=verbose tests/integration/dash0-e76-funnel.integration.test.ts && \
-	$(DORA) record --project $(PROJECT) --iteration $(if $(ITER),$(ITER),1) \
-	  --slice $(if $(SLICE),$(SLICE),012-schedule-ingestion) \
-	  --agent tester --event validation_run \
-	  --ref "$$(git -C work/$(PROJECT) rev-parse --short HEAD):dash0-e76-funnel.integration.test.ts" \
-	  --outcome success --item-id UC-S7 \
-	  --note "AC-S7.2 Dash0 E-76 funnel ratio probe green via make test-dash0-integration" || \
-	( $(DORA) record --project $(PROJECT) --iteration $(if $(ITER),$(ITER),1) \
-	  --slice $(if $(SLICE),$(SLICE),012-schedule-ingestion) \
-	  --agent tester --event validation_run \
-	  --ref "$$(git -C work/$(PROJECT) rev-parse --short HEAD):dash0-e76-funnel.integration.test.ts" \
-	  --outcome fail --item-id UC-S7 \
-	  --note "AC-S7.2 Dash0 E-76 funnel ratio probe FAILED via make test-dash0-integration" ; exit 1 )
+	npm --prefix $(APP) run test:integration -- --reporter=verbose tests/integration/dash0-e76-funnel.integration.test.ts
 
 # --- FIDS demo SPA (slice-010) self-service entry points -----------------------
 # The FIDS SPA is a SEPARATE browser package (React+TS+Vitest/jsdom) at
@@ -439,15 +390,7 @@ smoke-ci:
 validate-impacted:
 	$(if $(PROD_URL),PROD_URL=$(PROD_URL) ,)node work/$(PROJECT)/scripts/validate-impacted.js \
 	  --since $(SINCE) --project $(PROJECT) \
-	  $(if $(PROD_URL),--prod-url $(PROD_URL),) && \
-	$(DORA) record --project $(PROJECT) --iteration $(ITER) --slice $(SLICE) \
-	  --agent tester --event validation_run \
-	  --ref "$$(git rev-parse --short HEAD):validate-impacted" --outcome success \
-	  --note "impacted+core smoke green (SINCE=$(SINCE)) via make validate-impacted" || \
-	( $(DORA) record --project $(PROJECT) --iteration $(ITER) --slice $(SLICE) \
-	  --agent tester --event validation_run \
-	  --ref "$$(git rev-parse --short HEAD):validate-impacted" --outcome fail \
-	  --note "impacted+core smoke FAILED (SINCE=$(SINCE)) via make validate-impacted" ; exit 1 )
+	  $(if $(PROD_URL),--prod-url $(PROD_URL),)
 
 # validate-impacted-ci: runner-IP exemption + validate-impacted + always remove.
 # Mirrors smoke-ci for the impacted+core fast path. Use in CI / when the runner
@@ -522,15 +465,7 @@ board-stream-skeleton:
 	node work/$(PROJECT)/scripts/board-stream-skeleton.js \
 	  --games-table $(GAMES_TABLE) --leaderboard-table $(LEADERBOARD_TABLE) \
 	  --board-fn-log-group $(BOARD_FN_LOG_GROUP) \
-	  $(if $(AWS_PROFILE),--profile $(AWS_PROFILE),) && \
-	$(DORA) record --project $(PROJECT) --iteration $(ITER) --slice $(SLICE) \
-	  --agent engineer --event validation_run \
-	  --ref "$$(git rev-parse --short HEAD):board-stream-skeleton" --outcome success \
-	  --note "§30 DynamoDB Stream skeleton Probe A+B green vs prod (T-LB-10)" || \
-	( $(DORA) record --project $(PROJECT) --iteration $(ITER) --slice $(SLICE) \
-	  --agent engineer --event validation_run \
-	  --ref "$$(git rev-parse --short HEAD):board-stream-skeleton" --outcome fail \
-	  --note "§30 DynamoDB Stream skeleton FAILED vs prod (T-LB-10)" ; exit 1 )
+	  $(if $(AWS_PROFILE),--profile $(AWS_PROFILE),)
 
 # --- Observatory validation entrypoints (CHK-2) --------------------------------
 # test-observatory: single Vitest suite covering domain (server/__tests__) +
@@ -566,7 +501,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: sso-login dora-record dora-compute retro-debt ledger-drift reconcile-registry wi-append wi-project wi-validate wi-migrate validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3
+.PHONY: sso-login retro-debt retro-mark wi-append wi-project wi-validate wi-migrate doc-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3
 
 # --- Viggo-fix UC-W7: Country/Nationality ID remediation (T-SQL) --------------
 # Data-driven, self-building T-SQL remediation script set + its local stand-up
@@ -589,15 +524,13 @@ viggo-remed-analyse:
 	  -v MapDtoDEU=1 -v JunkCodes=CPH|TLD|ZZZ|YYY \
 	  -i work/Viggo-fix/tools/remediation/sql/analyse.sql
 
-# make dora-flow PROJECT=oxo-online  -> rewrites work/<project>/dora/flow.md
-# (per-project queues + time thieves + parallelism efficiency). v40 pull-flow view.
-.PHONY: dora-flow flow-status
-dora-flow:
-	$(DORA) flow --project $(PROJECT)
-
-# make flow-status PROJECT=oxo-online  -> refresh + print the flow view and queue depths
+# make flow-status PROJECT=oxo-online  -> recompute the DERIVED views (v82) and
+# print the queues + stats. State/queues/metrics are folded from item events by
+# `work-items project`; there is no dora.py flow view or queues/*.csv to count.
+.PHONY: flow-status
 flow-status:
-	$(DORA) flow --project $(PROJECT)
-	@echo '--- queues (depth = rows) ---'
-	@for q in intake ready deploy rework; do n=$$(($$(wc -l < work/$(PROJECT)/queues/$$q.csv 2>/dev/null || echo 1)-1)); echo "$$q: $$n"; done
-	@cat work/$(PROJECT)/dora/flow.md
+	$(WORKITEMS) project --project $(PROJECT)
+	@echo '--- queues ---'
+	@cat work/$(PROJECT)/views/queues.md
+	@echo '--- stats ---'
+	@cat work/$(PROJECT)/views/stats.md

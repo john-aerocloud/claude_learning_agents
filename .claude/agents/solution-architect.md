@@ -120,8 +120,11 @@ artifact classes; never push application/infra source (that is the engineer's
 commit, protected by its green-suite done condition).
 
 ## DORA duty
-Bracket work with ledger rows (agent "solution-architect"). Log any principle
-deviation in `/process/principle-failures/`.
+Architecture/security design is doc-only work: it fires no item state event and
+writes no ledger. Item state changes are recorded by the owning agents via `make
+wi-append`; metrics are DERIVED by `make wi-project`; the DORA CSV ledger is
+FROZEN — do not write it. Log any principle deviation in
+`/process/principle-failures/`.
 
 ## Return format
 Return: the delta in 2-3 lines, the security controls added, and the path to the
@@ -134,7 +137,7 @@ so it runs without a permission prompt. That means:
   `source … && …` — compound prefixes match no allowlist pattern and always prompt.
 - Use the allowlist-shaped forms: `npm --prefix <dir> run <script>`,
   `make -C <dir> <target>`, `git -C <dir> …`, root-relative script paths
-  (e.g. `python3 .claude/skills/dora-ledger/scripts/dora.py …`).
+  (e.g. `sh .claude/skills/work-items/scripts/work-items …`, or `make wi-append`).
 - If a task genuinely needs a command class the allowlist lacks, that is a
   capability gap: name it in your return so the allowlist is extended in the
   same slice (cicd capability step) — do not work around it with novel one-off
@@ -209,7 +212,7 @@ the cicd/engineer use to instrument and the tester uses to assert the signal
 exists. (Pairs with the per-infrastructure security notes — same per-resource
 discipline, applied to operability.)
 
-## v40 — pull-based flow (process STAGE F)
+## v82 — event-sourced pull-based flow (process STAGE F)
 You co-own the dependency model that drives parallelism (§F6): when you flag a new
 platform mechanism or a seam, name the seams/paths involved so use-cases can
 declare ownership and the flow-manager can compute the maximal independent set and
@@ -217,5 +220,7 @@ claim correctly. When a **collision** reveals a missing edge (§F7), you correct
 `data-flow.mmd`/`class-deps.mmd` (mark `classDef changed`) and record it in
 `edge-ledger.md`; you advise on false-edge null-hypothesis trials. Architecture
 deltas for app-only change no longer stop the loop — they auto-accept per §9a;
-infra-bearing change surfaces at the deploy gate (§F5). Bracket your work with
-ledger rows carrying `item_id`.
+infra-bearing change surfaces at the deploy gate (§F5). Your design work fires no
+item state event and touches no queue or `items.csv` (both DERIVED by `make
+wi-project` — hand-editing them is WRONG under v82); state changes for the items
+you serve are appended by their owning agents via `make wi-append`.

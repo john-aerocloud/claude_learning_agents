@@ -21,8 +21,8 @@ of agent behaviour.
    - **TOOLING** — describes a mechanical procedure better held by a Makefile
      target, skill, or command doc. Must move to that artifact's own docs.
    - **SCORED / HISTORICAL** — anticipated-vs-observed already settled, or
-     narrative of how a rule came to be. Belongs only in `process-history/`;
-     keep at most the live rule, not its origin story.
+     narrative of how a rule came to be. Belongs in the retro record / the
+     `process-v<NN>` git tag; keep at most the live rule, not its origin story.
    - **PROJECT-SPECIFIC** — names a project or its resources. RULE VIOLATION:
      generalise it or move the specifics to `/work/<project>/`.
 
@@ -42,9 +42,9 @@ of agent behaviour.
    change-set items must survive the refactor (carry them into the change-set
    queue section); scoring debts are never silently dropped.
 
-6. **Version it.** Snapshot the old file to
-   `process-history/vNN-<date>.md` with a retirement note containing the full
-   routing table (rule → new home). Bump `process_version`. The refactor
+6. **Version it.** Create an annotated git tag `process-v<NN>` marking the old
+   state (snapshots are git tags, not files — process §27.2), with a retirement
+   note containing the full routing table (rule → new home). Bump `process_version`. The refactor
    changes WHERE rules live, never WHAT they require — flag (don't make) any
    substantive change you think is also needed.
 
@@ -54,8 +54,7 @@ of agent behaviour.
    `git diff --stat` confirms agent files absorbed what the process file shed.
 
 8. **Commit** process file + history + agent files together; log a `process`
-   row in the decision log of the active project and a ledger `gate` row
-   (ref PROCESS-REFACTOR-vNN).
+   row in the decision log of the active project (ref PROCESS-REFACTOR-vNN).
 
 Report: the routing table (rule → destination), before/after line counts, the
 new section map, and any substantive issues flagged for the next retro.

@@ -110,8 +110,10 @@ promotion — this is an ISO traceability capability, not an afterthought:
   a hosted/.NET app's assembly/build version + a `Version`/`GitSha` deployment tag;
   a container image tag. An operator inspecting any prod resource must be able to
   answer "what version/commit is this?".
-- **Emit the version + SHA on the `deploy` DORA row** (§18a) so the ledger carries
-  release identity.
+- **Carry the version + SHA on the deploy events** — the release identity rides on
+  YOUR `deployed` (dev) and `promoted` (prod) events' `--ref <sha>`/`--note <version>`
+  (§18a); prod-resource tagging rides `promoted`. The derived stats read it from there.
+  Never a DORA CSV row.
 - **Version scheme is per-project policy** (declared in `capabilities.md` / the
   project's versioning ADR): SemVer for APIs (e.g. eDCS), CalVer for desktop apps,
   a release counter internally. **Default SemVer until the ADR lands — do NOT hardcode
@@ -338,10 +340,14 @@ runbook lists every manual step that is not yet automated so the gap is visible.
    failure is roll-forward, but rollback must always be possible.
 
 ## DORA duty
-You own much of deploy frequency, change failure rate and MTTR. Ensure the
-pipeline emits deploy/failure/recovery signals into `/process/dora/ledger.csv`
-(hook the dora-ledger skill into pipeline steps). Bracket your own work with
-task rows (agent "cicd").
+You own much of deploy frequency, change failure rate and MTTR — but these are now
+DERIVED, not emitted to a CSV. They are computed by `make wi-project` from the
+affected items' event timestamps (a deploy rides the engineer's `built_green`
+done-condition; a pipeline break you own is a `build_failed` event; recovery is
+the subsequent `retried`/`built_green`). Your own state events go via `make
+wi-append` (e.g. `build_failed` when the pipeline reds a UC you own). **The DORA
+CSV ledger (`/process/dora/ledger.csv`) is FROZEN — do not write it and do not
+hook the dora-ledger skill into pipeline steps.**
 
 ## Return format
 Return: environments now in play and why, the deploy path, rollback assets
@@ -354,7 +360,7 @@ so it runs without a permission prompt. That means:
   `source … && …` — compound prefixes match no allowlist pattern and always prompt.
 - Use the allowlist-shaped forms: `npm --prefix <dir> run <script>`,
   `make -C <dir> <target>`, `git -C <dir> …`, root-relative script paths
-  (e.g. `python3 .claude/skills/dora-ledger/scripts/dora.py …`).
+  (e.g. `sh .claude/skills/work-items/scripts/work-items …`, or `make wi-append`).
 - If a task genuinely needs a command class the allowlist lacks, that is a
   capability gap: name it in your return so the allowlist is extended in the
   same slice (cicd capability step) — do not work around it with novel one-off
@@ -405,12 +411,42 @@ BEFORE the first push of code that triggers the pipeline needing them — not in
 a later "deploy phase". When a build phase will push pipeline-triggering paths,
 its prerequisites are part of the capability step.
 
-## v40 — pull-based flow (process STAGE F)
+## Deploy to DEV, then to PROD — two deploys, both unattended (v82, state-graphs)
+The per-UC state path validates in DEV before prod and is UNATTENDED end-to-end (no
+human touch after intake — dev-AC-green is an automated promotion assurance, §F5a):
+`building --built_green(engineer)--> deploying(deploy-to-dev) --deployed(cicd)-->
+dev-validating --dev_validated(tester)--> prod-deploying --promoted(cicd)-->
+prod-validating --validated(tester)--> done`. You own BOTH deploys:
+- **deploy-to-dev — fire `deployed`.** After the engineer's `built_green`, deploy the
+  UC to DEV; once the dev deploy lands green append
+  `make wi-append ID=<uc> EVENT=deployed AGENT=cicd` (optionally `REF=<sha>`
+  `NOTE="<version>"` for release identity, §18a; record `TOKENS=<n>` — your reported
+  subagent_tokens — so the cost-split is computed from event tokens). This is the ONLY
+  way the item leaves `deploying`.
+- **deploy-to-prod — fire `promoted`.** The tester's `dev_validated` (dev AC green) is
+  the automated promotion assurance and AUTOMATICALLY triggers the prod deploy — no
+  human approves it (exactly like §F5a's infra auto-approve). Deploy the UC to PROD and
+  append `make wi-append ID=<uc> EVENT=promoted AGENT=cicd REF=<prod sha> NOTE="<version>"`
+  (§18a prod-tagging rides this event). This is the ONLY way the item leaves
+  `prod-deploying`.
+Both appends are edge-checked, so a deploy that did not land cannot advance the item,
+and a UC cannot reach prod without dev AC green. **Dev-first is the DEFAULT**;
+**straight-to-prod is ONLY the explicit local-only exception (§8)** — on a local-only
+project the dev surface IS the running surface, so there is a single deploy and the
+tester validates from `dev-validating` directly (no separate prod deploy). Honour the
+"dev-first, acceptance before prod" principle: never deploy a UC straight to prod on a
+cloud/hosted project.
+
+## v82 — event-sourced pull-based flow (process STAGE F)
 Capability work happens on PULL (when a use-case needs an environment, pipeline,
 flag, or allowlist entry it doesn't have) — nothing ahead of need, exactly as
-before, now triggered inside `/loop-run`. You **own `deploy.wip_limit`** in
-`queues/policy.csv`: it equals the pipeline's concurrency group, so same-pipeline
-deploys serialise by construction (§11a) — raise it only with §F7 evidence that
-the deploys are genuinely independent. Bracket your work with `stage_enter`/
-`stage_exit` rows and record `item_id`. New make targets / allowlist entries you
-add follow the §15/§16 contract (you own `.claude/settings.json`).
+before, now triggered inside `/loop-run`. **State lives ONLY in the item file;
+state = fold(events).** Same-pipeline deploys serialise by construction because
+the pipeline's concurrency group is the real constraint — enforce it in the
+workflow's `concurrency:` group, NOT via a hand-maintained `deploy.wip_limit` in a
+`queues/policy.csv` (queues and WIP are DERIVED by `make wi-project`, not stored;
+there is no policy csv to own and hand-editing a queue is WRONG under v82). Record
+any state event you fire via `make wi-append` (e.g. `build_failed` on a pipeline
+red) keyed on the WORK-ITEM id — there are NO `stage_enter`/`stage_exit` rows. New
+make targets / allowlist entries you add follow the §15/§16 contract (you own
+`.claude/settings.json`).

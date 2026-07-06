@@ -23,17 +23,29 @@ parents: [SLC-032]        # UPWARD edges only: hierarchical container(s). REQUIR
 deps: [UC-C0]             # peer prerequisites (DAG edges the pull uses for the independent set). may be empty.
 created_ts: 2026-06-17T21:30:00Z
 events:                   # append-only. state = fold(events) through the type graph. NEVER store a `state:` field.
+                          # each event MAY carry an OPTIONAL `tokens: <int>` — the subagent_tokens the
+                          # dispatched specialist spent producing that transition. Absent ⇒ unknown/0
+                          # (parsing is tolerant). Feeds the plumbing-vs-delivery cost-split in stats.
   - {ts: 2026-06-17T21:30:00Z, event: registered, agent: flow-manager}
   - {ts: 2026-06-18T09:00:00Z, event: made_ready, agent: flow-manager, note: "vc=6.0"}
   - {ts: 2026-06-18T12:00:00Z, event: pulled,      agent: orchestrator}
-  - {ts: 2026-06-18T15:30:00Z, event: built_green, agent: engineer, ref: <sha>}
-  - {ts: 2026-06-18T16:10:00Z, event: validated,   agent: tester,   ref: <sha>}
+  - {ts: 2026-06-18T15:30:00Z, event: built_green, agent: engineer, ref: <sha>, tokens: 48000}
+  - {ts: 2026-06-18T15:45:00Z, event: deployed,    agent: cicd}          # deploy-to-dev
+  - {ts: 2026-06-18T16:10:00Z, event: validated,   agent: tester, ref: <sha>, tokens: 12000}  # local-only: dev==prod
 # --- everything below this line is DERIVED (rendered by the machinery). do not hand-edit. ---
 derived:
   state: done
   queue: null
   children: [ ]           # computed: items whose `parents` include this id
   ancestors: [SLC-032, CHK-4, REQ-OAGEVENTSOURCE]
+  metrics:                # per-item DORA/flow, RENDERED per item (flow items only; pure fn of events)
+    gross_lead_time_s: 2400.0        # genesis (registered) -> terminal event
+    cycle_time_s: 2400.0             # pulled -> done (delivery clock)
+    time_in_state: {registered: 5400.0, ready: 10800.0, building: 12600.0, deploying: 900.0, dev-validating: 1500.0}
+    time_by_owner: {queue: 16200.0, engineer: 12600.0, tester: 1500.0, cicd: 900.0}
+    rework_count: 0
+    recovery: {n: 0, mttr_median_s: null, mttr_mean_s: null}
+    tokens: {total: 60000, plumbing: 0, delivery: 60000}
 ---
 
 ## Definition
@@ -67,10 +79,25 @@ There is no other way to change item state. No hand-editing of `derived:`; no se
   `queue_map[state]`. This is the queue generation, derived; no `queues/*.csv` stored state.
 - `work/<p>/views/state.md` — every item's current folded state (replaces the old hand-run cache).
 - `work/<p>/views/tree.md` — the dependency tree (parents/children/deps), derived.
-- `work/<p>/views/stats.json` + `.md` — DORA + flow from event timestamps: throughput, lead time
-  (registered→done), cycle time (pulled→done), MTTR (defect reported→resolved), WIP, rework rate.
+- `work/<p>/views/stats.json` + `.md` — DORA + flow from event timestamps. Reports:
+  - the **4 DORA metrics**: throughput (deploy frequency), lead time (registered→done),
+    change-failure rate, MTTR (defect reported→resolved); plus WIP.
+  - **(a) gross-lead-time decomposition** — `by_state` and `by_owner`: time attributed to
+    agent-work vs `queue` wait-latency vs `external` blocked, so the largest time thief is named.
+  - **(b) quality** — failure / rework rate **by stage** (which stage red-flags most).
+  - **(c) recovery** — **MTTR by failure class** (deploy failure vs prod defect vs collision).
+  - **(d) token cost** — `token_cost`: total, `by_owner` (event `tokens` folded through the event's
+    agent), and the **plumbing-vs-delivery split** (running-the-OS vs customer-value; classification
+    ported from dora.py cost-split, EXP-067). Computed from each event's optional `tokens`.
   Aggregate (slice/chunk/requirement) state bubbles from children per the graph `bubble` rule.
-- Re-renders each active item's `derived:` block (state, queue, children, ancestors).
+- Re-renders each active item's `derived:` block (state, queue, children, ancestors, **metrics**).
+- **(e) per-item metrics** — ALL the flow/DORA quantities are ALSO trackable for one item, not
+  just in aggregate. `project` renders a `metrics:` sub-block into every FLOW item's `derived:`
+  (gross lead time genesis→terminal, time-in-each-state, cycle time pulled→done, rework count,
+  recoveries + MTTR, token total + plumbing/delivery split). It is a pure re-composition of the
+  same helpers the aggregate stats use (`per_item_metrics`), so a single item's numbers are
+  definitionally consistent with the roll-up. `work-items project --project <p> --item <ID>`
+  prints one item's metrics to stdout (no view re-render) for a focused read.
 
 `work-items validate --project <p>` — the drift GATE, now by construction not after-the-fact.
 Exits non-zero if ANY invariant is violated:

@@ -1,26 +1,36 @@
-# Version 2 design — pull-based delivery system
+# Version 2 design — the delivery model
 
-**Status: IMPLEMENTED (2026-06-08) as process v40.** These docs are the rationale
-of record; the live system now embodies them — `process/process-current.md`
-**STAGE F**, `.claude/agents/flow-manager.md`, the `/intake` `/loop-run`
-`/flow-status` commands, the extended `dora.py` (+ `flow`), and per-project
-`items/`+`queues/` scaffolding (oxo-online & ox backfilled). Every change is a
-registered experiment (`process/experiments.md`, EXP-020…EXP-029) to be scored at
-future retros. `00-pull-system-design.md §12` was the implementation map.
+**Status: event-sourced work items are the model of record (process v82, full
+cutover 2026-07-06).** The single source of truth is the work item: state is
+`fold(events)` over a per-item append-only log, and queues / board / DORA /
+dependency tree are all *derived* views. The live system embodies this —
+`process/machinery/CONTRACT.md` (build contract) + `state-graphs.json` (the type
+graphs), `.claude/skills/work-items/`, the `make wi-append` / `wi-project` /
+`wi-validate` targets, the `linear` + `jira` projection agents, and per-project
+`items/{active,done}/` + `views/` scaffolding.
 
-- [`00-pull-system-design.md`](00-pull-system-design.md) — the design: work-item
-  model (parent/child + per-item DORA), queues + buffer, the pull loop,
-  replenishment, time thieves, the two-gate model, the new flow-manager agent,
-  **parallel dev loops by independence + the collision/dependency-tree learning
-  loop (§13)**, and the implementation map.
-- [`01-diagrams.md`](01-diagrams.md) — loops, gates, and queues (mermaid):
-  hierarchy, full flow, use-case state machine, time-thief view.
-- [`02-example-retro.md`](02-example-retro.md) — a worked retro that finds a
-  queue bottleneck and fixes it with a registered experiment.
+- [`04-work-item-state-model.md`](04-work-item-state-model.md) — **the model of
+  record.** Diagnoses the state-drift defect class, then defines the event-sourced
+  item model: the item as SSOT, `state = fold(events)` through per-type graphs,
+  edge-checked writes, one-directional edges, and every other view as a pure
+  projection. Read this first; the build contract that implements it is
+  `process/machinery/CONTRACT.md`.
 
-Decisions taken at kickoff: structured ledger + rendered views; intake + deploy
-gates only; a dedicated flow-manager agent; design-first (this folder), then
-implement on approval. Cost of Delay is deferred to a later iteration (the model
-is built CoD-ready).
+## Archived — QueueApproach design history
 
-The prior system is preserved verbatim under `../Version1/`.
+The prior **QueueApproach** (multi-queue, pull-based, DORA-CSV-ledger) design is
+superseded by `04` and preserved for history under [`archive/`](archive/) and at
+git tag `QueueApproach`:
+
+- [`archive/00-pull-system-design.md`](archive/00-pull-system-design.md) — the
+  QueueApproach design: parent/child work-item model, queues + buffers, the pull
+  loop, replenishment, time thieves, the two-gate model, parallel loops by
+  independence + collision/dependency-tree learning.
+- [`archive/01-diagrams.md`](archive/01-diagrams.md) — the QueueApproach loops,
+  gates and queue diagrams (mermaid).
+- [`archive/02-example-retro.md`](archive/02-example-retro.md) — a worked
+  QueueApproach retro that finds a queue bottleneck and fixes it.
+- [`archive/03-process-loops.md`](archive/03-process-loops.md) — how the
+  QueueApproach loops and the retro hang together.
+
+The prior (Version 1) system is preserved verbatim under `../Version1/`.

@@ -14,17 +14,17 @@ copy from it to Linear and never the other way.
 - `work/<project>/items/active/<ID>.md` (or `items/done/<ID>.md`) — the item file. Its
   frontmatter `derived:` block already holds the folded `state`, `queue`, `children`, and
   `ancestors`; its `events:` list holds the timestamped history; its body holds the definition.
-- `work/<project>/scripts/sync-linear.py` + `work/<project>/secrets/` — the project's Linear
-  binding (API key, team/project ids, id→issue mapping). If a project has no Linear binding,
-  do nothing and say so — Linear is optional per project.
+- `work/<project>/secrets/` — the project's Linear binding (API key, team/project ids,
+  id→issue mapping, per `process/linear-mapping.md`). If a project has no Linear binding, do
+  nothing and say so — Linear is optional per project.
 
 You do NOT read queues, the ledger, or other items. One item in, one issue out.
 
 ## What you do
 1. Read the item file for `--id <ID>` (the item whose events just changed).
-2. Upsert its Linear issue via the project binding
-   (`python3 work/<project>/scripts/sync-linear.py --item <ID> --live`, which now reads the
-   new item files), mapping:
+2. Upsert its Linear issue via the project's Linear binding (the board adapter reads the item
+   file and applies these mappings idempotently — find the issue by the id→issue map, create if
+   absent else edit), mapping:
    - item `derived.state` → Linear status (per `process/linear-mapping.md`).
    - `title` / body Definition → issue title / description.
    - `parents` → Linear parent/relation; `derived.children` → sub-issue relations.

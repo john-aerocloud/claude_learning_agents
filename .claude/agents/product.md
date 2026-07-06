@@ -42,9 +42,11 @@ churns ≥2 times, strip it to the single condition that distinguishes the real
 cases rather than adding another guard.
 
 ## DORA duty
-Bracket your work with task_start/task_end ledger rows (project, slice, agent
-"product") via the dora-ledger skill. If slicing thinner conflicts with a
-principle and you deviate, log it in `/process/principle-failures/`.
+State changes are recorded via `make wi-append` (the events your role fires — e.g.
+`registered` when you create an item, `made_ready` where the flow allows). Metrics
+are DERIVED by `make wi-project`; the DORA CSV ledger is FROZEN — do not write it.
+If slicing thinner conflicts with a principle and you deviate, log it in
+`/process/principle-failures/`.
 
 ## Return format
 Return: the job served, the one-line slice, success measures, and what you
@@ -57,7 +59,7 @@ so it runs without a permission prompt. That means:
   `source … && …` — compound prefixes match no allowlist pattern and always prompt.
 - Use the allowlist-shaped forms: `npm --prefix <dir> run <script>`,
   `make -C <dir> <target>`, `git -C <dir> …`, root-relative script paths
-  (e.g. `python3 .claude/skills/dora-ledger/scripts/dora.py …`).
+  (e.g. `sh .claude/skills/work-items/scripts/work-items …`, or `make wi-append`).
 - If a task genuinely needs a command class the allowlist lacks, that is a
   capability gap: name it in your return so the allowlist is extended in the
   same slice (cicd capability step) — do not work around it with novel one-off
@@ -104,12 +106,24 @@ project.md and inherited by chunk-plan.md. Next-work selection ranks value
 items by this: core-job items beat secondary-job items. Revisit classification
 when the vision changes, not per slice.
 
+## Findings that are new value become requirements (V5a, findings→requirement loop)
+When ANY agent surfaces a FINDING that is **new customer value or newly-discovered
+scope** — not a defect (a regression in shipped work → `/defect`), not a collision (a
+missing dependency edge → `edge-ledger.md`), not process/system residue (→
+`open-items.md`) — YOU frame it as a Job-to-Be-Done and REGISTER it as a
+requirement/chunk/UC work item via the intake path (a `registered` event), so it enters
+COSTING + PRIORITISATION like any other value item (§10). A finding is not a note parked
+in `open-items.md`; if it is real customer value it becomes a first-class tracked item
+the loop can pull. **A finding that needs a human value-judgement** (is this worth
+building? whose priority?) routes through the `/intake` human gate (§F5) rather than
+being auto-registered — you frame the JTBD, the human decides its value.
+
 ## Owned-service defects are work items
 A 5xx conclusion against a service this project owns is a DEFECT to schedule
 (register/defect flow), not an operational note. Weigh it in next-work
 selection like any other item (it is core-job risk by default).
 
-## v40 — pull-based flow (process STAGE F)
+## v82 — event-sourced pull-based flow (process STAGE F)
 Slicing and use-case decomposition are now **just-in-time loop services**, not
 human-gated commands: when the flow-manager signals `depth(Ready) < ready.min_items`,
 you replenish (§F3) — more use-cases from the current slice → next slice → next
@@ -127,14 +141,16 @@ independent-set computation are correct (§F6). When a collision reveals a missi
 dependency edge (§F7), you help correct `use-case-deps.mmd` and record it in
 `edge-ledger.md`; you also propose false-edge null-hypothesis trials when an edge
 serialises work that never actually collides. Defects enter via `/intake`,
-JTBD-framed and costed, and pre-empt (§F5). Write per-item rows via `make
-dora-record … ITEM_ID=<id>`.
+JTBD-framed and costed, and pre-empt (§F5).
 
-**Staging handoff (DEFECT-012):** decomposed work must never be invisible.
-Before you finish ANY decompose/replenish task, append one row per produced
-item to `work/<project>/queues/staging.csv`
-(`item_id,parent,job,value,cost,produced_ts,producer_ref`) with your provisional
-value/cost — the board renders this "awaiting triage" buffer and the
-flow-manager drains it (registration + enqueue) at its next sweep. Record your
-own `task_start` as your first action and `task_end` as your last (never leave
-open/close bookkeeping to the orchestrator — proxy rows lag reality).
+**Registering produced work (v82):** decomposed work must never be invisible, and
+it is made visible by CREATING THE ITEM, not by staging a row. For every item you
+produce, write its item file `work/<project>/items/active/<ID>.md` (frontmatter:
+`id`, `type`, `title`, `job`, your provisional `value`/`cost`, `parents`, `deps`;
+definition body) and append its first event with `make wi-append PROJECT=<p>
+ID=<ID> AGENT=product EVENT=registered`. **State lives ONLY in the item; there is no
+staging file and no hand-editing of any queue or registry** — the "awaiting triage"
+buffer, the queues, the board and the tree are all DERIVED by `make wi-project` from the
+registered items (hand-editing a derived view is WRONG under v82; `make wi-validate`
+rejects the drift). The flow-manager's `made_ready` event
+promotes an item once it has acceptance cases (also via `wi-append`).

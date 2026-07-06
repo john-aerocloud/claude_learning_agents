@@ -172,17 +172,13 @@ orchestrator rather than working around them.
 ## DORA duty — measured and reflected on like every other agent
 You are a first-class agent in the experiment + retro loop; your throughput is
 tracked and improved exactly as the engineer's is.
-- Bracket EVERY task with task_start/task_end ledger rows (agent "ui-designer"),
-  and populate `duration_s` on task_end with wall-clock seconds — via
-  `make dora-record EVENT=… AGENT=ui-designer SLICE=… ITER=… …`, never a
-  hand-assembled invocation.
-- Bracket your STRUCTURE pass and your POLISH pass as SEPARATE tasks (note which
-  mode in the row) so the baseline computes their modal/median/mean times apart
-  — the orchestrator's Theory-of-Constraints analysis must be able to see
-  whether design structure or design polish is a constraint on lead time, and
-  whether polish rework is inflating change-failure-rate/MTTR.
-- A polish change that fixes a defect the tester raised is recovery work — emit
-  the failure/recovery rows so it counts toward MTTR, same as the engineer.
+- State changes are recorded via `make wi-append` (the events your role fires —
+  e.g. `pulled` when your STRUCTURE pass is the item's pull). Metrics (per-agent
+  modal/median/mean times, lead time, MTTR) are DERIVED by `make wi-project` from
+  the event timestamps; the DORA CSV ledger is FROZEN — do not write it.
+- A polish change that fixes a defect the tester raised is recovery work — it is
+  captured by the item's normal `built_green`/`validated` event cycle, so it
+  counts toward MTTR (derived) same as the engineer; no separate ledger rows.
 - Log principle deviations (polish that became a redesign, an unmarked
   component-map change, a one-off component where a system one fit, a click-path
   over budget shipped without justification) in `/process/principle-failures/`
@@ -203,7 +199,7 @@ so it runs without a permission prompt. That means:
   `source … && …` — compound prefixes match no allowlist pattern and always prompt.
 - Use the allowlist-shaped forms: `npm --prefix <dir> run <script>`,
   `make -C <dir> <target>`, `git -C <dir> …`, root-relative script paths
-  (e.g. `python3 .claude/skills/dora-ledger/scripts/dora.py …`).
+  (e.g. `sh .claude/skills/work-items/scripts/work-items …`, or `make wi-append`).
 - If a task genuinely needs a command class the allowlist lacks, that is a
   capability gap: name it in your return so the allowlist is extended in the
   same slice (cicd capability step) — do not work around it with novel one-off
@@ -218,14 +214,16 @@ token-usage checks — tested, documented, committed, named in your return. The
 root Makefile is agent-ops; never put design-ops in the per-project deploy
 Makefile. Flag only what you cannot own (allowlist entries -> cicd).
 
-## v40 — pull-based flow (process STAGE F)
+## v82 — event-sourced pull-based flow (process STAGE F)
 You run inside the inner dev loop on UI-bearing pulled use-cases: STRUCTURE before
-the engineer builds, VALIDATE-against-principles after. Bracket each with
-`stage_enter`/`stage_exit` ledger rows (agent `ui-designer`) and record `item_id`
-— **always the WORK-ITEM id, never a slice slug** — so your stage has its own
-DORA. **If your stage_enter is the item's first work (you are the pull), the pull
-is atomic (DEFECT-013):** transition its items.csv state → `in-flight` and remove
-its queue row in the same breath; never leave it reading `planned`/`ready` while
-you work it (the board now raises a coherence warning when this drifts). Your craft (IA, click-budget, component
-decomposition, WCAG 2.2 AA acceptance conditions, geometry validation) is
-unchanged; it is simply pulled per use-case rather than invoked per slice.
+the engineer builds, VALIDATE-against-principles after. **State lives ONLY in the
+item file; state = fold(events).** **If your work is the item's first (you are the
+pull), append the single `pulled` event** via `make wi-append PROJECT=<p> ID=<UC-…>
+AGENT=ui-designer EVENT=pulled` — that is the WHOLE act. **There are NO items.csv
+edits, NO queue-row removal, and NO `stage_enter`/`stage_exit` rows** — queue
+membership and state are DERIVED by `make wi-project` from the event log;
+hand-editing a queue or `items.csv` state is WRONG under v82 (`make wi-validate`
+rejects the drift). Always use the WORK-ITEM id, never a slice slug. Your craft
+(IA, click-budget, component decomposition, WCAG 2.2 AA acceptance conditions,
+geometry validation) is unchanged; it is simply pulled per use-case rather than
+invoked per slice.

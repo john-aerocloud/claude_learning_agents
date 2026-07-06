@@ -1,218 +1,92 @@
-# Linear mapping — agent-system work-items → Linear (canonical)
+# Board mapping — work-item → Linear / Jira (canonical)
 
-**Status:** canonical map (generalises and supersedes the inline mapping in
-`process/improvement-slices/IMP-014-linear-plan-progress-board.md`, which mapped
-only the single OagEventSource product into one team).
+**Status:** canonical map, live-referenced by the `linear` **and** `jira`
+projection agents. The same id→object tree and derived-state→status table serves
+both boards; each agent is a pure, idempotent, one-way projection of the item
+file (the SSOT), reading the item and upserting its one board object — never
+writing state back.
 
-**Purpose.** A **one-way state mirror**, agent-system → Linear, that gives humans
-a plan + live-progress board. **No DORA, no estimates, no token cost** — metrics
-stay in the ledger as the SSOT for retros (explicit human decision, IMP-014).
-Linear has no custom fields anyway.
+Under the v82 event-sourced model the board is a **derived view**. An item's
+current state is `fold(events)` through its type's graph
+(`process/machinery/state-graphs.json`); the projection agent reads that folded
+`derived.state` and maps it to a board status. No board write ever changes the
+item — humans read the board; the item file is the only source of truth.
 
 ---
 
-## 1. Teams = projects
+## 1. Hierarchy — the work-item tree
 
-One Linear **team per `work/<project>`**. Excluded by decision: `ox` (oxo),
-`oxo-online`, `observatory`.
+The REQ▸CHK▸SLC▸UC tree maps 1:1 onto the board's four nesting levels.
 
-| `work/` project | Linear team | key |
-|---|---|---|
-| OagEventSource | OagEventSource | `OAG` |
-| viggo-fix | Viggo-Fix | `VIG` |
-| _(future, via `/project-new`)_ | one new team each | — |
-
-**`IMP-*` process-improvement work is NOT on Linear** (no "Agent System" team).
-It is the agent's own self-state — SSOT is `/process` (`improvement-slices/`,
-`experiments.md`, `principle-failures/`, the DORA ledger), deliberately
-project-agnostic (the §F10 shared spine). Linear mirrors human-facing *delivery*
-per project; process improvement is the system improving itself, not delivery,
-and its metrics never go to Linear. If a specific `IMP-*` becomes a substantial
-build, it is handled as work inside a project, not a standing board.
-
-`_TEMPLATE` is scaffolding — not a team.
-
-**Canonical: one Linear team per `work/` project.** `OagEventSource` is its own
-team, `viggo-fix` its own team, etc. Per-project `.linear-config.json` sets that
-project's `teamId`; the reconciler (paths resolve from its own location) builds
-the whole tree in that team.
-
-**Per-project, team-scoped API key.** Each project has its OWN Linear API key,
-scoped to its OWN team, stored in `work/<project>/secrets/linear.local.json`
-(gitignored). A project's key sees only its team — reinforcing the standalone-repo
-isolation (a project can be lifted out with its own key + team). The human creates
-the team + issues the key; the reconciler (config-driven `teamId`) builds into it.
-`teamCreate` itself needs a team-admin key, so team creation is a human UI step,
-not the reconciler's job.
-
-Current state: **OagEventSource → team `OAG`** (own key); **viggo-fix → team
-`VIG`** (own key). No initiatives, no shared team. To onboard a new project:
-human creates its team + key → drop the key in its `secrets/` → set
-`.linear-config.json` `teamId` → run `--live`.
-
-## 2. Hierarchy — the work-item tree (`items/items.csv`)
-
-The REQ▸CHK▸SLC▸UC tree maps 1:1 onto Linear's four nesting levels.
-
-| Framework | id prefix | Linear object | Notes |
+| Framework | id prefix | Board object | Notes |
 |---|---|---|---|
-| **requirement** | `REQ-` | **the Team itself** | 1 requirement per project = 1 team; the team name/description IS the product. No separate object. |
-| **chunk** | `CHK-` | **Project** | groups slices; lives in the project's team |
-| **slice** | `SLC-` | **Milestone** | the shippable value unit, inside its chunk-Project |
+| **requirement** | `REQ-` | **the Team itself** (Linear) / project container (Jira) | 1 requirement per project; the team/container name IS the product. No separate object. |
+| **chunk** | `CHK-` | **Project** (Linear) / epic (Jira) | groups slices; lives in the requirement's team |
+| **slice** | `SLC-` | **Milestone** (Linear) / version-or-epic (Jira) | the shippable value unit, inside its chunk |
 | **use-case** | `UC-` | **Issue** | the atomic deliverable; the unit of pull |
+| **defect** | `DEFECT-` | **sub-issue of the UC it is against** | defect-as-spec: it hangs off its parent UC (label `defect`) |
+| **open-item** | `OI-` | sub-issue of its UC, or an Issue at slice/chunk level | scope decides the attach level (label `open-item`) |
 
-**No Initiatives.** A Linear Initiative is a **cross-team / multi-project
-portfolio** grouping — the wrong construct here: each requirement is one
-self-contained project = one team, with nothing above it to group. We have no
-work that spans teams, so an initiative-per-project would misuse the construct
-(a portfolio of one). If a genuine cross-project programme ever exists, an
-Initiative grouping those teams' projects is the right place for it — not before.
+`IMP-*` process-improvement work is the agent's own self-state (SSOT is
+`/process`) and is **NOT mirrored to any board**.
 
-**Titling rule for composite-id chunks.** Some chunks carry a composite id from
-JIT replenishment (`CHK-5-SLC-024`, `CHK-9-SLC-026`, …) rather than a clean
-`CHK-N`. The sync keys on the raw `id` (so each is still its own Project, no
-dupes) but **titles the Project by the chunk's slice outcome, not the raw id** —
-e.g. `CHK-5-SLC-024` → "Master-data live adapter", read from `chunks.md` /
-`dora_ref`. Clean `CHK-N` ids keep their `CHK-N · <name>` title.
+Titles carry the human title from the item's definition body plus the canonical
+id (e.g. `UC-C1 · Fold carrier codeshares`) so a human can find the item and the
+projection stays idempotent (id → board-object cache, upsert in place, no dupes).
 
-```
-Team: OagEventSource                    (REQ — the team is the product)
-  Project:  CHK-3 Normalise             (CHK)
-    Milestone: SLC-008                  (SLC)
-      Issue:   UC-EB5   [In Progress]   (UC)
-        └─ sub-issue: DEFECT-OAG-010    (defect against UC-EB5)
-```
+## 2. State → board status
 
-## 2a. Issue content — human title, why, acceptance (REQUIRED)
+The left column is the `derived.state` values from `state-graphs.json` (the fold
+of an item's events). Aggregate states (slice/chunk/requirement) bubble from
+their children per the graph's `bubble` rule.
 
-Every UC Issue MUST carry, **mirrored from the use-case's artifact, never invented
-at sync time** (process §12d):
+**Flow items (use-case):**
 
-- **Title** — `UC-x · <human title>`, the use-case heading (falls back to
-  `UC-x — <job>` only when no artifact title exists).
-- **Description** (markdown) — a **Why this matters** section (the use-case's
-  observable outcome / value + `Value`/`Job`) followed by an **Acceptance
-  criteria** list (the `AC-…` cases it pins).
-
-Source = the project's `slices/<n>/use-cases.md` (per-UC block: heading title,
-"Observable outcome", "Acceptance cases" — bullet OR Given/When/Then table) with
-`slices/<n>/acceptance.md` as the AC fallback (rows attributed to their UC by
-**AC-id stem**, e.g. `AC-28a`→`UC-28`). Parsers are deterministic — see
-`scripts/sync-linear.py` (`load_uc_content`). A UC with **no acceptance criteria
-anywhere** gets the **`needs-acceptance`** label and an honest "none found" note
-— the gap is surfaced, **never fabricated** — and is **not Ready** to build.
-
-Defects carry a defect-as-spec description pointing at their `defects/<id>.md`
-(Expected/Actual/Intent), not UC acceptance.
-
-## 2b. Project content — chunk JTBD value (REQUIRED)
-
-Every chunk Project MUST carry its **JTBD value** (process §11b), mirrored from
-the CHK-keyed "## JTBD value per chunk" blocks in `chunks.md`:
-
-- **Project `content`** (markdown body) — **Job to be done** + **Who gets
-  value** / **What they can now do** / **Why this takes priority**.
-- **Project `description`** (short card summary) — the value at a glance
-  (`who: what-now`).
-
-A chunk whose value is not articulated (missing who / what-now / why) gets an
-explicit **`⚠ JTBD value not articulated — not prioritisable`** body and summary
-— surfaced, **never fabricated**. Parser: `parse_chunk_values` in
-`scripts/sync-linear.py`. (Linear Projects take no labels, so the flag lives in
-the body/summary, not a label.)
-
-**Project title** = `CHK-N · <name> — <purpose>`: keep the chunk id + mechanism
-name, then append the block's **Purpose** (a few words of WHY, not what), so the
-board title conveys value, not mechanism (process §11b).
-
-## 2c. Blocked items show WHY (comment + description, both ways)
-
-When an item is **Blocked**, the board says why and says so again when it clears
-(process §F7a). Source: `items/blocks.csv` (`item,reason`), maintained by the
-flow-manager on block/unblock. The sync mirrors it:
-- **Description** gets a **🚫 Blocked: <why>** banner prepended while Blocked.
-- A one-time **🚫 Blocked** comment is posted on entering Blocked (and again if
-  the reason changes); an **✅ Unblocked — now <status>** comment when the
-  `blocks.csv` row is removed. Idempotent via the local cache (`blocked` map).
-
-Applies to UC issues and defect issues alike.
-
-## 3. Non-tree item types → sub-issues / labelled issues
-
-| Framework | id prefix | Lives in | Linear | Rule |
-|---|---|---|---|---|
-| **defect** | `DEFECT-` | `defects/` | **sub-issue of the UC it is against** | label `defect`. Defect-as-spec: it hangs off its parent UC. |
-| **open-item** (UC-scoped) | `OI-` | `open-items.md` | **sub-issue of that UC** | label `open-item` |
-| **open-item** (slice/chunk-scoped) | `OI-` | `open-items.md` | **Issue** in the relevant Milestone/Project | label `open-item` |
-| **capability** | `CICD-`/`CAP-` | `capabilities.md` | **Issue** under the chunk-Project, Milestone = slice it enables | label `cicd` / `infra` |
-| **improvement-slice** | `IMP-` | `/process` | **NOT mirrored to Linear** — self-state, SSOT is `/process` (§1) | — |
-
-The `defects/` folder uses `DEFECT-OAG-NNN`; the `open-items.md` `OI-NNN` rows
-carry a `slice` column — that column decides whether the open-item attaches to a
-UC (sub-issue) or to a slice/chunk (issue at that level).
-
-## 4. Workflow states (= the queue model)
-
-The four queues (**Intake → Ready → Deploy → Rework**) plus the derived item
-states (`planned / in-flight / done`, from `state.md`) collapse to a single
-Linear status set, applied to **Issues** (UCs/defects/etc.):
-
-| Linear status | Source state |
+| `derived.state` | Board status |
 |---|---|
-| **Backlog** | in `intake` queue / `planned` |
-| **Ready** | in `ready` queue |
-| **In Progress** | `in-flight` (engineer building) |
-| **In Review** | tester / validate-in-prod |
-| **Blocked** | §F5 deploy gate, collision, or `rework` queue |
-| **Done** | `item_done` ledger event |
+| `registered` | Backlog |
+| `ready` | Ready |
+| `building` | In Progress |
+| `validating` | In Review |
+| `reworking` | In Progress (rework) |
+| `blocked` | Blocked |
+| `done` | Done |
 
-Done bubbles **up** (process §F): a slice's Milestone is done when all its UCs
-are done; a chunk's Project when its done-condition is met; the requirement's
-Initiative when all chunks are done.
+**Defect items:**
 
-## 5. Labels
+| `derived.state` | Board status |
+|---|---|
+| `reported` | Backlog |
+| `reproducing` | In Progress |
+| `fixing` | In Progress |
+| `validating` | In Review |
+| `blocked` | Blocked |
+| `resolved` | Done |
+| `wontfix` | Cancelled |
 
-**Type/flow:** `defect` · `open-item` · `cicd` / `infra` · `gate:deploy` · `blocked` · `needs-acceptance` (UC with no acceptance criteria in its artifact — not Ready)
+**Open-items:**
 
-**Job-to-be-done:** `job:<Jn>` — every tree item (Initiative/Project/Milestone/
-Issue) carries a label for its `job` column from `items.csv` (`job:J0`, `job:J3`,
-…) so humans can filter the board by JTBD. The `job` *code* is the only thing
-that crosses over; the JTBD prose stays in `project.md`/vision, not Linear.
+| `derived.state` | Board status |
+|---|---|
+| `open` | Backlog |
+| `scheduled` | Ready |
+| `done` | Done |
+| `wontfix` | Cancelled |
 
-## 6. Sync mechanics — idempotent one-way reconciler
+A blocked item shows *why* on its board object: mirror the `blocked` event's note
+into a banner/comment while blocked, and post an unblocked note when it clears.
+A UC with no acceptance criteria in its definition gets a `needs-acceptance`
+label (surfaced, never fabricated).
 
-- **Direction:** agent-system → Linear only. Humans read the board; they do not
-  edit state back (preserves the single-writer ledger invariant, STATE-MODEL.md).
-- **Trigger:** runs **each inner-dev-loop cycle** (`/loop-run`) so the board
-  self-updates as UCs are pulled / built / shipped / gated. Seed once, then auto.
-- **Reads:** `items/items.csv` (REQ▸CHK▸SLC▸UC tree) + `state.md` / queues
-  (current per-item state).
-- **Idempotency:** a per-project cache mapping canonical `id → linear-id`
-  (initiative/project/milestone/issue). Re-running reconciles in place — no dupes.
-  Canonical id (`UC-…`, `SLC-…`) is also embedded in the Linear title for humans.
-- **Script:** `scripts/sync-linear.py` (per IMP-014), config-driven per project
-  (`.linear-config.json`: `teamId` + `initiativeName`); paths resolve from the
-  script's own project folder. `IMP-*` is not synced (§1).
+## 3. Labels
 
-## 6b. Reconciliation is two-way — remove, not just create
+- **Type/flow:** `defect` · `open-item` · `blocked` · `needs-acceptance`
+- **Job-to-be-done:** `job:<Jn>` from the item's `job` field, so a human can
+  filter the board by JTBD. The job *code* is the only thing that crosses over;
+  the JTBD prose stays in the item definition, not the board.
 
-A reconciler that only *creates* lets every sync bug accumulate cruft (a bad
-run once left 15 orphan/duplicate chunk Projects). So the sync also **removes
-what the SSOT no longer connects to**:
-- **Inline (each run):** a chunk that leaves `items.csv` has its Project archived
-  and its milestones dropped (`--live` reconcile).
-- **`--prune` (one-off / periodic):** archives every Project **in this project's
-  initiative** whose id is not a current cache value — orphans/duplicates the
-  cache lost track of. Dry-run lists; `--live` archives. **Scoped to our own
-  initiative**, so a co-tenant project (another project's initiative in the
-  shared team) is never touched. Run `--prune` after any sync problem, rename,
-  or id change that could strand a Project.
+## 4. What deliberately does NOT go to the board
 
-Principle: *connected to the SSOT* is the only reason a Linear entity should
-exist; anything else is removed.
-
-## 7. What deliberately does NOT go to Linear
-
-DORA metrics, value/cost/`vc_ratio`, token cost, estimates, queue dwell times.
-All of it stays in the append-only ledger; retros read it there. Linear is a
+DORA metrics, value/cost, token cost, estimates, queue dwell times. All delivery
+metrics are DERIVED by `wi-project` from the item event logs; the board is a
 human-facing **plan + progress** view, nothing more.

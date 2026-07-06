@@ -44,6 +44,38 @@ def parse_ts(s):
 
 
 # ---------------------------------------------------------------------------
+# Statusline snapshot — the cheap pre-formatted file .claude/statusline.py reads.
+# work-items.py is now the writer (ledger cutover: dora.py is retiring). We
+# MERGE-update (read existing JSON, set keys, write back) so retro-debt keys and
+# the DORA keys never clobber each other. Schema matched from .claude/statusline.py:
+# flat top-level keys `project`, `cfr` (int %), `freq` (/active-day), `lead` (s),
+# `par` (2dp float), plus `retro_debt_<project>` / `retro_due_<project>`.
+# ---------------------------------------------------------------------------
+STATUSLINE = os.path.join(ROOT, "process", "dora", "statusline.json")
+
+
+def write_statusline(updates):
+    """Merge `updates` into process/dora/statusline.json (mirrors dora.py). None
+    values are stored as JSON null so a metric with no data renders as '–'."""
+    data = {}
+    if os.path.exists(STATUSLINE):
+        try:
+            with open(STATUSLINE, encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+    data.update(updates)
+    os.makedirs(os.path.dirname(STATUSLINE), exist_ok=True)
+    with open(STATUSLINE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=0)
+
+
+def _r0(x):
+    """Round to int for the statusline (matches dora.py's _r0); None passes through."""
+    return round(x) if isinstance(x, (int, float)) else None
+
+
+# ---------------------------------------------------------------------------
 # State-graph loader
 # ---------------------------------------------------------------------------
 class Graphs:
@@ -319,6 +351,10 @@ def _render_event(ev):
              f"agent: {_q(ev.get('agent'))}"]
     if ev.get("ref") not in (None, ""):
         parts.append(f"ref: {_q(ev.get('ref'))}")
+    # tokens: OPTIONAL subagent token cost of producing this transition. Rendered
+    # only when present (absent ⇒ unknown, treated as 0 by the cost-split fold).
+    if ev.get("tokens") not in (None, ""):
+        parts.append(f"tokens: {_q(ev.get('tokens'))}")
     if ev.get("note") not in (None, ""):
         parts.append(f"note: {_q(ev.get('note'))}")
     return "{" + ", ".join(parts) + "}"
@@ -327,6 +363,32 @@ def _render_event(ev):
 # Field render order for the frontmatter (contract's order).
 _FIELD_ORDER = ["id", "type", "title", "job", "value", "cost",
                 "parents", "deps", "created_ts"]
+
+
+def _render_map(vals):
+    """Render a {k: v} scalar map inline for a nested derived field."""
+    return "{" + ", ".join(f"{k}: {_q(v)}" for k, v in vals.items()) + "}"
+
+
+def _render_metrics_block(L, metrics):
+    """Render the per-item DORA/flow `metrics:` sub-block under derived: (nested,
+    2-space indent). No-op when metrics is None (aggregates)."""
+    if not metrics:
+        return
+    L.append("  metrics:")
+    L.append(f"    gross_lead_time_s: {_q(metrics.get('gross_lead_time_s'))}")
+    L.append(f"    cycle_time_s: {_q(metrics.get('cycle_time_s'))}")
+    L.append(f"    time_in_state: {_render_map(metrics.get('time_in_state', {}))}")
+    L.append(f"    time_by_owner: {_render_map(metrics.get('time_by_owner', {}))}")
+    L.append(f"    rework_count: {_q(metrics.get('rework_count'))}")
+    rec = metrics.get("recovery", {})
+    L.append(f"    recovery: {{n: {_q(rec.get('n'))}, "
+             f"mttr_median_s: {_q(rec.get('mttr_median_s'))}, "
+             f"mttr_mean_s: {_q(rec.get('mttr_mean_s'))}}}")
+    tok = metrics.get("tokens", {})
+    L.append(f"    tokens: {{total: {_q(tok.get('total'))}, "
+             f"plumbing: {_q(tok.get('plumbing'))}, "
+             f"delivery: {_q(tok.get('delivery'))}}}")
 
 
 def render_item(item, derived):
@@ -362,6 +424,7 @@ def render_item(item, derived):
     L.append(f"  queue: {_q(derived.get('queue'))}")
     L.append(f"  children: {_render_list(derived.get('children', []))}")
     L.append(f"  ancestors: {_render_list(derived.get('ancestors', []))}")
+    _render_metrics_block(L, derived.get("metrics"))
     L.append("---")
     body = item.body
     if body and not body.startswith("\n"):
@@ -503,16 +566,21 @@ def compute_ancestors(items, iid):
     return chain
 
 
-def derived_block(graphs, items, states, children, iid):
+def derived_block(graphs, items, states, children, iid, now=None):
     it = items[iid]
     state = states.get(iid)
     queue = graphs.queue_for(state) if state is not None else None
-    return {
+    d = {
         "state": state,
         "queue": queue,
         "children": children.get(iid, []),
         "ancestors": compute_ancestors(items, iid),
     }
+    # per-item DORA/flow metrics (flow items only; aggregates have no own stream)
+    m = per_item_metrics(graphs, it, now)
+    if m is not None:
+        d["metrics"] = m
+    return d
 
 
 # ---------------------------------------------------------------------------
@@ -561,6 +629,10 @@ def cmd_append(a):
     new_event = {"ts": ts, "event": a.event, "agent": a.agent}
     if a.ref:
         new_event["ref"] = a.ref
+    # tokens: the subagent_tokens the dispatched specialist spent producing this
+    # transition. Optional — rides the state event so cost-split is a pure fold.
+    if getattr(a, "tokens", None) is not None:
+        new_event["tokens"] = a.tokens
     if a.note:
         new_event["note"] = a.note
     item.fm.setdefault("events", [])
@@ -612,10 +684,25 @@ def cmd_project(a):
     items, _dup = load_all_items(a.project)
     states = compute_states(graphs, items)
     children = compute_children(items)
+    now = parse_ts(getattr(a, "now", None)) if getattr(a, "now", None) else None
+
+    # `project --item <ID>`: print ONE item's per-item metrics to stdout and stop
+    # (no re-render / view rewrite). A focused read for a single work item.
+    item_id = getattr(a, "item", None)
+    if item_id:
+        if item_id not in items:
+            sys.exit(f"project --item: no item {item_id} in work/{a.project}/items/")
+        m = per_item_metrics(graphs, items[item_id], now)
+        if m is None:
+            print(f"{item_id} is an aggregate ({items[item_id].type}); "
+                  f"per-item flow metrics apply to flow items only.")
+            return
+        print(_render_item_metrics_text(m))
+        return
 
     # 1. re-render every item's derived block + relocate terminal items to done/
     for iid, it in list(items.items()):
-        dv = derived_block(graphs, items, states, children, iid)
+        dv = derived_block(graphs, items, states, children, iid, now=now)
         with open(it.path, "w", encoding="utf-8") as f:
             f.write(render_item(it, dv))
         _maybe_relocate(a.project, iid, it, states.get(iid), graphs)
@@ -637,10 +724,21 @@ def cmd_project(a):
     # 4. tree view
     _write_tree(vd, items, children, states)
 
-    # 5. stats view
-    now = parse_ts(getattr(a, "now", None)) if getattr(a, "now", None) else None
+    # 5. stats view (reuses `now` computed above)
     stats = compute_stats(graphs, items, states, now=now)
     _write_stats(vd, stats)
+
+    # 6. statusline snapshot — the DORA keys .claude/statusline.py renders.
+    # Merge (not overwrite) so retro_debt_*/retro_due_* keys survive. Uses the
+    # ALL-TIME DORA figures; cfr as an integer percent (statusline prints "<cfr>%").
+    dora = stats["overall"]["dora"]["all_time"]
+    cfr = dora["change_failure_rate"]
+    write_statusline({
+        "project": a.project,
+        "cfr": _r0(cfr * 100) if cfr is not None else None,
+        "freq": _r0(dora["deployment_frequency_per_active_day"]),
+        "lead": _r0(dora["lead_time_for_changes_median_s"]),
+    })
 
     qcounts = {q: len(v) for q, v in sorted(queues.items())}
     print(f"project: {len(items)} items | queues={qcounts} | "
@@ -706,6 +804,73 @@ def _write_tree(vd, items, children, states):
 TERMINAL_STATES = {"done", "resolved", "wontfix"}
 GENESIS_EVENTS = ("registered", "reported", "open")
 REWORK_ENTRY_EVENTS = {"build_failed", "rejected", "retried", "reopened"}
+# v4: the use-case validation stage is split dev-then-prod; the defect graph still
+# uses one `validating`. Any `rejected` exit from ANY of these is a change failure,
+# so CFR/quality-by-stage fold over the whole set (kept as one metric family).
+VALIDATING_STATES = {"validating", "dev-validating", "prod-validating"}
+
+# --- plumbing vs delivery cost classification (ported verbatim from dora.py's
+# cost-split, v59/EXP-067; the ledger it read is now frozen, so the SAME rule is
+# reimplemented here over item EVENTS so the metric stays continuous) -----------
+# "Plumbing" = the cost of RUNNING the agent OS (coordination, flow management,
+# bookkeeping, gates) vs producing/validating customer value ("delivery"). Rule
+# (identical to dora.py:cost_class): an event is plumbing if its agent runs the
+# machine (orchestrator/flow-manager) OR its event is a coordination/bookkeeping
+# marker; everything else (engineer/tester/ui/product/architect/cicd/documenter
+# building, validating, designing, deploying) is delivery.
+PLUMBING_AGENTS = {"orchestrator", "flow-manager"}
+# dora.py's PLUMBING_EVENTS were ledger bookkeeping rows (enqueue/dequeue/retro/
+# item_registered/loop_wake/parallel_dispatch/collision/gate_decision/
+# log_decision). In the work-item event vocabulary the equivalent coordination/
+# bookkeeping transitions are the flow-manager/orchestrator markers below; the
+# agent rule already subsumes them (they are all fired by a plumbing agent), so
+# the split is identical whether keyed on agent or event.
+PLUMBING_EVENTS = {"registered", "made_ready", "pulled", "blocked", "unblocked",
+                   "scheduled", "reported", "triaged"}
+
+
+def cost_class(agent, event):
+    """plumbing iff agent runs the OS OR the event is a coordination/bookkeeping
+    marker; else delivery. Verbatim rule from dora.py:cost_class."""
+    return "plumbing" if (agent in PLUMBING_AGENTS or event in PLUMBING_EVENTS) else "delivery"
+
+
+def _compute_token_cost(flow_items):
+    """Token-cost section: total, by_owner (fold each event's `tokens` through the
+    event's AGENT — the owner that produced the transition), and the
+    plumbing-vs-delivery split (dora.py's classification, ported). An event with
+    no `tokens` contributes 0 and is not counted toward coverage. `token_coverage`
+    = fraction of events that carried a `tokens` value (mirrors dora.py's coverage
+    over task_end rows), so a project whose events pre-date `--tokens` reads 0."""
+    total = 0
+    by_owner = defaultdict(int)
+    split = {"plumbing": 0, "delivery": 0}
+    n_events = 0
+    n_with_tokens = 0
+    for it in flow_items:
+        for ev in it.events:
+            n_events += 1
+            tk = ev.get("tokens")
+            if not isinstance(tk, (int, float)):
+                continue
+            tk = int(tk)
+            n_with_tokens += 1
+            total += tk
+            by_owner[ev.get("agent") or "unowned"] += tk
+            split[cost_class(ev.get("agent"), ev.get("event"))] += tk
+    coverage = (n_with_tokens / n_events) if n_events else None
+    return {
+        "total_tokens": total,
+        "by_owner": {o: by_owner[o] for o in sorted(by_owner, key=lambda k: -by_owner[k])},
+        "plumbing_vs_delivery": {
+            "plumbing_tokens": split["plumbing"],
+            "delivery_tokens": split["delivery"],
+            "plumbing_share": _ratio(split["plumbing"], total),
+        },
+        "token_coverage": coverage,
+        "n_events_with_tokens": n_with_tokens,
+        "n_events": n_events,
+    }
 
 
 def _first_ts(item, event_names):
@@ -866,11 +1031,12 @@ def _compute_dora(graphs, flow_items, states, now, window_days):
         if bg and vd_ts and vd_ts >= bg and _in_window(vd_ts, now, window_days):
             lts.append((vd_ts - bg).total_seconds())
 
-    # change_failure_rate: rejected / (validated + rejected) over exits from validating
+    # change_failure_rate: rejected / (validated + rejected) over exits from ANY
+    # validating stage (v4 dev/prod split + the defect single `validating`).
     validated = rejected = 0
     for it in flow_items:
         for st, evc in _exits_from(graphs, it).items():
-            if st != "validating":
+            if st not in VALIDATING_STATES:
                 continue
             for name, c in evc.items():
                 if name == "validated":
@@ -949,6 +1115,7 @@ def _compute_quality(graphs, flow_items, now, window_days):
     rework rate; defect arrival rate over the window."""
     stage_exits = defaultdict(lambda: {"total": 0, "fail": 0})
     FAIL_EXIT = {"building": "build_failed", "validating": "rejected",
+                 "dev-validating": "rejected", "prod-validating": "rejected",
                  "reproducing": "not_reproduced"}
     for it in flow_items:
         for st, evc in _exits_from(graphs, it).items():
@@ -1017,7 +1184,120 @@ def _stats_for_set(graphs, flow_items, states, now):
             "trailing_30d": _compute_quality(graphs, flow_items, now, 30),
         },
         "recovery_by_class": _compute_recovery(graphs, flow_items),
+        "token_cost": _compute_token_cost(flow_items),
     }
+
+
+# ---------------------------------------------------------------------------
+# Per-item metrics — the SAME flow/DORA quantities, but for ONE item. A pure
+# re-composition of the existing helpers (walk_states / _first_ts / _last_ts /
+# _duration_after / REWORK_ENTRY_EVENTS / _compute_token_cost) so the numbers are
+# definitionally consistent with the aggregate view. The vision wants every
+# metric trackable per single item; this is that projection, rendered into each
+# item's derived `metrics:` block and printed by `project --item`.
+# ---------------------------------------------------------------------------
+_ITEM_TERMINAL_EVENTS = ("validated", "closed", "not_reproduced", "declined")
+
+
+def per_item_metrics(graphs, item, now):
+    """Return the single-item flow/DORA block for one FLOW item (dict), or None
+    for an aggregate (no own event stream). Pure function of the item's events.
+
+    - gross_lead_time_s: genesis (registered/reported/open) -> terminal event.
+    - time_in_state: {state: seconds} via walk_states (open segment closed at now).
+    - cycle_time_s: pulled -> done/terminal (the delivery clock, excludes intake).
+    - rework_count: number of REWORK_ENTRY_EVENTS in the stream.
+    - recoveries / mttr: recovery durations (any failure -> its next recovery) with
+      count, median, mean — the per-item MTTR.
+    - tokens: total + plumbing/delivery split + by_owner (via _compute_token_cost
+      over the single-item set)."""
+    if graphs.kind(item.type) != "flow":
+        return None
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    gen = _first_ts(item, GENESIS_EVENTS)
+    term = _last_ts(item, _ITEM_TERMINAL_EVENTS)
+    glt = (term - gen).total_seconds() if (gen and term and term >= gen) else None
+
+    # time-in-each-state (rounded), owner attribution mirrors the aggregate GLT
+    by_state = defaultdict(float)
+    by_owner = defaultdict(float)
+    for state, a, b in walk_states(graphs, item, now):
+        dur = (b - a).total_seconds()
+        if dur < 0:
+            continue
+        by_state[state] += dur
+        by_owner[graphs.owner_of(state) or "unowned"] += dur
+    time_in_state = {s: round(t, 2) for s, t in
+                     sorted(by_state.items(), key=lambda kv: -kv[1])}
+    time_by_owner = {o: round(t, 2) for o, t in
+                     sorted(by_owner.items(), key=lambda kv: -kv[1])}
+
+    # cycle time: pulled -> terminal (delivery clock). Use the FIRST pulled and the
+    # terminal event; None if the item was never pulled or is not yet terminal.
+    pulled = _first_ts(item, ("pulled",))
+    cycle = (term - pulled).total_seconds() if (pulled and term and term >= pulled) else None
+
+    rework_count = sum(1 for ev in item.events
+                       if ev.get("event") in REWORK_ENTRY_EVENTS)
+
+    # recoveries / MTTR: same trigger->recovery pairs the aggregate recovery uses.
+    recoveries = []
+    recoveries += _duration_after(item, {"build_failed"},
+                                  {"built_green", "retried", "done", "validated"})
+    recoveries += _duration_after(item, {"rejected"},
+                                  {"validated", "resolved", "done"})
+    recoveries += _duration_after(item, {"reported"}, {"validated", "resolved"})
+
+    tokens = _compute_token_cost([item])
+    return {
+        "id": item.id,
+        "type": item.type,
+        "state": fold_state(graphs, item.type, item.events),
+        "gross_lead_time_s": (round(glt, 2) if glt is not None else None),
+        "cycle_time_s": (round(cycle, 2) if cycle is not None else None),
+        "time_in_state": time_in_state,
+        "time_by_owner": time_by_owner,
+        "rework_count": rework_count,
+        "recovery": {
+            "n": len(recoveries),
+            "mttr_median_s": _median(recoveries),
+            "mttr_mean_s": _mean(recoveries),
+        },
+        "tokens": {
+            "total": tokens["total_tokens"],
+            "plumbing": tokens["plumbing_vs_delivery"]["plumbing_tokens"],
+            "delivery": tokens["plumbing_vs_delivery"]["delivery_tokens"],
+            "by_owner": tokens["by_owner"],
+        },
+    }
+
+
+def _render_item_metrics_text(m):
+    """Human-readable stdout rendering of one item's per-item metrics."""
+    L = [f"# Per-item metrics: {m['id']} [{m['type']}] — state {m['state']}",
+         f"  gross lead time (genesis->terminal): {_fmt(m['gross_lead_time_s'], ' s')}",
+         f"  cycle time (pulled->done):           {_fmt(m['cycle_time_s'], ' s')}",
+         f"  rework count:                        {m['rework_count']}"]
+    rec = m["recovery"]
+    L.append(f"  recoveries: n={rec['n']}, MTTR median={_fmt(rec['mttr_median_s'], ' s')}, "
+             f"mean={_fmt(rec['mttr_mean_s'], ' s')}")
+    L.append("  time-in-state:")
+    for st, t in m["time_in_state"].items():
+        L.append(f"    {st:16} {_fmt(t, ' s')}")
+    if not m["time_in_state"]:
+        L.append("    (no timed segments)")
+    L.append("  time-by-owner:")
+    for o, t in m["time_by_owner"].items():
+        L.append(f"    {o:16} {_fmt(t, ' s')}")
+    tok = m["tokens"]
+    L.append(f"  tokens: total={tok['total']} "
+             f"(plumbing={tok['plumbing']}, delivery={tok['delivery']})")
+    if tok["by_owner"]:
+        L.append("  tokens by owner: " +
+                 ", ".join(f"{o}={t}" for o, t in tok["by_owner"].items()))
+    return "\n".join(L)
 
 
 def compute_stats(graphs, items, states, now=None):
@@ -1139,10 +1419,170 @@ def _render_stats_md(stats):
             d = r[cls]
             L.append(f"| {label} | {_fmt(d['median_s'])} | {_fmt(d['mean_s'])} | {d['n']} |")
 
+        # E. token cost — plumbing vs delivery
+        tc = s["token_cost"]
+        pvd = tc["plumbing_vs_delivery"]
+        cov = tc["token_coverage"]
+        L.append("\n### E. Token cost — plumbing vs delivery\n")
+        L.append("_Plumbing = running the agent OS (orchestrator + flow-manager + "
+                 "coordination/bookkeeping transitions); delivery = producing / "
+                 "validating customer value (classification ported from dora.py "
+                 "cost-split, EXP-067). Token cost rides each state event's optional "
+                 "`tokens`. Watch the plumbing SHARE and its trend._\n")
+        if not tc["total_tokens"]:
+            L.append("_No event tokens recorded (coverage "
+                     f"{_pct(cov)}) — nothing to split yet._")
+        else:
+            L.append("| class | tokens | share |")
+            L.append("|-------|--------|-------|")
+            L.append(f"| plumbing | {pvd['plumbing_tokens']} | {_pct(pvd['plumbing_share'])} |")
+            L.append(f"| delivery | {pvd['delivery_tokens']} "
+                     f"| {_pct(_ratio(pvd['delivery_tokens'], tc['total_tokens']))} |")
+            L.append(f"| **TOTAL** | **{tc['total_tokens']}** | 100.0% |")
+            L.append(f"\n_Plumbing share: **{_pct(pvd['plumbing_share'])}** "
+                     f"(token coverage {_pct(cov)} of "
+                     f"{tc['n_events']} events — grows as dispatches carry `--tokens`)._")
+            L.append("\n**By owner**\n")
+            L.append("| owner | tokens |")
+            L.append("|-------|--------|")
+            for o, tk in tc["by_owner"].items():
+                L.append(f"| {o} | {tk} |")
+
     section("Overall", stats["overall"])
     for t, s in stats["by_type"].items():
         section(f"By type — {t}", s)
     return "\n".join(L) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# Subcommands: retro-debt (the §F8 cadence GATE) + retro-mark (drain the debt)
+#
+# Reimplemented over ITEM EVENTS (ledger cutover: replaces `dora.py retro-debt`,
+# which counted frozen-ledger rows). The "last retro" marker is a one-line ISO
+# timestamp at process/dora/retro-marker/<project>.txt, written by retro-mark.
+#
+# Debt since the marker:
+#   ROUTINE   = slice/chunk aggregates that BUBBLED to done after the marker.
+#               An aggregate's bubble time = the ts of its last child's terminal
+#               event (the moment the final child closing made it done).
+#   INCIDENT  = defect items whose terminal validated/resolved event is after the
+#               marker, OR use-cases with a build_failed / rejected event after it.
+# DUE iff routine >= threshold OR incidents >= 1. Routine batches to the
+# threshold; a single incident fires immediately (mirrors dora.py:v69 cadence).
+# ---------------------------------------------------------------------------
+def _retro_marker_path(project):
+    return os.path.join(ROOT, "process", "dora", "retro-marker", f"{project}.txt")
+
+
+def _read_retro_marker(project):
+    """Return the last-retro datetime (UTC), or epoch (all-time) if absent."""
+    p = _retro_marker_path(project)
+    if os.path.exists(p):
+        try:
+            with open(p, encoding="utf-8") as f:
+                ts = parse_ts(f.readline().strip())
+                if ts:
+                    return ts
+        except OSError:
+            pass
+    return datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def _terminal_ts(item):
+    """The ts an item reached a terminal state (its last validated/closed/
+    not_reproduced/declined event), or None."""
+    return _last_ts(item, ("validated", "closed", "not_reproduced", "declined"))
+
+
+def _aggregate_bubble_ts(graphs, items, iid, children):
+    """When aggregate `iid` bubbled to done = the ts of its LAST child's terminal
+    event (the moment the final closing child made the parent done). None unless
+    every child is terminal-done."""
+    kids = children.get(iid, [])
+    if not kids:
+        # childless done aggregate (decommission slice): use its own `closed` marker
+        own = _last_ts(items[iid], ("closed",))
+        return own
+    kid_terms = []
+    for k in kids:
+        child = items.get(k)
+        if not child:
+            return None
+        if graphs.kind(child.type) == "aggregate":
+            t = _aggregate_bubble_ts(graphs, items, k, children)
+        else:
+            t = _terminal_ts(child)
+        if t is None:
+            return None  # a child not yet done => aggregate not bubbled
+        kid_terms.append(t)
+    return max(kid_terms) if kid_terms else None
+
+
+def compute_retro_debt(graphs, project, threshold, now):
+    """Pure computation. Returns (routine, incidents, due, detail[])."""
+    items, _dup = load_all_items(project)
+    states = compute_states(graphs, items)
+    children = compute_children(items)
+    marker = _read_retro_marker(project)
+
+    routine, incidents, detail = [], [], []
+    for iid, it in items.items():
+        kind = graphs.kind(it.type)
+        if kind == "aggregate" and it.type in ("slice", "chunk"):
+            if states.get(iid) == "done":
+                bt = _aggregate_bubble_ts(graphs, items, iid, children)
+                if bt and bt > marker and (now is None or bt <= now):
+                    routine.append((iid, bt))
+                    detail.append((bt, "slice-close", iid))
+        elif it.type == "defect":
+            if states.get(iid) in ("resolved", "done"):
+                t = _terminal_ts(it)
+                if t and t > marker and (now is None or t <= now):
+                    incidents.append((iid, t))
+                    detail.append((t, "defect-resolve", iid))
+        elif it.type == "use-case":
+            for ev in it.events:
+                if ev.get("event") in ("build_failed", "rejected"):
+                    t = parse_ts(ev.get("ts"))
+                    if t and t > marker and (now is None or t <= now):
+                        incidents.append((iid, t))
+                        detail.append((t, "build/reject-fail", iid))
+                        break
+    due = (len(routine) >= threshold) or (len(incidents) >= 1)
+    detail.sort(key=lambda d: d[0] or datetime(1970, 1, 1, tzinfo=timezone.utc))
+    return routine, incidents, due, detail, marker
+
+
+def cmd_retro_debt(a):
+    graphs = Graphs.load()
+    now = parse_ts(getattr(a, "now", None)) if getattr(a, "now", None) else None
+    threshold = a.threshold
+    routine, incidents, due, detail, marker = compute_retro_debt(
+        graphs, a.project, threshold, now)
+    n = len(routine) + len(incidents)
+    reason = ("incident (immediate)" if incidents else
+              f"routine {len(routine)}>={threshold}" if len(routine) >= threshold else
+              f"routine {len(routine)}<{threshold}")
+    since = marker.strftime("%Y-%m-%dT%H:%M:%SZ")
+    print(f"retro-debt[{a.project}] = {n} (routine {len(routine)}/{threshold}, "
+          f"incidents {len(incidents)}) since last retro {since} "
+          f"=> {'RETRO DUE — drain before advancing ['+reason+']' if due else 'ok'}")
+    for ts, kind, ident in detail:
+        tss = ts.strftime("%Y-%m-%dT%H:%M:%SZ") if ts else "—"
+        print(f"  - {tss}  {kind:18}  {ident}")
+    write_statusline({f"retro_debt_{a.project}": n, f"retro_due_{a.project}": due})
+    sys.exit(2 if due else 0)
+
+
+def cmd_retro_mark(a):
+    """Write the last-retro marker = now — the reset `/retro` calls at close to
+    drain the debt."""
+    ts = a.now or now_iso()
+    p = _retro_marker_path(a.project)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(ts.strip() + "\n")
+    print(f"retro-mark: {a.project} last-retro set to {ts.strip()}")
 
 
 # ---------------------------------------------------------------------------
@@ -1266,9 +1706,19 @@ def _find_dep_cycle(items):
 _FLOW_PATHS = {
     "use-case": {
         "ready": [("registered", "flow-manager"), ("made_ready", "flow-manager")],
+        # v4: validation is split dev-then-prod. The full CLOUD path folds a
+        # migrated done UC legally under v4:
+        #   registered -> ready -> building -> deploying -> dev-validating
+        #   -> prod-deploying -> prod-validating -> done
+        # i.e. built_green (deploy-to-dev) -> deployed -> dev_validated
+        # (dev AC passed, promote) -> promoted (deploy-to-prod) -> validated
+        # (prod green). cicd owns deploying + prod-deploying; tester owns both
+        # validating states — so both deploy legs and both validations are
+        # attributable in the gross-lead-time breakdown.
         "done": [("registered", "flow-manager"), ("made_ready", "flow-manager"),
                  ("pulled", "orchestrator"), ("built_green", "engineer"),
-                 ("validated", "tester")],
+                 ("deployed", "cicd"), ("dev_validated", "tester"),
+                 ("promoted", "cicd"), ("validated", "tester")],
         "blocked": [("registered", "flow-manager"), ("made_ready", "flow-manager"),
                     ("blocked", "flow-manager")],
     },
@@ -1607,12 +2057,18 @@ def main(argv=None):
     ap.add_argument("--ref")
     ap.add_argument("--note")
     ap.add_argument("--ts")
+    ap.add_argument("--tokens", type=int,
+                    help="subagent_tokens the dispatched specialist spent producing "
+                         "this transition (optional; feeds the plumbing-vs-delivery "
+                         "cost-split in `project` stats)")
     ap.set_defaults(func=cmd_append)
 
     pr = sub.add_parser("project")
     pr.add_argument("--project", required=True)
     pr.add_argument("--now", help="reference 'now' (ISO-8601 UTC) for in-flight "
                                   "time-in-state + rate windows; default: real now")
+    pr.add_argument("--item", help="print ONE item's per-item DORA/flow metrics to "
+                                   "stdout (no view re-render); default: recompute all")
     pr.set_defaults(func=cmd_project)
 
     va = sub.add_parser("validate")
@@ -1622,6 +2078,17 @@ def main(argv=None):
     mi = sub.add_parser("migrate")
     mi.add_argument("--project", required=True)
     mi.set_defaults(func=cmd_migrate)
+
+    rd = sub.add_parser("retro-debt")
+    rd.add_argument("--project", required=True)
+    rd.add_argument("--threshold", type=int, default=3)
+    rd.add_argument("--now", help="reference 'now' (ISO-8601 UTC) for deterministic tests")
+    rd.set_defaults(func=cmd_retro_debt)
+
+    rm = sub.add_parser("retro-mark")
+    rm.add_argument("--project", required=True)
+    rm.add_argument("--now", help="marker timestamp (ISO-8601 UTC); default: real now")
+    rm.set_defaults(func=cmd_retro_mark)
 
     a = p.parse_args(argv)
     a.func(a)

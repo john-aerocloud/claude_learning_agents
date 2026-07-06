@@ -102,6 +102,58 @@ Per-role mechanics live in `tester.md` / `engineer.md` / `solution-architect.md`
 this skill states the proven methodology so the active `/process` need not carry
 the per-experiment rows.
 
+## Defect-prevention contracts — the standing catalogue (graduated from process §17)
+Defects whose root cause is detectable before production must be pinned by a
+test/probe **at the level the risk lives** and at the earliest point visible — not
+found in live validation. This is a cross-agent principle (process §17); each class
+below is an executable check (never a written note), and each graduated from a scored
+experiment + a prod defect. The standing classes:
+
+- **Cross-stack / cross-boundary contracts** — asserted at **synth time** (synth both
+  templates; assert the path/name contract between them).
+- **IAM grant = the FULL operation set of the code path, not its name.** A write/append/
+  ingest path is almost always READS-THEN-WRITES — an event-store APPEND grant = the read
+  ops + write ops (`dynamodb:Query`+`GetItem`+`PutItem`, +`kms:Decrypt`+`GenerateDataKey`
+  for an encrypted table), never `PutItem` alone. Architect derives it from the full
+  SDK-op set; the engineer's code↔policy pin asserts it. Evidence: ingest hit it 3×.
+  CFR + MTTR. [EXP-060]
+- **Diagrams are render-validated before reported done.** A Mermaid diagram is NOT done
+  until the committed `make -C work/<project> render-diagrams` gate is green (mmdc). Binds
+  documenter, solution-architect, orchestrator. Evidence: a `fix(diagram)` committed
+  without re-rendering. CFR + GLT. [EXP-088]
+- **Node ESM bundles get a CJS-require shim + an import-the-bundle smoke.** An ESM handler
+  whose transitive deps `require()` internally crashes at RUNTIME (`Dynamic require`) —
+  clean bundle, fails on run. cicd injects the `createRequire` banner (or bundles CJS); a
+  smoke that `node`-imports the bundle fails until present. (DynamoDB reserved-keyword
+  crashes are the same class, aliased via `ExpressionAttributeNames`.) CFR + MTTR. [EXP-061]
+- **External / cross-account resource identifiers** the stack does NOT create (a layer
+  ARN, a shared cross-account resource, a third-party endpoint) — asserted to resolve
+  BEFORE the first real deploy by a committed check that FAILS until it resolves, never a
+  "CONFIRM at build" note. Evidence: first deploy rolled back on non-existent layer ARNs.
+  CFR + MTTR. [EXP-056]
+- **New platform-integration mechanisms** (first WebSocket, CDN behaviour, auth flow,
+  queue) get an early **walking-skeleton probe**: one real request through the full
+  deployed path with the REAL client technology, BEFORE use cases build on top.
+- **Wire-on-deploy hand-offs**: the receiving role lands a contract test that FAILS until
+  X is wired.
+
+**"Real client" for a web surface means a real BROWSER, never a node probe.** A node
+`ws`/`fetch` probe runs below the browser's security/transport layer and returns a FALSE
+GREEN (bypasses CSP `connect-src`, config-injection ordering, mixed-content, event
+ordering — 4 of 6 root causes of one defect class were browser-only). Drive it via
+committed Playwright; use interactive-browser DISCOVERY before a spec exists, then convert
+each finding into a committed REGRESSION spec. **A defect is not closed until the
+end-to-end USER symptom is reproduced and pinned** — not just the first secondary cause.
+
+This is the lever on the **tester constraint**: the tester is the slowest step and its
+cost is driven by the QUALITY of work arriving. Surfacing browser/transport/policy breaks
+at skeleton time keeps them out of re-validation rounds. **Local standability:** most of
+the system stands up locally (a committed `run-local` entry point; hexagonal adapters with
+local substitutes) and the ENGINEER builds real-browser Playwright tests against it in the
+BUILD phase; what cannot stand locally is enumerated in the delta, each gap mapped to its
+covering control. The tester re-exercises (not re-discovers) those flows. Per-role
+mechanics live in the agent files; this skill states the catalogue.
+
 ## Environments (introduce only on need)
 prod-only by default -> add a TEST env when there is a customer to protect -> add
 PER-USER FEATURE FLAGS when releasing to some-but-not-all users -> add more envs

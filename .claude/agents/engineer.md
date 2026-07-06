@@ -104,12 +104,15 @@ the file cannot be split mid-wave.
 
 ## On failure in prod
 Prefer roll-forward. Use the maintained rollback assets only when forward is
-slower to safety. Emit failure/recovery ledger rows so MTTR is measured.
+slower to safety. A prod failure and its recovery are recorded as the item's
+`wi-append` events (the failure/recovery events your role fires) so MTTR is
+derived — never hand-write the DORA CSV.
 
 ## DORA duty
-Bracket each task with task_start/task_end rows (agent "engineer"); populate
-`duration_s` on the `task_end` row with wall-clock seconds. Emit deploy rows on
-merge-to-main. Log principle deviations in `/process/principle-failures/`.
+State changes are recorded via `make wi-append` (the events your role fires —
+`pulled`/`built_green`); metrics (lead time, cycle time, MTTR, throughput) are
+DERIVED by `make wi-project`. The DORA CSV ledger is FROZEN — do not write it.
+Log principle deviations in `/process/principle-failures/`.
 
 ## Return format
 Return: tests added (red->green), what landed on main (sha/PR), whether WIP stayed
@@ -122,7 +125,7 @@ so it runs without a permission prompt. That means:
   `source … && …` — compound prefixes match no allowlist pattern and always prompt.
 - Use the allowlist-shaped forms: `npm --prefix <dir> run <script>`,
   `make -C <dir> <target>`, `git -C <dir> …`, root-relative script paths
-  (e.g. `python3 .claude/skills/dora-ledger/scripts/dora.py …`).
+  (e.g. `sh .claude/skills/work-items/scripts/work-items …`, or `make wi-append`).
 - If a task genuinely needs a command class the allowlist lacks, that is a
   capability gap: name it in your return so the allowlist is extended in the
   same slice (cicd capability step) — do not work around it with novel one-off
@@ -340,16 +343,17 @@ a prod `AccessDenied` waiting for the first real event — it hit OagEventSource
 THREE times (ingest missing `dynamodb:Query`, then `kms:Decrypt`, then the append
 loadStreams read) before the grant was completed. [EXP-060]
 
-## v40 — pull-based flow (process STAGE F)
-You build per **pulled use-case** inside the continuous loop. Bracket each stage
-with `stage_enter`/`stage_exit` ledger rows (agent `engineer`) so per-stage DORA
-is real, and record `item_id` on every row — **always the WORK-ITEM id (UC-…/
-DEF-…), never a slice slug**. **The pull is ONE atomic act:** when
-you pull an item, in the same breath (a) remove its row from the queue csv,
-(b) transition its items.csv state → `in-flight`, (c) emit the `dequeue` +
-`stage_enter` rows. Never leave an item `planned`/`ready` in the registry while
-you build it — the flow-manager sweep RECONCILES these transitions, it does not
-originate them. **Declare the seams/paths your UC
+## v82 — event-sourced pull-based flow (process STAGE F)
+You build per **pulled use-case** inside the continuous loop. **State lives ONLY
+in the item file; state = fold(events).** Your role's state events are appended
+via `make wi-append PROJECT=<p> ID=<UC-…/DEF-…> AGENT=engineer EVENT=<e>`: fire
+`pulled` if you perform the pull, and `built_green` when the UC's suite+lint go
+green (`--ref <sha>`). Record `TOKENS=<n>` (your reported subagent_tokens) on your
+state event so the cost-split is computed from event tokens. **There are NO queue-csv or items.csv edits, no `dequeue`/
+`stage_enter`/`stage_exit` rows** — queue membership and state are DERIVED by
+`make wi-project` from the event log; hand-editing a queue or `items.csv` state
+is WRONG under v82 (it can drift from the fold and `make wi-validate` rejects it).
+Always use the WORK-ITEM id (UC-…/DEF-…), never a slice slug. **Declare the seams/paths your UC
 owns** (from its route) so the flow-manager can claim them; honour other UCs'
 claims — if you need a path/seam another in-flight UC owns, that is a **collision**
 (§F7): stop, flag it to the orchestrator/flow-manager, add the missing edge to

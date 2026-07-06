@@ -252,7 +252,7 @@ Minimal pipeline stages, in order:
 5. deploy-infra   → cdk diff + cdk deploy (prod stack)
 6. deploy-app     → aws s3 sync + CF invalidation (SPA)
                     or: aws lambda update-function-code (Lambda)
-7. dora-record    → sh .claude/skills/dora-ledger/scripts/dora record --event deploy
+7. record-state   → make wi-append EVENT=validated (or the item's deploy event)
 8. smoke-test     → curl / playwright against prod URL
 ```
 
@@ -260,8 +260,9 @@ Minimal pipeline stages, in order:
 - Auth: OIDC role (§7). No `AWS_ACCESS_KEY_ID` in secrets.
 - Environment variables from GitHub Actions secrets → injected as env vars
   during the deploy step (never baked into the artifact).
-- On failure at step 5+: emit `--event failure` to DORA ledger; alert via
-  GitHub notification.
+- On failure at step 5+: append the item's failure/rejected event via
+  `make wi-append` (the work-item substrate — see the `work-items` skill); alert
+  via GitHub notification.
 
 ---
 
@@ -273,7 +274,7 @@ Minimal pipeline stages, in order:
 | **Reliability** | Multi-AZ managed services (DynamoDB, API GW, Lambda); DynamoDB PITR on durable tables; TTL for ephemeral state; idempotent operations |
 | **Performance** | CDN for static assets; DynamoDB single-item reads; Lambda cold-start monitoring; AI client-side where < 200ms target |
 | **Cost** | Scale-to-zero (Lambda, DynamoDB on-demand, Aurora Serverless); no idle NAT/EC2/RDS; TTL avoids storage growth; tag all resources for cost allocation |
-| **Operational Excellence** | IaC for all resources (CDK); structured CloudWatch logs; DORA ledger hooked into CI; CloudTrail enabled |
+| **Operational Excellence** | IaC for all resources (CDK); structured CloudWatch logs; work-item state (`make wi-append`) recorded from CI; CloudTrail enabled |
 | **Sustainability** | On-demand over provisioned; scale-to-zero; no always-on infrastructure beyond what's needed |
 
 ---

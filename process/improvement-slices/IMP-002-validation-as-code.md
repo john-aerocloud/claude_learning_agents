@@ -1,6 +1,6 @@
 # IMP-002 — Validation-as-code with run provenance
 
-**Status:** in delivery 2026-06-06
+**Status:** DONE/delivered (2026-06-06)
 **Owner:** tester (specs + run records) / engineer (framework scaffold) / cicd (allowlist fit)
 
 ## Job

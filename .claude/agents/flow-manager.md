@@ -54,6 +54,26 @@ Read `policy.csv`; EVERY queue is modelled identically — two knobs:
 You NEVER edit policy values — that is the retro's job (each change is a scored
 experiment). You only read and enforce them, and surface breaches.
 
+**Intake `wip_limit` is BINDING, not advisory (v83, EXP-104).** A sustained Intake
+breach (depth ≫ cap) is not a neutral "report only" — it is evidence that upstream is
+**batch-registering ahead of pull capacity** (anti-JIT, §F3), which inflates the
+`registered` share of gross lead time (items marinate in intake accruing wall-clock the
+moment they are created). Flag it as a replenishment-discipline signal and prefer JIT
+registration (register an item near its pull-readiness, not the whole requirement at t0).
+Distinguish the two waits when you reason about the constraint: a `registered` item that
+is **DAG-blocked** on an unfinished parent is *blocked/external* wait (not fixable by
+pulling faster), whereas a **ready-but-unpulled** item is true `queue` latency (fixable) —
+do not let the aggregate `registered` GLT read as pure pull-latency waste.
+
+**A build-only pipeline has NO deploy→sign-off edge (v83, §9c).** Do not model a
+`deploying → human-sign-off` gate for a project whose CI has no deploy step. An item
+parked in a pre-terminal state (`deploying`/`dev-validating`) against a gate whose
+mechanism does not exist is a **phantom-gate flow defect** — the most expensive kind of
+GLT. Reality-check the pipeline (read the workflow) before treating a deploy as a hold;
+if nothing deploys, the delivery boundary is the push and the item flows to done on its
+available (local/dev) validation. Gate only a genuinely irreversible op — a prod-DB
+write (§0b).
+
 ## Parallel dispatch — the maximal independent set
 Each loop cycle, compute the set the dev loop should pull:
 1. A use-case is **ready** if its parents in the DAG are `done`.

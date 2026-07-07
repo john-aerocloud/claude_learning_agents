@@ -55,3 +55,24 @@ _(v82 slim: the three-writer coherence-retrofit item and the per-event
 historical-ledger backfill item were removed — both were made moot by the F0
 event-sourced cutover: state is fold(events) in one store, and the frozen DORA
 CSV is no longer the metrics source.)_
+
+## Retro carry-forward (v83, 2026-07-07)
+- **Cross-instance reconcile latency is HIGH — reconcile `instance/viggo-fix` → `main`
+  (§0a Rule 4).** At the v83 retro this instance was **67 commits ahead of `main`, 0
+  behind** — a large unreconciled batch, exactly the integration-batching Rule 4 bans
+  (rising reconcile latency = a gross-lead-time cost). Not fixed in-retro because a
+  67-commit merge to `main` affects the other instance (Mac/OAG) and wants care/a quiet
+  window (see the "pull with care" memory). ACTION: reconcile to `main` soon and then keep
+  it continuous, not batched.
+- **Attribute DAG-blocked `registered` wait to `external`, not `queue` (machinery /
+  improvement slice).** The v83 stats show `registered` = 88.82% of GLT, but much of that
+  is items correctly DAG-blocked on an unfinished parent — blocked/external wait, not
+  fixable pull-latency. Folding it into `queue` overstates fixable waste and hides the real
+  pull-latency signal. Refine `work-items.py` GLT decomposition so a registered item whose
+  DAG-parents are unfinished attributes its wait to `external`. Targets: metric fidelity
+  (so the retro attacks the true constraint). Related: EXP-104.
+- **Stale `deploy` row in per-project `queues/policy.csv` (schema gap).** v82 collapsed
+  building/deploying/etc. into one `wip` queue, but `policy.csv` still carries a `deploy`
+  row (`wip_limit=1`) and no `wip` row, so the current `wip` bucket has no policy floor/cap.
+  Update the policy schema + template to the v82 `queue_map`. Low blast-radius; flow-manager
+  flagged it at the v83 pull cycle.

@@ -1,11 +1,11 @@
 ---
-process_version: 82
-effective_from: 2026-07-06
-supersedes: v81, v80, v76
+process_version: 83
+effective_from: 2026-07-07
+supersedes: v82, v81, v80, v76
 status: active
 ---
 
-# Current Process — v82
+# Current Process — v83
 
 ## What this file is
 
@@ -364,6 +364,22 @@ gates, run unattended.
 **b. Parallel N+1 planning.** Because decisions are logged, planning the NEXT slice
 (product + architect) may begin while the CURRENT slice is built/tested, provided the
 two are sequentially independent; otherwise serialise.
+
+**c. Reality-check a perceived risk BEFORE gating on it (v83, EXP-103).** A gate exists
+to hold a *real* irreversible action, not a scary-sounding word. Before escalating a
+perceived risk ("deploy", "first-ever prod X", "irreversible") to a human sign-off or a
+hold, spend the cheap effort to confirm the mechanism **actually exists and executes** —
+read the pipeline/workflow/script that would perform it. If the mechanism does not exist
+(e.g. a CI workflow that is build/Gate-only with no deploy step), there is **no risk to
+gate**: proceed. Name the *specific* irreversible operation, not the category — "a
+deploy" is not a risk; **a prod-DB write** is (§0b), and an outward publish that truly
+executes is. Gate only the concrete op that is BOTH real and irreversible; let everything
+else flow. Rationale: an item parked in a pre-terminal state on a **non-existent** gate
+becomes pure queue-wait — the most expensive and most invisible gross-lead-time waste,
+reading as "responsible caution." A long-parked pre-terminal item dominating GLT is a flow
+defect to investigate, not a virtue. (Founding failure:
+`principle-failures/2026-07-07-perceived-deploy-risk-not-reality-checked.md` — the SLC-002
+cohort held ~88% of GLT behind a build-only pipeline's phantom deploy gate.)
 
 ## 10. Next-work selection — the open-items register
 "What runs next" is decided against the full set of unaddressed items, not just the

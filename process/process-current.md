@@ -743,6 +743,19 @@ correctness checks. Target for frontend-only validation < 300s; first-backend sl
 may run longer. (How the tester validates — validation-as-code, run provenance,
 identity-before-behaviour, stable selectors — lives in `tester.md`.)
 
+**Validate against the INPUT REQUIREMENT, not only the derived acceptance.** The
+acceptance cases and slice success measures are a *proxy* for the customer's job —
+the tester's oracle of record is the **input requirement the item traces to** (its
+`REQ-…` ancestor via `parents:` edges — its JTBD, stated outcome, and success
+measures). The tester reads that requirement first and asks, at the public surface,
+"does what is running satisfy the job the requirement asked for?" — not merely "do
+the acceptance cases pass?". A green acceptance run that does not deliver the
+requirement's stated outcome is a **fail** (and a signal the acceptance cases
+under-encode the requirement — name it so planning tightens them); a requirement
+outcome with no covering acceptance case is a finding, same as any uncovered changed
+node. Acceptance cases remain the frozen dev/prod oracle mechanics (§11b); the
+requirement is what they are held accountable to.
+
 **Auto-retro at delivery:** when a slice is `done` (validation passed, decision-log row
 written), the orchestrator runs the retro immediately and automatically in the same
 session — no human prompt, no wait. The human may interrupt or redirect, but their

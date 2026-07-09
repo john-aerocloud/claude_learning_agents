@@ -1,11 +1,11 @@
 ---
-process_version: 82
-effective_from: 2026-07-06
-supersedes: v81, v80, v76
+process_version: 83
+effective_from: 2026-07-09
+supersedes: v82, v81, v80, v76
 status: active
 ---
 
-# Current Process — v82
+# Current Process — v83
 
 ## What this file is
 
@@ -278,8 +278,11 @@ a full retro only when the constraint SHIFTS. Target: gross lead time. [EXP-100]
 # STAGE 1 — Next-work selection & gates
 
 ## 6. Loops
-- **Intake** → `/intake` — requirement OR defect enters here, JTBD-framed,
-  valued/costed; the one upstream human gate (§F5).
+- **Requirement intake** → `/requirement` — a NEW requirement enters here, is
+  ELABORATED by the discovery agent (personas across the four operator classes;
+  jobs-to-be-done drilled to root need via 5-whys; per-persona failure modes) into a
+  human-signed dossier, then JTBD-framed, valued/costed; the one upstream human gate
+  for new value (§F5). Defects enter via `/defect`. (`/intake` is a retired shim.)
 - **Continuous pull** → `/loop-run` — the inner dev loop pulls ready use-cases
   (parallel by independence, §F2/§F6) until queues drain; replenishes just-in-time
   (§F3). `/slice-next` is product's internal replenishment routine, not a human gate.
@@ -298,6 +301,7 @@ a full retro only when the constraint SHIFTS. Target: gross lead time. [EXP-100]
 ## 7. Agent roster
 | Agent | When dispatched |
 |-------|----------------|
+| discovery | requirement elaboration at `/requirement`: personas (4 operator classes) + jobs-to-be-done (5-whys root need) + per-persona failure modes -> signed dossier |
 | product | vision + slice definition (and parallel N+1 per §9b) |
 | solution-architect | architecture delta + security review (and parallel N+1) |
 | cicd | capabilities (environments, pipeline, rollback, flags, allowlist) |
@@ -311,7 +315,7 @@ Each agent's `model:` frontmatter is a tunable lever, scored like any other chan
 match the tier to the **judgment density** of the agent's task, not its prestige.
 Current: **opus** = engineer (long-horizon TDD build, the CFR lever), orchestrator
 (the ToC constraint), solution-architect, ui-designer; **sonnet** = product, cicd,
-tester, flow-manager; **haiku** = documenter. On any model release the retro
+tester, flow-manager, discovery; **haiku** = documenter. On any model release the retro
 re-assesses; every tier move is a registered experiment with a named DORA metric and
 a revert condition (cost without a metric move = revert).
 
@@ -379,7 +383,7 @@ predicate, §25a) — the known-up-front scoring opportunity set.
 collision, not process/system residue) is framed by product as a JTBD and REGISTERED as
 a requirement/chunk/UC item via the intake path (`registered`), so it enters costing +
 prioritisation here — distinct from `open-items.md` (process/system residue); a finding
-needing a human value-judgement routes through the `/intake` human gate (§F5, product.md).
+needing a human value-judgement routes through the `/requirement` human gate (§F5, product.md).
 
 Selection rule, applied at every "what next" decision and logged:
 1. **DORA-helping process improvements first** — system learning is this repo's goal

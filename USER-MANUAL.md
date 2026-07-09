@@ -31,7 +31,8 @@ Job-to-be-done → Chunk → Slice → Use-case → (built, deployed, validated)
                                      ↑ defects enter here too
 ```
 
-1. **You state a requirement** (`/project-new` or `/intake`). Product turns it into a
+1. **You state a requirement** (`/project-new` or `/requirement`). The discovery agent
+   elaborates who it serves and why (personas + jobs-to-be-done) with you, then product turns it into a
    vision, the architect sets the shape, and it's decomposed into chunks → slices →
    use-cases, each an item file with value/cost and dependency edges.
 2. **The loop pulls and builds** (`/loop-run`). Continuously, it pulls the largest set of
@@ -41,7 +42,8 @@ Job-to-be-done → Chunk → Slice → Use-case → (built, deployed, validated)
 3. **Done bubbles up.** A slice is done when its use-cases are; a chunk when its slices
    are; the requirement when its chunks are. All derived from the item events.
 
-**The only routine human gate is intake** (`/intake`) — you decide what work enters.
+**The routine human gates are `/requirement`** (new value — you agree the persona +
+jobs-to-be-done dossier) **and `/defect`** (defects) — you decide what work enters.
 Deploys (including infra) auto-approve under an automated policy assurance; the only
 other human touch is a genuinely irreversible production-data operation.
 
@@ -57,12 +59,15 @@ machine-local `work/ACTIVE` pointer is used.
   new-requirement workflow (vision → architecture → chunks → capabilities).
 - `/requirement-new <name>` — run that new-requirement workflow for an existing project
   (add another requirement). Vision/architecture are logged, not human-gated.
-- `/intake` — **the human gate.** Bring in a new requirement *or* a defect: it captures
-  and (for defects) reproduces, creates the item file, and appends the first event
-  (`registered` / `reported`). Queue membership is derived — there's no manual enqueue.
+- `/requirement` — **the human gate for new value.** Bring in a new requirement: the
+  discovery agent works with you to enumerate every user (consumer, build-eng,
+  platform-eng, support), drill each job to its root need (5-whys), and capture what
+  failure looks like for each — producing a dossier you sign off. Then product frames
+  value/cost, the item file is created, and the first event is appended (`registered`).
+  Queue membership is derived — there's no manual enqueue. (Defects go via `/defect`.)
 - `/loop-run <name>` — run the continuous pull loop (the workhorse). Autonomous: it
   pulls, builds, deploys, validates, replenishes, and retros at cadence until done.
-- `/defect …` — report a defect. Intake happens at `/intake`; this adds the one thing
+- `/defect …` — report a defect. Capture, reproduce, prioritise and register happen here; this adds the one thing
   intake doesn't: the mandatory **gap-closing retro** once the fix ships.
 
 **Seeing state**

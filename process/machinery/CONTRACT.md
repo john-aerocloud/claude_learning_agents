@@ -16,7 +16,8 @@ frontmatter (machine-authoritative) + markdown body (human definition).
 id: UC-C1
 type: use-case            # selects the state graph (process/machinery/state-graphs.json)
 title: "Fold carrier codeshares into the projection"
-job: J3
+job: J3                   # JTBD id (reference doc work/<p>/product/jtbd-map.md)
+personas: [P1, P3]        # OPTIONAL: which users this behaviour serves (reference doc .../personas.md). set by product from the signed-off discovery dossier.
 value: 3
 cost: 0.5
 parents: [SLC-032]        # UPWARD edges only: hierarchical container(s). REQUIRED (except requirement).

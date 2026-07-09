@@ -22,6 +22,7 @@ in `/process` may reference a specific project.
 orchestrator  (flow, gates, DORA, Theory of Constraints — NO product/eng calls)
   ├── flow-manager        (derives flow decisions — pull/replenish/parallelism/collisions — from item event-logs)
   ├── product             (Jobs to Be Done, vision, next-smallest slice, value/cost)
+  ├── discovery           (requirement elaboration: personas + jobs-to-be-done -> signed dossier)
   ├── solution-architect  (C4 / AWS Well-Architected, arch delta, security review)
   ├── cicd                (environments-on-need, pipeline, rollback assets)
   ├── engineer            (strict TDD on trunk)
@@ -90,7 +91,8 @@ writer, edge-checked), `make wi-project` (recompute all derived views + stats),
 
 | Command | What it does | Gates |
 |---------|--------------|-------|
-| `/intake "<req or defect>"` | **(v82)** JTBD-frame + value/cost + register item + `wi-append registered/made_ready` (defects pre-empt) | **intake** |
+| `/requirement "<req>"` | **(v83)** discovery elaborates personas (4 operator classes) + jobs-to-be-done (5-whys root need) into a signed dossier, then JTBD-frame + value/cost + register + `wi-append registered` | **intake** |
+| `/defect "<exp>\|<act>\|<intent>\|<why>"` | capture 4 fields + reproduce-to-confirm + register (`reported`, defects pre-empt) + gap-closing retro | **rework/ready** |
 | `/loop-run <name>` | **(v82)** continuous pull loop: read derived Ready view → pull independent set → build/deploy/validate (`wi-append` per stage) → `wi-project` → replenish → retro | deploy (infra-only) |
 | `/flow-status <name>` | **(v82)** derived queues vs buffers, time thieves, parallelism efficiency, item tree (from `wi-project`) | — |
 | `/project-new <name> [problem]` | Create the project, start the new-requirement workflow | intake |
@@ -159,7 +161,7 @@ derived `views/stats.*`.
 ## Layout
 
 ```
-.claude/agents/        orchestrator, flow-manager, product, solution-architect, cicd,
+.claude/agents/        orchestrator, flow-manager, discovery, product, solution-architect, cicd,
                        engineer, ui-designer, tester, documenter, linear, jira
 .claude/commands/      the workflow commands above (13)
 .claude/skills/        work-items, process-framework, delivery-principles, ui-design-system,
@@ -173,7 +175,7 @@ work/                  projects + _TEMPLATE/ (see work/README.md)
 
 1. `/project-new my-thing "the problem in one line"`
 2. Walk the gates; sign off when asked.
-3. `/intake "<req>"` → `/loop-run my-thing` → `/retro my-thing`.
+3. `/requirement "<req>"` → `/loop-run my-thing` → `/retro my-thing`.
 4. `make wi-project PROJECT=my-thing` then read `work/my-thing/views/stats.md`
    to see the constraint to attack next.
 

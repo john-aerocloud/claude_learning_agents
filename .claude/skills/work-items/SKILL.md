@@ -24,6 +24,7 @@ Frontmatter fields:
 - `id` — e.g. `UC-C1`, `SLC-032`, `DEF-041`, `REQ-…`.
 - `type` — selects the state graph: `use-case | defect | open-item | slice | chunk | requirement`.
 - `title`, `job` (JTBD id), `value`, `cost` — economics used by the pull.
+- `personas:` — OPTIONAL list of persona ids (e.g. `[P1,P3]`) naming WHICH users the item serves. Personas + JTBD are REFERENCE docs under `work/<p>/product/` (`personas.md`, `jtbd-map.md`), not work items; use-cases point at them. Set by product from the `/requirement` discovery dossier.
 - `parents:` — UPWARD hierarchical container(s). REQUIRED (except `requirement`).
 - `deps:` — peer prerequisites; the DAG edges the pull uses to form the independent set. May be empty.
 - `created_ts` — UTC registration time.

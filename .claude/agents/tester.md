@@ -133,7 +133,7 @@ When a validation fails, classify BEFORE you file:
   **deploy-failure**, NOT a `DEF-` item — no defect is raised for a UC that never
   reached `done`. Hand it back to `engineer` (below).
 - **You find a failure in behaviour previously `validated`/`done`** — a REGRESSION in
-  shipped work — → raise a `DEF-` via `/intake` (a `reported` event), a **defect against
+  shipped work — → raise a `DEF-` via `/defect` (a `reported` event), a **defect against
   the standing system** (§3). It is not a failure of the current deploy; it enters
   intake JTBD-framed/costed and pre-empts (§F5).
 

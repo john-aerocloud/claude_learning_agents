@@ -19,7 +19,7 @@
 #   worktree ensure   <project>   # create worktree+branch if absent; move parked repo in; set ACTIVE; print path
 #   worktree path     <project>   # print the worktree path (does not create)
 #   worktree list                 # list all worktrees
-#   worktree foldback <project>   # from the integration tree (on main): merge instance/<project> into main
+#   worktree foldback <project>   # merge instance/<project> into main IN the integration tree (works from any tree; unattended-safe; escalates on conflict)
 #   worktree remove   <project>   # park the project repo back to integration tree, then remove the worktree
 set -eu
 
@@ -86,13 +86,31 @@ cmd_path() {
 cmd_list() { git worktree list; }
 
 cmd_foldback() {
+  # Unattended-safe: merges instance/<proj> INTO main in the INTEGRATION tree,
+  # regardless of which tree you invoke it from (retro runs in the worktree and
+  # still folds back). Idempotent. Escalates — never forces — on conflict.
+  #   exit 0 clean/no-op | 3 integration tree dirty (deferred) | 4 merge conflict (aborted)
   proj=${1:?usage: worktree foldback <project>}
   br="instance/$proj"
-  cur=$(git rev-parse --abbrev-ref HEAD)
-  [ "$cur" = "main" ] || { echo "foldback must run from the integration tree (on main); you are on '$cur'" >&2; exit 1; }
+  mt=$(main_tree)
   git show-ref --verify --quiet "refs/heads/$br" || { echo "no branch $br to fold back" >&2; exit 1; }
-  git merge --no-edit "$br" >&2
-  echo "folded $br -> main (process layer only; work/* is gitignored)"
+  # already reintegrated?
+  if git -C "$mt" merge-base --is-ancestor "$br" main 2>/dev/null; then
+    echo "already folded: $br is an ancestor of main"; return 0
+  fi
+  # the integration tree must be clean to accept an unattended merge
+  if [ -n "$(git -C "$mt" status --porcelain)" ]; then
+    echo "DEFERRED: integration tree ($mt) has uncommitted changes — fold-back of $br is OWED once it is clean." >&2
+    exit 3
+  fi
+  if git -C "$mt" merge --no-edit "$br" >&2; then
+    echo "folded $br -> main (process layer only; work/* is gitignored)"
+  else
+    git -C "$mt" merge --abort 2>/dev/null || true
+    echo "CONFLICT folding $br -> main (merge aborted, main untouched). A process-layer" >&2
+    echo "conflict cannot be auto-resolved — resolve it in the integration tree ($mt)." >&2
+    exit 4
+  fi
 }
 
 cmd_remove() {

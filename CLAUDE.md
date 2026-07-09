@@ -98,12 +98,18 @@ See `README.md` for the full system. In short:
     **parks a project's nested repo back into the integration tree before removing
     its worktree** so `git worktree remove` never destroys project output.
     `/project-new`, `/project-switch`, `/project-stop`, `/project-list` all call it.
-  - **Fold-back (reconcile continuously, never batch — §0a Rule 4).** A `/retro` in a
-    worktree commits process improvements onto `instance/<project>`; reintegrate them
-    with `make project-foldback PROJECT=<project>` **from the integration tree** (on
-    `main`). Because `work/*` is gitignored, only the process layer merges — no project
-    output ever rides along. Rising instance→main latency is a gross-lead-time cost the
-    retro measures and drives down.
+  - **Fold-back is AUTOMATIC and unattended (reconcile continuously, never batch —
+    §0a Rule 4).** A `/retro` in a worktree commits process improvements onto
+    `instance/<project>` and then runs `make project-foldback PROJECT=<project>`
+    ITSELF as its close step — no human touch. The helper merges `instance/<project>`
+    into `main` in the integration tree *from wherever it is invoked* (it targets the
+    main worktree via `git -C`), so a retro in a project worktree still reintegrates
+    without you switching trees. Because `work/*` is gitignored, only the process layer
+    merges — no project output ever rides along. It escalates ONLY in two cases: the
+    integration tree has uncommitted changes (deferred — keep that tree clean so
+    fold-back always lands), or two projects edited the same process file incompatibly
+    (a real conflict, aborted with `main` untouched, needing human judgement). Rising
+    instance→main latency is a gross-lead-time cost the retro measures and drives down.
   Invariants that make this safe: **`work/ACTIVE` is machine-local and gitignored**
   (per-tree, never committed); **the write substrate is per-item files**
   (`work/<project>/items/{active,done}/<ID>.md`, disjoint concurrent writes — this

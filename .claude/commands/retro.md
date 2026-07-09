@@ -126,17 +126,24 @@ Act as the **orchestrator**. Own this; gather input but make the process call.
    returns `ok` again and the loop may resume pulls. (This is the v82 replacement
    for the old "record a `retro` ledger row" reset — there is no DORA CSV write.)
    Re-run `make retro-debt PROJECT=$1` to confirm the debt is drained (exit 0).
-8a. **FOLD BACK to main (§0a) — the retro is not closed until process learning is
-   reintegrated.** Every change this retro routed to the process/agent-system layer
-   (`/process`, `.claude/`, `CLAUDE.md`, Makefile, scripts) is committed on this
-   project's `instance/$1` branch. Reintegrate it into `main` **immediately, never
-   batched** (§0a Rule 4 — reconcile latency is a gross-lead-time cost, measured in
-   step 1): from the integration tree (the worktree on `main`) run
-   `make project-foldback PROJECT=$1`. If you are in the project's own worktree (on
-   `instance/$1`) you CANNOT merge into main from here — the helper refuses — so
-   STATE PLAINLY in your report that fold-back is owed and name the exact command, so
-   the integration session runs it without delay. Project output never rides the merge
-   (`work/*` is gitignored); only the process layer moves.
+8a. **FOLD BACK to main AUTOMATICALLY (§0a) — the retro is not closed until process
+   learning is reintegrated, and that happens UNATTENDED.** Every change this retro
+   routed to the process/agent-system layer (`/process`, `.claude/`, `CLAUDE.md`,
+   Makefile, scripts) must be committed on this project's `instance/$1` branch FIRST
+   (commit it now if you have not). Then **run `make project-foldback PROJECT=$1`
+   yourself** — do not merely instruct the human. The helper merges `instance/$1` into
+   `main` in the integration tree from wherever you are (works from the project
+   worktree), reconciling immediately, never batched (§0a Rule 4 — reconcile latency is
+   a gross-lead-time cost, measured in step 1). Project output never rides the merge
+   (`work/*` is gitignored); only the process layer moves. Handle the outcome:
+   - **exit 0** → folded (or already an ancestor of main): done, report it.
+   - **exit 3 (DEFERRED)** → the integration tree has uncommitted changes; fold-back is
+     OWED. Report that plainly with the exact command so it lands once the tree is clean
+     (this is the ONLY residual manual touch, and only when someone left the integration
+     tree dirty).
+   - **exit 4 (CONFLICT)** → two projects edited the same process file incompatibly; the
+     merge was aborted and `main` is untouched. This genuinely needs human judgement —
+     surface it as the one escalation the automation cannot resolve.
 
 Report: the focus question and answer, the new process version, each change
 WITH where it was routed (agent file / process / tool / improvement slice),

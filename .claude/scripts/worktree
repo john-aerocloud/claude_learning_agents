@@ -1,0 +1,124 @@
+#!/bin/sh
+# worktree — project-management worktree lifecycle (v83+).
+#
+# THE MODEL (CLAUDE.md §0a, process §0a): each project lives in its OWN git
+# worktree on branch `instance/<project>`, a sibling of the integration tree.
+# The integration tree stays on `main` and is where process/agent-system
+# improvements land; `/retro` commits process changes on the instance branch and
+# `foldback` merges them into `main` (only the process layer moves — `work/*` is
+# gitignored, so no project output ever rides the merge).
+#
+# HAZARD THIS SCRIPT GUARDS: a project's own repo lives PHYSICALLY inside its
+# worktree directory (`<wt>/work/<project>/`, a separate parent-ignored repo).
+# `git worktree remove` deletes that directory. So `remove` here first PARKS the
+# project repo back into the integration tree's `work/<project>/` (refusing if it
+# has uncommitted changes), and `ensure` moves a parked repo back into the
+# worktree. Stop/switch therefore round-trips without data loss.
+#
+# Usage (run from any tree in the repo; paths resolve to the `main` worktree):
+#   worktree ensure   <project>   # create worktree+branch if absent; move parked repo in; set ACTIVE; print path
+#   worktree path     <project>   # print the worktree path (does not create)
+#   worktree list                 # list all worktrees
+#   worktree foldback <project>   # from the integration tree (on main): merge instance/<project> into main
+#   worktree remove   <project>   # park the project repo back to integration tree, then remove the worktree
+set -eu
+
+sub=${1:-}; [ -n "$sub" ] && shift || true
+
+main_tree() {
+  # the worktree checked out on refs/heads/main = the integration tree
+  git worktree list --porcelain | awk '
+    /^worktree /{p=substr($0,10)}
+    /^branch refs\/heads\/main$/{print p; found=1; exit}
+    END{if(!found) exit 3}'
+}
+
+wt_path() {  # the CONVENTIONAL creation path (sibling of the main tree)
+  proj=$1
+  mt=$(main_tree)
+  parent=$(dirname "$mt")
+  printf '%s/%s-worktree\n' "$parent" "$proj"
+}
+
+wt_by_branch() {  # the ACTUAL registered worktree for instance/<proj>, by branch (dir-name agnostic); empty if none
+  proj=$1
+  git worktree list --porcelain | awk -v b="refs/heads/instance/$proj" '
+    /^worktree /{p=substr($0,10)}
+    $0=="branch "b{print p; exit}'
+}
+
+is_worktree() {  # is $1 a registered worktree path?
+  git worktree list --porcelain | grep -qx "worktree $1"
+}
+
+cmd_ensure() {
+  proj=${1:?usage: worktree ensure <project>}
+  mt=$(main_tree)
+  br="instance/$proj"
+  existing=$(wt_by_branch "$proj")
+  if [ -n "$existing" ]; then
+    wt=$existing                       # already checked out somewhere — use it, whatever it's named
+  else
+    wt=$(wt_path "$proj")              # create at the conventional path
+    if git show-ref --verify --quiet "refs/heads/$br"; then
+      git worktree add "$wt" "$br" >&2
+    else
+      git worktree add "$wt" -b "$br" main >&2
+    fi
+  fi
+  # relocate a PARKED project repo (from stop/remove) back into its worktree
+  if [ -d "$mt/work/$proj" ] && [ ! -d "$wt/work/$proj" ]; then
+    mv "$mt/work/$proj" "$wt/work/$proj" >&2
+    echo "un-parked $proj repo into $wt/work/$proj" >&2
+  fi
+  # per-tree machine-local active pointer (gitignored)
+  printf '%s\n' "$proj" > "$wt/work/ACTIVE"
+  echo "$wt"
+}
+
+cmd_path() {
+  proj=${1:?usage: worktree path <project>}
+  wt=$(wt_by_branch "$proj")
+  [ -n "$wt" ] || { echo "no worktree for $proj (run: worktree ensure $proj)" >&2; exit 1; }
+  echo "$wt"
+}
+
+cmd_list() { git worktree list; }
+
+cmd_foldback() {
+  proj=${1:?usage: worktree foldback <project>}
+  br="instance/$proj"
+  cur=$(git rev-parse --abbrev-ref HEAD)
+  [ "$cur" = "main" ] || { echo "foldback must run from the integration tree (on main); you are on '$cur'" >&2; exit 1; }
+  git show-ref --verify --quiet "refs/heads/$br" || { echo "no branch $br to fold back" >&2; exit 1; }
+  git merge --no-edit "$br" >&2
+  echo "folded $br -> main (process layer only; work/* is gitignored)"
+}
+
+cmd_remove() {
+  proj=${1:?usage: worktree remove <project>}
+  mt=$(main_tree)
+  wt=$(wt_by_branch "$proj")
+  [ -n "$wt" ] || { echo "no worktree for $proj" >&2; exit 0; }
+  # SAFETY: park the project's own repo back into the integration tree first
+  if [ -d "$wt/work/$proj" ]; then
+    if [ -n "$(git -C "$wt/work/$proj" status --porcelain 2>/dev/null)" ]; then
+      echo "REFUSING to remove: $proj project repo at $wt/work/$proj has uncommitted changes — commit them first." >&2
+      exit 1
+    fi
+    [ -d "$mt/work/$proj" ] && { echo "REFUSING: a parked repo already exists at $mt/work/$proj" >&2; exit 1; }
+    mv "$wt/work/$proj" "$mt/work/$proj" >&2
+    echo "parked $proj repo at $mt/work/$proj" >&2
+  fi
+  git worktree remove --force "$wt" >&2
+  echo "removed worktree $wt (branch instance/$proj retained; project repo parked)"
+}
+
+case "$sub" in
+  ensure)   cmd_ensure   "$@" ;;
+  path)     cmd_path     "$@" ;;
+  list)     cmd_list     "$@" ;;
+  foldback) cmd_foldback "$@" ;;
+  remove)   cmd_remove   "$@" ;;
+  *) echo "usage: worktree {ensure|path|list|foldback|remove} [project]" >&2; exit 2 ;;
+esac

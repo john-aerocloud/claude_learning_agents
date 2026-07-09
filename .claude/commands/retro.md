@@ -126,6 +126,17 @@ Act as the **orchestrator**. Own this; gather input but make the process call.
    returns `ok` again and the loop may resume pulls. (This is the v82 replacement
    for the old "record a `retro` ledger row" reset — there is no DORA CSV write.)
    Re-run `make retro-debt PROJECT=$1` to confirm the debt is drained (exit 0).
+8a. **FOLD BACK to main (§0a) — the retro is not closed until process learning is
+   reintegrated.** Every change this retro routed to the process/agent-system layer
+   (`/process`, `.claude/`, `CLAUDE.md`, Makefile, scripts) is committed on this
+   project's `instance/$1` branch. Reintegrate it into `main` **immediately, never
+   batched** (§0a Rule 4 — reconcile latency is a gross-lead-time cost, measured in
+   step 1): from the integration tree (the worktree on `main`) run
+   `make project-foldback PROJECT=$1`. If you are in the project's own worktree (on
+   `instance/$1`) you CANNOT merge into main from here — the helper refuses — so
+   STATE PLAINLY in your report that fold-back is owed and name the exact command, so
+   the integration session runs it without delay. Project output never rides the merge
+   (`work/*` is gitignored); only the process layer moves.
 
 Report: the focus question and answer, the new process version, each change
 WITH where it was routed (agent file / process / tool / improvement slice),

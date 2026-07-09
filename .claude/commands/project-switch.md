@@ -1,34 +1,38 @@
 ---
-description: Switch the active project. Sets work/ACTIVE and rebuilds minimal context from the decision log so work resumes exactly where it left off.
+description: Resume a project — ensure its worktree exists and rebuild minimal context so work continues where it left off.
 argument-hint: <project-name>
 allowed-tools: Read, Write, Edit, Bash
 ---
 
-Act as the **orchestrator**. Switch the active project to **$1**.
+Act as the **orchestrator**. Resume work on project **$1**.
 
-1. Validate `work/$1/` exists and read its `project.md`. If it does not exist,
-   list the projects under `work/` (excluding `_TEMPLATE`) with their status and
-   stop. If status=stopped, say so and ask whether to reactivate (set
-   status=active, log it) before switching.
-2. Write `$1` to `work/ACTIVE` (the **machine-local, gitignored** pointer — this
-   changes only THIS instance's active project; it is never committed and can
-   never affect another machine/instance).
-3. Rebuild MINIMAL resume context — read only:
+> **Worktree-per-project (§0a).** A project is worked INSIDE its own worktree on
+> branch `instance/$1`, not by flipping a shared pointer in this tree. "Switching"
+> therefore means: make sure the project's worktree exists (un-parking its repo if
+> it was stopped) and point the human at it. `work/ACTIVE` is per-tree and set there.
+
+1. **Ensure the worktree.** `WT=$(make -s project-worktree PROJECT=$1)` — if the
+   worktree is absent it is re-created on `instance/$1` and any parked project repo
+   (from `/project-stop`) is moved back in; that tree's `work/ACTIVE` is set to `$1`.
+   If no such project/branch/repo exists anywhere, run `make project-worktrees` +
+   scan for parked repos, list what IS available, and stop (suggest `/project-new $1`).
+2. **Read `$WT/work/$1/project.md`.** If status=stopped, set status=active and log the
+   reactivation in `$WT/work/$1/decision-log.md`.
+3. **Rebuild MINIMAL resume context** from the worktree — read only:
    - `project.md` (vision, status),
-   - the tail of `decision-log.md` (last ~10 entries: which gates are passed,
-     which decision is pending),
+   - the tail of `decision-log.md` (last ~10 entries: gates passed, decision pending),
    - `chunks.md` (which chunk is in play),
-   - the DERIVED work state — `work/$1/views/state.md` (each item's folded state)
-     and `work/$1/views/queues.md` (what is in flight / ready / rework) tell you
-     exactly where work stopped. Prefer these over inferring progress from which
-     slice artifact files happen to exist.
-   Do NOT load architecture or full slice history — the decision log plus the
-   derived views are the resume mechanism.
-4. Report: where the project stands (gate state, work state), the next
-   recommended command (`/slice-next`, `/loop-run`, or `/retro`), and any human
-   decision that was pending when work last stopped.
+   - the DERIVED work state — `$WT/work/$1/views/state.md` (each item's folded state)
+     and `views/queues.md` (in flight / ready / rework) — the authoritative record of
+     where work stopped. Prefer these over inferring progress from which artifact files
+     exist.
+   Do NOT load architecture or full slice history — the decision log + derived views
+   are the resume mechanism.
+4. **Report**: the worktree path, where the project stands (gate + work state), the next
+   recommended command to run **in that worktree session** (`/requirement`,
+   `/slice-next`, `/loop-run`, or `/retro`), and any human decision pending when work
+   last stopped.
 
-Switching never destroys state: the previous project keeps its files, its open
-gates, and its project-tagged DORA rows. Nothing in `/process` changes. Because
-`work/ACTIVE` is machine-local, switching here is invisible to any other running
-instance — each instance drives its own project independently.
+Resuming never destroys state. Nothing in `/process` changes. Because each project has
+its own worktree + machine-local `work/ACTIVE`, this is invisible to any other running
+instance — every instance drives its own project independently, in parallel.

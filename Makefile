@@ -34,6 +34,30 @@ SQLCMD       ?= C:/Program Files/Microsoft SQL Server/Client SDK/ODBC/170/Tools/
 REMED_SERVER ?= (localdb)\MSSQLLocalDB
 REMED_DB     ?= viggo_remed_test
 
+# --- Project worktree lifecycle (v83+, worktree-per-project) -------------------
+# Each project lives in its OWN git worktree on branch instance/<project>; THIS
+# (main) tree is the integration branch that process improvements fold back into.
+# The .claude/scripts/worktree helper owns the lifecycle, including the safety
+# guard that a worktree's nested project repo is PARKED (never deleted) on remove.
+# PROJECT has no default here (work/ACTIVE is `none` in the integration tree) —
+# always pass PROJECT=<name>.
+#   make project-worktree PROJECT=ROC          # ensure worktree+branch exist; print its path
+#   make project-worktree-path PROJECT=ROC     # print the worktree path (no create)
+#   make project-worktrees                     # list all worktrees
+#   make project-foldback PROJECT=ROC          # merge instance/ROC -> main (run from this tree, on main)
+#   make project-worktree-remove PROJECT=ROC   # park the project repo, then remove the worktree
+WORKTREE := sh .claude/scripts/worktree
+project-worktree:
+	@$(WORKTREE) ensure $(PROJECT)
+project-worktree-path:
+	@$(WORKTREE) path $(PROJECT)
+project-worktrees:
+	@$(WORKTREE) list
+project-foldback:
+	$(WORKTREE) foldback $(PROJECT)
+project-worktree-remove:
+	$(WORKTREE) remove $(PROJECT)
+
 # --- AWS SSO login -------------------------------------------------------------
 # Re-authenticate the project's SSO profile when the cached token has expired
 # (symptom: any aws CLI call fails with "Token has expired and refresh failed").
@@ -501,7 +525,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: sso-login retro-debt retro-mark wi-append wi-project wi-validate wi-migrate doc-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3
+.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-worktree-remove sso-login retro-debt retro-mark wi-append wi-project wi-validate wi-migrate doc-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3
 
 # --- Viggo-fix UC-W7: Country/Nationality ID remediation (T-SQL) --------------
 # Data-driven, self-building T-SQL remediation script set + its local stand-up

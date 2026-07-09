@@ -110,6 +110,16 @@ See `README.md` for the full system. In short:
     fold-back always lands), or two projects edited the same process file incompatibly
     (a real conflict, aborted with `main` untouched, needing human judgement). Rising
     instance→main latency is a gross-lead-time cost the retro measures and drives down.
+  - **Fold-forward (get updates: main → instance/<project>).** A worktree pulls the
+    latest process with `make project-update PROJECT=<project>` — no fetch (all
+    worktrees share one `.git`, `main` is already local). `/project-switch` runs it on
+    resume so a session always starts on the CURRENT process, and you can run it any
+    time between cycles to pick up another project's folded-back improvements. It is
+    SAFE by construction: only the process layer merges; the project's own repo
+    (`work/<project>/`, a separate gitignored repo) is never touched by a parent-repo
+    merge, so in-flight project work is never disturbed. Same escalation shape as
+    fold-back — deferred if the worktree has uncommitted process-layer edits, aborted
+    on a genuine conflict.
   Invariants that make this safe: **`work/ACTIVE` is machine-local and gitignored**
   (per-tree, never committed); **the write substrate is per-item files**
   (`work/<project>/items/{active,done}/<ID>.md`, disjoint concurrent writes — this

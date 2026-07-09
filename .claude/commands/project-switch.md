@@ -16,6 +16,13 @@ Act as the **orchestrator**. Resume work on project **$1**.
    (from `/project-stop`) is moved back in; that tree's `work/ACTIVE` is set to `$1`.
    If no such project/branch/repo exists anywhere, run `make project-worktrees` +
    scan for parked repos, list what IS available, and stop (suggest `/project-new $1`).
+1a. **Pull the latest process (fold-forward).** Run `make project-update PROJECT=$1`
+   so the worktree picks up any process/agent improvements folded to `main` since you
+   last worked here — you resume on the CURRENT process, not a stale snapshot. It is
+   safe (only the process layer merges; the project's own repo is untouched). Report
+   the outcome: updated / already-current / DEFERRED if the worktree has uncommitted
+   process-layer edits (rare) / CONFLICT if local process edits clash with main (the
+   one case needing your resolution).
 2. **Read `$WT/work/$1/project.md`.** If status=stopped, set status=active and log the
    reactivation in `$WT/work/$1/decision-log.md`.
 3. **Rebuild MINIMAL resume context** from the worktree — read only:

@@ -20,6 +20,7 @@
 #   worktree path     <project>   # print the worktree path (does not create)
 #   worktree list                 # list all worktrees
 #   worktree foldback <project>   # merge instance/<project> into main IN the integration tree (works from any tree; unattended-safe; escalates on conflict)
+#   worktree update   <project>   # fold-FORWARD: merge main INTO instance/<project> so the worktree gets the latest process (safe — only the process layer moves; project repo untouched)
 #   worktree remove   <project>   # park the project repo back to integration tree, then remove the worktree
 set -eu
 
@@ -113,6 +114,35 @@ cmd_foldback() {
   fi
 }
 
+cmd_update() {
+  # Fold-FORWARD: merge main into instance/<proj> in that project's worktree so it
+  # runs on the latest process. Safe — the process layer moves; the project's own
+  # repo (work/<proj>, a separate gitignored repo) is untouched by a parent-repo merge.
+  #   exit 0 clean/no-op | 2 no worktree | 3 worktree dirty (deferred) | 4 conflict (aborted)
+  proj=${1:?usage: worktree update <project>}
+  br="instance/$proj"
+  wt=$(wt_by_branch "$proj")
+  [ -n "$wt" ] || { echo "no worktree for $proj (run: worktree ensure $proj)" >&2; exit 2; }
+  # already current?
+  if git -C "$wt" merge-base --is-ancestor main "$br" 2>/dev/null; then
+    echo "already up to date: main is an ancestor of $br"; return 0
+  fi
+  # the worktree's PROCESS-LAYER checkout must be clean (work/<proj> is a separate
+  # gitignored repo and is intentionally NOT considered here)
+  if [ -n "$(git -C "$wt" status --porcelain)" ]; then
+    echo "DEFERRED: worktree ($wt) has uncommitted process-layer changes — update owed once it is clean." >&2
+    exit 3
+  fi
+  if git -C "$wt" merge --no-edit main >&2; then
+    echo "updated $br from main (process layer only; project repo untouched)"
+  else
+    git -C "$wt" merge --abort 2>/dev/null || true
+    echo "CONFLICT updating $br from main (merge aborted, $br untouched). The worktree" >&2
+    echo "has local process-layer edits that clash with main — resolve in $wt." >&2
+    exit 4
+  fi
+}
+
 cmd_remove() {
   proj=${1:?usage: worktree remove <project>}
   mt=$(main_tree)
@@ -137,6 +167,7 @@ case "$sub" in
   path)     cmd_path     "$@" ;;
   list)     cmd_list     "$@" ;;
   foldback) cmd_foldback "$@" ;;
+  update)   cmd_update   "$@" ;;
   remove)   cmd_remove   "$@" ;;
-  *) echo "usage: worktree {ensure|path|list|foldback|remove} [project]" >&2; exit 2 ;;
+  *) echo "usage: worktree {ensure|path|list|foldback|update|remove} [project]" >&2; exit 2 ;;
 esac

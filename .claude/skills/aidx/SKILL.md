@@ -35,6 +35,7 @@ When triggered, read the reference file that matches the question. Don't dump th
 | "How does AIDX relate to OAG / FlightAware / Type-B / IS-XML?"       | `references/06-boundaries-and-comparison.md`  |
 | "How do I publish AIDX to SITA / what's the REST API?"              | `references/07-sita-api.md`                   |
 | "What are the exact XSD enumerations / cardinality / Fuel / GM?"     | `references/08-xsd-schema.md`                 |
+| "Validate a message / get the actual XSD files"                      | `schemas/` (bundled v21.2 XSDs + how-to)      |
 | "What changed between AIDX versions? Which version do I target?"    | `references/09-version-history.md`            |
 | "How does AIDX map to our capability / persona / event model?"       | `references/10-aerocloud-relevance.md`        |
 | "Where is this info from / what needs refreshing?"                   | `references/sources.md`                       |

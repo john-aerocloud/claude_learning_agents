@@ -117,4 +117,8 @@ GM RQ filters on `Airline` (0..1) and/or `Registration` (0..1, nillable, 0–10 
 - **Key stability** (doc): `OriginDate` "must not change once initialized"; GA `PlannedDepartureDateTime` is part of the identifier, static.
 
 ## Validation asset
-These 12 XSDs are the machine-readable schema — usable directly for XML validation of AIDX/Fuel/GM messages. Saved at `sources/aidx-schema-v21/`.
+These 12 XSDs are the machine-readable schema — usable directly for XML validation of AIDX/Fuel/GM messages. **Bundled with this skill at `schemas/aidx-v21.2/`** (see `schemas/README.md` for validation commands). Example:
+
+```bash
+xmllint --noout --schema schemas/aidx-v21.2/IATA_AIDX_FlightLegNotifRQ.xsd samples/create-update-flightlegnotifrq.xml
+```

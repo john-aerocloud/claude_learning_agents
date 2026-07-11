@@ -1,6 +1,6 @@
 # Work-item machinery — contract
 
-The event-sourced single-source-of-truth work-item model (design: `Version2-design/04`).
+The event-sourced single-source-of-truth work-item model (design: `design-rationale/work-item-state-model.md`).
 This file is the build contract for the machinery script and the Linear/Jira projection
 agents. **One principle:** each fact is stored once (in the item), and every other view
 (queues, board, stats, tree) is computed from the items on read — never persisted-and-hand-synced.

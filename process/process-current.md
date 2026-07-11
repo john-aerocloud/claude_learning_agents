@@ -25,8 +25,9 @@ Pointers:
   `process/machinery/CONTRACT.md`.
 - **State graphs** (per-type transitions, `state_owners`, `queue_map`):
   `process/machinery/state-graphs.json` — edit only via the retro/version-bump gate.
-- **Design + rationale**: `Version2-design/04` (work-item state model), plus
-  `00`–`03` (pull-system design, diagrams, loops) and `02` (worked retro).
+- **Design + rationale**: `design-rationale/work-item-state-model.md`. The prior
+  QueueApproach design (pull-system, diagrams, worked retro) is archived at git tag
+  `QueueApproach`.
 - **Operative cutover rules**: **STAGE F → §F0**. Most of §F1–§F10 (buffers, WIP,
   parallel dispatch, collisions, retro-debt gate, deploy gate) stay valid and now
   operate on the *derived* queues — only the state substrate beneath them changed.
@@ -928,9 +929,10 @@ The v82 cutover was needed partly because the docs themselves rotted (2834 lines
 # STAGE F — Flow & queues (pull-based)
 
 The cross-agent rules of the pull system. **§F0 (above) is the substrate**; the rules
-below name flow behaviour and now operate on the *derived* views (§F0). Full rationale,
-diagrams, and a worked retro are in `Version2-design/`. Each rule names the DORA metric
-it targets, per §25a.
+below name flow behaviour and now operate on the *derived* views (§F0). Full rationale
+is in `design-rationale/work-item-state-model.md` (the prior QueueApproach design —
+diagrams and a worked retro — is archived at git tag `QueueApproach`). Each rule names
+the DORA metric it targets, per §25a.
 
 ## F1. Work items — hierarchy, links, and honest closes
 Every unit of work is a typed item — `REQ-`/`CHK-`/`SLC-`/`UC-`/`DEF-` — as a per-item

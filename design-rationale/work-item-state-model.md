@@ -3,8 +3,8 @@
 Status: **ACCEPTED — process v82, full cutover 2026-07-06.** Written to debug a
 recurring drift defect and to evaluate whether the multi-queue model should be replaced
 by a single self-contained-work-item model; adopted as the delivery substrate. This is
-the **model of record** — the prior QueueApproach design (`archive/00`–`03`) is archived
-history, preserved at git tag `QueueApproach`. Build contract: `process/machinery/CONTRACT.md`.
+the **model of record** — the prior QueueApproach design is archived history, preserved
+at git tag `QueueApproach`. Build contract: `process/machinery/CONTRACT.md`.
 
 ---
 

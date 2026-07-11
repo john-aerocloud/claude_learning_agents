@@ -1,0 +1,24 @@
+<!-- AIDX DELETE sample. Source: SITA developer.aero (S5), Version 15.1.
+     A delete keys off LegIdentifier only; LegData is empty.
+     Note the BA extension namespace (baplc.com/extensionSchema) — an example
+     of TPA_Extensions-style vendor namespaces in the wild. -->
+<IATA_AIDX_FlightLegNotifRQ
+    xmlns:ba="http://baplc.com/extensionSchema"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns="http://www.iata.org/IATA/2007/00"
+    AltLangID="en-us" PrimaryLangID="en-us" Target="Test" Version="15.1"
+    TimeStamp="2015-06-05T00:32:07.48Z" TransactionIdentifier="FLD" SequenceNmbr="9717">
+    <Originator CompanyShortName="BA"/>
+    <DeliveringSystem CompanyShortName="BA"/>
+    <FlightLeg>
+        <LegIdentifier>
+            <Airline CodeContext="3">BA</Airline>
+            <FlightNumber>6589</FlightNumber>
+            <DepartureAirport CodeContext="3">LGA</DepartureAirport>
+            <ArrivalAirport CodeContext="3">ORD</ArrivalAirport>
+            <OriginDate>2015-07-17</OriginDate>
+            <RepeatNumber>1</RepeatNumber>
+        </LegIdentifier>
+        <LegData/>
+    </FlightLeg>
+</IATA_AIDX_FlightLegNotifRQ>

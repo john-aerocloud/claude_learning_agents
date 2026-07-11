@@ -20,17 +20,31 @@ Before any AWS CLI or SDK operation:
 
 ---
 
-## 1. IaC default: AWS CDK (TypeScript)
+## 1. IaC default: SST v3+ (Ion)
 
-- **Default:** AWS CDK v2 in TypeScript. One CDK app per project under
-  `infra/` in the repository. Stacks named by environment: `OxoOnlineProd`.
-- **Why:** CDK generates CloudFormation, gives type-safe constructs, and
-  integrates naturally with the TypeScript/Node backend this team uses.
-- **Reversal → Terraform:** if the project is multi-cloud, or if the team has
-  strong existing Terraform expertise and no TypeScript familiarity.
-- **Never:** raw CloudFormation JSON/YAML (no type safety, no reuse).
+**Team preference (2026-07-11): SST v3+ (the Ion engine) is the AWS IaC default.**
 
-CDK bootstrap: `cdk bootstrap aws://<account>/<region> --profile <profile>`.
+- **Default:** **SST v3+ / Ion**, TypeScript, one `sst.config.ts` per project at
+  the repo/app root. Ion is built on Pulumi + Terraform providers — **not**
+  CloudFormation — so no CFN stack/resource limits and faster deploys. Resources
+  via `sst.aws.*` components (`sst.aws.Function`, `sst.aws.Bucket`,
+  `sst.aws.Cron`, …). Environments map to **stages** (`dev`, `prod`), aligned to
+  the AWS profile (§0).
+- **Why:** TypeScript-first like the team's Node stack; live-dev (`sst dev`) for
+  fast Lambda iteration; provider ecosystem (Terraform/Pulumi providers) if a
+  non-AWS resource is ever needed in the same app.
+- **State & bootstrap:** SST manages state in an S3 state bucket it bootstraps
+  per account/region (`sst` first run); secrets via `sst secret set` (backed by
+  SSM). No manual CloudFormation.
+- **Commands:** `sst deploy --stage <stage>` to apply; **`sst diff`** is the
+  `cdk diff` equivalent (preview before every apply); `sst remove` to tear down.
+- **Reversal → AWS CDK:** existing/legacy CDK stacks stay on CDK — do NOT
+  re-platform working infrastructure unless it's being substantially reworked;
+  new AWS IaC defaults to SST. **Reversal → Terraform:** only for a genuine
+  cross-cloud stack where the team standardises on Terraform (note: Azure work
+  already defaults to Terraform — see the `azure-architecture` skill).
+- **Never:** raw CloudFormation JSON/YAML; portal ClickOps for anything
+  persistent.
 
 ---
 
@@ -44,7 +58,7 @@ CDK bootstrap: `cdk bootstrap aws://<account>/<region> --profile <profile>`.
 
 - All cross-account and CI/CD trust via **OIDC federation** — no long-lived IAM
   user keys ever.
-- Tag every resource: `Project`, `Env`, `ManagedBy=cdk`.
+- Tag every resource: `Project`, `Env`, `ManagedBy=sst`.
 
 ---
 
@@ -104,7 +118,7 @@ Is the data relational (joins, transactions across entities)?
 
 **DynamoDB defaults:**
 - Billing: on-demand (not provisioned) for new projects.
-- Encryption: AWS-managed key (SSE enabled by default in CDK).
+- Encryption: AWS-managed key (SSE enabled by default).
 - TTL: always set for ephemeral items (game state, WS connections, sessions).
   Prevents unbounded storage growth without a cleanup job.
 - Access: Lambda execution roles only; never direct public access.
@@ -146,7 +160,9 @@ Rules:
 4. No inline policies on users. No IAM users for applications.
 5. Enable AWS CloudTrail in all accounts (management + data events for S3).
 
-Standard CDK construct for OIDC:
+GitHub OIDC deploy-role — illustrated below in CDK; in SST/Ion use the
+equivalent Pulumi `aws.iam.OpenIdConnectProvider` + `aws.iam.Role` in
+`sst.config.ts` (same trust policy):
 ```typescript
 const ghProvider = new iam.OpenIdConnectProvider(this, 'GithubOidc', {
   url: 'https://token.actions.githubusercontent.com',
@@ -219,7 +235,7 @@ the hard way (oxo-online s005-h1-waf, deploy reject 2026-06-06):
 - [ ] Execution role follows §7 (one role per function, ARN-scoped).
 - [ ] No `AWSLambdaFullAccess` or `AdministratorAccess`.
 - [ ] Environment variables: no secrets in plaintext — use SSM Parameter
-      Store (SecureString) or Secrets Manager; inject at deploy time via CDK.
+      Store (SecureString) or Secrets Manager; inject at deploy time via SST (`sst secret`).
 - [ ] VPC attachment only if function needs VPC resources; otherwise no VPC
       (avoids cold-start penalty from ENI provisioning).
 - [ ] Reserved concurrency set to prevent runaway cost.
@@ -249,7 +265,7 @@ Minimal pipeline stages, in order:
 2. lint           → eslint / ruff
 3. test           → jest / pytest (with coverage gate)
 4. build          → tsc / webpack / docker build
-5. deploy-infra   → cdk diff + cdk deploy (prod stack)
+5. deploy-infra   → sst diff + sst deploy (prod stage)
 6. deploy-app     → aws s3 sync + CF invalidation (SPA)
                     or: aws lambda update-function-code (Lambda)
 7. record-state   → make wi-append EVENT=validated (or the item's deploy event)
@@ -274,7 +290,7 @@ Minimal pipeline stages, in order:
 | **Reliability** | Multi-AZ managed services (DynamoDB, API GW, Lambda); DynamoDB PITR on durable tables; TTL for ephemeral state; idempotent operations |
 | **Performance** | CDN for static assets; DynamoDB single-item reads; Lambda cold-start monitoring; AI client-side where < 200ms target |
 | **Cost** | Scale-to-zero (Lambda, DynamoDB on-demand, Aurora Serverless); no idle NAT/EC2/RDS; TTL avoids storage growth; tag all resources for cost allocation |
-| **Operational Excellence** | IaC for all resources (CDK); structured CloudWatch logs; work-item state (`make wi-append`) recorded from CI; CloudTrail enabled |
+| **Operational Excellence** | IaC for all resources (SST/Ion); structured CloudWatch logs; work-item state (`make wi-append`) recorded from CI; CloudTrail enabled |
 | **Sustainability** | On-demand over provisioned; scale-to-zero; no always-on infrastructure beyond what's needed |
 
 ---

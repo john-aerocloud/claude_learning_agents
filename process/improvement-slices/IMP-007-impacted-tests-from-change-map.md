@@ -1,7 +1,22 @@
 # IMP-007 — Impacted-tests lookup from the change-impact model
 
-**Status:** queued (specced at v31 focused retro, 2026-06-07, human-directed)
-**Owner:** tester (consumer/spec) / engineer (build) / cicd (make target + allowlist)
+**Status:** BUILD-NOW (re-prioritised 2026-07-11 after 4× recurrence on OFS UC-A3/A4/A5/E3)
+**Owner:** cicd (owns the tool + make target + allowlist, §16.3); tester consumes
+
+## BLOCKER addendum (2026-07-11) — nested-repo git-root resolution
+Before the change-map lookup below can work at all under the v50 nested-repo /
+worktree-per-project topology, the tool must resolve the RIGHT git root. Today
+`.claude/tools/impacted-tests.js` uses `root = process.cwd()` (the parent/integration
+repo), so any project SHA passed as `SINCE` fails `fatal: bad revision` — the project is
+its own nested repo under `work/<project>/`. This recurred on FOUR OFS slices and is the
+active blocker.
+
+**Proven fix (tester-derived this session, 14/14 self-tests green):** detect the nested
+`.git` under `work/<project>/` and run the diff FROM that nested repo
+(`git -C work/<project> diff <since>..HEAD -- architecture/dependencies/*.mmd`), falling
+back to the parent repo only when the project has no nested repo. `SINCE` is interpreted
+against the repo that actually owns the SHA. cicd lands this + keeps the self-tests as its
+protection, then completes the change-map lookup done-condition below.
 
 ## Job
 The tester is the named constraint (median 1130s) and most of its cost is

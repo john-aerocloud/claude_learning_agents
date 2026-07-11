@@ -69,11 +69,18 @@ Each cycle:
      `make wi-append ID=<uc> EVENT=blocked AGENT=flow-manager NOTE="<reason>"`; clear it with
      `EVENT=unblocked`. The blocked reason rides on the event note, so the board banner is
      DERIVED — there is no separate blocked-reason file to keep in step.
-   - **Per-item board push (near-real-time):** as an agent CREATES, STARTS, FINISHES or BLOCKS
-     an item (i.e. after any `wi-append`), dispatch the `linear` (and/or `jira`) projection
-     agent for just that id — it reads the item file and upserts the one issue idempotently. The
-     step-5b full sweep stays the backstop for structure/prune. An item in `blocked` state shows
-     Blocked on the board regardless of its queue.
+   - **Per-item board push — MANDATORY, in-cycle (not optional, not "eventually"):**
+     immediately after ANY `wi-append` that changes an item's state (created / made_ready /
+     pulled / built_green / deployed / validated / blocked / unblocked / rejected), dispatch the
+     `linear` (and/or `jira`) projection agent for THAT id, in the SAME cycle, before the loop
+     advances to the next item. It reads the item file and upserts the one issue idempotently.
+     **Invariant: an item's board status must never lag its item-file state by more than the
+     current cycle.** Only the external API *call* is best-effort (a network failure is logged
+     and the next push/sweep reconciles) — the DISPATCH itself is NOT skippable. Skipping it is
+     a process failure: the board silently goes stale and the humans watching it lose the plot
+     (EXP-101, the board/doc-lag lapse this rule exists to prevent). The step-5b full sweep is
+     only a periodic backstop for structure/prune, never the primary path. An item in `blocked`
+     state shows Blocked on the board regardless of its queue.
 5. **Done & bubble up.** `make wi-append ID=<uc> EVENT=validated AGENT=tester REF=<sha>`
    (same turn as the green push), then `make wi-project PROJECT=$1` — the item moves to
    `items/done/`, releases its claims, and slice→chunk→requirement done bubbles automatically
@@ -90,12 +97,20 @@ Each cycle:
    constraint SHIFTS**, or when the routine-batch/incident threshold fires (§F8). A
    stable constraint on a clean run does not pay full-retro overhead; a shifted
    constraint is real learning that a retro must walk (exploit/subordinate/elevate).
-5b. **Mirror to the human board (parallel, non-blocking).** Dispatch the `linear` and/or
-   `jira` projection agent in full-sweep mode after the state change so the board self-updates
-   from the item files (mapping in `process/linear-mapping.md`). State-only mirror. Skip
-   silently if the project has no board binding. Never block the loop on it; a failure is
-   logged, not fatal.
-6. **Document (parallel, non-blocking).** Dispatch `documenter` in the background.
+5b. **Full-sweep board reconcile — periodic BACKSTOP only (the primary path is the
+   step-4 per-item push).** After a slice/chunk close, dispatch the `linear`/`jira` projection
+   agent in full-sweep mode to reconcile structure (create/prune the Project/Milestone
+   hierarchy, catch anything the per-item pushes missed) from the item files (mapping in
+   `process/linear-mapping.md`). State-only mirror. Skip silently if the project has no board
+   binding. Never block the loop on the API; a failure is logged, not fatal. This does NOT
+   replace the per-item push — if you find the sweep is doing real work every time, the
+   per-item push (step 4) is being skipped, which is the EXP-101 failure.
+6. **Document — REQUIRED at each slice/UC close (docs must not drift).** Dispatch `documenter`
+   to update the project README (and GitBook where bound) to match what just shipped — at
+   every slice close, and for any UC that changes user-facing behaviour. Runs in the
+   background, but is NOT skippable across a slice close: stale or absent user-facing docs are
+   a process failure the same way a stale board is (EXP-101). Keep it honest to shipped state
+   (never document unbuilt features as done).
 7. **RETRO-DEBT GATE — mechanical, not discretionary (§F8, v68).** Before pulling
    the NEXT work after any slice/chunk close or defect resolve, run
    `make retro-debt PROJECT=$1`. This is a **hard loop-state precondition, not a

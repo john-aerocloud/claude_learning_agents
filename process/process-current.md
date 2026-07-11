@@ -91,9 +91,16 @@ each as a share of gross lead time. This replaces `dora.py flow`/`compute`; the 
 (legal history; done ⇒ in no queue; edge consistency; one file per id). Non-zero exit blocks the
 pull. This replaces `make ledger-drift` and `reconcile-registry`.
 
-**Boards mirror per item, in parallel.** When an item's events change, dispatch the `linear`
-and/or `jira` projection agent for that one id (idempotent, independent, non-blocking); a
-full-sweep run is the backstop. Boards are projections — the item always wins.
+**Boards mirror per item, in-cycle — MANDATORY (§F0 invariant).** Every `wi-append` that
+changes an item's state MUST be followed, in the SAME loop cycle, by dispatching the `linear`
+and/or `jira` projection agent for that one id (idempotent, independent). The DISPATCH is not
+optional or deferrable; only the external API *call* is best-effort (a failure is logged and the
+next push/sweep reconciles). **Invariant: an item's board status never lags its item-file state
+by more than the current cycle.** The full-sweep run is a periodic structure backstop, NOT the
+primary path — if the sweep does real state work every time, per-item pushes are being skipped
+(the EXP-101 board/doc-lag lapse). Likewise user-facing docs (README / GitBook, via `documenter`)
+are refreshed at each slice close and must not drift from shipped state. Boards and docs are
+projections — the item always wins, but a projection left stale is a process failure.
 
 **Command mapping (old → new)** — the ONE sanctioned place naming retired mechanics (§27.3): <!-- doc-lint:allow -->
 `dora record … --event enqueue/dequeue/item_done` → <!-- doc-lint:allow -->

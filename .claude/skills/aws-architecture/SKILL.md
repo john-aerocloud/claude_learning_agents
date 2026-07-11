@@ -20,17 +20,55 @@ Before any AWS CLI or SDK operation:
 
 ---
 
-## 1. IaC default: AWS CDK (TypeScript)
+## 1. IaC default: SST v3 (Ion), TypeScript
 
-- **Default:** AWS CDK v2 in TypeScript. One CDK app per project under
-  `infra/` in the repository. Stacks named by environment: `OxoOnlineProd`.
-- **Why:** CDK generates CloudFormation, gives type-safe constructs, and
-  integrates naturally with the TypeScript/Node backend this team uses.
-- **Reversal → Terraform:** if the project is multi-cloud, or if the team has
-  strong existing Terraform expertise and no TypeScript familiarity.
-- **Never:** raw CloudFormation JSON/YAML (no type safety, no reuse).
+> **This is the org standard (human-directed, 2026-07-11).** The prior CDK
+> default caused repeated, cross-project problems (an un-gated CDK choice reached
+> build + a live deploy on AdixOut before being caught; see
+> `/process/principle-failures/2026-07-11-adixout-skipped-solution-architecture-gate-iac.md`).
+> **Default to SST v3 (Ion). Do NOT default to CDK.** The reference implementation
+> is the OagEventSource project (`Spike-FlightEventSource-OAG/sst.config.ts`) —
+> read it before authoring infra.
 
-CDK bootstrap: `cdk bootstrap aws://<account>/<region> --profile <profile>`.
+- **Default:** **SST v3 (Ion)** in TypeScript — one SST app per project rooted at
+  `sst.config.ts` (`export default $config({ app(){…}, async run(){…} })`).
+  `app()` returns `{ name, home: "aws", removal: "retain", providers: { aws } }`
+  with `aws = hasEnvCreds ? { region } : { region, profile: process.env.AWS_PROFILE ?? "<sandbox-profile>" }`
+  (CI injects OIDC env creds → no profile; local falls back to the shared-config
+  profile). Deploy per **stage**: `sst deploy --stage <env>`; tear down with
+  `sst remove --stage <env>`.
+- **Why:** SST v3 (Ion) provisions via Pulumi/Terraform providers (NOT
+  CloudFormation), gives type-safe first-class components (`sst.aws.Function`,
+  `sst.aws.Dynamo`, `sst.aws.Queue`, `sst.aws.ApiGatewayV1/V2`) with raw Pulumi
+  (`aws.*`) available for anything without a first-class component (KMS, IAM,
+  EventBridge cron, EventBus, Pipes), and it is the convention the org's live
+  services already use — matching siblings avoids the cross-project drift the CDK
+  default caused.
+- **Construct notes that bite (from OagEventSource + AdixOut):**
+  - **IAM is HAND-AUTHORED, not link/grant-inferred.** Pre-create `aws.iam.Role`
+    + inline `aws.iam.RolePolicy` per function, ARN-scoped, enumerating the FULL
+    op set of the real access path — including the READS a write path performs
+    (`dynamodb:Query`/`GetItem`) and `kms:Decrypt` for SSE. Under-granting is the
+    #1 SST failure mode (OAG hit `AccessDenied` three times this way). Pin
+    code↔policy (§30) so they cannot drift.
+    (This replaces CDK's automatic `grant*()` inference — there is no auto-grant.)
+  - `sst.aws.Cron` wraps a handler *definition*, not a pre-built Function — for a
+    scheduled invoke of a pre-built Function use **raw Pulumi**
+    `aws.cloudwatch.EventRule` (`rate(1 minute)`) + `EventTarget` + `aws.lambda.Permission`.
+  - Only `sst.aws.ApiGatewayV1` (REST) has usage plans / API keys; HTTP-API v2
+    lacks them — choose V1 when per-consumer throttling is a (current or seam'd)
+    requirement.
+  - Tags do not propagate app-wide under Pulumi — set `{Project, Env, ManagedBy:"sst", BuildSha}` per resource.
+  - State lives in an SST-managed S3 bucket (`s3://sst-state-<hash>/<App>/<stage>/`)
+    + encrypted `resource.enc` — a private bucket + a scoped OIDC deploy role are
+    part of the security surface (see the project's `security/sst-deploy-and-state.md`).
+- **Reversal → Terraform (plain):** if the project is multi-cloud beyond what
+  SST's providers cover cleanly, or the team has strong existing Terraform
+  expertise and no SST familiarity. **Reversal → CDK:** only with a specific,
+  logged justification — it is NOT the default and diverges from the org's live
+  services.
+- **Never:** raw CloudFormation JSON/YAML; CDK-by-default; mixing two IaC
+  frameworks in one project.
 
 ---
 
@@ -44,7 +82,8 @@ CDK bootstrap: `cdk bootstrap aws://<account>/<region> --profile <profile>`.
 
 - All cross-account and CI/CD trust via **OIDC federation** — no long-lived IAM
   user keys ever.
-- Tag every resource: `Project`, `Env`, `ManagedBy=cdk`.
+- Tag every resource: `Project`, `Env`, `ManagedBy=sst`, `BuildSha` (set
+  per-resource — Pulumi does not propagate app-wide tags).
 
 ---
 
@@ -104,7 +143,8 @@ Is the data relational (joins, transactions across entities)?
 
 **DynamoDB defaults:**
 - Billing: on-demand (not provisioned) for new projects.
-- Encryption: AWS-managed key (SSE enabled by default in CDK).
+- Encryption: AWS-managed key (`sst.aws.Dynamo` enables SSE; CMK only if the
+  data is sensitive). PITR is always-on under `sst.aws.Dynamo`.
 - TTL: always set for ephemeral items (game state, WS connections, sessions).
   Prevents unbounded storage growth without a cleanup job.
 - Access: Lambda execution roles only; never direct public access.
@@ -146,21 +186,30 @@ Rules:
 4. No inline policies on users. No IAM users for applications.
 5. Enable AWS CloudTrail in all accounts (management + data events for S3).
 
-Standard CDK construct for OIDC:
+OIDC deploy role with raw Pulumi (inside `run()` in `sst.config.ts`):
 ```typescript
-const ghProvider = new iam.OpenIdConnectProvider(this, 'GithubOidc', {
-  url: 'https://token.actions.githubusercontent.com',
-  clientIds: ['sts.amazonaws.com'],
+const ghProvider = new aws.iam.OpenIdConnectProvider("GithubOidc", {
+  url: "https://token.actions.githubusercontent.com",
+  clientIdLists: ["sts.amazonaws.com"],
+  thumbprintLists: ["<gh-oidc-thumbprint>"],
 });
-const deployRole = new iam.Role(this, 'DeployRole', {
-  assumedBy: new iam.WebIdentityPrincipal(ghProvider.openIdConnectProviderArn, {
-    StringEquals: {
-      'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
-      'token.actions.githubusercontent.com:sub':
-        'repo:<org>/<repo>:ref:refs/heads/main',
-    },
-  }),
+const deployRole = new aws.iam.Role("DeployRole", {
+  assumeRolePolicy: ghProvider.arn.apply((arn) => JSON.stringify({
+    Version: "2012-10-17",
+    Statement: [{
+      Effect: "Allow",
+      Principal: { Federated: arn },
+      Action: "sts:AssumeRoleWithWebIdentity",
+      Condition: { StringEquals: {
+        "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+        "token.actions.githubusercontent.com:sub": "repo:<org>/<repo>:ref:refs/heads/main",
+      } },
+    }],
+  })),
 });
+// The deploy role holds Pulumi resource-create perms + IAM-write scoped to the
+// project's role-name prefix ONLY (no workload-role escalation). Workload
+// function roles are separate, hand-authored, ARN-scoped (§1).
 ```
 
 ---
@@ -219,7 +268,9 @@ the hard way (oxo-online s005-h1-waf, deploy reject 2026-06-06):
 - [ ] Execution role follows §7 (one role per function, ARN-scoped).
 - [ ] No `AWSLambdaFullAccess` or `AdministratorAccess`.
 - [ ] Environment variables: no secrets in plaintext — use SSM Parameter
-      Store (SecureString) or Secrets Manager; inject at deploy time via CDK.
+      Store (SecureString) or Secrets Manager; resolve at deploy time in
+      `sst.config.ts` (e.g. `aws.secretsmanager.getSecretVersionOutput`), never
+      commit plaintext.
 - [ ] VPC attachment only if function needs VPC resources; otherwise no VPC
       (avoids cold-start penalty from ENI provisioning).
 - [ ] Reserved concurrency set to prevent runaway cost.
@@ -235,8 +286,11 @@ the hard way (oxo-online s005-h1-waf, deploy reject 2026-06-06):
 - [ ] No long-lived IAM user access keys for CI/CD.
 - [ ] OIDC provider trust constrained to `repo:org/repo:ref:refs/heads/main`
       (or the deploy branch).
-- [ ] Deploy role cannot `iam:CreateRole`, `iam:AttachRolePolicy`, or
-      `iam:PutRolePolicy` (prevents privilege escalation via deploy).
+- [ ] Deploy role's `iam:CreateRole`/`AttachRolePolicy`/`PutRolePolicy` is
+      **scoped to the project's role-name prefix only** (SST hand-authors
+      workload roles, so the deploy identity MUST write IAM — but only for this
+      project's roles, never `Resource:"*"`). No workload function role may
+      itself write IAM (no privilege escalation from a workload role).
 
 ---
 
@@ -247,13 +301,12 @@ Minimal pipeline stages, in order:
 ```
 1. install        → npm ci (or pip install)
 2. lint           → eslint / ruff
-3. test           → jest / pytest (with coverage gate)
-4. build          → tsc / webpack / docker build
-5. deploy-infra   → cdk diff + cdk deploy (prod stack)
-6. deploy-app     → aws s3 sync + CF invalidation (SPA)
-                    or: aws lambda update-function-code (Lambda)
-7. record-state   → make wi-append EVENT=validated (or the item's deploy event)
-8. smoke-test     → curl / playwright against prod URL
+3. test           → jest|vitest / pytest (with coverage gate)
+4. build          → tsc / bundle the handler assets
+5. deploy         → sst deploy --stage <env>  (infra + app in one SST apply;
+                    OIDC env creds, no profile in CI)
+6. record-state   → make wi-append EVENT=validated (or the item's deploy event)
+7. smoke-test     → curl / playwright against the deployed URL
 ```
 
 - Trigger: push to `main` only. PRs run steps 1–4.
@@ -274,7 +327,7 @@ Minimal pipeline stages, in order:
 | **Reliability** | Multi-AZ managed services (DynamoDB, API GW, Lambda); DynamoDB PITR on durable tables; TTL for ephemeral state; idempotent operations |
 | **Performance** | CDN for static assets; DynamoDB single-item reads; Lambda cold-start monitoring; AI client-side where < 200ms target |
 | **Cost** | Scale-to-zero (Lambda, DynamoDB on-demand, Aurora Serverless); no idle NAT/EC2/RDS; TTL avoids storage growth; tag all resources for cost allocation |
-| **Operational Excellence** | IaC for all resources (CDK); structured CloudWatch logs; work-item state (`make wi-append`) recorded from CI; CloudTrail enabled |
+| **Operational Excellence** | IaC for all resources (**SST v3 / Ion**, §1); structured CloudWatch logs; work-item state (`make wi-append`) recorded from CI; CloudTrail enabled |
 | **Sustainability** | On-demand over provisioned; scale-to-zero; no always-on infrastructure beyond what's needed |
 
 ---
@@ -286,6 +339,7 @@ condition that would trigger a reversal:
 
 | Deviation | Project | Justification | Reversal condition |
 |-----------|---------|---------------|-------------------|
+| **IaC default changed CDK → SST v3 (Ion)** (2026-07-11, human-directed) | ALL / org-wide | CDK default caused repeated cross-project problems; org's live services (OagEventSource) use SST v3 Ion; §1 rewritten. Prior projects on CDK are grandfathered until they next touch infra. | Reversal → CDK only with a specific logged justification (not the default); reversal → plain Terraform if multi-cloud beyond SST's providers |
 | Lambda over ECS Fargate | oxo-online | Spiky low-volume; scale-to-zero | p95 move latency > 1s due to cold starts |
 | API GW WS over ECS long-lived | oxo-online | Managed conns; no warm server needed | Message fan-out rate > API GW limits |
 | DynamoDB over RDS | oxo-online | No relational need; ephemeral game state | Leaderboard needs ranked queries beyond top-N |

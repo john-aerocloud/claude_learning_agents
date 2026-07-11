@@ -182,6 +182,15 @@ Everything else is a **derived view**, recomputed on read, never hand-synced:
 - **The board** (Linear / Jira) — a projection the `linear`/`jira` agents mirror per item.
 - **DORA + flow metrics** — fall out of the event timestamps already in the item.
 
+**Linear / Jira boards.** The system will **create and update tickets on Linear and
+Jira** for you: as each work item changes, the `linear`/`jira` agents create its issue and
+keep it current (state, title, links). This is a **one-way projection** — item file →
+board, always. It never reads the board back: editing a ticket in Linear/Jira does **not**
+change the work item, and any board edit is overwritten on the next projection. If you
+want to change what a ticket says, change the work item (drive it through the loop); the
+board follows. Because each projection touches exactly one item and shares no state, any
+number run in parallel.
+
 The write path is a single edge-checked appender: an event that isn't a legal transition
 from the item's current folded state is **rejected**, so a half-transition can't exist.
 Drift is a **construction gate** (`make wi-validate`), not an after-the-fact reconcile.

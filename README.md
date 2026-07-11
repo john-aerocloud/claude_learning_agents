@@ -90,6 +90,20 @@ It loops with you until you sign off.
 The dossier is not registered until you sign it. **A vague ask is sent back for
 clarification, not guessed.**
 
+**Feeding in your own material.** You don't have to describe everything in the prompt.
+Drop supporting files anywhere in the project — a folder you name (e.g.
+`work/my-thing/inbox/`), a spec, notes, a diagram, an email thread, an existing schema —
+and tell the project to **ingest** them:
+```
+/requirement "ingest the files in work/my-thing/inbox/ and elaborate the requirement"
+```
+The agents read what you dropped and **create whatever documents the current stage needs
+from it** — at the requirement stage that's the personas, JTBD map and dossier; at later
+stages it's the artifacts that stage calls for. It attempts to fill the gaps itself rather
+than making you retype what's already written down. (Still review the generated files
+against your source material before you sign off — ingestion is a starting draft, not a
+rubber stamp.)
+
 ### 2. Slicing — value cut thin
 The **product** agent decomposes the requirement into chunks → slices → use-cases, each
 one an item file. This is just-in-time (`/slice-next` runs inside the loop); you don't

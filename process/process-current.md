@@ -1,11 +1,11 @@
 ---
-process_version: 83
-effective_from: 2026-07-09
-supersedes: v82, v81, v80, v76
+process_version: 84
+effective_from: 2026-07-11
+supersedes: v83, v82, v81, v80, v76
 status: active
 ---
 
-# Current Process — v83
+# Current Process — v84
 
 ## What this file is
 
@@ -498,6 +498,28 @@ observable outcome/value); and its acceptance criteria. These live in the item's
 **no acceptance criteria** is flagged **`needs-acceptance`** and is **not Ready** — it
 cannot be pulled or built until product authors them (§F definition-of-ready). Genuine
 gaps are flagged, **never back-filled with fabricated criteria**. [EXP-072]
+
+## 12d. CORE-job done-gate + no-silent-partial delivery [v84]
+Aggregate state folds **structurally** (all children `done` → `done`). For a CORE `job`
+that is necessary but **NOT sufficient**: a slice/chunk carrying a CORE job is
+"done-in-fact" only when its acceptance is validated against **that job's success measure
+for the named persona(s)** — not merely when its child use-cases are `done`. Two
+obligations:
+1. **Job-anchored acceptance.** A CORE-job item's acceptance cases MUST cite the job's
+   success measure and the persona(s) it serves (§11a, §12). The tester prod-validates a
+   CORE-job item against that success measure, not incidental behaviour.
+2. **No silent partial.** When a value-slice deliberately delivers only PART of a CORE
+   job (a legitimate thin slice — e.g. same-account before cross-account), the
+   **undelivered remainder MUST be registered as a tracked item (child/sibling) BEFORE the
+   slice closes**. A CORE job may not leave `items/active/` empty while unfulfilled — an
+   empty backlog is truthful only when every CORE job's success measure is met.
+(Per-role: product anchors acceptance to the job's success measure + persona; tester
+validates against it; flow-manager confirms the remainder is tracked before a partial CORE
+slice closes.) Rationale + pattern:
+`principle-failures/2026-07-11-core-slice-false-done-and-delivery-model-inversion`
+(SLC-030 closed `done` having built same-account only; the cross-account CORE remainder
+fell off the backlog and the inversion propagated to the consumer skill; CFR read 0.0%
+throughout). [EXP-106]
 
 ## 12b. Multi-party / multi-instance modelling
 When a use case involves MORE THAN ONE PARTY operating SEPARATE INSTANCES (two

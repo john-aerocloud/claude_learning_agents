@@ -73,6 +73,16 @@ type graph, and:
 
 There is no other way to change item state. No hand-editing of `derived:`; no separate queue file.
 
+**Cancelling / superseding an item [state-graph v5].** Every flow type (use-case, defect,
+open-item) has a `cancelled` terminal, reachable via a `cancelled` event (agents: orchestrator,
+flow-manager) from any non-terminal working state. Use it when work is obsoleted by a design
+change or de-scoped — the honest alternative to silently editing an item into a different thing.
+A `cancelled` flow item archives to `items/done/` like any terminal item, and is EXCLUDED from
+lead-time and deployment-frequency (it never shipped). For aggregates (slice/chunk/requirement):
+a cancelled child does NOT block the parent — the parent is `done` when all children are terminal
+(done or cancelled) and at least one is done; if ALL children are cancelled the aggregate itself
+folds to `cancelled`.
+
 ## 3. Projections (queue generation + statistics = machinery, run after each loop)
 
 `work-items project --project <p>` recomputes ALL views from the item set (pure functions):
@@ -83,6 +93,13 @@ There is no other way to change item state. No hand-editing of `derived:`; no se
 - `work/<p>/views/stats.json` + `.md` — DORA + flow from event timestamps. Reports:
   - the **4 DORA metrics**: throughput (deploy frequency), lead time (registered→done),
     change-failure rate, MTTR (defect reported→resolved); plus WIP.
+    - **change-failure rate [state-graph v5]** = (validation `rejected` + `deploy_failed`) /
+      (validations + deploy failures). A `rejected` (tester validation failure) OR a
+      `deploy_failed` (deploy/CI-pipeline failure — e.g. a red pipeline on push) is a change
+      failure. `deploy_failed` (`deploying`/`prod-deploying` → `reworking`, fired by cicd/engineer)
+      exists so a **fixed-forward** deploy failure is not invisible: previously a red deploy
+      recorded only `built_green`, so CFR read a false 0%. Fire `deploy_failed` on any red
+      deploy even when you fix forward — the trace is what CFR counts.
   - **(a) gross-lead-time decomposition** — `by_state` and `by_owner`: time attributed to
     agent-work vs `queue` wait-latency vs `external` blocked, so the largest time thief is named.
   - **(b) quality** — failure / rework rate **by stage** (which stage red-flags most).

@@ -74,6 +74,14 @@ for a service the deploy role did not previously touch.) Keep `infra/policies/*.
 passes on a COMPLETE allowlist, so a verb-complete grant keeps the assurance
 honest.
 
+**Record every deploy failure as `deploy_failed` (v87, EXP-108, §3).** When a deploy you
+own fails — a mid-apply IAM-limit break, a verb-incomplete grant, an auto-deploy CI job
+gone red — fire `make wi-append … ID=<uc> EVENT=deploy_failed AGENT=cicd` BEFORE the
+re-deploy cycle, **even if you fix it forward in the same pass**. A deploy failure that
+leaves no event makes CFR read a false 0% (the "each miss is a CFR hit" above only counts
+if the hit is recorded). `deploy_failed` (`deploying`/`prod-deploying` → `reworking`) is a
+CFR change-failure; a pre-deploy build/test/lint red is a pipeline wait, not CFR.
+
 **`bootstrap-deploy-role.sh` must PRUNE managed-policy versions (v79, EXP-094).**
 AWS caps a managed policy at **5 versions** and does NOT auto-prune; repeated
 `bootstrap`/re-apply cycles hit `LimitExceeded` on `CreatePolicyVersion`. The

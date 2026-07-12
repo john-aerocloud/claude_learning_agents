@@ -82,8 +82,47 @@ Before any AWS CLI or SDK operation:
 
 - All cross-account and CI/CD trust via **OIDC federation** — no long-lived IAM
   user keys ever.
-- Tag every resource: `Project`, `Env`, `ManagedBy=sst`, `BuildSha` (set
-  per-resource — Pulumi does not propagate app-wide tags).
+
+### 2a. Resource tagging — the standard tag set (ADR-0007)
+
+Source of truth: **AeroCloudSystems/ADR → ADR-0007 (AWS resource tagging strategy)**
++ ADR-0006 (release provenance). Apply at the IaC root so every taggable resource
+inherits them (SST/Pulumi does NOT propagate app-wide tags — set them per-resource,
+e.g. a shared `defaultTags` object spread onto every component's `transform`/tags).
+Keys are `PascalCase`; org-internal keys may use an **`ac:`** namespace (e.g.
+`ac:CostCentre`) to avoid third-party collision; values from a controlled vocabulary
+where practical.
+
+**Mandatory (deploy-block/flag if missing):**
+
+| Key | Example | Purpose |
+|-----|---------|---------|
+| `Service` | `AdixOut` | The bounded context / service that owns the resource (use this, NOT `Project`) |
+| `Environment` | `sandbox` | `dev` \| `staging` \| `prod` \| `sandbox` (controlled vocab) |
+| `Owner` | `adixout-team` | Owning **team**, never an individual |
+| `CostCentre` | `CC-xxxx` | Cost allocation / showback (activated cost-allocation tag) |
+| `ManagedBy` | `sst` | `sst` \| `terraform` \| `console` — flags click-ops drift |
+| `DataClassification` | `internal` | `public` \| `internal` \| `confidential` \| `restricted` |
+| `Airport` | `LHR` / `shared` | IATA(3)/ICAO(4) uppercase, or **`shared`** for multi-tenant/platform. ALWAYS present (defaults `shared`) so nothing is un-attributable to an airport. |
+
+**Release-provenance (applied by the pipeline at deploy time — ADR-0006 link):**
+
+| Key | Example | Purpose |
+|-----|---------|---------|
+| `GitCommit` | full **40-char** SHA | Exact source that produced the resource (NOT a short sha) |
+| `Version` | `2.4.1` or `2026.07.0` | Human release per the ADR-0006 §4 scheme for this workload |
+| `Repository` | `AeroCloudSystems/AdixOut` | Where the source lives |
+| `DeployedAt` | `2026-07-12T12:01Z` | When this revision deployed |
+
+Recommended-when-relevant: `Backup`, `ExpiryDate` (sandbox teardown), `OnCall`,
+`Product` (cost roll-up), `Compliance`. **Cost attribution (ADR-0007 §7) is
+activity-based, not account-based:** `Service`/`CostCentre`/`Owner`/`Airport` are
+activated cost-allocation tags queried from the CUR; the `Airport` tag lets shared
+spend split down per-airport — this is the native mechanism that satisfies a
+"running cost by airport / by service" need (e.g. a Finance-Officer persona).
+Governance: Organizations Tag Policies + a `required-tags` Config rule + SCP
+(report-only → enforce). **Do not invent a thinner set** — the old
+`Project/Env/ManagedBy` trio is superseded by the above.
 
 ---
 
@@ -317,6 +356,54 @@ Minimal pipeline stages, in order:
   `make wi-append` (the work-item substrate — see the `work-items` skill); alert
   via GitHub notification.
 
+### 9a. Release management, versioning & provenance (ADR-0006)
+
+Source of truth: **AeroCloudSystems/ADR → ADR-0006**. Non-negotiables: (1) always
+know exactly what code is in prod, traceable to one commit; (2) each deployable
+releases at its **own cadence** — no org-wide lockstep/version.
+
+- **Conventional Commits are the vendor-neutral source of truth.**
+  `type(scope): subject` (`feat`/`fix`/`chore`/`docs`/`refactor`/`test`/`build`/`ci`,
+  `!`/`BREAKING CHANGE:` for breaking). Ticket linkage as a git **trailer**, not free
+  text, so it parses deterministically: `Refs: LIN-482` (Linear) or `Refs: FIDS-1187`
+  (Jira) — per-project config maps the prefix to the tracker. The commit history IS
+  the release-notes DB.
+- **Build once, promote by digest — never rebuild to promote.** The immutable
+  artifact is keyed by the **full 40-char commit SHA** (container `sha-<full-sha>` →
+  deploy by **image digest** `@sha256:…`; Lambda/bundle `…-<full-sha>.zip` in a
+  versioned S3 object → pin the **object-version-id**). Dev/staging/prod deploy the
+  **identical digest** — that is what makes "green on dev ⇒ same bits safe for prod"
+  literally true. (This also frames the build-identity discipline: a resource's
+  `GitCommit`/`Version` tag must name the digest actually serving — see the
+  stream-Lambda deploy-atomicity principle-failure.)
+- **Two promotion modes, one mechanism:** continuous (dev green → auto-promote same
+  digest; version derived from commits) OR batched (cut a release on demand,
+  bundling commits since the last tag into one versioned deploy + generated notes).
+  Chosen per deployable; never couples one team's cadence to another's.
+- **Versioning is a per-context policy, NOT one scheme** (ADR-0006 §4): **SemVer** if
+  something external *pins a version of you* (APIs, desktop apps, shared IaC
+  modules/libraries other teams import); **CalVer** (`YYYY.MM.patch` + `+sha`) for
+  continuously-deployed web apps (everyone runs latest); **CalVer/sequential** for
+  deployed leaf infra with no external consumer. Rule of thumb: *pinned → SemVer;
+  leaf-deployed → CalVer/sequential.* Every stream independent + monotonic.
+- **Pre-declare the bump, reconcile at release:** record intended significance on the
+  ticket (`release-impact: patch|minor|major`) + the planned commit type; if it turns
+  out more significant mid-flight, update the commit footer (`!`/`BREAKING CHANGE:`) —
+  the computed version then reflects reality. Human sanity-check before the tag is cut.
+- **Writing release metadata must NOT trigger a build** (a rebuild breaks provenance):
+  annotated git tags carry the release + don't change the working tree; trigger
+  build/deploy on **branch pushes, not tag pushes**; keep any `CHANGELOG`/manifest
+  commit out of the trigger (path filters / `chore(release): … [skip ci]`).
+- **Implementation:** a **release-please-style** CI-agnostic tool (parses Conventional
+  Commits, computes the scheme-aware bump, opens a release PR, on merge cuts the
+  annotated tag + CHANGELOG + notes). The CI vendor is a replaceable executor — the
+  release logic lives in git.
+
+Both ADR-0006 and ADR-0007 are **`proposed`** in the ADR repo (open questions
+remain, e.g. ratifying the versioning mapping, the `ac:` prefix, cost-split driver) —
+adopt them as the working standard and track those questions, don't treat them as
+frozen.
+
 ---
 
 ## 10. Well-Architected pillars — quick checklist
@@ -340,6 +427,8 @@ condition that would trigger a reversal:
 | Deviation | Project | Justification | Reversal condition |
 |-----------|---------|---------------|-------------------|
 | **IaC default changed CDK → SST v3 (Ion)** (2026-07-11, human-directed) | ALL / org-wide | CDK default caused repeated cross-project problems; org's live services (OagEventSource) use SST v3 Ion; §1 rewritten. Prior projects on CDK are grandfathered until they next touch infra. | Reversal → CDK only with a specific logged justification (not the default); reversal → plain Terraform if multi-cloud beyond SST's providers |
+| **Adopt ADR-0007 tag set** (2026-07-12, human-directed) | ALL / org-wide | ADR-0007 supersedes the thin `Service/Env/Owner` (and the interim `Project/Env/ManagedBy/BuildSha`) — mandatory `Service/Environment/Owner/CostCentre/ManagedBy/DataClassification/Airport` + provenance `GitCommit(40-char)/Version/Repository/DeployedAt`; §2a added. `Airport`+cost-allocation gives per-airport spend. | ADR is `proposed`; open questions (mandatory-DataClassification scope, `ac:` prefix, activated cost tags) resolved at ADR acceptance |
+| **Adopt ADR-0006 release/provenance** (2026-07-12, human-directed) | ALL / org-wide | Conventional Commits + trailers, build-once/promote-by-digest (full-SHA/object-version), per-context versioning (SemVer/CalVer/sequential), no-rebuild-on-release; §9a added. | ADR is `proposed`; ratify the §4 versioning mapping + release-tool choice at ADR acceptance |
 | Lambda over ECS Fargate | oxo-online | Spiky low-volume; scale-to-zero | p95 move latency > 1s due to cold starts |
 | API GW WS over ECS long-lived | oxo-online | Managed conns; no warm server needed | Message fan-out rate > API GW limits |
 | DynamoDB over RDS | oxo-online | No relational need; ephemeral game state | Leaderboard needs ranked queries beyond top-N |

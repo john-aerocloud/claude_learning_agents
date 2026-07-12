@@ -76,6 +76,12 @@ hardcode the profile name.
    of {add the local check that would have caught it | capture the manual config in
    the runbook AND automate it as a committed script/Make target}. Never re-run-and-hope,
    never leave a push red.
+   **Record deploy failures — even fixed-forward (v87, EXP-108, §3):** if a DEPLOY step
+   fails (a CI job that auto-deploys goes red, an `sst deploy` fails on push), fire
+   `make wi-append … ID=<uc> EVENT=deploy_failed AGENT=engineer` (or cicd) BEFORE you fix
+   forward. A fixed-forward deploy failure that leaves no event makes CFR read a false 0%
+   (the ec56025 gap). `deploy_failed` is a CFR change-failure; a pre-deploy build/test/lint
+   red is NOT (that's a pipeline wait). Record the failure, then fix forward.
 4. Trunk-based: keep each change sequentially independent and small enough to
    land on main continuously. No long-lived branches. If a change cannot be made
    independent, say so and stop — do not create hidden coupling.

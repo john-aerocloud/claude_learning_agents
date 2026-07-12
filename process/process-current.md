@@ -1,11 +1,11 @@
 ---
-process_version: 86
+process_version: 87
 effective_from: 2026-07-12
-supersedes: v85, v84, v83, v82, v81, v80, v76
+supersedes: v86, v85, v84, v83, v82, v81, v80, v76
 status: active
 ---
 
-# Current Process — v86
+# Current Process — v87
 
 <!-- v85 (retro, AdixOut 2026-07-12; renumbered from a v84 that collided with main's concurrent v84 CORE-job-done-gate retro — both sets of learning coexist, only the version number was reconciled): constraint = QUEUE WAIT (ready 48.9% + registered 27.7% = 76.6% of GLT by owner `queue`), sample n=2 and heavily contaminated by non-system waits (mid-session org spend-limit outage, heavy human-steering gaps, deliberate serial-build pacing) — treat DIRECTIONAL, not a capacity signal. CFR 33% from ONE rejection (UC-ADIX-003 deploy-race), a GOOD catch. Changes routed this cycle (all already applied + folded): aws-architecture IaC default CDK→SST v3 Ion; ADR-0006 (release/provenance) + ADR-0007 (tagging) encoded into aws-architecture §9a/§2a; 3 principle-failures (rushed-to-register-before-understanding; skipped-solution-architecture-gate→wrong-IaC; build-identity-claimed-before-code-live); documenter standing duty (living root README); safe-deploy stream-drain (AdixOut cicd). Forward lever for the queue constraint = per-UC worktree isolation so the inner loop's maximal-independent-set actually builds in parallel (improvement-slice IMP-017, deferred — validate on a cleaner sample). Token review: 811k delivery tokens for 2 UCs; dominant WASTE = the CDK→SST full-infra rebuild forced by the skipped architecture gate — the gate fix (check tech choices vs org before build) is the token lever too. -->
 
@@ -218,11 +218,23 @@ inflated CFR — every `/defect` used to count):
   not a failure *of a specific recent deploy*, so it is **excluded from CFR** and
   reported separately as a **defect-arrival rate**. Counting it in CFR would measure
   how diligently we report, not how often deploys break.
-- **pipeline-failure / pipeline-recovery** — CI/CD red **before** prod. Not in
-  CFR/MTTR; a pipeline-iteration wait (§5), attacked via cicd pre-flight.
+- **pipeline-failure / pipeline-recovery** — a **pre-DEPLOY** CI red (build / test /
+  lint / typecheck, before any deploy step runs). Not in CFR/MTTR; a pipeline-iteration
+  wait (§5), attacked via cicd pre-flight. **NARROWED [v87]:** this carve-out is ONLY for
+  failures *before* a deploy. A **deploy step that fails is NOT a pipeline wait** — see below.
 
-**MTTR spans both deploy-failures and defect-intakes** — recovery speed for *any*
-prod issue. `wi-project` classifies by item type and event, so the distinction holds.
+**Deploy failures ARE recorded and ARE counted [v87, EXP-108].** When a DEPLOY to any
+environment fails — including a CI job that auto-deploys (the UC-XA2 `ec56025` infra-CI-red
+incident) — it is a `deploy_failed` event (`deploying`/`prod-deploying` → `reworking`), fired
+by cicd/engineer **even when fixed-forward**. `deploy_failed` is a CFR change-failure:
+`wi-project` now computes **CFR = (rejected + deploy_failed) / (validated + rejected +
+deploy_failed)**. The old convention let a fixed-forward deploy failure hide as a "pipeline
+wait" with no event, so CFR read a falsely-perfect 0% (`principle-failures/2026-07-12-cfr-reads-zero-and-no-cancel-state`).
+A green/zero quality reading must reflect *recorded, verified* reality — never *un-recorded*
+failure.
+
+**MTTR spans deploy-failures (incl. `deploy_failed`) and defect-intakes** — recovery speed
+for *any* prod issue. `wi-project` classifies by item type and event, so the distinction holds.
 A genuine deploy regression is a deploy-failure, full stop — a defect item is only for
 issues raised against already-shipped, standing work.
 
@@ -524,6 +536,19 @@ slice closes.) Rationale + pattern:
 (SLC-030 closed `done` having built same-account only; the cross-account CORE remainder
 fell off the backlog and the inversion propagated to the consumer skill; CFR read 0.0%
 throughout). [EXP-106]
+
+## 12e. Cancelling obsoleted work items [v87]
+Work items have a **`cancelled`** terminal (state-graphs v5) for the item that is no longer
+wanted — obsoleted by a design change, superseded by a better slice, or descoped. When work
+is obsoleted, **fire `cancelled`** via `make wi-append … EVENT=cancelled AGENT=orchestrator`
+(or flow-manager) — do NOT repurpose an item's definition in place, and do NOT hack an
+illegal transition. A `cancelled` item is terminal: it archives to `items/done/`, sits in no
+queue, and is **excluded from lead-time and deployment-frequency** (it never shipped). An
+aggregate whose children are all terminal bubbles to `done` if ≥1 child is `done`, else
+(all children cancelled) to `cancelled`; a cancelled child never blocks its parent. Rationale:
+`principle-failures/2026-07-12-cfr-reads-zero-and-no-cancel-state` (a re-decomposition had to
+repurpose items in place because no cancel path existed — forcing silent edits or illegal
+transitions).
 
 ## 12b. Multi-party / multi-instance modelling
 When a use case involves MORE THAN ONE PARTY operating SEPARATE INSTANCES (two

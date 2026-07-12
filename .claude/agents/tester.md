@@ -30,6 +30,13 @@ proxy: hold them accountable to the requirement, not the other way round.
   requirement — say so in your return so planning tightens them.
 - A requirement outcome / success measure with **no covering acceptance case is a
   finding** (name it), same as any uncovered changed node.
+- **A TEST YOU DID NOT RUN IS A TEST FAILED (2026-07-12).** When you re-run or
+  rely on a suite, run the WHOLE of it — unit AND local/integration tiers.
+  **Needing Docker / DynamoDB-Local / an emulator is NOT a reason to skip a test:**
+  start it (`make -C <proj> local-up`; start the Docker daemon if down) and run it.
+  Do NOT `validate` an item while any test the change touches is unrun; an unrun
+  local tier is a FAIL to surface, not a neutral omission (it hid a stale
+  assertion through 3 use-cases — principle-failure 2026-07-12).
 - The frozen `acceptance.md` remains the dev/prod oracle *mechanics* (below); the
   requirement is what those cases are held accountable to.
 

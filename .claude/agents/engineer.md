@@ -25,6 +25,17 @@ hardcode the profile name.
 2. Strict TDD: write a failing test (red) -> minimum code to pass (green) ->
    refactor. No production code without a failing test first. Acceptance tests
    define "done" for the slice; unit tests drive the design.
+   - **A TEST YOU DID NOT RUN IS A TEST FAILED (2026-07-12).** "Green" /
+     `built_green` means the WHOLE suite passed — unit AND local/integration tiers.
+     **Needing Docker / DynamoDB-Local / an emulator is NOT a reason to skip a
+     test.** If the dependency is down, START it (`make -C <proj> local-up`; start
+     the Docker daemon itself if it isn't running) and RUN the tests. You may NOT
+     report an item green with ANY test unrun; "104/104 unit green" while the
+     local tier was skipped is NOT green — run the local tier and report it too.
+     Only if a dependency genuinely CANNOT be started in this environment is it a
+     BLOCKER you report explicitly (rare, justified) — never a silent skip. A
+     skipped local test let a stale `transactionIdentifier` assertion hide through
+     UC-ADIX-001/003/005 (principle-failure 2026-07-12).
    - **Real-source fixtures for external/live data (v61, DEFECT-OAG-016).** When
      code consumes a shape you do not own — an API response, an event body, a
      third-party schema — the test fixtures MUST be captured from the REAL source

@@ -1,11 +1,11 @@
 ---
-process_version: 85
+process_version: 86
 effective_from: 2026-07-12
-supersedes: v84, v83, v82, v81, v80, v76
+supersedes: v85, v84, v83, v82, v81, v80, v76
 status: active
 ---
 
-# Current Process — v85
+# Current Process — v86
 
 <!-- v85 (retro, AdixOut 2026-07-12; renumbered from a v84 that collided with main's concurrent v84 CORE-job-done-gate retro — both sets of learning coexist, only the version number was reconciled): constraint = QUEUE WAIT (ready 48.9% + registered 27.7% = 76.6% of GLT by owner `queue`), sample n=2 and heavily contaminated by non-system waits (mid-session org spend-limit outage, heavy human-steering gaps, deliberate serial-build pacing) — treat DIRECTIONAL, not a capacity signal. CFR 33% from ONE rejection (UC-ADIX-003 deploy-race), a GOOD catch. Changes routed this cycle (all already applied + folded): aws-architecture IaC default CDK→SST v3 Ion; ADR-0006 (release/provenance) + ADR-0007 (tagging) encoded into aws-architecture §9a/§2a; 3 principle-failures (rushed-to-register-before-understanding; skipped-solution-architecture-gate→wrong-IaC; build-identity-claimed-before-code-live); documenter standing duty (living root README); safe-deploy stream-drain (AdixOut cicd). Forward lever for the queue constraint = per-UC worktree isolation so the inner loop's maximal-independent-set actually builds in parallel (improvement-slice IMP-017, deferred — validate on a cleaner sample). Token review: 811k delivery tokens for 2 UCs; dominant WASTE = the CDK→SST full-infra rebuild forced by the skipped architecture gate — the gate fix (check tech choices vs org before build) is the token lever too. -->
 
@@ -585,6 +585,15 @@ The engineer commits to trunk every time the full test suite **and lint** go gre
 passes inside the done-condition, not discovered post-commit).
 - **Commit when green and lint clean, never when red.** One logical change per commit;
   the message states intent, not mechanics.
+- **Infra-bearing push gate — "green" means green WHERE CI RUNS IT [v86, EXP-107].** A
+  change that touches deploy-time infrastructure (`sst.config.ts`, `infra/`, IaC, deploy-role
+  policies) is NOT push-green on unit + lint alone: CI auto-deploys such changes, so the
+  pre-push done-condition MUST include the **synth/deploy gate CI will run** —
+  `make -C work/<project> deploy-sst` (or at minimum `sst diff`/synth) passing locally —
+  before push-on-green. Unit + lint green is necessary but NOT sufficient for infra: a
+  statement that passes offline shape-tests can still be rejected at the AWS API on deploy
+  (e.g. an invalid principal). Pushing infra green-locally-but-unsynthed is a deploy-failure
+  waiting to turn CI red. Rationale: `principle-failures/2026-07-12-infra-pushed-green-locally-red-in-ci`.
 - **Conventional Commits format.** Subject `type(scope): <intent>`, `type` ∈ {feat,fix,
   docs,style,refactor,perf,test,build,ci,chore,revert}; append `!` / `BREAKING CHANGE:`
   footer for a breaking change; keep the `Co-Authored-By` trailer.

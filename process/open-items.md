@@ -63,9 +63,16 @@ CSV is no longer the metrics source.)_
   §33 rule — no interactive prompts in an agent (use `--yes`/non-interactive flags,
   pre-provisioned auth), and background genuinely long installs. Single data point so far;
   promote to an experiment if it recurs. Targets: lead time (avoid watchdog stalls).
-- **OI: lean per-item board projection (token cost)** — the `linear` projection agent used
-  ~100–140k tokens PER per-item push (updating 1–2 issue statuses), because it reloads broad
-  context each call. Route: trim the linear agent to a truly minimal single-id upsert (read
-  one item, one API call, no full-board re-read) — preserving the EXP-103 in-cycle freshness
-  at a fraction of the tokens. Scored on DORA-value-per-token (board freshness must not
-  regress). Deferred: token efficiency, not the current (queue-wait) constraint.
+- **OI: lean per-item board projection + a deterministic description render-script**
+  (token cost + reliability). Evidence sharpened 2026-07-12: the `linear` agent used
+  ~100–170k tokens per call AND, when asked to bulk-enrich 14 tickets with the §2a
+  5-section descriptions, it BALKED (couldn't hold 14×5 in one run) — because composing
+  rich descriptions by LLM per call is the wrong shape. **Fix (improvement-slice):** a
+  committed, tested script (e.g. `.claude/skills/work-items/scripts/render-ticket.py <ID>`)
+  that DETERMINISTICALLY renders the §2a Markdown description from the item file +
+  `personas.md`/`jtbd-map.md` + the parent chain — no LLM composition. The `linear`/`jira`
+  agent then just calls the script and does the one API upsert (cheap, reliable,
+  idempotent), and a full-sweep BACKFILL of all existing tickets becomes a trivial loop.
+  Backfills the 11 done tickets (ROC-2..11) that the manual enrichment can't economically
+  reach. Scored on DORA-value-per-token (board freshness/detail unharmed). Needs
+  building+testing → an improvement-slice, not an inline change.

@@ -20,24 +20,34 @@ copy from it to Linear and never the other way.
 
 You do NOT read queues, the ledger, or other items. One item in, one issue out.
 
-## What you do
-1. Read the item file for `--id <ID>` (the item whose events just changed).
-2. Upsert its Linear issue via the project's Linear binding (the board adapter reads the item
-   file and applies these mappings idempotently — find the issue by the id→issue map, create if
-   absent else edit), mapping:
-   - item `derived.state` → Linear status (per `process/linear-mapping.md`).
-   - `title` → issue title (`<ID> · <title>`).
-   - **description → the RICH, plan-connected body (linear-mapping §2a):** compose it
-     from the item — *What this delivers* (value statement), *Jobs to be done* (`job:`
-     codes resolved to their job story from `product/jtbd-map.md`), *Personas served*
-     (`personas:` ids resolved to who they are from `product/personas.md`), *Acceptance
-     criteria* (the testable `AC-…` from the item body), and *Part of the plan* (the
-     parent slice→chunk→requirement chain resolved to titles + the slice's value, plus a
-     one-line contribution). A pure render of the item + those referenced files; never
-     invented. Re-render every projection so it tracks the item.
-   - `parents` → Linear parent/relation; `derived.children` → sub-issue relations.
-   - block reason (an item in `blocked` state, from its latest `blocked` event note) → a
-     "Blocked: <reason>" banner + comment; clear it when the item leaves `blocked`.
+## What you do — RUN THE TESTED SCRIPT, do not hand-compose (v89)
+
+**The render + upsert is a committed, unit-tested tool — you MUST shell out to it, never
+compose the description yourself.** Hand-composing truncated multi-line acceptance criteria
+to their first line and put nonsense on the board (the human-facing surface); DEF: the
+`.claude/tools/linear-project.py` renderer fixes this deterministically (joins each AC's
+wrapped continuation lines into the complete criterion) and is proven by
+`make test-board-project` + a live read-back.
+
+1. For `--id <ID>` (the item whose events changed), from the project root run:
+   ```
+   make board-project PROJECT=<project> ID=<ID>
+   ```
+   That single idempotent command reads the item file (the SSOT), renders the RICH,
+   plan-connected description per `process/linear-mapping.md` §2a (What this delivers · Jobs
+   to be done · Personas served · **full** Acceptance criteria · Part of the plan — personas/
+   jobs resolved from `product/personas.md`/`jtbd-map.md`, parent chain from the parent item
+   files), maps `derived.state` → Linear status, sets the `job:<Jn>`/`defect`/`blocked`/
+   `needs-acceptance` labels + project/milestone/parent, upserts the issue (create-or-edit via
+   the id→issue map in `secrets/linear.json`), and persists any new mapping. It NEVER prints
+   the api_key and NEVER writes the item file.
+2. **Full-sweep mode** = loop the command over every active+done item id for the project.
+3. Report what the command did (created/updated + Linear identifier + status); on a non-zero
+   exit, relay its (key-free) error — the API call is best-effort, the next sweep reconciles.
+
+Do NOT re-implement any of the mapping in prose here; `linear-mapping.md` is the spec and
+`linear-project.py` is its sole executable renderer. If the mapping must change, change the
+script (with its test) — not a hand-composed description.
    - DORA timestamps from `events:` → keep as a comment/custom field if the board wants them.
 3. In **full-sweep mode** (no `--id`): project EVERY active + done item to reconcile drift the
    per-item path may have missed (the backstop). This is `--live` with no `--item`.

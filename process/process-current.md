@@ -1,11 +1,11 @@
 ---
-process_version: 84
-effective_from: 2026-07-11
-supersedes: v83, v82, v81, v80, v76
+process_version: 86
+effective_from: 2026-07-12
+supersedes: v85, v84, v83, v82, v81, v80, v76
 status: active
 ---
 
-# Current Process — v84
+# Current Process — v86
 
 ## What this file is
 
@@ -581,6 +581,15 @@ The engineer commits to trunk every time the full test suite **and lint** go gre
 passes inside the done-condition, not discovered post-commit).
 - **Commit when green and lint clean, never when red.** One logical change per commit;
   the message states intent, not mechanics.
+- **Infra-bearing push gate — "green" means green WHERE CI RUNS IT [v86, EXP-107].** A
+  change that touches deploy-time infrastructure (`sst.config.ts`, `infra/`, IaC, deploy-role
+  policies) is NOT push-green on unit + lint alone: CI auto-deploys such changes, so the
+  pre-push done-condition MUST include the **synth/deploy gate CI will run** —
+  `make -C work/<project> deploy-sst` (or at minimum `sst diff`/synth) passing locally —
+  before push-on-green. Unit + lint green is necessary but NOT sufficient for infra: a
+  statement that passes offline shape-tests can still be rejected at the AWS API on deploy
+  (e.g. an invalid principal). Pushing infra green-locally-but-unsynthed is a deploy-failure
+  waiting to turn CI red. Rationale: `principle-failures/2026-07-12-infra-pushed-green-locally-red-in-ci`.
 - **Conventional Commits format.** Subject `type(scope): <intent>`, `type` ∈ {feat,fix,
   docs,style,refactor,perf,test,build,ci,chore,revert}; append `!` / `BREAKING CHANGE:`
   footer for a breaking change; keep the `Co-Authored-By` trailer.

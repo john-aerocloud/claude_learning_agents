@@ -63,6 +63,13 @@ hardcode the profile name.
    recorded in project.md/decision-log), `git -C work/<project> push origin <trunk>`
    — one green use-case is one push; never let commits pool. **No/unverified remote
    → do not push** (report and stop; the unverified-destination guard still binds).
+   **Infra-bearing change → the done-condition ALSO includes the synth/deploy gate CI runs
+   (v86, EXP-107, §14):** if the change touches `sst.config.ts`/`infra/`/IaC/deploy-role
+   policy, run `make -C work/<project> deploy-sst` (or `sst diff`/synth) and see it pass
+   BEFORE push — unit + lint green is not sufficient, because CI auto-deploys and the AWS API
+   can reject a statement that passed offline shape-tests (e.g. an unresolvable principal).
+   Pushing infra green-locally-but-unsynthed = a deploy-failure that turns CI red (the
+   ec56025 incident). Never push infra without the synth/deploy gate green.
    **After pushing, set off the non-blocking CI watch and keep working:**
    `make -C work/<project> ci-watch`. If that run fails while your local suite + lint
    were green, that is a **defect** — raise it via `/defect`; its fix is exactly one

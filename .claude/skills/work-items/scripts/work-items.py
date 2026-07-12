@@ -529,6 +529,9 @@ def compute_states(graphs, items):
 
 # states that count as an aggregate child being "done" (done_when_all_children_done)
 _DONE_STATES = {"done", "resolved"}
+# A cancelled child is terminal-but-not-delivered: it must NOT block an aggregate
+# from completing, but it also does not, by itself, make the aggregate "done".
+_TERMINAL_RESOLVED = _DONE_STATES | {"cancelled"}
 
 
 def _bubble(graphs, items, kids, states, agg_item=None):
@@ -547,8 +550,10 @@ def _bubble(graphs, items, kids, states, agg_item=None):
                                         for ev in agg_item.events):
             return "done"
         return AGG_INITIAL
-    if all(states.get(k) in _DONE_STATES for k in kids):
-        return "done"
+    if all(states.get(k) in _TERMINAL_RESOLVED for k in kids):
+        # every child is terminal: done if at least one actually delivered,
+        # else (all cancelled) the aggregate itself is cancelled.
+        return "done" if any(states.get(k) in _DONE_STATES for k in kids) else "cancelled"
     if any(_child_past_initial(graphs, items, k, states) for k in kids):
         return "in_progress"
     return AGG_INITIAL
@@ -691,7 +696,7 @@ def _maybe_relocate(project, iid, item, state, graphs):
     physically archived (there is no own terminal event to archive on)."""
     if graphs.kind(item.type) == "aggregate":
         return
-    terminal = state in graphs.terminals(item.type) or state in ("done", "resolved", "wontfix")
+    terminal = state in graphs.terminals(item.type) or state in ("done", "resolved", "wontfix", "cancelled")
     want = "done" if terminal else "active"
     cur_path, cur_sub = find_item_path(project, iid)
     if cur_sub and cur_sub != want:
@@ -831,9 +836,9 @@ def _write_tree(vd, items, children, states):
 # wait latency / 'external' = blocked outside the system) — that is how each part
 # of the process reads its own contribution to gross lead time.
 # ---------------------------------------------------------------------------
-TERMINAL_STATES = {"done", "resolved", "wontfix"}
+TERMINAL_STATES = {"done", "resolved", "wontfix", "cancelled"}
 GENESIS_EVENTS = ("registered", "reported", "open")
-REWORK_ENTRY_EVENTS = {"build_failed", "rejected", "retried", "reopened"}
+REWORK_ENTRY_EVENTS = {"build_failed", "deploy_failed", "rejected", "retried", "reopened"}
 # v4: the use-case validation stage is split dev-then-prod; the defect graph still
 # uses one `validating`. Any `rejected` exit from ANY of these is a change failure,
 # so CFR/quality-by-stage fold over the whole set (kept as one metric family).
@@ -1061,24 +1066,29 @@ def _compute_dora(graphs, flow_items, states, now, window_days):
         if bg and vd_ts and vd_ts >= bg and _in_window(vd_ts, now, window_days):
             lts.append((vd_ts - bg).total_seconds())
 
-    # change_failure_rate: rejected / (validated + rejected) over exits from ANY
-    # validating stage (v4 dev/prod split + the defect single `validating`).
-    validated = rejected = 0
+    # change_failure_rate [retro v87]: (validation rejections + deploy-pipeline
+    # failures) / (validations + deploy failures). A `rejected` (tester validation
+    # failure, exit from ANY validating stage — v4 dev/prod split + defect single
+    # `validating`) OR a `deploy_failed` (deploy/CI failure, e.g. a red pipeline on
+    # push) is a change failure. deploy_failed was added because a fixed-forward
+    # deploy failure recorded only `built_green` was invisible → CFR read a false 0%.
+    validated = rejected = deploy_failed = 0
     for it in flow_items:
         for st, evc in _exits_from(graphs, it).items():
-            if st not in VALIDATING_STATES:
-                continue
             for name, c in evc.items():
-                if name == "validated":
+                if st in VALIDATING_STATES and name == "validated":
                     validated += c
-                elif name == "rejected":
+                elif st in VALIDATING_STATES and name == "rejected":
                     rejected += c
-    cfr = _ratio(rejected, validated + rejected)
+                elif name == "deploy_failed":
+                    deploy_failed += c
+    cfr = _ratio(rejected + deploy_failed, validated + rejected + deploy_failed)
 
     # mttr: any failure event -> its recovery (aggregated across the classes in D)
     all_recoveries = []
     for it in flow_items:
         all_recoveries += _duration_after(it, {"build_failed"}, {"built_green", "retried", "done", "validated"})
+        all_recoveries += _duration_after(it, {"deploy_failed"}, {"built_green", "retried", "deployed", "done", "validated"})
         all_recoveries += _duration_after(it, {"rejected"}, {"validated", "resolved", "done"})
         all_recoveries += _duration_after(it, {"reported"}, {"validated", "resolved"})
 
@@ -1092,6 +1102,7 @@ def _compute_dora(graphs, flow_items, states, now, window_days):
         "change_failure_rate": cfr,
         "n_validations": validated + rejected,
         "n_validation_failures": rejected,
+        "n_deploy_failures": deploy_failed,
         "mttr_median_s": _median(all_recoveries),
         "mttr_mean_s": _mean(all_recoveries),
         "mttr_n": len(all_recoveries),
@@ -1144,7 +1155,8 @@ def _compute_quality(graphs, flow_items, now, window_days):
     validating.rejection rate (each attributed to the state owner); overall
     rework rate; defect arrival rate over the window."""
     stage_exits = defaultdict(lambda: {"total": 0, "fail": 0})
-    FAIL_EXIT = {"building": "build_failed", "validating": "rejected",
+    FAIL_EXIT = {"building": "build_failed", "deploying": "deploy_failed",
+                 "prod-deploying": "deploy_failed", "validating": "rejected",
                  "dev-validating": "rejected", "prod-validating": "rejected",
                  "reproducing": "not_reproduced"}
     for it in flow_items:
@@ -1671,7 +1683,7 @@ def validate_items(graphs, project):
         # I2: no item both terminal/done AND in a non-null queue
         state = states.get(iid)
         q = graphs.queue_for(state) if state is not None else None
-        is_terminal = state in ("done", "resolved", "wontfix")
+        is_terminal = state in ("done", "resolved", "wontfix", "cancelled")
         if is_terminal and q is not None:
             violations.append(f"(I2) {iid}: terminal state '{state}' but queue '{q}' is non-null")
 
@@ -1679,9 +1691,9 @@ def validate_items(graphs, project):
         # active/ — their state is DERIVED from children, not their own stream,
         # so a bubbled-done chunk/slice is not physically archived).
         if graphs.kind(it.type) == "flow":
-            if state in ("done", "resolved", "wontfix") and getattr(it, "subdir", None) == "active":
+            if state in ("done", "resolved", "wontfix", "cancelled") and getattr(it, "subdir", None) == "active":
                 violations.append(f"(I4) {iid}: terminal ('{state}') but in items/active/ (must be items/done/)")
-            if state not in ("done", "resolved", "wontfix") and getattr(it, "subdir", None) == "done":
+            if state not in ("done", "resolved", "wontfix", "cancelled") and getattr(it, "subdir", None) == "done":
                 violations.append(f"(I4) {iid}: non-terminal ('{state}') but in items/done/ (must be items/active/)")
 
     # I3: edge consistency — parents/deps resolve; no cycles in deps
@@ -1903,7 +1915,7 @@ def cmd_migrate(a):
         else:
             state = _target_flow_state(itype, is_done, is_blocked, is_wontfix)
             events = _synth_events(itype, state, created_ts, done_ts.get(iid))
-            subdir = "done" if state in ("done", "resolved", "wontfix") else "active"
+            subdir = "done" if state in ("done", "resolved", "wontfix", "cancelled") else "active"
 
         title = _title_for(project, row)
         fm = {

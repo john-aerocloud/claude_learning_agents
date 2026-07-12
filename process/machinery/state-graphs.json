@@ -1,6 +1,6 @@
 {
   "_comment": "Declarative per-item-type state machines. THE auditable core of the event-sourced work-item model (design-rationale/work-item-state-model.md). An item's current state is fold(events) through its type's graph. Appending an event that is not a legal transition from the current state is REJECTED at write time — a half-transition (the drift class) becomes unrepresentable. Wanting a transition that does not exist here is not something an agent may just do: it must propose an amendment to this file WITH A REASON — a process experiment (EXP-NNN) routed through the retro/version-bump gate. Edit this file only via that gate.",
-  "version": 4,
+  "version": 5,
   "state_owners": {
     "_comment": "Who is accountable for the time an item spends in each state — the basis for attributing GROSS LEAD TIME. An agent name = that agent is actively working the item (their throughput/quality). 'queue' = pure wait latency, nobody working (a flow/constraint cost, the classic time thief). 'external' = blocked on something outside the system (human gate, third-party portal) — excluded from any agent's quality but counted in gross lead time. Every part of the process reads its own contribution from here.",
     "registered": "queue",
@@ -40,23 +40,26 @@
     "in_progress": null,
     "done": null,
     "resolved": null,
-    "wontfix": null
+    "wontfix": null,
+    "cancelled": null
   },
   "types": {
     "use-case": {
       "kind": "flow",
       "initial": "registered",
-      "terminal": ["done"],
+      "terminal": ["done", "cancelled"],
       "transitions": [
         {"from": "registered",     "to": "ready",           "event": "made_ready",   "agents": ["flow-manager"]},
         {"from": "ready",          "to": "building",         "event": "pulled",       "agents": ["orchestrator", "flow-manager"]},
         {"from": "building",       "to": "deploying",        "event": "built_green",  "agents": ["engineer"]},
         {"from": "deploying",      "to": "dev-validating",   "event": "deployed",     "agents": ["cicd"]},
         {"from": "building",       "to": "reworking",        "event": "build_failed", "agents": ["engineer", "cicd"]},
+        {"from": "deploying",      "to": "reworking",        "event": "deploy_failed","agents": ["cicd", "engineer"]},
         {"from": "dev-validating", "to": "prod-deploying",   "event": "dev_validated","agents": ["tester"]},
         {"from": "dev-validating", "to": "done",             "event": "validated",    "agents": ["tester"]},
         {"from": "dev-validating", "to": "reworking",        "event": "rejected",     "agents": ["tester"]},
         {"from": "prod-deploying", "to": "prod-validating",  "event": "promoted",     "agents": ["cicd"]},
+        {"from": "prod-deploying", "to": "reworking",        "event": "deploy_failed","agents": ["cicd"]},
         {"from": "prod-validating","to": "done",             "event": "validated",    "agents": ["tester"]},
         {"from": "prod-validating","to": "reworking",        "event": "rejected",     "agents": ["tester"]},
         {"from": "reworking",      "to": "building",         "event": "retried",      "agents": ["engineer"]},
@@ -65,13 +68,21 @@
         {"from": "dev-validating", "to": "blocked",          "event": "blocked",      "agents": ["flow-manager", "orchestrator"]},
         {"from": "prod-validating","to": "blocked",          "event": "blocked",      "agents": ["flow-manager", "orchestrator"]},
         {"from": "blocked",        "to": "ready",            "event": "unblocked",    "agents": ["flow-manager"]},
-        {"from": "done",           "to": "building",         "event": "reopened",     "agents": ["orchestrator"]}
+        {"from": "done",           "to": "building",         "event": "reopened",     "agents": ["orchestrator"]},
+        {"from": "registered",     "to": "cancelled",        "event": "cancelled",    "agents": ["orchestrator", "flow-manager"]},
+        {"from": "ready",          "to": "cancelled",        "event": "cancelled",    "agents": ["orchestrator", "flow-manager"]},
+        {"from": "building",       "to": "cancelled",        "event": "cancelled",    "agents": ["orchestrator", "flow-manager"]},
+        {"from": "reworking",      "to": "cancelled",        "event": "cancelled",    "agents": ["orchestrator", "flow-manager"]},
+        {"from": "blocked",        "to": "cancelled",        "event": "cancelled",    "agents": ["orchestrator", "flow-manager"]},
+        {"from": "dev-validating", "to": "cancelled",        "event": "cancelled",    "agents": ["orchestrator", "flow-manager"]},
+        {"from": "prod-validating","to": "cancelled",        "event": "cancelled",    "agents": ["orchestrator", "flow-manager"]},
+        {"from": "prod-deploying", "to": "cancelled",        "event": "cancelled",    "agents": ["orchestrator", "flow-manager"]}
       ]
     },
     "defect": {
       "kind": "flow",
       "initial": "reported",
-      "terminal": ["resolved", "wontfix"],
+      "terminal": ["resolved", "wontfix", "cancelled"],
       "transitions": [
         {"from": "reported",    "to": "reproducing", "event": "triaged",       "agents": ["orchestrator"]},
         {"from": "reproducing", "to": "fixing",      "event": "confirmed",     "agents": ["orchestrator", "engineer"]},
@@ -81,37 +92,43 @@
         {"from": "validating",  "to": "fixing",      "event": "rejected",      "agents": ["tester"]},
         {"from": "fixing",      "to": "blocked",     "event": "blocked",       "agents": ["flow-manager", "orchestrator"]},
         {"from": "reproducing", "to": "blocked",     "event": "blocked",       "agents": ["flow-manager", "orchestrator"]},
-        {"from": "blocked",     "to": "fixing",      "event": "unblocked",     "agents": ["flow-manager"]}
+        {"from": "blocked",     "to": "fixing",      "event": "unblocked",     "agents": ["flow-manager"]},
+        {"from": "reported",    "to": "cancelled",   "event": "cancelled",     "agents": ["orchestrator", "flow-manager"]},
+        {"from": "reproducing", "to": "cancelled",   "event": "cancelled",     "agents": ["orchestrator", "flow-manager"]},
+        {"from": "fixing",      "to": "cancelled",   "event": "cancelled",     "agents": ["orchestrator", "flow-manager"]},
+        {"from": "blocked",     "to": "cancelled",   "event": "cancelled",     "agents": ["orchestrator", "flow-manager"]}
       ]
     },
     "open-item": {
       "kind": "flow",
       "initial": "open",
-      "terminal": ["done", "wontfix"],
+      "terminal": ["done", "wontfix", "cancelled"],
       "transitions": [
         {"from": "open",      "to": "scheduled", "event": "scheduled", "agents": ["flow-manager", "orchestrator"]},
         {"from": "scheduled", "to": "done",      "event": "closed",    "agents": ["orchestrator", "engineer", "tester"]},
         {"from": "open",      "to": "done",      "event": "closed",    "agents": ["orchestrator", "engineer", "tester"]},
-        {"from": "open",      "to": "wontfix",   "event": "declined",  "agents": ["orchestrator"]}
+        {"from": "open",      "to": "wontfix",   "event": "declined",  "agents": ["orchestrator"]},
+        {"from": "open",      "to": "cancelled", "event": "cancelled", "agents": ["orchestrator", "flow-manager"]},
+        {"from": "scheduled", "to": "cancelled", "event": "cancelled", "agents": ["orchestrator", "flow-manager"]}
       ]
     },
     "slice": {
       "kind": "aggregate",
       "initial": "planned",
-      "terminal": ["done"],
+      "terminal": ["done", "cancelled"],
       "bubble": "done_when_all_children_done",
-      "_comment": "Aggregate state is DERIVED from children: done iff all children done; in_progress iff any child past its initial state; else planned. Aggregates carry registered/amended events for audit but their state is a fold over children, not their own event stream."
+      "_comment": "Aggregate state is DERIVED from children: done iff all children terminal AND at least one done; cancelled iff all children cancelled; in_progress iff any child past its initial state; else planned. A cancelled child does NOT block completion. Aggregates carry registered/amended events for audit but their state is a fold over children, not their own event stream."
     },
     "chunk": {
       "kind": "aggregate",
       "initial": "planned",
-      "terminal": ["done"],
+      "terminal": ["done", "cancelled"],
       "bubble": "done_when_all_children_done"
     },
     "requirement": {
       "kind": "aggregate",
       "initial": "planned",
-      "terminal": ["done"],
+      "terminal": ["done", "cancelled"],
       "bubble": "done_when_all_children_done"
     }
   }

@@ -167,6 +167,27 @@ class TestFold(Base):
         ]
         self.assertEqual(wi.fold_state(self.graphs, "use-case", evs), "reworking")
 
+    def test_use_case_fold_cancelled(self):
+        # [v87] a UC cancelled from a working state folds to the terminal `cancelled`
+        evs = [
+            {"ts": "1", "event": "registered", "agent": "flow-manager"},
+            {"ts": "2", "event": "made_ready", "agent": "flow-manager"},
+            {"ts": "3", "event": "cancelled", "agent": "orchestrator"},
+        ]
+        self.assertEqual(wi.fold_state(self.graphs, "use-case", evs), "cancelled")
+        self.assertIn("cancelled", self.graphs.terminals("use-case"))
+
+    def test_use_case_fold_deploy_failed(self):
+        # [v87] deploy_failed from `deploying` lands in reworking
+        evs = [
+            {"ts": "1", "event": "registered", "agent": "flow-manager"},
+            {"ts": "2", "event": "made_ready", "agent": "flow-manager"},
+            {"ts": "3", "event": "pulled", "agent": "orchestrator"},
+            {"ts": "4", "event": "built_green", "agent": "engineer"},
+            {"ts": "5", "event": "deploy_failed", "agent": "cicd"},
+        ]
+        self.assertEqual(wi.fold_state(self.graphs, "use-case", evs), "reworking")
+
 
 # --------------------------------------------------------------------------- #
 # append — legality
@@ -362,6 +383,28 @@ class TestBubble(Base):
         st = wi.compute_states(self.graphs, wi.load_all_items(self.project)[0])
         self.assertEqual(st["SLC-1"], "done")
         self.assertEqual(st["CHK-1"], "done")
+
+    def _cancelled_uc(self):
+        return [
+            {"ts": "1", "event": "registered", "agent": "flow-manager"},
+            {"ts": "2", "event": "cancelled", "agent": "orchestrator"},
+        ]
+
+    def test_bubble_mixed_done_cancelled_is_done(self):
+        # [v87] a cancelled child does NOT block completion; one real done => slice done
+        self.write_item("done", "UC-1", "use-case", self._done_uc(), parents=["SLC-1"])
+        self.write_item("done", "UC-2", "use-case", self._cancelled_uc(), parents=["SLC-1"])
+        self.write_item("active", "SLC-1", "slice", self._reg())
+        st = wi.compute_states(self.graphs, wi.load_all_items(self.project)[0])
+        self.assertEqual(st["SLC-1"], "done")
+
+    def test_bubble_all_cancelled_is_cancelled(self):
+        # [v87] every child cancelled => the aggregate itself is cancelled (not done)
+        self.write_item("done", "UC-1", "use-case", self._cancelled_uc(), parents=["SLC-1"])
+        self.write_item("done", "UC-2", "use-case", self._cancelled_uc(), parents=["SLC-1"])
+        self.write_item("active", "SLC-1", "slice", self._reg())
+        st = wi.compute_states(self.graphs, wi.load_all_items(self.project)[0])
+        self.assertEqual(st["SLC-1"], "cancelled")
 
 
 # --------------------------------------------------------------------------- #
@@ -665,6 +708,27 @@ class TestStats(Base):
         ])
         at = self._stats()["overall"]["dora"]["all_time"]
         self.assertIsNone(at["change_failure_rate"])
+
+    def test_cfr_counts_deploy_failed(self):
+        # [v87] a deploy_failed (deploy/CI failure) is a CHANGE FAILURE — the fix for
+        # CFR reading a false 0% when a fixed-forward deploy failure left no event.
+        deploy_failed_uc = [
+            {"ts": _dt(12, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(12, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(12, 2), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(12, 4), "event": "built_green", "agent": "engineer"},
+            {"ts": _dt(12, 5), "event": "deploy_failed", "agent": "cicd"},   # CI red
+            {"ts": _dt(12, 6), "event": "retried", "agent": "engineer"},
+            {"ts": _dt(12, 8), "event": "built_green", "agent": "engineer"},
+            {"ts": _dt(12, 9), "event": "deployed", "agent": "cicd"},
+            {"ts": _dt(12, 10), "event": "validated", "agent": "tester"},
+        ]
+        self.write_item("done", "UC-DF", "use-case", deploy_failed_uc)
+        at = self._stats()["overall"]["dora"]["all_time"]
+        # 1 deploy_failed + 1 validated => cfr = 1/(1+1) = 0.5 (was 0 before v87)
+        self.assertAlmostEqual(at["change_failure_rate"], 0.5, places=4)
+        self.assertEqual(at["n_deploy_failures"], 1)
+        self.assertGreater(at["change_failure_rate"], 0)
 
     # ---- lead-time percentiles ----
     def test_lead_time_percentiles(self):

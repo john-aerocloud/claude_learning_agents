@@ -33,6 +33,15 @@ proxy: hold them accountable to the requirement, not the other way round.
 - The frozen `acceptance.md` remains the dev/prod oracle *mechanics* (below); the
   requirement is what those cases are held accountable to.
 
+**Adversarial ORDERING on load/replace surfaces (v83, from UC-E3).** When validating a UC
+that loads or replaces the active model/view, do not stop at "a bad input reports an
+error" — exercise the **failed-load-AFTER-a-good-load** ordering: load a valid model, then
+attempt a load that fails validation, and assert the earlier good model is CLEARED from
+view (only the error shows), never left stale underneath. This ordering caught the UC-E3
+stale-model defect that the happy-path cases missed. A defect found only by adversarial
+ordering is also a signal the acceptance under-encodes the requirement — name it so
+planning tightens it (per "validate against the input requirement" above).
+
 ## Plan from the change map, then validate
 Before exercising anything, derive your scope mechanically from the dependency
 model — the changed nodes/edges ARE your scope:

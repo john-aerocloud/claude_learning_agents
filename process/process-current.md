@@ -1,17 +1,14 @@
 ---
-process_version: 84
-effective_from: 2026-07-09
-supersedes: v82, v81, v80, v76
+process_version: 87
+effective_from: 2026-07-12
+supersedes: v86, v85, v84, v83, v82, v81, v80, v76
 status: active
 ---
 
-# Current Process — v84
+# Current Process — v87
 
-<!-- v84 (2026-07-12, ROC retro): §F0 — per-item board push + docs-refresh are hard
-in-cycle invariants, not skippable (EXP-103, board/doc-lag). §F3 — register linear
-dependency-chain use-cases JIT per-UC, not batch up front, and prefer independent
-decompositions (EXP-104, gross lead time: `registered` was 70% of GLT as a
-batch-registration artifact). -->
+<!-- v85 (retro, AdixOut 2026-07-12; renumbered from a v84 that collided with main's concurrent v84 CORE-job-done-gate retro — both sets of learning coexist, only the version number was reconciled): constraint = QUEUE WAIT (ready 48.9% + registered 27.7% = 76.6% of GLT by owner `queue`), sample n=2 and heavily contaminated by non-system waits (mid-session org spend-limit outage, heavy human-steering gaps, deliberate serial-build pacing) — treat DIRECTIONAL, not a capacity signal. CFR 33% from ONE rejection (UC-ADIX-003 deploy-race), a GOOD catch. Changes routed this cycle (all already applied + folded): aws-architecture IaC default CDK→SST v3 Ion; ADR-0006 (release/provenance) + ADR-0007 (tagging) encoded into aws-architecture §9a/§2a; 3 principle-failures (rushed-to-register-before-understanding; skipped-solution-architecture-gate→wrong-IaC; build-identity-claimed-before-code-live); documenter standing duty (living root README); safe-deploy stream-drain (AdixOut cicd). Forward lever for the queue constraint = per-UC worktree isolation so the inner loop's maximal-independent-set actually builds in parallel (improvement-slice IMP-017, deferred — validate on a cleaner sample). Token review: 811k delivery tokens for 2 UCs; dominant WASTE = the CDK→SST full-infra rebuild forced by the skipped architecture gate — the gate fix (check tech choices vs org before build) is the token lever too. -->
+<!-- v87 (ROC retro 2026-07-12): §F0 — per-item board push + docs-refresh are HARD in-cycle invariants (board never lags item-file state by >1 cycle; documenter required at each slice close); founding lapse principle-failures/2026-07-11-board-and-docs-lag-during-loop.md. §F3 — register linear dependency-chain use-cases JIT per-UC, not batch up front (ROC: `registered` was 70% of GLT purely as a batch-registration artifact). BOTH folded as PLAIN process practice, deliberately NOT new experiment rows — enacting the same-retro directive to stop over-generating experiments and to fix DORA measurement. -->
 
 
 ## What this file is
@@ -32,8 +29,9 @@ Pointers:
   `process/machinery/CONTRACT.md`.
 - **State graphs** (per-type transitions, `state_owners`, `queue_map`):
   `process/machinery/state-graphs.json` — edit only via the retro/version-bump gate.
-- **Design + rationale**: `Version2-design/04` (work-item state model), plus
-  `00`–`03` (pull-system design, diagrams, loops) and `02` (worked retro).
+- **Design + rationale**: `design-rationale/work-item-state-model.md`. The prior
+  QueueApproach design (pull-system, diagrams, worked retro) is archived at git tag
+  `QueueApproach`.
 - **Operative cutover rules**: **STAGE F → §F0**. Most of §F1–§F10 (buffers, WIP,
   parallel dispatch, collisions, retro-debt gate, deploy gate) stay valid and now
   operate on the *derived* queues — only the state substrate beneath them changed.
@@ -105,7 +103,7 @@ optional or deferrable; only the external API *call* is best-effort (a failure i
 next push/sweep reconciles). **Invariant: an item's board status never lags its item-file state
 by more than the current cycle.** The full-sweep run is a periodic structure backstop, NOT the
 primary path — if the sweep does real state work every time, per-item pushes are being skipped
-(the EXP-103 board/doc-lag lapse). Likewise user-facing docs (README / GitBook, via `documenter`)
+(the board/doc-lag lapse). Likewise user-facing docs (README / GitBook, via `documenter`)
 are refreshed at each slice close and must not drift from shipped state. Boards and docs are
 projections — the item always wins, but a projection left stale is a process failure.
 
@@ -513,6 +511,28 @@ observable outcome/value); and its acceptance criteria. These live in the item's
 cannot be pulled or built until product authors them (§F definition-of-ready). Genuine
 gaps are flagged, **never back-filled with fabricated criteria**. [EXP-072]
 
+## 12d. CORE-job done-gate + no-silent-partial delivery [v84]
+Aggregate state folds **structurally** (all children `done` → `done`). For a CORE `job`
+that is necessary but **NOT sufficient**: a slice/chunk carrying a CORE job is
+"done-in-fact" only when its acceptance is validated against **that job's success measure
+for the named persona(s)** — not merely when its child use-cases are `done`. Two
+obligations:
+1. **Job-anchored acceptance.** A CORE-job item's acceptance cases MUST cite the job's
+   success measure and the persona(s) it serves (§11a, §12). The tester prod-validates a
+   CORE-job item against that success measure, not incidental behaviour.
+2. **No silent partial.** When a value-slice deliberately delivers only PART of a CORE
+   job (a legitimate thin slice — e.g. same-account before cross-account), the
+   **undelivered remainder MUST be registered as a tracked item (child/sibling) BEFORE the
+   slice closes**. A CORE job may not leave `items/active/` empty while unfulfilled — an
+   empty backlog is truthful only when every CORE job's success measure is met.
+(Per-role: product anchors acceptance to the job's success measure + persona; tester
+validates against it; flow-manager confirms the remainder is tracked before a partial CORE
+slice closes.) Rationale + pattern:
+`principle-failures/2026-07-11-core-slice-false-done-and-delivery-model-inversion`
+(SLC-030 closed `done` having built same-account only; the cross-account CORE remainder
+fell off the backlog and the inversion propagated to the consumer skill; CFR read 0.0%
+throughout). [EXP-106]
+
 ## 12b. Multi-party / multi-instance modelling
 When a use case involves MORE THAN ONE PARTY operating SEPARATE INSTANCES (two
 browsers, two devices, a sharer and a joiner), the happy-path of one instance is not
@@ -573,6 +593,15 @@ The engineer commits to trunk every time the full test suite **and lint** go gre
 passes inside the done-condition, not discovered post-commit).
 - **Commit when green and lint clean, never when red.** One logical change per commit;
   the message states intent, not mechanics.
+- **Infra-bearing push gate — "green" means green WHERE CI RUNS IT [v86, EXP-107].** A
+  change that touches deploy-time infrastructure (`sst.config.ts`, `infra/`, IaC, deploy-role
+  policies) is NOT push-green on unit + lint alone: CI auto-deploys such changes, so the
+  pre-push done-condition MUST include the **synth/deploy gate CI will run** —
+  `make -C work/<project> deploy-sst` (or at minimum `sst diff`/synth) passing locally —
+  before push-on-green. Unit + lint green is necessary but NOT sufficient for infra: a
+  statement that passes offline shape-tests can still be rejected at the AWS API on deploy
+  (e.g. an invalid principal). Pushing infra green-locally-but-unsynthed is a deploy-failure
+  waiting to turn CI red. Rationale: `principle-failures/2026-07-12-infra-pushed-green-locally-red-in-ci`.
 - **Conventional Commits format.** Subject `type(scope): <intent>`, `type` ∈ {feat,fix,
   docs,style,refactor,perf,test,build,ci,chore,revert}; append `!` / `BREAKING CHANGE:`
   footer for a breaking change; keep the `Co-Authored-By` trailer.
@@ -920,9 +949,10 @@ The v82 cutover was needed partly because the docs themselves rotted (2834 lines
 # STAGE F — Flow & queues (pull-based)
 
 The cross-agent rules of the pull system. **§F0 (above) is the substrate**; the rules
-below name flow behaviour and now operate on the *derived* views (§F0). Full rationale,
-diagrams, and a worked retro are in `Version2-design/`. Each rule names the DORA metric
-it targets, per §25a.
+below name flow behaviour and now operate on the *derived* views (§F0). Full rationale
+is in `design-rationale/work-item-state-model.md` (the prior QueueApproach design —
+diagrams and a worked retro — is archived at git tag `QueueApproach`). Each rule names
+the DORA metric it targets, per §25a.
 
 ## F1. Work items — hierarchy, links, and honest closes
 Every unit of work is a typed item — `REQ-`/`CHK-`/`SLC-`/`UC-`/`DEF-` — as a per-item

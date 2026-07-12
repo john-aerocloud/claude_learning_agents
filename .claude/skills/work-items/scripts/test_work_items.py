@@ -1220,5 +1220,48 @@ class TestPerItemMetrics(Base):
             wi.cmd_project(argparse.Namespace(project=self.project, now=NOW, item="UC-NOPE"))
 
 
+class NoteRoundTrip(unittest.TestCase):
+    """Regression: event `note` values containing commas and/or quotes must survive
+    parse+render round-trips without truncation or compounding backslash-escapes.
+
+    Guards the quote-aware `_split_top_commas` + `_unescape_dq`/`_q` fix. Before it,
+    a comma inside a quoted note split the inline map (truncating the note at the
+    first comma) and each `wi-project`/`wi-append` re-render doubled the backslashes
+    on any escaped quote — silently corrupting the audit trail, worse every cycle.
+    """
+
+    def test_split_top_commas_keeps_quoted_comma_note_whole(self):
+        parts = wi._split_top_commas('event: deployed, note: "a, b, c"')
+        self.assertEqual(parts[0].strip(), "event: deployed")
+        self.assertEqual(parts[1].strip(), 'note: "a, b, c"')
+
+    def test_inline_map_note_with_commas_not_truncated(self):
+        d = wi._parse_inline_map('{event: deployed, agent: cicd, note: "local dev==prod, 47 tests, served"}')
+        self.assertEqual(d["note"], "local dev==prod, 47 tests, served")
+        self.assertEqual(d["agent"], "cicd")
+
+    def test_scalar_unescapes_embedded_quotes(self):
+        self.assertEqual(wi._parse_scalar(r'"say \"hi\" now"'), 'say "hi" now')
+
+    def test_render_parse_roundtrip_is_idempotent(self):
+        original = 'local dev==prod: green build, "quoted", 47 tests'
+        once = wi._q(original)
+        self.assertEqual(wi._parse_scalar(once), original)
+        # a second render/parse cycle must be byte-identical — no compounding escapes
+        twice = wi._q(wi._parse_scalar(once))
+        self.assertEqual(twice, once)
+        self.assertEqual(wi._parse_scalar(twice), original)
+
+    def test_event_note_survives_two_render_cycles(self):
+        ev = {"ts": "2026-07-11T00:00:00Z", "event": "deployed", "agent": "cicd",
+              "note": "local dev==prod: green build, 47 tests, served via preview"}
+        r1 = wi._render_event(ev)
+        p1 = wi._parse_inline_map(r1)
+        self.assertEqual(p1["note"], ev["note"])
+        r2 = wi._render_event(p1)
+        self.assertEqual(r2, r1)  # idempotent
+        self.assertEqual(wi._parse_inline_map(r2)["note"], ev["note"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

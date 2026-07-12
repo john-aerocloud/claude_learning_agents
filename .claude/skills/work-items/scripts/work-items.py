@@ -211,12 +211,26 @@ def _split_frontmatter(text):
     return "\n".join(lines[1:end]), "\n".join(lines[end + 1:])
 
 
+def _unescape_dq(s):
+    """Unescape a double-quoted scalar body: \\" -> " and \\\\ -> \\ (left-to-right)."""
+    out = []
+    i = 0
+    while i < len(s):
+        if s[i] == "\\" and i + 1 < len(s) and s[i + 1] in '"\\':
+            out.append(s[i + 1])
+            i += 2
+        else:
+            out.append(s[i])
+            i += 1
+    return "".join(out)
+
+
 def _parse_scalar(v):
     v = v.strip()
     if v == "" or v == "~" or v == "null":
         return None
     if v.startswith('"') and v.endswith('"') and len(v) >= 2:
-        return v[1:-1]
+        return _unescape_dq(v[1:-1])
     if v.startswith("'") and v.endswith("'") and len(v) >= 2:
         return v[1:-1]
     # int / float
@@ -237,9 +251,25 @@ def _parse_inline_list(v):
 
 
 def _split_top_commas(s):
-    """Split on commas not inside braces/brackets."""
+    """Split on commas not inside braces/brackets and not inside a double-quoted
+    string (honouring \\-escapes), so a quoted `note` containing commas stays whole."""
     out, depth, cur = [], 0, ""
+    in_str = False
+    esc = False
     for ch in s:
+        if in_str:
+            cur += ch
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+            cur += ch
+            continue
         if ch in "[{":
             depth += 1
         elif ch in "]}":
@@ -338,7 +368,7 @@ def _q(v):
         return str(v)
     s = str(v)
     if s == "" or re.search(r'[:#\[\]{}",]', s) or s.strip() != s:
-        return '"' + s.replace('"', '\\"') + '"'
+        return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
     return s
 
 

@@ -1,4 +1,4 @@
-# Principle failure — board + docs left stale during the dev loop (EXP-103)
+# Principle failure — board + docs left stale during the dev loop
 
 - **Date:** 2026-07-11
 - **Agent:** orchestrator

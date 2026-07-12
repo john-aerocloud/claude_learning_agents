@@ -156,7 +156,7 @@ retro-debt:
 retro-mark:
 	$(WORKITEMS) retro-mark --project $(PROJECT)
 
-# --- Event-sourced work-item machinery (Version2-design/04, process/machinery/CONTRACT.md) ---
+# --- Event-sourced work-item machinery (design-rationale/work-item-state-model.md, process/machinery/CONTRACT.md) ---
 # State lives ONLY in the per-item files (work/$(PROJECT)/items/{active,done}/<ID>.md);
 # queues, stats and the dependency tree are DERIVED here, never stored-and-hand-synced.
 # Append an edge-checked event (the ONLY way to change item state; rejects illegal transitions):

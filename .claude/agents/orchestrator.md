@@ -105,14 +105,21 @@ cycles keep the plain trunk working tree. Target: commit-attribution-correctness
 - Every state change is a `wi-append` event (carrying `--tokens`/`TOKENS=` from the
   returning agent, per below); all metrics derive from `make wi-project`. There is no
   per-dispatch ledger bracketing — the DORA ledger is frozen (§F0).
-- **Token cost awareness (v59, EXP-067):** when a dispatched agent returns its reported
-  `subagent_tokens`, carry that count on the `wi-append` for the state event it produced
-  (`--tokens <n>` / `TOKENS=<n>`), so the token cost rides the event. The
-  plumbing (run-the-OS) vs delivery (customer-value) cost-split is then computed
-  automatically by `make wi-project` from event `tokens` (stats §E `token_cost`,
-  and `stats.json`) — read it there for the retro's cost review (§26), no longer a
-  hand gap. Your own main-loop tokens aren't auto-logged — the §26 token-estimate
-  covers that share.
+- **Token cost awareness (v59, EXP-067; sharpened v83 EXP-103):** stamp the token cost on
+  EVERY stage event as you append it. **The source is the DISPATCH-LEVEL `subagent_tokens`
+  the Task/Agent return surfaces to YOU — not the agent's self-report.** A subagent cannot
+  introspect its own `subagent_tokens`, so if you wait for the agent to report it you get
+  `--tokens 0` (the systemic blind spot found on the OFS run: every engineer/tester/cicd
+  event landed TOKENS=0, so the §E plumbing-vs-delivery split was silently zero and the §26
+  token-efficiency review was uncomputable). RULE: when a dispatch returns, read its token
+  usage from the dispatch result and pass it on the SAME `wi-append` that records the state
+  event it produced (`--tokens <n>` / `TOKENS=<n>`). A stage event appended with `--tokens
+  0` (or omitted) when a real dispatch produced it is a metering defect — TOKENS=0 is
+  reserved for genuinely token-free bookkeeping transitions. The plumbing (run-the-OS) vs
+  delivery (customer-value) cost-split is then computed automatically by `make wi-project`
+  from event `tokens` (stats §E `token_cost`, and `stats.json`) — read it there for the
+  retro's cost review (§26). Your own main-loop tokens aren't auto-logged — the §26
+  token-estimate covers that share.
 - After each iteration run `make wi-project` — the baseline is DERIVED, not a
   hand-written file: read `work/<project>/views/stats.md`.
 - Read the baseline as a flow model: find the CONSTRAINT (slowest step / longest

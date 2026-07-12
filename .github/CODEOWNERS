@@ -1,0 +1,16 @@
+# Everything in this repo is owned by the maintainer.
+# Any pull request touching these paths requires review + approval from @john-aerocloud
+# before it can be merged to a protected branch.
+#
+# Fork freely. If you have an improvement, open a PR or — better — come and talk to me
+# first (see the note at the top of README.md). I generally do NOT want external pushes
+# into the learned process (/process, process/experiments.md, process/process-history/):
+# a lot of how this system works for me lives in those experiments and version history.
+
+*                       @john-aerocloud
+
+# The learned process is especially protected — this is the accumulated, project-agnostic
+# knowledge the agents improve over time. Change it via /retro, not by hand-editing.
+/process/               @john-aerocloud
+/CLAUDE.md              @john-aerocloud
+/.claude/               @john-aerocloud

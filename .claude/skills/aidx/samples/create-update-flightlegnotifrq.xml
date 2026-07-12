@@ -1,0 +1,52 @@
+<!-- AIDX create/update sample. Source: SITA developer.aero (S5). Schema v21.2.
+     BA1484 LHR->GLA, 2015-06-03. Note Usage="Actual", DepartureOrArrival,
+     OperationTime with CodeContext/RepeatIndex/TimeType/OperationQualifier,
+     and xsi:nil="true" for known-but-not-yet-populated times. -->
+<IATA_AIDX_FlightLegNotifRQ xmlns="http://www.iata.org/IATA/2007/00" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Version="21.2">
+    <Originator CompanyShortName="BA"/>
+    <DeliveringSystem CompanyShortName="BA"/>
+    <FlightLeg>
+        <LegIdentifier>
+            <Airline CodeContext="3">BA</Airline>
+            <FlightNumber>1484</FlightNumber>
+            <DepartureAirport CodeContext="3">LHR</DepartureAirport>
+            <ArrivalAirport CodeContext="3">GLA</ArrivalAirport>
+            <OriginDate>2015-06-03</OriginDate>
+            <RepeatNumber>1</RepeatNumber>
+        </LegIdentifier>
+        <LegData>
+            <OperationalStatus RepeatIndex="1" CodeContext="1245">SCH</OperationalStatus>
+            <OperationalStatus RepeatIndex="2" CodeContext="1245">SCH</OperationalStatus>
+            <ServiceType>J</ServiceType>
+            <OwnerAirline><Airline>BA</Airline></OwnerAirline>
+            <AssociatedFlightLegAircraft RepeatIndex="1">
+                <Airline CodeContext="3">BA</Airline>
+                <FlightNumber>1479</FlightNumber>
+                <DepartureAirport CodeContext="3">GLA</DepartureAirport>
+                <ArrivalAirport CodeContext="3">LHR</ArrivalAirport>
+                <OriginDate>2015-06-03</OriginDate>
+                <RepeatNumber>1</RepeatNumber>
+            </AssociatedFlightLegAircraft>
+            <AirportResources Usage="Actual">
+                <Resource DepartureOrArrival="Departure">
+                    <Runway/>
+                    <AircraftTerminal>5</AircraftTerminal>
+                    <PublicTerminal RepeatIndex="1">5</PublicTerminal>
+                </Resource>
+                <Resource DepartureOrArrival="Arrival">
+                    <Runway/>
+                    <AircraftTerminal>M</AircraftTerminal>
+                    <PublicTerminal RepeatIndex="1">M</PublicTerminal>
+                </Resource>
+            </AirportResources>
+            <OperationTime CodeContext="9750" RepeatIndex="1" TimeType="TAR" OperationQualifier="SRT" xsi:nil="true"/>
+            <OperationTime CodeContext="9750" RepeatIndex="2" TimeType="SCT" OperationQualifier="OFB">2015-06-03T12:15:00Z</OperationTime>
+            <OperationTime CodeContext="9750" RepeatIndex="4" TimeType="CAL" OperationQualifier="TKO">2015-06-03T12:35:00Z</OperationTime>
+            <OperationTime CodeContext="9750" RepeatIndex="8" TimeType="SCT" OperationQualifier="ONB">2015-06-03T13:35:00Z</OperationTime>
+            <AircraftInfo>
+                <AircraftType>321</AircraftType>
+                <Registration>GEUXH</Registration>
+            </AircraftInfo>
+        </LegData>
+    </FlightLeg>
+</IATA_AIDX_FlightLegNotifRQ>

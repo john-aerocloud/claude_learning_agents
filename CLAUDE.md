@@ -28,7 +28,7 @@ See `README.md` for the full system. In short:
   assurance (§F5/§F5a, EXP-093), and the only residual human touch is a genuinely
   irreversible prod-DATA op (§0b). Build contract: `process/machinery/CONTRACT.md`;
   cross-agent rules: `process/process-current.md` **STAGE F**.
-  Rationale/diagrams/worked-retro: `Version2-design/`. Use `/flow-status` to see
+  Design rationale: `design-rationale/work-item-state-model.md`. Use `/flow-status` to see
   the derived queues, buffers, and time thieves.
 - Drive work with the slash commands in `.claude/commands/`. The drivers are
   `/requirement`, `/loop-run`, `/flow-status`. Full set: `/requirement`, `/loop-run`,

@@ -60,6 +60,11 @@ Each cycle:
    Each stage `wi-append` carries `TOKENS=<n>` — the `subagent_tokens` the dispatched
    specialist reported for that transition — so the plumbing-vs-delivery cost-split
    (§E `token_cost`) is computed automatically by `make wi-project` from event tokens.
+   It ALSO carries `DURATION_MS=<n>` — the dispatch's reported `duration_ms` (the
+   agent's REAL wall-clock cycle time for that transition) — so the agent-cycle-time
+   vs gross-lead-time block (§F `agent_cycle_time`) is derived by `make wi-project`.
+   GLT stays the honest TOTAL elapsed; §F is its complement (work-effort vs wait/
+   overhead), e.g. `make wi-append … EVENT=built_green AGENT=engineer TOKENS=<n> DURATION_MS=<n>`.
    - **Collision** (a UC needs a seam/path another in-flight UC claimed, or a
      flag-compose failure): flow-manager emits `collision`, STOP the pair, add the
      missing edge to the model + `edge-ledger.md`, re-serialise (§19); the rework

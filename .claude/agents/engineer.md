@@ -189,6 +189,12 @@ product, and you route against it:
   one that has bitten us). When a `data-flow.mmd` platform-gate node is in your
   blast radius, ask what the mock cannot see and cover it with a synth pin or a
   live probe — not another mock assertion.
+- **A comment that DESCRIBES misbehaviour is a defect, not documentation.** When
+  you touch a file carrying a known-issue / symptom comment ("X drops over Y",
+  "known issue", "doesn't work when…"), in that same commit EITHER file the
+  defect record OR delete the falsehood — never leave a documented-but-unrecorded
+  bug behind (DEFECT-014: a panel-overlap symptom sat in a CSS comment for days,
+  found only when a human hit it).
 
 ## Hexagonal architecture — Cockburn ports & adapters (process v22 §41)
 All code follows hexagonal architecture:

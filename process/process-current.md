@@ -1,11 +1,18 @@
 ---
-process_version: 83
+process_version: 84
 effective_from: 2026-07-09
 supersedes: v82, v81, v80, v76
 status: active
 ---
 
-# Current Process — v83
+# Current Process — v84
+
+<!-- v84 (2026-07-12, ROC retro): §F0 — per-item board push + docs-refresh are hard
+in-cycle invariants, not skippable (EXP-103, board/doc-lag). §F3 — register linear
+dependency-chain use-cases JIT per-UC, not batch up front, and prefer independent
+decompositions (EXP-104, gross lead time: `registered` was 70% of GLT as a
+batch-registration artifact). -->
+
 
 ## What this file is
 
@@ -98,7 +105,7 @@ optional or deferrable; only the external API *call* is best-effort (a failure i
 next push/sweep reconciles). **Invariant: an item's board status never lags its item-file state
 by more than the current cycle.** The full-sweep run is a periodic structure backstop, NOT the
 primary path — if the sweep does real state work every time, per-item pushes are being skipped
-(the EXP-101 board/doc-lag lapse). Likewise user-facing docs (README / GitBook, via `documenter`)
+(the EXP-103 board/doc-lag lapse). Likewise user-facing docs (README / GitBook, via `documenter`)
 are refreshed at each slice close and must not drift from shipped state. Boards and docs are
 projections — the item always wins, but a projection left stale is a process failure.
 
@@ -991,6 +998,20 @@ Product is never idle while engineers build; it keeps the Ready buffer **at or a
   projected-below-floor after the next pull — replenish the moment the buffer would dip.
   The very FIRST build wave of a slice is dispatched together with a product look-ahead
   for the NEXT work.
+- **Register dependency-chain use-cases JIT, not in one up-front batch (EXP-104 → gross
+  lead time).** When a slice decomposes into a LINEAR dependency chain (UC-a→UC-b→UC-c,
+  each needing its predecessor's output), do NOT batch-`registered` the whole chain at
+  slice-start: a downstream UC registered up front accrues `registered`-queue dwell for the
+  entire time its predecessors build, though it is not yet pullable — inflating gross lead
+  time with pure accounting wait. (ROC C1 + dashboard: `registered` was **70% of GLT** at
+  **0% rework / 0% CFR** — not idle capacity but an inventory artifact of batch
+  registration; raising `N`, §F6, cannot relieve a linear chain.) Instead fire each chained
+  UC's `registered` birth event (or hold `made_ready`) only as its predecessor nears done,
+  so `registered` reflects real ready-wait. Product may still DEFINE the whole chain up
+  front (scope stays visible); it is the birth EVENT that is deferred per-UC. And prefer
+  decompositions with genuinely INDEPENDENT use-cases where the domain allows, so the
+  maximal independent set (§F6) is >1 and `N` can actually help — reserve the linear chain
+  for stages that truly serialise (e.g. a pipeline walking skeleton).
 - **Across chunk boundaries.** Product decomposes the next slice — and the next chunk's
   first slice — WHILE the current chunk is still building, so there is no decompose-gap
   at a chunk edge. Order: (a) more use-cases from the current slice; (b) next slice from

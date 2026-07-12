@@ -78,7 +78,7 @@ Each cycle:
      current cycle.** Only the external API *call* is best-effort (a network failure is logged
      and the next push/sweep reconciles) — the DISPATCH itself is NOT skippable. Skipping it is
      a process failure: the board silently goes stale and the humans watching it lose the plot
-     (EXP-101, the board/doc-lag lapse this rule exists to prevent). The step-5b full sweep is
+     (EXP-103, the board/doc-lag lapse this rule exists to prevent). The step-5b full sweep is
      only a periodic backstop for structure/prune, never the primary path. An item in `blocked`
      state shows Blocked on the board regardless of its queue.
 5. **Done & bubble up.** `make wi-append ID=<uc> EVENT=validated AGENT=tester REF=<sha>`
@@ -104,12 +104,12 @@ Each cycle:
    `process/linear-mapping.md`). State-only mirror. Skip silently if the project has no board
    binding. Never block the loop on the API; a failure is logged, not fatal. This does NOT
    replace the per-item push — if you find the sweep is doing real work every time, the
-   per-item push (step 4) is being skipped, which is the EXP-101 failure.
+   per-item push (step 4) is being skipped, which is the EXP-103 failure.
 6. **Document — REQUIRED at each slice/UC close (docs must not drift).** Dispatch `documenter`
    to update the project README (and GitBook where bound) to match what just shipped — at
    every slice close, and for any UC that changes user-facing behaviour. Runs in the
    background, but is NOT skippable across a slice close: stale or absent user-facing docs are
-   a process failure the same way a stale board is (EXP-101). Keep it honest to shipped state
+   a process failure the same way a stale board is (EXP-103). Keep it honest to shipped state
    (never document unbuilt features as done).
 7. **RETRO-DEBT GATE — mechanical, not discretionary (§F8, v68).** Before pulling
    the NEXT work after any slice/chunk close or defect resolve, run

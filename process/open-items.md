@@ -55,3 +55,17 @@ _(v82 slim: the three-writer coherence-retrofit item and the per-event
 historical-ledger backfill item were removed — both were made moot by the F0
 event-sourced cutover: state is fold(events) in one store, and the frozen DORA
 CSV is no longer the metrics source.)_
+
+## Deferred at the ROC retro (2026-07-12) — real but NOT constraint-targeting (change budget went to EXP-104)
+- **OI: agents must never run interactive/long-blocking commands** — the ROC cicd
+  agent stalled the 600s watchdog on an interactive Vite scaffolder / a `gh auth refresh`
+  device-flow prompt, costing ~10 min + a re-dispatch. Route (when picked up): a cicd.md +
+  §33 rule — no interactive prompts in an agent (use `--yes`/non-interactive flags,
+  pre-provisioned auth), and background genuinely long installs. Single data point so far;
+  promote to an experiment if it recurs. Targets: lead time (avoid watchdog stalls).
+- **OI: lean per-item board projection (token cost)** — the `linear` projection agent used
+  ~100–140k tokens PER per-item push (updating 1–2 issue statuses), because it reloads broad
+  context each call. Route: trim the linear agent to a truly minimal single-id upsert (read
+  one item, one API call, no full-board re-read) — preserving the EXP-103 in-cycle freshness
+  at a fraction of the tokens. Scored on DORA-value-per-token (board freshness must not
+  regress). Deferred: token efficiency, not the current (queue-wait) constraint.

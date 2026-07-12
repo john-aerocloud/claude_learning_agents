@@ -90,7 +90,7 @@ alone. Cheap to bake into the IaC from the first stack; expensive to retrofit.
    heal" — the tester had to improvise the concurrency stressor to catch it (a rework +
    CFR hit that a concurrency acceptance condition would have made the engineer TDD
    first-time). A concurrent surface with no concurrency/idempotency acceptance condition
-   is incomplete. [EXP-103]
+   is incomplete. [EXP-109]
 4. **Maintain `architecture/dependencies/data-flow.mmd`**: the runtime data-flow
    with **platform gates as explicit nodes** — WAF, authorizers, identity-source
    checks, cache layers, TTL/lazy-deletion semantics, CSP. Express each slice's

@@ -113,7 +113,7 @@ model — the changed nodes/edges ARE your scope:
   all along.)
 
 - **Probe CONCURRENCY/durability on any concurrent surface — STANDING practice, not
-  instinct (v86, UC-ADIX-006, EXP-103).** When the surface is served by a
+  instinct (v86, UC-ADIX-006, EXP-109).** When the surface is served by a
   concurrent/parallel-invocation component (SQS-, stream-, or EventBridge-triggered
   Lambda; anything where >1 instance folds shared state at once), a single happy-path
   pass does NOT prove correctness under load — a last-writer-wins race, out-of-order

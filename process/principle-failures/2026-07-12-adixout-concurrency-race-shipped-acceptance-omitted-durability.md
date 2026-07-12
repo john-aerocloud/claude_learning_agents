@@ -47,10 +47,10 @@ at design time.
   (last-writer-wins, out-of-order/duplicate delivery, stale-snapshot clobber, state
   regression) and the observable condition that must hold under batched load (e.g. "under
   N simultaneous deliveries to the same aggregate the high-water mark never regresses and
-  no applied content is lost"). Routed to `solution-architect.md` step 3. [EXP-103]
+  no applied content is lost"). Routed to `solution-architect.md` step 3. [EXP-109]
 - **The tester runs a concurrency/batch-durability probe as STANDING practice** for such
   surfaces — fire a simultaneous batch at the same record, consistent-read, assert no
-  regression across EVERY affected record. Routed to `tester.md`. [EXP-103]
+  regression across EVERY affected record. Routed to `tester.md`. [EXP-109]
 - Net effect: the race becomes a first-time TDD target for the engineer (fewer
   post-deploy rejects → lower CFR + MTTR), and the tester's improvised catch becomes a
   guaranteed check rather than luck. Sibling to the "validate derived state on a

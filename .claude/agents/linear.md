@@ -26,7 +26,15 @@ You do NOT read queues, the ledger, or other items. One item in, one issue out.
    file and applies these mappings idempotently — find the issue by the id→issue map, create if
    absent else edit), mapping:
    - item `derived.state` → Linear status (per `process/linear-mapping.md`).
-   - `title` / body Definition → issue title / description.
+   - `title` → issue title (`<ID> · <title>`).
+   - **description → the RICH, plan-connected body (linear-mapping §2a):** compose it
+     from the item — *What this delivers* (value statement), *Jobs to be done* (`job:`
+     codes resolved to their job story from `product/jtbd-map.md`), *Personas served*
+     (`personas:` ids resolved to who they are from `product/personas.md`), *Acceptance
+     criteria* (the testable `AC-…` from the item body), and *Part of the plan* (the
+     parent slice→chunk→requirement chain resolved to titles + the slice's value, plus a
+     one-line contribution). A pure render of the item + those referenced files; never
+     invented. Re-render every projection so it tracks the item.
    - `parents` → Linear parent/relation; `derived.children` → sub-issue relations.
    - block reason (an item in `blocked` state, from its latest `blocked` event note) → a
      "Blocked: <reason>" banner + comment; clear it when the item leaves `blocked`.

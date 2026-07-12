@@ -112,6 +112,21 @@ model — the changed nodes/edges ARE your scope:
   bounded backward-scan window; the correct `actual.*` fields were in the aggregate
   all along.)
 
+- **Probe CONCURRENCY/durability on any concurrent surface — STANDING practice, not
+  instinct (v86, UC-ADIX-006, EXP-103).** When the surface is served by a
+  concurrent/parallel-invocation component (SQS-, stream-, or EventBridge-triggered
+  Lambda; anything where >1 instance folds shared state at once), a single happy-path
+  pass does NOT prove correctness under load — a last-writer-wins race, out-of-order
+  or duplicate delivery, or a stale-snapshot clobber only appears when multiple
+  invocations touch the SAME record concurrently. Drive the concurrency stressor
+  explicitly: fire a BATCH of simultaneous deliveries at the same aggregate (real
+  in-flight keys where possible), then verify with a CONSISTENT read that the shared
+  state did not regress (high-water monotonic) and no applied content was lost across
+  EVERY affected record — not just one. UC-ADIX-006 shipped a silent data-loss race
+  that only the batched-injection probe caught (the happy-path acceptance missed it);
+  make this probe automatic for concurrent surfaces, and validate against the
+  concurrency/idempotency acceptance conditions the architect now authors for them.
+
 ## Validate in dev first, then prod (dev-then-prod path, v82 state-graphs)
 A use-case is validated in DEV before it reaches prod — you fire TWO validations on
 the locked path `deploying(deploy-to-dev) → dev-validating → prod-deploying →

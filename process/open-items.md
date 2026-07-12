@@ -55,3 +55,18 @@ _(v82 slim: the three-writer coherence-retrofit item and the per-event
 historical-ledger backfill item were removed — both were made moot by the F0
 event-sourced cutover: state is fold(events) in one store, and the frozen DORA
 CSV is no longer the metrics source.)_
+
+- **OI-BUNDLE-DRIFT (AdixOut, 2026-07-12):** committed pre-built handler bundles
+  (`work/AdixOut/infra/assets/*/handler.mjs`) can go STALE relative to source — the
+  engineer changed domain source (90d0afd) without rebuilding the committed bundle, and
+  cicd's deploy-time `bundle-all` regenerated it and had to commit a reconcile
+  (`bca4dac`). No defect resulted (the deploy rebuilds from source, so the DEPLOYED code
+  was correct), but it is recurring reconcile-commit noise and briefly makes a "clean
+  tree" contain a stale artifact. Deferred from the v86 retro (not the constraint, not a
+  defect — constraint gate). Fix when picked up: either (a) the engineer rebuilds the
+  bundle (`make bundle-all`) as part of any handler-source change and commits it in the
+  green commit (route to engineer.md), or (b) a post-`bundle-all` freshness assertion in
+  the deploy path fails if regeneration dirties the tree (the committed bundle was
+  stale) — turning drift into a caught error rather than a silent reconcile. Owner: cicd
+  + engineer. The bundles are a DELIBERATE committed asset (architecture decision), so do
+  NOT simply gitignore them without the architect.

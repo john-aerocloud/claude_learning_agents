@@ -27,7 +27,14 @@ You do NOT read queues, the ledger, or other items. One item in, one issue out.
 1. Read the item file for `--id <ID>` (the item whose events just changed).
 2. Upsert its Jira issue via the project binding, mapping:
    - item `derived.state` → Jira status (transition the issue; use the project's state→status map).
-   - `title` / body Definition → summary / description.
+   - `title` → summary (`<ID> · <title>`).
+   - **description → the RICH, plan-connected body (linear-mapping §2a):** compose it from
+     the item — *What this delivers* (value statement), *Jobs to be done* (`job:` resolved
+     to the job story from `product/jtbd-map.md`), *Personas served* (`personas:` resolved
+     from `product/personas.md`), *Acceptance criteria* (the testable `AC-…` from the item
+     body), and *Part of the plan* (the parent slice→chunk→requirement chain + the slice's
+     value + a one-line contribution). A pure render of the item + referenced files, never
+     invented; re-render every projection.
    - `parents` → Jira Epic/parent link; `derived.children` → child-issue links.
    - block reason (an item in `blocked` state, from its latest `blocked` event note) → a
      "Blocked: <reason>" note + flag; clear it when the item leaves `blocked`.

@@ -1,11 +1,26 @@
 ---
-process_version: 88
+process_version: 89
 effective_from: 2026-07-12
-supersedes: v86, v85, v84, v83, v82, v81, v80, v76
+supersedes: v88, v86, v85, v84, v83, v82, v81, v80, v76
 status: active
 ---
 
-# Current Process — v88
+# Current Process — v89
+
+<!-- v89 (2026-07-12, ROC retro): constraint = registered/queue (74.44% of GLT by owner
+`queue`), but per §5b/EXP-100 method it is artifact-dominated — front-loaded batch UC-registration
+at decomposition + multi-day human-session cadence on a weekend project; the squeezable in-system
+WORKING constraint is engineer/building (25.56%). EXPLOIT enabler landed: EXP-103 fired on ROC
+(token coverage 18%→50%, build tokens now visible). DOMINANT quality finding (constraint-gate
+SAFETY exception): the §12d/EXP-106 CORE-job done-gate RECURRED on a third project — CHK-ROC-001
+(CORE job J1 = a REAL Jira ticket) folded to `done` on its LOCAL/fake-Jira child while its
+real-delivery remainder (SLC-ROC-002) was never registered, so CFR read 0.0% blind to it. Remedy:
+registered SLC-ROC-002 (CHK-ROC-001 + REQ-ROC-001 reverted to in_progress — honest); opened
+principle-failure 2026-07-12-roc-core-slice-local-only; §12d strengthened to point at a MECHANICAL
+gate (IMP-011: a `wi-validate` I5 invariant failing a CORE aggregate that reaches `done` without a
+job-success validation OR a registered remainder). EXP-106 scored NEGATIVE (1st opp), EXP-100 →2/3,
+EXP-103 →1/2 positive. Registry held at the 8-active cap (no new rows — the remedy is a fix +
+improvement-slice, not an experiment). -->
 
 <!-- v88 (2026-07-12, ROC — experiment-leanness + honest measurement reform, human-directed):
 §25a — HARD WIP cap of 8 active experiments (retire one to open one); a fix is NOT an experiment
@@ -541,6 +556,16 @@ slice closes.) Rationale + pattern:
 (SLC-030 closed `done` having built same-account only; the cross-account CORE remainder
 fell off the backlog and the inversion propagated to the consumer skill; CFR read 0.0%
 throughout). [EXP-106]
+
+**This gate is being made MECHANICAL (IMP-011, ROC retro 2026-07-12) after a THIRD
+recurrence** — ROC's `CHK-ROC-001` (CORE job J1 = a real Jira ticket) folded to `done` on
+its LOCAL/fake-Jira child while the real-delivery remainder `SLC-ROC-002` was never
+registered (`principle-failures/2026-07-12-roc-core-slice-local-only-real-delivery-untracked`).
+A text-only gate on a CORE invariant is not load-bearing; IMP-011 adds `wi-validate`
+invariant **I5** — a CORE-job aggregate may not be `done` without EITHER a job-success
+validation event in its subtree OR a registered, not-yet-done remainder child. Until I5
+lands, the slice-close parts-check (§F8/EXP-100, loop-run) must explicitly verify this for
+every CORE aggregate before it closes.
 
 ## 12b. Multi-party / multi-instance modelling
 When a use case involves MORE THAN ONE PARTY operating SEPARATE INSTANCES (two

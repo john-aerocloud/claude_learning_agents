@@ -1,13 +1,13 @@
 ---
-process_version: 84
+process_version: 85
 effective_from: 2026-07-12
-supersedes: v83, v82, v81, v80, v76
+supersedes: v84, v83, v82, v81, v80, v76
 status: active
 ---
 
-# Current Process — v84
+# Current Process — v85
 
-<!-- v84 (retro, AdixOut 2026-07-12): constraint = QUEUE WAIT (ready 48.9% + registered 27.7% = 76.6% of GLT by owner `queue`), sample n=2 and heavily contaminated by non-system waits (mid-session org spend-limit outage, heavy human-steering gaps, deliberate serial-build pacing) — treat DIRECTIONAL, not a capacity signal. CFR 33% from ONE rejection (UC-ADIX-003 deploy-race), a GOOD catch. Changes routed this cycle (all already applied + folded): aws-architecture IaC default CDK→SST v3 Ion; ADR-0006 (release/provenance) + ADR-0007 (tagging) encoded into aws-architecture §9a/§2a; 3 principle-failures (rushed-to-register-before-understanding; skipped-solution-architecture-gate→wrong-IaC; build-identity-claimed-before-code-live); documenter standing duty (living root README); safe-deploy stream-drain (AdixOut cicd). Forward lever for the queue constraint = per-UC worktree isolation so the inner loop's maximal-independent-set actually builds in parallel (improvement-slice IMP-017, deferred — validate on a cleaner sample). Token review: 811k delivery tokens for 2 UCs; dominant WASTE = the CDK→SST full-infra rebuild forced by the skipped architecture gate — the gate fix (check tech choices vs org before build) is the token lever too. -->
+<!-- v85 (retro, AdixOut 2026-07-12; renumbered from a v84 that collided with main's concurrent v84 CORE-job-done-gate retro — both sets of learning coexist, only the version number was reconciled): constraint = QUEUE WAIT (ready 48.9% + registered 27.7% = 76.6% of GLT by owner `queue`), sample n=2 and heavily contaminated by non-system waits (mid-session org spend-limit outage, heavy human-steering gaps, deliberate serial-build pacing) — treat DIRECTIONAL, not a capacity signal. CFR 33% from ONE rejection (UC-ADIX-003 deploy-race), a GOOD catch. Changes routed this cycle (all already applied + folded): aws-architecture IaC default CDK→SST v3 Ion; ADR-0006 (release/provenance) + ADR-0007 (tagging) encoded into aws-architecture §9a/§2a; 3 principle-failures (rushed-to-register-before-understanding; skipped-solution-architecture-gate→wrong-IaC; build-identity-claimed-before-code-live); documenter standing duty (living root README); safe-deploy stream-drain (AdixOut cicd). Forward lever for the queue constraint = per-UC worktree isolation so the inner loop's maximal-independent-set actually builds in parallel (improvement-slice IMP-017, deferred — validate on a cleaner sample). Token review: 811k delivery tokens for 2 UCs; dominant WASTE = the CDK→SST full-infra rebuild forced by the skipped architecture gate — the gate fix (check tech choices vs org before build) is the token lever too. -->
 
 
 ## What this file is
@@ -28,8 +28,9 @@ Pointers:
   `process/machinery/CONTRACT.md`.
 - **State graphs** (per-type transitions, `state_owners`, `queue_map`):
   `process/machinery/state-graphs.json` — edit only via the retro/version-bump gate.
-- **Design + rationale**: `Version2-design/04` (work-item state model), plus
-  `00`–`03` (pull-system design, diagrams, loops) and `02` (worked retro).
+- **Design + rationale**: `design-rationale/work-item-state-model.md`. The prior
+  QueueApproach design (pull-system, diagrams, worked retro) is archived at git tag
+  `QueueApproach`.
 - **Operative cutover rules**: **STAGE F → §F0**. Most of §F1–§F10 (buffers, WIP,
   parallel dispatch, collisions, retro-debt gate, deploy gate) stay valid and now
   operate on the *derived* queues — only the state substrate beneath them changed.
@@ -502,6 +503,28 @@ observable outcome/value); and its acceptance criteria. These live in the item's
 cannot be pulled or built until product authors them (§F definition-of-ready). Genuine
 gaps are flagged, **never back-filled with fabricated criteria**. [EXP-072]
 
+## 12d. CORE-job done-gate + no-silent-partial delivery [v84]
+Aggregate state folds **structurally** (all children `done` → `done`). For a CORE `job`
+that is necessary but **NOT sufficient**: a slice/chunk carrying a CORE job is
+"done-in-fact" only when its acceptance is validated against **that job's success measure
+for the named persona(s)** — not merely when its child use-cases are `done`. Two
+obligations:
+1. **Job-anchored acceptance.** A CORE-job item's acceptance cases MUST cite the job's
+   success measure and the persona(s) it serves (§11a, §12). The tester prod-validates a
+   CORE-job item against that success measure, not incidental behaviour.
+2. **No silent partial.** When a value-slice deliberately delivers only PART of a CORE
+   job (a legitimate thin slice — e.g. same-account before cross-account), the
+   **undelivered remainder MUST be registered as a tracked item (child/sibling) BEFORE the
+   slice closes**. A CORE job may not leave `items/active/` empty while unfulfilled — an
+   empty backlog is truthful only when every CORE job's success measure is met.
+(Per-role: product anchors acceptance to the job's success measure + persona; tester
+validates against it; flow-manager confirms the remainder is tracked before a partial CORE
+slice closes.) Rationale + pattern:
+`principle-failures/2026-07-11-core-slice-false-done-and-delivery-model-inversion`
+(SLC-030 closed `done` having built same-account only; the cross-account CORE remainder
+fell off the backlog and the inversion propagated to the consumer skill; CFR read 0.0%
+throughout). [EXP-106]
+
 ## 12b. Multi-party / multi-instance modelling
 When a use case involves MORE THAN ONE PARTY operating SEPARATE INSTANCES (two
 browsers, two devices, a sharer and a joiner), the happy-path of one instance is not
@@ -909,9 +932,10 @@ The v82 cutover was needed partly because the docs themselves rotted (2834 lines
 # STAGE F — Flow & queues (pull-based)
 
 The cross-agent rules of the pull system. **§F0 (above) is the substrate**; the rules
-below name flow behaviour and now operate on the *derived* views (§F0). Full rationale,
-diagrams, and a worked retro are in `Version2-design/`. Each rule names the DORA metric
-it targets, per §25a.
+below name flow behaviour and now operate on the *derived* views (§F0). Full rationale
+is in `design-rationale/work-item-state-model.md` (the prior QueueApproach design —
+diagrams and a worked retro — is archived at git tag `QueueApproach`). Each rule names
+the DORA metric it targets, per §25a.
 
 ## F1. Work items — hierarchy, links, and honest closes
 Every unit of work is a typed item — `REQ-`/`CHK-`/`SLC-`/`UC-`/`DEF-` — as a per-item

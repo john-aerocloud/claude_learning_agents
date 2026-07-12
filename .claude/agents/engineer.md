@@ -57,6 +57,12 @@ hardcode the profile name.
    item's Linear id (+ customer Jira key where one exists), per §14 ISO traceability** —
    e.g. `fix(pnl): resolve issuing-State against Country.Code (VF-003, PP-127)`. Never
    commit while any test is red.
+   **Verify the code is ACTUALLY on trunk (v89, DEF-ROC-001):** after committing, confirm
+   each NEW source file is tracked — `git -C work/<project> ls-files -- <path>` returns it,
+   and `git check-ignore <path>` returns nothing. A green suite in your working tree is a
+   FALSE-GREEN if `.gitignore` silently drops the file (an unanchored pattern like `secrets/`
+   matches every `secrets/` dir, including a source package): the UC reads `done` while its
+   code was never committed. A done UC's code must be on trunk, not merely passing locally.
    **Then integrate, don't batch (process §14/§19b):** when a use-case's full
    done-condition is met (suite **and** lint green), if the project repo has a
    configured, verified remote (`git remote get-url origin` resolves to the origin

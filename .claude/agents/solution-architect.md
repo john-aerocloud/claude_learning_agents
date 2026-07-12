@@ -59,6 +59,15 @@ an INCOMPLETE design. The catalog is a core `actual/` doc (the documenter keeps
 it surfaced). A consumer that poisons on a known-type stored event is this
 principle violated, not a data problem (see DEFECT-OAG-024/025).
 
+When you define or change an externally-consumed event/message body, design it
+**consume-first**: the body is the MINIMAL structured delta a consumer APPLIES —
+the changed leaves, explicitly keyed — with NO redundant change-representations
+and (for non-genesis events) NO full-state snapshot. Derive the shape from what
+the consumer folds, not from what the differ already produces; pin it with a
+"consumer applies this event with no other source" test. An over-stuffed,
+emit-shaped body is a design defect that forces an expensive contract redesign
+(DEFECT-OAG-009).
+
 ## Release-identity tagging on prod resources (process §18a, ISO)
 Every production resource must be traceable to the version + commit running it. In
 your per-infrastructure notes, **specify which prod resources carry the `Version` and

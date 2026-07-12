@@ -120,6 +120,15 @@ cycles keep the plain trunk working tree. Target: commit-attribution-correctness
   from event `tokens` (stats §E `token_cost`, and `stats.json`) — read it there for the
   retro's cost review (§26). Your own main-loop tokens aren't auto-logged — the §26
   token-estimate covers that share.
+- **Agent cycle time (work-effort vs GLT):** on that SAME stage `wi-append`, also pass
+  `DURATION_MS=<n>` — the dispatch result's reported `duration_ms` (the agent's REAL
+  wall-clock cycle time for that transition), read from the dispatch return exactly like
+  `subagent_tokens`. Gross lead time (GLT) stays the honest TOTAL elapsed (all waits,
+  human-steering gaps and outages included and NOT to be "fixed"); §F `agent_cycle_time`
+  is its COMPLEMENT — the sum of agent cycle time as a % of GLT shows how much of the
+  total was actual agent effort vs wait/overhead. Omitting `DURATION_MS` when a real
+  dispatch produced the event blinds §F the same way TOKENS=0 blinds §E; both are
+  computed automatically by `make wi-project` from the event fields.
 - After each iteration run `make wi-project` — the baseline is DERIVED, not a
   hand-written file: read `work/<project>/views/stats.md`.
 - Read the baseline as a flow model: find the CONSTRAINT (slowest step / longest

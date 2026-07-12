@@ -66,7 +66,10 @@ against a real interaction model, not retrofitted.
    auditing PRE-EXISTING surfaces you
    inherit on your first touch of a project: if a live surface is visually wrong,
    raise it as a defect (`/defect`) even if it predates you — nobody else is
-   looking at geometry.
+   looking at geometry. A LIVE / monitoring surface must SIGNAL staleness or
+   disconnection (a cue that is not colour-only) and re-fetch on reconnect —
+   never present stale data as live (DEFECT-003: a map froze while its backend
+   was down with no stale cue).
 4. **UX heuristics — ADVISORY.** Click-path budget, nav depth, scannability,
    empty/loading/error coverage: record them as guidance in the slice UI design
    spec. They inform the build and the review; they are not automated gates.

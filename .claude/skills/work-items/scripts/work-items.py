@@ -385,6 +385,11 @@ def _render_event(ev):
     # only when present (absent ⇒ unknown, treated as 0 by the cost-split fold).
     if ev.get("tokens") not in (None, ""):
         parts.append(f"tokens: {_q(ev.get('tokens'))}")
+    # duration_ms: OPTIONAL real per-stage work-effort (the dispatched agent's
+    # reported cycle time for THIS transition). Rides the event exactly as `tokens`
+    # does; absent ⇒ unknown, treated as 0/uncounted by the agent-cycle-time fold.
+    if ev.get("duration_ms") not in (None, ""):
+        parts.append(f"duration_ms: {_q(ev.get('duration_ms'))}")
     if ev.get("note") not in (None, ""):
         parts.append(f"note: {_q(ev.get('note'))}")
     return "{" + ", ".join(parts) + "}"
@@ -668,6 +673,10 @@ def cmd_append(a):
     # transition. Optional — rides the state event so cost-split is a pure fold.
     if getattr(a, "tokens", None) is not None:
         new_event["tokens"] = a.tokens
+    # duration_ms: the dispatched agent's REAL cycle time (work-effort) for this
+    # transition. Optional — rides the state event so agent-cycle-time is a pure fold.
+    if getattr(a, "duration_ms", None) is not None:
+        new_event["duration_ms"] = a.duration_ms
     if a.note:
         new_event["note"] = a.note
     item.fm.setdefault("events", [])
@@ -904,6 +913,92 @@ def _compute_token_cost(flow_items):
         },
         "token_coverage": coverage,
         "n_events_with_tokens": n_with_tokens,
+        "n_events": n_events,
+    }
+
+
+def _walk_events(graphs, item):
+    """Yield (from_state, event) for each event that is a legal transition, where
+    from_state is the state the item was IN when the event fired — i.e. the STAGE in
+    which the producing agent did the work (built_green fires from `building`, so the
+    engineer's effort is attributed to `building`). The genesis event yields the
+    item's initial state. Illegal-from-here events are skipped (mirrors walk_states /
+    _exits_from). Empty for aggregates (no own stream)."""
+    if graphs.kind(item.type) != "flow":
+        return
+    trans = graphs.transitions(item.type)
+    state = graphs.initial(item.type)
+    first = True
+    for ev in item.events:
+        name = ev.get("event")
+        if first:
+            first = False
+            if name == graphs.initial(item.type):
+                yield (state, ev)  # genesis: effort (if any) sits in the initial state
+                continue
+        nxt = None
+        for t in trans:
+            if t["from"] == state and t["event"] == name:
+                nxt = t["to"]
+                break
+        if nxt is None:
+            continue
+        yield (state, ev)
+        state = nxt
+
+
+def _compute_agent_cycle_time(graphs, flow_items, glt_total_s):
+    """Section F — the REAL per-stage work-effort each dispatched agent spent
+    (duration_ms), folded alongside gross lead time. GLT stays the honest TOTAL
+    elapsed (waits + steering gaps + outages included); this is its complement.
+
+    - by_owner: total/median/n duration_ms folded through the event's AGENT (who
+      did the work).
+    - by_stage: total/median/n duration_ms folded through the FROM-state of the
+      transition (where the work happened), carrying that state's owner.
+    - cycle_time_vs_glt: Σ agent effort (s) / gross-lead-time total (s) — how much
+      of the total lead time was actual agent effort vs wait/overhead. None when GLT
+      is 0 (nothing timed).
+    - duration_coverage: fraction of legal-walk events that carried a duration_ms
+      (grows as dispatches pass --duration-ms).
+    """
+    by_owner = defaultdict(list)   # owner (agent) -> [durations_ms]
+    by_stage = defaultdict(list)   # from-state    -> [durations_ms]
+    total_ms = 0
+    n_events = 0
+    n_with = 0
+    for it in flow_items:
+        for from_state, ev in _walk_events(graphs, it):
+            n_events += 1
+            d = ev.get("duration_ms")
+            if not isinstance(d, (int, float)):
+                continue
+            d = int(d)
+            n_with += 1
+            total_ms += d
+            by_owner[ev.get("agent") or "unowned"].append(d)
+            by_stage[from_state].append(d)
+
+    def pack_owner(m):
+        return {o: {"total_ms": sum(v), "median_ms": _median(v), "n": len(v)}
+                for o, v in sorted(m.items(), key=lambda kv: -sum(kv[1]))}
+    by_stage_out = {
+        st: {"total_ms": sum(v), "median_ms": _median(v), "n": len(v),
+             "owner": graphs.owner_of(st)}
+        for st, v in sorted(by_stage.items(), key=lambda kv: -sum(kv[1]))
+    }
+    total_s = total_ms / 1000.0
+    return {
+        "total_ms": total_ms,
+        "total_s": round(total_s, 2),
+        "by_owner": pack_owner(by_owner),
+        "by_stage": by_stage_out,
+        "gross_lead_time_total_s": glt_total_s,
+        # None when no duration data (the ratio is UNKNOWN, not zero effort) — mirrors
+        # token_cost.plumbing_share; a 0 would falsely read "no effort".
+        "cycle_time_vs_glt": (_ratio(total_s, glt_total_s) if total_ms else None),
+        "duration_coverage": (n_with / n_events) if n_events else None,
+        "n_events_with_duration": n_with,
         "n_events": n_events,
     }
 
@@ -1214,19 +1309,23 @@ def _compute_recovery(graphs, flow_items):
 
 def _stats_for_set(graphs, flow_items, states, now):
     """All four sections + windowed rate metrics for one set of flow items."""
+    glt = _compute_glt(graphs, flow_items, now)
     return {
         "n_items": len(flow_items),
         "dora": {
             "all_time": _compute_dora(graphs, flow_items, states, now, None),
             "trailing_30d": _compute_dora(graphs, flow_items, states, now, 30),
         },
-        "gross_lead_time": _compute_glt(graphs, flow_items, now),
+        "gross_lead_time": glt,
         "quality": {
             "all_time": _compute_quality(graphs, flow_items, now, None),
             "trailing_30d": _compute_quality(graphs, flow_items, now, 30),
         },
         "recovery_by_class": _compute_recovery(graphs, flow_items),
         "token_cost": _compute_token_cost(flow_items),
+        # Section F — REAL per-stage agent work-effort vs the honest total lead time.
+        "agent_cycle_time": _compute_agent_cycle_time(
+            graphs, flow_items, glt["gross_lead_time_total_s"]),
     }
 
 
@@ -1489,6 +1588,41 @@ def _render_stats_md(stats):
             L.append("|-------|--------|")
             for o, tk in tc["by_owner"].items():
                 L.append(f"| {o} | {tk} |")
+
+        # F. agent cycle time — REAL work-effort vs gross lead time
+        act = s["agent_cycle_time"]
+        cov = act["duration_coverage"]
+        L.append("\n### F. Agent cycle time — work-effort vs gross lead time\n")
+        L.append("_The REAL per-stage cycle time each dispatched agent spent "
+                 "(`duration_ms`, reported by the dispatch layer, riding each state "
+                 "event). GLT above stays the honest TOTAL elapsed (all waits, "
+                 "human-steering gaps and outages included); this is its COMPLEMENT "
+                 "— how much of that total was actual agent effort. The delta is the "
+                 "overhead/wait the process must squeeze._\n")
+        if not act["total_ms"]:
+            L.append("_No agent duration recorded (coverage "
+                     f"{_pct(cov)}) — pass `--duration-ms` on stage appends._")
+        else:
+            L.append(f"- Total agent work-effort: **{_fmt(act['total_ms'])} ms** "
+                     f"(**{_fmt(act['total_s'])} s**)")
+            L.append(f"- Cycle time vs gross lead time: "
+                     f"**{_pct(act['cycle_time_vs_glt'])}** of GLT "
+                     f"(**{_fmt(act['gross_lead_time_total_s'])} s** total elapsed) "
+                     f"— the rest is wait/overhead")
+            L.append(f"- Duration coverage: {_pct(cov)} of {act['n_events']} "
+                     "legal-walk events carried a duration\n")
+            L.append("**Agent work-effort — by owner (ranked)**\n")
+            L.append("| Owner | total (ms) | median (ms) | n |")
+            L.append("|-------|------------|-------------|---|")
+            for o, d in act["by_owner"].items():
+                L.append(f"| {o} | {_fmt(d['total_ms'])} | {_fmt(d['median_ms'])} "
+                         f"| {d['n']} |")
+            L.append("\n**Agent work-effort — by stage**\n")
+            L.append("| Stage | owner | total (ms) | median (ms) | n |")
+            L.append("|-------|-------|------------|-------------|---|")
+            for st, d in act["by_stage"].items():
+                L.append(f"| {st} | {d['owner']} | {_fmt(d['total_ms'])} "
+                         f"| {_fmt(d['median_ms'])} | {d['n']} |")
 
     section("Overall", stats["overall"])
     for t, s in stats["by_type"].items():
@@ -2103,6 +2237,10 @@ def main(argv=None):
                     help="subagent_tokens the dispatched specialist spent producing "
                          "this transition (optional; feeds the plumbing-vs-delivery "
                          "cost-split in `project` stats)")
+    ap.add_argument("--duration-ms", dest="duration_ms", type=int,
+                    help="the dispatched agent's REAL cycle time in ms for this "
+                         "transition (optional; feeds the agent-cycle-time-vs-GLT "
+                         "block in `project` stats — work-effort vs total lead time)")
     ap.set_defaults(func=cmd_append)
 
     pr = sub.add_parser("project")

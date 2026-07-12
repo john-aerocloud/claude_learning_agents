@@ -1,11 +1,20 @@
 ---
-process_version: 87
+process_version: 88
 effective_from: 2026-07-12
 supersedes: v86, v85, v84, v83, v82, v81, v80, v76
 status: active
 ---
 
-# Current Process — v87
+# Current Process — v88
+
+<!-- v88 (2026-07-12, ROC — experiment-leanness + honest measurement reform, human-directed):
+§25a — HARD WIP cap of 8 active experiments (retire one to open one); a fix is NOT an experiment
+(fold as plain practice, no row); 3-strikes score-or-kill (unscored/unmoved at 3 opportunities →
+killed); archive-with-outcome mandatory. §F3 — REVERTED the v87 "defer registration" idea as
+metric-gaming; the honest lever for chain lead-time is independent decomposition, not deferred
+counting; GLT rightly includes all waits/gaps/outages (minimise them indirectly). Plus: agent
+per-stage cycle time (duration_ms) recorded alongside GLT; registry backfilled to the cap. -->
+
 
 <!-- v85 (retro, AdixOut 2026-07-12; renumbered from a v84 that collided with main's concurrent v84 CORE-job-done-gate retro — both sets of learning coexist, only the version number was reconciled): constraint = QUEUE WAIT (ready 48.9% + registered 27.7% = 76.6% of GLT by owner `queue`), sample n=2 and heavily contaminated by non-system waits (mid-session org spend-limit outage, heavy human-steering gaps, deliberate serial-build pacing) — treat DIRECTIONAL, not a capacity signal. CFR 33% from ONE rejection (UC-ADIX-003 deploy-race), a GOOD catch. Changes routed this cycle (all already applied + folded): aws-architecture IaC default CDK→SST v3 Ion; ADR-0006 (release/provenance) + ADR-0007 (tagging) encoded into aws-architecture §9a/§2a; 3 principle-failures (rushed-to-register-before-understanding; skipped-solution-architecture-gate→wrong-IaC; build-identity-claimed-before-code-live); documenter standing duty (living root README); safe-deploy stream-drain (AdixOut cicd). Forward lever for the queue constraint = per-UC worktree isolation so the inner loop's maximal-independent-set actually builds in parallel (improvement-slice IMP-017, deferred — validate on a cleaner sample). Token review: 811k delivery tokens for 2 UCs; dominant WASTE = the CDK→SST full-infra rebuild forced by the skipped architecture gate — the gate fix (check tech choices vs org before build) is the token lever too. -->
 <!-- v87 (ROC retro 2026-07-12): §F0 — per-item board push + docs-refresh are HARD in-cycle invariants (board never lags item-file state by >1 cycle; documenter required at each slice close); founding lapse principle-failures/2026-07-11-board-and-docs-lag-during-loop.md. §F3 — register linear dependency-chain use-cases JIT per-UC, not batch up front (ROC: `registered` was 70% of GLT purely as a batch-registration artifact). BOTH folded as PLAIN process practice, deliberately NOT new experiment rows — enacting the same-retro directive to stop over-generating experiments and to fix DORA measurement. -->
@@ -917,6 +926,26 @@ sight. The lifecycle is **adopt-or-delete**. A sound shipped behaviour whose row
 only MIS-PHRASED is handled by deleting the ROW while KEEPING the behaviour as plain
 agent practice; never undo a defect-preventing behaviour because its row failed the bar.
 
+**LEAN REGISTRY — a HARD WIP cap of 8 active experiments (v88).** The registry is a
+WIP-limited queue, not a museum: **at or above 8 `active` rows you may NOT open a new
+experiment without first retiring one** (adopt or kill). Reduction is therefore a hard
+constraint every retro must satisfy, not an aspiration. Corollaries:
+- **A fix is NOT an experiment.** A broken process/rule that simply needs correcting is
+  folded straight into its owning agent/process file as PLAIN practice, with NO row. Reserve
+  an experiment for a genuinely UNCERTAIN change whose named metric could move either way.
+  Most routed changes are fixes — they must not enter the registry at all. (This is the
+  main inflow valve: if you cannot say honestly "this might not work," it is a fix, not an
+  experiment.)
+- **3-strikes score-or-kill.** Every `active` row is scored at each retro that gives it a
+  scoring opportunity. **At 3 scoring opportunities with no measurable movement — or still
+  unscored (`0/N`) at its horizon — the row is KILLED.** There is no indefinite `active
+  (0/N)` limbo; an experiment either shows a measurable effect or it goes.
+- **Archive-with-outcome is MANDATORY.** A retired row never just vanishes: adopted →
+  behaviour folded into the owning agent + row moved to `experiments-archive.md` WITH the
+  measured result; killed → moved to `experiments-archive.md` WITH "no measurable effect /
+  never validated." An empty or skipped archive means the learning was lost — itself a
+  process failure. The live registry holds only what is currently being tested.
+
 **The status-lifecycle mechanics** (active → validated/integrated → under-question →
 retirement-trial → failed, the null-hypothesis retirement test, the concurrency guard,
 and scoring-honesty under a confounded window) live in the **`process-framework` skill** —
@@ -1053,20 +1082,18 @@ Product is never idle while engineers build; it keeps the Ready buffer **at or a
   projected-below-floor after the next pull — replenish the moment the buffer would dip.
   The very FIRST build wave of a slice is dispatched together with a product look-ahead
   for the NEXT work.
-- **Register dependency-chain use-cases JIT, not in one up-front batch (EXP-104 → gross
-  lead time).** When a slice decomposes into a LINEAR dependency chain (UC-a→UC-b→UC-c,
-  each needing its predecessor's output), do NOT batch-`registered` the whole chain at
-  slice-start: a downstream UC registered up front accrues `registered`-queue dwell for the
-  entire time its predecessors build, though it is not yet pullable — inflating gross lead
-  time with pure accounting wait. (ROC C1 + dashboard: `registered` was **70% of GLT** at
-  **0% rework / 0% CFR** — not idle capacity but an inventory artifact of batch
-  registration; raising `N`, §F6, cannot relieve a linear chain.) Instead fire each chained
-  UC's `registered` birth event (or hold `made_ready`) only as its predecessor nears done,
-  so `registered` reflects real ready-wait. Product may still DEFINE the whole chain up
-  front (scope stays visible); it is the birth EVENT that is deferred per-UC. And prefer
-  decompositions with genuinely INDEPENDENT use-cases where the domain allows, so the
-  maximal independent set (§F6) is >1 and `N` can actually help — reserve the linear chain
-  for stages that truly serialise (e.g. a pipeline walking skeleton).
+- **Decompose for INDEPENDENCE so parallelism can cut real serial wait (ROC retro
+  2026-07-12 → gross lead time).** When a slice is a LINEAR dependency chain
+  (UC-a→UC-b→UC-c, each needing its predecessor's output), the maximal independent set is 1
+  and use-cases build one-at-a-time, so downstream UCs genuinely wait — and that wait is
+  REAL gross lead time, honestly counted (ROC C1 + dashboard: `registered` ≈ **70% of GLT**
+  at 0% rework/CFR). Do NOT try to shrink that number by DEFERRING the `registered` birth
+  event — that only stops *counting* the wait, it does not reduce it (metric-gaming, not
+  flow improvement; register work when it is committed, honestly). The real lever is
+  UPSTREAM, in decomposition: prefer use-cases that are genuinely INDEPENDENT where the
+  domain allows, so the maximal independent set (§F6) is >1 and `N` actually reduces the
+  serial wait. Where a stage truly serialises (a pipeline walking skeleton), accept the
+  inherent lead time as honest — raising `N` cannot relieve a real chain.
 - **Across chunk boundaries.** Product decomposes the next slice — and the next chunk's
   first slice — WHILE the current chunk is still building, so there is no decompose-gap
   at a chunk edge. Order: (a) more use-cases from the current slice; (b) next slice from

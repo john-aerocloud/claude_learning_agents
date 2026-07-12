@@ -58,10 +58,11 @@ Before any AWS CLI or SDK operation:
   - Only `sst.aws.ApiGatewayV1` (REST) has usage plans / API keys; HTTP-API v2
     lacks them — choose V1 when per-consumer throttling is a (current or seam'd)
     requirement.
-  - Tags do not propagate app-wide under Pulumi — set `{Project, Env, ManagedBy:"sst", BuildSha}` per resource.
-  - State lives in an SST-managed S3 bucket (`s3://sst-state-<hash>/<App>/<stage>/`)
+  - Tags do not propagate app-wide under Pulumi — set the §2a tag set per resource.
+  - SST keeps its deploy state in an SST-managed S3 bucket (`s3://sst-state-<hash>/<App>/<stage>/`) <!-- doc-lint:allow -->
     + encrypted `resource.enc` — a private bucket + a scoped OIDC deploy role are
-    part of the security surface (see the project's `security/sst-deploy-and-state.md`).
+    part of the security surface (see the project's `security/sst-deploy-and-state.md`). <!-- doc-lint:allow -->
+    (This is SST's own IaC state, unrelated to the retired QueueApproach `state.md` store.)
 - **Reversal → Terraform (plain):** if the project is multi-cloud beyond what
   SST's providers cover cleanly, or the team has strong existing Terraform
   expertise and no SST familiarity. **Reversal → CDK:** only with a specific,

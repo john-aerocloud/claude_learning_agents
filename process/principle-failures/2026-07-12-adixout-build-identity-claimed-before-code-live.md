@@ -41,3 +41,16 @@ invocation fails closed rather than emitting mis-identified output. Also: after 
 deploy that could have produced bad records, SCAN for and purge them (they are real
 data even if produced in a race). A build-identity tag must never be attachable
 before the code it names is actually serving.
+
+## Second manifestation (2026-07-12, UC-ADIX-005) — deploy off a DIRTY tree
+cicd deployed `AdixOut-Subscribe` (VERSION 0.5.0) with its C10/C11 changes still
+UNCOMMITTED. The pipeline injected `GitCommit` from the LAST commit (`f010289`, which
+has no C10 code), so the deployed resource claimed `f010289` while actually running
+the uncommitted C10 config — a build-identity LIE from a different cause: deploying
+non-committed code. Same root principle (ADR-0006: build-once, deploy a COMMITTED
+artifact by digest; the tag must name the bits actually serving).
+**Guard:** the deploy target MUST assert a CLEAN working tree (`git status
+--porcelain` empty) before deploying — refuse (or require an explicit
+`--allow-dirty`) on uncommitted changes, so `GitCommit` is always truthful. Fixed
+here by committing then redeploying (0.5.1 from the committed sha). Add the
+clean-tree assertion to `deploy-sandbox`/`safe-deploy.sh` (cicd follow-up).

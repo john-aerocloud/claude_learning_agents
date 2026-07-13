@@ -494,6 +494,22 @@ def ensure_labels(api_key, team_id, wanted):
 # --------------------------------------------------------------------------- #
 # Upsert
 # --------------------------------------------------------------------------- #
+def normalize_entry(entry):
+    """Convert entry to dict format, handling old string-only format.
+    
+    Old format: "uuid-string" (just the issue ID)
+    New format: {"type": "...", "id": "...", "identifier": "..."}
+    
+    Returns either a normalized dict or None if entry is missing.
+    For old format, assume it was an issue ID.
+    """
+    if entry is None:
+        return None
+    if isinstance(entry, str):
+        return {"type": "issue", "id": entry}  # Assume old format was an issue ID
+    return entry
+
+
 def upsert(project, item_id):
     secrets_path = ROOT / "work" / project / "secrets" / "linear.json"
     if not secrets_path.exists():
@@ -517,6 +533,7 @@ def upsert(project, item_id):
     parent_issue_id = None
     for iid, ptype, _title in ancestor_titles(project, item_id):
         entry = id_to_issue.get(iid)
+        entry = normalize_entry(entry)
         if not entry:
             continue
         if ptype == "chunk" and entry.get("type") == "project":
@@ -527,6 +544,7 @@ def upsert(project, item_id):
     if itype == "defect":
         for pid in item.get("parents", []):
             e = id_to_issue.get(pid)
+            e = normalize_entry(e)
             if e and e.get("type") == "issue":
                 parent_issue_id = e["id"]
 
@@ -546,6 +564,7 @@ def upsert(project, item_id):
         input_fields["parentId"] = parent_issue_id
 
     entry = id_to_issue.get(item_id)
+    entry = normalize_entry(entry)
     if entry and entry.get("type") == "issue" and entry.get("id"):
         d = graphql(
             api_key,

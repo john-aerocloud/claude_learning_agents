@@ -58,7 +58,33 @@
  *   1  usage/operational error (bad args, git failure).
  *
  * SELF-TESTING: .claude/tools/impacted-tests.test.js (node --test) proves the
- * three behaviours with fixtures + a throwaway git repo. No credentials.
+ * behaviours with fixtures + throwaway git repo(s). No credentials.
+ *
+ * NESTED-REPO GIT-ROOT RESOLUTION (EXP-104, fixed here — recurred 5x before this)
+ *   Under the v50 topology, work/<project>/ is very often its OWN independent git
+ *   repo (a nested `.git`), disjoint from the parent/integration repo's history
+ *   (the parent .gitignores every work/<project> dir entirely). Before this fix, `gitDiff()` ran
+ *   unconditionally against `root` (the parent, `process.cwd()` by default) — a
+ *   SHA that only exists in the project's nested repo was `fatal: bad revision`
+ *   there, and vice versa. `resolveDiffRoot()` asks each candidate repo whether it
+ *   owns `since` (`git rev-parse --verify <sha>^{commit}`), PREFERRING the nested
+ *   project repo (that is where a project SHA actually lives), falling back to
+ *   the parent only when the nested repo doesn't own it, and raising an
+ *   ACTIONABLE error (not a raw `fatal: bad revision`) when NEITHER does. Both the
+ *   committed-window diff and the uncommitted working-tree diff run against the
+ *   SAME resolved root, since a nested repo's working tree/index is disjoint from
+ *   the parent's too.
+ *
+ * @covers / NODE-ID CONVENTION SANITY CHECK (see checkTagConvention())
+ *   A project can have @covers tags that are semantically real but keyed to a
+ *   DIFFERENT id vocabulary than the .mmd node ids (e.g. spec tags `domain-map`,
+ *   `domain-serialize` vs .mmd node ids `MAP`, `G_CONF`) — every changed node then
+ *   silently shows UNCOVERED even though a covering spec exists, which reads as
+ *   "no tests were written" when the real problem is a naming mismatch. This is
+ *   a STRUCTURAL check (full node-id inventory vs the full @covers-tag set,
+ *   independent of the SINCE window) that fires a loud WARNING banner in the
+ *   report rather than silently under-reporting. It does not change exit codes;
+ *   it changes what a human/tester DOES with an "uncovered" line.
  */
 
 const { execFileSync } = require('node:child_process');
@@ -194,15 +220,87 @@ function depFiles(root, project) {
 // args: ['<since>..HEAD'] for the committed window, or [] for the uncommitted
 // working-tree diff. Both feed the SAME line extractor; their union is the set of
 // nodes that moved in-window (OI-42: diff-sourced, not a full-file class scan).
-function gitDiff(root, revs, files) {
-  const rel = files.map((f) => path.relative(root, f));
+// `diffRoot` is the RESOLVED git root (see resolveDiffRoot) — NOT necessarily
+// the tool's `root` arg, since a project SHA usually lives in the project's own
+// nested repo (EXP-104).
+function gitDiff(diffRoot, revs, files) {
+  const rel = files.map((f) => path.relative(diffRoot, f));
   try {
-    return execFileSync('git', ['-C', root, 'diff', ...revs, '--', ...rel],
+    return execFileSync('git', ['-C', diffRoot, 'diff', ...revs, '--', ...rel],
       { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   } catch (e) {
-    const what = revs.length ? `(is "${revs.join(' ')}" a valid range?)` : '(working tree)';
+    const what = revs.length ? `(is "${revs.join(' ')}" a valid range in ${diffRoot}?)` : '(working tree)';
     throw new Error(`git diff failed ${what}: ${e.message}`);
   }
+}
+
+// Does `repoRoot`'s OWN git history contain `sha`? Used to pick which repo a
+// project SHA actually belongs to (EXP-104).
+function shaExistsIn(repoRoot, sha) {
+  try {
+    execFileSync('git', ['-C', repoRoot, 'rev-parse', '--verify', '--quiet', `${sha}^{commit}`],
+      { encoding: 'utf8' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Which repo should the revision range / diff run against? Under v50, work/
+// <project>/ is very often its OWN independent git repo (nested `.git`),
+// disjoint from the parent/integration repo's history. Prefer the nested
+// project repo when it owns `since` (that is where a project SHA actually
+// lives); fall back to the parent when the nested repo doesn't own it (or
+// doesn't exist); raise an ACTIONABLE error when NEITHER repo owns the SHA
+// (never let a raw `fatal: bad revision` leak out uncontextualised).
+function resolveDiffRoot(root, project, since) {
+  const projectRoot = path.join(root, 'work', project);
+  const hasNestedGit = fs.existsSync(path.join(projectRoot, '.git'));
+  if (hasNestedGit && shaExistsIn(projectRoot, since)) return projectRoot;
+  if (shaExistsIn(root, since)) return root;
+  if (hasNestedGit) {
+    throw new Error(
+      `SHA "${since}" not found in the project repo (${projectRoot}) or the parent ` +
+      `repo (${root}). Pass a SHA that exists in one of these two repos.`
+    );
+  }
+  throw new Error(`SHA "${since}" not found in repo (${root}).`);
+}
+
+// Node ids appearing ANYWHERE in this .mmd text (declaration or edge endpoint),
+// regardless of "changed" state — the FULL inventory of this diagram's node-id
+// vocabulary. Used ONLY for the @covers/node-id convention sanity check below;
+// the changed-set stays diff-sourced only (OI-42).
+function extractAllNodeIds(text) {
+  const out = new Set();
+  for (const rawLine of text.split('\n')) {
+    const dm = rawLine.match(NODE_DECL_RE);
+    if (dm) out.add(dm[1]);
+    EDGE_RE.lastIndex = 0;
+    const em = rawLine.match(EDGE_RE);
+    if (em) { out.add(em[1]); out.add(em[2]); }
+  }
+  return out;
+}
+
+// Structural sanity check, independent of the SINCE window: do ANY @covers tags
+// in this project match ANY node id declared in its .mmd diagrams? If the
+// project HAS @covers tags but NONE overlap the diagram's node-id vocabulary,
+// every changed node will show UNCOVERED even when a covering spec exists under
+// a different tag vocabulary (e.g. `domain-map` vs `MAP`) — a silent
+// under-report, not a real coverage gap. Loud, not silent (this file's header).
+function checkTagConvention(allNodeIds, coversIndex) {
+  const taggedIds = [...coversIndex.keys()].sort();
+  if (taggedIds.length === 0) {
+    return { mismatch: false, taggedIds, overlap: [], allNodeIds: [...allNodeIds].sort() };
+  }
+  const overlap = taggedIds.filter((id) => allNodeIds.has(id));
+  return {
+    mismatch: overlap.length === 0,
+    taggedIds,
+    overlap,
+    allNodeIds: [...allNodeIds].sort(),
+  };
 }
 
 // Spec discovery: walk work/<project>/src for *.ts/*.js test files, plus the
@@ -260,15 +358,30 @@ function run({ root, project, since }) {
   //    that are in neither diff, which is exactly the s009 over-report.
   const changed = new Set();
   if (files.length) {
-    const committedDiff = gitDiff(root, [`${since}..HEAD`], files);
+    // EXP-104: resolve the git root that actually owns `since` BEFORE diffing —
+    // a project SHA usually lives in work/<project>/'s own nested repo, not the
+    // parent/integration repo at `root`. Both the committed-window diff and the
+    // uncommitted working-tree diff run against the SAME resolved root.
+    const diffRoot = resolveDiffRoot(root, project, since);
+    const committedDiff = gitDiff(diffRoot, [`${since}..HEAD`], files);
     for (const id of extractNodesFromDiffLines(committedDiff)) changed.add(id);
-    const workingDiff = gitDiff(root, [], files);
+    const workingDiff = gitDiff(diffRoot, [], files);
     for (const id of extractNodesFromDiffLines(workingDiff)) changed.add(id);
   }
   const changedNodes = [...changed].sort();
 
   // 2. covers index over committed specs
   const coversIndex = buildCoversIndex(findSpecFiles(root, project));
+
+  // 2b. full node-id inventory (current working-tree content of the .mmd files,
+  // NOT diff-sourced) for the @covers/node-id convention sanity check.
+  const allNodeIds = new Set();
+  for (const f of files) {
+    let text;
+    try { text = fs.readFileSync(f, 'utf8'); } catch { continue; }
+    for (const id of extractAllNodeIds(text)) allNodeIds.add(id);
+  }
+  const tagConvention = checkTagConvention(allNodeIds, coversIndex);
 
   // 3. partition
   const impacted = [];
@@ -283,7 +396,7 @@ function run({ root, project, since }) {
   }
 
   const exitCode = uncovered.length ? 2 : 0;
-  return { changedNodes, impacted, uncovered, exitCode };
+  return { changedNodes, impacted, uncovered, exitCode, tagConvention };
 }
 
 // ---- plain-text report ------------------------------------------------------
@@ -292,6 +405,20 @@ function formatReport(res, { project, since, root }) {
   const lines = [];
   lines.push(`# impacted-tests — project=${project} since=${since}`);
   lines.push('');
+  if (res.tagConvention && res.tagConvention.mismatch) {
+    lines.push('## WARNING: @covers TAG / NODE-ID CONVENTION MISMATCH');
+    lines.push(`  ${res.tagConvention.taggedIds.length} @covers tag(s) found across this project's specs,`);
+    lines.push(`  but NONE match any of the ${res.tagConvention.allNodeIds.length} node id(s) declared in`);
+    lines.push('  architecture/dependencies/*.mmd.');
+    lines.push(`  Tags found:     ${res.tagConvention.taggedIds.join(', ')}`);
+    lines.push(`  Node ids found: ${res.tagConvention.allNodeIds.join(', ')}`);
+    lines.push('  Every "UNCOVERED" node below may just be tagged under a DIFFERENT vocabulary');
+    lines.push('  (e.g. `domain-map` vs `MAP`) — do NOT treat UNCOVERED as "write a new spec"');
+    lines.push('  until this is reconciled: (a) retag specs to the exact .mmd node id, or');
+    lines.push('  (b) adopt a documented alias between the semantic tag and the node id.');
+    lines.push('  This is flagged as a follow-up, not auto-fixed by this tool run.');
+    lines.push('');
+  }
   if (res.changedNodes.length === 0) {
     lines.push('No changed/added/removed nodes in architecture/dependencies/*.mmd.');
     lines.push('');
@@ -367,7 +494,11 @@ if (require.main === module) main();
 module.exports = {
   extractMarkedNodes,
   extractNodesFromDiffLines,
+  extractAllNodeIds,
+  checkTagConvention,
   parseCoversTags,
+  resolveDiffRoot,
+  shaExistsIn,
   run,
   formatReport,
 };

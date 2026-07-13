@@ -231,3 +231,130 @@ test('run(): exit 0 when there are no changed nodes', () => {
   assert.equal(res.exitCode, 0);
   fs.rmSync(repo, { recursive: true, force: true });
 });
+
+// --- EXP-104: nested-repo (v50) git-root resolution --------------------------
+// work/<project>/ is very often its OWN independent git repo, disjoint from the
+// parent/integration repo. A project SHA is `fatal: bad revision` against the
+// parent and vice versa. These tests build TWO real, separate git repos (a
+// "parent" with its own history + a "project" nested at work/projY/ with ITS
+// OWN .git) to prove resolution picks the repo that actually owns the SHA.
+
+function buildNestedRepoPair() {
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'imp104-parent-'));
+  git(parent, ['init', '-q']);
+  git(parent, ['config', 'user.email', 'p@p']);
+  git(parent, ['config', 'user.name', 'p']);
+  fs.writeFileSync(path.join(parent, '.gitignore'), 'work/*/\n');
+  fs.writeFileSync(path.join(parent, 'README.md'), '# parent\n');
+  git(parent, ['add', '-A']);
+  git(parent, ['commit', '-qm', 'parent baseline']);
+  const parentSha = git(parent, ['rev-parse', 'HEAD']).trim();
+
+  const projectRoot = path.join(parent, 'work', 'projY');
+  const depDir = path.join(projectRoot, 'architecture', 'dependencies');
+  const specDir = path.join(projectRoot, 'src', 'specs');
+  fs.mkdirSync(depDir, { recursive: true });
+  fs.mkdirSync(specDir, { recursive: true });
+  git(projectRoot, ['init', '-q']);
+  git(projectRoot, ['config', 'user.email', 'j@j']);
+  git(projectRoot, ['config', 'user.name', 'j']);
+  fs.writeFileSync(path.join(depDir, 'class-deps.mmd'),
+    'flowchart TD\n  existing["existing"]:::stable\n');
+  fs.writeFileSync(path.join(specDir, 'covered.spec.ts'),
+    '// @covers newNode\nit("x", () => {});\n');
+  git(projectRoot, ['add', '-A']);
+  git(projectRoot, ['commit', '-qm', 'project baseline']);
+  const projectSha = git(projectRoot, ['rev-parse', 'HEAD']).trim();
+
+  // in-window project-only change: add a new changed node (uncommitted, so both
+  // the committed-window diff and the working-tree diff paths get exercised).
+  fs.writeFileSync(path.join(depDir, 'class-deps.mmd'),
+    'flowchart TD\n  existing["existing"]:::stable\n  newNode["new"]:::s001changed\n');
+
+  return { parent, parentSha, projectRoot, projectSha };
+}
+
+test('resolveDiffRoot: a project-only SHA resolves to the NESTED project repo, not the parent', () => {
+  const { parent, projectRoot, projectSha } = buildNestedRepoPair();
+  const resolved = tool.resolveDiffRoot(parent, 'projY', projectSha);
+  assert.equal(resolved, projectRoot);
+  fs.rmSync(parent, { recursive: true, force: true });
+});
+
+test('resolveDiffRoot: falls back to the PARENT repo when the nested repo does not own the SHA', () => {
+  const { parent, parentSha } = buildNestedRepoPair();
+  const resolved = tool.resolveDiffRoot(parent, 'projY', parentSha);
+  assert.equal(resolved, parent);
+  fs.rmSync(parent, { recursive: true, force: true });
+});
+
+test('resolveDiffRoot: a SHA unknown to BOTH repos raises an actionable error (never a raw git failure)', () => {
+  const { parent } = buildNestedRepoPair();
+  assert.throws(
+    () => tool.resolveDiffRoot(parent, 'projY', 'deadbeef'),
+    /not found in the project repo .* or the parent repo/,
+  );
+  fs.rmSync(parent, { recursive: true, force: true });
+});
+
+test('run(): EXP-104 end-to-end — a project-only SHA against a nested project repo returns a non-empty impacted set with ZERO bad-revision failure', () => {
+  const { parent, projectRoot, projectSha } = buildNestedRepoPair();
+  // sanity: the parent repo genuinely does NOT know this SHA (proves the bug
+  // would have fired `fatal: bad revision` before this fix).
+  assert.equal(tool.shaExistsIn(parent, projectSha), false);
+  assert.equal(tool.shaExistsIn(projectRoot, projectSha), true);
+
+  const res = tool.run({ root: parent, project: 'projY', since: projectSha });
+  assert.ok(res.changedNodes.includes('newNode'), 'newNode should be detected as changed');
+  const covered = res.impacted.find((r) => r.node === 'newNode');
+  assert.ok(covered, 'newNode should be impacted (covered by covered.spec.ts)');
+  assert.ok(covered.specs.some((s) => s.endsWith('covered.spec.ts')));
+  assert.equal(res.uncovered.length, 0);
+  fs.rmSync(parent, { recursive: true, force: true });
+});
+
+// --- @covers / node-id convention sanity check --------------------------------
+
+test('checkTagConvention: no @covers tags at all -> no mismatch (nothing to reconcile)', () => {
+  const res = tool.checkTagConvention(new Set(['MAP', 'G_CONF']), new Map());
+  assert.equal(res.mismatch, false);
+});
+
+test('checkTagConvention: @covers tags exist but match NO node id -> mismatch (silent under-report risk)', () => {
+  const coversIndex = new Map([
+    ['domain-map', new Set(['a.spec.ts'])],
+    ['domain-conformance', new Set(['b.spec.ts'])],
+  ]);
+  const res = tool.checkTagConvention(new Set(['MAP', 'G_CONF']), coversIndex);
+  assert.equal(res.mismatch, true);
+  assert.deepEqual(res.overlap, []);
+});
+
+test('checkTagConvention: @covers tags overlap node ids -> no mismatch', () => {
+  const coversIndex = new Map([
+    ['MAP', new Set(['a.spec.ts'])],
+    ['domain-conformance', new Set(['b.spec.ts'])],
+  ]);
+  const res = tool.checkTagConvention(new Set(['MAP', 'G_CONF']), coversIndex);
+  assert.equal(res.mismatch, false);
+  assert.deepEqual(res.overlap, ['MAP']);
+});
+
+test('formatReport: prints a loud WARNING banner on a tag/node-id convention mismatch', () => {
+  const res = {
+    changedNodes: ['MAP'],
+    impacted: [],
+    uncovered: ['MAP'],
+    exitCode: 2,
+    tagConvention: {
+      mismatch: true,
+      taggedIds: ['domain-map'],
+      overlap: [],
+      allNodeIds: ['MAP', 'G_CONF'],
+    },
+  };
+  const out = tool.formatReport(res, { project: 'AdixOut', since: 'abc123', root: '/x' });
+  assert.match(out, /WARNING: @covers TAG \/ NODE-ID CONVENTION MISMATCH/);
+  assert.match(out, /domain-map/);
+  assert.match(out, /MAP, G_CONF/);
+});

@@ -90,3 +90,20 @@ CSV is no longer the metrics source.)_
   stale) — turning drift into a caught error rather than a silent reconcile. Owner: cicd
   + engineer. The bundles are a DELIBERATE committed asset (architecture decision), so do
   NOT simply gitignore them without the architect.
+- **OI-COVERS-NODEID (AdixOut, 2026-07-13):** `make impacted-tests` now resolves the
+  correct nested-repo git root (EXP-104), but on AdixOut its 17 `@covers` tags
+  (`domain-map`, `domain-serialize`, `domain-conformance`, `adapter-subscribe`, ...)
+  use a semantic-domain vocabulary that matches NONE of the 22 `.mmd` node ids
+  (`MAP`, `G_CONF`, `C11`, `POLL`, ...) — a real, thoughtfully-applied tagging
+  convention, just keyed to a different id space than the architecture diagram. The
+  tool now detects this structurally and prints a loud WARNING banner (never a silent
+  0-impacted report), but does NOT auto-reconcile it. Fix when picked up (either
+  route is acceptable, pick one and apply consistently project-wide): (a) retag
+  AdixOut's 17 `@covers` sites to the exact `.mmd` node id(s) they cover (e.g.
+  `domain-map` → `MAP`; some tags may need to expand to multiple ids, e.g.
+  `resyncHandler.test.ts`'s `domain-resync-handler` plausibly maps to `G_KEY` +
+  `G_THROTTLE` + `RESYNC`), or (b) extend the `.mmd` node declarations with an inline
+  alias comment (`%% @alias MAP=domain-map`) that the tool's covers-index reads
+  alongside the raw node id. Route to engineer (retag) or cicd (alias mechanism).
+  Target: CFR / tester lead time — a changed node with a genuinely-existing covering
+  spec should show IMPACTED, not UNCOVERED.

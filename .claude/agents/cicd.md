@@ -338,6 +338,27 @@ exactly one of two is true and the fix MUST be one of them:
 Pipeline secrets/role/bootstrap prerequisites are sequenced (§19 scheduling), and the
 runbook lists every manual step that is not yet automated so the gap is visible.
 
+## Dependency-vulnerability audit gate (v91, DEF-ADIX-001, EXP-112)
+Vulnerable dependencies accumulate SILENTLY between deploys — DEF-ADIX-001 let a
+**CRITICAL** advisory (vitest UI-server arbitrary file read/exec) plus a HIGH and
+several MEDIUMs sit unaddressed across the whole first requirement because nothing in
+the loop ever ran an audit; the only signal was GitHub's Dependabot banner, which no
+agent reads. Close that gap with a standing, committed gate rather than waiting for a
+banner:
+- For any npm project, maintain a `make audit` target that runs `npm audit
+  --audit-level=high` in EVERY manifest the repo carries (root AND each sub-package —
+  DEF-ADIX-001's vulns were in BOTH `package-lock.json` and `src/app/package-lock.json`).
+  Non-zero exit (a high/critical advisory) is a gate FAILURE.
+- Run `make audit` as part of the build/push gate you own (alongside lint/test), so a
+  new high/critical advisory is caught at the next push, not accumulated. A found
+  advisory is triaged like any defect: if it needs a fix, it becomes a `DEF-` through
+  intake (§3) — dev/build/test-only advisories are still fixed (supply-chain hygiene),
+  but note the no-prod-runtime-exposure fact in the defect so it is prioritised
+  correctly against runtime-exposed ones.
+- The gate is version-bump-friendly: prefer the minimal patched bump; a toolchain bump
+  (e.g. a vitest major) MUST be verified green across all test tiers before it is
+  push-green (EXP-110) — never pin back to a vulnerable version to keep tests passing.
+
 ## Each iteration, before engineering starts
 1. Confirm/define technology choices and deployment approach for the slice.
 2. Stand up only the capabilities the slice requires; record them in

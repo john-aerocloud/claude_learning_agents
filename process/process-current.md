@@ -1,11 +1,13 @@
 ---
-process_version: 90
-effective_from: 2026-07-12
-supersedes: v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
+process_version: 91
+effective_from: 2026-07-13
+supersedes: v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
 status: active
 ---
 
-# Current Process — v90
+# Current Process — v91
+
+<!-- v91 (retro, AdixOut 2026-07-13; incident-triggered — DEF-ADIX-001 defect-resolve): constraint = `queue` wait (73.6% of GLT), but n=7 over a 3-day multi-session window is calendar-time-dominated (spend-limit pause + human gaps + a compaction) — DIRECTIONAL, budget NOT spent on it (constraint-gate). Real win this session: the engineer stage's REWORK fell to 0.68% (from 33% rework-rate last retro) and lead-time median 3022→2000→1284s — because EXP-109 (concurrency-acceptance authored upfront, last retro's exploit) landed and PAID OFF on its first concurrent surface (REQ-002 UC-008 throttle: 0 rework, no repeat of the UC-006 race). Incident: DEF-ADIX-001 — dependency vulns (vitest CRITICAL + vite HIGH + esbuild) accumulated across the whole first requirement with NO audit signal in the loop (only GitHub's Dependabot banner, which no agent reads). Gap-closing change routed: EXP-112 — a `make audit` dependency-vulnerability gate wired into cicd's build/push gate (`npm audit --audit-level=high` across every manifest; a found advisory → a triaged DEF-). Scored: EXP-109 →1/2, EXP-110 →2/3, EXP-111 →2/3 (all POSITIVE); EXP-102 (defect-vs-rework fork) →3/3 ADOPTED (DEF-ADIX-001 correctly a DEF- not rework; woven into §3+tester.md, row retired — cap-neutral with EXP-112). Next constraint: engineer build time (rework largely wrung out); watch EXP-112 gate latency + EXP-109's 2nd opportunity. -->
 
 <!-- v89 (2026-07-12, ROC retro): constraint = registered/queue (74.44% of GLT by owner
 `queue`), but per §5b/EXP-100 method it is artifact-dominated — front-loaded batch UC-registration

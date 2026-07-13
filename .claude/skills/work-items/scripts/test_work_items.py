@@ -167,6 +167,27 @@ class TestFold(Base):
         ]
         self.assertEqual(wi.fold_state(self.graphs, "use-case", evs), "reworking")
 
+    def test_use_case_fold_cancelled(self):
+        # [v87] a UC cancelled from a working state folds to the terminal `cancelled`
+        evs = [
+            {"ts": "1", "event": "registered", "agent": "flow-manager"},
+            {"ts": "2", "event": "made_ready", "agent": "flow-manager"},
+            {"ts": "3", "event": "cancelled", "agent": "orchestrator"},
+        ]
+        self.assertEqual(wi.fold_state(self.graphs, "use-case", evs), "cancelled")
+        self.assertIn("cancelled", self.graphs.terminals("use-case"))
+
+    def test_use_case_fold_deploy_failed(self):
+        # [v87] deploy_failed from `deploying` lands in reworking
+        evs = [
+            {"ts": "1", "event": "registered", "agent": "flow-manager"},
+            {"ts": "2", "event": "made_ready", "agent": "flow-manager"},
+            {"ts": "3", "event": "pulled", "agent": "orchestrator"},
+            {"ts": "4", "event": "built_green", "agent": "engineer"},
+            {"ts": "5", "event": "deploy_failed", "agent": "cicd"},
+        ]
+        self.assertEqual(wi.fold_state(self.graphs, "use-case", evs), "reworking")
+
 
 # --------------------------------------------------------------------------- #
 # append — legality
@@ -362,6 +383,28 @@ class TestBubble(Base):
         st = wi.compute_states(self.graphs, wi.load_all_items(self.project)[0])
         self.assertEqual(st["SLC-1"], "done")
         self.assertEqual(st["CHK-1"], "done")
+
+    def _cancelled_uc(self):
+        return [
+            {"ts": "1", "event": "registered", "agent": "flow-manager"},
+            {"ts": "2", "event": "cancelled", "agent": "orchestrator"},
+        ]
+
+    def test_bubble_mixed_done_cancelled_is_done(self):
+        # [v87] a cancelled child does NOT block completion; one real done => slice done
+        self.write_item("done", "UC-1", "use-case", self._done_uc(), parents=["SLC-1"])
+        self.write_item("done", "UC-2", "use-case", self._cancelled_uc(), parents=["SLC-1"])
+        self.write_item("active", "SLC-1", "slice", self._reg())
+        st = wi.compute_states(self.graphs, wi.load_all_items(self.project)[0])
+        self.assertEqual(st["SLC-1"], "done")
+
+    def test_bubble_all_cancelled_is_cancelled(self):
+        # [v87] every child cancelled => the aggregate itself is cancelled (not done)
+        self.write_item("done", "UC-1", "use-case", self._cancelled_uc(), parents=["SLC-1"])
+        self.write_item("done", "UC-2", "use-case", self._cancelled_uc(), parents=["SLC-1"])
+        self.write_item("active", "SLC-1", "slice", self._reg())
+        st = wi.compute_states(self.graphs, wi.load_all_items(self.project)[0])
+        self.assertEqual(st["SLC-1"], "cancelled")
 
 
 # --------------------------------------------------------------------------- #
@@ -665,6 +708,27 @@ class TestStats(Base):
         ])
         at = self._stats()["overall"]["dora"]["all_time"]
         self.assertIsNone(at["change_failure_rate"])
+
+    def test_cfr_counts_deploy_failed(self):
+        # [v87] a deploy_failed (deploy/CI failure) is a CHANGE FAILURE — the fix for
+        # CFR reading a false 0% when a fixed-forward deploy failure left no event.
+        deploy_failed_uc = [
+            {"ts": _dt(12, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(12, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(12, 2), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(12, 4), "event": "built_green", "agent": "engineer"},
+            {"ts": _dt(12, 5), "event": "deploy_failed", "agent": "cicd"},   # CI red
+            {"ts": _dt(12, 6), "event": "retried", "agent": "engineer"},
+            {"ts": _dt(12, 8), "event": "built_green", "agent": "engineer"},
+            {"ts": _dt(12, 9), "event": "deployed", "agent": "cicd"},
+            {"ts": _dt(12, 10), "event": "validated", "agent": "tester"},
+        ]
+        self.write_item("done", "UC-DF", "use-case", deploy_failed_uc)
+        at = self._stats()["overall"]["dora"]["all_time"]
+        # 1 deploy_failed + 1 validated => cfr = 1/(1+1) = 0.5 (was 0 before v87)
+        self.assertAlmostEqual(at["change_failure_rate"], 0.5, places=4)
+        self.assertEqual(at["n_deploy_failures"], 1)
+        self.assertGreater(at["change_failure_rate"], 0)
 
     # ---- lead-time percentiles ----
     def test_lead_time_percentiles(self):
@@ -1218,6 +1282,200 @@ class TestPerItemMetrics(Base):
     def test_project_item_unknown_id_errors(self):
         with self.assertRaises(SystemExit):
             wi.cmd_project(argparse.Namespace(project=self.project, now=NOW, item="UC-NOPE"))
+
+
+class NoteRoundTrip(unittest.TestCase):
+    """Regression: event `note` values containing commas and/or quotes must survive
+    parse+render round-trips without truncation or compounding backslash-escapes.
+
+    Guards the quote-aware `_split_top_commas` + `_unescape_dq`/`_q` fix. Before it,
+    a comma inside a quoted note split the inline map (truncating the note at the
+    first comma) and each `wi-project`/`wi-append` re-render doubled the backslashes
+    on any escaped quote — silently corrupting the audit trail, worse every cycle.
+    """
+
+    def test_split_top_commas_keeps_quoted_comma_note_whole(self):
+        parts = wi._split_top_commas('event: deployed, note: "a, b, c"')
+        self.assertEqual(parts[0].strip(), "event: deployed")
+        self.assertEqual(parts[1].strip(), 'note: "a, b, c"')
+
+    def test_inline_map_note_with_commas_not_truncated(self):
+        d = wi._parse_inline_map('{event: deployed, agent: cicd, note: "local dev==prod, 47 tests, served"}')
+        self.assertEqual(d["note"], "local dev==prod, 47 tests, served")
+        self.assertEqual(d["agent"], "cicd")
+
+    def test_scalar_unescapes_embedded_quotes(self):
+        self.assertEqual(wi._parse_scalar(r'"say \"hi\" now"'), 'say "hi" now')
+
+    def test_render_parse_roundtrip_is_idempotent(self):
+        original = 'local dev==prod: green build, "quoted", 47 tests'
+        once = wi._q(original)
+        self.assertEqual(wi._parse_scalar(once), original)
+        # a second render/parse cycle must be byte-identical — no compounding escapes
+        twice = wi._q(wi._parse_scalar(once))
+        self.assertEqual(twice, once)
+        self.assertEqual(wi._parse_scalar(twice), original)
+
+    def test_event_note_survives_two_render_cycles(self):
+        ev = {"ts": "2026-07-11T00:00:00Z", "event": "deployed", "agent": "cicd",
+              "note": "local dev==prod: green build, 47 tests, served via preview"}
+        r1 = wi._render_event(ev)
+        p1 = wi._parse_inline_map(r1)
+        self.assertEqual(p1["note"], ev["note"])
+        r2 = wi._render_event(p1)
+        self.assertEqual(r2, r1)  # idempotent
+        self.assertEqual(wi._parse_inline_map(r2)["note"], ev["note"])
+
+
+# --------------------------------------------------------------------------- #
+# Agent cycle time — the REAL per-stage work-effort each dispatched agent spent
+# (duration_ms), folded alongside gross lead time. GLT stays the honest TOTAL
+# elapsed (waits + steering gaps + outages included); this is its complement —
+# how much of that total was actual agent effort vs wait/overhead.
+# --------------------------------------------------------------------------- #
+class TestAgentCycleTime(Base):
+    def _append(self, iid, event, agent, duration_ms=None):
+        ns = argparse.Namespace(project=self.project, id=iid, event=event, agent=agent,
+                                ref=None, note=None, ts="2026-06-18T00:00:00Z",
+                                tokens=None, duration_ms=duration_ms)
+        with contextlib.redirect_stdout(io.StringIO()):
+            wi.cmd_append(ns)
+
+    def _stats(self):
+        it = wi.load_all_items(self.project)[0]
+        st = wi.compute_states(self.graphs, it)
+        return wi.compute_stats(self.graphs, it, st, now=NOW_DT)
+
+    def _fixture_uc(self):
+        # the clean UC (GLT total = 43200s = 12h) with a known duration_ms per event.
+        # duration_ms is attributed per-OWNER via the event's agent, and per-STAGE
+        # via the state the item was IN when the event fired (the from-state — where
+        # the agent did the work):
+        #   made_ready  flow-manager  5000     (from registered)
+        #   pulled      orchestrator  10000    (from ready)
+        #   built_green engineer      4800000  (from building) — the ~4.8M-ms engineer
+        #   deployed    cicd          60000    (from deploying)
+        #   validated   tester        120000   (from dev-validating)
+        # total = 4995000 ms = 4995 s ; genesis `registered` carries no duration.
+        return [
+            {"ts": _dt(10, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(10, 1), "event": "made_ready", "agent": "flow-manager", "duration_ms": 5000},
+            {"ts": _dt(10, 3), "event": "pulled", "agent": "orchestrator", "duration_ms": 10000},
+            {"ts": _dt(10, 6), "event": "built_green", "agent": "engineer", "duration_ms": 4800000},
+            {"ts": _dt(10, 8), "event": "deployed", "agent": "cicd", "duration_ms": 60000},
+            {"ts": _dt(10, 12), "event": "validated", "agent": "tester", "duration_ms": 120000},
+        ]
+
+    # ---- append records --duration-ms on the event (mirrors --tokens) ----
+    def test_append_records_duration_ms(self):
+        self.write_item("active", "UC-D", "use-case",
+                        [{"ts": "1", "event": "registered", "agent": "flow-manager"}])
+        self._append("UC-D", "made_ready", "flow-manager", duration_ms=54321)
+        item = wi.load_item(os.path.join(self._items("active"), "UC-D.md"))
+        self.assertEqual(item.events[-1]["duration_ms"], 54321)
+
+    def test_append_without_duration_has_no_key(self):
+        self.write_item("active", "UC-N", "use-case",
+                        [{"ts": "1", "event": "registered", "agent": "flow-manager"}])
+        self._append("UC-N", "made_ready", "flow-manager")  # no duration
+        item = wi.load_item(os.path.join(self._items("active"), "UC-N.md"))
+        self.assertNotIn("duration_ms", item.events[-1])
+
+    def test_duration_ms_survives_render_roundtrip(self):
+        ev = {"ts": _dt(10, 6), "event": "built_green", "agent": "engineer",
+              "duration_ms": 4800000, "tokens": 50000}
+        r = wi._render_event(ev)
+        p = wi._parse_inline_map(r)
+        self.assertEqual(p["duration_ms"], 4800000)
+        self.assertEqual(p["tokens"], 50000)
+
+    # ---- deterministic fixture: exact totals / by_owner / by_stage / ratio ----
+    def test_total_and_by_owner_exact(self):
+        self.write_item("done", "UC-1", "use-case", self._fixture_uc())
+        act = self._stats()["overall"]["agent_cycle_time"]
+        self.assertEqual(act["total_ms"], 4995000)
+        self.assertAlmostEqual(act["total_s"], 4995.0, places=2)
+        bo = act["by_owner"]
+        self.assertEqual(bo["engineer"]["total_ms"], 4800000)
+        self.assertEqual(bo["engineer"]["median_ms"], 4800000)
+        self.assertEqual(bo["engineer"]["n"], 1)
+        self.assertEqual(bo["tester"]["total_ms"], 120000)
+        self.assertEqual(bo["cicd"]["total_ms"], 60000)
+        self.assertEqual(bo["orchestrator"]["total_ms"], 10000)
+        self.assertEqual(bo["flow-manager"]["total_ms"], 5000)
+
+    def test_by_stage_exact_with_owner(self):
+        self.write_item("done", "UC-1", "use-case", self._fixture_uc())
+        bs = self._stats()["overall"]["agent_cycle_time"]["by_stage"]
+        # effort is attributed to the state the item was IN when the event fired
+        self.assertEqual(bs["building"]["total_ms"], 4800000)
+        self.assertEqual(bs["building"]["owner"], "engineer")
+        self.assertEqual(bs["deploying"]["total_ms"], 60000)
+        self.assertEqual(bs["deploying"]["owner"], "cicd")
+        self.assertEqual(bs["dev-validating"]["total_ms"], 120000)
+        self.assertEqual(bs["dev-validating"]["owner"], "tester")
+        # readying stages are queue-owned even though flow-manager/orchestrator acted
+        self.assertEqual(bs["registered"]["total_ms"], 5000)   # made_ready fired here
+        self.assertEqual(bs["ready"]["total_ms"], 10000)       # pulled fired here
+
+    def test_cycle_time_vs_glt_ratio(self):
+        # GLT total (all segments) for the clean UC = 43200s; effort = 4995s.
+        self.write_item("done", "UC-1", "use-case", self._fixture_uc())
+        s = self._stats()["overall"]
+        self.assertAlmostEqual(s["gross_lead_time"]["gross_lead_time_total_s"], 43200, places=1)
+        act = s["agent_cycle_time"]
+        self.assertAlmostEqual(act["gross_lead_time_total_s"], 43200, places=1)
+        self.assertAlmostEqual(act["cycle_time_vs_glt"], 4995.0 / 43200.0, places=6)
+        # GLT itself is UNCHANGED by adding cycle time (honest total elapsed)
+        self.assertAlmostEqual(s["gross_lead_time"]["gross_lead_time_median_s"], 43200, places=1)
+
+    def test_full_coverage_reported(self):
+        self.write_item("done", "UC-1", "use-case", self._fixture_uc())
+        act = self._stats()["overall"]["agent_cycle_time"]
+        # 5 of 6 legal-walk events carry a duration (genesis `registered` does not)
+        self.assertEqual(act["n_events_with_duration"], 5)
+        self.assertAlmostEqual(act["duration_coverage"], 5 / 6, places=6)
+
+    # ---- absent durations degrade gracefully (no crash, zero/empty/None) ----
+    def test_absent_durations_zero_and_no_crash(self):
+        self.write_item("done", "UC-1", "use-case",
+                        TestStats._clean_uc(self, "UC-1"))
+        act = self._stats()["overall"]["agent_cycle_time"]
+        self.assertEqual(act["total_ms"], 0)
+        self.assertEqual(act["by_owner"], {})
+        self.assertEqual(act["by_stage"], {})
+        self.assertIsNone(act["cycle_time_vs_glt"])
+        self.assertEqual(act["n_events_with_duration"], 0)
+
+    def test_median_over_multiple_durations(self):
+        # two engineer built_green events across a rework loop => median of the two
+        evs = TestStats._rework_uc(self, "UC-1")
+        # attach durations to the two built_green (engineer) events
+        eng_durations = []
+        for ev in evs:
+            if ev["event"] == "built_green":
+                d = 1000 * (len(eng_durations) + 3)  # 3000, 4000
+                ev["duration_ms"] = d
+                eng_durations.append(d)
+        self.write_item("done", "UC-1", "use-case", evs)
+        bo = self._stats()["overall"]["agent_cycle_time"]["by_owner"]
+        self.assertEqual(bo["engineer"]["n"], 2)
+        self.assertEqual(bo["engineer"]["total_ms"], 3000 + 4000)
+        self.assertEqual(bo["engineer"]["median_ms"], (3000 + 4000) / 2)
+
+    # ---- stats.md renders the §F block ----
+    def test_stats_md_renders_cycle_time_section(self):
+        self.write_item("done", "UC-1", "use-case", self._fixture_uc())
+        md = wi._render_stats_md(self._stats())
+        self.assertIn("F. Agent cycle time", md)
+        self.assertIn("cycle time vs gross lead time", md.lower())
+
+    def test_stats_md_cycle_time_empty_no_crash(self):
+        self.write_item("done", "UC-1", "use-case",
+                        TestStats._clean_uc(self, "UC-1"))
+        md = wi._render_stats_md(self._stats())
+        self.assertIn("F. Agent cycle time", md)
+        self.assertIn("No agent duration recorded", md)
 
 
 if __name__ == "__main__":

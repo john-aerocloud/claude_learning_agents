@@ -1,4 +1,7 @@
 {
+  "env": {
+    "PATH": "/Users/johnnicholas/.nvm/versions/node/v22.22.3/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH}"
+  },
   "permissions": {
     "allow": [
       "Bash(python .claude/skills/dora-ledger/scripts/dora.py record *)",

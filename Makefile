@@ -156,15 +156,17 @@ retro-debt:
 retro-mark:
 	$(WORKITEMS) retro-mark --project $(PROJECT)
 
-# --- Event-sourced work-item machinery (Version2-design/04, process/machinery/CONTRACT.md) ---
+# --- Event-sourced work-item machinery (design-rationale/work-item-state-model.md, process/machinery/CONTRACT.md) ---
 # State lives ONLY in the per-item files (work/$(PROJECT)/items/{active,done}/<ID>.md);
 # queues, stats and the dependency tree are DERIVED here, never stored-and-hand-synced.
 # Append an edge-checked event (the ONLY way to change item state; rejects illegal transitions):
-# make wi-append PROJECT=P ID=UC-1 EVENT=made_ready AGENT=flow-manager [REF=<sha>] [NOTE="..."] [TOKENS=<n>]
+# make wi-append PROJECT=P ID=UC-1 EVENT=made_ready AGENT=flow-manager [REF=<sha>] [NOTE="..."] [TOKENS=<n>] [DURATION_MS=<n>]
 # TOKENS = subagent_tokens the dispatched specialist spent producing this transition (optional).
+# DURATION_MS = the dispatched agent's REAL cycle time in ms for this transition (optional;
+#   the dispatch layer's reported duration_ms). Feeds §F agent-cycle-time-vs-GLT in wi-project.
 wi-append:
 	$(WORKITEMS) append --project $(PROJECT) --id $(ID) --event $(EVENT) --agent $(AGENT) \
-	  $(if $(REF),--ref "$(REF)",) $(if $(NOTE),--note "$(NOTE)",) $(if $(TOKENS),--tokens "$(TOKENS)",)
+	  $(if $(REF),--ref "$(REF)",) $(if $(NOTE),--note "$(NOTE)",) $(if $(TOKENS),--tokens "$(TOKENS)",) $(if $(DURATION_MS),--duration-ms "$(DURATION_MS)",)
 # Recompute ALL views (queues + stats + tree + re-render each item's derived block). Run after each loop.
 # make wi-project PROJECT=OagEventSource
 wi-project:
@@ -176,6 +178,27 @@ wi-validate:
 # One-shot migration from items.csv + ledger into per-item files.
 wi-migrate:
 	$(WORKITEMS) migrate --project $(PROJECT)
+
+# --- Board projection: work-item -> Linear issue (deterministic render) -------
+# Renders ONE work item into a correctly-formed Linear issue and upserts it via
+# the Linear GraphQL API, idempotently (canonical map: process/linear-mapping.md).
+# REPLACES the LLM-hand-composed description (which truncated multi-line
+# acceptance criteria to their first line — the defect this fixes). The `linear`
+# projection agent DEPENDS on this: it shells out to `make board-project` rather
+# than hand-composing a description.
+#
+# Runs via BOARDPY — the SAME cross-platform interpreter resolution the
+# work-items launcher uses (never bare python3; the launcher skips the Windows
+# Store stub and falls back to uv). linear-project.py is stdlib-only.
+#   make board-project PROJECT=ROC ID=UC-ROC-015   -> upsert one item's issue
+#   make test-board-project                         -> offline renderer unit test
+BOARDPY ?= $(shell sh .claude/skills/work-items/scripts/work-items --python)
+.PHONY: board-project test-board-project
+board-project:
+	$(BOARDPY) .claude/tools/linear-project.py --project $(PROJECT) --id $(ID)
+
+test-board-project:
+	$(BOARDPY) .claude/tools/linear-project.test.py
 
 # --- Process-doc conformance gate (process §27.5) -----------------------------
 # Scans the LIVE process/agent/skill/root docs for a DENYLIST of RETIRED

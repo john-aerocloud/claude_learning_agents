@@ -61,23 +61,26 @@ Act as the **orchestrator**. Own this; gather input but make the process call.
    anticipated-vs-observed score for the PREVIOUS change. Revert or rework any prior
    change that was not a net win across throughput (lead time), quality (CFR),
    frequency, and recovery (MTTR).
-5a. **Score the experiment registry** (`/process/experiments.md`, process §25a):
-   FIRST audit every live row against the **validity bar** (EXP-063): a row that
-   describes a piece of work / a feature, names no target DORA metric, or has a
-   measurement that cannot come back negative is NOT a valid experiment — delete
-   it (keep the behaviour as plain agent practice if it is sound and load-bearing;
-   undo it if it is speculative). Then score: scoring is **adopt-or-delete** — a
-   row whose metric MOVED is adopted (fold into the owning agent, prune the row);
-   a row whose metric did NOT move is rewritten, retirement-trialled, or deleted.
-   Every `active` row that had a scoring opportunity gets a scoring note;
-   horizon-reached rows with no measurable improvement move to
-   `under-question` and MUST be resolved (rewrite as a new experiment, or
-   start a `retirement-trial` — physically remove the text, run **4–5 scoring
-   opportunities** (1–2 is an anecdote, not a sample), reinstate on an
-   attributable metric drop / retire permanently only after no drop across
-   the full window; max one trial RUNNING per artifact at a time — a
-   confounding guard, not a sample size). Agent-def simplicity is a goal:
-   text that cannot demonstrate value does not stay.
+5a. **Score the experiment registry — and keep it LEAN (§25a, v88).** The registry is a
+   WIP-limited queue with a **HARD CAP of 8 `active` rows**. Every retro MUST leave it at
+   or under the cap; if it is over, retire rows (adopt or kill) until it is not — reduction
+   is a required output of the retro, not optional.
+   - **Validity audit FIRST (EXP-063):** a row that describes a piece of work/feature, names
+     no target DORA metric, or has a measurement that cannot come back NEGATIVE is not an
+     experiment — delete it (keep sound load-bearing behaviour as plain agent practice; undo
+     speculative behaviour). Remember: **a fix is not an experiment** — it should never have
+     had a row.
+   - **Score adopt-or-KILL (3-strikes):** a row whose metric MOVED is adopted (fold into the
+     owning agent, prune the row). **A row still unscored (`0/N`) or unmoved at its 3rd
+     scoring opportunity is KILLED** — no `under-question`/`retirement-trial` limbo for
+     unvalidated rows; 3 strikes and it goes. (A retirement-trial remains available only for
+     a row that DID show value and you now suspect is load-bearing-but-redundant — that is a
+     different question from "never demonstrated anything".)
+   - **Archive-with-outcome is MANDATORY:** every retired row moves to
+     `experiments-archive.md` WITH its result — adopted (metric moved, + the integration
+     commit) or killed (no measurable effect / never validated). Nothing vanishes silently;
+     an empty archive is a process failure. Agent-def simplicity is the goal: text that
+     cannot demonstrate value does not stay.
    **Newly-validated rows trigger INTEGRATION (§25a v34):** rewrite the owning
    agent file(s) so the validated behaviour is woven into the agent's core
    instructions as plain operating practice — experiment scaffolding (vNN/EXP

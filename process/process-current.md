@@ -7,8 +7,33 @@ status: active
 
 # Current Process — v90
 
+<!-- v89 (2026-07-12, ROC retro): constraint = registered/queue (74.44% of GLT by owner
+`queue`), but per §5b/EXP-100 method it is artifact-dominated — front-loaded batch UC-registration
+at decomposition + multi-day human-session cadence on a weekend project; the squeezable in-system
+WORKING constraint is engineer/building (25.56%). EXPLOIT enabler landed: EXP-103 fired on ROC
+(token coverage 18%→50%, build tokens now visible). DOMINANT quality finding (constraint-gate
+SAFETY exception): the §12d/EXP-106 CORE-job done-gate RECURRED on a third project — CHK-ROC-001
+(CORE job J1 = a REAL Jira ticket) folded to `done` on its LOCAL/fake-Jira child while its
+real-delivery remainder (SLC-ROC-002) was never registered, so CFR read 0.0% blind to it. Remedy:
+registered SLC-ROC-002 (CHK-ROC-001 + REQ-ROC-001 reverted to in_progress — honest); opened
+principle-failure 2026-07-12-roc-core-slice-local-only; §12d strengthened to point at a MECHANICAL
+gate (IMP-011: a `wi-validate` I5 invariant failing a CORE aggregate that reaches `done` without a
+job-success validation OR a registered remainder). EXP-106 scored NEGATIVE (1st opp), EXP-100 →2/3,
+EXP-103 →1/2 positive. Registry held at the 8-active cap (no new rows — the remedy is a fix +
+improvement-slice, not an experiment). -->
+
+<!-- v88 (2026-07-12, ROC — experiment-leanness + honest measurement reform, human-directed):
+§25a — HARD WIP cap of 8 active experiments (retire one to open one); a fix is NOT an experiment
+(fold as plain practice, no row); 3-strikes score-or-kill (unscored/unmoved at 3 opportunities →
+killed); archive-with-outcome mandatory. §F3 — REVERTED the v87 "defer registration" idea as
+metric-gaming; the honest lever for chain lead-time is independent decomposition, not deferred
+counting; GLT rightly includes all waits/gaps/outages (minimise them indirectly). Plus: agent
+per-stage cycle time (duration_ms) recorded alongside GLT; registry backfilled to the cap. -->
+
+
+<!-- v85 (retro, AdixOut 2026-07-12; renumbered from a v84 that collided with main's concurrent v84 CORE-job-done-gate retro — both sets of learning coexist, only the version number was reconciled): constraint = QUEUE WAIT (ready 48.9% + registered 27.7% = 76.6% of GLT by owner `queue`), sample n=2 and heavily contaminated by non-system waits (mid-session org spend-limit outage, heavy human-steering gaps, deliberate serial-build pacing) — treat DIRECTIONAL, not a capacity signal. CFR 33% from ONE rejection (UC-ADIX-003 deploy-race), a GOOD catch. Changes routed this cycle (all already applied + folded): aws-architecture IaC default CDK→SST v3 Ion; ADR-0006 (release/provenance) + ADR-0007 (tagging) encoded into aws-architecture §9a/§2a; 3 principle-failures (rushed-to-register-before-understanding; skipped-solution-architecture-gate→wrong-IaC; build-identity-claimed-before-code-live); documenter standing duty (living root README); safe-deploy stream-drain (AdixOut cicd). Forward lever for the queue constraint = per-UC worktree isolation so the inner loop's maximal-independent-set actually builds in parallel (improvement-slice IMP-017, deferred — validate on a cleaner sample). Token review: 811k delivery tokens for 2 UCs; dominant WASTE = the CDK→SST full-infra rebuild forced by the skipped architecture gate — the gate fix (check tech choices vs org before build) is the token lever too. -->
+<!-- v87 (ROC retro 2026-07-12): §F0 — per-item board push + docs-refresh are HARD in-cycle invariants (board never lags item-file state by >1 cycle; documenter required at each slice close); founding lapse principle-failures/2026-07-11-board-and-docs-lag-during-loop.md. §F3 — register linear dependency-chain use-cases JIT per-UC, not batch up front (ROC: `registered` was 70% of GLT purely as a batch-registration artifact). BOTH folded as PLAIN process practice, deliberately NOT new experiment rows — enacting the same-retro directive to stop over-generating experiments and to fix DORA measurement. -->
 <!-- v90 (retro, AdixOut 2026-07-12; incident-triggered — UC-ADIX-006 validation reject; renumbered v86→v90 to sit above main's concurrent v87–v89 retros — additive, no rule collision): constraint = queue WAIT again (ready 45.5% + registered 28.7% = 74.2% of GLT by owner `queue`), but the sample (n=6) is still heavily contaminated by non-system calendar time (org spend-limit pause, a context compaction, deliberate serial-build pacing) — DIRECTIONAL, not a capacity signal, so the change budget was NOT spent on the queue number. The actionable in-process constraint = the ENGINEER stage (19.4% active GLT, top working owner) and its REWORK (33.3% rework rate, CFR 25%). ToC EXPLOIT move taken: remove the rework at source. Incident: UC-ADIX-006 shipped a last-writer-wins concurrency race (silent push-only data loss, breach of REQ-001 J3) to the 0.6.0 deploy; the acceptance specified only happy-path gap-heal, so the engineer's green build could not cover it and only the tester's improvised batched-injection probe caught it (post-deploy → CFR hit). Fixed to 0.6.1 (monotonic conditional write + reload/re-fold/retry + skip pure-dedup saves), re-validated PASS (11-stream concurrent probe, 0 regressions). Changes routed this cycle: EXP-109 — architect authors concurrency/ordering/idempotency ACCEPTANCE conditions for concurrent surfaces (SQS/stream/EventBridge-triggered) + tester runs a concurrency/batch-durability probe as STANDING practice (solution-architect.md + tester.md). Retroactively REGISTERED two prior-session shipped changes never given a retro: EXP-110 (unrun test = failure — all tiers run, start Docker; engineer/tester/cicd) and EXP-111 (truthful build identity — Makefile assert-clean-tree + safe-deploy stream-drain). SUBORDINATE lever noted (the `registered` inventory) but deferred as confound-dominated. Token review: ~2.26M delivery tokens across 11 items (engineer 1.13M, tester 967k — the tester's high share is the concurrency-stress probing that caught the incident, DORA-positive, not waste); plumbing share 0% (coverage 38% — grows as dispatches carry --tokens). Deferred to open-items: committed-bundle-drift (handler .mjs bundles going stale vs source; caused no defect — deploy rebuilds — but recurring reconcile-commit noise). Next constraint to attack: still the engineer stage/rework — score whether EXP-109 lowers it. -->
-<!-- v85 (retro, AdixOut 2026-07-12; renumbered from a v84 that collided with main's concurrent v84 CORE-job-done-gate retro): constraint = QUEUE WAIT (ready 48.9% + registered 27.7%), n=2, contaminated by non-system waits — DIRECTIONAL. Changes (all applied+folded): aws-architecture IaC default CDK→SST v3 Ion; ADR-0006 + ADR-0007 into aws-architecture §9a/§2a; 3 principle-failures; documenter living-README duty; safe-deploy stream-drain. -->
 
 
 ## What this file is
@@ -96,9 +121,16 @@ each as a share of gross lead time. This replaces `dora.py flow`/`compute`; the 
 (legal history; done ⇒ in no queue; edge consistency; one file per id). Non-zero exit blocks the
 pull. This replaces `make ledger-drift` and `reconcile-registry`.
 
-**Boards mirror per item, in parallel.** When an item's events change, dispatch the `linear`
-and/or `jira` projection agent for that one id (idempotent, independent, non-blocking); a
-full-sweep run is the backstop. Boards are projections — the item always wins.
+**Boards mirror per item, in-cycle — MANDATORY (§F0 invariant).** Every `wi-append` that
+changes an item's state MUST be followed, in the SAME loop cycle, by dispatching the `linear`
+and/or `jira` projection agent for that one id (idempotent, independent). The DISPATCH is not
+optional or deferrable; only the external API *call* is best-effort (a failure is logged and the
+next push/sweep reconciles). **Invariant: an item's board status never lags its item-file state
+by more than the current cycle.** The full-sweep run is a periodic structure backstop, NOT the
+primary path — if the sweep does real state work every time, per-item pushes are being skipped
+(the board/doc-lag lapse). Likewise user-facing docs (README / GitBook, via `documenter`)
+are refreshed at each slice close and must not drift from shipped state. Boards and docs are
+projections — the item always wins, but a projection left stale is a process failure.
 
 **Command mapping (old → new)** — the ONE sanctioned place naming retired mechanics (§27.3): <!-- doc-lint:allow -->
 `dora record … --event enqueue/dequeue/item_done` → <!-- doc-lint:allow -->
@@ -219,11 +251,23 @@ inflated CFR — every `/defect` used to count):
   not a failure *of a specific recent deploy*, so it is **excluded from CFR** and
   reported separately as a **defect-arrival rate**. Counting it in CFR would measure
   how diligently we report, not how often deploys break.
-- **pipeline-failure / pipeline-recovery** — CI/CD red **before** prod. Not in
-  CFR/MTTR; a pipeline-iteration wait (§5), attacked via cicd pre-flight.
+- **pipeline-failure / pipeline-recovery** — a **pre-DEPLOY** CI red (build / test /
+  lint / typecheck, before any deploy step runs). Not in CFR/MTTR; a pipeline-iteration
+  wait (§5), attacked via cicd pre-flight. **NARROWED [v87]:** this carve-out is ONLY for
+  failures *before* a deploy. A **deploy step that fails is NOT a pipeline wait** — see below.
 
-**MTTR spans both deploy-failures and defect-intakes** — recovery speed for *any*
-prod issue. `wi-project` classifies by item type and event, so the distinction holds.
+**Deploy failures ARE recorded and ARE counted [v87, EXP-108].** When a DEPLOY to any
+environment fails — including a CI job that auto-deploys (the UC-XA2 `ec56025` infra-CI-red
+incident) — it is a `deploy_failed` event (`deploying`/`prod-deploying` → `reworking`), fired
+by cicd/engineer **even when fixed-forward**. `deploy_failed` is a CFR change-failure:
+`wi-project` now computes **CFR = (rejected + deploy_failed) / (validated + rejected +
+deploy_failed)**. The old convention let a fixed-forward deploy failure hide as a "pipeline
+wait" with no event, so CFR read a falsely-perfect 0% (`principle-failures/2026-07-12-cfr-reads-zero-and-no-cancel-state`).
+A green/zero quality reading must reflect *recorded, verified* reality — never *un-recorded*
+failure.
+
+**MTTR spans deploy-failures (incl. `deploy_failed`) and defect-intakes** — recovery speed
+for *any* prod issue. `wi-project` classifies by item type and event, so the distinction holds.
 A genuine deploy regression is a deploy-failure, full stop — a defect item is only for
 issues raised against already-shipped, standing work.
 
@@ -526,6 +570,29 @@ slice closes.) Rationale + pattern:
 fell off the backlog and the inversion propagated to the consumer skill; CFR read 0.0%
 throughout). [EXP-106]
 
+**This gate is being made MECHANICAL (IMP-011, ROC retro 2026-07-12) after a THIRD
+recurrence** — ROC's `CHK-ROC-001` (CORE job J1 = a real Jira ticket) folded to `done` on
+its LOCAL/fake-Jira child while the real-delivery remainder `SLC-ROC-002` was never
+registered (`principle-failures/2026-07-12-roc-core-slice-local-only-real-delivery-untracked`).
+A text-only gate on a CORE invariant is not load-bearing; IMP-011 adds `wi-validate`
+invariant **I5** — a CORE-job aggregate may not be `done` without EITHER a job-success
+validation event in its subtree OR a registered, not-yet-done remainder child. Until I5
+lands, the slice-close parts-check (§F8/EXP-100, loop-run) must explicitly verify this for
+every CORE aggregate before it closes.
+
+## 12e. Cancelling obsoleted work items [v87]
+Work items have a **`cancelled`** terminal (state-graphs v5) for the item that is no longer
+wanted — obsoleted by a design change, superseded by a better slice, or descoped. When work
+is obsoleted, **fire `cancelled`** via `make wi-append … EVENT=cancelled AGENT=orchestrator`
+(or flow-manager) — do NOT repurpose an item's definition in place, and do NOT hack an
+illegal transition. A `cancelled` item is terminal: it archives to `items/done/`, sits in no
+queue, and is **excluded from lead-time and deployment-frequency** (it never shipped). An
+aggregate whose children are all terminal bubbles to `done` if ≥1 child is `done`, else
+(all children cancelled) to `cancelled`; a cancelled child never blocks its parent. Rationale:
+`principle-failures/2026-07-12-cfr-reads-zero-and-no-cancel-state` (a re-decomposition had to
+repurpose items in place because no cancel path existed — forcing silent edits or illegal
+transitions).
+
 ## 12b. Multi-party / multi-instance modelling
 When a use case involves MORE THAN ONE PARTY operating SEPARATE INSTANCES (two
 browsers, two devices, a sharer and a joiner), the happy-path of one instance is not
@@ -586,6 +653,15 @@ The engineer commits to trunk every time the full test suite **and lint** go gre
 passes inside the done-condition, not discovered post-commit).
 - **Commit when green and lint clean, never when red.** One logical change per commit;
   the message states intent, not mechanics.
+- **Infra-bearing push gate — "green" means green WHERE CI RUNS IT [v86, EXP-107].** A
+  change that touches deploy-time infrastructure (`sst.config.ts`, `infra/`, IaC, deploy-role
+  policies) is NOT push-green on unit + lint alone: CI auto-deploys such changes, so the
+  pre-push done-condition MUST include the **synth/deploy gate CI will run** —
+  `make -C work/<project> deploy-sst` (or at minimum `sst diff`/synth) passing locally —
+  before push-on-green. Unit + lint green is necessary but NOT sufficient for infra: a
+  statement that passes offline shape-tests can still be rejected at the AWS API on deploy
+  (e.g. an invalid principal). Pushing infra green-locally-but-unsynthed is a deploy-failure
+  waiting to turn CI red. Rationale: `principle-failures/2026-07-12-infra-pushed-green-locally-red-in-ci`.
 - **Conventional Commits format.** Subject `type(scope): <intent>`, `type` ∈ {feat,fix,
   docs,style,refactor,perf,test,build,ci,chore,revert}; append `!` / `BREAKING CHANGE:`
   footer for a breaking change; keep the `Co-Authored-By` trailer.
@@ -876,6 +952,26 @@ sight. The lifecycle is **adopt-or-delete**. A sound shipped behaviour whose row
 only MIS-PHRASED is handled by deleting the ROW while KEEPING the behaviour as plain
 agent practice; never undo a defect-preventing behaviour because its row failed the bar.
 
+**LEAN REGISTRY — a HARD WIP cap of 8 active experiments (v88).** The registry is a
+WIP-limited queue, not a museum: **at or above 8 `active` rows you may NOT open a new
+experiment without first retiring one** (adopt or kill). Reduction is therefore a hard
+constraint every retro must satisfy, not an aspiration. Corollaries:
+- **A fix is NOT an experiment.** A broken process/rule that simply needs correcting is
+  folded straight into its owning agent/process file as PLAIN practice, with NO row. Reserve
+  an experiment for a genuinely UNCERTAIN change whose named metric could move either way.
+  Most routed changes are fixes — they must not enter the registry at all. (This is the
+  main inflow valve: if you cannot say honestly "this might not work," it is a fix, not an
+  experiment.)
+- **3-strikes score-or-kill.** Every `active` row is scored at each retro that gives it a
+  scoring opportunity. **At 3 scoring opportunities with no measurable movement — or still
+  unscored (`0/N`) at its horizon — the row is KILLED.** There is no indefinite `active
+  (0/N)` limbo; an experiment either shows a measurable effect or it goes.
+- **Archive-with-outcome is MANDATORY.** A retired row never just vanishes: adopted →
+  behaviour folded into the owning agent + row moved to `experiments-archive.md` WITH the
+  measured result; killed → moved to `experiments-archive.md` WITH "no measurable effect /
+  never validated." An empty or skipped archive means the learning was lost — itself a
+  process failure. The live registry holds only what is currently being tested.
+
 **The status-lifecycle mechanics** (active → validated/integrated → under-question →
 retirement-trial → failed, the null-hypothesis retirement test, the concurrency guard,
 and scoring-honesty under a confounded window) live in the **`process-framework` skill** —
@@ -1012,6 +1108,18 @@ Product is never idle while engineers build; it keeps the Ready buffer **at or a
   projected-below-floor after the next pull — replenish the moment the buffer would dip.
   The very FIRST build wave of a slice is dispatched together with a product look-ahead
   for the NEXT work.
+- **Decompose for INDEPENDENCE so parallelism can cut real serial wait (ROC retro
+  2026-07-12 → gross lead time).** When a slice is a LINEAR dependency chain
+  (UC-a→UC-b→UC-c, each needing its predecessor's output), the maximal independent set is 1
+  and use-cases build one-at-a-time, so downstream UCs genuinely wait — and that wait is
+  REAL gross lead time, honestly counted (ROC C1 + dashboard: `registered` ≈ **70% of GLT**
+  at 0% rework/CFR). Do NOT try to shrink that number by DEFERRING the `registered` birth
+  event — that only stops *counting* the wait, it does not reduce it (metric-gaming, not
+  flow improvement; register work when it is committed, honestly). The real lever is
+  UPSTREAM, in decomposition: prefer use-cases that are genuinely INDEPENDENT where the
+  domain allows, so the maximal independent set (§F6) is >1 and `N` actually reduces the
+  serial wait. Where a stage truly serialises (a pipeline walking skeleton), accept the
+  inherent lead time as honest — raising `N` cannot relieve a real chain.
 - **Across chunk boundaries.** Product decomposes the next slice — and the next chunk's
   first slice — WHILE the current chunk is still building, so there is no decompose-gap
   at a chunk edge. Order: (a) more use-cases from the current slice; (b) next slice from

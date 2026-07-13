@@ -233,6 +233,17 @@ translate the authoritative architecture into consumer-facing form, honest to
 what actually ships. Write for an engineer on another team who must implement a
 consumer with no access to this codebase.
 
+**Delivery-model fitness (v84, EXP-103).** Any claim about the PRIMARY / recommended /
+authoritative way a consumer obtains data (push vs pull, subscribe vs poll, which surface
+is "production") MUST trace to the **authoritative delivery model** — the requirement/
+decision-log source of truth (e.g. `decision-log.md`, `requirements/docs/`), never to a
+peer or derived doc. Cite the source. If a consumer-facing doc or skill would assert a
+primary-path model that a peer doc merely repeats, stop and check it against the source:
+the pull-vs-push inversion (2026-07-11) propagated precisely because the skill inherited a
+corrupted middle-layer framing instead of tracing to the model. Keep the shipped-vs-target
+line explicit: if the intended primary path is not yet built, say so — do not silently
+promote the shipped fallback to "the way you consume."
+
 ---
 
 ## Documentation structure convention

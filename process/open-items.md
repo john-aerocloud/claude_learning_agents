@@ -56,6 +56,26 @@ historical-ledger backfill item were removed — both were made moot by the F0
 event-sourced cutover: state is fold(events) in one store, and the frozen DORA
 CSV is no longer the metrics source.)_
 
+## Deferred at the ROC retro (2026-07-12) — real but NOT constraint-targeting (change budget went to EXP-104)
+- **OI: agents must never run interactive/long-blocking commands** — the ROC cicd
+  agent stalled the 600s watchdog on an interactive Vite scaffolder / a `gh auth refresh`
+  device-flow prompt, costing ~10 min + a re-dispatch. Route (when picked up): a cicd.md +
+  §33 rule — no interactive prompts in an agent (use `--yes`/non-interactive flags,
+  pre-provisioned auth), and background genuinely long installs. Single data point so far;
+  promote to an experiment if it recurs. Targets: lead time (avoid watchdog stalls).
+- **OI: lean per-item board projection + a deterministic description render-script**
+  (token cost + reliability). Evidence sharpened 2026-07-12: the `linear` agent used
+  ~100–170k tokens per call AND, when asked to bulk-enrich 14 tickets with the §2a
+  5-section descriptions, it BALKED (couldn't hold 14×5 in one run) — because composing
+  rich descriptions by LLM per call is the wrong shape. **Fix (improvement-slice):** a
+  committed, tested script (e.g. `.claude/skills/work-items/scripts/render-ticket.py <ID>`)
+  that DETERMINISTICALLY renders the §2a Markdown description from the item file +
+  `personas.md`/`jtbd-map.md` + the parent chain — no LLM composition. The `linear`/`jira`
+  agent then just calls the script and does the one API upsert (cheap, reliable,
+  idempotent), and a full-sweep BACKFILL of all existing tickets becomes a trivial loop.
+  Backfills the 11 done tickets (ROC-2..11) that the manual enrichment can't economically
+  reach. Scored on DORA-value-per-token (board freshness/detail unharmed). Needs
+  building+testing → an improvement-slice, not an inline change.
 - **OI-BUNDLE-DRIFT (AdixOut, 2026-07-12):** committed pre-built handler bundles
   (`work/AdixOut/infra/assets/*/handler.mjs`) can go STALE relative to source — the
   engineer changed domain source (90d0afd) without rebuilding the committed bundle, and

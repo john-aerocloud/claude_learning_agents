@@ -68,18 +68,37 @@ hardcode the profile name.
    item's Linear id (+ customer Jira key where one exists), per §14 ISO traceability** —
    e.g. `fix(pnl): resolve issuing-State against Country.Code (VF-003, PP-127)`. Never
    commit while any test is red.
+   **Verify the code is ACTUALLY on trunk (v89, DEF-ROC-001):** after committing, confirm
+   each NEW source file is tracked — `git -C work/<project> ls-files -- <path>` returns it,
+   and `git check-ignore <path>` returns nothing. A green suite in your working tree is a
+   FALSE-GREEN if `.gitignore` silently drops the file (an unanchored pattern like `secrets/`
+   matches every `secrets/` dir, including a source package): the UC reads `done` while its
+   code was never committed. A done UC's code must be on trunk, not merely passing locally.
    **Then integrate, don't batch (process §14/§19b):** when a use-case's full
    done-condition is met (suite **and** lint green), if the project repo has a
    configured, verified remote (`git remote get-url origin` resolves to the origin
    recorded in project.md/decision-log), `git -C work/<project> push origin <trunk>`
    — one green use-case is one push; never let commits pool. **No/unverified remote
    → do not push** (report and stop; the unverified-destination guard still binds).
+   **Infra-bearing change → the done-condition ALSO includes the synth/deploy gate CI runs
+   (v86, EXP-107, §14):** if the change touches `sst.config.ts`/`infra/`/IaC/deploy-role
+   policy, run `make -C work/<project> deploy-sst` (or `sst diff`/synth) and see it pass
+   BEFORE push — unit + lint green is not sufficient, because CI auto-deploys and the AWS API
+   can reject a statement that passed offline shape-tests (e.g. an unresolvable principal).
+   Pushing infra green-locally-but-unsynthed = a deploy-failure that turns CI red (the
+   ec56025 incident). Never push infra without the synth/deploy gate green.
    **After pushing, set off the non-blocking CI watch and keep working:**
    `make -C work/<project> ci-watch`. If that run fails while your local suite + lint
    were green, that is a **defect** — raise it via `/defect`; its fix is exactly one
    of {add the local check that would have caught it | capture the manual config in
    the runbook AND automate it as a committed script/Make target}. Never re-run-and-hope,
    never leave a push red.
+   **Record deploy failures — even fixed-forward (v87, EXP-108, §3):** if a DEPLOY step
+   fails (a CI job that auto-deploys goes red, an `sst deploy` fails on push), fire
+   `make wi-append … ID=<uc> EVENT=deploy_failed AGENT=engineer` (or cicd) BEFORE you fix
+   forward. A fixed-forward deploy failure that leaves no event makes CFR read a false 0%
+   (the ec56025 gap). `deploy_failed` is a CFR change-failure; a pre-deploy build/test/lint
+   red is NOT (that's a pipeline wait). Record the failure, then fix forward.
 4. Trunk-based: keep each change sequentially independent and small enough to
    land on main continuously. No long-lived branches. If a change cannot be made
    independent, say so and stop — do not create hidden coupling.
@@ -193,6 +212,12 @@ product, and you route against it:
   one that has bitten us). When a `data-flow.mmd` platform-gate node is in your
   blast radius, ask what the mock cannot see and cover it with a synth pin or a
   live probe — not another mock assertion.
+- **A comment that DESCRIBES misbehaviour is a defect, not documentation.** When
+  you touch a file carrying a known-issue / symptom comment ("X drops over Y",
+  "known issue", "doesn't work when…"), in that same commit EITHER file the
+  defect record OR delete the falsehood — never leave a documented-but-unrecorded
+  bug behind (DEFECT-014: a panel-overlap symptom sat in a CSS comment for days,
+  found only when a human hit it).
 
 ## Hexagonal architecture — Cockburn ports & adapters (process v22 §41)
 All code follows hexagonal architecture:

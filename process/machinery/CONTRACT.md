@@ -1,6 +1,6 @@
 # Work-item machinery — contract
 
-The event-sourced single-source-of-truth work-item model (design: `Version2-design/04`).
+The event-sourced single-source-of-truth work-item model (design: `design-rationale/work-item-state-model.md`).
 This file is the build contract for the machinery script and the Linear/Jira projection
 agents. **One principle:** each fact is stored once (in the item), and every other view
 (queues, board, stats, tree) is computed from the items on read — never persisted-and-hand-synced.
@@ -27,12 +27,16 @@ events:                   # append-only. state = fold(events) through the type g
                           # each event MAY carry an OPTIONAL `tokens: <int>` — the subagent_tokens the
                           # dispatched specialist spent producing that transition. Absent ⇒ unknown/0
                           # (parsing is tolerant). Feeds the plumbing-vs-delivery cost-split in stats.
+                          # each event MAY also carry an OPTIONAL `duration_ms: <int>` — the dispatched
+                          # agent's REAL wall-clock cycle time for that transition (the dispatch layer's
+                          # reported duration_ms). Absent ⇒ unknown/uncounted. Feeds §F agent_cycle_time
+                          # (work-effort vs gross lead time); GLT itself stays the honest total elapsed.
   - {ts: 2026-06-17T21:30:00Z, event: registered, agent: flow-manager}
   - {ts: 2026-06-18T09:00:00Z, event: made_ready, agent: flow-manager, note: "vc=6.0"}
   - {ts: 2026-06-18T12:00:00Z, event: pulled,      agent: orchestrator}
-  - {ts: 2026-06-18T15:30:00Z, event: built_green, agent: engineer, ref: <sha>, tokens: 48000}
+  - {ts: 2026-06-18T15:30:00Z, event: built_green, agent: engineer, ref: <sha>, tokens: 48000, duration_ms: 4800000}
   - {ts: 2026-06-18T15:45:00Z, event: deployed,    agent: cicd}          # deploy-to-dev
-  - {ts: 2026-06-18T16:10:00Z, event: validated,   agent: tester, ref: <sha>, tokens: 12000}  # local-only: dev==prod
+  - {ts: 2026-06-18T16:10:00Z, event: validated,   agent: tester, ref: <sha>, tokens: 12000, duration_ms: 300000}  # local-only: dev==prod
 # --- everything below this line is DERIVED (rendered by the machinery). do not hand-edit. ---
 derived:
   state: done
@@ -73,6 +77,16 @@ type graph, and:
 
 There is no other way to change item state. No hand-editing of `derived:`; no separate queue file.
 
+**Cancelling / superseding an item [state-graph v5].** Every flow type (use-case, defect,
+open-item) has a `cancelled` terminal, reachable via a `cancelled` event (agents: orchestrator,
+flow-manager) from any non-terminal working state. Use it when work is obsoleted by a design
+change or de-scoped — the honest alternative to silently editing an item into a different thing.
+A `cancelled` flow item archives to `items/done/` like any terminal item, and is EXCLUDED from
+lead-time and deployment-frequency (it never shipped). For aggregates (slice/chunk/requirement):
+a cancelled child does NOT block the parent — the parent is `done` when all children are terminal
+(done or cancelled) and at least one is done; if ALL children are cancelled the aggregate itself
+folds to `cancelled`.
+
 ## 3. Projections (queue generation + statistics = machinery, run after each loop)
 
 `work-items project --project <p>` recomputes ALL views from the item set (pure functions):
@@ -83,6 +97,13 @@ There is no other way to change item state. No hand-editing of `derived:`; no se
 - `work/<p>/views/stats.json` + `.md` — DORA + flow from event timestamps. Reports:
   - the **4 DORA metrics**: throughput (deploy frequency), lead time (registered→done),
     change-failure rate, MTTR (defect reported→resolved); plus WIP.
+    - **change-failure rate [state-graph v5]** = (validation `rejected` + `deploy_failed`) /
+      (validations + deploy failures). A `rejected` (tester validation failure) OR a
+      `deploy_failed` (deploy/CI-pipeline failure — e.g. a red pipeline on push) is a change
+      failure. `deploy_failed` (`deploying`/`prod-deploying` → `reworking`, fired by cicd/engineer)
+      exists so a **fixed-forward** deploy failure is not invisible: previously a red deploy
+      recorded only `built_green`, so CFR read a false 0%. Fire `deploy_failed` on any red
+      deploy even when you fix forward — the trace is what CFR counts.
   - **(a) gross-lead-time decomposition** — `by_state` and `by_owner`: time attributed to
     agent-work vs `queue` wait-latency vs `external` blocked, so the largest time thief is named.
   - **(b) quality** — failure / rework rate **by stage** (which stage red-flags most).
@@ -90,6 +111,10 @@ There is no other way to change item state. No hand-editing of `derived:`; no se
   - **(d) token cost** — `token_cost`: total, `by_owner` (event `tokens` folded through the event's
     agent), and the **plumbing-vs-delivery split** (running-the-OS vs customer-value; classification
     ported from dora.py cost-split, EXP-067). Computed from each event's optional `tokens`.
+  - **(f) agent cycle time** — `agent_cycle_time`: the REAL per-stage work-effort each dispatched
+    agent spent (`duration_ms`), `by_owner` and `by_stage` (total/median/n), plus the key derived
+    figure **`cycle_time_vs_glt`** — Σ agent effort as a % of gross lead time (work-effort vs
+    wait/overhead). GLT stays the honest TOTAL elapsed; §F is its complement. From optional `duration_ms`.
   Aggregate (slice/chunk/requirement) state bubbles from children per the graph `bubble` rule.
 - Re-renders each active item's `derived:` block (state, queue, children, ancestors, **metrics**).
 - **(e) per-item metrics** — ALL the flow/DORA quantities are ALSO trackable for one item, not

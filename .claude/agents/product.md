@@ -93,6 +93,16 @@ Ready, or it ships to the board flagged `needs-acceptance`. Co-decide infra enab
 solution-architect. A use case is done when its own acceptance cases pass
 independently of the others.
 
+**Load/replace surfaces must encode the stale-prior-state case (v83, from UC-E3).** For
+any UC whose job is to LOAD or REPLACE the active model/view (load-a-config, switch-a-
+selection, apply-a-file), a happy-path acceptance case is not enough: author an explicit
+case for **a FAILED load AFTER a prior GOOD load** — the failure branch must CLEAR the
+earlier good model from view (leaving only the error), never leave a stale/wrong model
+rendered underneath the error. This is the exact class UC-E3 under-encoded (its acceptance
+only said a bad entry must not load as a wrong model, not that a PRIOR good model must be
+cleared) — the tester's adversarial ordering caught it, costing a rework cycle (the run's
+only CFR hit). Encode it up front so it is dev-validated first time.
+
 Mirror the use-case dependency edges into
 `work/<project>/architecture/dependencies/use-case-deps.mmd` (mermaid graph,
 one node per use case / delivered behaviour, edges = genuine behavioural

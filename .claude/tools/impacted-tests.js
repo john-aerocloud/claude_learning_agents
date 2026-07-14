@@ -85,6 +85,23 @@
  *   independent of the SINCE window) that fires a loud WARNING banner in the
  *   report rather than silently under-reporting. It does not change exit codes;
  *   it changes what a human/tester DOES with an "uncovered" line.
+ *
+ * @alias RECONCILIATION (OI-COVERS-NODEID, see parseAliasComments/effectiveSpecsFor)
+ *   The fix for the convention mismatch above, WITHOUT flattening a project's
+ *   thoughtful semantic @covers vocabulary into the diagram's terse ids (or
+ *   coupling specs to a lightweight "context-only, NOT a build spec" sketch).
+ *   A .mmd node declares which @covers tags cover it via comment lines:
+ *     %% @alias MAP=domain-map,domain-serialize
+ *     %% @alias G_CONF=domain-conformance
+ *   The tool reads these alongside node ids; a changed node's covering specs are
+ *   its directly-tagged specs UNIONed with the specs of every aliased tag, so
+ *   node `MAP` reports IMPACTED via specs tagged `domain-map`. The alias lives next
+ *   to the node id it explains, is self-documenting, expresses the natural
+ *   granularity mismatch in both directions (many tags -> one node; one tag ->
+ *   many nodes by repeating it), and generalises to any project with this same
+ *   mismatch. Purely ADDITIVE: absent any @alias line the map is empty and the
+ *   tool behaves exactly as before, and an adopted alias also suppresses the
+ *   convention-mismatch WARNING for the tags it reconciles.
  */
 
 const { execFileSync } = require('node:child_process');
@@ -206,6 +223,48 @@ function parseCoversTags(text, specPath) {
   return map;
 }
 
+// `%% @alias <nodeId>=<tag>[, <tag>...]` comment lines in a .mmd -> Map(nodeId ->
+// Set(coversTag)). The alias reconciles a node id (the diagram's terse vocabulary,
+// e.g. `MAP`) with the @covers tags that actually cover it (the specs' semantic
+// vocabulary, e.g. `domain-map`, `domain-serialize`) WITHOUT forcing either side
+// to change — see OI-COVERS-NODEID. Keyed by node id so the natural granularity
+// mismatch is expressible in BOTH directions: many tags -> one node
+// (`%% @alias MAP=domain-map,domain-serialize`) and one tag -> many nodes (repeat
+// the tag on each node's alias line). Purely additive: a .mmd with no @alias lines
+// yields an empty map and the tool behaves exactly as before.
+function parseAliasComments(text) {
+  const map = new Map();
+  const re = /^\s*%%\s*@alias\s+([A-Za-z0-9_-]+)\s*=\s*(.+)$/gm;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const node = m[1].trim();
+    // a trailing parenthetical annotation is allowed and stripped, mirroring @covers
+    const list = m[2].replace(/\([^)]*\)\s*$/, '').trim();
+    for (const raw of list.split(',')) {
+      const tag = raw.trim().replace(/[.,;]+$/, '');
+      if (!tag || tag.startsWith('(')) continue;
+      if (!map.has(node)) map.set(node, new Set());
+      map.get(node).add(tag);
+    }
+  }
+  return map;
+}
+
+// The covering specs for a node id: its own directly-tagged specs (a spec that
+// literally says `@covers <nodeId>`) UNIONed with the specs of every @covers tag
+// aliased to it. Returns a sorted array (possibly empty).
+function effectiveSpecsFor(node, coversIndex, aliasMap) {
+  const specs = new Set(coversIndex.get(node) || []);
+  const tags = aliasMap.get(node);
+  if (tags) {
+    for (const tag of tags) {
+      const set = coversIndex.get(tag);
+      if (set) for (const s of set) specs.add(s);
+    }
+  }
+  return [...specs].sort();
+}
+
 // ---- filesystem / git glue --------------------------------------------------
 
 function depFiles(root, project) {
@@ -284,17 +343,23 @@ function extractAllNodeIds(text) {
 }
 
 // Structural sanity check, independent of the SINCE window: do ANY @covers tags
-// in this project match ANY node id declared in its .mmd diagrams? If the
-// project HAS @covers tags but NONE overlap the diagram's node-id vocabulary,
-// every changed node will show UNCOVERED even when a covering spec exists under
-// a different tag vocabulary (e.g. `domain-map` vs `MAP`) — a silent
-// under-report, not a real coverage gap. Loud, not silent (this file's header).
-function checkTagConvention(allNodeIds, coversIndex) {
+// in this project match ANY node id declared in its .mmd diagrams, EITHER directly
+// or via a documented `%% @alias` (OI-COVERS-NODEID)? If the project HAS @covers
+// tags but NONE reconcile with the diagram's node-id vocabulary, every changed
+// node will show UNCOVERED even when a covering spec exists under a different tag
+// vocabulary (e.g. `domain-map` vs `MAP`) — a silent under-report, not a real
+// coverage gap. Loud, not silent (this file's header). An adopted alias mapping
+// IS the reconciliation, so a tag referenced by any alias counts as matched and
+// no longer trips the warning.
+function checkTagConvention(allNodeIds, coversIndex, aliasMap = new Map()) {
   const taggedIds = [...coversIndex.keys()].sort();
   if (taggedIds.length === 0) {
     return { mismatch: false, taggedIds, overlap: [], allNodeIds: [...allNodeIds].sort() };
   }
-  const overlap = taggedIds.filter((id) => allNodeIds.has(id));
+  // tags reconciled by an alias line (`%% @alias NODE=tag,...`) count as matched.
+  const aliasedTags = new Set();
+  for (const tags of aliasMap.values()) for (const t of tags) aliasedTags.add(t);
+  const overlap = taggedIds.filter((id) => allNodeIds.has(id) || aliasedTags.has(id));
   return {
     mismatch: overlap.length === 0,
     taggedIds,
@@ -373,23 +438,30 @@ function run({ root, project, since }) {
   // 2. covers index over committed specs
   const coversIndex = buildCoversIndex(findSpecFiles(root, project));
 
-  // 2b. full node-id inventory (current working-tree content of the .mmd files,
-  // NOT diff-sourced) for the @covers/node-id convention sanity check.
+  // 2b. full node-id inventory + adopted @alias mappings (current working-tree
+  // content of the .mmd files, NOT diff-sourced) for coverage resolution and the
+  // @covers/node-id convention sanity check.
   const allNodeIds = new Set();
+  const aliasMap = new Map(); // nodeId -> Set(coversTag)
   for (const f of files) {
     let text;
     try { text = fs.readFileSync(f, 'utf8'); } catch { continue; }
     for (const id of extractAllNodeIds(text)) allNodeIds.add(id);
+    for (const [node, tags] of parseAliasComments(text)) {
+      if (!aliasMap.has(node)) aliasMap.set(node, new Set());
+      for (const t of tags) aliasMap.get(node).add(t);
+    }
   }
-  const tagConvention = checkTagConvention(allNodeIds, coversIndex);
+  const tagConvention = checkTagConvention(allNodeIds, coversIndex, aliasMap);
 
-  // 3. partition
+  // 3. partition — a node is IMPACTED if it has directly-tagged specs OR specs
+  //    reached through an adopted @alias (effectiveSpecsFor unions both).
   const impacted = [];
   const uncovered = [];
   for (const node of changedNodes) {
-    const set = coversIndex.get(node);
-    if (set && set.size) {
-      impacted.push({ node, specs: [...set].sort() });
+    const specs = effectiveSpecsFor(node, coversIndex, aliasMap);
+    if (specs.length) {
+      impacted.push({ node, specs });
     } else {
       uncovered.push(node);
     }
@@ -415,7 +487,8 @@ function formatReport(res, { project, since, root }) {
     lines.push('  Every "UNCOVERED" node below may just be tagged under a DIFFERENT vocabulary');
     lines.push('  (e.g. `domain-map` vs `MAP`) — do NOT treat UNCOVERED as "write a new spec"');
     lines.push('  until this is reconciled: (a) retag specs to the exact .mmd node id, or');
-    lines.push('  (b) adopt a documented alias between the semantic tag and the node id.');
+    lines.push('  (b) add `%% @alias <nodeId>=<tag>,<tag>` comment lines to the .mmd (this');
+    lines.push('  tool reads them and unions the aliased tag\'s specs into the node\'s coverage).');
     lines.push('  This is flagged as a follow-up, not auto-fixed by this tool run.');
     lines.push('');
   }
@@ -497,6 +570,8 @@ module.exports = {
   extractAllNodeIds,
   checkTagConvention,
   parseCoversTags,
+  parseAliasComments,
+  effectiveSpecsFor,
   resolveDiffRoot,
   shaExistsIn,
   run,

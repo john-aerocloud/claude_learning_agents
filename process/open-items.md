@@ -90,20 +90,25 @@ CSV is no longer the metrics source.)_
   stale) — turning drift into a caught error rather than a silent reconcile. Owner: cicd
   + engineer. The bundles are a DELIBERATE committed asset (architecture decision), so do
   NOT simply gitignore them without the architect.
-- **OI-COVERS-NODEID (AdixOut, 2026-07-13):** `make impacted-tests` now resolves the
-  correct nested-repo git root (EXP-104), but on AdixOut its 17 `@covers` tags
-  (`domain-map`, `domain-serialize`, `domain-conformance`, `adapter-subscribe`, ...)
-  use a semantic-domain vocabulary that matches NONE of the 22 `.mmd` node ids
-  (`MAP`, `G_CONF`, `C11`, `POLL`, ...) — a real, thoughtfully-applied tagging
-  convention, just keyed to a different id space than the architecture diagram. The
-  tool now detects this structurally and prints a loud WARNING banner (never a silent
-  0-impacted report), but does NOT auto-reconcile it. Fix when picked up (either
-  route is acceptable, pick one and apply consistently project-wide): (a) retag
-  AdixOut's 17 `@covers` sites to the exact `.mmd` node id(s) they cover (e.g.
-  `domain-map` → `MAP`; some tags may need to expand to multiple ids, e.g.
-  `resyncHandler.test.ts`'s `domain-resync-handler` plausibly maps to `G_KEY` +
-  `G_THROTTLE` + `RESYNC`), or (b) extend the `.mmd` node declarations with an inline
-  alias comment (`%% @alias MAP=domain-map`) that the tool's covers-index reads
-  alongside the raw node id. Route to engineer (retag) or cicd (alias mechanism).
-  Target: CFR / tester lead time — a changed node with a genuinely-existing covering
-  spec should show IMPACTED, not UNCOVERED.
+- **OI-COVERS-NODEID (AdixOut, 2026-07-13) — RESOLVED 2026-07-14 via route (b).**
+  `make impacted-tests` now resolves the correct nested-repo git root (EXP-104), but on
+  AdixOut its 17 `@covers` tags (`domain-map`, `domain-serialize`, `domain-conformance`,
+  `adapter-subscribe`, ...) used a semantic-domain vocabulary that matched NONE of the
+  `.mmd` node ids (`MAP`, `G_CONF`, `C11`, `POLL`, ...) — a real, thoughtfully-applied
+  tagging convention, just keyed to a different id space than the architecture diagram.
+  **Fix shipped (route b, alias mechanism):** `impacted-tests.js` now parses
+  `%% @alias <nodeId>=<tag>,<tag>` comment lines in `architecture/dependencies/*.mmd`
+  (`parseAliasComments`) and, for a changed node, unions its directly-tagged specs with
+  the specs of every aliased tag (`effectiveSpecsFor`); an adopted alias also suppresses
+  the convention-mismatch WARNING for the tags it reconciles. Purely ADDITIVE — a `.mmd`
+  with no `@alias` line behaves exactly as before, so no other project is affected.
+  Route (b) was chosen over (a) retag because the `@covers` vocabulary is deliberately
+  finer/more-semantic than the terse diagram ids, and the diagram is explicitly a
+  "LIGHTWEIGHT, context-only; NOT a build spec" sketch — coupling thoughtful test tags
+  to a non-authoritative sketch's ids (and flattening `domain-map`+`domain-serialize`
+  into one `MAP`) would be backwards. AdixOut's `data-flow.mmd` now carries 11 `@alias`
+  lines; `make impacted-tests SINCE=594fe8e PROJECT=AdixOut` reports MAP/G_CONF/G_KEY/
+  G_THROTTLE as IMPACTED (was 4×UNCOVERED + warning), EXIT 0 clean. 7 new self-tests
+  added (29 total green via `make test-tools`). Unblocks the EXP-104 measurement
+  (impacted-tests usable on AdixOut with 0 false-UNCOVERED). Target met: CFR / tester
+  lead time — a changed node with a genuinely-existing covering spec now shows IMPACTED.

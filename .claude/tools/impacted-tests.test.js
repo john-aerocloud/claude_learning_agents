@@ -358,3 +358,102 @@ test('formatReport: prints a loud WARNING banner on a tag/node-id convention mis
   assert.match(out, /domain-map/);
   assert.match(out, /MAP, G_CONF/);
 });
+
+// --- OI-COVERS-NODEID: `%% @alias` node-id <-> @covers-tag reconciliation ------
+
+test('parseAliasComments: `%% @alias NODE=tag1,tag2` -> Map(node -> {tags}); many tags to one node', () => {
+  const mmd = [
+    'flowchart TB',
+    '  %% @alias MAP=domain-map,domain-serialize',
+    '  %% @alias G_CONF=domain-conformance',
+    '  MAP["map"]',
+  ].join('\n');
+  const m = tool.parseAliasComments(mmd);
+  assert.deepEqual([...m.get('MAP')].sort(), ['domain-map', 'domain-serialize']);
+  assert.deepEqual([...m.get('G_CONF')], ['domain-conformance']);
+});
+
+test('parseAliasComments: one tag repeated across nodes expresses a one-tag -> many-nodes mapping', () => {
+  const mmd = [
+    '  %% @alias G_KEY=domain-resync-handler',
+    '  %% @alias G_THROTTLE=domain-resync-handler',
+    '  %% @alias RESYNC=domain-resync,domain-resync-handler',
+  ].join('\n');
+  const m = tool.parseAliasComments(mmd);
+  assert.ok(m.get('G_KEY').has('domain-resync-handler'));
+  assert.ok(m.get('G_THROTTLE').has('domain-resync-handler'));
+  assert.ok(m.get('RESYNC').has('domain-resync-handler'));
+  assert.ok(m.get('RESYNC').has('domain-resync'));
+});
+
+test('parseAliasComments: no @alias lines -> empty map (purely additive, no behaviour change)', () => {
+  const mmd = 'flowchart TB\n  %% just a normal comment\n  MAP["map"]:::changed\n';
+  assert.equal(tool.parseAliasComments(mmd).size, 0);
+});
+
+test('effectiveSpecsFor: unions a node\'s direct specs with every aliased tag\'s specs', () => {
+  const coversIndex = new Map([
+    ['MAP', new Set(['direct.spec.ts'])],
+    ['domain-map', new Set(['map.spec.ts'])],
+    ['domain-serialize', new Set(['ser.spec.ts'])],
+  ]);
+  const aliasMap = new Map([['MAP', new Set(['domain-map', 'domain-serialize'])]]);
+  assert.deepEqual(
+    tool.effectiveSpecsFor('MAP', coversIndex, aliasMap),
+    ['direct.spec.ts', 'map.spec.ts', 'ser.spec.ts'],
+  );
+});
+
+test('effectiveSpecsFor: a node with no direct tag and no alias resolves to no specs', () => {
+  assert.deepEqual(tool.effectiveSpecsFor('OAG', new Map(), new Map()), []);
+});
+
+test('checkTagConvention: an adopted alias reconciles the vocabulary -> NO mismatch warning', () => {
+  const coversIndex = new Map([
+    ['domain-map', new Set(['a.spec.ts'])],
+    ['domain-conformance', new Set(['b.spec.ts'])],
+  ]);
+  const aliasMap = new Map([
+    ['MAP', new Set(['domain-map'])],
+    ['G_CONF', new Set(['domain-conformance'])],
+  ]);
+  const res = tool.checkTagConvention(new Set(['MAP', 'G_CONF']), coversIndex, aliasMap);
+  assert.equal(res.mismatch, false);
+  assert.deepEqual(res.overlap.sort(), ['domain-conformance', 'domain-map']);
+});
+
+test('run(): a changed node keyed to a DIFFERENT tag vocabulary shows IMPACTED via `%% @alias`', () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'imp-alias-'));
+  git(repo, ['init', '-q']);
+  git(repo, ['config', 'user.email', 't@t']);
+  git(repo, ['config', 'user.name', 't']);
+  const depDir = path.join(repo, 'work', 'projZ', 'architecture', 'dependencies');
+  const specDir = path.join(repo, 'work', 'projZ', 'src', 'specs');
+  fs.mkdirSync(depDir, { recursive: true });
+  fs.mkdirSync(specDir, { recursive: true });
+  // baseline: MAP declared, terse node id; spec tags the SEMANTIC vocabulary.
+  fs.writeFileSync(path.join(depDir, 'data-flow.mmd'),
+    'flowchart TB\n' +
+    '  %% @alias MAP=domain-map,domain-serialize\n' +
+    '  MAP["map + serialize"]:::stable\n');
+  fs.writeFileSync(path.join(specDir, 'mapDeparture.test.ts'),
+    '// @covers domain-map\nit("x", () => {});\n');
+  git(repo, ['add', '-A']);
+  git(repo, ['commit', '-qm', 'baseline with alias']);
+  const since = git(repo, ['rev-parse', 'HEAD']).trim();
+  // in-window: MAP is re-marked changed (uncommitted working-tree edit).
+  fs.writeFileSync(path.join(depDir, 'data-flow.mmd'),
+    'flowchart TB\n' +
+    '  %% @alias MAP=domain-map,domain-serialize\n' +
+    '  MAP["map + serialize"]:::s001changed\n');
+  const res = tool.run({ root: repo, project: 'projZ', since });
+  assert.ok(res.changedNodes.includes('MAP'), 'MAP is the changed node');
+  const mapImpact = res.impacted.find((r) => r.node === 'MAP');
+  assert.ok(mapImpact, 'MAP must show IMPACTED via the domain-map alias, not UNCOVERED');
+  assert.ok(mapImpact.specs.some((s) => s.endsWith('mapDeparture.test.ts')));
+  assert.equal(res.uncovered.includes('MAP'), false);
+  assert.equal(res.exitCode, 0, 'the only changed node is now covered -> clean exit');
+  // and the adopted alias suppresses the convention-mismatch warning.
+  assert.equal(res.tagConvention.mismatch, false);
+  fs.rmSync(repo, { recursive: true, force: true });
+});

@@ -19,7 +19,7 @@ Subcommands:
 Stdlib only. Frontmatter is parsed by hand (the tiny YAML-ish subset the contract
 uses); JSON via stdlib json. Invoke via the launcher `sh .../work-items <cmd>`.
 """
-import argparse, csv, json, os, re, sys
+import argparse, csv, json, os, re, subprocess, sys
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 
@@ -714,6 +714,32 @@ def _maybe_relocate(project, iid, item, state, graphs):
         dst = os.path.join(dst_dir, f"{iid}.md")
         os.replace(cur_path, dst)
         print(f"  relocated {iid} -> items/{want}/")
+        _git_stage_relocation(project, cur_path, dst)
+
+
+def _git_stage_relocation(project, cur_path, dst):
+    """Best-effort: record the active/<->done/ rename in the project's git repo
+    so a completed item's `items/done/<ID>.md` is never left UNTRACKED (a recurring
+    hygiene gap — the file moved on disk via os.replace above, but git was never
+    told, so a later *targeted* `git add <paths>` in the commit step silently
+    missed the new file; observed on UC-ADIX-009, UC-ADIX-010, ...).
+
+    Staging (not committing) is exactly the caller's intent here: wi mutations are
+    always followed by a commit of the item change, so the moved file must be in
+    the index. This NEVER raises and NEVER affects the move — the relocation has
+    already succeeded above; this only annotates git. It is a silent no-op outside
+    a git repo (the machinery's own temp-dir tests) and in the parent/integration
+    tree (where `work/*` is gitignored, so the pathspec is ignored and git exits
+    non-zero, which we swallow). `git add -A -- <old> <new>` stages BOTH the
+    deletion of the vacated path and the addition of the new one."""
+    repo = os.path.join(ROOT, "work", project)
+    try:
+        subprocess.run(
+            ["git", "-C", repo, "add", "-A", "--", cur_path, dst],
+            check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------

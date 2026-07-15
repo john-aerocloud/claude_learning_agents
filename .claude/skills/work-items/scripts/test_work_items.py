@@ -10,6 +10,7 @@ import os
 import sys
 import json
 import shutil
+import subprocess
 import tempfile
 import unittest
 import contextlib
@@ -241,6 +242,37 @@ class TestAppend(Base):
             self._run_append("UC-D", "validated", "tester")
         self.assertFalse(os.path.exists(os.path.join(self._items("active"), "UC-D.md")))
         self.assertTrue(os.path.exists(os.path.join(self._items("done"), "UC-D.md")))
+
+    @unittest.skipUnless(shutil.which("git"), "git not on PATH")
+    def test_relocation_to_done_is_staged_in_git_not_left_untracked(self):
+        # Hygiene regression: when a completed item moves active/ -> done/, the
+        # machinery must record the rename in the project's git repo so the new
+        # done/<ID>.md is never left UNTRACKED for a later targeted `git add` to
+        # miss (recurred on UC-ADIX-009, UC-ADIX-010).
+        repo = os.path.join(self.tmp, "work", self.project)
+        os.makedirs(repo, exist_ok=True)
+        for args in (["init", "-q"], ["config", "user.email", "t@t"], ["config", "user.name", "t"]):
+            subprocess.run(["git", "-C", repo, *args], check=True)
+        self.write_item("active", "UC-GIT", "use-case",
+                        [{"ts": "1", "event": "registered", "agent": "flow-manager"},
+                         {"ts": "2", "event": "made_ready", "agent": "flow-manager"},
+                         {"ts": "3", "event": "pulled", "agent": "orchestrator"},
+                         {"ts": "4", "event": "built_green", "agent": "engineer"},
+                         {"ts": "5", "event": "deployed", "agent": "cicd"}])
+        subprocess.run(["git", "-C", repo, "add", "-A"], check=True)
+        subprocess.run(["git", "-C", repo, "commit", "-qm", "active item"], check=True)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self._run_append("UC-GIT", "validated", "tester")
+        # physically moved to done/
+        self.assertTrue(os.path.exists(os.path.join(self._items("done"), "UC-GIT.md")))
+        # the new done/ path is STAGED (in the index vs HEAD), not untracked
+        staged = subprocess.run(["git", "-C", repo, "diff", "--cached", "--name-only"],
+                                capture_output=True, text=True, check=True).stdout
+        self.assertIn("items/done/UC-GIT.md", staged)
+        # nothing about the item is left dangling untracked
+        porcelain = subprocess.run(["git", "-C", repo, "status", "--porcelain"],
+                                   capture_output=True, text=True, check=True).stdout
+        self.assertNotIn("??", porcelain)
 
     def test_append_deployed_by_cicd(self):
         # cicd deploys a UC sitting in `deploying`; lands in dev-validating (v4)

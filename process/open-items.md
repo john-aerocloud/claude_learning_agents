@@ -112,3 +112,17 @@ CSV is no longer the metrics source.)_
   added (29 total green via `make test-tools`). Unblocks the EXP-104 measurement
   (impacted-tests usable on AdixOut with 0 false-UNCOVERED). Target met: CFR / tester
   lead time — a changed node with a genuinely-existing covering spec now shows IMPACTED.
+- **OI-WI-DONEMOVE-UNTRACKED (shared machinery, 2026-07-15) — RESOLVED.** When an
+  item became terminal, `work-items.py` `_maybe_relocate` did `os.replace(active→done)`
+  with NO git operation, so the new `items/done/<ID>.md` was left UNTRACKED and a later
+  *targeted* `git add <paths>` in the commit step silently missed it (recurred:
+  UC-ADIX-009 `47e71f5`, UC-ADIX-010 `44659c2`, both needed a manual follow-up add).
+  **Fix:** `_maybe_relocate` now best-effort stages the rename in the project repo
+  (`git add -A -- <old> <new>`) via `_git_stage_relocation` — guarded to NEVER raise
+  or affect the move (relocation already succeeded), a silent no-op outside a git repo
+  (the machinery's temp-dir tests) and in the parent/integration tree (`work/*`
+  gitignored). Staging, not committing — the caller still owns the commit. 1 new
+  self-test (`test_relocation_to_done_is_staged_in_git_not_left_untracked`, 104 total
+  green). The comma-truncation sibling defect was already fixed earlier (regression
+  tests present); the nested-repo sibling was EXP-104. Target: git hygiene of the SSOT
+  — a completed item is never left out of version control.

@@ -322,7 +322,7 @@ naming it.
 The retro WALKS these steps (retro.md); a routed change-set that does not target the
 current constraint must justify itself (a subordinate/exploit move or a safety fix) or
 be deferred. Per-close, the loop does a cheap parts-check (loop-run.md) and escalates to
-a full retro only when the constraint SHIFTS. Target: gross lead time. [EXP-100]
+a full retro only when the constraint SHIFTS. Target: gross lead time.
 
 ---
 

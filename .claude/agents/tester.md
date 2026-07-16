@@ -136,6 +136,17 @@ model — the changed nodes/edges ARE your scope:
   make this probe automatic for concurrent surfaces, and validate against the
   concurrency/idempotency acceptance conditions the architect now authors for them.
 
+- **Match the FULL identifying tuple, never a bare qualifier substring (2026-07-16,
+  recurring 3x).** When a probe or acceptance assertion checks an AIDX/event
+  `OperationTime` — or any element keyed by a code + qualifier — match the full
+  identifying tuple (for `OperationTime`, the `(OperationQualifier, TimeType)` pair),
+  never a bare-qualifier substring like `includes('OperationQualifier="ONB"')`. A
+  bare-qualifier match false-fails the moment a new twin of the same qualifier ships
+  (an `EST` predictive twin alongside the `ACT` one), so the probe reads red though the
+  product is correct — a test artifact, not a defect. Scope every such assertion to the
+  specific `(qualifier, timeType)` it means; and when asserting OMISSION, assert the
+  SPECIFIC twin is absent, not the qualifier.
+
 ## Validate in dev first, then prod (dev-then-prod path, v82 state-graphs)
 A use-case is validated in DEV before it reaches prod — you fire TWO validations on
 the locked path `deploying(deploy-to-dev) → dev-validating → prod-deploying →

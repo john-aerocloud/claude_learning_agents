@@ -56,6 +56,29 @@ for Azure work by default.
   single `terraform plan` gate. Layout: one root module per environment under
   `infra/terraform/`, shared resources factored into modules, env-parameterised
   via `*.tfvars`.
+- **BASE every Azure Terraform root on the org platform modules (2026-07-14,
+  human direction).** Do NOT hand-roll raw `azurerm` resources — consume the
+  shared **composition modules** in
+  [`AeroCloudSystems/aas-platform-modules`](https://github.com/AeroCloudSystems/aas-platform-modules).
+  The canonical starting point is
+  `examples/minimal/azure-app-service/main.tf` (fetch it authoritatively via
+  `gh api repos/AeroCloudSystems/aas-platform-modules/contents/<path> --jq .content | base64 -d`
+  — the repo is gh-accessible). Copy its shape and adjust for the workload:
+  - `terraform { required_version = ">= 1.8.0"; backend "azurerm" {}; required_providers { azurerm = { source = "hashicorp/azurerm", version = ">= 4.0.0" } } }`
+  - `provider "azurerm" { features {}; resource_provider_registrations = "none" }`
+  - `module "<x>" { source = "../../../modules/compositions/<composition>" … }` —
+    pick the composition matching the compute (e.g. `azure-app-service`; use the
+    Function-App / Event-Hubs / Service-Bus compositions the repo provides for an
+    event-driven workload rather than raw resources).
+  - **Naming:** `<kind>-aas-<service>-<env>-<region-abbr>-NNN`
+    (e.g. `app-aas-example-dev-cus-001`, `rg-…`, `asp-…`, `pep-…`, `vnet-…`).
+  - **Network-isolated by default:** `virtual_network_integration` +
+    `private_endpoint` (private DNS via the connectivity hub RG), as the example shows.
+  - **Mandatory `tags` block:** `platform / environment / service / owner /
+    criticality / data_classification / cost_centre / managed_by = "terraform"`.
+  Deviating from a platform composition (hand-rolling a resource it already
+  provides) needs a logged reason — the modules encode the org's network/security/
+  tagging posture, so re-implementing them silently drifts from it.
 - **Remote state (required):** backend in an **Azure Storage account with state
   locking** (blob lease). Under a data-residency mandate the state — which can
   contain resource metadata — **stays in the same Azure tenant/region** as the

@@ -10,6 +10,18 @@ Act as the **orchestrator** for project **$1**, driving the v40/v41 pull loop
 (process STAGE F). You hold dispatch authority; the **flow-manager** owns queue
 state and flow decisions.
 
+> **STEP 0 — FRESHNESS PRECONDITION (v92, EXP-113).** Before the FIRST pull, fold the
+> current process layer forward: run `make project-update PROJECT=$1`. The loop must NOT
+> run on a stale process — a stale instance re-runs already-fixed tools/agents and
+> re-incurs already-fixed defects (evidence: an 8-versions-stale OFS instance re-hit the
+> EXP-104 impacted-tests nested-repo bug 3× in one session, each a manual tester fallback,
+> though the fix was already on `main`). This is the same fold-forward `/project-switch`
+> runs on resume; entering the loop directly ("start the loops") skipped it. Handle the
+> outcome exactly as §0a: exit 0 → proceed on the current process; exit 3 (DEFERRED, dirty
+> integration tree) → proceed but report the owed update; exit 4 (CONFLICT) → stop and
+> surface it (the one escalation automation cannot resolve). Skip only if `$1` has no
+> `instance/$1` branch (non-worktree/standalone project).
+
 > **v82 CUTOVER (process §F0).** State is event-sourced in per-item files
 > (`work/$1/items/{active,done}/<ID>.md`); state = `fold(events)`. Change state ONLY via
 > `make wi-append PROJECT=$1 ID=<id> EVENT=<e> AGENT=<role>` (edge-checked) — the stage

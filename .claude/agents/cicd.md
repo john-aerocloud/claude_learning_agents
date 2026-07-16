@@ -46,6 +46,31 @@ Always create TWO OIDC roles:
 - App role: S3 + CloudFront only (no IAM, no CloudFormation).
 - Infra role: can assume CDK bootstrap roles; requires `cdk bootstrap --trust <account>`.
 
+## Every environment deploys through the pipeline (v88, EXP-109)
+**No environment is ever deployed by hand.** Every deploy to a real account —
+sandbox, **shared/hub, dev, prod** — runs as a CI job on push to `main`. A
+hand-run `make deploy-sst`/`sst deploy` against a real account is NOT a delivery
+mechanism; locally you run only the **synth/diff pre-push gate** (`sst diff`/synth).
+
+- **Dev is the fully-integrated pre-prod validation environment.** It is the
+  environment that proves a prod deploy will work, so **all integration/acceptance
+  tests against a deployed environment run IN the pipeline** (the `acceptance-dev`
+  job) and gate prod mechanically (`deploy-prod needs: acceptance-dev`). Never a
+  manual local probe standing in for the CI gate.
+- **Every stage/tier gets its own CI deploy job — including a cross-account or hub
+  tier.** A shared-account EventBridge hub + its fan-out, and the end-to-end
+  cross-account integration probe (e.g. a 3-hop published→hub→consumer-folded
+  latency/delivery check), belong in the pipeline: a `deploy-<stage>` job (with a
+  one-time human-bootstrapped OIDC deploy role, §F5) plus a CI integration-test job
+  on the dev tier that gates prod exactly like `acceptance-dev`.
+- **A stage not yet wired into CI is an INFRA GAP to close, not a licence to deploy
+  by hand.** When you (or the engineer) find yourself reaching for a manual
+  cross-account/shared deploy, that is the signal a pipeline job is missing:
+  register it as work, add the CI deploy job + integration probe, bootstrap the
+  OIDC role (§F5 human gate), and let the pipeline deliver. The permission system
+  resisting a manual shared-account write is the guard working as intended.
+  Founding lapse: `process/principle-failures/2026-07-16-manual-shared-deploy-no-ci-path.md`.
+
 **Deploy-role grants: watch the inline-policy budget (v61, DEFECT-OAG-014).** An
 IAM role's INLINE policies share a 10,240-byte hard limit. As a deploy role
 accrues per-service grants it WILL hit this and the deploy fails mid-apply

@@ -1,14 +1,15 @@
 ---
-process_version: 87
-effective_from: 2026-07-12
-supersedes: v86, v85, v84, v83, v82, v81, v80, v76
+process_version: 88
+effective_from: 2026-07-16
+supersedes: v87, v86, v85, v84, v83, v82, v81, v80, v76
 status: active
 ---
 
-# Current Process — v87
+# Current Process — v88
 
 <!-- v85 (retro, AdixOut 2026-07-12; renumbered from a v84 that collided with main's concurrent v84 CORE-job-done-gate retro — both sets of learning coexist, only the version number was reconciled): constraint = QUEUE WAIT (ready 48.9% + registered 27.7% = 76.6% of GLT by owner `queue`), sample n=2 and heavily contaminated by non-system waits (mid-session org spend-limit outage, heavy human-steering gaps, deliberate serial-build pacing) — treat DIRECTIONAL, not a capacity signal. CFR 33% from ONE rejection (UC-ADIX-003 deploy-race), a GOOD catch. Changes routed this cycle (all already applied + folded): aws-architecture IaC default CDK→SST v3 Ion; ADR-0006 (release/provenance) + ADR-0007 (tagging) encoded into aws-architecture §9a/§2a; 3 principle-failures (rushed-to-register-before-understanding; skipped-solution-architecture-gate→wrong-IaC; build-identity-claimed-before-code-live); documenter standing duty (living root README); safe-deploy stream-drain (AdixOut cicd). Forward lever for the queue constraint = per-UC worktree isolation so the inner loop's maximal-independent-set actually builds in parallel (improvement-slice IMP-017, deferred — validate on a cleaner sample). Token review: 811k delivery tokens for 2 UCs; dominant WASTE = the CDK→SST full-infra rebuild forced by the skipped architecture gate — the gate fix (check tech choices vs org before build) is the token lever too. -->
 <!-- v87 (ROC retro 2026-07-12): §F0 — per-item board push + docs-refresh are HARD in-cycle invariants (board never lags item-file state by >1 cycle; documenter required at each slice close); founding lapse principle-failures/2026-07-11-board-and-docs-lag-during-loop.md. §F3 — register linear dependency-chain use-cases JIT per-UC, not batch up front (ROC: `registered` was 70% of GLT purely as a batch-registration artifact). BOTH folded as PLAIN process practice, deliberately NOT new experiment rows — enacting the same-retro directive to stop over-generating experiments and to fix DORA measurement. -->
+<!-- v88 (OAG, human-directed 2026-07-16, EXP-109): §14 infra-push-gate — environment deploys are PIPELINE-ONLY; local `sst deploy` to a real account is never a delivery path (only synth/diff pre-push). Dev is the fully-integrated pre-prod validation env; all integration/acceptance tests against a deployed env run IN the pipeline, gating prod. A cross-account/hub tier (shared-stage Aerobus + fan-out + the 3-hop probe) belongs in the pipeline too — its own CI deploy job + CI integration probe. A stage not yet wired into CI is an infra gap to close, not a licence to deploy by hand. Founding lapse: principle-failures/2026-07-16-manual-shared-deploy-no-ci-path.md (SLC-041 shared fan-out attempted via manual `make deploy-sst STAGE=shared` 3× because no CI path existed). -->
 
 
 ## What this file is
@@ -627,6 +628,22 @@ passes inside the done-condition, not discovered post-commit).
   statement that passes offline shape-tests can still be rejected at the AWS API on deploy
   (e.g. an invalid principal). Pushing infra green-locally-but-unsynthed is a deploy-failure
   waiting to turn CI red. Rationale: `principle-failures/2026-07-12-infra-pushed-green-locally-red-in-ci`.
+- **Environment deploys are PIPELINE-ONLY; local `sst deploy` to a real account is NEVER a
+  delivery path [v88, EXP-109].** Every deploy to a shared, dev, or prod environment happens
+  through the CI/CD pipeline on push to `main` — never a hand-run `make deploy-sst`/`sst deploy`
+  against a real account from a worktree. Local runs are the **synth/diff pre-push gate ONLY**
+  (`sst diff`/synth, per the bullet above). **Dev is the fully-integrated pre-prod validation
+  environment**: it is the environment that proves a prod deploy will work, so ALL
+  integration/acceptance tests against a deployed environment run IN the pipeline
+  (`acceptance-dev`), gating prod mechanically — not as a manual local probe. **A cross-account
+  or hub tier (e.g. a `shared`-stage EventBridge hub + its fan-out, and the cross-account
+  end-to-end integration probe) is part of the pipeline too** — it gets its own CI deploy job
+  (with a one-time human-bootstrapped OIDC deploy role, §F5) and its integration probe runs as a
+  CI job on the dev tier, gating prod like `acceptance-dev`. **A stage/environment not yet wired
+  into the pipeline is an INFRA GAP to close (add the CI job + bootstrap the OIDC role), NOT a
+  licence to deploy it by hand.** If a human/agent finds themselves reaching for a manual
+  cross-account deploy, that is the signal a pipeline job is missing — register it and wire it,
+  don't work around it. Rationale: `principle-failures/2026-07-16-manual-shared-deploy-no-ci-path`.
 - **Conventional Commits format.** Subject `type(scope): <intent>`, `type` ∈ {feat,fix,
   docs,style,refactor,perf,test,build,ci,chore,revert}; append `!` / `BREAKING CHANGE:`
   footer for a breaking change; keep the `Co-Authored-By` trailer.

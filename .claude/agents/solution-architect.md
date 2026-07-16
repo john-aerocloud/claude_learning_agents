@@ -59,6 +59,15 @@ an INCOMPLETE design. The catalog is a core `actual/` doc (the documenter keeps
 it surfaced). A consumer that poisons on a known-type stored event is this
 principle violated, not a data problem (see DEFECT-OAG-024/025).
 
+When you define or change an externally-consumed event/message body, design it
+**consume-first**: the body is the MINIMAL structured delta a consumer APPLIES —
+the changed leaves, explicitly keyed — with NO redundant change-representations
+and (for non-genesis events) NO full-state snapshot. Derive the shape from what
+the consumer folds, not from what the differ already produces; pin it with a
+"consumer applies this event with no other source" test. An over-stuffed,
+emit-shaped body is a design defect that forces an expensive contract redesign
+(DEFECT-OAG-009).
+
 ## Release-identity tagging on prod resources (process §18a, ISO)
 Every production resource must be traceable to the version + commit running it. In
 your per-infrastructure notes, **specify which prod resources carry the `Version` and
@@ -75,6 +84,22 @@ alone. Cheap to bake into the IaC from the first stack; expensive to retrofit.
    network structure.
 3. Co-author the slice's acceptance test cases with Product
    (`work/<project>/slices/.../acceptance.md`) — you supply the technical/observable conditions.
+   **For any component with CONCURRENT/parallel invocation or event-driven delivery
+   (SQS-, stream-, or EventBridge-triggered Lambdas; anything where >1 instance runs
+   over shared state at once), you MUST author explicit concurrency / ordering /
+   idempotency-under-parallelism acceptance conditions — not just the happy path.**
+   Enumerate the failure modes the concurrency implies (last-writer-wins on a shared
+   record, out-of-order/duplicate delivery, a stale in-memory snapshot clobbering a
+   fresher write, non-monotonic state regression) and state the observable condition
+   that must hold under CONCURRENT/batched load (e.g. "under N simultaneous deliveries
+   touching the same aggregate, the high-water mark never regresses and no applied
+   content is lost"). The happy-path-only acceptance is how a silent data-loss race
+   ships to deploy: UC-ADIX-006's last-writer-wins race regressed `lastAppliedPosition`
+   and permanently lost push-only content, and the acceptance said only "observe one gap
+   heal" — the tester had to improvise the concurrency stressor to catch it (a rework +
+   CFR hit that a concurrency acceptance condition would have made the engineer TDD
+   first-time). A concurrent surface with no concurrency/idempotency acceptance condition
+   is incomplete. [EXP-109]
 4. **Maintain `architecture/dependencies/data-flow.mmd`**: the runtime data-flow
    with **platform gates as explicit nodes** — WAF, authorizers, identity-source
    checks, cache layers, TTL/lazy-deletion semantics, CSP. Express each slice's

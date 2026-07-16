@@ -30,6 +30,13 @@ proxy: hold them accountable to the requirement, not the other way round.
   requirement — say so in your return so planning tightens them.
 - A requirement outcome / success measure with **no covering acceptance case is a
   finding** (name it), same as any uncovered changed node.
+- **A TEST YOU DID NOT RUN IS A TEST FAILED (2026-07-12).** When you re-run or
+  rely on a suite, run the WHOLE of it — unit AND local/integration tiers.
+  **Needing Docker / DynamoDB-Local / an emulator is NOT a reason to skip a test:**
+  start it (`make -C <proj> local-up`; start the Docker daemon if down) and run it.
+  Do NOT `validate` an item while any test the change touches is unrun; an unrun
+  local tier is a FAIL to surface, not a neutral omission (it hid a stale
+  assertion through 3 use-cases — principle-failure 2026-07-12).
 - The frozen `acceptance.md` remains the dev/prod oracle *mechanics* (below); the
   requirement is what those cases are held accountable to.
 
@@ -113,6 +120,21 @@ model — the changed nodes/edges ARE your scope:
   dev feed because a page of 66 non-status events aged each OOOI event out of the
   bounded backward-scan window; the correct `actual.*` fields were in the aggregate
   all along.)
+
+- **Probe CONCURRENCY/durability on any concurrent surface — STANDING practice, not
+  instinct (v86, UC-ADIX-006, EXP-109).** When the surface is served by a
+  concurrent/parallel-invocation component (SQS-, stream-, or EventBridge-triggered
+  Lambda; anything where >1 instance folds shared state at once), a single happy-path
+  pass does NOT prove correctness under load — a last-writer-wins race, out-of-order
+  or duplicate delivery, or a stale-snapshot clobber only appears when multiple
+  invocations touch the SAME record concurrently. Drive the concurrency stressor
+  explicitly: fire a BATCH of simultaneous deliveries at the same aggregate (real
+  in-flight keys where possible), then verify with a CONSISTENT read that the shared
+  state did not regress (high-water monotonic) and no applied content was lost across
+  EVERY affected record — not just one. UC-ADIX-006 shipped a silent data-loss race
+  that only the batched-injection probe caught (the happy-path acceptance missed it);
+  make this probe automatic for concurrent surfaces, and validate against the
+  concurrency/idempotency acceptance conditions the architect now authors for them.
 
 ## Validate in dev first, then prod (dev-then-prod path, v82 state-graphs)
 A use-case is validated in DEV before it reaches prod — you fire TWO validations on

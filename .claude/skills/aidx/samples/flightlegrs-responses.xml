@@ -1,0 +1,14 @@
+<!-- AIDX FlightLegRS responses. Source: SITA developer.aero (S5).
+     Both success and error return HTTP 200 OK. -->
+
+<!-- SUCCESS -->
+<IATA_AIDX_FlightLegRS xmlns="http://www.iata.org/IATA/2007/00">
+    <Success/>
+</IATA_AIDX_FlightLegRS>
+
+<!-- ERROR (still HTTP 200) -->
+<IATA_AIDX_FlightLegRS xmlns="http://www.iata.org/IATA/2007/00">
+    <Errors>
+        <Error ShortText="Service Exception" Code="1007"/>
+    </Errors>
+</IATA_AIDX_FlightLegRS>

@@ -78,6 +78,37 @@ into a banner/comment while blocked, and post an unblocked note when it clears.
 A UC with no acceptance criteria in its definition gets a `needs-acceptance`
 label (surfaced, never fabricated).
 
+## 2a. Ticket DESCRIPTION — rich, plan-connected (v88+)
+
+A board object is not just a title + status: its **description** MUST let a human
+see, without opening the repo, what the ticket delivers and how it fits the plan.
+The projection composes the description from the item file (the SSOT) — it is a
+pure render of data already there, never invented. Every projected issue's
+description carries these sections (omit a section only if the item genuinely
+lacks it):
+
+- **What this delivers** — the item's one-line value statement (the outcome, in
+  plain language — NOT the numeric value/cost, which stays off per §4).
+- **Jobs to be done** — the item's `job:` code(s) resolved to the job story /
+  root need from `work/<project>/product/jtbd-map.md` (e.g. `J15 — trust that a
+  resolved fault closes itself out`). This is the WHY.
+- **Personas served** — the item's `personas:` ids resolved to who they are from
+  `work/<project>/product/personas.md` (e.g. `P1 — CUPPS/PPSM Support Engineer`).
+  This is the WHO.
+- **Acceptance criteria** — the testable conditions from the item body (the
+  `AC-…` list). This is HOW WE KNOW IT'S DONE / what the tester validates.
+- **Part of the plan** — the parent chain resolved: this UC → its **slice**
+  (with the slice's value statement) → its **chunk** → the **requirement**, plus
+  a one-line **contribution** ("advances the slice's job by …"). This is HOW IT
+  FITS.
+
+The projection resolves persona/job ids to their prose by reading
+`personas.md` / `jtbd-map.md`, and the parent titles/values by reading the
+parent item files. Keep it a faithful render; if the item lacks acceptance or a
+persona/job mapping, surface that (a UC with no acceptance gets the
+`needs-acceptance` label, §2) rather than fabricating. Re-render on every
+projection so the description tracks the item (idempotent).
+
 ## 3. Labels
 
 - **Type/flow:** `defect` · `open-item` · `blocked` · `needs-acceptance`

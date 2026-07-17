@@ -74,8 +74,19 @@ hardcode the profile name.
    FALSE-GREEN if `.gitignore` silently drops the file (an unanchored pattern like `secrets/`
    matches every `secrets/` dir, including a source package): the UC reads `done` while its
    code was never committed. A done UC's code must be on trunk, not merely passing locally.
+   **Type-check is part of green, not optional (DEF-ROC-002 false-green):** if the
+   project has a `build`/`typecheck` script (e.g. `npm run build` = `tsc`), it MUST pass
+   before the UC is green — a passing test suite is NOT sufficient. Fast test runners
+   skip type-checking (vitest/jest via esbuild/swc transpile-only) and eslint does not
+   type-check, so a type-broken change (even in production code) ships with a green suite
+   and clean lint. DEF-ROC-002: UC-ROC-019 shipped a production `tsc` TS2556 with 189
+   tests green + lint clean; it would have broken the deploy build (`tsc --outDir dist`)
+   that the pipeline runs to emit the artifact. Run the project's `build`/`typecheck`
+   after the suite goes green and treat any type error as red. If no such script exists in
+   a typed project, that gap is itself a defect (add the script). Where possible add the
+   type-check to the pre-commit/CI fast gate so this cannot recur.
    **Then integrate, don't batch (process §14/§19b):** when a use-case's full
-   done-condition is met (suite **and** lint green), if the project repo has a
+   done-condition is met (suite, lint **and** type-check/build green), if the project repo has a
    configured, verified remote (`git remote get-url origin` resolves to the origin
    recorded in project.md/decision-log), `git -C work/<project> push origin <trunk>`
    — one green use-case is one push; never let commits pool. **No/unverified remote

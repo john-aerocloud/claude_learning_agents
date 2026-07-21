@@ -118,6 +118,19 @@ test('parseCoversTags: comma list, strips trailing (annotation), maps to file', 
   assert.equal(map.has('class-deps.mmd'), false); // annotation not treated as a node
 });
 
+test('parseCoversTags: an annotation WRAPPING onto a second comment line still registers the id (2026-07-21 fix — a same-line-only close previously dropped these silently)', () => {
+  const spec = [
+    '// @covers timing (class-deps.mmd — engine/timing: deriveItemTiming, the SINGULAR',
+    '//                 per-item per-pass breakdown for a COMPLETED or IN-FLIGHT item)',
+    '// @covers eventlog (data-flow.mmd — per-item append-only authoritative log)',
+  ].join('\n');
+  const map = tool.parseCoversTags(spec, '/some/spec.ts');
+  assert.equal(map.get('timing')?.has('/some/spec.ts'), true);
+  assert.equal(map.get('eventlog')?.has('/some/spec.ts'), true);
+  // the wrapped continuation line's prose is never mistaken for a second id.
+  assert.equal(map.has('per-item per-pass breakdown for a COMPLETED or IN-FLIGHT item)'), false);
+});
+
 // --- integration: full run() against a throwaway git repo --------------------
 
 function git(repo, args) {

@@ -205,16 +205,25 @@ function extractNodesFromDiffLines(diffText) {
  * @covers tags in a spec's text -> Map(nodeId -> Set(specPath)). A tag is a
  * `@covers a, b, c` list; a trailing ` (annotation)` is stripped; tokens that
  * are pure annotations (start with `(`) are ignored.
+ *
+ * The annotation is allowed to WRAP onto subsequent `//`-comment lines (a
+ * widespread convention across this repo's specs, e.g. a multi-paragraph
+ * rationale after the id list) — the id list itself is always complete on
+ * the FIRST line, ending at the first `(` if one is present, so it's cut
+ * there rather than requiring the parenthetical to close on the same line
+ * (a same-line-only close previously made every wrapped annotation silently
+ * fail to register its node-id at all — 2026-07-21 tool-bug fix).
  */
 function parseCoversTags(text, specPath) {
   const map = new Map();
   const re = /@covers\s+(.+)/g;
   let m;
   while ((m = re.exec(text)) !== null) {
-    // strip a trailing parenthetical annotation: "a, b (class-deps.mmd s005-h3)"
-    const list = m[1].replace(/\([^)]*\)\s*$/, '').trim();
-    for (const raw of list.split(',')) {
-      const id = raw.trim().replace(/[.,;]+$/, '');
+    const raw = m[1];
+    const parenIdx = raw.indexOf('(');
+    const list = (parenIdx === -1 ? raw : raw.slice(0, parenIdx)).trim();
+    for (const rawId of list.split(',')) {
+      const id = rawId.trim().replace(/[.,;]+$/, '');
       if (!id || id.startsWith('(')) continue;
       if (!map.has(id)) map.set(id, new Set());
       map.get(id).add(specPath);

@@ -315,6 +315,8 @@ data-testid) — they are the a11y contract and your selector in one. The
 from: a `classDef changed` component is in your UI scope. An a11y acceptance case
 with no covering spec is a finding, same as any uncovered changed node.
 
+**Contrast is verified at the PAINTED PIXEL, never from the token or `getComputedStyle` (EXP-114, v94).** `getComputedStyle`/nominal token values FALSE-GREEN: they return the *declared* colour, so a CSS transition mid-flip, a UA-chrome override, an `opacity`/blend, or a `state`-dependent fill can paint a failing pixel while the token nominally passes. DEF-001 (a shipped AA miss on the Reset button, 4.41:1) and the UC-B1 chip-border reject were both this trap. Measure the ACTUAL rendered pixel — a Playwright screenshot decoded to RGBA (node `zlib`, no new dep) sampled at the control's fill — for every contrast acceptance clause, and for state-dependent controls sample the settled state AND during any transition (disabled→enabled, hover) so no low-contrast frame hides. The page-wide axe scan runs on every UI-bearing build with **no permanent `.exclude()` selectors** — a standing exclusion silently hides a real violation (it is only ever a momentary scaffold within a single in-flight fix, removed in the same slice/defect that introduced it). If the project has no axe wiring yet, add `@axe-core/playwright` as the first UI slice's committed gate — do not validate a11y by eye for want of it.
+
 ## Identity before behaviour (principles/01)
 First assertion of ANY live validation: served build identity == sha under
 test (page header/meta, API header). On mismatch: bounded wait/retry, then

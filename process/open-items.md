@@ -126,3 +126,8 @@ CSV is no longer the metrics source.)_
   green). The comma-truncation sibling defect was already fixed earlier (regression
   tests present); the nested-repo sibling was EXP-104. Target: git hygiene of the SSOT
   — a completed item is never left out of version control.
+
+## OFS retro 2026-07-21 — minor coverage/tagging + process nits (non-blocking)
+- **UC-C2 200-row overflow — no live-browser DOM proof.** The `DRILLDOWN_ROW_CAP=200` head-kept+"+N more" is proven exhaustively at the headless/pure-function tier (`drilldownView.test.ts`); the analogous UC-B1 queue-overflow is browser-proven, so judged proportionate not to block. Add a live e2e overflow assertion when CHK-C is next touched.
+- **`@covers` tag gaps.** `idinput` (SEC-C1-1/3 gate) and, earlier-noted, some multi-line-tagged nodes lack a literal `@covers <node>` tag though the behaviour is covered — impacted-tests would falsely flag them uncovered. (The multi-line `@covers` PARSER bug itself was fixed this session in `.claude/tools/impacted-tests.js` + regression test; this is the residual tag-hygiene follow-up.)
+- **Process-doc nit: `wi-append EVENT=registered` instruction is wrong for aggregates/use-cases.** The command/skill text tells the registering agent to `make wi-append ... EVENT=registered`, but the machinery rejects it (a use-case's initial state already IS `registered` with no modeled transition; a slice/chunk is an aggregate and `append` refuses aggregates). The working convention (used by every sibling item) is to hand-author the `registered` event into the new item file's frontmatter at creation. Reconcile the instruction text with actual tool behaviour so the next agent doesn't hit the rejected-append surprise. (Surfaced by product on SLC-C1/UC-C1/UC-C2 registration.)

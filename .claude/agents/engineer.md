@@ -61,7 +61,13 @@ hardcode the profile name.
      "Scheduled" while 412 unit tests stayed green. Gate/Arrival columns worked
      because they read fields, not the window-seeded marker.)
 3. **Commit when green; push when the use-case is done (v60).** Every time the full
-   test suite goes from red to green, commit immediately to trunk. The commit message
+   test suite goes from red to green, commit immediately to trunk — including at each
+   green SUB-STEP of a larger UC (a passing red→green TDD increment), not only at the
+   final green (v95): an agent can stall/be-interrupted mid-build, and any work not
+   committed at the last green is lost and must be rebuilt from scratch (OFS UC-C2: a
+   first attempt stalled after ~600s having written code but committed nothing, forcing
+   a full re-dispatch). Frequent green commits make a stall cost one increment, not the
+   whole UC. The commit message
    uses **Conventional Commits** (`type(scope): intent` — feat/fix/docs/refactor/perf/
    test/build/ci/chore/revert, `!` for breaking; required in Viggo-fix, default
    elsewhere), states the *intent* not the code changed, and **references the tracked

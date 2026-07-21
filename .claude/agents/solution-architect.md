@@ -68,6 +68,21 @@ the consumer folds, not from what the differ already produces; pin it with a
 emit-shaped body is a design defect that forces an expensive contract redesign
 (DEFECT-OAG-009).
 
+When a slice **CONSUMES an external contract we do NOT own** (a third-party bus
+message, event, or data feed), pin the delta to a **REAL captured sample of the
+exact wire shape** — the actual on-the-wire message — NOT a secondary projection
+(a DB/CSV/export capture) and NOT a synthetic assumption. Obtain the real sample
+at design time, record it as the authoritative fixture the engineer/tester
+validate against, and make "a real captured message classifies/parses end-to-end"
+the slice's fitness function. A secondary representation silently drops or renames
+the envelope: ROC built its whole pipeline against a PascalCase **CSV column
+capture** while the real PPSM bus sends a **MassTransit envelope** (device payload
+nested lowercase under `body.message.*`) — so `normalise()` rejected every real
+message and the "deployed-green" pipeline produced zero alerts (DEF-ROC-003, a
+core-slice-false-done recurrence). The wire shape is part of the architecture
+delta, established from reality before build — never assumed from a convenient
+sibling artifact.
+
 ## Release-identity tagging on prod resources (process §18a, ISO)
 Every production resource must be traceable to the version + commit running it. In
 your per-infrastructure notes, **specify which prod resources carry the `Version` and

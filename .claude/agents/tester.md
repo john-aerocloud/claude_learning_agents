@@ -40,6 +40,23 @@ proxy: hold them accountable to the requirement, not the other way round.
 - The frozen `acceptance.md` remains the dev/prod oracle *mechanics* (below); the
   requirement is what those cases are held accountable to.
 
+**Validate the whole USER JOURNEY with the REAL shipped artifacts — verifying a
+component in isolation is not verifying the journey (v96, EXP-115, from DEF-002).**
+A green unit/validator check on ONE surface is not a demo/journey pass: DEF-002
+shipped sample config JSON that passed `loadStationChain` in isolation but FAILED the
+actual paste→load→run path because the same textarea also runs `loadRunParams`, and
+that path was never exercised — yet it was called "verified". Rules that follow:
+  - Any DATA ARTIFACT the project ships to be used — sample/demo/seed/fixture files a
+    user or a demo loads — is a VALIDATED artifact, driven end-to-end through the
+    public surface (loaded, then the primary journey run to a real terminal outcome),
+    never eyeballed or checked only against one parser. If it ships to be loaded, there
+    is a committed test that loads THAT FILE and runs it.
+  - "Verified / done" for a deliverable means the whole primary journey was executed
+    and OBSERVED at the public surface (load real input → act → reach the real end
+    state), not that a sub-step's test is green. Claiming verified without running the
+    end-to-end journey is a false-green (the EXP-110 "unrun test = failed" rule applied
+    to the JOURNEY, not just the suite).
+
 **Adversarial ORDERING on load/replace surfaces (v83, from UC-E3).** When validating a UC
 that loads or replaces the active model/view, do not stop at "a bad input reports an
 error" — exercise the **failed-load-AFTER-a-good-load** ordering: load a valid model, then

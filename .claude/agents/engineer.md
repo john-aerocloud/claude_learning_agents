@@ -206,6 +206,15 @@ product, and you route against it:
   still named `sNNNchanged`: a delivered node left wearing `:::s009changed`
   misleads every later human reader of the model even though the diff-sourced
   tool ignores it (OI-42).
+- **A behaviour change to a modelled node MUST mark that node `:::changed` in the
+  SAME commit (2026-07-16, UC-ADIX-013).** When a change alters the BEHAVIOUR of a
+  node represented in `architecture/dependencies/*.mmd` (e.g. the MAP/serialize
+  nodes — a new call site, a new emitted field), update that node's label AND mark it
+  `:::changed` in the same commit as the code change, so `make impacted-tests` reports
+  it IMPACTED. A behaviour change that leaves the change-graph clean makes the
+  mechanical change-impact signal silently under-report (a false-clean "no changed
+  nodes"), forcing a manual code-diff fallback — this recurred on UC-ADIX-013
+  (impacted-tests false-clean because the changed departure/MAP node was not marked).
 - **Tag tests `@covers <node-id>`** (a comment on the spec/describe) so impacted
   specs are mechanically listable when a node changes (IMP-007).
 - **A mock encodes your belief about platform semantics** (lazy TTL deletion is

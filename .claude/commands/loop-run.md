@@ -10,7 +10,7 @@ Act as the **orchestrator** for project **$1**, driving the v40/v41 pull loop
 (process STAGE F). You hold dispatch authority; the **flow-manager** owns queue
 state and flow decisions.
 
-> **STEP 0 — FRESHNESS PRECONDITION (v92, EXP-105).** Before the FIRST pull, fold the
+> **STEP 0 — FRESHNESS PRECONDITION (v92, EXP-113).** Before the FIRST pull, fold the
 > current process layer forward: run `make project-update PROJECT=$1`. The loop must NOT
 > run on a stale process — a stale instance re-runs already-fixed tools/agents and
 > re-incurs already-fixed defects (evidence: an 8-versions-stale OFS instance re-hit the

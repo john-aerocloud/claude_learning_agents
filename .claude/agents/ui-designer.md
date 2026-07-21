@@ -51,7 +51,7 @@ against a real interaction model, not retrofitted.
    `work/<project>/slices/<nnn>-<slug>/acceptance.md` exactly as the architect co-authors
    security conditions — they become axe/Playwright tests the tester enforces.
    **Contrast conditions are painted-pixel-verifiable, and a new token is verified
-   against its NEW adjacencies (EXP-106, v93).** Never alias a colour token straight to
+   against its NEW adjacencies (EXP-114, v94).** Never alias a colour token straight to
    an existing one (e.g. a chip border to the panel border) without checking the ratio
    against the *actual* surfaces THIS surface places it on — the UC-B1 chip-border reject
    (1.26:1) was a blind alias. State the required ratio against each named adjacent

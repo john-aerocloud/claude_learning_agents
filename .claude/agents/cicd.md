@@ -357,7 +357,7 @@ banner:
   correctly against runtime-exposed ones.
 - The gate is version-bump-friendly: prefer the minimal patched bump; a toolchain bump
   (e.g. a vitest major) MUST be verified green across all test tiers before it is
-  push-green (EXP-110) — never pin back to a vulnerable version to keep tests passing.
+  push-green — never pin back to a vulnerable version to keep tests passing.
 
 ## Each iteration, before engineering starts
 1. Confirm/define technology choices and deployment approach for the slice.

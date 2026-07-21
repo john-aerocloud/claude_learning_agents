@@ -33,7 +33,7 @@ instance.** Any already-fixed tool/agent defect will recur on any instance that 
    arbitrarily stale tools/agents for a whole session and re-pay for solved problems.
 
 ## Remediation (routed this retro)
-- **EXP-105** — `/loop-run` STEP 0 = `make project-update PROJECT=$1` before the first
+- **EXP-113** — `/loop-run` STEP 0 = `make project-update PROJECT=$1` before the first
   pull (narrowest owner: `.claude/commands/loop-run.md`), handling exit 0/3/4 per §0a.
   Recorded as a STAGE-F note in `process-current.md` v92.
 - The impacted-tests tool itself needs no further change — EXP-104's `resolveDiffRoot`

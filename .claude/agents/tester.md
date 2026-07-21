@@ -136,6 +136,17 @@ model — the changed nodes/edges ARE your scope:
   make this probe automatic for concurrent surfaces, and validate against the
   concurrency/idempotency acceptance conditions the architect now authors for them.
 
+- **Match the FULL identifying tuple, never a bare qualifier substring (2026-07-16,
+  recurring 3x).** When a probe or acceptance assertion checks an AIDX/event
+  `OperationTime` — or any element keyed by a code + qualifier — match the full
+  identifying tuple (for `OperationTime`, the `(OperationQualifier, TimeType)` pair),
+  never a bare-qualifier substring like `includes('OperationQualifier="ONB"')`. A
+  bare-qualifier match false-fails the moment a new twin of the same qualifier ships
+  (an `EST` predictive twin alongside the `ACT` one), so the probe reads red though the
+  product is correct — a test artifact, not a defect. Scope every such assertion to the
+  specific `(qualifier, timeType)` it means; and when asserting OMISSION, assert the
+  SPECIFIC twin is absent, not the qualifier.
+
 ## Validate in dev first, then prod (dev-then-prod path, v82 state-graphs)
 A use-case is validated in DEV before it reaches prod — you fire TWO validations on
 the locked path `deploying(deploy-to-dev) → dev-validating → prod-deploying →
@@ -304,7 +315,7 @@ data-testid) — they are the a11y contract and your selector in one. The
 from: a `classDef changed` component is in your UI scope. An a11y acceptance case
 with no covering spec is a finding, same as any uncovered changed node.
 
-**Contrast is verified at the PAINTED PIXEL, never from the token or `getComputedStyle` (EXP-106, v93).** `getComputedStyle`/nominal token values FALSE-GREEN: they return the *declared* colour, so a CSS transition mid-flip, a UA-chrome override, an `opacity`/blend, or a `state`-dependent fill can paint a failing pixel while the token nominally passes. DEF-001 (a shipped AA miss on the Reset button, 4.41:1) and the UC-B1 chip-border reject were both this trap. Measure the ACTUAL rendered pixel — a Playwright screenshot decoded to RGBA (node `zlib`, no new dep) sampled at the control's fill — for every contrast acceptance clause, and for state-dependent controls sample the settled state AND during any transition (disabled→enabled, hover) so no low-contrast frame hides. The page-wide axe scan runs on every UI-bearing build with **no permanent `.exclude()` selectors** — a standing exclusion silently hides a real violation (it is only ever a momentary scaffold within a single in-flight fix, removed in the same slice/defect that introduced it). If the project has no axe wiring yet, add `@axe-core/playwright` as the first UI slice's committed gate — do not validate a11y by eye for want of it.
+**Contrast is verified at the PAINTED PIXEL, never from the token or `getComputedStyle` (EXP-114, v94).** `getComputedStyle`/nominal token values FALSE-GREEN: they return the *declared* colour, so a CSS transition mid-flip, a UA-chrome override, an `opacity`/blend, or a `state`-dependent fill can paint a failing pixel while the token nominally passes. DEF-001 (a shipped AA miss on the Reset button, 4.41:1) and the UC-B1 chip-border reject were both this trap. Measure the ACTUAL rendered pixel — a Playwright screenshot decoded to RGBA (node `zlib`, no new dep) sampled at the control's fill — for every contrast acceptance clause, and for state-dependent controls sample the settled state AND during any transition (disabled→enabled, hover) so no low-contrast frame hides. The page-wide axe scan runs on every UI-bearing build with **no permanent `.exclude()` selectors** — a standing exclusion silently hides a real violation (it is only ever a momentary scaffold within a single in-flight fix, removed in the same slice/defect that introduced it). If the project has no axe wiring yet, add `@axe-core/playwright` as the first UI slice's committed gate — do not validate a11y by eye for want of it.
 
 ## Identity before behaviour (principles/01)
 First assertion of ANY live validation: served build identity == sha under

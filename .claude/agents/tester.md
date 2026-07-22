@@ -56,6 +56,16 @@ that path was never exercised — yet it was called "verified". Rules that follo
     state), not that a sub-step's test is green. Claiming verified without running the
     end-to-end journey is a false-green (the EXP-110 "unrun test = failed" rule applied
     to the JOURNEY, not just the suite).
+  - **Drive the REAL human entry point, not the harness's copy of it (v98, EXP-115, from
+    DEF-003).** If the human runs a command/script/URL to reach the feature (a `demo.sh`,
+    a run/launch script, a documented URL), validate THAT exact entry point — derive the
+    URL/flags/args the way it does — not a list the test maintains separately. DEF-003:
+    the distribution chart was invisible via `demo.sh` because its flag list drifted from
+    the code, while the demo-journey e2e stayed GREEN off its OWN hardcoded flag copy — two
+    copies, drifted, so the test validated a path no user takes. Any "which flags/config
+    the entry point uses" set MUST be a single code-derived source of truth shared by the
+    entry point AND the test, with a committed guard that they cannot diverge. A feature
+    reachable only via the test harness, not the human's command, is NOT verified.
 
 **Adversarial ORDERING on load/replace surfaces (v83, from UC-E3).** When validating a UC
 that loads or replaces the active model/view, do not stop at "a bad input reports an

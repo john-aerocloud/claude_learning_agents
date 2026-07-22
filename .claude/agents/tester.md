@@ -163,6 +163,21 @@ model — the changed nodes/edges ARE your scope:
   make this probe automatic for concurrent surfaces, and validate against the
   concurrency/idempotency acceptance conditions the architect now authors for them.
 
+- **Exercise an edge protection with a REAL representative payload, never a happy-path
+  probe (2026-07-22, UC-ADIX-016 → UC-ADIX-017).** When a slice adds or relies on an EDGE
+  PROTECTION in front of an endpoint — WAF managed rules, body inspection, schema/size
+  limits — its acceptance MUST be exercised with a REAL representative REQUEST PAYLOAD (e.g.
+  an actual AIDX XML `FlightLegRQ` body), NOT just empty-body / query-param / happy-path
+  probes. UC-ADIX-016's WAF was validated only with query-param and empty-body requests, so
+  `AWSManagedRulesCommonRuleSet`'s `CrossSiteScripting_BODY` sub-rule silently BLOCKED every
+  real AIDX XML body — invisible until UC-ADIX-017 first sent one (an escaped edge
+  false-positive that would have blocked the real consumer in prod). A probe that never
+  sends the payload the protection inspects proves nothing about that protection. The
+  solution-architect authors the real-payload edge acceptance condition; you exercise it.
+  Sibling of "assert the REAL deployed resource state, never a proxy" (below) and the
+  concurrency-durability probe (above) — a green build is only as complete as what its
+  acceptance actually exercises.
+
 - **Match the FULL identifying tuple, never a bare qualifier substring (2026-07-16,
   recurring 3x).** When a probe or acceptance assertion checks an AIDX/event
   `OperationTime` — or any element keyed by a code + qualifier — match the full

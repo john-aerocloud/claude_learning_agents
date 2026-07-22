@@ -371,6 +371,24 @@ the hard way (oxo-online s005-h1-waf, deploy reject 2026-06-06):
   (per-IP WAF then applies at the edge). Choose the authorizer for per-IP/auth;
   choose CloudFront-front for edge WAF + managed rule groups.
 
+### Managed-WAF body rules false-positive on XML-body APIs (AdixOut UC-ADIX-017, 2026-07-22)
+`AWSManagedRulesCommonRuleSet` (CRS) inspects the **request body**, and two of its
+sub-rules BLOCK well-formed XML request bodies as if they were attacks:
+- **`CrossSiteScripting_BODY`** — XML tag structure (`<...>`) reads as XSS.
+- **`GenericRFI_BODY`** — namespace URIs (`http://…`, `urn:…`) contain `://`, which reads
+  as remote-file-inclusion.
+For ANY endpoint whose contract is an XML request body (e.g. an AIDX `FlightLegRQ` POST),
+these fire on every legitimate message — the API silently rejects all real traffic while
+happy-path (empty-body / query-param) probes pass. **PLAN THIS UPFRONT:** on that route,
+set those two sub-rules to `count` (NEVER `allow`) via a scoped `ruleActionOverrides` on
+the managed-rule-group statement, WITH compensating controls: schema/XSD validation of the
+body + auth + entitlement, and **keep every other CRS rule and SSRF blocking intact**.
+Route-scope the WebACL so the override applies only to the XML-body route. This WEAKENS a
+managed control, so it is a **security-posture decision requiring human approval** — record
+it as such in the delta and the per-resource security note. Founding incident: AdixOut
+UC-ADIX-017 (human-approved 2026-07-22) — CRS blocked every real AIDX XML body until a
+real-payload probe surfaced it.
+
 ### Lambda
 - [ ] Execution role follows §7 (one role per function, ARN-scoped).
 - [ ] No `AWSLambdaFullAccess` or `AdministratorAccess`.

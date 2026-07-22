@@ -115,6 +115,18 @@ alone. Cheap to bake into the IaC from the first stack; expensive to retrofit.
    CFR hit that a concurrency acceptance condition would have made the engineer TDD
    first-time). A concurrent surface with no concurrency/idempotency acceptance condition
    is incomplete. [EXP-109]
+   **For any EDGE PROTECTION the slice adds or relies on in front of an endpoint** — WAF
+   managed rules, body inspection, request-schema/size limits — you MUST author an
+   acceptance condition that exercises it with a REAL representative REQUEST PAYLOAD (e.g.
+   an actual AIDX XML `FlightLegRQ` body), NOT just empty-body / query-param / happy-path
+   probes. An edge protection is only validated by sending the payload it inspects: state
+   the observable that must hold when a real well-formed body traverses the protection
+   (it passes and reaches the handler; a genuinely malicious body is still blocked).
+   UC-ADIX-016's WAF was accepted on query-param/empty-body probes only, so
+   `AWSManagedRulesCommonRuleSet`'s `CrossSiteScripting_BODY` silently blocked every real
+   AIDX XML body until UC-ADIX-017 sent one — an escaped edge false-positive that would
+   have blocked the real consumer in prod. An edge-protection delta with no real-payload
+   acceptance condition is incomplete.
 4. **Maintain `architecture/dependencies/data-flow.mmd`**: the runtime data-flow
    with **platform gates as explicit nodes** — WAF, authorizers, identity-source
    checks, cache layers, TTL/lazy-deletion semantics, CSP. Express each slice's

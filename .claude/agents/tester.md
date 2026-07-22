@@ -147,6 +147,30 @@ model — the changed nodes/edges ARE your scope:
   specific `(qualifier, timeType)` it means; and when asserting OMISSION, assert the
   SPECIFIC twin is absent, not the qualifier.
 
+- **Assert the REAL deployed resource state, never a proxy for it (2026-07-22,
+  UC-ADIX-014 AC7 false-green → DEF-ADIX-002).** A validation/probe assertion MUST read
+  the ACTUAL deployed resource — its live config as the control plane reports it (e.g.
+  `aws apigateway get-tags` on the resource ARN, `aws iam get-role-policy`, the real
+  response of the deployed endpoint) — NEVER a proxy that merely *stands in* for it. A
+  response HEADER is not the resource's tags; a synth plan / `sst diff` output is not the
+  applied resource state. **A synth plan is NOT authoritative for apply-time effects:**
+  an SST `$transform` on a child resource showed a tag in the `sst diff` plan that never
+  actually applied live (§1 aws-architecture child-transform gotcha), so a plan-reading
+  assertion read green while the resource was untagged. UC-ADIX-014's AC7 was "validated"
+  against a proxy — a response header, not the resource's real tags — and passed a
+  false-green that escaped as DEF-ADIX-002. This strengthens identity-before-behaviour
+  (below) and the truthful-build-identity discipline (v93 EXP-111): the oracle is the
+  deployed thing itself, read at its authoritative source, not any stand-in for it.
+
+- **Scope a close-out re-validation to what CHANGED (2026-07-22).** After a TARGETED
+  fix (a `rejected`→re-`built_green` rework, or a single failed check remediated), the
+  re-validation exercises the DELTA — the specific check(s) that failed and the changed
+  node(s) from the change map — PLUS a light regression smoke, NOT a re-run of the full
+  expensive campaign. Re-running a whole sustained-load/soak suite to re-confirm a
+  one-line fix is waste: a 360s sustained-WAF + burst-cooldown loop re-run stalled a
+  tester this cycle for no added assurance. Full-campaign re-runs are for a fresh slice
+  or a change whose blast radius is genuinely the whole surface, not for a scoped fix.
+
 ## Validate in dev first, then prod (dev-then-prod path, v82 state-graphs)
 A use-case is validated in DEV before it reaches prod — you fire TWO validations on
 the locked path `deploying(deploy-to-dev) → dev-validating → prod-deploying →

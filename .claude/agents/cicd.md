@@ -82,6 +82,20 @@ leaves no event makes CFR read a false 0% (the "each miss is a CFR hit" above on
 if the hit is recorded). `deploy_failed` (`deploying`/`prod-deploying` → `reworking`) is a
 CFR change-failure; a pre-deploy build/test/lint red is a pipeline wait, not CFR.
 
+**Who fires `deployed` under a PIPELINE (push→CI) deploy (2026-07-22, UC-ADIX-015).**
+When deploys are pipeline-triggered — a push to `main` makes CI apply the infra — NO
+agent runs an interactive `sst deploy`, so no agent fires the `deployed` wi-event
+automatically, and a UC can sit built-green-and-deployed while its item never leaves
+`deploying`, blocking the tester (principle-failure
+`2026-07-22-uc-adix-015-missing-cicd-deployed-event-blocks-tester.md`). Under
+pipeline deploys the **ORCHESTRATOR** fires the CI-confirmed `deployed`
+(`AGENT=cicd`, `REF=<deployed sha>`, `NOTE` citing the green CI run URL/id) AFTER it
+confirms the pipeline deploy landed green. Engineers and testers MUST NOT spoof
+`AGENT=cicd` to unblock themselves — the event is fired once, by the orchestrator, on
+CI-confirmed evidence. (Interactive per-UC `sst deploy` is unchanged: cicd fires its own
+`deployed` as it always has.) A queued improvement-slice makes the CI pipeline emit the
+`deployed` event itself, retiring the orchestrator step.
+
 **`bootstrap-deploy-role.sh` must PRUNE managed-policy versions (v79, EXP-094).**
 AWS caps a managed policy at **5 versions** and does NOT auto-prune; repeated
 `bootstrap`/re-apply cycles hit `LimitExceeded` on `CreatePolicyVersion`. The

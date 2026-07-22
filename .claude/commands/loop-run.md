@@ -77,6 +77,16 @@ Each cycle:
    vs gross-lead-time block (§F `agent_cycle_time`) is derived by `make wi-project`.
    GLT stays the honest TOTAL elapsed; §F is its complement (work-effort vs wait/
    overhead), e.g. `make wi-append … EVENT=built_green AGENT=engineer TOKENS=<n> DURATION_MS=<n>`.
+   - **`deployed` under a PIPELINE (push→CI) deploy (2026-07-22, UC-ADIX-015).** When
+     the deploy is pipeline-triggered (push to `main` → CI applies the infra), NO agent
+     runs an interactive `sst deploy`, so none fires `deployed` automatically and the UC
+     stalls in `deploying`, blocking the tester. YOU (the orchestrator) fire the
+     CI-confirmed `deployed` (`AGENT=cicd`, `REF=<deployed sha>`, `NOTE` citing the green
+     CI run) once you confirm the pipeline deploy landed green — engineers/testers must
+     NOT spoof `AGENT=cicd`. (Interactive per-UC deploys are unchanged: cicd fires its own
+     `deployed`.) principle-failure
+     `2026-07-22-uc-adix-015-missing-cicd-deployed-event-blocks-tester.md`; an
+     improvement-slice will move this emission into the CI pipeline itself.
    - **Collision** (a UC needs a seam/path another in-flight UC claimed, or a
      flag-compose failure): flow-manager emits `collision`, STOP the pair, add the
      missing edge to the model + `edge-ledger.md`, re-serialise (§19); the rework

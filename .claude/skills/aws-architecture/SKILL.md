@@ -59,6 +59,19 @@ Before any AWS CLI or SDK operation:
     lacks them — choose V1 when per-consumer throttling is a (current or seam'd)
     requirement.
   - Tags do not propagate app-wide under Pulumi — set the §2a tag set per resource.
+  - **To tag/customize a component's CHILD resource, use the component's
+    construction-time `transform.<child>` PROP, NOT a global `$transform` (AdixOut
+    UC-ADIX-016, 2 rework cycles).** A first-class component creates child resources
+    *inside itself at construction* (e.g. `sst.aws.ApiGatewayV1` creates its
+    `aws.apigateway.Stage`). Pulumi child resources inherit only transforms registered
+    BEFORE their parent component is constructed, so a global
+    `$transform(aws.apigateway.Stage, …)` registered after the component exists is a
+    permanent NO-OP for that Stage — and worse, `sst diff` FALSELY shows the tag applying
+    though it never lands live. Pass the customization on the component instead —
+    `new sst.aws.ApiGatewayV1("api", { transform: { stage: { tags: {…} } } })`. (Resources
+    added via LATER explicit calls — a UsagePlan/ApiKey created after the API — are NOT
+    child-at-construction and are unaffected by this; a global `$transform` or direct prop
+    works for them.)
   - SST keeps its deploy state in an SST-managed S3 bucket (`s3://sst-state-<hash>/<App>/<stage>/`) <!-- doc-lint:allow -->
     + encrypted `resource.enc` — a private bucket + a scoped OIDC deploy role are
     part of the security surface (see the project's `security/sst-deploy-and-state.md`) — <!-- doc-lint:allow -->

@@ -107,6 +107,25 @@ leaves no event makes CFR read a false 0% (the "each miss is a CFR hit" above on
 if the hit is recorded). `deploy_failed` (`deploying`/`prod-deploying` → `reworking`) is a
 CFR change-failure; a pre-deploy build/test/lint red is a pipeline wait, not CFR.
 
+**A deploy is not green until the LIVE resource matches declared intent (EXP-111).**
+An IaC provider's success / `Updated` line is INTENT, not a confirmed apply — some
+`Update*` paths silently SWALLOW a change (EventBridge `UpdatePipe` drops a target
+change when the update payload carries a CREATE-only key like `StartingPosition`), so
+CI goes green on a resource that never moved. That FALSE GREEN becomes a split-brain
+when a companion change DID apply (e.g. the IAM grant retargeted but the Pipe target
+did not → 100% AccessDenied), and it HIDES the real failure (it masked the CX-3
+cross-account-Pipe impossibility for a whole cycle). So every infra `deploy-<stage>`
+job MUST, after `sst deploy`, READ BACK the live resource and ASSERT its
+declared-intent fields match config (`aws pipes describe-pipe … --query Target` == the
+expected ARN; the analogous read-back for whatever the deploy changed) and FAIL the job
+on mismatch — never close on the deploy report alone. Where a provider `Update*` carries
+a CREATE-only field, ALSO force a real replace (`replaceOnChanges:[<field>]` +
+`deleteBeforeReplace`) so the change lands via `Create*`. This is the POST-deploy
+complement to EXP-107 (pre-push synth/diff) and a member of the false-green family
+(delivery-principles skill). Founding: UC-XA10 false-green (CI green, Pipe target
+unchanged). Runbook: `work/OagEventSource/docs/runbooks/pipe-target-silently-swallowed.md`.
+Target: CFR.
+
 **`bootstrap-deploy-role.sh` must PRUNE managed-policy versions (v79, EXP-094).**
 AWS caps a managed policy at **5 versions** and does NOT auto-prune; repeated
 `bootstrap`/re-apply cycles hit `LimitExceeded` on `CreatePolicyVersion`. The

@@ -173,6 +173,24 @@ command best-guessed `/flight-info/v2/flights` + `Ocp-Apim-Subscription-Key`
 interface CONTRACT, not just payload semantics. Target: GLT (no discovery detour)
 + CFR (no wrong-endpoint code).
 
+## Probe a load-bearing UNVERIFIED external CAPABILITY before building on it (EXP-112)
+Distinct from EXP-078 (which verifies an interface CONTRACT — path/header/schema): when
+the CHOSEN design's viability rests on an external-platform CAPABILITY not already
+proven in THIS system — "can a Pipe even target a cross-account bus?", "does a fresh
+`PutEvents` reset the one-bus-to-bus-forward budget?" — that capability is a load-bearing
+PREMISE, and vendor docs are NOT proof (this project was burned repeatedly on unverified
+EventBridge cross-account facts). Settle it with the CHEAPEST possible LIVE probe
+(ideally zero-infra, e.g. one `aws events put-events`) BEFORE the build commits to that
+premise. Do NOT nominate the doc-confident option as "primary" and defer the settling
+probe to post-build CI — a wrong premise then costs full deploy cycles to disprove
+(UC-XA10: the "primary" direct Pipe→Aerobus design was architecturally IMPOSSIBLE (CX-3);
+~4 deploy cycles + a false-green were spent before a ~zero-infra probe settled the real
+path (CX-5)). When two designs exist and one rests on an unproven capability, either
+probe that capability first OR build the already-PROVEN design first and keep the
+doc-confident one as the gated swap. Runbook:
+`work/OagEventSource/docs/runbooks/cross-account-pipe-target-forbidden.md`. Target: lead
+time (no multi-cycle disproof detour) + CFR (no deploy-failures disproving a premise).
+
 ## Design for local standability (v28, principles/02)
 Architecture must allow most of the system to stand up locally (hexagonal
 ports with local adapter substitutes). Every delta ENUMERATES the local/prod

@@ -1,14 +1,15 @@
 ---
-process_version: 88
-effective_from: 2026-07-16
-supersedes: v87, v86, v85, v84, v83, v82, v81, v80, v76
+process_version: 89
+effective_from: 2026-07-22
+supersedes: v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
 status: active
 ---
 
-# Current Process — v88
+# Current Process — v89
 
 <!-- v85 (retro, AdixOut 2026-07-12; renumbered from a v84 that collided with main's concurrent v84 CORE-job-done-gate retro — both sets of learning coexist, only the version number was reconciled): constraint = QUEUE WAIT (ready 48.9% + registered 27.7% = 76.6% of GLT by owner `queue`), sample n=2 and heavily contaminated by non-system waits (mid-session org spend-limit outage, heavy human-steering gaps, deliberate serial-build pacing) — treat DIRECTIONAL, not a capacity signal. CFR 33% from ONE rejection (UC-ADIX-003 deploy-race), a GOOD catch. Changes routed this cycle (all already applied + folded): aws-architecture IaC default CDK→SST v3 Ion; ADR-0006 (release/provenance) + ADR-0007 (tagging) encoded into aws-architecture §9a/§2a; 3 principle-failures (rushed-to-register-before-understanding; skipped-solution-architecture-gate→wrong-IaC; build-identity-claimed-before-code-live); documenter standing duty (living root README); safe-deploy stream-drain (AdixOut cicd). Forward lever for the queue constraint = per-UC worktree isolation so the inner loop's maximal-independent-set actually builds in parallel (improvement-slice IMP-017, deferred — validate on a cleaner sample). Token review: 811k delivery tokens for 2 UCs; dominant WASTE = the CDK→SST full-infra rebuild forced by the skipped architecture gate — the gate fix (check tech choices vs org before build) is the token lever too. -->
 <!-- v87 (ROC retro 2026-07-12): §F0 — per-item board push + docs-refresh are HARD in-cycle invariants (board never lags item-file state by >1 cycle; documenter required at each slice close); founding lapse principle-failures/2026-07-11-board-and-docs-lag-during-loop.md. §F3 — register linear dependency-chain use-cases JIT per-UC, not batch up front (ROC: `registered` was 70% of GLT purely as a batch-registration artifact). BOTH folded as PLAIN process practice, deliberately NOT new experiment rows — enacting the same-retro directive to stop over-generating experiments and to fix DORA measurement. -->
+<!-- v89 (OAG, human-directed 2026-07-22, EXP-110): §21a — Definition of Done is MULTI-AUDIENCE: done = tested + THREE docs produced as part of the work: (1) SUPPORT runbook incl. every error pathway found while building/deploying/diagnosing (canonical home work/<project>/docs/runbooks/, resolving "where are the runbooks?"), (2) MARKETING capability/value doc, (3) PRODUCT delivery-tree (shipped vs in-flight vs blocked vs not-started, as a dependency tree). Error pathways captured at the moment found, not later. All three are not-skippable in-cycle documenter outputs (board/doc-lag class). Documenter remit + templates expanded in documenter.md. Prompted while the SLC-041 reset kept discovering error pathways (THIRD_ACCOUNT_HOP, iam:UpdateRoleDescription papercut, rawPath-vs-path DEF-XA2) with no clear runbook home. -->
 <!-- v88 (OAG, human-directed 2026-07-16, EXP-109): §14 infra-push-gate — environment deploys are PIPELINE-ONLY; local `sst deploy` to a real account is never a delivery path (only synth/diff pre-push). Dev is the fully-integrated pre-prod validation env; all integration/acceptance tests against a deployed env run IN the pipeline, gating prod. A cross-account/hub tier (shared-stage Aerobus + fan-out + the 3-hop probe) belongs in the pipeline too — its own CI deploy job + CI integration probe. A stage not yet wired into CI is an infra gap to close, not a licence to deploy by hand. Founding lapse: principle-failures/2026-07-16-manual-shared-deploy-no-ci-path.md (SLC-041 shared fan-out attempted via manual `make deploy-sst STAGE=shared` 3× because no CI path existed). -->
 
 
@@ -859,6 +860,39 @@ Nothing in the process depends on documentation output. At delivery the orchestr
 dispatches the documenter **in the background, in parallel** with the retro (and with
 N+1 planning). No gate, agent, or loop step waits on it. The documenter commits its own
 changes and documents what shipped, not what was planned. (Detail: `documenter.md`.)
+
+## 21a. Definition of Done is MULTI-AUDIENCE — tested + 3 docs [v89, EXP-110]
+A use-case/slice is **not done when the code is green** — it is done when it is **tested
+AND documented for the three audiences who consume the work downstream.** "Documentation is
+part of the work, produced AS the work happens — never a deferred follow-up" (extends
+§19a/§14). The done-condition adds, alongside the existing test/deploy/validate gates:
+
+1. **SUPPORT — the runbook.** Every slice, and every defect/infra/deploy change that
+   discovers an **error pathway**, updates the project **support runbook**. This is the
+   home for: how to operate the shipped capability, and — critically — **every error
+   pathway found while building/deploying/diagnosing** (the symptom, the root cause, and
+   the diagnosis/response), so on-call (P7 / J13) can act without escalating. Error
+   pathways are captured **at the moment they are found** (during the fix/deploy that
+   surfaced them), not reconstructed later. **Canonical location:
+   `work/<project>/docs/runbooks/`** (owned by `documenter`, pointed to from
+   `DOCS-LAYOUT.md`). This resolves the "where are the support runbooks?" ambiguity: there
+   is ONE place, and it is a done-condition to keep it current.
+2. **MARKETING — the capability/value doc.** A plain, outward-facing description of the
+   value the slice delivers (what a customer/stakeholder now can do), kept honest to what
+   actually shipped. Location: `work/<project>/docs/marketing/` (or a single
+   `marketing.md`), owned by `documenter`.
+3. **PRODUCT — the delivery tree.** A product-facing view of **what HAS and HAS NOT been
+   delivered, as a dependency tree** — so a product person sees, at a glance, shipped vs
+   in-flight vs blocked vs not-started, and the dependencies between them. Derived from /
+   consistent with the item tree (`views/tree.md`) but written for a product reader, not
+   an engineer. Location: `work/<project>/docs/delivery-tree.md`, owned by `documenter`,
+   refreshed on every material state change (like the README, §documenter standing duty).
+
+These three are HARD in-cycle documenter outputs at each slice close (and the runbook also
+on any error-pathway-discovering defect/deploy), the same class of not-skippable invariant
+as the per-item board push and the living README (§F0). Stale/absent support-runbook,
+marketing, or delivery-tree docs are a process failure (the board/doc-lag family). Detail +
+templates: `documenter.md`.
 
 ---
 

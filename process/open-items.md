@@ -86,3 +86,11 @@ projection — read ONE item file, upsert ONE issue, key loaded from
 (queue-wait) constraint, and the SSOT remains correct meanwhile. Safety note: the
 key-inlining fallback must never be used — a projection that cannot use the
 key-from-secrets path STOPS and reports.
+
+## OI — dead deploy-role PutEvents-on-oag-event-bus grant (OAG, after UC-XA11, 2026-07-22)
+UC-XA11 removed `oag-event-bus`, but `infra/policies/sst-deploy*.json` still grants
+`events:PutEvents` on the now-deleted bus (pinned by
+`deploy-role-putevents-grant-uceb5.test.ts`). HARMLESS (grants nothing usable — the
+resource is gone) but dead config. Follow-up cleanup: drop the grant + retire/adjust
+its pin test. Deliberately NOT folded into UC-XA11 to keep that deletion minimal.
+Low priority; not a delivery blocker.

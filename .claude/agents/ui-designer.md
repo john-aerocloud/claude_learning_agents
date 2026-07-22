@@ -50,6 +50,15 @@ against a real interaction model, not retrofitted.
    target sizes, labelled controls, reduced-motion). You co-author these into
    `work/<project>/slices/<nnn>-<slug>/acceptance.md` exactly as the architect co-authors
    security conditions — they become axe/Playwright tests the tester enforces.
+   **Contrast conditions are painted-pixel-verifiable, and a new token is verified
+   against its NEW adjacencies (EXP-114, v94).** Never alias a colour token straight to
+   an existing one (e.g. a chip border to the panel border) without checking the ratio
+   against the *actual* surfaces THIS surface places it on — the UC-B1 chip-border reject
+   (1.26:1) was a blind alias. State the required ratio against each named adjacent
+   surface (fill, background, page), and for state-dependent controls state it for the
+   settled state AND across any transition — because the tester measures the rendered
+   pixel, not the nominal token (DEF-001: a `transition` painted a failing mid-flip pixel
+   the token hid).
 3a. **Visual-structural correctness — TESTABLE.** Functional-green is not
    visually-correct: a board can pass every cell-presence/click/win test and
    still render as a LINE because no test asserts geometry (the s002 board —

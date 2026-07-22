@@ -61,7 +61,13 @@ hardcode the profile name.
      "Scheduled" while 412 unit tests stayed green. Gate/Arrival columns worked
      because they read fields, not the window-seeded marker.)
 3. **Commit when green; push when the use-case is done (v60).** Every time the full
-   test suite goes from red to green, commit immediately to trunk. The commit message
+   test suite goes from red to green, commit immediately to trunk — including at each
+   green SUB-STEP of a larger UC (a passing red→green TDD increment), not only at the
+   final green (v95): an agent can stall/be-interrupted mid-build, and any work not
+   committed at the last green is lost and must be rebuilt from scratch (OFS UC-C2: a
+   first attempt stalled after ~600s having written code but committed nothing, forcing
+   a full re-dispatch). Frequent green commits make a stall cost one increment, not the
+   whole UC. The commit message
    uses **Conventional Commits** (`type(scope): intent` — feat/fix/docs/refactor/perf/
    test/build/ci/chore/revert, `!` for breaking; required in Viggo-fix, default
    elsewhere), states the *intent* not the code changed, and **references the tracked
@@ -74,8 +80,19 @@ hardcode the profile name.
    FALSE-GREEN if `.gitignore` silently drops the file (an unanchored pattern like `secrets/`
    matches every `secrets/` dir, including a source package): the UC reads `done` while its
    code was never committed. A done UC's code must be on trunk, not merely passing locally.
+   **Type-check is part of green, not optional (DEF-ROC-002 false-green):** if the
+   project has a `build`/`typecheck` script (e.g. `npm run build` = `tsc`), it MUST pass
+   before the UC is green — a passing test suite is NOT sufficient. Fast test runners
+   skip type-checking (vitest/jest via esbuild/swc transpile-only) and eslint does not
+   type-check, so a type-broken change (even in production code) ships with a green suite
+   and clean lint. DEF-ROC-002: UC-ROC-019 shipped a production `tsc` TS2556 with 189
+   tests green + lint clean; it would have broken the deploy build (`tsc --outDir dist`)
+   that the pipeline runs to emit the artifact. Run the project's `build`/`typecheck`
+   after the suite goes green and treat any type error as red. If no such script exists in
+   a typed project, that gap is itself a defect (add the script). Where possible add the
+   type-check to the pre-commit/CI fast gate so this cannot recur.
    **Then integrate, don't batch (process §14/§19b):** when a use-case's full
-   done-condition is met (suite **and** lint green), if the project repo has a
+   done-condition is met (suite, lint **and** type-check/build green), if the project repo has a
    configured, verified remote (`git remote get-url origin` resolves to the origin
    recorded in project.md/decision-log), `git -C work/<project> push origin <trunk>`
    — one green use-case is one push; never let commits pool. **No/unverified remote

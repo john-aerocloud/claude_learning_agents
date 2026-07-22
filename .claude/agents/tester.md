@@ -40,6 +40,23 @@ proxy: hold them accountable to the requirement, not the other way round.
 - The frozen `acceptance.md` remains the dev/prod oracle *mechanics* (below); the
   requirement is what those cases are held accountable to.
 
+**Validate the whole USER JOURNEY with the REAL shipped artifacts — verifying a
+component in isolation is not verifying the journey (v96, EXP-115, from DEF-002).**
+A green unit/validator check on ONE surface is not a demo/journey pass: DEF-002
+shipped sample config JSON that passed `loadStationChain` in isolation but FAILED the
+actual paste→load→run path because the same textarea also runs `loadRunParams`, and
+that path was never exercised — yet it was called "verified". Rules that follow:
+  - Any DATA ARTIFACT the project ships to be used — sample/demo/seed/fixture files a
+    user or a demo loads — is a VALIDATED artifact, driven end-to-end through the
+    public surface (loaded, then the primary journey run to a real terminal outcome),
+    never eyeballed or checked only against one parser. If it ships to be loaded, there
+    is a committed test that loads THAT FILE and runs it.
+  - "Verified / done" for a deliverable means the whole primary journey was executed
+    and OBSERVED at the public surface (load real input → act → reach the real end
+    state), not that a sub-step's test is green. Claiming verified without running the
+    end-to-end journey is a false-green (the EXP-110 "unrun test = failed" rule applied
+    to the JOURNEY, not just the suite).
+
 **Adversarial ORDERING on load/replace surfaces (v83, from UC-E3).** When validating a UC
 that loads or replaces the active model/view, do not stop at "a bad input reports an
 error" — exercise the **failed-load-AFTER-a-good-load** ordering: load a valid model, then
@@ -338,6 +355,8 @@ data-testid) — they are the a11y contract and your selector in one. The
 `architecture/dependencies/component-map.mmd` is part of the change map you plan
 from: a `classDef changed` component is in your UI scope. An a11y acceptance case
 with no covering spec is a finding, same as any uncovered changed node.
+
+**Contrast is verified at the PAINTED PIXEL, never from the token or `getComputedStyle` (EXP-114, v94).** `getComputedStyle`/nominal token values FALSE-GREEN: they return the *declared* colour, so a CSS transition mid-flip, a UA-chrome override, an `opacity`/blend, or a `state`-dependent fill can paint a failing pixel while the token nominally passes. DEF-001 (a shipped AA miss on the Reset button, 4.41:1) and the UC-B1 chip-border reject were both this trap. Measure the ACTUAL rendered pixel — a Playwright screenshot decoded to RGBA (node `zlib`, no new dep) sampled at the control's fill — for every contrast acceptance clause, and for state-dependent controls sample the settled state AND during any transition (disabled→enabled, hover) so no low-contrast frame hides. The page-wide axe scan runs on every UI-bearing build with **no permanent `.exclude()` selectors** — a standing exclusion silently hides a real violation (it is only ever a momentary scaffold within a single in-flight fix, removed in the same slice/defect that introduced it). If the project has no axe wiring yet, add `@axe-core/playwright` as the first UI slice's committed gate — do not validate a11y by eye for want of it.
 
 ## Identity before behaviour (principles/01)
 First assertion of ANY live validation: served build identity == sha under

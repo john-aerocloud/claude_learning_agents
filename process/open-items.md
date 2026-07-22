@@ -94,3 +94,9 @@ UC-XA11 removed `oag-event-bus`, but `infra/policies/sst-deploy*.json` still gra
 resource is gone) but dead config. Follow-up cleanup: drop the grant + retire/adjust
 its pin test. Deliberately NOT folded into UC-XA11 to keep that deletion minimal.
 Low priority; not a delivery blocker.
+
+## OI — 3 hydration mermaid diagrams render-fail (OAG, pre-existing, found 2026-07-22)
+`architecture/hydration-{consumer-component,seq-coldstart,seq-recovery}.mmd` fail
+`make render-diagrams` on old edge-label syntax. Pre-existing/committed, unrelated to
+SLC-041 (untouched this cycle). Follow-up: fix the edge-label syntax so the render gate
+is fully green. Low priority (docs-only, scratch architecture).

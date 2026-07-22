@@ -69,3 +69,20 @@ CSV is no longer the metrics source.)_
   one item, one API call, no full-board re-read) — preserving the EXP-103 in-cycle freshness
   at a fraction of the tokens. Scored on DORA-value-per-token (board freshness must not
   regress). Deferred: token efficiency, not the current (queue-wait) constraint.
+
+## OI — Linear/Jira sync tooling not rebuilt for v82 event-sourced items (OAG DEF-XA3 retro 2026-07-22)
+`scripts/sync-linear.py` was RETIRED in the v82 cutover (f9cd5a1, "dead scripts")
+but the `linear`/`jira` projection agents still DEPEND on it, and the old source
+does not parse v82 per-item event-sourced files (dry-run against UC-XA4:
+"not a known use-case or live defect"). Symptom this cycle: the DEF-XA3 board push
+(OAG-150) only succeeded via a leftover `.pyc`; the UC-XA4 push then failed, and a
+raw-curl fallback tried to INLINE the API key and was correctly blocked as
+credential leakage. Net: per-item board pushes for use-case items flake, so board
+state can silently lag the SSOT (the exact board/doc-lag failure §F9 step-4 exists
+to prevent). Route: an improvement slice (§32) to rebuild a minimal v82-native
+projection — read ONE item file, upsert ONE issue, key loaded from
+`secrets/linear.local.json` at runtime (NEVER inlined), no whole-board re-read
+(compose with the EXP-104 token-trim open-item above). DEFERRED: not the current
+(queue-wait) constraint, and the SSOT remains correct meanwhile. Safety note: the
+key-inlining fallback must never be used — a projection that cannot use the
+key-from-secrets path STOPS and reports.

@@ -253,6 +253,25 @@ failure is CATEGORISED so support can tell whose problem it is, mechanically:
   behaviour is asserted. Logging is also documented — the documenter turns it
   into the support runbook; write log events so a support engineer can act.
 
+**Batch a bounded external API + test at the source's MAX batch (EXP-113).** When
+publishing/writing to an external API that caps entries-per-request (EventBridge
+`PutEvents` = 10, SQS `SendMessageBatch` = 10, DynamoDB `BatchWrite` = 25, …),
+CHUNK to that documented limit — never map a whole upstream batch into one call.
+And TEST at the largest batch the source can actually deliver, not the happy N=1:
+an ordered source (DynamoDB Streams / Kinesis / an EventBridge Pipe over them)
+fills a LARGE batch under backlog, and a single over-limit / rejected request
+there does not fail one record — it **poisons the whole ordered batch**, which the
+source retries forever, stalling the shard head so nothing newer is ever
+delivered. So (a) chunk to the limit, (b) aggregate per-entry failures across
+chunks (`FailedEntryCount>0 ⇒ throw`, never a silent drop), (c) categorise an
+over-limit/malformed request as `internal-service` (our defect), NOT
+`external-availability`, and (d) unit-test the chunk boundaries at N = 1, limit,
+limit+1, and a multi-chunk size. A live integration probe that only ever seeds one
+event NEVER exercises the batched path — the gap that let DEF-XA3 reach prod (the
+Aerobus publisher issued one PutEvents with 12–15 entries → ValidationException →
+poison-retry → total cross-account stall). Runbook:
+`work/<project>/docs/runbooks/` (publisher poison-batch).
+
 ## Tooling self-service (process v23 §33)
 Create the committed tooling your role needs (make targets in the ROOT
 Makefile, build wiring, scripts) in the same slice — tested, documented,

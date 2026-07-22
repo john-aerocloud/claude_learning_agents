@@ -382,6 +382,22 @@ exactly one of two is true and the fix MUST be one of them:
 Pipeline secrets/role/bootstrap prerequisites are sequenced (§19 scheduling), and the
 runbook lists every manual step that is not yet automated so the gap is visible.
 
+## Failure diagnostics MUST correlate to THIS run's own event (EXP-114)
+A failure-diagnostics step (DLQ dump, error-log scrape, dead-letter read) must be
+scoped to the event THIS run produced — filter by the run's own time-window and/or
+the id/streamId it just emitted — never dump the whole queue/DLQ unfiltered. A
+long-lived DLQ retains STALE messages from earlier, already-fixed failure modes;
+an unfiltered dump surfaces those first and points root-cause at the wrong thing.
+DEF-XA3 cost real investigation time this way: the fan-out DLQ diagnostics printed
+day-old `THIRD_ACCOUNT_HOP_DETECTED` messages (from the retired pre-publisher
+topology) while the actual live failure was a publisher poison-batch — the stale
+dump nearly sent the fix at the wrong layer. So: (a) filter diagnostics to the
+current run's correlation id / time-window and print message ages; (b) when a DLQ's
+contents are known-stale after a topology/logic fix, PURGE or redrive it (a Make
+target) so the next failure's diagnostics aren't polluted; (c) if a diagnostic
+cannot be correlated, label its output "UNCORRELATED — may predate this run" so it
+is read as a hint, not a conclusion.
+
 ## Each iteration, before engineering starts
 1. Confirm/define technology choices and deployment approach for the slice.
 2. Stand up only the capabilities the slice requires; record them in

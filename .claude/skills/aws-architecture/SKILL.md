@@ -125,6 +125,60 @@ Governance: Organizations Tag Policies + a `required-tags` Config rule + SCP
 (report-only → enforce). **Do not invent a thinner set** — the old
 `Project/Env/ManagedBy` trio is superseded by the above.
 
+### 2b. Sharing data OUTSIDE the AWS Org (ADR-0011)
+
+Source of truth: **AeroCloudSystems/ADR → ADR-0011 (external high-volume data
+sharing — egress projection + webhook push, DRAFT; depends on ADR-0001 + ADR-0008;
+pattern PAT-004).** Every OTHER sharing decision (ADR-0004 S3, ADR-0005
+subscription, ADR-0008 bus topology, ADR-0009 governance) is **internal** — it
+trusts IAM and assumes callers sit inside `aws:PrincipalOrgID`. **The moment you
+share with a third party OUTSIDE the Org, none of that trust applies to the
+external hop.** Design that boundary as a dedicated **External Distribution
+(egress) service** — an anti-corruption layer:
+
+- **Consume internally like any other subscriber** (own rule on the central bus →
+  own SQS queue+DLQ, ADR-0005) — expose **nothing new** internally.
+- **Project internal domain events → the external published language** (e.g. AIDX
+  XML) at the egress; this seam decouples internal schema evolution (ADR-0009) from
+  the external contract and is the **one place to redact PII / drop unlicensed
+  fields** before the message is built.
+- **Two customer surfaces we fully control:** (a) a **synchronous query API** for
+  basic state — API GW → Lambda → read model, **OAuth2 client-credentials
+  (Cognito/JWT authorizer) + WAF + per-customer usage plans** (NOT IAM, NOT an
+  API-key alone); (b) the **high-volume stream** by **per-customer** delivery.
+- **Delivery selection rule (scenario, not one answer — projection + entitlement
+  layer is identical, only the last hop changes):** **webhook push (EventBridge API
+  Destinations + Connection)** is the DEFAULT for HTTPS-capable customers
+  (provider-side rate control, no customer AWS dependency, mTLS + payload
+  signature); a **per-customer projected SQS queue** when the customer is AWS-native
+  and wants pull (a pinned customer account/role ARN or STS temp creds — this is NOT
+  "exposing a queue": projected AIDX, one entitlement, own DLQ); a **hardened
+  dedicated MQ edge broker** (Amazon MQ for ActiveMQ; per-customer destination;
+  mTLS; private connectivity; patch SLA — CVE-2023-46604 class) ONLY when a customer
+  mandates JMS; a **cursor pull REST API** fallback for firewalled/non-AWS customers.
+- **NEVER** expose the internal bus/queue, an internet-facing broker, or a **single
+  shared** external queue/destination.
+- **Non-negotiable external-boundary controls:** per-customer **entitlement enforced
+  server-side** (customer cannot widen scope; Customer A never sees B), one
+  **API Destination + Connection + DLQ + rate limit per customer** (bulkhead),
+  per-customer secrets in **Secrets Manager (rotated, revocable)**, **WAF** + usage
+  plans on the query API, **mTLS + signature** on push, and **least-privilege = the
+  full read-then-write op set** of the router/query code path (reads the
+  EntitlementStore + read model + `kms:Decrypt`, then `events:PutEvents` /
+  `secretsmanager:GetSecretValue` on the per-customer ARNs only; §7/§30 pin).
+- **Delivery semantics:** at-least-once, **NO end-to-end ordering** (state it in the
+  customer contract); self-describing messages (`occurredAt` + monotonic per-entity
+  version) so customers dedupe by msg-id and apply last-writer-wins.
+- **Own account** for the egress boundary; **full security review** (this is a
+  cross-Org surface — the internal trust model does not carry over).
+
+ADR-0011 is **DRAFT** — mTLS-vs-signature baseline, AIDX version/profile, routing
+impl (rules-per-customer vs router Lambda), self-service entitlements, and
+billing/metering are open; adopt the shape, track the open questions. Worked
+alignment: AdixOut IS this service — see its
+`architecture/deltas/005-adr0011-external-distribution.md` + the four
+`architecture/security/external-*.md` / `entitlement-store.md` notes.
+
 ---
 
 ## 3. Compute: decision tree
@@ -430,6 +484,7 @@ condition that would trigger a reversal:
 | **IaC default changed CDK → SST v3 (Ion)** (2026-07-11, human-directed) | ALL / org-wide | CDK default caused repeated cross-project problems; org's live services (OagEventSource) use SST v3 Ion; §1 rewritten. Prior projects on CDK are grandfathered until they next touch infra. | Reversal → CDK only with a specific logged justification (not the default); reversal → plain Terraform if multi-cloud beyond SST's providers |
 | **Adopt ADR-0007 tag set** (2026-07-12, human-directed) | ALL / org-wide | ADR-0007 supersedes the thin `Service/Env/Owner` (and the interim `Project/Env/ManagedBy/BuildSha`) — mandatory `Service/Environment/Owner/CostCentre/ManagedBy/DataClassification/Airport` + provenance `GitCommit(40-char)/Version/Repository/DeployedAt`; §2a added. `Airport`+cost-allocation gives per-airport spend. | ADR is `proposed`; open questions (mandatory-DataClassification scope, `ac:` prefix, activated cost tags) resolved at ADR acceptance |
 | **Adopt ADR-0006 release/provenance** (2026-07-12, human-directed) | ALL / org-wide | Conventional Commits + trailers, build-once/promote-by-digest (full-SHA/object-version), per-context versioning (SemVer/CalVer/sequential), no-rebuild-on-release; §9a added. | ADR is `proposed`; ratify the §4 versioning mapping + release-tool choice at ADR acceptance |
+| **Adopt ADR-0011 external egress pattern** (2026-07-22, human-directed) | ALL / org-wide (external data sharing) | First cross-Org sharing decision; internal IAM/`aws:PrincipalOrgID` trust does NOT extend past the external hop. Dedicated External Distribution (egress) service = anti-corruption projection → OAuth2/WAF query API + per-customer webhook push (API Destinations, mTLS+signature) / per-customer SQS / hardened MQ edge broker; server-side entitlement + per-customer isolation; §2b added. | ADR is `DRAFT`; mTLS-vs-signature baseline, AIDX version/profile, routing impl, self-service entitlements, billing resolved at ADR `proposed` |
 | Lambda over ECS Fargate | oxo-online | Spiky low-volume; scale-to-zero | p95 move latency > 1s due to cold starts |
 | API GW WS over ECS long-lived | oxo-online | Managed conns; no warm server needed | Message fan-out rate > API GW limits |
 | DynamoDB over RDS | oxo-online | No relational need; ephemeral game state | Leaderboard needs ranked queries beyond top-N |

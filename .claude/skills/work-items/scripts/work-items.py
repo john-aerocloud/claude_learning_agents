@@ -1664,13 +1664,20 @@ def _render_stats_md(stats):
 # timestamp at process/dora/retro-marker/<project>.txt, written by retro-mark.
 #
 # Debt since the marker:
-#   ROUTINE   = slice/chunk aggregates that BUBBLED to done after the marker.
-#               An aggregate's bubble time = the ts of its last child's terminal
-#               event (the moment the final child closing made it done).
+#   ROUTINE   = slice/chunk aggregates that BUBBLED to done after the marker
+#               (bubble time = ts of the last child's terminal event), PLUS
+#               use-case dev-validation rework (a build_failed / rejected event
+#               after the marker): a dev reject that gets fixed + re-validated is
+#               the process WORKING (XP/TDD/dev-first catching a defect BEFORE
+#               prod), not an incident — so it BATCHES to the threshold (learning
+#               still captured at the batched retro), it does not trip an
+#               immediate retro.
 #   INCIDENT  = defect items whose terminal validated/resolved event is after the
-#               marker, OR use-cases with a build_failed / rejected event after it.
-# DUE iff routine >= threshold OR incidents >= 1. Routine batches to the
-# threshold; a single incident fires immediately (mirrors dora.py:v69 cadence).
+#               marker (a defect against SHIPPED work is a real escape worth an
+#               immediate retro).
+# DUE iff routine >= threshold OR incidents >= 1. Routine (slice-closes +
+# uc-rework) batches to the threshold; a single incident (defect-resolve) fires
+# immediately. (IMP-019, v101: uc-rework reclassified incident->routine.)
 # ---------------------------------------------------------------------------
 def _retro_marker_path(project):
     return os.path.join(ROOT, "process", "dora", "retro-marker", f"{project}.txt")
@@ -1747,8 +1754,14 @@ def compute_retro_debt(graphs, project, threshold, now):
                 if ev.get("event") in ("build_failed", "rejected"):
                     t = parse_ts(ev.get("ts"))
                     if t and t > marker and (now is None or t <= now):
-                        incidents.append((iid, t))
-                        detail.append((t, "build/reject-fail", iid))
+                        # IMP-019 (v101): a dev-validation reject / build-fail that
+                        # gets fixed + re-validated is the process WORKING, not an
+                        # incident — batch it as ROUTINE (accrues toward the
+                        # threshold), do NOT trip an immediate retro. A defect
+                        # against SHIPPED work stays an immediate incident (branch
+                        # above).
+                        routine.append((iid, t))
+                        detail.append((t, "uc-rework", iid))
                         break
     due = (len(routine) >= threshold) or (len(incidents) >= 1)
     detail.sort(key=lambda d: d[0] or datetime(1970, 1, 1, tzinfo=timezone.utc))

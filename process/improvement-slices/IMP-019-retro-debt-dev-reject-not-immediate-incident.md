@@ -1,6 +1,28 @@
 # IMP-019 — A resolved dev-validation `rejected` batches ROUTINE, not immediate-incident
 
-**Status:** QUEUED (2026-07-22, AdixOut v99 retro — REQ-005 Chunk A close; retro-cadence thrash)
+**AdixOut v102 retro (2026-07-23) — VALIDATED (working).** REQ-005 Chunk B's UC-019/020
+dev-rejects were classified ROUTINE and the retro BATCHED cleanly at the chunk boundary
+instead of thrashing an immediate full retro per dev-catch (the pre-IMP-019 behaviour). No
+prod defect appeared after a batched dev-reject (the CFR falsification guard held). The
+change is doing exactly what it was implemented for. Continue watching across the next
+retros that no prod escape follows a batched dev-reject.
+
+**Status:** IMPLEMENTED at v101 (2026-07-23, AdixOut retro — REQ-005 Chunk B close).
+Landed in `.claude/skills/work-items/scripts/work-items.py` `compute_retro_debt`: the
+use-case `rejected`/`build_failed` branch now appends to **routine** (detail label
+`uc-rework`) instead of `incidents`, so a dev-validation reject batches to the retro
+threshold rather than tripping an immediate retro; the `defect`-resolve branch stays an
+immediate incident. Module cadence comment updated. Machinery self-tests extended and GREEN
+(`test_uc_rejection_is_routine_not_immediate_incident`,
+`test_uc_reject_then_validated_is_routine`, `test_uc_rework_batches_to_threshold`,
+`test_uc_build_failed_is_routine_not_immediate_incident`; `test_incident_defect_fires_immediately`
+still asserts the defect immediate-incident). NOTE: the shipped change is the SIMPLE
+reclassification (ALL use-case rejects → routine); it does not implement the finer
+"unresolved / repeated reject still trips" distinction sketched in the original Done
+condition below — that was deliberately NOT re-decided this retro. Score at the next two
+retros per §Score.
+
+Original proposal (QUEUED 2026-07-22, AdixOut v99 retro — REQ-005 Chunk A close; retro-cadence thrash):
 **Owner:** work-item machinery (the §F8 retro-debt gate in `work-items.py`); orchestrator consumes the classification
 
 ## Job

@@ -127,6 +127,24 @@ alone. Cheap to bake into the IaC from the first stack; expensive to retrofit.
    AIDX XML body until UC-ADIX-017 sent one — an escaped edge false-positive that would
    have blocked the real consumer in prod. An edge-protection delta with no real-payload
    acceptance condition is incomplete.
+   **For any MULTI-TENANT onboarding / provisioning surface** — a flow that makes a new
+   customer (or tenant/account) ready to be served — you MUST first ENUMERATE the FULL set
+   of per-customer resources that must exist for that customer to be served end-to-end, then
+   author acceptance conditions requiring onboarding to ensure ALL of them IDEMPOTENTLY
+   (create-if-absent), INCLUDING the migration case: a customer whose record PREDATES a
+   later-added resource must be SELF-HEALED (re-running onboarding creates the missing
+   resource for the pre-existing customer), not just the happy-path brand-new onboard. A
+   fingerprint / "already-provisioned" short-circuit that skips ensuring the resource set for
+   a pre-existing row is a completeness hole. Founding failure: UC-ADIX-019 (dynamic
+   per-customer auth) took 3 dev-validation rework cycles because the per-customer resource
+   set (EntitlementStore row, Secrets-Manager JWT key, dynamic key resolution, API-Gateway
+   API-key, usage-plan association) was discovered INCREMENTALLY and an idempotency
+   short-circuit skipped ensuring resources for pre-existing rows. State the observable that
+   must hold: after onboarding (new AND re-applied against a pre-existing customer), every
+   enumerated per-customer resource exists. Sibling of the concurrency/idempotency family
+   [EXP-109] — this extends it from single-resource idempotency to resource-SET completeness
+   + migration/self-heal. A multi-tenant provisioning delta with no enumerated resource set
+   and no self-heal/migration acceptance condition is incomplete.
 4. **Maintain `architecture/dependencies/data-flow.mmd`**: the runtime data-flow
    with **platform gates as explicit nodes** — WAF, authorizers, identity-source
    checks, cache layers, TTL/lazy-deletion semantics, CSP. Express each slice's

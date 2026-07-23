@@ -178,6 +178,22 @@ model — the changed nodes/edges ARE your scope:
   concurrency-durability probe (above) — a green build is only as complete as what its
   acceptance actually exercises.
 
+- **Exercise re-apply-heals-a-pre-existing-customer on any multi-tenant onboarding /
+  provisioning surface (2026-07-23, UC-ADIX-019).** When a slice onboards or provisions
+  per-customer (or per-tenant/account) resources, do NOT stop at the happy-path new-onboard.
+  Assert that EVERY per-customer resource the architect enumerated exists after onboarding,
+  AND drive the MIGRATION/self-heal case: re-run onboarding against a customer whose record
+  PREDATES a later-added resource and assert the missing resource is now created for that
+  pre-existing customer — an idempotency short-circuit must NOT skip ensuring the resource
+  set for an already-present row. UC-ADIX-019 (dynamic per-customer auth) took 3 dev-catch
+  rework cycles because the per-customer resource set (EntitlementStore row, Secrets-Manager
+  JWT key, dynamic key resolution, API-Gateway API-key, usage-plan association) was
+  discovered incrementally and the fingerprint idempotency short-circuit skipped ensuring
+  resources for pre-existing rows. These were dev-validation catches, fixed before prod — the
+  process working — but the re-apply-heals-migration probe makes catching them STANDING, not
+  luck. Sibling of the concurrency-durability probe (above) and [EXP-109] — extends
+  single-resource idempotency to resource-SET completeness + migration.
+
 - **Match the FULL identifying tuple, never a bare qualifier substring (2026-07-16,
   recurring 3x).** When a probe or acceptance assertion checks an AIDX/event
   `OperationTime` — or any element keyed by a code + qualifier — match the full

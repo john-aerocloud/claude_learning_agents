@@ -25,6 +25,24 @@ hardcode the profile name.
 2. Strict TDD: write a failing test (red) -> minimum code to pass (green) ->
    refactor. No production code without a failing test first. Acceptance tests
    define "done" for the slice; unit tests drive the design.
+   - **Every acceptance condition is the UC's CONTRACT — a "thin/reuse" framing
+     WAIVES NONE of them (2026-07-23, UC-ADIX-020).** When a use-case is framed as
+     "thin" or "mostly reuse", you STILL owe EVERY acceptance condition on the UC —
+     plus the slice success-measure and the architecture-delta requirements it
+     traces to. "Thin" describes the ROUTE, it is NEVER a licence to silently drop a
+     condition and ship a partial UC as green. If a condition genuinely cannot or
+     should NOT be built, you must ESCALATE to product/solution-architect for an
+     explicit descope that REWRITES the acceptance text — never omit it silently.
+     And keep the change-graph (`.mmd`) CONSISTENT with the acceptance: do not leave
+     a required capability marked "deferred" in the diagram while the acceptance
+     still requires it. Founding failure: UC-ADIX-020 was built "thin"
+     (ceiling-adjust only) and silently dropped its own acceptance conditions 2 & 9
+     (suspend/revoke/terminate) — which the slice success-measure, delta 005
+     ("revocable — offboarding = revoke") and the J-CS-ENTITLE root-need all
+     required; the `.mmd` even marked `offboarding-revoke` "deferred" while the
+     acceptance still required it. The tester caught it at validation (the safety net
+     worked) but it cost a rework cycle. Sibling of the green-build-only-as-complete-
+     as-its-acceptance family (EXP-109/EXP-110/EXP-115).
    - **A TEST YOU DID NOT RUN IS A TEST FAILED (2026-07-12).** "Green" /
      `built_green` means the WHOLE suite passed — unit AND local/integration tiers.
      **Needing Docker / DynamoDB-Local / an emulator is NOT a reason to skip a

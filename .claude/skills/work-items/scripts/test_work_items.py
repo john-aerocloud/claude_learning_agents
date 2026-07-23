@@ -960,8 +960,11 @@ class TestRetro(Base):
         self.assertEqual(len(incidents), 1)
         self.assertTrue(due)   # single incident forces due despite routine < threshold
 
-    def test_incident_uc_rejection_fires(self):
-        # a use-case with a rejected event (an incident) since the marker
+    # ---- IMP-019 (v101): a use-case dev-validation reject is ROUTINE, not an
+    #      immediate incident (a dev reject fixed + re-validated is the process
+    #      WORKING — it BATCHES to the threshold, it does not trip immediately). ----
+    def test_uc_rejection_is_routine_not_immediate_incident(self):
+        # a use-case with a rejected event since the marker -> ROUTINE, not incident
         self.write_item("active", "UC-REJ", "use-case", [
             {"ts": _dt(16, 0), "event": "registered", "agent": "flow-manager"},
             {"ts": _dt(16, 1), "event": "made_ready", "agent": "flow-manager"},
@@ -971,8 +974,58 @@ class TestRetro(Base):
             {"ts": _dt(16, 5), "event": "rejected", "agent": "tester"},
         ])
         routine, incidents, due, detail, _m = self._debt(threshold=3)
-        self.assertEqual(len(incidents), 1)
-        self.assertTrue(due)
+        self.assertEqual(len(incidents), 0)          # NOT an immediate incident
+        self.assertEqual(len(routine), 1)            # batches as routine
+        self.assertFalse(due)                        # below threshold -> not due
+        self.assertIn("uc-rework", [d[1] for d in detail])
+
+    def test_uc_reject_then_validated_is_routine(self):
+        # the founding UC-ADIX-019 shape: rejected (dev-catch) -> fixed -> validated,
+        # all within the same slice. The reject is the process WORKING, so it batches
+        # as ROUTINE, it does NOT trip an immediate retro.
+        self.write_item("done", "UC-REVAL", "use-case", [
+            {"ts": _dt(16, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(16, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(16, 2), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(16, 3), "event": "built_green", "agent": "engineer"},
+            {"ts": _dt(16, 4), "event": "deployed", "agent": "cicd"},
+            {"ts": _dt(16, 5), "event": "rejected", "agent": "tester"},
+            {"ts": _dt(16, 6), "event": "built_green", "agent": "engineer"},
+            {"ts": _dt(16, 7), "event": "deployed", "agent": "cicd"},
+            {"ts": _dt(16, 12), "event": "validated", "agent": "tester"},
+        ])
+        routine, incidents, due, detail, _m = self._debt(threshold=3)
+        self.assertEqual(len(incidents), 0)          # dev-catch is not an incident
+        self.assertEqual(len(routine), 1)            # counted once (uc-rework)
+        self.assertFalse(due)                        # below threshold -> batches
+
+    def test_uc_rework_batches_to_threshold(self):
+        # accumulated dev-rework still triggers a BATCHED retro at the threshold
+        for i in range(3):
+            self.write_item("active", f"UC-RW{i}", "use-case", [
+                {"ts": _dt(16, 0), "event": "registered", "agent": "flow-manager"},
+                {"ts": _dt(16, 1), "event": "made_ready", "agent": "flow-manager"},
+                {"ts": _dt(16, 2), "event": "pulled", "agent": "orchestrator"},
+                {"ts": _dt(16, 3), "event": "built_green", "agent": "engineer"},
+                {"ts": _dt(16, 4), "event": "deployed", "agent": "cicd"},
+                {"ts": _dt(16, 5), "event": "rejected", "agent": "tester"},
+            ])
+        routine, incidents, due, detail, _m = self._debt(threshold=3)
+        self.assertEqual(len(incidents), 0)
+        self.assertEqual(len(routine), 3)
+        self.assertTrue(due)                         # threshold reached -> batched retro
+
+    def test_uc_build_failed_is_routine_not_immediate_incident(self):
+        self.write_item("active", "UC-BF", "use-case", [
+            {"ts": _dt(16, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(16, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(16, 2), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(16, 3), "event": "build_failed", "agent": "engineer"},
+        ])
+        routine, incidents, due, detail, _m = self._debt(threshold=3)
+        self.assertEqual(len(incidents), 0)
+        self.assertEqual(len(routine), 1)
+        self.assertFalse(due)
 
     # ---- marker resets the count ----
     def test_marker_resets_count(self):

@@ -36,6 +36,58 @@ file holds ONLY the live experiments under test; everything retired is in
 
 | EXP-116 | v100 (2026-07-23, ROC) | orchestrator.md (lean-orchestration trial, guarded) | **Problem:** on ROC the orchestrator ran a LEANER loop than the letter of §F — it authored small decomposition-gap use-cases directly (UC-ROC-024/025/026/036) rather than a full `product` dispatch per UC, and centralised all stage-event `wi-append`s. The user authorised validating this AS AN EXPERIMENT ("you can be pragmatic if it's an experiment and we're validating if it's better or not"). Open question: does lean orchestration cut registration/coordination latency (the #1 GLT contributor — `registered`/`queue` = 65% this cycle) WITHOUT losing the guarantees the specialist roles provide? An early NEGATIVE signal already surfaced: centralised appends REGRESSED token-coverage 50%→19.5% (the killed EXP-103) because appends landed `TOKENS=0`. **Solution:** for small, well-understood work INSIDE an already-signed-off slice the orchestrator MAY author decomposition-gap UCs (inheriting the parent's signed-off persona/job, introducing NO new scope) and centralise bookkeeping — under FIVE HARD GUARDS; any breach = revert that class to full role dispatch: **(G1)** every orchestrator-authored UC carries persona/job from the signed-off dossier; **(G2)** NO product/architecture DECISION (new scope/persona/tech choice) is taken by the orchestrator — those still dispatch product/solution-architect; **(G3)** NO code fix is EVER hand-cranked by the orchestrator — every bug is a `/defect` built by engineer + validated by tester (the v98 rule + principle-failure `2026-07-22-orchestrator-hand-cranked-fix` STAND, explicitly NOT relaxed by this trial); **(G4)** every UI/pipeline slice still gets a real live-stack tester E2E (stand up the FE + push data through the running pipeline, EXP-115 family); **(G5)** every centralised stage append carries the dispatch-return `TOKENS` (absorbs EXP-103 — no coverage regression). | gross lead time (registration/coordination latency on the `registered`/`queue` constraint FALLS) | over the next 3 slices: lead-time median does not rise (target: falls) AND all five guards hold with 0 breaches — 0 orchestrator-authored UCs missing persona/job, 0 orchestrator-taken product/arch decisions, 0 hand-cranked code fixes, every UI/pipeline slice live-E2E'd, token-coverage does NOT regress vs this cycle; if lead time does not improve OR any guard breaks, FAILED (revert to full role dispatch) | 3 slices (or 3 retros) | active (0/3) | applies-to: ROC (and any project trialing lean orchestration). Founding: user authorisation 2026-07-23 + honest self-assessment that the ROC loop ran leaner than §F. FENCES OFF the known-forbidden hand-crank pattern (G3) — this trial is ONLY about authoring obvious decomposition-gap UCs + centralised bookkeeping, never skipping engineer/tester or making product/arch calls. Absorbs killed EXP-103's token-stamping as G5. |
 
+## Retro 2026-07-23 (AdixOut) — v102 — REQ-005 Chunk B complete (governed customer lifecycle); IMP-019 validated
+
+- **Constraint:** UNCHANGED — `queue` wait (~72.7% of GLT), the ESTABLISHED
+  calendar-time/dependency ARTIFACT (multi-session human cadence + inter-item wait), not
+  squeezable in-system, so the change budget was NOT spent chasing it (constraint-gate).
+  REQ-005 Chunk B is COMPLETE: the governed customer lifecycle
+  (onboard→auth→serve→adjust→suspend/revoke/terminate) is all live on dev-shared.
+- **Fold A (plain practice → engineer.md + product.md): a UC's acceptance conditions are its
+  CONTRACT — never silently dropped under a "thin/reuse" framing.** When a use-case is framed
+  "thin"/"mostly reuse", the engineer STILL owes EVERY acceptance condition on the UC (plus the
+  slice success-measure and the traced architecture-delta requirements). If a condition
+  genuinely cannot/should not be built, the engineer ESCALATES to product/solution-architect for
+  an explicit descope that REWRITES the acceptance text — never omits it and ships a partial UC
+  as green; the change-graph (`.mmd`) stays consistent with the acceptance (no capability marked
+  "deferred" while the acceptance still requires it). product.md: when authoring a "reuse"
+  slice, make the acceptance conditions explicit and complete so "thin" cannot hide a gap.
+  Founding failure: UC-ADIX-020 was built "thin" (ceiling-adjust only) and silently dropped its
+  own acceptance conditions 2 & 9 (suspend/revoke/terminate) — required by the slice
+  success-measure, delta 005 ("revocable — offboarding = revoke") and the J-CS-ENTITLE
+  root-need; the `.mmd` even marked `offboarding-revoke` "deferred" while the acceptance still
+  required it. The tester caught it at validation (the safety net worked) but it cost a rework
+  cycle. Sibling of the green-build-only-as-complete-as-its-acceptance family
+  (EXP-109/110/115). NO new experiment row (deterministic plain practice).
+- **IMP-019 VALIDATED this cycle (worked).** The v101 retro-cadence machinery fix (a use-case
+  `rejected`/`build_failed` classifies ROUTINE and batches to the threshold; the defect-resolve
+  branch stays an immediate incident) did exactly its job: REQ-005 Chunk B's UC-019/020
+  dev-rejects were batched and the retro batched CLEANLY at the chunk boundary instead of
+  thrashing an immediate full retro per dev-catch. No prod defect appeared after a batched
+  dev-reject (the CFR falsification guard held). Dated note added to IMP-019.
+- **Fold B (plain practice, small → work-items SKILL.md): note-quoting extends to backticks /
+  `$(…)`.** Extended the existing `wi-append` NOTE-quoting note: SINGLE-QUOTE `NOTE='…'` AND
+  avoid backticks, `$(…)` command-substitution, and commas in the note text — a backtick/`$(…)`
+  in a double-quoted note is shell-command-substituted (mangling/executing), and commas can
+  truncate. Caller hazard, not a machinery bug. principle-failure
+  `2026-07-23-wi-append-note-backtick-command-substitution-mangled-evidence.md`.
+- **Improvement-slice IMP-020 (QUEUED, owned by cicd): CI bundle-freshness guard.** Recurring
+  OI-BUNDLE-DRIFT: committed `infra/assets/*.mjs` deploy bundles go stale vs their `src/app`
+  source (UC-ADIX-020 commit `6a1c88a` carried a stale bundle → an incidental later commit
+  regenerated it → a mid-validation CI auto-redeploy `6a1c88a`→`9212c9d`; no functional impact
+  since `deploy-sst` re-bundles fresh, but a confusing deploy-identity shift + git-hygiene gap).
+  Proposed: a `build-and-test` CI check / `make` target that rebuilds bundles and FAILS if the
+  committed `.mjs` differ from a fresh `make bundle-all`, catching a stale bundle at push not by
+  luck. Also flags the sibling `make render-diagrams` gap (documenter-flagged) — both are
+  project-level cicd-capability gaps. Target metric: fewer confusing deploy-identity shifts /
+  CFR-noise from bundle drift.
+- **Experiment scores:** no experiment rows added or retired. Main's scoring preserved as-is.
+  Registry: **8 active** (EXP-101, 106, 107, 109, 112, 113, 115, 116) — AT the v88 cap-8.
+- **Constraint to attack next:** UNCHANGED (queue = artifact, not squeezable in-system). The
+  changes that landed = the acceptance-is-the-contract fold (engineer.md + product.md), the
+  note-quoting extension (work-items SKILL.md), and improvement-slice IMP-020. Watch that no
+  prod defect follows a batched dev-reject (would falsify IMP-019).
+
 ## Retro 2026-07-23 (AdixOut) — v101 — REQ-005 Chunk B (dynamic multi-tenant onboarding; IMP-019 retro-cadence fix landed)
 
 - **Constraint:** UNCHANGED — `queue` wait remains the dominant GLT share, the ESTABLISHED

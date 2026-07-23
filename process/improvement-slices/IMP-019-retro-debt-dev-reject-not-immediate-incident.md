@@ -1,5 +1,12 @@
 # IMP-019 — A resolved dev-validation `rejected` batches ROUTINE, not immediate-incident
 
+**AdixOut v102 retro (2026-07-23) — VALIDATED (working).** REQ-005 Chunk B's UC-019/020
+dev-rejects were classified ROUTINE and the retro BATCHED cleanly at the chunk boundary
+instead of thrashing an immediate full retro per dev-catch (the pre-IMP-019 behaviour). No
+prod defect appeared after a batched dev-reject (the CFR falsification guard held). The
+change is doing exactly what it was implemented for. Continue watching across the next
+retros that no prod escape follows a batched dev-reject.
+
 **Status:** IMPLEMENTED at v101 (2026-07-23, AdixOut retro — REQ-005 Chunk B close).
 Landed in `.claude/skills/work-items/scripts/work-items.py` `compute_retro_debt`: the
 use-case `rejected`/`build_failed` branch now appends to **routine** (detail label

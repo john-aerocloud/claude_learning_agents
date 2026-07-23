@@ -48,9 +48,17 @@ their children per the graph's `bubble` rule.
 | `ready` | Ready |
 | `building` | In Progress |
 | `validating` | In Review |
+| `dev-validating` | In Review |
+| `prod-deploying` | In Progress |
+| `prod-validating` | In Review |
 | `reworking` | In Progress (rework) |
 | `blocked` | Blocked |
 | `done` | Done |
+
+(The dev-then-prod validation states `dev-validating`/`prod-deploying`/`prod-validating`
+come from the EXP-101/§11b state graph; before v100 they were unmapped and fell back to
+Backlog, mislabelling active validation work. Aggregates additionally map `planned` →
+Backlog.)
 
 **Defect items:**
 

@@ -96,18 +96,22 @@ Each cycle:
      `make wi-append ID=<uc> EVENT=blocked AGENT=flow-manager NOTE="<reason>"`; clear it with
      `EVENT=unblocked`. The blocked reason rides on the event note, so the board banner is
      DERIVED — there is no separate blocked-reason file to keep in step.
-   - **Per-item board push — MANDATORY, in-cycle (not optional, not "eventually"):**
-     immediately after ANY `wi-append` that changes an item's state (created / made_ready /
-     pulled / built_green / deployed / validated / blocked / unblocked / rejected), dispatch the
-     `linear` (and/or `jira`) projection agent for THAT id, in the SAME cycle, before the loop
-     advances to the next item. It reads the item file and upserts the one issue idempotently.
-     **Invariant: an item's board status must never lag its item-file state by more than the
-     current cycle.** Only the external API *call* is best-effort (a network failure is logged
-     and the next push/sweep reconciles) — the DISPATCH itself is NOT skippable. Skipping it is
-     a process failure: the board silently goes stale and the humans watching it lose the plot
-     (the board/doc-lag lapse this rule exists to prevent). The step-5b full sweep is
-     only a periodic backstop for structure/prune, never the primary path. An item in `blocked`
-     state shows Blocked on the board regardless of its queue.
+   - **Per-item board push — at MEANINGFUL transitions, in-cycle (EXP-117 cadence, v103):**
+     dispatch the `linear` (and/or `jira`) projection agent for an id, in the SAME cycle, after a
+     `wi-append` that reaches a **meaningful** state — **`pulled`** (work started), **`blocked`/
+     `unblocked`**, and any **TERMINAL** state (**`validated`/`done`, `rejected`, `resolved`**).
+     **SKIP** the transient intermediate pushes (`created`/`made_ready`/`built_green`/`deployed`/
+     `dev-validating`) — they collapse to the same "In Progress" band a human cannot distinguish,
+     and pushing each one was the largest plumbing-token cost with no fidelity gain (EXP-117).
+     It reads the item file and upserts the one issue idempotently.
+     **Invariant: a TERMINAL or `blocked` board status must never lag its item-file state by more
+     than the current cycle** (the states humans act on). Intermediate in-progress detail may lag
+     until the next meaningful push or the step-5b sweep. Only the external API *call* is
+     best-effort (a network failure is logged; the next push/sweep reconciles) — the DISPATCH at a
+     meaningful transition is NOT skippable. The step-5b full sweep is the periodic reconciling
+     backstop for structure/prune AND for any intermediate drift; it is not the primary path for
+     terminal/blocked fidelity. An item in `blocked` state shows Blocked on the board regardless of
+     its queue.
 5. **Done & bubble up.** `make wi-append ID=<uc> EVENT=validated AGENT=tester REF=<sha>`
    (same turn as the green push), then `make wi-project PROJECT=$1` — the item moves to
    `items/done/`, releases its claims, and slice→chunk→requirement done bubbles automatically

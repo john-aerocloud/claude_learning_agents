@@ -148,6 +148,21 @@ model — the changed nodes/edges ARE your scope:
   bounded backward-scan window; the correct `actual.*` fields were in the aggregate
   all along.)
 
+- **Isolate stateful shared resources across parallel test files + start FRESH
+  (v103, ROC C3).** When acceptance/e2e specs run in PARALLEL (e.g. vitest default
+  file-parallelism) and share ONE stateful external resource, they collide invisibly
+  and produce FALSE failures: on ROC two SB→EH wire-path consumers on the same Event
+  Hub consumer group fought for the epoch (`ReceiverDisconnectedError`) and
+  cross-delivered messages between separate fake-Jira instances. Standing practice:
+  (a) a wire-path-sensitive spec uses the DIRECT handler/sweep entry pattern, NOT a
+  second live wire-path consumer competing for the shared consumer group; (b) a spec
+  that itself SWEEPS or scans shared state (e.g. a whole-table `listExpiredHolds`)
+  runs against a DEDICATED isolated table/namespace so it cannot pollute a sibling;
+  (c) re-runs start from a FRESH stack (`local:down && up`) — persistent
+  dedup-markers / checkpoints from a prior run pollute a re-run and fail specs that
+  were green on a clean stack. A false-fail from harness contention is NOT a product
+  defect — fix the harness isolation, do not chase a phantom.
+
 - **Probe CONCURRENCY/durability on any concurrent surface — STANDING practice, not
   instinct (v86, UC-ADIX-006, EXP-109).** When the surface is served by a
   concurrent/parallel-invocation component (SQS-, stream-, or EventBridge-triggered

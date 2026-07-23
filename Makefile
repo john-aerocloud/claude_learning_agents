@@ -28,6 +28,7 @@ PROJECT ?= $(shell cat work/ACTIVE 2>/dev/null)
 APP     := work/$(PROJECT)/src/app
 INFRA   := work/$(PROJECT)/src/infra
 WORKITEMS := sh .claude/skills/work-items/scripts/work-items
+BOARDPROJECT := sh .claude/skills/board-projection/scripts/board-project
 AWS_PROFILE ?= $(shell cat .claude/config/aws-profile 2>/dev/null)
 PY      ?= $(shell sh .claude/skills/dora-ledger/scripts/dora --python)
 SQLCMD       ?= C:/Program Files/Microsoft SQL Server/Client SDK/ODBC/170/Tools/Binn/sqlcmd.exe
@@ -176,6 +177,21 @@ wi-validate:
 # One-shot migration from items.csv + ledger into per-item files.
 wi-migrate:
 	$(WORKITEMS) migrate --project $(PROJECT)
+
+# --- Board projection (Linear; v82-native, single-item, idempotent) -----------
+# Project ONE work item onto its Linear issue (one-way; never writes item state).
+# Default is --dry-run (read-only plan); pass LIVE=1 to perform the mutation.
+# The Linear API key is read at RUNTIME from work/<p>/secrets/linear.local.json
+# and NEVER inlined/echoed/logged. Jira parity is a fast-follow (not built here).
+#   make board-project PROJECT=OagEventSource ITEM=UC-XA4            # dry-run
+#   make board-project PROJECT=OagEventSource ITEM=UC-XA4 LIVE=1     # live upsert
+board-project:
+	$(BOARDPROJECT) --project $(PROJECT) --item $(ITEM) $(if $(LIVE),--live,--dry-run)
+# Offline unit tests for the board-projection tool (stdlib unittest; no network).
+#   make test-board-project
+test-board-project:
+	$(BOARDPROJECT) --python >/dev/null && \
+	  $$($(BOARDPROJECT) --python) .claude/skills/board-projection/scripts/test_board_project.py
 
 # --- Process-doc conformance gate (process §27.5) -----------------------------
 # Scans the LIVE process/agent/skill/root docs for a DENYLIST of RETIRED

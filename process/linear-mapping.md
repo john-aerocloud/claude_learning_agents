@@ -6,6 +6,13 @@ both boards; each agent is a pure, idempotent, one-way projection of the item
 file (the SSOT), reading the item and upserting its one board object — never
 writing state back.
 
+The **Linear** projection is performed by the shared, v82-native, single-item
+tool `.claude/skills/board-projection/scripts/board-project`
+(`board-project --project <p> --item <ID>` with `--dry-run` default / `--live`).
+It parses the per-item file, maps `derived.state` → the status table below, and
+upserts exactly ONE issue idempotently via `.linear-map.json` (no whole-board
+re-read). Jira parity is a fast-follow (not yet built).
+
 Under the v82 event-sourced model the board is a **derived view**. An item's
 current state is `fold(events)` through its type's graph
 (`process/machinery/state-graphs.json`); the projection agent reads that folded
@@ -40,17 +47,23 @@ The left column is the `derived.state` values from `state-graphs.json` (the fold
 of an item's events). Aggregate states (slice/chunk/requirement) bubble from
 their children per the graph's `bubble` rule.
 
-**Flow items (use-case):**
+**Flow items (use-case)** — covers every v82 use-case state in
+`state-graphs.json` (the deploy/validate granularity added in v82):
 
 | `derived.state` | Board status |
 |---|---|
 | `registered` | Backlog |
 | `ready` | Ready |
 | `building` | In Progress |
+| `deploying` | In Progress |
+| `prod-deploying` | In Progress |
+| `reworking` | In Progress |
+| `dev-validating` | In Review |
 | `validating` | In Review |
-| `reworking` | In Progress (rework) |
+| `prod-validating` | In Review |
 | `blocked` | Blocked |
 | `done` | Done |
+| `cancelled` | Cancelled |
 
 **Defect items:**
 
@@ -63,6 +76,7 @@ their children per the graph's `bubble` rule.
 | `blocked` | Blocked |
 | `resolved` | Done |
 | `wontfix` | Cancelled |
+| `cancelled` | Cancelled |
 
 **Open-items:**
 
@@ -72,6 +86,17 @@ their children per the graph's `bubble` rule.
 | `scheduled` | Ready |
 | `done` | Done |
 | `wontfix` | Cancelled |
+| `cancelled` | Cancelled |
+
+**Aggregates (slice/chunk/requirement)** — state is DERIVED from children per
+the graph's `bubble` rule; the same status column applies:
+
+| `derived.state` | Board status |
+|---|---|
+| `planned` | Backlog |
+| `in_progress` | In Progress |
+| `done` | Done |
+| `cancelled` | Cancelled |
 
 A blocked item shows *why* on its board object: mirror the `blocked` event's note
 into a banner/comment while blocked, and post an unblocked note when it clears.

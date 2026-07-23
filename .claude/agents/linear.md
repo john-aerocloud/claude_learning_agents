@@ -20,19 +20,36 @@ copy from it to Linear and never the other way.
 
 You do NOT read queues, the ledger, or other items. One item in, one issue out.
 
-## What you do
-1. Read the item file for `--id <ID>` (the item whose events just changed).
-2. Upsert its Linear issue via the project's Linear binding (the board adapter reads the item
-   file and applies these mappings idempotently — find the issue by the id→issue map, create if
-   absent else edit), mapping:
-   - item `derived.state` → Linear status (per `process/linear-mapping.md`).
-   - `title` / body Definition → issue title / description.
-   - `parents` → Linear parent/relation; `derived.children` → sub-issue relations.
-   - block reason (an item in `blocked` state, from its latest `blocked` event note) → a
-     "Blocked: <reason>" banner + comment; clear it when the item leaves `blocked`.
-   - DORA timestamps from `events:` → keep as a comment/custom field if the board wants them.
-3. In **full-sweep mode** (no `--id`): project EVERY active + done item to reconcile drift the
-   per-item path may have missed (the backstop). This is `--live` with no `--item`.
+## What you do — invoke the shared board-projection tool
+You do NOT hand-roll GraphQL or `curl`. Use the committed, v82-native, single-item tool
+`.claude/skills/board-projection/scripts/board-project` (cross-platform launcher; NEVER bare
+`python3`). It is the successor to the retired per-project `sync-linear.py` (removed in the v82 cutover — do not resurrect it). <!-- doc-lint:allow: historical citation of the retired tool this one supersedes -->
+It reads the item file + the project's Linear binding and
+applies `process/linear-mapping.md` idempotently for you.
+
+1. Dry-run first (default) to inspect the planned mutation:
+   `make board-project PROJECT=<p> ITEM=<ID>`
+   (equivalently `sh .claude/skills/board-projection/scripts/board-project --project <p> --item <ID>`).
+2. Then perform it live:
+   `make board-project PROJECT=<p> ITEM=<ID> LIVE=1` (or `… --item <ID> --live`).
+
+The tool handles all of the mapping so you don't have to:
+   - item `derived.state` → Linear status (per `process/linear-mapping.md`, all v82 states);
+   - frontmatter `title` (fallback: Definition body) → issue title `"<ID> · <title>"`; body → description;
+   - `parents` → sub-issue (defect/open-item under its UC) or milestone/project attach (UC) where resolvable;
+   - block reason (latest `blocked` event note) → a "🚫 Blocked: <reason>" comment, cleared with a "✅ Unblocked" note when it leaves `blocked`;
+   - labels `defect` / `open-item` / `needs-acceptance` / `blocked` / `job:<Jn>` as applicable;
+   - upsert via `.linear-map.json` — create then write the new issue id back, else patch in place (no dupes). NO whole-board re-read.
+
+The API key is read at RUNTIME from `work/<p>/secrets/linear.local.json` by the tool and is
+NEVER passed on a command line, echoed, or logged. If the secrets file/key is missing the tool
+STOPS with a clear message — do nothing further (Linear is optional per project).
+
+**Full-sweep mode** (reconcile the whole board) is not yet a single flag on this tool: invoke
+it once per lagging item (`--item <ID> --live`). A batch/sweep wrapper is a fast-follow.
+
+**Jira parity is a fast-follow** (tracked as a separate IMP); this tool is Linear-only today.
+Do NOT build or invoke a Jira path here.
 
 ## Invariants that make you safe at any scale
 - **Idempotent.** You read the item's *current* state and set the issue to match — you never

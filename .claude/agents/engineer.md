@@ -396,6 +396,23 @@ symptom is reproduced and pinned — not just the first true-but-secondary cause
 (diagnosis that stops at a real-but-partial bug, like an IAM AccessDenied,
 without reproducing the user-visible failure, keeps re-opening the same defect).
 
+## Author acceptance probes to SELF-BOOTSTRAP (2026-07-23, UC-ADIX-021)
+An acceptance/live probe you author that needs CUSTOMER AUTHENTICATION (a signed
+JWT, a customer API key) MUST be self-contained — it onboards a DEDICATED EPHEMERAL
+test customer with a fresh in-process keypair, reusing the shared `probeBootstrap.ts`
+helper (generate the keypair, onboard through the GOVERNED provisioning path, read the
+provisioned key IN-SCRIPT, mint the JWT). NEVER wire a probe to an out-of-band key
+file, a key persisted across sessions, or a direct interactive
+`aws secretsmanager get-secret-value` (that read is blocked by the security guardrail;
+reading a secret INSIDE the committed probe script is fine, a direct interactive read
+is not). The probe must NEVER mutate the shared synthetic customers (`-a`/`-b`) and
+must self-restore. Founding friction: UC-ADIX-021's validation was BLOCKED because
+`probe-subscription` depended on an out-of-band key — the self-bootstrapping
+`probeBootstrap.ts` + `synthetic-probe-*` customers closed a recurring cross-session
+validation gap that had touched several UCs. A probe the tester cannot run for want of
+a credential is a build gap you own (tooling self-service, above), not the tester's to
+work around.
+
 ## Wire-on-deploy contract tests (process v27)
 When a deploy/capability step says "the app/engineer wires X" (e.g. pipeline
 writes `/config.js`; `index.html` must reference it before the bundle), land a

@@ -1,5 +1,11 @@
 # IMP-019 — A resolved dev-validation `rejected` batches ROUTINE, not immediate-incident
 
+**AdixOut v104 retro (2026-07-23) — STILL HEALTHY (2nd confirmation).** REQ-005 Chunk C
+(self-service subscription) batched cleanly again at the chunk boundary — its dev-catches
+(incl. the UC-021 self-bootstrap tooling gap + the UC-022 pagination probe bug) accrued
+ROUTINE with no retro thrash, and no prod defect followed a batched dev-reject. The
+cadence fix continues to do exactly what it was implemented for; no change needed.
+
 **AdixOut v102 retro (2026-07-23) — VALIDATED (working).** REQ-005 Chunk B's UC-019/020
 dev-rejects were classified ROUTINE and the retro BATCHED cleanly at the chunk boundary
 instead of thrashing an immediate full retro per dev-catch (the pre-IMP-019 behaviour). No

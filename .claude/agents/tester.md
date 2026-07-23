@@ -148,6 +148,21 @@ model — the changed nodes/edges ARE your scope:
   bounded backward-scan window; the correct `actual.*` fields were in the aggregate
   all along.)
 
+- **Isolate stateful shared resources across parallel test files + start FRESH
+  (v103, ROC C3).** When acceptance/e2e specs run in PARALLEL (e.g. vitest default
+  file-parallelism) and share ONE stateful external resource, they collide invisibly
+  and produce FALSE failures: on ROC two SB→EH wire-path consumers on the same Event
+  Hub consumer group fought for the epoch (`ReceiverDisconnectedError`) and
+  cross-delivered messages between separate fake-Jira instances. Standing practice:
+  (a) a wire-path-sensitive spec uses the DIRECT handler/sweep entry pattern, NOT a
+  second live wire-path consumer competing for the shared consumer group; (b) a spec
+  that itself SWEEPS or scans shared state (e.g. a whole-table `listExpiredHolds`)
+  runs against a DEDICATED isolated table/namespace so it cannot pollute a sibling;
+  (c) re-runs start from a FRESH stack (`local:down && up`) — persistent
+  dedup-markers / checkpoints from a prior run pollute a re-run and fail specs that
+  were green on a clean stack. A false-fail from harness contention is NOT a product
+  defect — fix the harness isolation, do not chase a phantom.
+
 - **Probe CONCURRENCY/durability on any concurrent surface — STANDING practice, not
   instinct (v86, UC-ADIX-006, EXP-109).** When the surface is served by a
   concurrent/parallel-invocation component (SQS-, stream-, or EventBridge-triggered
@@ -193,6 +208,30 @@ model — the changed nodes/edges ARE your scope:
   process working — but the re-apply-heals-migration probe makes catching them STANDING, not
   luck. Sibling of the concurrency-durability probe (above) and [EXP-109] — extends
   single-resource idempotency to resource-SET completeness + migration.
+
+- **A live acceptance probe needing customer auth MUST SELF-BOOTSTRAP — a probe that
+  can't run for want of an out-of-band credential is a TOOLING gap to fix, not a
+  silently-skipped condition (2026-07-23, UC-ADIX-021).** When a live acceptance/probe
+  needs customer authentication (a signed JWT, a customer key), it MUST be
+  self-contained: it onboards a DEDICATED EPHEMERAL test customer with a fresh
+  in-process keypair via the shared `probeBootstrap.ts` helper — generate the keypair,
+  onboard through the GOVERNED path, read the provisioned key IN-SCRIPT, mint the JWT —
+  NEVER depending on an out-of-band key file, a key persisted across sessions, or a
+  DIRECT interactive `aws secretsmanager get-secret-value` (the last is blocked by the
+  security guardrail; reading a secret INSIDE a committed probe script is fine, a direct
+  interactive read is not). It must NEVER mutate the shared synthetic customers
+  (`-a`/`-b`) and must self-restore (its `synthetic-probe-*` customer is torn down /
+  left inert). Founding friction: UC-ADIX-021's validation was BLOCKED because
+  `probe-subscription` depended on an out-of-band key; the fix (`probeBootstrap.ts` +
+  self-bootstrapping `synthetic-probe-*` customers) removed a recurring cross-session
+  validation gap that had touched several UCs. If a probe you inherit is not
+  self-bootstrapping, MAKE it self-bootstrap (self-service tooling, above) — do not skip
+  the condition and never fabricate green for a probe you could not run. Sibling of the
+  re-apply-heals migration probe (above) and validation-as-code (§35).
+  **A probe asserting a FULL result set must follow PAGINATION to exhaustion (2026-07-23,
+  UC-022 probe bug):** dev-shared runs `CATCHUP_PAGE_SIZE=2`, so a single-page compare
+  false-fails — page to the end (drain the cursor/`nextToken`) before asserting the
+  complete set.
 
 - **Match the FULL identifying tuple, never a bare qualifier substring (2026-07-16,
   recurring 3x).** When a probe or acceptance assertion checks an AIDX/event

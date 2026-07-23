@@ -373,6 +373,9 @@ STATE_STATUS = {
         "ready": ["Ready", "Todo", "Backlog"],
         "building": ["In Progress"],
         "validating": ["In Review"],
+        "dev-validating": ["In Review"],
+        "prod-deploying": ["In Progress"],
+        "prod-validating": ["In Review"],
         "reworking": ["In Progress (rework)", "In Progress"],
         "blocked": ["Blocked", "In Progress"],
         "done": ["Done"],
@@ -395,7 +398,7 @@ STATE_STATUS = {
 }
 # aggregate items (slice/chunk/requirement) reuse the flow-item table
 STATE_STATUS["slice"] = STATE_STATUS["use-case"].copy()
-STATE_STATUS["slice"].update({"in_progress": ["In Progress"]})
+STATE_STATUS["slice"].update({"planned": ["Backlog"], "in_progress": ["In Progress"]})
 STATE_STATUS["chunk"] = STATE_STATUS["slice"]
 STATE_STATUS["requirement"] = STATE_STATUS["slice"]
 

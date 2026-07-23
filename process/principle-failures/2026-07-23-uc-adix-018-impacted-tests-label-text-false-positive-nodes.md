@@ -49,3 +49,7 @@ Waived in this pass's test-plan (`ADMIN`/`UC019`/`UC020` are legitimate waivers;
 `customer`/`governed` are non-issues, not real scope). Named here per the
 tester's standing duty to log tool-scope findings rather than silently work
 around them.
+
+## Cross-instance recurrence (ROC v103 retro, 2026-07-23)
+
+The SAME impacted-tests coverage-vocabulary class recurred on ROC C3, independently: `@covers` tags use a `domain-/functions-/adapter-/config-` prefix the bare `.mmd` node ids never match, so `consumer`/`decisionRecord` + 4 port/interface nodes (`alertPayload`/`alertStatePort`/`jiraPort`/`soakTriggerPort`) read UNCOVERED despite real specs covering them. Patched project-locally via `%% @alias` lines. Two projects, same tool → past the per-project-workaround threshold. Fix routed as **IMP-021** (impacted-tests resolves id AND label + normalises the prefix vocabulary natively; drop per-project aliases when it lands).

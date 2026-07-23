@@ -51,3 +51,25 @@ parameterised `--project <p> --item <ID>` with `--dry-run` (default) / `--live`.
 ## Notes
 Process-layer — commits on `instance/OagEventSource`; folds back with the reconciliation the
 owner is handling. Supersedes the retired `work/<project>/scripts/sync-linear.py`.
+
+## DELIVERED (2026-07-23, commit `ed3506f`)
+Tool `.claude/skills/board-projection/scripts/board_project.py` + launcher `board-project` +
+`make board-project`/`make test-board-project`; 26/26 offline tests green; `linear.md` rewired;
+`linear-mapping.md` refreshed for v82 states. Live-verified idempotently (no dupes, key-safe):
+UC-XA4→OAG-151, UC-XA11→OAG-152, SLC-041→OAG-153 (all Done). AC-1 ✅, AC-2 ✅, AC-3 ✅
+(Linear). Acute pain fixed: per-item state pushes (§F9 step-4) no longer flake.
+
+## Fast-follows (NOT built here — deliberately scoped out)
+1. **Board hierarchy / full-sweep (§F9 step-5b).** The single-item tool projects EVERY item
+   (incl. slices/chunks) as a flat Issue keyed in `issues[ID]` — so SLC-041 became Issue
+   OAG-153, not a Milestone. The canonical REQ▸CHK▸SLC▸UC → Team▸Project▸Milestone▸Issue
+   nesting + prune is not maintained. A future IMP adds a `--sweep` mode that builds/prunes the
+   Project/Milestone structure and re-parents Issues.
+2. **Jira parity.** ROC (and any Jira-bound project) still needs the equivalent v82-native
+   single-item Jira projection; the `jira` agent is not yet rewired. Mirror this tool's shape.
+3. **Title source.** The tool takes frontmatter `title:` as primary, `## Definition` body
+   first-line as fallback (UC-XA4 has no `## Definition` heading, so body-first produced garbage
+   — evidence-forced). Fine for current items; revisit if item authoring changes.
+4. `.linear-map.json` is a gitignored machine-local id-cache (per-instance); losing it would
+   make the tool create duplicate issues on next run. A future hardening could reconcile by
+   Issue-title lookup before create.

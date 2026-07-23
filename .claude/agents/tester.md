@@ -66,6 +66,16 @@ that path was never exercised — yet it was called "verified". Rules that follo
     the entry point uses" set MUST be a single code-derived source of truth shared by the
     entry point AND the test, with a committed guard that they cannot diverge. A feature
     reachable only via the test harness, not the human's command, is NOT verified.
+  - **Validate the JTBD OUTCOME end-to-end, not merely that the changed code path runs
+    (2026-07-24, DEF-ADIX-003).** When validating a fix or feature, exercise the ACTUAL
+    user-facing outcome / job-to-be-done live end-to-end — a code path that executes is
+    NOT an outcome that works. DEF-ADIX-003's first "fix" reached the secret-recovery code
+    (the changed path ran green), but validating the real JTBD — "a reactivated customer
+    becomes USABLE: it can authenticate AND get served" — found the customer STILL locked
+    out by two further bugs (a DLQ-cooldown timeout on onboard, a stale rotation-unaware
+    key cache) that a code-path view would have missed. Drive the outcome the requirement
+    promises to its real terminal state, not the diff. This is the outcome-level of the
+    assert-real-state-not-proxy (v97) + self-bootstrapping-probe (v104) family.
 
 **Adversarial ORDERING on load/replace surfaces (v83, from UC-E3).** When validating a UC
 that loads or replaces the active model/view, do not stop at "a bad input reports an
@@ -232,6 +242,13 @@ model — the changed nodes/edges ARE your scope:
   UC-022 probe bug):** dev-shared runs `CATCHUP_PAGE_SIZE=2`, so a single-page compare
   false-fails — page to the end (drain the cursor/`nextToken`) before asserting the
   complete set.
+  **A self-bootstrapping / live probe must decide pass/fail AFTER its `finally`/cleanup
+  block — NEVER call `process.exit()` from inside a `try` (2026-07-24, recurring across
+  UC-021/024/DEF-ADIX-003):** Node does NOT unwind `finally` on `process.exit()`, so an
+  `exit()` from inside the guarded body SKIPS cleanup and orphans the live ephemeral
+  resources (the `synthetic-probe-*` customer + its secret/queue). The single
+  `process.exit` must run AFTER `finally` returns; capture the verdict, clean up, then
+  exit. A probe that leaks its ephemerals on failure is a tooling gap to fix.
 
 - **Match the FULL identifying tuple, never a bare qualifier substring (2026-07-16,
   recurring 3x).** When a probe or acceptance assertion checks an AIDX/event

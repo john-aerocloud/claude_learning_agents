@@ -145,6 +145,33 @@ alone. Cheap to bake into the IaC from the first stack; expensive to retrofit.
    [EXP-109] — this extends it from single-resource idempotency to resource-SET completeness
    + migration/self-heal. A multi-tenant provisioning delta with no enumerated resource set
    and no self-heal/migration acceptance condition is incomplete.
+   **For any idempotent PROVISIONING ("ensure") or resource RESOLUTION against AWS** —
+   secrets, queues, eventing targets, per-container caches/resolvers — the acceptance MUST
+   enumerate the resource's STATE-MACHINE, not just the absent-vs-present dichotomy: name the
+   BAD / TRANSITIONAL states the resource can be in and state the observable that must hold in
+   each. A resource is not merely "there or not there" — it can be present-but-unusable, and
+   an "ensure/resolve" that treats present==provisioned ships a customer that looks onboarded
+   but cannot be served. Enumerate at least:
+   - a secret can be SCHEDULED-FOR-DELETION (`DescribeSecret` still returns the ARN through
+     the 7-day recovery window) → the acceptance requires `RestoreSecret`, NOT treating the
+     returned ARN as provisioned;
+   - a queue can be in the ~60s delete-recreate COOLDOWN (`QueueDeletedRecently`) → the
+     acceptance requires the caller NOT to block past its timeout (defer / heal-later), and
+     not-found is the real SDK error name (`QueueDoesNotExist`);
+   - a cross-service delivery target (e.g. an SQS DLQ for EventBridge) needs its RESOURCE
+     POLICY, not merely to exist, for delivery to succeed — acceptance asserts the policy;
+   - a per-container CACHE / key resolver must be ROTATION-AWARE — the acceptance exercises a
+     verify-failure → invalidate+refetch (or bounded TTL), so a stale-positive cache entry
+     cannot serve a rotated-out key;
+   - a freshly-created API-Gateway / EventBridge resource has a ~60s PROPAGATION lag →
+     acceptance permits bounded-retry, not an immediate-fail.
+   Founding chain: DEF-ADIX-003 revealed THREE sequential bugs in ONE offboard→reactivate flow
+   (secret marked-for-deletion → DLQ cooldown timing out the onboard Lambda → stale
+   rotation-unaware key cache), plus UC-025's three (per-customer verify, secret self-heal, DLQ
+   resource policy) — every one a "handled absent/present but not the BAD/TRANSITIONAL state"
+   gap. Extends EXP-109 + the v101 multi-tenant-completeness fold from resource-SET presence to
+   resource-STATE correctness. An ensure/resolve delta whose acceptance enumerates only
+   absent-vs-present, not the failure/transitional states of the AWS resource, is incomplete.
 4. **Maintain `architecture/dependencies/data-flow.mmd`**: the runtime data-flow
    with **platform gates as explicit nodes** — WAF, authorizers, identity-source
    checks, cache layers, TTL/lazy-deletion semantics, CSP. Express each slice's

@@ -83,6 +83,16 @@ core-slice-false-done recurrence). The wire shape is part of the architecture
 delta, established from reality before build — never assumed from a convenient
 sibling artifact.
 
+**"Reuse existing X" is a claim to VERIFY against the real target account/stack,
+not to assume from another environment (2026-07-24, SLC-AIDX-011 scope-gap).** When
+a delta reuses an existing resource (a stack, queue, table, Lambda, bus), confirm at
+design time that X actually exists in the TARGET deployed account you are building
+against — do not infer its presence from a sibling env. SLC-AIDX-011 assumed the
+C10/C11 ingest was on dev-dataout because the egress had migrated there, but the
+account migration had moved only the egress — the ingest was still sandbox-only. The
+engineer's §F7 stop was correct; a predecessor UC + an architect delta had to be
+inserted. Falsify a reuse premise against the live target before it enters the delta.
+
 ## Release-identity tagging on prod resources (process §18a, ISO)
 Every production resource must be traceable to the version + commit running it. In
 your per-infrastructure notes, **specify which prod resources carry the `Version` and

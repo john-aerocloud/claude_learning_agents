@@ -43,6 +43,18 @@ hardcode the profile name.
      acceptance still required it. The tester caught it at validation (the safety net
      worked) but it cost a rework cycle. Sibling of the green-build-only-as-complete-
      as-its-acceptance family (EXP-109/EXP-110/EXP-115).
+   - **"Reuse existing X" must be VERIFIED against the real deployed target, not
+     ASSUMED from another environment (2026-07-24, SLC-AIDX-011 scope-gap).** When a
+     slice/UC/architecture-delta says "reuse the existing X" (a stack, queue, table,
+     Lambda, bus, secret), assert-real-state FIRST: confirm X actually exists in the
+     TARGET deployed account/stack you are building against — never infer its presence
+     from a sibling environment. Founding case: UC-AIDX-028's "reuse the existing
+     C10/C11 ingest" premise was wrong — C10/C11 were SANDBOX-only; the account
+     migration had moved only the egress to dev-dataout, so the ingest was NOT there.
+     STOPPING (§F7) rather than building against an absent dependency was correct — it
+     let a predecessor UC (UC-030) + an architect delta (007) be inserted at the real
+     edge instead of compensating for a phantom. An "assumed-from-another-env" reuse is
+     a scope gap; falsify it against the live target before you build.
    - **An "ensure/resolve" must handle a resource in a BAD/TRANSITIONAL state, not just
      absent-vs-present (2026-07-24, DEF-ADIX-003 + UC-025).** For any idempotent
      provisioning ("ensure") or resource resolution against AWS — secrets, queues,
@@ -64,6 +76,28 @@ hardcode the profile name.
      out the onboard Lambda → stale rotation-unaware cache); UC-025 added three more of the
      same class. Every one was "handled absent/present but not the bad/transitional state".
      Build the ensure/resolve against the architect's enumerated resource state-machine.
+   - **EventBridge target payload — pass a `detail` object VERBATIM with
+     `inputPath: "$.detail"`, NOT an `inputTransformer` `<placeholder>`; and always
+     wire a target `DeadLetterConfig` (2026-07-24, UC-AIDX-028's two reworks).** For an
+     EventBridge rule → SQS/target that must forward the event's `detail` object as the
+     message body:
+     - The DEFAULT rule delivery WRAPS the event (full envelope: `detail-type`,
+       `source`, `detail`, …), so a consumer that parses only the inner body treats it
+       as poison (UC-028 rework #1: C11's `parseEnvelope` rejected the wrapped event).
+     - To forward the inner object verbatim, use **`inputPath: "$.detail"`** (JSONPath
+       extraction). Do NOT use an `inputTransformer` with a bare `<detail>` object
+       placeholder: the `<placeholder>` idiom **quote-strips a nested OBJECT into
+       invalid JSON** (EventBridge `ERROR_CODE=INVALID_JSON`) — it only round-trips
+       STRING values (which is why the webhook router's flat string fields worked).
+       That was UC-028 rework #2.
+     - An EventBridge target with NO `DeadLetterConfig` makes delivery failures
+       (`FailedInvocations`) OPAQUE — you cannot see WHY delivery failed. Add a target
+       `DeadLetterConfig` so `ERROR_CODE`/`ERROR_MESSAGE` are inspectable, and
+       INSTRUMENT-FIRST: capture the real error before guessing at an opaque
+       cross-service delivery failure (the DLQ's `ERROR_CODE=INVALID_JSON` is what
+       pinpointed the `<placeholder>` bug). Leave an OFFLINE synth-pin behind for the
+       InputTransformer/`inputPath` shape + the `DeadLetterConfig`, so this
+       payload-shape class is caught offline next time, not only live.
    - **A TEST YOU DID NOT RUN IS A TEST FAILED (2026-07-12).** "Green" /
      `built_green` means the WHOLE suite passed — unit AND local/integration tiers.
      **Needing Docker / DynamoDB-Local / an emulator is NOT a reason to skip a

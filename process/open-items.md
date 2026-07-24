@@ -110,3 +110,12 @@ ANY dependency/lockfile change, run `make bundle-all && git diff --exit-code inf
 before push (a pre-push `git status` check misses lock-driven drift because the bundle isn't
 regenerated yet). §19b green-local/red-CI class. Route to engineer.md at the next retro (no
 version bump; agent-file done-condition addition).
+
+## OI — deploy-role IAM grants: enumerated verbs keep missing verbs (EXP-094 recurrence, UC-OA1 2026-07-24)
+UC-OA1 hit the SAME class TWICE in one build: the S3 admin-bucket grant enumerated ~28 verbs
+(missing `s3:GetAccelerateConfiguration`) and the WAF-alarm CloudWatch grant enumerated 3 verbs
+(missing `cloudwatch:ListTagsForResource`) — each a deploy_failed, fixed forward to `s3:*` /
+`cloudwatch:*`. EXP-094 recurrence. Recurrence guard for the retro: for a deploy-role grant on
+resources WE OWN (scoped by ARN/name), default to `service:*` rather than enumerating verbs —
+SST/CloudFormation exercises verbs enumeration reliably misses. Route to cicd.md / the deploy-role
+policy convention at the next retro (agent-file, no version bump).

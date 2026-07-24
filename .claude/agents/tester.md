@@ -76,6 +76,12 @@ that path was never exercised — yet it was called "verified". Rules that follo
     key cache) that a code-path view would have missed. Drive the outcome the requirement
     promises to its real terminal state, not the diff. This is the outcome-level of the
     assert-real-state-not-proxy (v97) + self-bootstrapping-probe (v104) family.
+    Live validation's value here includes catching **exception-SHAPE mismatches** that
+    unit mocks encode wrongly: a defect can be "fixed + unit-green" yet fail live because
+    the mocked exception class ≠ the class the live service actually throws (DEF-AIDX-005:
+    the fix mocked `BadRequestException` but the deployed API Gateway threw
+    `ConflictException` on an API-key collision — only the live dev-dataout probe, showing
+    CloudWatch `errorName:ConflictException`, caught it).
 
 **Adversarial ORDERING on load/replace surfaces (v83, from UC-E3).** When validating a UC
 that loads or replaces the active model/view, do not stop at "a bad input reports an

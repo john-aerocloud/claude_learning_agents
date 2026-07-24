@@ -100,3 +100,13 @@ Low priority; not a delivery blocker.
 `make render-diagrams` on old edge-label syntax. Pre-existing/committed, unrelated to
 SLC-041 (untouched this cycle). Follow-up: fix the edge-label syntax so the render gate
 is fully green. Low priority (docs-only, scratch architecture).
+
+## OI — bundle drift after a lockfile/dependency change (CI-red-after-local-green, UC-XB4 2026-07-24)
+Adding `@aws-sdk/client-lambda` bumped the shared `@aws-sdk/*` tree in package-lock.json,
+which changed the `ingest-consumer` bundle (it inlines aws-sdk, no `--external`) → the CI
+"bundle diff gate" went RED though local tsc+eslint+vitest were GREEN. Fixed forward by
+regenerating + committing the bundles. Recurrence guard for engineer done-condition: after
+ANY dependency/lockfile change, run `make bundle-all && git diff --exit-code infra/assets/`
+before push (a pre-push `git status` check misses lock-driven drift because the bundle isn't
+regenerated yet). §19b green-local/red-CI class. Route to engineer.md at the next retro (no
+version bump; agent-file done-condition addition).

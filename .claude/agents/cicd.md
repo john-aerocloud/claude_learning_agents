@@ -362,13 +362,23 @@ banner:
 - For any npm project, maintain a `make audit` target that runs `npm audit
   --audit-level=high` in EVERY manifest the repo carries (root AND each sub-package —
   DEF-ADIX-001's vulns were in BOTH `package-lock.json` and `src/app/package-lock.json`).
-  Non-zero exit (a high/critical advisory) is a gate FAILURE.
-- Run `make audit` as part of the build/push gate you own (alongside lint/test), so a
-  new high/critical advisory is caught at the next push, not accumulated. A found
-  advisory is triaged like any defect: if it needs a fix, it becomes a `DEF-` through
-  intake (§3) — dev/build/test-only advisories are still fixed (supply-chain hygiene),
-  but note the no-prod-runtime-exposure fact in the defect so it is prioritised
-  correctly against runtime-exposed ones.
+- **The PUSH-BLOCKING condition is PROD-RUNTIME-scoped (`--omit=dev`), NOT the
+  dev-inclusive audit (v107, DEF-ROC-007).** A high/critical in the PROD-runtime tree
+  (`npm audit --omit=dev --audit-level=high` non-zero) is a hard push-FAILURE — it ships
+  to customers. A high/critical that exists ONLY in dev/build tooling (test runner,
+  bundler, storybook, a vendored design-system's own dev deps — not shipped) is DETECTED
+  and TRACKED but does NOT block a prod-clean push: it is a flagged `DEF-`/Dependabot-drain
+  item, prioritised as no-prod-runtime-exposure. Rationale: DEF-ROC-007's first gate run
+  blocked a prod-clean, dev-only-vuln push (fast-xml-parser — a real prod HIGH — was the
+  only blocker; once bumped, `--omit=dev` was 0 while the vitest/vite/tar dev chain stayed
+  red and correctly did NOT hold the push). Do NOT force-fix a dev-only advisory into a
+  push (a breaking `vitest@4`-style bump belongs to the drain, verified across tiers).
+- Run `make audit` as part of the build/push gate you own (alongside lint/test), so a new
+  PROD-runtime high/critical is caught at the next push, not accumulated. A found advisory
+  is triaged like any defect (`DEF-` through intake, §3); dev/build-only advisories are
+  still fixed for supply-chain hygiene (via the drain) but flagged no-prod-runtime-exposure
+  so they are prioritised correctly against runtime-exposed ones — and never block a
+  prod-clean push.
 - The gate is version-bump-friendly: prefer the minimal patched bump; a toolchain bump
   (e.g. a vitest major) MUST be verified green across all test tiers before it is
   push-green — never pin back to a vulnerable version to keep tests passing.

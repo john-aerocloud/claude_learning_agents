@@ -232,6 +232,7 @@
       "Bash(make ws-skeleton *)",
       "Bash(curl https://d3pf3kcvzpau1x.cloudfront.net*)",
       "Bash(curl https://ikvpqv86ok.execute-api.eu-west-2.amazonaws.com*)",
+      "Bash(curl https://qfd5cy0lyk.execute-api.eu-west-2.amazonaws.com*)",
       "Bash(git -C work/OagEventSource push *)",
       "Bash(git -C work/AdixOut add *)",
       "Bash(git -C work/AdixOut commit *)",

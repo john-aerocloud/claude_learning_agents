@@ -1,5 +1,20 @@
 # IMP-019 — A resolved dev-validation `rejected` batches ROUTINE, not immediate-incident
 
+**AdixOut v105 retro (2026-07-24, REQ-005 COMPLETE) — STILL HEALTHY (3rd confirmation).**
+The cadence held cleanly across the whole milestone: this retro BATCHED at the REQ-005
+milestone (all four chunks / UC-014..026), so the accumulated dev-catches accrued ROUTINE
+without per-dev-catch retro thrash — AND the DEF-ADIX-003 resolve CORRECTLY tripped its own
+immediate incident (a defect against the offboard→reactivate flow is a real escape, exactly
+the branch that should fire immediately). Milestone-batched + defect-immediate, both limbs
+working as designed. No prod defect followed any batched dev-reject (the CFR falsification
+guard held; the elevated CFR is honest dev-catches, not decay). No change needed.
+
+**AdixOut v104 retro (2026-07-23) — STILL HEALTHY (2nd confirmation).** REQ-005 Chunk C
+(self-service subscription) batched cleanly again at the chunk boundary — its dev-catches
+(incl. the UC-021 self-bootstrap tooling gap + the UC-022 pagination probe bug) accrued
+ROUTINE with no retro thrash, and no prod defect followed a batched dev-reject. The
+cadence fix continues to do exactly what it was implemented for; no change needed.
+
 **AdixOut v102 retro (2026-07-23) — VALIDATED (working).** REQ-005 Chunk B's UC-019/020
 dev-rejects were classified ROUTINE and the retro BATCHED cleanly at the chunk boundary
 instead of thrashing an immediate full retro per dev-catch (the pre-IMP-019 behaviour). No

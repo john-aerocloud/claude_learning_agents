@@ -43,6 +43,27 @@ hardcode the profile name.
      acceptance still required it. The tester caught it at validation (the safety net
      worked) but it cost a rework cycle. Sibling of the green-build-only-as-complete-
      as-its-acceptance family (EXP-109/EXP-110/EXP-115).
+   - **An "ensure/resolve" must handle a resource in a BAD/TRANSITIONAL state, not just
+     absent-vs-present (2026-07-24, DEF-ADIX-003 + UC-025).** For any idempotent
+     provisioning ("ensure") or resource resolution against AWS — secrets, queues,
+     eventing targets, per-container caches/resolvers — build the logic to handle the
+     resource's failure/transitional states, not only the there-or-not-there dichotomy:
+     a secret SCHEDULED-FOR-DELETION (`DescribeSecret` still returns the ARN mid-7-day
+     window) must be `RestoreSecret`d, not treated as provisioned; a queue in the ~60s
+     delete-recreate COOLDOWN (`QueueDeletedRecently`) must not block the caller past its
+     timeout (defer / heal-later), and not-found is the real SDK error name
+     (`QueueDoesNotExist`); an SQS DLQ target needs its RESOURCE POLICY, not just to
+     exist, for EventBridge to deliver; a per-container key CACHE must be ROTATION-AWARE
+     (invalidate+refetch on a verify failure / bounded TTL), never a stale-positive; a
+     freshly-created API-GW / EventBridge resource has a ~60s PROPAGATION lag — bounded-retry,
+     not immediate-fail. And prefer a SHARED recovery helper over per-path duplication:
+     DEF-ADIX-003's first fix landed the recovery in ONE secret path but not the other, so
+     the second offboard→reactivate still broke — the DRY fix `recoverIfScheduledForDeletion`
+     is now shared across both paths. Founding chain: DEF-ADIX-003 was THREE sequential
+     bugs in ONE offboard→reactivate flow (secret marked-for-deletion → DLQ cooldown timing
+     out the onboard Lambda → stale rotation-unaware cache); UC-025 added three more of the
+     same class. Every one was "handled absent/present but not the bad/transitional state".
+     Build the ensure/resolve against the architect's enumerated resource state-machine.
    - **A TEST YOU DID NOT RUN IS A TEST FAILED (2026-07-12).** "Green" /
      `built_green` means the WHOLE suite passed — unit AND local/integration tiers.
      **Needing Docker / DynamoDB-Local / an emulator is NOT a reason to skip a
@@ -407,6 +428,33 @@ complementary, not redundant. A defect is not closed until the end-to-end USER
 symptom is reproduced and pinned — not just the first true-but-secondary cause
 (diagnosis that stops at a real-but-partial bug, like an IAM AccessDenied,
 without reproducing the user-visible failure, keeps re-opening the same defect).
+
+## Author acceptance probes to SELF-BOOTSTRAP (2026-07-23, UC-ADIX-021)
+An acceptance/live probe you author that needs CUSTOMER AUTHENTICATION (a signed
+JWT, a customer API key) MUST be self-contained — it onboards a DEDICATED EPHEMERAL
+test customer with a fresh in-process keypair, reusing the shared `probeBootstrap.ts`
+helper (generate the keypair, onboard through the GOVERNED provisioning path, read the
+provisioned key IN-SCRIPT, mint the JWT). NEVER wire a probe to an out-of-band key
+file, a key persisted across sessions, or a direct interactive
+`aws secretsmanager get-secret-value` (that read is blocked by the security guardrail;
+reading a secret INSIDE the committed probe script is fine, a direct interactive read
+is not). The probe must NEVER mutate the shared synthetic customers (`-a`/`-b`) and
+must self-restore. Founding friction: UC-ADIX-021's validation was BLOCKED because
+`probe-subscription` depended on an out-of-band key — the self-bootstrapping
+`probeBootstrap.ts` + `synthetic-probe-*` customers closed a recurring cross-session
+validation gap that had touched several UCs. A probe the tester cannot run for want of
+a credential is a build gap you own (tooling self-service, above), not the tester's to
+work around.
+
+**Decide pass/fail AFTER cleanup — NEVER `process.exit()` from inside a `try`
+(2026-07-24, recurring UC-021/024/DEF-ADIX-003).** A self-bootstrapping / live probe
+that stands up ephemeral resources must run its `finally`/cleanup block to completion
+and only THEN exit with its verdict. Node does NOT unwind `finally` on
+`process.exit()`, so a `process.exit(1)` (or `exit(0)`) called from inside the `try`
+SKIPS cleanup and orphans the live ephemeral resources (the `synthetic-probe-*`
+customer, its secret, its queue). Structure the probe so the verdict is captured
+(a variable / thrown error), cleanup runs in `finally`, and the single
+`process.exit` happens after the `finally` returns — never inside the guarded body.
 
 ## Wire-on-deploy contract tests (process v27)
 When a deploy/capability step says "the app/engineer wires X" (e.g. pipeline

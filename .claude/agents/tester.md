@@ -66,6 +66,16 @@ that path was never exercised — yet it was called "verified". Rules that follo
     the entry point uses" set MUST be a single code-derived source of truth shared by the
     entry point AND the test, with a committed guard that they cannot diverge. A feature
     reachable only via the test harness, not the human's command, is NOT verified.
+  - **Validate the JTBD OUTCOME end-to-end, not merely that the changed code path runs
+    (2026-07-24, DEF-ADIX-003).** When validating a fix or feature, exercise the ACTUAL
+    user-facing outcome / job-to-be-done live end-to-end — a code path that executes is
+    NOT an outcome that works. DEF-ADIX-003's first "fix" reached the secret-recovery code
+    (the changed path ran green), but validating the real JTBD — "a reactivated customer
+    becomes USABLE: it can authenticate AND get served" — found the customer STILL locked
+    out by two further bugs (a DLQ-cooldown timeout on onboard, a stale rotation-unaware
+    key cache) that a code-path view would have missed. Drive the outcome the requirement
+    promises to its real terminal state, not the diff. This is the outcome-level of the
+    assert-real-state-not-proxy (v97) + self-bootstrapping-probe (v104) family.
 
 **Adversarial ORDERING on load/replace surfaces (v83, from UC-E3).** When validating a UC
 that loads or replaces the active model/view, do not stop at "a bad input reports an
@@ -208,6 +218,37 @@ model — the changed nodes/edges ARE your scope:
   process working — but the re-apply-heals-migration probe makes catching them STANDING, not
   luck. Sibling of the concurrency-durability probe (above) and [EXP-109] — extends
   single-resource idempotency to resource-SET completeness + migration.
+
+- **A live acceptance probe needing customer auth MUST SELF-BOOTSTRAP — a probe that
+  can't run for want of an out-of-band credential is a TOOLING gap to fix, not a
+  silently-skipped condition (2026-07-23, UC-ADIX-021).** When a live acceptance/probe
+  needs customer authentication (a signed JWT, a customer key), it MUST be
+  self-contained: it onboards a DEDICATED EPHEMERAL test customer with a fresh
+  in-process keypair via the shared `probeBootstrap.ts` helper — generate the keypair,
+  onboard through the GOVERNED path, read the provisioned key IN-SCRIPT, mint the JWT —
+  NEVER depending on an out-of-band key file, a key persisted across sessions, or a
+  DIRECT interactive `aws secretsmanager get-secret-value` (the last is blocked by the
+  security guardrail; reading a secret INSIDE a committed probe script is fine, a direct
+  interactive read is not). It must NEVER mutate the shared synthetic customers
+  (`-a`/`-b`) and must self-restore (its `synthetic-probe-*` customer is torn down /
+  left inert). Founding friction: UC-ADIX-021's validation was BLOCKED because
+  `probe-subscription` depended on an out-of-band key; the fix (`probeBootstrap.ts` +
+  self-bootstrapping `synthetic-probe-*` customers) removed a recurring cross-session
+  validation gap that had touched several UCs. If a probe you inherit is not
+  self-bootstrapping, MAKE it self-bootstrap (self-service tooling, above) — do not skip
+  the condition and never fabricate green for a probe you could not run. Sibling of the
+  re-apply-heals migration probe (above) and validation-as-code (§35).
+  **A probe asserting a FULL result set must follow PAGINATION to exhaustion (2026-07-23,
+  UC-022 probe bug):** dev-shared runs `CATCHUP_PAGE_SIZE=2`, so a single-page compare
+  false-fails — page to the end (drain the cursor/`nextToken`) before asserting the
+  complete set.
+  **A self-bootstrapping / live probe must decide pass/fail AFTER its `finally`/cleanup
+  block — NEVER call `process.exit()` from inside a `try` (2026-07-24, recurring across
+  UC-021/024/DEF-ADIX-003):** Node does NOT unwind `finally` on `process.exit()`, so an
+  `exit()` from inside the guarded body SKIPS cleanup and orphans the live ephemeral
+  resources (the `synthetic-probe-*` customer + its secret/queue). The single
+  `process.exit` must run AFTER `finally` returns; capture the verdict, clean up, then
+  exit. A probe that leaks its ephemerals on failure is a tooling gap to fix.
 
 - **Match the FULL identifying tuple, never a bare qualifier substring (2026-07-16,
   recurring 3x).** When a probe or acceptance assertion checks an AIDX/event

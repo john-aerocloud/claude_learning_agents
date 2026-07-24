@@ -373,6 +373,27 @@ banner:
   (e.g. a vitest major) MUST be verified green across all test tiers before it is
   push-green — never pin back to a vulnerable version to keep tests passing.
 
+## Dependabot-drain cadence (v104, ROC — human directive 2026-07-24)
+The `make audit` gate above is the DETECTOR; Dependabot is the upstream that already opens
+the patched-version bumps as branches/PRs on the project remote. Do NOT let them pile up
+unread (the same "banner nobody reads" gap, one step upstream) — drain them on a standing
+cadence, at every slice/chunk close (and any retro):
+- **Enumerate** the OPEN Dependabot branches/PRs on the project remote (`gh pr list
+  --author 'app/dependabot'`, or list `origin/dependabot/*` branches for the repo host).
+- **Gate each** — run the FULL local gate on that branch: the whole test suite + the
+  build/`tsc` across ALL projects (not just unit — a bump can break the type/build graph,
+  cf. DEF-ROC-006) + `make audit`.
+- **Merge the green ones** (small, frequent, low-risk — the point is never to accumulate a
+  big-bang dependency debt), with a note; **a bump that FAILS** the gate becomes a triaged
+  `DEF-` (or stays open with the failure captured) — never force-merged, never silently
+  ignored.
+- **Respect the project's push policy:** dependency bumps are shared-repo MAINTENANCE
+  (distinct from any feature-push hold, e.g. ROC's local-only track) — merge them onto the
+  remote's default branch WITHOUT riding along unpushed local feature work.
+Rationale (DORA): keeps CFR down (no accumulated vuln/breakage debt surfacing at a bad
+time) and lead time down (many tiny reviewed bumps vs one painful catch-up). Sibling of
+EXP-112 — detector + remediation cadence together close the supply-chain loop.
+
 ## Each iteration, before engineering starts
 1. Confirm/define technology choices and deployment approach for the slice.
 2. Stand up only the capabilities the slice requires; record them in

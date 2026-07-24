@@ -54,6 +54,18 @@ hardcode the profile name.
      BLOCKER you report explicitly (rare, justified) — never a silent skip. A
      skipped local test let a stale `transactionIdentifier` assertion hide through
      UC-ADIX-001/003/005 (principle-failure 2026-07-12).
+   - **"Green" includes the FULL BUILD GRAPH — `tsc -b` across ALL projects, not
+     just unit+lint (DEF-ROC-002 → DEF-ROC-006).** The fast test/lint gates
+     (vitest/eslint/oxlint) do NOT type-check the way the DEPLOY build does. Before
+     `built_green`/push, run the project's real build (`npm run build` / `make build`)
+     which type-checks EVERY tsconfig project — app source, node, AND committed
+     test/e2e specs. A committed spec that passes its runtime runner but fails `tsc -b`
+     is NOT green: DEF-ROC-006 shipped a Playwright e2e spec (`window`/`document` under
+     a dom-less tsconfig) that passed vitest+oxlint+Playwright yet broke the dashboard
+     `tsc -b` — which the CI DEPLOY build runs, so it would have turned CI red
+     post-push. Run the whole build locally so a type/build-graph break is caught before
+     push, not at deploy. (cicd: fold the dashboard/app `npm run build` into the
+     standing pre-push gate, not only the CI deploy step.)
    - **Real-source fixtures for external/live data (v61, DEFECT-OAG-016).** When
      code consumes a shape you do not own — an API response, an event body, a
      third-party schema — the test fixtures MUST be captured from the REAL source

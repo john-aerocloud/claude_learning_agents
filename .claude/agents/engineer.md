@@ -288,7 +288,18 @@ product, and you route against it:
 - **A mock encodes your belief about platform semantics** (lazy TTL deletion is
   one that has bitten us). When a `data-flow.mmd` platform-gate node is in your
   blast radius, ask what the mock cannot see and cover it with a synth pin or a
-  live probe — not another mock assertion.
+  live probe — not another mock assertion. **This includes the exception CLASS the
+  live service throws (2026-07-24, DEF-AIDX-005).** When you write/adjust an
+  adapter's AWS-(or any-SDK) error-handling branch, the guarding unit test MUST
+  throw the REAL exception type the live service produces — import the actual SDK
+  error class (e.g. `ConflictException` from `@aws-sdk/client-api-gateway`), never a
+  plausible-but-guessed class/name. A mock that throws the wrong exception type
+  FALSE-GREENS the fix: DEF-AIDX-005's guard+test keyed on `BadRequestException`
+  went green, but the deployed API Gateway throws `ConflictException` on an
+  API-key value-collision, so the fix failed live (CloudWatch `errorName:ConflictException`)
+  and cost one rework cycle — the corrected test imports the real `ConflictException`.
+  Verify the error-shape against the live service (CloudWatch / a live probe) or the
+  real SDK error type, never assume it.
 - **A comment that DESCRIBES misbehaviour is a defect, not documentation.** When
   you touch a file carrying a known-issue / symptom comment ("X drops over Y",
   "known issue", "doesn't work when…"), in that same commit EITHER file the

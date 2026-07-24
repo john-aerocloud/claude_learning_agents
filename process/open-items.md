@@ -127,6 +127,18 @@ CSV is no longer the metrics source.)_
   tests present); the nested-repo sibling was EXP-104. Target: git hygiene of the SSOT
   — a completed item is never left out of version control.
 
+## AdixOut v106 focused-retro 2026-07-24 — machinery consideration (do NOT build now)
+- **OI-WI-BLOCKED-UNBLOCK-TRANSITION (shared machinery, 2026-07-24).** When a defect is
+  BLOCKED-then-unblocked by a SIBLING defect's fix and needs NO new code of its own, the
+  item is stuck in `fixing` and the tester cannot append `validated` — the state graph
+  requires an engineer `fixed` before a tester `validated`. On DEF-AIDX-006 (a stale probe
+  unblocked by the sibling handler being correct) the orchestrator handled it by appending
+  `fixed`(engineer, note "no new code — sibling fix unblocked it") then `validated`(tester)
+  with correct attribution. That is a fine one-off. Possible future machinery: an explicit
+  `unblocked`→`validating` transition so a no-new-code sibling-unblock does not need a
+  cosmetic `fixed` event. Minor — record only; do NOT build a graph change now (constraint
+  gate; the manual bridge is cheap and correctly attributed).
+
 ## OFS retro 2026-07-21 — minor coverage/tagging + process nits (non-blocking)
 - **UC-C2 200-row overflow — no live-browser DOM proof.** The `DRILLDOWN_ROW_CAP=200` head-kept+"+N more" is proven exhaustively at the headless/pure-function tier (`drilldownView.test.ts`); the analogous UC-B1 queue-overflow is browser-proven, so judged proportionate not to block. Add a live e2e overflow assertion when CHK-C is next touched.
 - **`@covers` tag gaps.** `idinput` (SEC-C1-1/3 gate) and, earlier-noted, some multi-line-tagged nodes lack a literal `@covers <node>` tag though the behaviour is covered — impacted-tests would falsely flag them uncovered. (The multi-line `@covers` PARSER bug itself was fixed this session in `.claude/tools/impacted-tests.js` + regression test; this is the residual tag-hygiene follow-up.)

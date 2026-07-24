@@ -52,19 +52,20 @@ and leaves no reusable asset — it is a role-boundary failure (log it). A one-o
 ground-truth probe to ADJUDICATE conflicting agent reports is allowed, but it
 does not replace the owning agent's validation — send them back to do it right.
 
-### Lean-orchestration trial (EXP-116, ROC — GUARDED, scored)
-For small, well-understood work INSIDE an already-signed-off slice, you MAY run a
+### Lean orchestration (guarded — plain practice)
+For small, well-understood work INSIDE an already-signed-off slice you MAY run a
 leaner loop: author obvious decomposition-gap use-cases yourself (inheriting the
 parent slice's signed-off persona/job, introducing NO new scope) and centralise the
-stage-event bookkeeping, to cut registration/coordination latency (the dominant GLT
-contributor). This is a MEASURED EXPERIMENT, not a relaxation of the role boundary —
-it holds ONLY under five guards, and any breach reverts that class to full dispatch:
+stage-event bookkeeping. This cuts registration/coordination latency without losing
+the guarantees the specialist roles provide — but it is NOT a relaxation of the role
+boundary. It holds ONLY under five guards; any breach reverts that class to full dispatch:
 - **G1** every orchestrator-authored UC carries `personas:`/`job:` from the signed-off dossier (a UC without them is a discovery gap — dispatch `discovery`/`product`).
 - **G2** you take NO product/architecture DECISION (new scope, new persona, a tech choice) — those still dispatch `product`/`solution-architect`.
-- **G3** you NEVER hand-crank a code fix. Diagnosing ≠ fixing: every bug is ingested as a `/defect`, built by the `engineer` (TDD) and validated by the `tester`. This is the v98 rule + principle-failure `2026-07-22-orchestrator-hand-cranked-fix` and is NOT relaxed by this trial.
-- **G4** every UI/pipeline slice still gets a real live-stack `tester` E2E — stand up the front end and push data through the running pipeline, not just component tests (EXP-115 family; ROC memory `roc-local-e2e-validation`).
-- **G5** every centralised stage `wi-append` carries the dispatch-return `TOKENS=<n>` (never `TOKENS=0` for a real dispatch), so cost visibility is not lost (absorbs the killed EXP-103).
-If lead time does not improve or any guard breaks, revert to full role dispatch and record it. Outside an already-signed-off slice, dispatch the specialists as normal.
+- **G3** you NEVER hand-crank a code fix. Diagnosing ≠ fixing: every bug is ingested as a `/defect`, built by the `engineer` (TDD) and validated by the `tester`. This is the v98 rule + principle-failure `2026-07-22-orchestrator-hand-cranked-fix`.
+- **G4** every UI/pipeline slice still gets a real live-stack `tester` E2E — stand up the front end and push data through the running pipeline, not just component tests (`roc-local-e2e-validation`).
+- **G5** every centralised stage `wi-append` carries the dispatch-return `TOKENS=<n>` (never `TOKENS=0` for a real dispatch), so cost visibility is not lost.
+Outside an already-signed-off slice — and for anything introducing new scope, persona, or a
+tech choice — dispatch the specialists as normal (that is where new value goes through the gate).
 
 ## Gates (checkpoint model)
 Pause for human sign-off at exactly these points, and append every decision to

@@ -1,4 +1,4 @@
-# IMP-022 — ROC CI: emulator-readiness poll + Dependabot-CI config
+# IMP-023 — ROC CI: emulator-readiness poll + Dependabot-CI config
 
 **Opened:** 2026-07-24 (ROC v104 retro, incident-triggered by a red GitHub CI)
 **Owner:** cicd (workflow `work/ROC/.github/workflows/deploy-ROC.yml`) + one HUMAN action

@@ -119,3 +119,9 @@ UC-OA1 hit the SAME class TWICE in one build: the S3 admin-bucket grant enumerat
 resources WE OWN (scoped by ARN/name), default to `service:*` rather than enumerating verbs —
 SST/CloudFormation exercises verbs enumeration reliably misses. Route to cicd.md / the deploy-role
 policy convention at the next retro (agent-file, no version bump).
+
+## OI update — render-diagrams gate now 4 failing (OAG, 2026-07-27)
+Adds `architecture/dependencies/class-deps.mmd` to the earlier 3 `hydration-*.mmd` render
+failures (class-deps broke during the OA/chunk-2 architecture edits). `make render-diagrams`
+has 4 failing diagrams — a standing gate breakage (docs-scratch, non-blocking). Fold the fix
+into the chunk-2 close: fix all 4 edge-label/syntax errors so the gate is green.

@@ -452,6 +452,26 @@ only coverage for browser behaviour. Consult the delta's local/prod gap list —
 what the stand-up cannot prove (CDN/CSP, IAM, platform runtime semantics) is
 covered by a skeleton probe, synth contract, or policy pin, not by hoping.
 
+**Your green bar must exercise the REAL artifact, not an isolated proxy — the
+recurring live-only-defect classes (ROC C4, five live rejects offline-green missed).**
+A passing unit+component+build-graph bar is necessary but does NOT clear a UI or
+pipeline slice, because the defects live in the rendered/driven layer it can't see:
+(1) **jsdom axe ≠ fully-themed live axe** — a house `ACTextInput` in its `aria-invalid`
+state drops its cross-element `aria-labelledby`, giving a serious live `label-title-only`
+jsdom never reports; so give EVERY input a **same-element `aria-label`** prophylactically.
+(2) **jsdom has no layout** — a shared or ancestor `overflow-auto` reflows a sibling
+panel on a blocked-Save `focus()`; use `focus({ preventScroll: true })` and ensure no
+ancestor above the scroll panels can itself scroll (residual `h-screen`/nav slack). (3)
+**a mocked/empty store bypasses production wiring** — the local runners hand-rolled
+`makeDecide` without `rulesFor`, so published rules were never picked up and the
+Simulator diverged from the driven pipeline. For a pipeline/consumer slice, add a
+committed acceptance that BOOTS THE REAL COMPOSITION (`composeConsumer`) against a
+POPULATED store and drives an event through `consume()` end-to-end — never assert
+pickup/parity through a mocked seam. Each class was offline-GREEN, live-BROKEN: leave
+the earliest catchable pin behind (composed-driven acceptance, painted-pixel/live-axe
+spec) per the live-caught→offline-pin rule below, and run the fully-themed live axe +
+composed-driven check before you call it `built_green`.
+
 **Probe a new mechanism end-to-end before building on it.** When your slice
 introduces a NEW platform-integration mechanism (first WebSocket, first CDN
 behaviour class, first auth flow, first queue — the architect's delta names it),

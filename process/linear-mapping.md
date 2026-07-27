@@ -52,7 +52,7 @@ their children per the graph's `bubble` rule.
 | `prod-deploying` | In Progress |
 | `prod-validating` | In Review |
 | `reworking` | In Progress (rework) |
-| `blocked` | Blocked |
+| `blocked` | Blocked → else Todo → Backlog (NEVER In Progress) |
 | `done` | Done |
 
 (The dev-then-prod validation states `dev-validating`/`prod-deploying`/`prod-validating`
@@ -68,7 +68,7 @@ Backlog.)
 | `reproducing` | In Progress |
 | `fixing` | In Progress |
 | `validating` | In Review |
-| `blocked` | Blocked |
+| `blocked` | Blocked → else Todo → Backlog (NEVER In Progress) |
 | `resolved` | Done |
 | `wontfix` | Cancelled |
 
@@ -83,6 +83,12 @@ Backlog.)
 
 A blocked item shows *why* on its board object: mirror the `blocked` event's note
 into a banner/comment while blocked, and post an unblocked note when it clears.
+A `blocked` item is NOT actively-worked, so it never maps to In Progress — it shows
+as Blocked (or, absent that workspace state, Todo/Backlog) with the `blocked` label,
+keeping the In-Progress lane honest. An AGGREGATE (slice/chunk/requirement) whose
+only non-terminal children are all `blocked` itself derives `blocked` (see
+`_bubble`), so a parked-on-external tree drops out of In Progress instead of
+masquerading as active work.
 A UC with no acceptance criteria in its definition gets a `needs-acceptance`
 label (surfaced, never fabricated).
 

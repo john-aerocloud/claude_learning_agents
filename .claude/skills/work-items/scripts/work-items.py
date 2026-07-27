@@ -559,6 +559,14 @@ def _bubble(graphs, items, kids, states, agg_item=None):
         # every child is terminal: done if at least one actually delivered,
         # else (all cancelled) the aggregate itself is cancelled.
         return "done" if any(states.get(k) in _DONE_STATES for k in kids) else "cancelled"
+    # An aggregate whose only non-terminal (not-yet-delivered) children are ALL
+    # `blocked` is itself blocked: no work can progress until they clear. This
+    # keeps a parked-on-external aggregate out of the "in_progress" view (queues,
+    # stats, board) instead of masquerading as actively-worked. As soon as one
+    # non-terminal child is unblocked/working, it falls through to in_progress.
+    non_terminal = [k for k in kids if states.get(k) not in _TERMINAL_RESOLVED]
+    if non_terminal and all(states.get(k) == "blocked" for k in non_terminal):
+        return "blocked"
     if any(_child_past_initial(graphs, items, k, states) for k in kids):
         return "in_progress"
     return AGG_INITIAL

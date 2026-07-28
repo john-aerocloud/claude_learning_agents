@@ -372,6 +372,7 @@ STATE_STATUS = {
         "registered": ["Backlog"],
         "ready": ["Ready", "Todo", "Backlog"],
         "building": ["In Progress"],
+        "deploying": ["In Progress"],
         "validating": ["In Review"],
         "dev-validating": ["In Review"],
         "prod-deploying": ["In Progress"],

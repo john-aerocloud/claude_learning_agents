@@ -47,6 +47,7 @@ their children per the graph's `bubble` rule.
 | `registered` | Backlog |
 | `ready` | Ready |
 | `building` | In Progress |
+| `deploying` | In Progress |
 | `validating` | In Review |
 | `dev-validating` | In Review |
 | `prod-deploying` | In Progress |

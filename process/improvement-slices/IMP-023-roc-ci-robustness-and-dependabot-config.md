@@ -30,6 +30,29 @@ Two distinct, both-red CI conditions on `AeroCloudSystems/PpsEventAggregation` (
   readiness poll — loop until the Service Bus emulator accepts an AMQP connection (and the
   other emulators are healthy), bounded by a timeout, before `test:acceptance`. Kills the
   flake class.
+
+### Update (2026-07-24, cicd — DONE) — engineer's follow-on diagnosis + fix
+The engineer traced the `ECONNRESET` more precisely than "readiness": with a WARM stack
+and the readiness poll in place, `uc006-c1-thin-thread.test.ts` still failed under
+vitest's default file-parallel execution — the acceptance tier's suite files share the
+SAME SB/EH emulator containers (one topic/hub per stack, not per file), and concurrent
+worker processes overwhelm the emulators' AMQP listeners
+(`MessagingError: ECONNRESET` / `ServiceBusTelemetrySource receive error: Failed to
+connect`). Serialised against a warmed stack it is 100% green. Both fixes landed together:
+1. `vitest.acceptance.config.ts`: `fileParallelism: false` — serialises the emulator-backed
+   acceptance tier only. The unit tier (`vitest.config.ts`) is untouched and stays
+   parallel/fast (454 tests, ~3s wall, confirmed unaffected).
+2. `.github/workflows/deploy-ROC.yml`: the blind `sleep 20` step is replaced with a real
+   readiness poll that sources `scenarios/lib.sh` (the SAME `wait_for_port`/`wait_for_log`
+   helpers `demo.sh` already gates on against the `"Emulator Service is Successfully Up!"`
+   log marker) — CI and local now share one proven readiness mechanism instead of two that
+   could drift.
+Verified locally: two consecutive fresh-stack (`local:down && local:up`) runs of the full
+acceptance tier (`npm run test:acceptance`) both green — 46 passed, 1 skipped
+(`uc017-live-real-jira`, no real Jira credential locally), 0 failures, including the
+previously-flaky `uc006-c1-thin-thread.test.ts`. Unit tier (`npm run test`) unaffected: 454
+passed, parallel (401% CPU), ~3s. `actionlint` clean on the new step (pre-existing shellcheck
+warnings elsewhere in the file are unrelated, unchanged).
 - **(cicd, workflow)** Extend the `deploy-ROC.yml` path filters (or add a matrix leg) to
   cover `src/tools/replay-injector/**` so its dependabot bumps actually get gated.
 - **(cicd, workflow — optional hardening)** Make the `Web App` design-system vendor step
@@ -45,6 +68,11 @@ main `Test` is reliably green (readiness poll, no ECONNRESET flake) and `deploy-
 runs; open Dependabot PRs get a full green CI (Function App + Web App) once the Dependabot
 secret is added + path filters cover replay-injector; the dependabot-drain cadence
 (cicd.md) can then actually merge green bumps.
+
+**Status (2026-07-24):** the readiness-poll + acceptance-tier serialisation half of this
+slice is DONE and verified green locally (see Update above) — `Function App` should no
+longer flake on `test:acceptance`. Still open: the Dependabot-secret (human action) and the
+replay-injector path-filter extension, both outstanding below.
 
 ## Note
 Queued as process/CI work. The workflow edits push to the shared repo's CI (infra

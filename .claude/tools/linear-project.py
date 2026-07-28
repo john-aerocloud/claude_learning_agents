@@ -377,7 +377,7 @@ STATE_STATUS = {
         "prod-deploying": ["In Progress"],
         "prod-validating": ["In Review"],
         "reworking": ["In Progress (rework)", "In Progress"],
-        "blocked": ["Blocked", "In Progress"],
+        "blocked": ["Blocked", "Todo", "Backlog"],
         "done": ["Done"],
     },
     "defect": {
@@ -385,7 +385,7 @@ STATE_STATUS = {
         "reproducing": ["In Progress"],
         "fixing": ["In Progress"],
         "validating": ["In Review"],
-        "blocked": ["Blocked", "In Progress"],
+        "blocked": ["Blocked", "Todo", "Backlog"],
         "resolved": ["Done"],
         "wontfix": ["Cancelled", "Canceled"],
     },

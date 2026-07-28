@@ -300,6 +300,22 @@ every job that uses secrets or variables:
     fi
 ```
 
+## Private package-registry auth — GitHub Packages / design system (human directive 2026-07-24)
+When a UI-bearing project consumes the org design system `@aerocloudsystems/design-system`
+(ui-designer.md — React 19 + Tailwind 4 + Flowbite, published to **GitHub Packages**,
+registry `https://npm.pkg.github.com`), the pipeline authenticates to that registry — and
+the read token is a **SECRET, never a committed literal**:
+- Project `.npmrc` (safe to commit — contains NO secret): a scope line
+  `@aerocloudsystems:registry=https://npm.pkg.github.com/` and an auth line that reads an
+  ENV VAR: `//npm.pkg.github.com/:_authToken=${NPM_TOKEN}` (or `NODE_AUTH_TOKEN`).
+- CI: the token is a pipeline **secret** (e.g. GitHub Actions `secrets.<PROJECT>_GHP_PACKAGES_TOKEN`),
+  injected as that env var at the `npm ci`/install step and covered by the fail-fast config
+  validation above. Local dev: a machine-local `~/.npmrc` or a gitignored env, never a
+  `.npmrc` with a literal token inside `work/<project>/`.
+- A GH PAT (`ghp_…`) is a read-scope credential — if one is ever pasted/exposed in a
+  transcript or a file, treat it as COMPROMISED, rotate it, and re-store only as a secret.
+  NEVER echo, commit, or write a design-system token to any tracked file.
+
 ## AWS authentication
 When any AWS CLI, CDK, or IaC operation is required:
 1. Read the profile from `.claude/config/aws-profile` (default: `SND` if file absent).

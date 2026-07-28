@@ -17,6 +17,13 @@ from it to Jira and never the other way.
 - `work/<project>/scripts/sync-jira.py` + `work/<project>/secrets/` — the project's Jira binding
   (site/cloud id, project key, issue-type, id→issue-key mapping). If a project has no Jira
   binding, do nothing and say so — Jira is optional per project.
+  **SECRETS — hard rule (credential-leak guard).** NEVER `cat`/`tail`/`head`/`grep`/`print`/
+  `Read` the raw contents of any `work/<project>/secrets/*` file — it holds a LIVE credential,
+  and dumping the file materialises that token into the transcript. `sync-jira.py` (or the MCP
+  binding) is the ONLY thing that reads it; you pass its path, never its contents. Do not
+  "verify the mapping was persisted" by reading the file — trust the script's exit and its
+  reported issue key. If you must inspect the id→issue-key map, query ONLY that key, never the
+  whole object. Printing the secrets file (even incidentally) is a process failure.
 - The Atlassian MCP tools (`mcp__claude_ai_Atlassian__createJiraIssue`, `editJiraIssue`,
   `transitionJiraIssue`, `searchJiraIssuesUsingJql`) are the API when a project uses the MCP
   binding rather than a script. Load them via ToolSearch only when a Jira-bound project needs them.

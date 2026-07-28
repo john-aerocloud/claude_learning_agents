@@ -68,13 +68,18 @@ that path was never exercised — yet it was called "verified". Rules that follo
     reachable only via the test harness, not the human's command, is NOT verified.
   - **A validation-as-code spec you COMMIT must be build-graph-clean before you land it
     (DEF-006-class, ROC v112).** When you author + commit an e2e/Playwright (or any) spec
-    as validation-as-code, run the FULL build graph (`tsc -b` INCLUDING the `tests/e2e`
-    project, the DEF-006 lesson) after adding it — the engineer's pre-`built_green` bar
-    gates the engineer's OWN commits, not a spec you push afterward, so a committed spec
-    with a type error lands false-green and breaks the next build graph (ROC: UC-062's
-    committed history e2e spec broke dashboard `tsc -b`, rolled-forward by the UC-063
-    engineer). Your committed spec is part of the trunk's green bar — verify it, don't
-    assume `playwright test` running means it type-checks.
+    as validation-as-code, run the FULL build graph after adding it — that means BOTH
+    `tsc -b` (INCLUDING the `tests/e2e` project — the original DEF-006 lesson) AND the
+    LINTER the CI gate runs (`eslint .` for `src/app`, `oxlint` for the dashboard). The
+    engineer's pre-`built_green` bar gates the engineer's OWN commits, not a spec you push
+    afterward, so a committed spec that type-errors OR trips a lint rule lands false-green
+    and breaks the next build graph / the CI lint gate. Two confirmed recurrences: UC-062's
+    committed history e2e spec broke dashboard `tsc -b` (rolled-forward by the UC-063
+    engineer); UC-068's committed live spec tripped `@typescript-eslint/no-empty-object-type`
+    and left `src/app` lint RED on trunk (caught by the UC-067 engineer, fixed by the
+    orchestrator). `tsc` passing does NOT imply lint passes — run the linter too. Your
+    committed spec is part of the trunk's green bar — verify it against the SAME gates CI
+    runs, don't assume `playwright test`/`vitest` running means it type-checks or lints.
   - **Validate the JTBD OUTCOME end-to-end, not merely that the changed code path runs
     (2026-07-24, DEF-ADIX-003).** When validating a fix or feature, exercise the ACTUAL
     user-facing outcome / job-to-be-done live end-to-end — a code path that executes is

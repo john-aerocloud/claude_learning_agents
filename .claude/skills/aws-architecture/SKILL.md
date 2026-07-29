@@ -59,6 +59,19 @@ Before any AWS CLI or SDK operation:
     lacks them — choose V1 when per-consumer throttling is a (current or seam'd)
     requirement.
   - Tags do not propagate app-wide under Pulumi — set the §2a tag set per resource.
+  - **To tag/customize a component's CHILD resource, use the component's
+    construction-time `transform.<child>` PROP, NOT a global `$transform` (AdixOut
+    UC-ADIX-016, 2 rework cycles).** A first-class component creates child resources
+    *inside itself at construction* (e.g. `sst.aws.ApiGatewayV1` creates its
+    `aws.apigateway.Stage`). Pulumi child resources inherit only transforms registered
+    BEFORE their parent component is constructed, so a global
+    `$transform(aws.apigateway.Stage, …)` registered after the component exists is a
+    permanent NO-OP for that Stage — and worse, `sst diff` FALSELY shows the tag applying
+    though it never lands live. Pass the customization on the component instead —
+    `new sst.aws.ApiGatewayV1("api", { transform: { stage: { tags: {…} } } })`. (Resources
+    added via LATER explicit calls — a UsagePlan/ApiKey created after the API — are NOT
+    child-at-construction and are unaffected by this; a global `$transform` or direct prop
+    works for them.)
   - SST keeps its deploy state in an SST-managed S3 bucket (`s3://sst-state-<hash>/<App>/<stage>/`) <!-- doc-lint:allow -->
     + encrypted `resource.enc` — a private bucket + a scoped OIDC deploy role are
     part of the security surface (see the project's `security/sst-deploy-and-state.md`) — <!-- doc-lint:allow -->
@@ -124,6 +137,60 @@ spend split down per-airport — this is the native mechanism that satisfies a
 Governance: Organizations Tag Policies + a `required-tags` Config rule + SCP
 (report-only → enforce). **Do not invent a thinner set** — the old
 `Project/Env/ManagedBy` trio is superseded by the above.
+
+### 2b. Sharing data OUTSIDE the AWS Org (ADR-0011)
+
+Source of truth: **AeroCloudSystems/ADR → ADR-0011 (external high-volume data
+sharing — egress projection + webhook push, DRAFT; depends on ADR-0001 + ADR-0008;
+pattern PAT-004).** Every OTHER sharing decision (ADR-0004 S3, ADR-0005
+subscription, ADR-0008 bus topology, ADR-0009 governance) is **internal** — it
+trusts IAM and assumes callers sit inside `aws:PrincipalOrgID`. **The moment you
+share with a third party OUTSIDE the Org, none of that trust applies to the
+external hop.** Design that boundary as a dedicated **External Distribution
+(egress) service** — an anti-corruption layer:
+
+- **Consume internally like any other subscriber** (own rule on the central bus →
+  own SQS queue+DLQ, ADR-0005) — expose **nothing new** internally.
+- **Project internal domain events → the external published language** (e.g. AIDX
+  XML) at the egress; this seam decouples internal schema evolution (ADR-0009) from
+  the external contract and is the **one place to redact PII / drop unlicensed
+  fields** before the message is built.
+- **Two customer surfaces we fully control:** (a) a **synchronous query API** for
+  basic state — API GW → Lambda → read model, **OAuth2 client-credentials
+  (Cognito/JWT authorizer) + WAF + per-customer usage plans** (NOT IAM, NOT an
+  API-key alone); (b) the **high-volume stream** by **per-customer** delivery.
+- **Delivery selection rule (scenario, not one answer — projection + entitlement
+  layer is identical, only the last hop changes):** **webhook push (EventBridge API
+  Destinations + Connection)** is the DEFAULT for HTTPS-capable customers
+  (provider-side rate control, no customer AWS dependency, mTLS + payload
+  signature); a **per-customer projected SQS queue** when the customer is AWS-native
+  and wants pull (a pinned customer account/role ARN or STS temp creds — this is NOT
+  "exposing a queue": projected AIDX, one entitlement, own DLQ); a **hardened
+  dedicated MQ edge broker** (Amazon MQ for ActiveMQ; per-customer destination;
+  mTLS; private connectivity; patch SLA — CVE-2023-46604 class) ONLY when a customer
+  mandates JMS; a **cursor pull REST API** fallback for firewalled/non-AWS customers.
+- **NEVER** expose the internal bus/queue, an internet-facing broker, or a **single
+  shared** external queue/destination.
+- **Non-negotiable external-boundary controls:** per-customer **entitlement enforced
+  server-side** (customer cannot widen scope; Customer A never sees B), one
+  **API Destination + Connection + DLQ + rate limit per customer** (bulkhead),
+  per-customer secrets in **Secrets Manager (rotated, revocable)**, **WAF** + usage
+  plans on the query API, **mTLS + signature** on push, and **least-privilege = the
+  full read-then-write op set** of the router/query code path (reads the
+  EntitlementStore + read model + `kms:Decrypt`, then `events:PutEvents` /
+  `secretsmanager:GetSecretValue` on the per-customer ARNs only; §7/§30 pin).
+- **Delivery semantics:** at-least-once, **NO end-to-end ordering** (state it in the
+  customer contract); self-describing messages (`occurredAt` + monotonic per-entity
+  version) so customers dedupe by msg-id and apply last-writer-wins.
+- **Own account** for the egress boundary; **full security review** (this is a
+  cross-Org surface — the internal trust model does not carry over).
+
+ADR-0011 is **DRAFT** — mTLS-vs-signature baseline, AIDX version/profile, routing
+impl (rules-per-customer vs router Lambda), self-service entitlements, and
+billing/metering are open; adopt the shape, track the open questions. Worked
+alignment: AdixOut IS this service — see its
+`architecture/deltas/005-adr0011-external-distribution.md` + the four
+`architecture/security/external-*.md` / `entitlement-store.md` notes.
 
 ---
 
@@ -304,6 +371,24 @@ the hard way (oxo-online s005-h1-waf, deploy reject 2026-06-06):
   (per-IP WAF then applies at the edge). Choose the authorizer for per-IP/auth;
   choose CloudFront-front for edge WAF + managed rule groups.
 
+### Managed-WAF body rules false-positive on XML-body APIs (AdixOut UC-ADIX-017, 2026-07-22)
+`AWSManagedRulesCommonRuleSet` (CRS) inspects the **request body**, and two of its
+sub-rules BLOCK well-formed XML request bodies as if they were attacks:
+- **`CrossSiteScripting_BODY`** — XML tag structure (`<...>`) reads as XSS.
+- **`GenericRFI_BODY`** — namespace URIs (`http://…`, `urn:…`) contain `://`, which reads
+  as remote-file-inclusion.
+For ANY endpoint whose contract is an XML request body (e.g. an AIDX `FlightLegRQ` POST),
+these fire on every legitimate message — the API silently rejects all real traffic while
+happy-path (empty-body / query-param) probes pass. **PLAN THIS UPFRONT:** on that route,
+set those two sub-rules to `count` (NEVER `allow`) via a scoped `ruleActionOverrides` on
+the managed-rule-group statement, WITH compensating controls: schema/XSD validation of the
+body + auth + entitlement, and **keep every other CRS rule and SSRF blocking intact**.
+Route-scope the WebACL so the override applies only to the XML-body route. This WEAKENS a
+managed control, so it is a **security-posture decision requiring human approval** — record
+it as such in the delta and the per-resource security note. Founding incident: AdixOut
+UC-ADIX-017 (human-approved 2026-07-22) — CRS blocked every real AIDX XML body until a
+real-payload probe surfaced it.
+
 ### Lambda
 - [ ] Execution role follows §7 (one role per function, ARN-scoped).
 - [ ] No `AWSLambdaFullAccess` or `AdministratorAccess`.
@@ -430,6 +515,7 @@ condition that would trigger a reversal:
 | **IaC default changed CDK → SST v3 (Ion)** (2026-07-11, human-directed) | ALL / org-wide | CDK default caused repeated cross-project problems; org's live services (OagEventSource) use SST v3 Ion; §1 rewritten. Prior projects on CDK are grandfathered until they next touch infra. | Reversal → CDK only with a specific logged justification (not the default); reversal → plain Terraform if multi-cloud beyond SST's providers |
 | **Adopt ADR-0007 tag set** (2026-07-12, human-directed) | ALL / org-wide | ADR-0007 supersedes the thin `Service/Env/Owner` (and the interim `Project/Env/ManagedBy/BuildSha`) — mandatory `Service/Environment/Owner/CostCentre/ManagedBy/DataClassification/Airport` + provenance `GitCommit(40-char)/Version/Repository/DeployedAt`; §2a added. `Airport`+cost-allocation gives per-airport spend. | ADR is `proposed`; open questions (mandatory-DataClassification scope, `ac:` prefix, activated cost tags) resolved at ADR acceptance |
 | **Adopt ADR-0006 release/provenance** (2026-07-12, human-directed) | ALL / org-wide | Conventional Commits + trailers, build-once/promote-by-digest (full-SHA/object-version), per-context versioning (SemVer/CalVer/sequential), no-rebuild-on-release; §9a added. | ADR is `proposed`; ratify the §4 versioning mapping + release-tool choice at ADR acceptance |
+| **Adopt ADR-0011 external egress pattern** (2026-07-22, human-directed) | ALL / org-wide (external data sharing) | First cross-Org sharing decision; internal IAM/`aws:PrincipalOrgID` trust does NOT extend past the external hop. Dedicated External Distribution (egress) service = anti-corruption projection → OAuth2/WAF query API + per-customer webhook push (API Destinations, mTLS+signature) / per-customer SQS / hardened MQ edge broker; server-side entitlement + per-customer isolation; §2b added. | ADR is `DRAFT`; mTLS-vs-signature baseline, AIDX version/profile, routing impl, self-service entitlements, billing resolved at ADR `proposed` |
 | Lambda over ECS Fargate | oxo-online | Spiky low-volume; scale-to-zero | p95 move latency > 1s due to cold starts |
 | API GW WS over ECS long-lived | oxo-online | Managed conns; no warm server needed | Message fan-out rate > API GW limits |
 | DynamoDB over RDS | oxo-online | No relational need; ephemeral game state | Leaderboard needs ranked queries beyond top-N |

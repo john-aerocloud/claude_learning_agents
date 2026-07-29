@@ -25,6 +25,126 @@ hardcode the profile name.
 2. Strict TDD: write a failing test (red) -> minimum code to pass (green) ->
    refactor. No production code without a failing test first. Acceptance tests
    define "done" for the slice; unit tests drive the design.
+   - **Every acceptance condition is the UC's CONTRACT — a "thin/reuse" framing
+     WAIVES NONE of them (2026-07-23, UC-ADIX-020).** When a use-case is framed as
+     "thin" or "mostly reuse", you STILL owe EVERY acceptance condition on the UC —
+     plus the slice success-measure and the architecture-delta requirements it
+     traces to. "Thin" describes the ROUTE, it is NEVER a licence to silently drop a
+     condition and ship a partial UC as green. If a condition genuinely cannot or
+     should NOT be built, you must ESCALATE to product/solution-architect for an
+     explicit descope that REWRITES the acceptance text — never omit it silently.
+     And keep the change-graph (`.mmd`) CONSISTENT with the acceptance: do not leave
+     a required capability marked "deferred" in the diagram while the acceptance
+     still requires it. Founding failure: UC-ADIX-020 was built "thin"
+     (ceiling-adjust only) and silently dropped its own acceptance conditions 2 & 9
+     (suspend/revoke/terminate) — which the slice success-measure, delta 005
+     ("revocable — offboarding = revoke") and the J-CS-ENTITLE root-need all
+     required; the `.mmd` even marked `offboarding-revoke` "deferred" while the
+     acceptance still required it. The tester caught it at validation (the safety net
+     worked) but it cost a rework cycle. Sibling of the green-build-only-as-complete-
+     as-its-acceptance family (EXP-109/EXP-110/EXP-115).
+   - **"Reuse existing X" must be VERIFIED against the real deployed target, not
+     ASSUMED from another environment (2026-07-24, SLC-AIDX-011 scope-gap).** When a
+     slice/UC/architecture-delta says "reuse the existing X" (a stack, queue, table,
+     Lambda, bus, secret), assert-real-state FIRST: confirm X actually exists in the
+     TARGET deployed account/stack you are building against — never infer its presence
+     from a sibling environment. Founding case: UC-AIDX-028's "reuse the existing
+     C10/C11 ingest" premise was wrong — C10/C11 were SANDBOX-only; the account
+     migration had moved only the egress to dev-dataout, so the ingest was NOT there.
+     STOPPING (§F7) rather than building against an absent dependency was correct — it
+     let a predecessor UC (UC-030) + an architect delta (007) be inserted at the real
+     edge instead of compensating for a phantom. An "assumed-from-another-env" reuse is
+     a scope gap; falsify it against the live target before you build.
+   - **An "ensure/resolve" must handle a resource in a BAD/TRANSITIONAL state, not just
+     absent-vs-present (2026-07-24, DEF-ADIX-003 + UC-025).** For any idempotent
+     provisioning ("ensure") or resource resolution against AWS — secrets, queues,
+     eventing targets, per-container caches/resolvers — build the logic to handle the
+     resource's failure/transitional states, not only the there-or-not-there dichotomy:
+     a secret SCHEDULED-FOR-DELETION (`DescribeSecret` still returns the ARN mid-7-day
+     window) must be `RestoreSecret`d, not treated as provisioned; a queue in the ~60s
+     delete-recreate COOLDOWN (`QueueDeletedRecently`) must not block the caller past its
+     timeout (defer / heal-later), and not-found is the real SDK error name
+     (`QueueDoesNotExist`); an SQS DLQ target needs its RESOURCE POLICY, not just to
+     exist, for EventBridge to deliver; a per-container key CACHE must be ROTATION-AWARE
+     (invalidate+refetch on a verify failure / bounded TTL), never a stale-positive; a
+     freshly-created API-GW / EventBridge resource has a ~60s PROPAGATION lag — bounded-retry,
+     not immediate-fail. And prefer a SHARED recovery helper over per-path duplication:
+     DEF-ADIX-003's first fix landed the recovery in ONE secret path but not the other, so
+     the second offboard→reactivate still broke — the DRY fix `recoverIfScheduledForDeletion`
+     is now shared across both paths. Founding chain: DEF-ADIX-003 was THREE sequential
+     bugs in ONE offboard→reactivate flow (secret marked-for-deletion → DLQ cooldown timing
+     out the onboard Lambda → stale rotation-unaware cache); UC-025 added three more of the
+     same class. Every one was "handled absent/present but not the bad/transitional state".
+     Build the ensure/resolve against the architect's enumerated resource state-machine.
+   - **EventBridge target payload — pass a `detail` object VERBATIM with
+     `inputPath: "$.detail"`, NOT an `inputTransformer` `<placeholder>`; and always
+     wire a target `DeadLetterConfig` (2026-07-24, UC-AIDX-028's two reworks).** For an
+     EventBridge rule → SQS/target that must forward the event's `detail` object as the
+     message body:
+     - The DEFAULT rule delivery WRAPS the event (full envelope: `detail-type`,
+       `source`, `detail`, …), so a consumer that parses only the inner body treats it
+       as poison (UC-028 rework #1: C11's `parseEnvelope` rejected the wrapped event).
+     - To forward the inner object verbatim, use **`inputPath: "$.detail"`** (JSONPath
+       extraction). Do NOT use an `inputTransformer` with a bare `<detail>` object
+       placeholder: the `<placeholder>` idiom **quote-strips a nested OBJECT into
+       invalid JSON** (EventBridge `ERROR_CODE=INVALID_JSON`) — it only round-trips
+       STRING values (which is why the webhook router's flat string fields worked).
+       That was UC-028 rework #2.
+     - An EventBridge target with NO `DeadLetterConfig` makes delivery failures
+       (`FailedInvocations`) OPAQUE — you cannot see WHY delivery failed. Add a target
+       `DeadLetterConfig` so `ERROR_CODE`/`ERROR_MESSAGE` are inspectable, and
+       INSTRUMENT-FIRST: capture the real error before guessing at an opaque
+       cross-service delivery failure (the DLQ's `ERROR_CODE=INVALID_JSON` is what
+       pinpointed the `<placeholder>` bug). Leave an OFFLINE synth-pin behind for the
+       InputTransformer/`inputPath` shape + the `DeadLetterConfig`, so this
+       payload-shape class is caught offline next time, not only live.
+   - **An EXTERNAL-feed integration validated only against SYNTHETIC data is
+     built-to-a-guess, NOT done — pin against a REAL captured sample and treat the
+     live assert as a first-class acceptance step (2026-07-28, REQ-004 orphaned
+     consumer-side).** When you build ingestion/consumption of a feed whose contract
+     we do NOT own, your synth-pins must be pinned against the architect's REAL
+     captured wire sample (routing `source`/`detail-type`, delivery topology/bus,
+     envelope nesting) — not a shape you assume. A green synthetic suite proves only
+     self-consistency; it passes happily while the real contract differs on topology
+     or envelope, so it does not make the integration `built_green` in the real sense.
+     Do not report an external integration done until it has consumed a REAL message
+     from the REAL source end-to-end. Founding: REQ-004's dev consumer-side passed a
+     full synthetic suite (C12 bus, `source=oagEvents.producer`, top-level envelope)
+     yet was entirely orphaned from the real OAG feed (shared `oag-consumer-bus`,
+     `source=oag.eventstore`, envelope under `.detail`) — a large reconciliation
+     (delta 008) followed. Sibling of the EXP-115 whole-journey/live-assert family.
+   - **On a PUSH feed, a "gap" is the NORMAL join-mid-stream condition, not a dropped
+     delivery — tolerate it, do not pull-heal from a store that may not be the feed's
+     (2026-07-28, DEF-AIDX-007).** On an EventBridge (or any push/subscribe) feed the
+     first event we observe at `eventPosition > 0` means we JOINED mid-stream, not that
+     a delivery was lost — log + fold + continue (`GAP_HEAL_MODE` = tolerate). Do NOT
+     back-fill by pulling from an event store unless that store is provably the SAME
+     feed's source (DEF-007 gap-healed from the wrong/sandbox store on the push feed).
+     Select gap behaviour by feed MODE: a pull/catch-up feed heals; a push feed
+     tolerates.
+   - **A TEST YOU DID NOT RUN IS A TEST FAILED (2026-07-12).** "Green" /
+     `built_green` means the WHOLE suite passed — unit AND local/integration tiers.
+     **Needing Docker / DynamoDB-Local / an emulator is NOT a reason to skip a
+     test.** If the dependency is down, START it (`make -C <proj> local-up`; start
+     the Docker daemon itself if it isn't running) and RUN the tests. You may NOT
+     report an item green with ANY test unrun; "104/104 unit green" while the
+     local tier was skipped is NOT green — run the local tier and report it too.
+     Only if a dependency genuinely CANNOT be started in this environment is it a
+     BLOCKER you report explicitly (rare, justified) — never a silent skip. A
+     skipped local test let a stale `transactionIdentifier` assertion hide through
+     UC-ADIX-001/003/005 (principle-failure 2026-07-12).
+   - **"Green" includes the FULL BUILD GRAPH — `tsc -b` across ALL projects, not
+     just unit+lint (DEF-ROC-002 → DEF-ROC-006).** The fast test/lint gates
+     (vitest/eslint/oxlint) do NOT type-check the way the DEPLOY build does. Before
+     `built_green`/push, run the project's real build (`npm run build` / `make build`)
+     which type-checks EVERY tsconfig project — app source, node, AND committed
+     test/e2e specs. A committed spec that passes its runtime runner but fails `tsc -b`
+     is NOT green: DEF-ROC-006 shipped a Playwright e2e spec (`window`/`document` under
+     a dom-less tsconfig) that passed vitest+oxlint+Playwright yet broke the dashboard
+     `tsc -b` — which the CI DEPLOY build runs, so it would have turned CI red
+     post-push. Run the whole build locally so a type/build-graph break is caught before
+     push, not at deploy. (cicd: fold the dashboard/app `npm run build` into the
+     standing pre-push gate, not only the CI deploy step.)
    - **Real-source fixtures for external/live data (v61, DEFECT-OAG-016).** When
      code consumes a shape you do not own — an API response, an event body, a
      third-party schema — the test fixtures MUST be captured from the REAL source
@@ -50,15 +170,38 @@ hardcode the profile name.
      "Scheduled" while 412 unit tests stayed green. Gate/Arrival columns worked
      because they read fields, not the window-seeded marker.)
 3. **Commit when green; push when the use-case is done (v60).** Every time the full
-   test suite goes from red to green, commit immediately to trunk. The commit message
+   test suite goes from red to green, commit immediately to trunk — including at each
+   green SUB-STEP of a larger UC (a passing red→green TDD increment), not only at the
+   final green (v95): an agent can stall/be-interrupted mid-build, and any work not
+   committed at the last green is lost and must be rebuilt from scratch (OFS UC-C2: a
+   first attempt stalled after ~600s having written code but committed nothing, forcing
+   a full re-dispatch). Frequent green commits make a stall cost one increment, not the
+   whole UC. The commit message
    uses **Conventional Commits** (`type(scope): intent` — feat/fix/docs/refactor/perf/
    test/build/ci/chore/revert, `!` for breaking; required in Viggo-fix, default
    elsewhere), states the *intent* not the code changed, and **references the tracked
    item's Linear id (+ customer Jira key where one exists), per §14 ISO traceability** —
    e.g. `fix(pnl): resolve issuing-State against Country.Code (VF-003, PP-127)`. Never
    commit while any test is red.
+   **Verify the code is ACTUALLY on trunk (v89, DEF-ROC-001):** after committing, confirm
+   each NEW source file is tracked — `git -C work/<project> ls-files -- <path>` returns it,
+   and `git check-ignore <path>` returns nothing. A green suite in your working tree is a
+   FALSE-GREEN if `.gitignore` silently drops the file (an unanchored pattern like `secrets/`
+   matches every `secrets/` dir, including a source package): the UC reads `done` while its
+   code was never committed. A done UC's code must be on trunk, not merely passing locally.
+   **Type-check is part of green, not optional (DEF-ROC-002 false-green):** if the
+   project has a `build`/`typecheck` script (e.g. `npm run build` = `tsc`), it MUST pass
+   before the UC is green — a passing test suite is NOT sufficient. Fast test runners
+   skip type-checking (vitest/jest via esbuild/swc transpile-only) and eslint does not
+   type-check, so a type-broken change (even in production code) ships with a green suite
+   and clean lint. DEF-ROC-002: UC-ROC-019 shipped a production `tsc` TS2556 with 189
+   tests green + lint clean; it would have broken the deploy build (`tsc --outDir dist`)
+   that the pipeline runs to emit the artifact. Run the project's `build`/`typecheck`
+   after the suite goes green and treat any type error as red. If no such script exists in
+   a typed project, that gap is itself a defect (add the script). Where possible add the
+   type-check to the pre-commit/CI fast gate so this cannot recur.
    **Then integrate, don't batch (process §14/§19b):** when a use-case's full
-   done-condition is met (suite **and** lint green), if the project repo has a
+   done-condition is met (suite, lint **and** type-check/build green), if the project repo has a
    configured, verified remote (`git remote get-url origin` resolves to the origin
    recorded in project.md/decision-log), `git -C work/<project> push origin <trunk>`
    — one green use-case is one push; never let commits pool. **No/unverified remote
@@ -189,12 +332,38 @@ product, and you route against it:
   still named `sNNNchanged`: a delivered node left wearing `:::s009changed`
   misleads every later human reader of the model even though the diff-sourced
   tool ignores it (OI-42).
+- **A behaviour change to a modelled node MUST mark that node `:::changed` in the
+  SAME commit (2026-07-16, UC-ADIX-013).** When a change alters the BEHAVIOUR of a
+  node represented in `architecture/dependencies/*.mmd` (e.g. the MAP/serialize
+  nodes — a new call site, a new emitted field), update that node's label AND mark it
+  `:::changed` in the same commit as the code change, so `make impacted-tests` reports
+  it IMPACTED. A behaviour change that leaves the change-graph clean makes the
+  mechanical change-impact signal silently under-report (a false-clean "no changed
+  nodes"), forcing a manual code-diff fallback — this recurred on UC-ADIX-013
+  (impacted-tests false-clean because the changed departure/MAP node was not marked).
 - **Tag tests `@covers <node-id>`** (a comment on the spec/describe) so impacted
   specs are mechanically listable when a node changes (IMP-007).
 - **A mock encodes your belief about platform semantics** (lazy TTL deletion is
   one that has bitten us). When a `data-flow.mmd` platform-gate node is in your
   blast radius, ask what the mock cannot see and cover it with a synth pin or a
-  live probe — not another mock assertion.
+  live probe — not another mock assertion. **This includes the exception CLASS the
+  live service throws (2026-07-24, DEF-AIDX-005).** When you write/adjust an
+  adapter's AWS-(or any-SDK) error-handling branch, the guarding unit test MUST
+  throw the REAL exception type the live service produces — import the actual SDK
+  error class (e.g. `ConflictException` from `@aws-sdk/client-api-gateway`), never a
+  plausible-but-guessed class/name. A mock that throws the wrong exception type
+  FALSE-GREENS the fix: DEF-AIDX-005's guard+test keyed on `BadRequestException`
+  went green, but the deployed API Gateway throws `ConflictException` on an
+  API-key value-collision, so the fix failed live (CloudWatch `errorName:ConflictException`)
+  and cost one rework cycle — the corrected test imports the real `ConflictException`.
+  Verify the error-shape against the live service (CloudWatch / a live probe) or the
+  real SDK error type, never assume it.
+- **A comment that DESCRIBES misbehaviour is a defect, not documentation.** When
+  you touch a file carrying a known-issue / symptom comment ("X drops over Y",
+  "known issue", "doesn't work when…"), in that same commit EITHER file the
+  defect record OR delete the falsehood — never leave a documented-but-unrecorded
+  bug behind (DEFECT-014: a panel-overlap symptom sat in a CSS comment for days,
+  found only when a human hit it).
 
 ## Hexagonal architecture — Cockburn ports & adapters (process v22 §41)
 All code follows hexagonal architecture:
@@ -253,25 +422,6 @@ failure is CATEGORISED so support can tell whose problem it is, mechanically:
   behaviour is asserted. Logging is also documented — the documenter turns it
   into the support runbook; write log events so a support engineer can act.
 
-**Batch a bounded external API + test at the source's MAX batch (EXP-113).** When
-publishing/writing to an external API that caps entries-per-request (EventBridge
-`PutEvents` = 10, SQS `SendMessageBatch` = 10, DynamoDB `BatchWrite` = 25, …),
-CHUNK to that documented limit — never map a whole upstream batch into one call.
-And TEST at the largest batch the source can actually deliver, not the happy N=1:
-an ordered source (DynamoDB Streams / Kinesis / an EventBridge Pipe over them)
-fills a LARGE batch under backlog, and a single over-limit / rejected request
-there does not fail one record — it **poisons the whole ordered batch**, which the
-source retries forever, stalling the shard head so nothing newer is ever
-delivered. So (a) chunk to the limit, (b) aggregate per-entry failures across
-chunks (`FailedEntryCount>0 ⇒ throw`, never a silent drop), (c) categorise an
-over-limit/malformed request as `internal-service` (our defect), NOT
-`external-availability`, and (d) unit-test the chunk boundaries at N = 1, limit,
-limit+1, and a multi-chunk size. A live integration probe that only ever seeds one
-event NEVER exercises the batched path — the gap that let DEF-XA3 reach prod (the
-Aerobus publisher issued one PutEvents with 12–15 entries → ValidationException →
-poison-retry → total cross-account stall). Runbook:
-`work/<project>/docs/runbooks/` (publisher poison-batch).
-
 ## Tooling self-service (process v23 §33)
 Create the committed tooling your role needs (make targets in the ROOT
 Makefile, build wiring, scripts) in the same slice — tested, documented,
@@ -326,6 +476,39 @@ only coverage for browser behaviour. Consult the delta's local/prod gap list —
 what the stand-up cannot prove (CDN/CSP, IAM, platform runtime semantics) is
 covered by a skeleton probe, synth contract, or policy pin, not by hoping.
 
+**Your green bar must exercise the REAL artifact, not an isolated proxy — the
+recurring live-only-defect classes (ROC C4, five live rejects offline-green missed).**
+A passing unit+component+build-graph bar is necessary but does NOT clear a UI or
+pipeline slice, because the defects live in the rendered/driven layer it can't see:
+(1) **jsdom axe ≠ fully-themed live axe** — a house `ACTextInput` in its `aria-invalid`
+state drops its cross-element `aria-labelledby`, giving a serious live `label-title-only`
+jsdom never reports; so give EVERY input a **same-element `aria-label`** prophylactically.
+(2) **jsdom has no layout** — a shared or ancestor `overflow-auto` reflows a sibling
+panel on a blocked-Save `focus()`; use `focus({ preventScroll: true })` and ensure no
+ancestor above the scroll panels can itself scroll (residual `h-screen`/nav slack). (3)
+**a mocked/empty store bypasses production wiring** — the local runners hand-rolled
+`makeDecide` without `rulesFor`, so published rules were never picked up and the
+Simulator diverged from the driven pipeline. For a pipeline/consumer slice, add a
+committed acceptance that BOOTS THE REAL COMPOSITION (`composeConsumer`) against a
+POPULATED store and drives an event through `consume()` end-to-end — never assert
+pickup/parity through a mocked seam. (4) **house design-system component VARIANTS are
+not all themed for AA non-text contrast, and it is invisible offline (ROC C4, THREE
+live rejects: UC-056/064/069).** `ACBadge color="warning"` fill paints 1.11:1;
+`ACTextInput`'s settled border 1.47:1; `ACButton color="success"` is an UNSTYLED code
+path → transparent fill + 0 border = 1.00:1. jsdom axe and vitest-browser's APPROXIMATED
+CSS both pass these — only a real painted-pixel measure catches them. So, for any UI
+control: NEVER rely on an un-themed house color/variant prop for a painted affordance
+(prefer the DS's default painted variant, or an explicit `src/index.css` override);
+and EVERY new `data-testid`'d control that carries a house component with a color/variant
+prop or a border MUST be added to the shared `index.css` non-text-contrast override AND
+pinned in `index.css.contrast.test.ts` (the offline source pin) IN THE SAME CHANGE — the
+pin is REQUIRED coverage, not optional, because the enumerative pin only protects the
+testids already listed; a new un-pinned control silently re-inherits the failing default.
+Each class was offline-GREEN, live-BROKEN: leave
+the earliest catchable pin behind (composed-driven acceptance, painted-pixel/live-axe
+spec, `index.css.contrast.test.ts` pin) per the live-caught→offline-pin rule below, and
+run the fully-themed live axe + composed-driven check before you call it `built_green`.
+
 **Probe a new mechanism end-to-end before building on it.** When your slice
 introduces a NEW platform-integration mechanism (first WebSocket, first CDN
 behaviour class, first auth flow, first queue — the architect's delta names it),
@@ -347,6 +530,33 @@ complementary, not redundant. A defect is not closed until the end-to-end USER
 symptom is reproduced and pinned — not just the first true-but-secondary cause
 (diagnosis that stops at a real-but-partial bug, like an IAM AccessDenied,
 without reproducing the user-visible failure, keeps re-opening the same defect).
+
+## Author acceptance probes to SELF-BOOTSTRAP (2026-07-23, UC-ADIX-021)
+An acceptance/live probe you author that needs CUSTOMER AUTHENTICATION (a signed
+JWT, a customer API key) MUST be self-contained — it onboards a DEDICATED EPHEMERAL
+test customer with a fresh in-process keypair, reusing the shared `probeBootstrap.ts`
+helper (generate the keypair, onboard through the GOVERNED provisioning path, read the
+provisioned key IN-SCRIPT, mint the JWT). NEVER wire a probe to an out-of-band key
+file, a key persisted across sessions, or a direct interactive
+`aws secretsmanager get-secret-value` (that read is blocked by the security guardrail;
+reading a secret INSIDE the committed probe script is fine, a direct interactive read
+is not). The probe must NEVER mutate the shared synthetic customers (`-a`/`-b`) and
+must self-restore. Founding friction: UC-ADIX-021's validation was BLOCKED because
+`probe-subscription` depended on an out-of-band key — the self-bootstrapping
+`probeBootstrap.ts` + `synthetic-probe-*` customers closed a recurring cross-session
+validation gap that had touched several UCs. A probe the tester cannot run for want of
+a credential is a build gap you own (tooling self-service, above), not the tester's to
+work around.
+
+**Decide pass/fail AFTER cleanup — NEVER `process.exit()` from inside a `try`
+(2026-07-24, recurring UC-021/024/DEF-ADIX-003).** A self-bootstrapping / live probe
+that stands up ephemeral resources must run its `finally`/cleanup block to completion
+and only THEN exit with its verdict. Node does NOT unwind `finally` on
+`process.exit()`, so a `process.exit(1)` (or `exit(0)`) called from inside the `try`
+SKIPS cleanup and orphans the live ephemeral resources (the `synthetic-probe-*`
+customer, its secret, its queue). Structure the probe so the verdict is captured
+(a variable / thrown error), cleanup runs in `finally`, and the single
+`process.exit` happens after the `finally` returns — never inside the guarded body.
 
 ## Wire-on-deploy contract tests (process v27)
 When a deploy/capability step says "the app/engineer wires X" (e.g. pipeline

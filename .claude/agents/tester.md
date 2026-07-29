@@ -30,8 +30,72 @@ proxy: hold them accountable to the requirement, not the other way round.
   requirement — say so in your return so planning tightens them.
 - A requirement outcome / success measure with **no covering acceptance case is a
   finding** (name it), same as any uncovered changed node.
+- **A TEST YOU DID NOT RUN IS A TEST FAILED (2026-07-12).** When you re-run or
+  rely on a suite, run the WHOLE of it — unit AND local/integration tiers.
+  **Needing Docker / DynamoDB-Local / an emulator is NOT a reason to skip a test:**
+  start it (`make -C <proj> local-up`; start the Docker daemon if down) and run it.
+  Do NOT `validate` an item while any test the change touches is unrun; an unrun
+  local tier is a FAIL to surface, not a neutral omission (it hid a stale
+  assertion through 3 use-cases — principle-failure 2026-07-12).
 - The frozen `acceptance.md` remains the dev/prod oracle *mechanics* (below); the
   requirement is what those cases are held accountable to.
+
+**Validate the whole USER JOURNEY with the REAL shipped artifacts — verifying a
+component in isolation is not verifying the journey (v96, EXP-115, from DEF-002).**
+A green unit/validator check on ONE surface is not a demo/journey pass: DEF-002
+shipped sample config JSON that passed `loadStationChain` in isolation but FAILED the
+actual paste→load→run path because the same textarea also runs `loadRunParams`, and
+that path was never exercised — yet it was called "verified". Rules that follow:
+  - Any DATA ARTIFACT the project ships to be used — sample/demo/seed/fixture files a
+    user or a demo loads — is a VALIDATED artifact, driven end-to-end through the
+    public surface (loaded, then the primary journey run to a real terminal outcome),
+    never eyeballed or checked only against one parser. If it ships to be loaded, there
+    is a committed test that loads THAT FILE and runs it.
+  - "Verified / done" for a deliverable means the whole primary journey was executed
+    and OBSERVED at the public surface (load real input → act → reach the real end
+    state), not that a sub-step's test is green. Claiming verified without running the
+    end-to-end journey is a false-green (the EXP-110 "unrun test = failed" rule applied
+    to the JOURNEY, not just the suite).
+  - **Drive the REAL human entry point, not the harness's copy of it (v98, EXP-115, from
+    DEF-003).** If the human runs a command/script/URL to reach the feature (a `demo.sh`,
+    a run/launch script, a documented URL), validate THAT exact entry point — derive the
+    URL/flags/args the way it does — not a list the test maintains separately. DEF-003:
+    the distribution chart was invisible via `demo.sh` because its flag list drifted from
+    the code, while the demo-journey e2e stayed GREEN off its OWN hardcoded flag copy — two
+    copies, drifted, so the test validated a path no user takes. Any "which flags/config
+    the entry point uses" set MUST be a single code-derived source of truth shared by the
+    entry point AND the test, with a committed guard that they cannot diverge. A feature
+    reachable only via the test harness, not the human's command, is NOT verified.
+  - **A validation-as-code spec you COMMIT must be build-graph-clean before you land it
+    (DEF-006-class, ROC v112).** When you author + commit an e2e/Playwright (or any) spec
+    as validation-as-code, run the FULL build graph after adding it — that means BOTH
+    `tsc -b` (INCLUDING the `tests/e2e` project — the original DEF-006 lesson) AND the
+    LINTER the CI gate runs (`eslint .` for `src/app`, `oxlint` for the dashboard). The
+    engineer's pre-`built_green` bar gates the engineer's OWN commits, not a spec you push
+    afterward, so a committed spec that type-errors OR trips a lint rule lands false-green
+    and breaks the next build graph / the CI lint gate. Two confirmed recurrences: UC-062's
+    committed history e2e spec broke dashboard `tsc -b` (rolled-forward by the UC-063
+    engineer); UC-068's committed live spec tripped `@typescript-eslint/no-empty-object-type`
+    and left `src/app` lint RED on trunk (caught by the UC-067 engineer, fixed by the
+    orchestrator). `tsc` passing does NOT imply lint passes — run the linter too. Your
+    committed spec is part of the trunk's green bar — verify it against the SAME gates CI
+    runs, don't assume `playwright test`/`vitest` running means it type-checks or lints.
+  - **Validate the JTBD OUTCOME end-to-end, not merely that the changed code path runs
+    (2026-07-24, DEF-ADIX-003).** When validating a fix or feature, exercise the ACTUAL
+    user-facing outcome / job-to-be-done live end-to-end — a code path that executes is
+    NOT an outcome that works. DEF-ADIX-003's first "fix" reached the secret-recovery code
+    (the changed path ran green), but validating the real JTBD — "a reactivated customer
+    becomes USABLE: it can authenticate AND get served" — found the customer STILL locked
+    out by two further bugs (a DLQ-cooldown timeout on onboard, a stale rotation-unaware
+    key cache) that a code-path view would have missed. Drive the outcome the requirement
+    promises to its real terminal state, not the diff. This is the outcome-level of the
+    assert-real-state-not-proxy (v97) + self-bootstrapping-probe (v104) family.
+    Live validation's value here includes catching **exception-SHAPE mismatches** that
+    unit mocks encode wrongly: a defect can be "fixed + unit-green" yet fail live because
+    the mocked exception class ≠ the class the live service actually throws (DEF-AIDX-005:
+    the fix mocked `BadRequestException` but the deployed API Gateway threw
+    `ConflictException` on an API-key collision — only the live dev-dataout probe, showing
+    CloudWatch `errorName:ConflictException`, caught it).
 
 **Adversarial ORDERING on load/replace surfaces (v83, from UC-E3).** When validating a UC
 that loads or replaces the active model/view, do not stop at "a bad input reports an
@@ -61,6 +125,17 @@ model — the changed nodes/edges ARE your scope:
    waiver per item). The tool's exit 2 on any uncovered node is ADVISORY (your
    tick-off, not CI-blocking) — never skip the uncovered list because it is
    non-empty.
+   **Pick the right SINCE for a multi-UC slice (v115, recurring on UC-H2/H3/I2/J1/J2).**
+   The immediately-prior UC's validated ref UNDER-REPORTS scope whenever the slice's
+   ARCHITECTURE GATE front-loaded the `:::changed` marks in ONE commit at slice-
+   registration (the norm here): those marks PREDATE the prior-UC window, so
+   `impacted-tests` returns "no changed nodes" or a thin set. When the result looks
+   empty/thin but code+`.mmd` clearly moved, re-run with SINCE = the slice's
+   PRE-REGISTRATION baseline (the last validated ref BEFORE this slice started) which
+   spans the arch-gate commit — never accept a false-clean (same trap as point 4, at
+   slice-window granularity). Also ADD a spec's `@covers <node-id>` tag AT AUTHORING —
+   the recurring `idinput`/`ratectrl`/`analyst`/`UCG1` gaps were behaviourally-covered
+   nodes missing only the literal tag, each costing a re-derivation cycle.
 2. **Reassess validity, don't just re-run**: when a node a spec covers has
    changed, ask whether the spec's assertions still encode the contract. A
    green-but-stale spec is a false assurance — a covered contract spec needs
@@ -113,6 +188,133 @@ model — the changed nodes/edges ARE your scope:
   dev feed because a page of 66 non-status events aged each OOOI event out of the
   bounded backward-scan window; the correct `actual.*` fields were in the aggregate
   all along.)
+
+- **Isolate stateful shared resources across parallel test files + start FRESH
+  (v103, ROC C3).** When acceptance/e2e specs run in PARALLEL (e.g. vitest default
+  file-parallelism) and share ONE stateful external resource, they collide invisibly
+  and produce FALSE failures: on ROC two SB→EH wire-path consumers on the same Event
+  Hub consumer group fought for the epoch (`ReceiverDisconnectedError`) and
+  cross-delivered messages between separate fake-Jira instances. Standing practice:
+  (a) a wire-path-sensitive spec uses the DIRECT handler/sweep entry pattern, NOT a
+  second live wire-path consumer competing for the shared consumer group; (b) a spec
+  that itself SWEEPS or scans shared state (e.g. a whole-table `listExpiredHolds`)
+  runs against a DEDICATED isolated table/namespace so it cannot pollute a sibling;
+  (c) re-runs start from a FRESH stack (`local:down && up`) — persistent
+  dedup-markers / checkpoints from a prior run pollute a re-run and fail specs that
+  were green on a clean stack. A false-fail from harness contention is NOT a product
+  defect — fix the harness isolation, do not chase a phantom.
+
+- **Probe CONCURRENCY/durability on any concurrent surface — STANDING practice, not
+  instinct (v86, UC-ADIX-006, EXP-109).** When the surface is served by a
+  concurrent/parallel-invocation component (SQS-, stream-, or EventBridge-triggered
+  Lambda; anything where >1 instance folds shared state at once), a single happy-path
+  pass does NOT prove correctness under load — a last-writer-wins race, out-of-order
+  or duplicate delivery, or a stale-snapshot clobber only appears when multiple
+  invocations touch the SAME record concurrently. Drive the concurrency stressor
+  explicitly: fire a BATCH of simultaneous deliveries at the same aggregate (real
+  in-flight keys where possible), then verify with a CONSISTENT read that the shared
+  state did not regress (high-water monotonic) and no applied content was lost across
+  EVERY affected record — not just one. UC-ADIX-006 shipped a silent data-loss race
+  that only the batched-injection probe caught (the happy-path acceptance missed it);
+  make this probe automatic for concurrent surfaces, and validate against the
+  concurrency/idempotency acceptance conditions the architect now authors for them.
+
+- **Exercise an edge protection with a REAL representative payload, never a happy-path
+  probe (2026-07-22, UC-ADIX-016 → UC-ADIX-017).** When a slice adds or relies on an EDGE
+  PROTECTION in front of an endpoint — WAF managed rules, body inspection, schema/size
+  limits — its acceptance MUST be exercised with a REAL representative REQUEST PAYLOAD (e.g.
+  an actual AIDX XML `FlightLegRQ` body), NOT just empty-body / query-param / happy-path
+  probes. UC-ADIX-016's WAF was validated only with query-param and empty-body requests, so
+  `AWSManagedRulesCommonRuleSet`'s `CrossSiteScripting_BODY` sub-rule silently BLOCKED every
+  real AIDX XML body — invisible until UC-ADIX-017 first sent one (an escaped edge
+  false-positive that would have blocked the real consumer in prod). A probe that never
+  sends the payload the protection inspects proves nothing about that protection. The
+  solution-architect authors the real-payload edge acceptance condition; you exercise it.
+  Sibling of "assert the REAL deployed resource state, never a proxy" (below) and the
+  concurrency-durability probe (above) — a green build is only as complete as what its
+  acceptance actually exercises.
+
+- **Exercise re-apply-heals-a-pre-existing-customer on any multi-tenant onboarding /
+  provisioning surface (2026-07-23, UC-ADIX-019).** When a slice onboards or provisions
+  per-customer (or per-tenant/account) resources, do NOT stop at the happy-path new-onboard.
+  Assert that EVERY per-customer resource the architect enumerated exists after onboarding,
+  AND drive the MIGRATION/self-heal case: re-run onboarding against a customer whose record
+  PREDATES a later-added resource and assert the missing resource is now created for that
+  pre-existing customer — an idempotency short-circuit must NOT skip ensuring the resource
+  set for an already-present row. UC-ADIX-019 (dynamic per-customer auth) took 3 dev-catch
+  rework cycles because the per-customer resource set (EntitlementStore row, Secrets-Manager
+  JWT key, dynamic key resolution, API-Gateway API-key, usage-plan association) was
+  discovered incrementally and the fingerprint idempotency short-circuit skipped ensuring
+  resources for pre-existing rows. These were dev-validation catches, fixed before prod — the
+  process working — but the re-apply-heals-migration probe makes catching them STANDING, not
+  luck. Sibling of the concurrency-durability probe (above) and [EXP-109] — extends
+  single-resource idempotency to resource-SET completeness + migration.
+
+- **A live acceptance probe needing customer auth MUST SELF-BOOTSTRAP — a probe that
+  can't run for want of an out-of-band credential is a TOOLING gap to fix, not a
+  silently-skipped condition (2026-07-23, UC-ADIX-021).** When a live acceptance/probe
+  needs customer authentication (a signed JWT, a customer key), it MUST be
+  self-contained: it onboards a DEDICATED EPHEMERAL test customer with a fresh
+  in-process keypair via the shared `probeBootstrap.ts` helper — generate the keypair,
+  onboard through the GOVERNED path, read the provisioned key IN-SCRIPT, mint the JWT —
+  NEVER depending on an out-of-band key file, a key persisted across sessions, or a
+  DIRECT interactive `aws secretsmanager get-secret-value` (the last is blocked by the
+  security guardrail; reading a secret INSIDE a committed probe script is fine, a direct
+  interactive read is not). It must NEVER mutate the shared synthetic customers
+  (`-a`/`-b`) and must self-restore (its `synthetic-probe-*` customer is torn down /
+  left inert). Founding friction: UC-ADIX-021's validation was BLOCKED because
+  `probe-subscription` depended on an out-of-band key; the fix (`probeBootstrap.ts` +
+  self-bootstrapping `synthetic-probe-*` customers) removed a recurring cross-session
+  validation gap that had touched several UCs. If a probe you inherit is not
+  self-bootstrapping, MAKE it self-bootstrap (self-service tooling, above) — do not skip
+  the condition and never fabricate green for a probe you could not run. Sibling of the
+  re-apply-heals migration probe (above) and validation-as-code (§35).
+  **A probe asserting a FULL result set must follow PAGINATION to exhaustion (2026-07-23,
+  UC-022 probe bug):** dev-shared runs `CATCHUP_PAGE_SIZE=2`, so a single-page compare
+  false-fails — page to the end (drain the cursor/`nextToken`) before asserting the
+  complete set.
+  **A self-bootstrapping / live probe must decide pass/fail AFTER its `finally`/cleanup
+  block — NEVER call `process.exit()` from inside a `try` (2026-07-24, recurring across
+  UC-021/024/DEF-ADIX-003):** Node does NOT unwind `finally` on `process.exit()`, so an
+  `exit()` from inside the guarded body SKIPS cleanup and orphans the live ephemeral
+  resources (the `synthetic-probe-*` customer + its secret/queue). The single
+  `process.exit` must run AFTER `finally` returns; capture the verdict, clean up, then
+  exit. A probe that leaks its ephemerals on failure is a tooling gap to fix.
+
+- **Match the FULL identifying tuple, never a bare qualifier substring (2026-07-16,
+  recurring 3x).** When a probe or acceptance assertion checks an AIDX/event
+  `OperationTime` — or any element keyed by a code + qualifier — match the full
+  identifying tuple (for `OperationTime`, the `(OperationQualifier, TimeType)` pair),
+  never a bare-qualifier substring like `includes('OperationQualifier="ONB"')`. A
+  bare-qualifier match false-fails the moment a new twin of the same qualifier ships
+  (an `EST` predictive twin alongside the `ACT` one), so the probe reads red though the
+  product is correct — a test artifact, not a defect. Scope every such assertion to the
+  specific `(qualifier, timeType)` it means; and when asserting OMISSION, assert the
+  SPECIFIC twin is absent, not the qualifier.
+
+- **Assert the REAL deployed resource state, never a proxy for it (2026-07-22,
+  UC-ADIX-014 AC7 false-green → DEF-ADIX-002).** A validation/probe assertion MUST read
+  the ACTUAL deployed resource — its live config as the control plane reports it (e.g.
+  `aws apigateway get-tags` on the resource ARN, `aws iam get-role-policy`, the real
+  response of the deployed endpoint) — NEVER a proxy that merely *stands in* for it. A
+  response HEADER is not the resource's tags; a synth plan / `sst diff` output is not the
+  applied resource state. **A synth plan is NOT authoritative for apply-time effects:**
+  an SST `$transform` on a child resource showed a tag in the `sst diff` plan that never
+  actually applied live (§1 aws-architecture child-transform gotcha), so a plan-reading
+  assertion read green while the resource was untagged. UC-ADIX-014's AC7 was "validated"
+  against a proxy — a response header, not the resource's real tags — and passed a
+  false-green that escaped as DEF-ADIX-002. This strengthens identity-before-behaviour
+  (below) and the truthful-build-identity discipline (v93 EXP-111): the oracle is the
+  deployed thing itself, read at its authoritative source, not any stand-in for it.
+
+- **Scope a close-out re-validation to what CHANGED (2026-07-22).** After a TARGETED
+  fix (a `rejected`→re-`built_green` rework, or a single failed check remediated), the
+  re-validation exercises the DELTA — the specific check(s) that failed and the changed
+  node(s) from the change map — PLUS a light regression smoke, NOT a re-run of the full
+  expensive campaign. Re-running a whole sustained-load/soak suite to re-confirm a
+  one-line fix is waste: a 360s sustained-WAF + burst-cooldown loop re-run stalled a
+  tester this cycle for no added assurance. Full-campaign re-runs are for a fresh slice
+  or a change whose blast radius is genuinely the whole surface, not for a scoped fix.
 
 ## Validate in dev first, then prod (dev-then-prod path, v82 state-graphs)
 A use-case is validated in DEV before it reaches prod — you fire TWO validations on
@@ -281,6 +483,8 @@ data-testid) — they are the a11y contract and your selector in one. The
 `architecture/dependencies/component-map.mmd` is part of the change map you plan
 from: a `classDef changed` component is in your UI scope. An a11y acceptance case
 with no covering spec is a finding, same as any uncovered changed node.
+
+**Contrast is verified at the PAINTED PIXEL, never from the token or `getComputedStyle` (EXP-114, v94).** `getComputedStyle`/nominal token values FALSE-GREEN: they return the *declared* colour, so a CSS transition mid-flip, a UA-chrome override, an `opacity`/blend, or a `state`-dependent fill can paint a failing pixel while the token nominally passes. DEF-001 (a shipped AA miss on the Reset button, 4.41:1) and the UC-B1 chip-border reject were both this trap. Measure the ACTUAL rendered pixel — a Playwright screenshot decoded to RGBA (node `zlib`, no new dep) sampled at the control's fill — for every contrast acceptance clause, and for state-dependent controls sample the settled state AND during any transition (disabled→enabled, hover) so no low-contrast frame hides. The page-wide axe scan runs on every UI-bearing build with **no permanent `.exclude()` selectors** — a standing exclusion silently hides a real violation (it is only ever a momentary scaffold within a single in-flight fix, removed in the same slice/defect that introduced it). If the project has no axe wiring yet, add `@axe-core/playwright` as the first UI slice's committed gate — do not validate a11y by eye for want of it.
 
 ## Identity before behaviour (principles/01)
 First assertion of ANY live validation: served build identity == sha under

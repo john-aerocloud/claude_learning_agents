@@ -67,6 +67,22 @@ Makefile wraps each.
    file with the frontmatter above and the initial `registered`/`reported`/`open`
    event, then append subsequent events with this command. No hand-editing of
    `derived:`; no separate queue file.
+   - **CALLER HAZARD — SINGLE-QUOTE the `NOTE=` value (2026-07-22).** A `$`-sequence in
+     a DOUBLE-quoted note is shell-expanded before the launcher ever sees it and is
+     silently mangled — e.g. `NOTE="…SST $transform no-op…"` reached the item as
+     `…SST ransform no-op…` (`$transform` → the empty var `$transform` → `ransform`),
+     corrupting the audit evidence. Always single-quote: `make wi-append …
+     NOTE='…SST $transform no-op…'`. This is a shell-quoting hazard on the CALLER side,
+     NOT a machinery bug. principle-failure
+     `2026-07-22-wi-append-note-dollar-expansion-mangled-evidence.md`.
+     - **This extends to BACKTICKS / `$(…)` and commas (2026-07-23).** In a
+       DOUBLE-quoted note a backtick or `$(…)` is command-SUBSTITUTED by the shell —
+       the enclosed text is run as a command and its output (or an error) replaces it,
+       mangling or even EXECUTING part of the note before the launcher sees it; and a
+       comma can TRUNCATE the note. So single-quote `NOTE='…'` AND avoid backticks,
+       `$(…)` command-substitution, and commas in the note TEXT itself. Caller hazard,
+       not a machinery bug. principle-failure
+       `2026-07-23-wi-append-note-backtick-command-substitution-mangled-evidence.md`.
 
 2. **`make wi-project PROJECT=P`** — recompute ALL views from the item set (pure
    functions). Run **after each loop pass** (and after any batch of appends). Writes:

@@ -93,6 +93,31 @@ Ready, or it ships to the board flagged `needs-acceptance`. Co-decide infra enab
 solution-architect. A use case is done when its own acceptance cases pass
 independently of the others.
 
+**A behaviour change to a shared domain must UPDATE every SHIPPED surface that mirrors it
+(v104, DEF-ROC-005).** When a slice changes domain/pipeline behaviour that a DONE
+read/trace/projection surface parallels — a "what would the system decide?" simulator, a
+trace view, a dashboard field, a report that must MATCH the live path — the slice's
+acceptance MUST include updating AND re-verifying that mirror surface for the new behaviour;
+name the affected mirror surfaces in the slice (co-scope with the solution-architect's
+delta). Otherwise the mirror silently drifts into an actively-WRONG answer on a trust
+surface: C3's soak/de-bounce (SLC-ROC-012) added a `held-until` pipeline outcome but did NOT
+update the Simulator's `evaluateTrace`, so the Simulator showed "Raised" for a fault the
+pipeline would HOLD (DEF-ROC-005 — a J21 parity regression that escaped because cross-surface
+parity was not in C3's acceptance). A slice that changes a mirrored behaviour is not "done"
+until its mirror surfaces agree.
+
+**A "reuse"/"thin" slice's acceptance must be EXPLICIT and COMPLETE (v102, from UC-ADIX-020).**
+When you author a slice framed as "mostly reuse" or "thin", make its acceptance conditions
+explicit and complete — enumerate EVERY condition the job/success-measure and the traced
+architecture-delta require, so that "thin" cannot HIDE a gap the engineer then silently drops.
+The acceptance is the UC's contract; a reuse framing narrows the ROUTE, never the required
+outcomes. Founding failure: UC-ADIX-020 was framed "thin" (ceiling-adjust only) and its own
+acceptance conditions 2 & 9 (suspend/revoke/terminate) — required by the slice success-measure,
+delta 005 ("revocable — offboarding = revoke") and the J-CS-ENTITLE root-need — were silently
+dropped by the engineer and only caught at tester validation, costing a rework cycle. If a
+condition should genuinely be descoped, YOU rewrite the acceptance text explicitly (with the
+solution-architect where a delta is affected) — the engineer never omits it unilaterally.
+
 **Load/replace surfaces must encode the stale-prior-state case (v83, from UC-E3).** For
 any UC whose job is to LOAD or REPLACE the active model/view (load-a-config, switch-a-
 selection, apply-a-file), a happy-path acceptance case is not enough: author an explicit

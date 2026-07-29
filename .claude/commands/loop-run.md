@@ -10,6 +10,18 @@ Act as the **orchestrator** for project **$1**, driving the v40/v41 pull loop
 (process STAGE F). You hold dispatch authority; the **flow-manager** owns queue
 state and flow decisions.
 
+> **STEP 0 — FRESHNESS PRECONDITION (v92, EXP-113).** Before the FIRST pull, fold the
+> current process layer forward: run `make project-update PROJECT=$1`. The loop must NOT
+> run on a stale process — a stale instance re-runs already-fixed tools/agents and
+> re-incurs already-fixed defects (evidence: an 8-versions-stale OFS instance re-hit the
+> EXP-104 impacted-tests nested-repo bug 3× in one session, each a manual tester fallback,
+> though the fix was already on `main`). This is the same fold-forward `/project-switch`
+> runs on resume; entering the loop directly ("start the loops") skipped it. Handle the
+> outcome exactly as §0a: exit 0 → proceed on the current process; exit 3 (DEFERRED, dirty
+> integration tree) → proceed but report the owed update; exit 4 (CONFLICT) → stop and
+> surface it (the one escalation automation cannot resolve). Skip only if `$1` has no
+> `instance/$1` branch (non-worktree/standalone project).
+
 > **v82 CUTOVER (process §F0).** State is event-sourced in per-item files
 > (`work/$1/items/{active,done}/<ID>.md`); state = `fold(events)`. Change state ONLY via
 > `make wi-append PROJECT=$1 ID=<id> EVENT=<e> AGENT=<role>` (edge-checked) — the stage
@@ -60,6 +72,21 @@ Each cycle:
    Each stage `wi-append` carries `TOKENS=<n>` — the `subagent_tokens` the dispatched
    specialist reported for that transition — so the plumbing-vs-delivery cost-split
    (§E `token_cost`) is computed automatically by `make wi-project` from event tokens.
+   It ALSO carries `DURATION_MS=<n>` — the dispatch's reported `duration_ms` (the
+   agent's REAL wall-clock cycle time for that transition) — so the agent-cycle-time
+   vs gross-lead-time block (§F `agent_cycle_time`) is derived by `make wi-project`.
+   GLT stays the honest TOTAL elapsed; §F is its complement (work-effort vs wait/
+   overhead), e.g. `make wi-append … EVENT=built_green AGENT=engineer TOKENS=<n> DURATION_MS=<n>`.
+   - **`deployed` under a PIPELINE (push→CI) deploy (2026-07-22, UC-ADIX-015).** When
+     the deploy is pipeline-triggered (push to `main` → CI applies the infra), NO agent
+     runs an interactive `sst deploy`, so none fires `deployed` automatically and the UC
+     stalls in `deploying`, blocking the tester. YOU (the orchestrator) fire the
+     CI-confirmed `deployed` (`AGENT=cicd`, `REF=<deployed sha>`, `NOTE` citing the green
+     CI run) once you confirm the pipeline deploy landed green — engineers/testers must
+     NOT spoof `AGENT=cicd`. (Interactive per-UC deploys are unchanged: cicd fires its own
+     `deployed`.) principle-failure
+     `2026-07-22-uc-adix-015-missing-cicd-deployed-event-blocks-tester.md`; an
+     improvement-slice will move this emission into the CI pipeline itself.
    - **Collision** (a UC needs a seam/path another in-flight UC claimed, or a
      flag-compose failure): flow-manager emits `collision`, STOP the pair, add the
      missing edge to the model + `edge-ledger.md`, re-serialise (§19); the rework
@@ -69,18 +96,22 @@ Each cycle:
      `make wi-append ID=<uc> EVENT=blocked AGENT=flow-manager NOTE="<reason>"`; clear it with
      `EVENT=unblocked`. The blocked reason rides on the event note, so the board banner is
      DERIVED — there is no separate blocked-reason file to keep in step.
-   - **Per-item board push — MANDATORY, in-cycle (not optional, not "eventually"):**
-     immediately after ANY `wi-append` that changes an item's state (created / made_ready /
-     pulled / built_green / deployed / validated / blocked / unblocked / rejected), dispatch the
-     `linear` (and/or `jira`) projection agent for THAT id, in the SAME cycle, before the loop
-     advances to the next item. It reads the item file and upserts the one issue idempotently.
-     **Invariant: an item's board status must never lag its item-file state by more than the
-     current cycle.** Only the external API *call* is best-effort (a network failure is logged
-     and the next push/sweep reconciles) — the DISPATCH itself is NOT skippable. Skipping it is
-     a process failure: the board silently goes stale and the humans watching it lose the plot
-     (the board/doc-lag lapse this rule exists to prevent). The step-5b full sweep is
-     only a periodic backstop for structure/prune, never the primary path. An item in `blocked`
-     state shows Blocked on the board regardless of its queue.
+   - **Per-item board push — at MEANINGFUL transitions, in-cycle (EXP-117 cadence, v103):**
+     dispatch the `linear` (and/or `jira`) projection agent for an id, in the SAME cycle, after a
+     `wi-append` that reaches a **meaningful** state — **`pulled`** (work started), **`blocked`/
+     `unblocked`**, and any **TERMINAL** state (**`validated`/`done`, `rejected`, `resolved`**).
+     **SKIP** the transient intermediate pushes (`created`/`made_ready`/`built_green`/`deployed`/
+     `dev-validating`) — they collapse to the same "In Progress" band a human cannot distinguish,
+     and pushing each one was the largest plumbing-token cost with no fidelity gain (EXP-117).
+     It reads the item file and upserts the one issue idempotently.
+     **Invariant: a TERMINAL or `blocked` board status must never lag its item-file state by more
+     than the current cycle** (the states humans act on). Intermediate in-progress detail may lag
+     until the next meaningful push or the step-5b sweep. Only the external API *call* is
+     best-effort (a network failure is logged; the next push/sweep reconciles) — the DISPATCH at a
+     meaningful transition is NOT skippable. The step-5b full sweep is the periodic reconciling
+     backstop for structure/prune AND for any intermediate drift; it is not the primary path for
+     terminal/blocked fidelity. An item in `blocked` state shows Blocked on the board regardless of
+     its queue.
 5. **Done & bubble up.** `make wi-append ID=<uc> EVENT=validated AGENT=tester REF=<sha>`
    (same turn as the green push), then `make wi-project PROJECT=$1` — the item moves to
    `items/done/`, releases its claims, and slice→chunk→requirement done bubbles automatically

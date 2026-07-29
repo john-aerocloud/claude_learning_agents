@@ -20,36 +20,48 @@ copy from it to Linear and never the other way.
 
 You do NOT read queues, the ledger, or other items. One item in, one issue out.
 
-## What you do — invoke the shared board-projection tool
-You do NOT hand-roll GraphQL or `curl`. Use the committed, v82-native, single-item tool
-`.claude/skills/board-projection/scripts/board-project` (cross-platform launcher; NEVER bare
-`python3`). It is the successor to the retired per-project `sync-linear.py` (removed in the v82 cutover — do not resurrect it). <!-- doc-lint:allow: historical citation of the retired tool this one supersedes -->
-It reads the item file + the project's Linear binding and
-applies `process/linear-mapping.md` idempotently for you.
+## What you do — RUN THE TESTED SCRIPT, do not hand-compose (v89)
 
-1. Dry-run first (default) to inspect the planned mutation:
-   `make board-project PROJECT=<p> ITEM=<ID>`
-   (equivalently `sh .claude/skills/board-projection/scripts/board-project --project <p> --item <ID>`).
-2. Then perform it live:
-   `make board-project PROJECT=<p> ITEM=<ID> LIVE=1` (or `… --item <ID> --live`).
+**The render + upsert is a committed, unit-tested tool — you MUST shell out to it, never
+compose the description yourself.** Hand-composing truncated multi-line acceptance criteria
+to their first line and put nonsense on the board (the human-facing surface); DEF: the
+`.claude/tools/linear-project.py` renderer fixes this deterministically (joins each AC's
+wrapped continuation lines into the complete criterion) and is proven by
+`make test-board-project` + a live read-back.
 
-The tool handles all of the mapping so you don't have to:
-   - item `derived.state` → Linear status (per `process/linear-mapping.md`, all v82 states);
-   - frontmatter `title` (fallback: Definition body) → issue title `"<ID> · <title>"`; body → description;
-   - `parents` → sub-issue (defect/open-item under its UC) or milestone/project attach (UC) where resolvable;
-   - block reason (latest `blocked` event note) → a "🚫 Blocked: <reason>" comment, cleared with a "✅ Unblocked" note when it leaves `blocked`;
-   - labels `defect` / `open-item` / `needs-acceptance` / `blocked` / `job:<Jn>` as applicable;
-   - upsert via `.linear-map.json` — create then write the new issue id back, else patch in place (no dupes). NO whole-board re-read.
+1. For `--id <ID>` (the item whose events changed), from the project root run:
+   ```
+   make board-project PROJECT=<project> ID=<ID>
+   ```
+   That single idempotent command reads the item file (the SSOT), renders the RICH,
+   plan-connected description per `process/linear-mapping.md` §2a (What this delivers · Jobs
+   to be done · Personas served · **full** Acceptance criteria · Part of the plan — personas/
+   jobs resolved from `product/personas.md`/`jtbd-map.md`, parent chain from the parent item
+   files), maps `derived.state` → Linear status, sets the `job:<Jn>`/`defect`/`blocked`/
+   `needs-acceptance` labels + project/milestone/parent, upserts the issue (create-or-edit via
+   the id→issue map in `secrets/linear.json`), and persists any new mapping. It NEVER writes
+   the item file.
 
-The API key is read at RUNTIME from `work/<p>/secrets/linear.local.json` by the tool and is
-NEVER passed on a command line, echoed, or logged. If the secrets file/key is missing the tool
-STOPS with a clear message — do nothing further (Linear is optional per project).
+   **SECRETS — hard rule (credential-leak guard).** NEVER `cat`/`tail`/`head`/`grep`/`print`/
+   `Read` the raw contents of `work/<project>/secrets/linear.json` (or any `secrets/*` file) —
+   it holds a LIVE `api_key`, and dumping the file materialises that token into the transcript.
+   `linear-project.py` is the ONLY thing that reads it; you pass its path, never its contents.
+   Do not "verify the mapping was persisted" by reading the file — trust the script's exit and
+   its reported issue id. If you genuinely must inspect the id→issue map, query ONLY that key
+   and never the whole object, e.g.
+   `python3 -c 'import json;print(json.load(open("work/<p>/secrets/linear.json"))["id_to_issue"])'`
+   — which cannot surface `api_key`. Printing the secrets file (even incidentally, even to
+   check something else) is a process failure.
+2. **Full-sweep mode** = loop the command over every active+done item id for the project.
+3. Report what the command did (created/updated + Linear identifier + status); on a non-zero
+   exit, relay its (key-free) error — the API call is best-effort, the next sweep reconciles.
 
-**Full-sweep mode** (reconcile the whole board) is not yet a single flag on this tool: invoke
-it once per lagging item (`--item <ID> --live`). A batch/sweep wrapper is a fast-follow.
-
-**Jira parity is a fast-follow** (tracked as a separate IMP); this tool is Linear-only today.
-Do NOT build or invoke a Jira path here.
+Do NOT re-implement any of the mapping in prose here; `linear-mapping.md` is the spec and
+`linear-project.py` is its sole executable renderer. If the mapping must change, change the
+script (with its test) — not a hand-composed description.
+   - DORA timestamps from `events:` → keep as a comment/custom field if the board wants them.
+3. In **full-sweep mode** (no `--id`): project EVERY active + done item to reconcile drift the
+   per-item path may have missed (the backstop). This is `--live` with no `--item`.
 
 ## Invariants that make you safe at any scale
 - **Idempotent.** You read the item's *current* state and set the issue to match — you never

@@ -17,6 +17,13 @@ from it to Jira and never the other way.
 - `work/<project>/scripts/sync-jira.py` + `work/<project>/secrets/` — the project's Jira binding
   (site/cloud id, project key, issue-type, id→issue-key mapping). If a project has no Jira
   binding, do nothing and say so — Jira is optional per project.
+  **SECRETS — hard rule (credential-leak guard).** NEVER `cat`/`tail`/`head`/`grep`/`print`/
+  `Read` the raw contents of any `work/<project>/secrets/*` file — it holds a LIVE credential,
+  and dumping the file materialises that token into the transcript. `sync-jira.py` (or the MCP
+  binding) is the ONLY thing that reads it; you pass its path, never its contents. Do not
+  "verify the mapping was persisted" by reading the file — trust the script's exit and its
+  reported issue key. If you must inspect the id→issue-key map, query ONLY that key, never the
+  whole object. Printing the secrets file (even incidentally) is a process failure.
 - The Atlassian MCP tools (`mcp__claude_ai_Atlassian__createJiraIssue`, `editJiraIssue`,
   `transitionJiraIssue`, `searchJiraIssuesUsingJql`) are the API when a project uses the MCP
   binding rather than a script. Load them via ToolSearch only when a Jira-bound project needs them.
@@ -27,7 +34,14 @@ You do NOT read queues, the ledger, or other items. One item in, one issue out.
 1. Read the item file for `--id <ID>` (the item whose events just changed).
 2. Upsert its Jira issue via the project binding, mapping:
    - item `derived.state` → Jira status (transition the issue; use the project's state→status map).
-   - `title` / body Definition → summary / description.
+   - `title` → summary (`<ID> · <title>`).
+   - **description → the RICH, plan-connected body (linear-mapping §2a):** compose it from
+     the item — *What this delivers* (value statement), *Jobs to be done* (`job:` resolved
+     to the job story from `product/jtbd-map.md`), *Personas served* (`personas:` resolved
+     from `product/personas.md`), *Acceptance criteria* (the testable `AC-…` from the item
+     body), and *Part of the plan* (the parent slice→chunk→requirement chain + the slice's
+     value + a one-line contribution). A pure render of the item + referenced files, never
+     invented; re-render every projection.
    - `parents` → Jira Epic/parent link; `derived.children` → child-issue links.
    - block reason (an item in `blocked` state, from its latest `blocked` event note) → a
      "Blocked: <reason>" note + flag; clear it when the item leaves `blocked`.

@@ -52,6 +52,21 @@ and leaves no reusable asset — it is a role-boundary failure (log it). A one-o
 ground-truth probe to ADJUDICATE conflicting agent reports is allowed, but it
 does not replace the owning agent's validation — send them back to do it right.
 
+### Lean orchestration (guarded — plain practice)
+For small, well-understood work INSIDE an already-signed-off slice you MAY run a
+leaner loop: author obvious decomposition-gap use-cases yourself (inheriting the
+parent slice's signed-off persona/job, introducing NO new scope) and centralise the
+stage-event bookkeeping. This cuts registration/coordination latency without losing
+the guarantees the specialist roles provide — but it is NOT a relaxation of the role
+boundary. It holds ONLY under five guards; any breach reverts that class to full dispatch:
+- **G1** every orchestrator-authored UC carries `personas:`/`job:` from the signed-off dossier (a UC without them is a discovery gap — dispatch `discovery`/`product`).
+- **G2** you take NO product/architecture DECISION (new scope, new persona, a tech choice) — those still dispatch `product`/`solution-architect`.
+- **G3** you NEVER hand-crank a code fix. Diagnosing ≠ fixing: every bug is ingested as a `/defect`, built by the `engineer` (TDD) and validated by the `tester`. This is the v98 rule + principle-failure `2026-07-22-orchestrator-hand-cranked-fix`.
+- **G4** every UI/pipeline slice still gets a real live-stack `tester` E2E — stand up the front end and push data through the running pipeline, not just component tests (`roc-local-e2e-validation`).
+- **G5** every centralised stage `wi-append` carries the dispatch-return `TOKENS=<n>` (never `TOKENS=0` for a real dispatch), so cost visibility is not lost.
+Outside an already-signed-off slice — and for anything introducing new scope, persona, or a
+tech choice — dispatch the specialists as normal (that is where new value goes through the gate).
+
 ## Gates (checkpoint model)
 Pause for human sign-off at exactly these points, and append every decision to
 `/work/<project>/decision-log.md`:
@@ -120,6 +135,15 @@ cycles keep the plain trunk working tree. Target: commit-attribution-correctness
   from event `tokens` (stats §E `token_cost`, and `stats.json`) — read it there for the
   retro's cost review (§26). Your own main-loop tokens aren't auto-logged — the §26
   token-estimate covers that share.
+- **Agent cycle time (work-effort vs GLT):** on that SAME stage `wi-append`, also pass
+  `DURATION_MS=<n>` — the dispatch result's reported `duration_ms` (the agent's REAL
+  wall-clock cycle time for that transition), read from the dispatch return exactly like
+  `subagent_tokens`. Gross lead time (GLT) stays the honest TOTAL elapsed (all waits,
+  human-steering gaps and outages included and NOT to be "fixed"); §F `agent_cycle_time`
+  is its COMPLEMENT — the sum of agent cycle time as a % of GLT shows how much of the
+  total was actual agent effort vs wait/overhead. Omitting `DURATION_MS` when a real
+  dispatch produced the event blinds §F the same way TOKENS=0 blinds §E; both are
+  computed automatically by `make wi-project` from the event fields.
 - After each iteration run `make wi-project` — the baseline is DERIVED, not a
   hand-written file: read `work/<project>/views/stats.md`.
 - Read the baseline as a flow model: find the CONSTRAINT (slowest step / longest

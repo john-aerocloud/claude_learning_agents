@@ -6,13 +6,6 @@ both boards; each agent is a pure, idempotent, one-way projection of the item
 file (the SSOT), reading the item and upserting its one board object — never
 writing state back.
 
-The **Linear** projection is performed by the shared, v82-native, single-item
-tool `.claude/skills/board-projection/scripts/board-project`
-(`board-project --project <p> --item <ID>` with `--dry-run` default / `--live`).
-It parses the per-item file, maps `derived.state` → the status table below, and
-upserts exactly ONE issue idempotently via `.linear-map.json` (no whole-board
-re-read). Jira parity is a fast-follow (not yet built).
-
 Under the v82 event-sourced model the board is a **derived view**. An item's
 current state is `fold(events)` through its type's graph
 (`process/machinery/state-graphs.json`); the projection agent reads that folded
@@ -47,8 +40,7 @@ The left column is the `derived.state` values from `state-graphs.json` (the fold
 of an item's events). Aggregate states (slice/chunk/requirement) bubble from
 their children per the graph's `bubble` rule.
 
-**Flow items (use-case)** — covers every v82 use-case state in
-`state-graphs.json` (the deploy/validate granularity added in v82):
+**Flow items (use-case):**
 
 | `derived.state` | Board status |
 |---|---|
@@ -56,14 +48,18 @@ their children per the graph's `bubble` rule.
 | `ready` | Ready |
 | `building` | In Progress |
 | `deploying` | In Progress |
-| `prod-deploying` | In Progress |
-| `reworking` | In Progress |
-| `dev-validating` | In Review |
 | `validating` | In Review |
+| `dev-validating` | In Review |
+| `prod-deploying` | In Progress |
 | `prod-validating` | In Review |
-| `blocked` | Blocked |
+| `reworking` | In Progress (rework) |
+| `blocked` | Blocked → else Todo → Backlog (NEVER In Progress) |
 | `done` | Done |
-| `cancelled` | Cancelled |
+
+(The dev-then-prod validation states `dev-validating`/`prod-deploying`/`prod-validating`
+come from the EXP-101/§11b state graph; before v100 they were unmapped and fell back to
+Backlog, mislabelling active validation work. Aggregates additionally map `planned` →
+Backlog.)
 
 **Defect items:**
 
@@ -73,10 +69,9 @@ their children per the graph's `bubble` rule.
 | `reproducing` | In Progress |
 | `fixing` | In Progress |
 | `validating` | In Review |
-| `blocked` | Blocked |
+| `blocked` | Blocked → else Todo → Backlog (NEVER In Progress) |
 | `resolved` | Done |
 | `wontfix` | Cancelled |
-| `cancelled` | Cancelled |
 
 **Open-items:**
 
@@ -86,22 +81,48 @@ their children per the graph's `bubble` rule.
 | `scheduled` | Ready |
 | `done` | Done |
 | `wontfix` | Cancelled |
-| `cancelled` | Cancelled |
-
-**Aggregates (slice/chunk/requirement)** — state is DERIVED from children per
-the graph's `bubble` rule; the same status column applies:
-
-| `derived.state` | Board status |
-|---|---|
-| `planned` | Backlog |
-| `in_progress` | In Progress |
-| `done` | Done |
-| `cancelled` | Cancelled |
 
 A blocked item shows *why* on its board object: mirror the `blocked` event's note
 into a banner/comment while blocked, and post an unblocked note when it clears.
+A `blocked` item is NOT actively-worked, so it never maps to In Progress — it shows
+as Blocked (or, absent that workspace state, Todo/Backlog) with the `blocked` label,
+keeping the In-Progress lane honest. An AGGREGATE (slice/chunk/requirement) whose
+only non-terminal children are all `blocked` itself derives `blocked` (see
+`_bubble`), so a parked-on-external tree drops out of In Progress instead of
+masquerading as active work.
 A UC with no acceptance criteria in its definition gets a `needs-acceptance`
 label (surfaced, never fabricated).
+
+## 2a. Ticket DESCRIPTION — rich, plan-connected (v88+)
+
+A board object is not just a title + status: its **description** MUST let a human
+see, without opening the repo, what the ticket delivers and how it fits the plan.
+The projection composes the description from the item file (the SSOT) — it is a
+pure render of data already there, never invented. Every projected issue's
+description carries these sections (omit a section only if the item genuinely
+lacks it):
+
+- **What this delivers** — the item's one-line value statement (the outcome, in
+  plain language — NOT the numeric value/cost, which stays off per §4).
+- **Jobs to be done** — the item's `job:` code(s) resolved to the job story /
+  root need from `work/<project>/product/jtbd-map.md` (e.g. `J15 — trust that a
+  resolved fault closes itself out`). This is the WHY.
+- **Personas served** — the item's `personas:` ids resolved to who they are from
+  `work/<project>/product/personas.md` (e.g. `P1 — CUPPS/PPSM Support Engineer`).
+  This is the WHO.
+- **Acceptance criteria** — the testable conditions from the item body (the
+  `AC-…` list). This is HOW WE KNOW IT'S DONE / what the tester validates.
+- **Part of the plan** — the parent chain resolved: this UC → its **slice**
+  (with the slice's value statement) → its **chunk** → the **requirement**, plus
+  a one-line **contribution** ("advances the slice's job by …"). This is HOW IT
+  FITS.
+
+The projection resolves persona/job ids to their prose by reading
+`personas.md` / `jtbd-map.md`, and the parent titles/values by reading the
+parent item files. Keep it a faithful render; if the item lacks acceptance or a
+persona/job mapping, surface that (a UC with no acceptance gets the
+`needs-acceptance` label, §2) rather than fabricating. Re-render on every
+projection so the description tracks the item (idempotent).
 
 ## 3. Labels
 

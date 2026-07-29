@@ -28,7 +28,6 @@ PROJECT ?= $(shell cat work/ACTIVE 2>/dev/null)
 APP     := work/$(PROJECT)/src/app
 INFRA   := work/$(PROJECT)/src/infra
 WORKITEMS := sh .claude/skills/work-items/scripts/work-items
-BOARDPROJECT := sh .claude/skills/board-projection/scripts/board-project
 AWS_PROFILE ?= $(shell cat .claude/config/aws-profile 2>/dev/null)
 PY      ?= $(shell sh .claude/skills/dora-ledger/scripts/dora --python)
 SQLCMD       ?= C:/Program Files/Microsoft SQL Server/Client SDK/ODBC/170/Tools/Binn/sqlcmd.exe
@@ -161,11 +160,13 @@ retro-mark:
 # State lives ONLY in the per-item files (work/$(PROJECT)/items/{active,done}/<ID>.md);
 # queues, stats and the dependency tree are DERIVED here, never stored-and-hand-synced.
 # Append an edge-checked event (the ONLY way to change item state; rejects illegal transitions):
-# make wi-append PROJECT=P ID=UC-1 EVENT=made_ready AGENT=flow-manager [REF=<sha>] [NOTE="..."] [TOKENS=<n>]
+# make wi-append PROJECT=P ID=UC-1 EVENT=made_ready AGENT=flow-manager [REF=<sha>] [NOTE="..."] [TOKENS=<n>] [DURATION_MS=<n>]
 # TOKENS = subagent_tokens the dispatched specialist spent producing this transition (optional).
+# DURATION_MS = the dispatched agent's REAL cycle time in ms for this transition (optional;
+#   the dispatch layer's reported duration_ms). Feeds §F agent-cycle-time-vs-GLT in wi-project.
 wi-append:
 	$(WORKITEMS) append --project $(PROJECT) --id $(ID) --event $(EVENT) --agent $(AGENT) \
-	  $(if $(REF),--ref "$(REF)",) $(if $(NOTE),--note "$(NOTE)",) $(if $(TOKENS),--tokens "$(TOKENS)",)
+	  $(if $(REF),--ref "$(REF)",) $(if $(NOTE),--note "$(NOTE)",) $(if $(TOKENS),--tokens "$(TOKENS)",) $(if $(DURATION_MS),--duration-ms "$(DURATION_MS)",)
 # Recompute ALL views (queues + stats + tree + re-render each item's derived block). Run after each loop.
 # make wi-project PROJECT=OagEventSource
 wi-project:
@@ -178,20 +179,26 @@ wi-validate:
 wi-migrate:
 	$(WORKITEMS) migrate --project $(PROJECT)
 
-# --- Board projection (Linear; v82-native, single-item, idempotent) -----------
-# Project ONE work item onto its Linear issue (one-way; never writes item state).
-# Default is --dry-run (read-only plan); pass LIVE=1 to perform the mutation.
-# The Linear API key is read at RUNTIME from work/<p>/secrets/linear.local.json
-# and NEVER inlined/echoed/logged. Jira parity is a fast-follow (not built here).
-#   make board-project PROJECT=OagEventSource ITEM=UC-XA4            # dry-run
-#   make board-project PROJECT=OagEventSource ITEM=UC-XA4 LIVE=1     # live upsert
+# --- Board projection: work-item -> Linear issue (deterministic render) -------
+# Renders ONE work item into a correctly-formed Linear issue and upserts it via
+# the Linear GraphQL API, idempotently (canonical map: process/linear-mapping.md).
+# REPLACES the LLM-hand-composed description (which truncated multi-line
+# acceptance criteria to their first line — the defect this fixes). The `linear`
+# projection agent DEPENDS on this: it shells out to `make board-project` rather
+# than hand-composing a description.
+#
+# Runs via BOARDPY — the SAME cross-platform interpreter resolution the
+# work-items launcher uses (never bare python3; the launcher skips the Windows
+# Store stub and falls back to uv). linear-project.py is stdlib-only.
+#   make board-project PROJECT=ROC ID=UC-ROC-015   -> upsert one item's issue
+#   make test-board-project                         -> offline renderer unit test
+BOARDPY ?= $(shell sh .claude/skills/work-items/scripts/work-items --python)
+.PHONY: board-project test-board-project
 board-project:
-	$(BOARDPROJECT) --project $(PROJECT) --item $(ITEM) $(if $(LIVE),--live,--dry-run)
-# Offline unit tests for the board-projection tool (stdlib unittest; no network).
-#   make test-board-project
+	$(BOARDPY) .claude/tools/linear-project.py --project $(PROJECT) --id $(ID)
+
 test-board-project:
-	$(BOARDPROJECT) --python >/dev/null && \
-	  $$($(BOARDPROJECT) --python) .claude/skills/board-projection/scripts/test_board_project.py
+	$(BOARDPY) .claude/tools/linear-project.test.py
 
 # --- Process-doc conformance gate (process §27.5) -----------------------------
 # Scans the LIVE process/agent/skill/root docs for a DENYLIST of RETIRED

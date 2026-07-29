@@ -118,6 +118,19 @@ test('parseCoversTags: comma list, strips trailing (annotation), maps to file', 
   assert.equal(map.has('class-deps.mmd'), false); // annotation not treated as a node
 });
 
+test('parseCoversTags: an annotation WRAPPING onto a second comment line still registers the id (2026-07-21 fix — a same-line-only close previously dropped these silently)', () => {
+  const spec = [
+    '// @covers timing (class-deps.mmd — engine/timing: deriveItemTiming, the SINGULAR',
+    '//                 per-item per-pass breakdown for a COMPLETED or IN-FLIGHT item)',
+    '// @covers eventlog (data-flow.mmd — per-item append-only authoritative log)',
+  ].join('\n');
+  const map = tool.parseCoversTags(spec, '/some/spec.ts');
+  assert.equal(map.get('timing')?.has('/some/spec.ts'), true);
+  assert.equal(map.get('eventlog')?.has('/some/spec.ts'), true);
+  // the wrapped continuation line's prose is never mistaken for a second id.
+  assert.equal(map.has('per-item per-pass breakdown for a COMPLETED or IN-FLIGHT item)'), false);
+});
+
 // --- integration: full run() against a throwaway git repo --------------------
 
 function git(repo, args) {
@@ -229,5 +242,231 @@ test('run(): exit 0 when there are no changed nodes', () => {
   const res = tool.run({ root: repo, project: 'projX', since });
   assert.equal(res.changedNodes.length, 0);
   assert.equal(res.exitCode, 0);
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+// --- EXP-104: nested-repo (v50) git-root resolution --------------------------
+// work/<project>/ is very often its OWN independent git repo, disjoint from the
+// parent/integration repo. A project SHA is `fatal: bad revision` against the
+// parent and vice versa. These tests build TWO real, separate git repos (a
+// "parent" with its own history + a "project" nested at work/projY/ with ITS
+// OWN .git) to prove resolution picks the repo that actually owns the SHA.
+
+function buildNestedRepoPair() {
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'imp104-parent-'));
+  git(parent, ['init', '-q']);
+  git(parent, ['config', 'user.email', 'p@p']);
+  git(parent, ['config', 'user.name', 'p']);
+  fs.writeFileSync(path.join(parent, '.gitignore'), 'work/*/\n');
+  fs.writeFileSync(path.join(parent, 'README.md'), '# parent\n');
+  git(parent, ['add', '-A']);
+  git(parent, ['commit', '-qm', 'parent baseline']);
+  const parentSha = git(parent, ['rev-parse', 'HEAD']).trim();
+
+  const projectRoot = path.join(parent, 'work', 'projY');
+  const depDir = path.join(projectRoot, 'architecture', 'dependencies');
+  const specDir = path.join(projectRoot, 'src', 'specs');
+  fs.mkdirSync(depDir, { recursive: true });
+  fs.mkdirSync(specDir, { recursive: true });
+  git(projectRoot, ['init', '-q']);
+  git(projectRoot, ['config', 'user.email', 'j@j']);
+  git(projectRoot, ['config', 'user.name', 'j']);
+  fs.writeFileSync(path.join(depDir, 'class-deps.mmd'),
+    'flowchart TD\n  existing["existing"]:::stable\n');
+  fs.writeFileSync(path.join(specDir, 'covered.spec.ts'),
+    '// @covers newNode\nit("x", () => {});\n');
+  git(projectRoot, ['add', '-A']);
+  git(projectRoot, ['commit', '-qm', 'project baseline']);
+  const projectSha = git(projectRoot, ['rev-parse', 'HEAD']).trim();
+
+  // in-window project-only change: add a new changed node (uncommitted, so both
+  // the committed-window diff and the working-tree diff paths get exercised).
+  fs.writeFileSync(path.join(depDir, 'class-deps.mmd'),
+    'flowchart TD\n  existing["existing"]:::stable\n  newNode["new"]:::s001changed\n');
+
+  return { parent, parentSha, projectRoot, projectSha };
+}
+
+test('resolveDiffRoot: a project-only SHA resolves to the NESTED project repo, not the parent', () => {
+  const { parent, projectRoot, projectSha } = buildNestedRepoPair();
+  const resolved = tool.resolveDiffRoot(parent, 'projY', projectSha);
+  assert.equal(resolved, projectRoot);
+  fs.rmSync(parent, { recursive: true, force: true });
+});
+
+test('resolveDiffRoot: falls back to the PARENT repo when the nested repo does not own the SHA', () => {
+  const { parent, parentSha } = buildNestedRepoPair();
+  const resolved = tool.resolveDiffRoot(parent, 'projY', parentSha);
+  assert.equal(resolved, parent);
+  fs.rmSync(parent, { recursive: true, force: true });
+});
+
+test('resolveDiffRoot: a SHA unknown to BOTH repos raises an actionable error (never a raw git failure)', () => {
+  const { parent } = buildNestedRepoPair();
+  assert.throws(
+    () => tool.resolveDiffRoot(parent, 'projY', 'deadbeef'),
+    /not found in the project repo .* or the parent repo/,
+  );
+  fs.rmSync(parent, { recursive: true, force: true });
+});
+
+test('run(): EXP-104 end-to-end — a project-only SHA against a nested project repo returns a non-empty impacted set with ZERO bad-revision failure', () => {
+  const { parent, projectRoot, projectSha } = buildNestedRepoPair();
+  // sanity: the parent repo genuinely does NOT know this SHA (proves the bug
+  // would have fired `fatal: bad revision` before this fix).
+  assert.equal(tool.shaExistsIn(parent, projectSha), false);
+  assert.equal(tool.shaExistsIn(projectRoot, projectSha), true);
+
+  const res = tool.run({ root: parent, project: 'projY', since: projectSha });
+  assert.ok(res.changedNodes.includes('newNode'), 'newNode should be detected as changed');
+  const covered = res.impacted.find((r) => r.node === 'newNode');
+  assert.ok(covered, 'newNode should be impacted (covered by covered.spec.ts)');
+  assert.ok(covered.specs.some((s) => s.endsWith('covered.spec.ts')));
+  assert.equal(res.uncovered.length, 0);
+  fs.rmSync(parent, { recursive: true, force: true });
+});
+
+// --- @covers / node-id convention sanity check --------------------------------
+
+test('checkTagConvention: no @covers tags at all -> no mismatch (nothing to reconcile)', () => {
+  const res = tool.checkTagConvention(new Set(['MAP', 'G_CONF']), new Map());
+  assert.equal(res.mismatch, false);
+});
+
+test('checkTagConvention: @covers tags exist but match NO node id -> mismatch (silent under-report risk)', () => {
+  const coversIndex = new Map([
+    ['domain-map', new Set(['a.spec.ts'])],
+    ['domain-conformance', new Set(['b.spec.ts'])],
+  ]);
+  const res = tool.checkTagConvention(new Set(['MAP', 'G_CONF']), coversIndex);
+  assert.equal(res.mismatch, true);
+  assert.deepEqual(res.overlap, []);
+});
+
+test('checkTagConvention: @covers tags overlap node ids -> no mismatch', () => {
+  const coversIndex = new Map([
+    ['MAP', new Set(['a.spec.ts'])],
+    ['domain-conformance', new Set(['b.spec.ts'])],
+  ]);
+  const res = tool.checkTagConvention(new Set(['MAP', 'G_CONF']), coversIndex);
+  assert.equal(res.mismatch, false);
+  assert.deepEqual(res.overlap, ['MAP']);
+});
+
+test('formatReport: prints a loud WARNING banner on a tag/node-id convention mismatch', () => {
+  const res = {
+    changedNodes: ['MAP'],
+    impacted: [],
+    uncovered: ['MAP'],
+    exitCode: 2,
+    tagConvention: {
+      mismatch: true,
+      taggedIds: ['domain-map'],
+      overlap: [],
+      allNodeIds: ['MAP', 'G_CONF'],
+    },
+  };
+  const out = tool.formatReport(res, { project: 'AdixOut', since: 'abc123', root: '/x' });
+  assert.match(out, /WARNING: @covers TAG \/ NODE-ID CONVENTION MISMATCH/);
+  assert.match(out, /domain-map/);
+  assert.match(out, /MAP, G_CONF/);
+});
+
+// --- OI-COVERS-NODEID: `%% @alias` node-id <-> @covers-tag reconciliation ------
+
+test('parseAliasComments: `%% @alias NODE=tag1,tag2` -> Map(node -> {tags}); many tags to one node', () => {
+  const mmd = [
+    'flowchart TB',
+    '  %% @alias MAP=domain-map,domain-serialize',
+    '  %% @alias G_CONF=domain-conformance',
+    '  MAP["map"]',
+  ].join('\n');
+  const m = tool.parseAliasComments(mmd);
+  assert.deepEqual([...m.get('MAP')].sort(), ['domain-map', 'domain-serialize']);
+  assert.deepEqual([...m.get('G_CONF')], ['domain-conformance']);
+});
+
+test('parseAliasComments: one tag repeated across nodes expresses a one-tag -> many-nodes mapping', () => {
+  const mmd = [
+    '  %% @alias G_KEY=domain-resync-handler',
+    '  %% @alias G_THROTTLE=domain-resync-handler',
+    '  %% @alias RESYNC=domain-resync,domain-resync-handler',
+  ].join('\n');
+  const m = tool.parseAliasComments(mmd);
+  assert.ok(m.get('G_KEY').has('domain-resync-handler'));
+  assert.ok(m.get('G_THROTTLE').has('domain-resync-handler'));
+  assert.ok(m.get('RESYNC').has('domain-resync-handler'));
+  assert.ok(m.get('RESYNC').has('domain-resync'));
+});
+
+test('parseAliasComments: no @alias lines -> empty map (purely additive, no behaviour change)', () => {
+  const mmd = 'flowchart TB\n  %% just a normal comment\n  MAP["map"]:::changed\n';
+  assert.equal(tool.parseAliasComments(mmd).size, 0);
+});
+
+test('effectiveSpecsFor: unions a node\'s direct specs with every aliased tag\'s specs', () => {
+  const coversIndex = new Map([
+    ['MAP', new Set(['direct.spec.ts'])],
+    ['domain-map', new Set(['map.spec.ts'])],
+    ['domain-serialize', new Set(['ser.spec.ts'])],
+  ]);
+  const aliasMap = new Map([['MAP', new Set(['domain-map', 'domain-serialize'])]]);
+  assert.deepEqual(
+    tool.effectiveSpecsFor('MAP', coversIndex, aliasMap),
+    ['direct.spec.ts', 'map.spec.ts', 'ser.spec.ts'],
+  );
+});
+
+test('effectiveSpecsFor: a node with no direct tag and no alias resolves to no specs', () => {
+  assert.deepEqual(tool.effectiveSpecsFor('OAG', new Map(), new Map()), []);
+});
+
+test('checkTagConvention: an adopted alias reconciles the vocabulary -> NO mismatch warning', () => {
+  const coversIndex = new Map([
+    ['domain-map', new Set(['a.spec.ts'])],
+    ['domain-conformance', new Set(['b.spec.ts'])],
+  ]);
+  const aliasMap = new Map([
+    ['MAP', new Set(['domain-map'])],
+    ['G_CONF', new Set(['domain-conformance'])],
+  ]);
+  const res = tool.checkTagConvention(new Set(['MAP', 'G_CONF']), coversIndex, aliasMap);
+  assert.equal(res.mismatch, false);
+  assert.deepEqual(res.overlap.sort(), ['domain-conformance', 'domain-map']);
+});
+
+test('run(): a changed node keyed to a DIFFERENT tag vocabulary shows IMPACTED via `%% @alias`', () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'imp-alias-'));
+  git(repo, ['init', '-q']);
+  git(repo, ['config', 'user.email', 't@t']);
+  git(repo, ['config', 'user.name', 't']);
+  const depDir = path.join(repo, 'work', 'projZ', 'architecture', 'dependencies');
+  const specDir = path.join(repo, 'work', 'projZ', 'src', 'specs');
+  fs.mkdirSync(depDir, { recursive: true });
+  fs.mkdirSync(specDir, { recursive: true });
+  // baseline: MAP declared, terse node id; spec tags the SEMANTIC vocabulary.
+  fs.writeFileSync(path.join(depDir, 'data-flow.mmd'),
+    'flowchart TB\n' +
+    '  %% @alias MAP=domain-map,domain-serialize\n' +
+    '  MAP["map + serialize"]:::stable\n');
+  fs.writeFileSync(path.join(specDir, 'mapDeparture.test.ts'),
+    '// @covers domain-map\nit("x", () => {});\n');
+  git(repo, ['add', '-A']);
+  git(repo, ['commit', '-qm', 'baseline with alias']);
+  const since = git(repo, ['rev-parse', 'HEAD']).trim();
+  // in-window: MAP is re-marked changed (uncommitted working-tree edit).
+  fs.writeFileSync(path.join(depDir, 'data-flow.mmd'),
+    'flowchart TB\n' +
+    '  %% @alias MAP=domain-map,domain-serialize\n' +
+    '  MAP["map + serialize"]:::s001changed\n');
+  const res = tool.run({ root: repo, project: 'projZ', since });
+  assert.ok(res.changedNodes.includes('MAP'), 'MAP is the changed node');
+  const mapImpact = res.impacted.find((r) => r.node === 'MAP');
+  assert.ok(mapImpact, 'MAP must show IMPACTED via the domain-map alias, not UNCOVERED');
+  assert.ok(mapImpact.specs.some((s) => s.endsWith('mapDeparture.test.ts')));
+  assert.equal(res.uncovered.includes('MAP'), false);
+  assert.equal(res.exitCode, 0, 'the only changed node is now covered -> clean exit');
+  // and the adopted alias suppresses the convention-mismatch warning.
+  assert.equal(res.tagConvention.mismatch, false);
   fs.rmSync(repo, { recursive: true, force: true });
 });

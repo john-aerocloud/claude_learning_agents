@@ -50,6 +50,15 @@ against a real interaction model, not retrofitted.
    target sizes, labelled controls, reduced-motion). You co-author these into
    `work/<project>/slices/<nnn>-<slug>/acceptance.md` exactly as the architect co-authors
    security conditions — they become axe/Playwright tests the tester enforces.
+   **Contrast conditions are painted-pixel-verifiable, and a new token is verified
+   against its NEW adjacencies (EXP-114, v94).** Never alias a colour token straight to
+   an existing one (e.g. a chip border to the panel border) without checking the ratio
+   against the *actual* surfaces THIS surface places it on — the UC-B1 chip-border reject
+   (1.26:1) was a blind alias. State the required ratio against each named adjacent
+   surface (fill, background, page), and for state-dependent controls state it for the
+   settled state AND across any transition — because the tester measures the rendered
+   pixel, not the nominal token (DEF-001: a `transition` painted a failing mid-flip pixel
+   the token hid).
 3a. **Visual-structural correctness — TESTABLE.** Functional-green is not
    visually-correct: a board can pass every cell-presence/click/win test and
    still render as a LINE because no test asserts geometry (the s002 board —
@@ -66,7 +75,27 @@ against a real interaction model, not retrofitted.
    auditing PRE-EXISTING surfaces you
    inherit on your first touch of a project: if a live surface is visually wrong,
    raise it as a defect (`/defect`) even if it predates you — nobody else is
-   looking at geometry.
+   looking at geometry. A LIVE / monitoring surface must SIGNAL staleness or
+   disconnection (a cue that is not colour-only) and re-fetch on reconnect —
+   never present stale data as live (DEFECT-003: a map froze while its backend
+   was down with no stale cue).
+3b. **Data-visualization FAITHFULNESS — TESTABLE (v114, DEF-004).** For any chart /
+   plot / graph, geometry + a11y green is NOT enough: every visual mark must
+   quantitatively REPRESENT its underlying datum WITHOUT a silent clamp, truncation,
+   or renormalization that changes what the viewer reads. Emit a checkable
+   faithfulness condition per encoded quantity, and hold it to the JOB the chart
+   serves (can the analyst read the real relationship?). DEF-004: the fitted
+   log-normal overlay was scaled to the tallest histogram bar and CLAMPED at the plot
+   top, so whenever the true peak exceeded the bars it rendered a FLAT TOP — and this
+   was signed off as "by-design (hump preserved)" because no acceptance clause
+   required the curve to be a faithful density. Rules: a mark that "fits in the box"
+   by distorting the data is a DEFECT, not by-design; series drawn on one plot share
+   an HONEST common scale (a shared axis sized to hold ALL series' true extent, not
+   one series clamped to another); a computed overlay (fit/trend/density) is derived
+   from the SOURCE data and depicts its true shape (single real peak, correct tail),
+   asserted by sampling the rendered marks (e.g. a single interior maximum, no
+   ≥3-point top plateau), not just "a curve is present." The tester validates the
+   DEPICTED RELATIONSHIP at the painted surface, not merely that the chart renders.
 4. **UX heuristics — ADVISORY.** Click-path budget, nav depth, scannability,
    empty/loading/error coverage: record them as guidance in the slice UI design
    spec. They inform the build and the review; they are not automated gates.

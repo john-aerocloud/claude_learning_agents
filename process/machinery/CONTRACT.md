@@ -27,12 +27,16 @@ events:                   # append-only. state = fold(events) through the type g
                           # each event MAY carry an OPTIONAL `tokens: <int>` — the subagent_tokens the
                           # dispatched specialist spent producing that transition. Absent ⇒ unknown/0
                           # (parsing is tolerant). Feeds the plumbing-vs-delivery cost-split in stats.
+                          # each event MAY also carry an OPTIONAL `duration_ms: <int>` — the dispatched
+                          # agent's REAL wall-clock cycle time for that transition (the dispatch layer's
+                          # reported duration_ms). Absent ⇒ unknown/uncounted. Feeds §F agent_cycle_time
+                          # (work-effort vs gross lead time); GLT itself stays the honest total elapsed.
   - {ts: 2026-06-17T21:30:00Z, event: registered, agent: flow-manager}
   - {ts: 2026-06-18T09:00:00Z, event: made_ready, agent: flow-manager, note: "vc=6.0"}
   - {ts: 2026-06-18T12:00:00Z, event: pulled,      agent: orchestrator}
-  - {ts: 2026-06-18T15:30:00Z, event: built_green, agent: engineer, ref: <sha>, tokens: 48000}
+  - {ts: 2026-06-18T15:30:00Z, event: built_green, agent: engineer, ref: <sha>, tokens: 48000, duration_ms: 4800000}
   - {ts: 2026-06-18T15:45:00Z, event: deployed,    agent: cicd}          # deploy-to-dev
-  - {ts: 2026-06-18T16:10:00Z, event: validated,   agent: tester, ref: <sha>, tokens: 12000}  # local-only: dev==prod
+  - {ts: 2026-06-18T16:10:00Z, event: validated,   agent: tester, ref: <sha>, tokens: 12000, duration_ms: 300000}  # local-only: dev==prod
 # --- everything below this line is DERIVED (rendered by the machinery). do not hand-edit. ---
 derived:
   state: done
@@ -107,6 +111,10 @@ folds to `cancelled`.
   - **(d) token cost** — `token_cost`: total, `by_owner` (event `tokens` folded through the event's
     agent), and the **plumbing-vs-delivery split** (running-the-OS vs customer-value; classification
     ported from dora.py cost-split, EXP-067). Computed from each event's optional `tokens`.
+  - **(f) agent cycle time** — `agent_cycle_time`: the REAL per-stage work-effort each dispatched
+    agent spent (`duration_ms`), `by_owner` and `by_stage` (total/median/n), plus the key derived
+    figure **`cycle_time_vs_glt`** — Σ agent effort as a % of gross lead time (work-effort vs
+    wait/overhead). GLT stays the honest TOTAL elapsed; §F is its complement. From optional `duration_ms`.
   Aggregate (slice/chunk/requirement) state bubbles from children per the graph `bubble` rule.
 - Re-renders each active item's `derived:` block (state, queue, children, ancestors, **metrics**).
 - **(e) per-item metrics** — ALL the flow/DORA quantities are ALSO trackable for one item, not

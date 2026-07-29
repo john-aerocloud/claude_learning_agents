@@ -59,6 +59,65 @@ an INCOMPLETE design. The catalog is a core `actual/` doc (the documenter keeps
 it surfaced). A consumer that poisons on a known-type stored event is this
 principle violated, not a data problem (see DEFECT-OAG-024/025).
 
+When you define or change an externally-consumed event/message body, design it
+**consume-first**: the body is the MINIMAL structured delta a consumer APPLIES —
+the changed leaves, explicitly keyed — with NO redundant change-representations
+and (for non-genesis events) NO full-state snapshot. Derive the shape from what
+the consumer folds, not from what the differ already produces; pin it with a
+"consumer applies this event with no other source" test. An over-stuffed,
+emit-shaped body is a design defect that forces an expensive contract redesign
+(DEFECT-OAG-009).
+
+When a slice **CONSUMES an external contract we do NOT own** (a third-party bus
+message, event, or data feed), pin the delta to a **REAL captured sample of the
+exact wire shape** — the actual on-the-wire message — NOT a secondary projection
+(a DB/CSV/export capture) and NOT a synthetic assumption. Obtain the real sample
+at design time, record it as the authoritative fixture the engineer/tester
+validate against, and make "a real captured message classifies/parses end-to-end"
+the slice's fitness function. A secondary representation silently drops or renames
+the envelope: ROC built its whole pipeline against a PascalCase **CSV column
+capture** while the real PPSM bus sends a **MassTransit envelope** (device payload
+nested lowercase under `body.message.*`) — so `normalise()` rejected every real
+message and the "deployed-green" pipeline produced zero alerts (DEF-ROC-003, a
+core-slice-false-done recurrence). The wire shape is part of the architecture
+delta, established from reality before build — never assumed from a convenient
+sibling artifact.
+
+**SPIKE the real source and CAPTURE the real sample BEFORE you design — the
+contract includes DELIVERY TOPOLOGY, not just the envelope shape; and a deferred
+"live validation" of an external integration is a standing RISK flag, NEVER a green
+checkbox (2026-07-28, REQ-004 orphaned dev consumer-side).** For any slice that
+integrates an external feed/API whose contract we do NOT control, the architecture
+gate's FIRST act is to spike the real source and capture a real on-the-wire sample —
+then pin the design + the engineer's synth-pins against THAT sample. "Contract" here
+means the whole integration surface: routing attributes (`source`, `detail-type`),
+the delivery TOPOLOGY (which bus/queue actually carries it, single- vs cross-account,
+fan-out), AND the envelope nesting — not merely the payload fields. Synthetic,
+self-consistent validation PASSES while the real contract differs on any of these,
+so a slice validated only against synthetic PUTs is **built-to-a-guess, NOT done** —
+its "live validation" must be a first-class acceptance step, and while it is deferred
+the integration carries an explicit RISK flag (it may be entirely orphaned against
+reality), never a `validated` checkbox. Founding case: REQ-004's entire dev
+consumer-side was designed + synth-validated green against a GUESSED OAG contract (a
+separate C12 bus, `source=oagEvents.producer`, a top-level envelope) and was ENTIRELY
+orphaned — OAG actually fans `Aerobus` → a SHARED `oag-consumer-bus` in our account
+(~42k/day live) with `source=oag.eventstore` / `detail-type=OagCanonicalEvent` and the
+canonical envelope nested under `.detail`. Only consulting the real feed forced the
+correct design (delta 008: retire C12 + its cross-account grant, rewire onto
+`oag-consumer-bus` with the real pattern + `inputPath:$.detail`, pin against a real
+captured wire sample, gap-tolerate the join-mid-stream). Extends the v110
+verify-reuse-against-real-target + the assert-real-state family.
+
+**"Reuse existing X" is a claim to VERIFY against the real target account/stack,
+not to assume from another environment (2026-07-24, SLC-AIDX-011 scope-gap).** When
+a delta reuses an existing resource (a stack, queue, table, Lambda, bus), confirm at
+design time that X actually exists in the TARGET deployed account you are building
+against — do not infer its presence from a sibling env. SLC-AIDX-011 assumed the
+C10/C11 ingest was on dev-dataout because the egress had migrated there, but the
+account migration had moved only the egress — the ingest was still sandbox-only. The
+engineer's §F7 stop was correct; a predecessor UC + an architect delta had to be
+inserted. Falsify a reuse premise against the live target before it enters the delta.
+
 ## Release-identity tagging on prod resources (process §18a, ISO)
 Every production resource must be traceable to the version + commit running it. In
 your per-infrastructure notes, **specify which prod resources carry the `Version` and
@@ -75,6 +134,79 @@ alone. Cheap to bake into the IaC from the first stack; expensive to retrofit.
    network structure.
 3. Co-author the slice's acceptance test cases with Product
    (`work/<project>/slices/.../acceptance.md`) — you supply the technical/observable conditions.
+   **For any component with CONCURRENT/parallel invocation or event-driven delivery
+   (SQS-, stream-, or EventBridge-triggered Lambdas; anything where >1 instance runs
+   over shared state at once), you MUST author explicit concurrency / ordering /
+   idempotency-under-parallelism acceptance conditions — not just the happy path.**
+   Enumerate the failure modes the concurrency implies (last-writer-wins on a shared
+   record, out-of-order/duplicate delivery, a stale in-memory snapshot clobbering a
+   fresher write, non-monotonic state regression) and state the observable condition
+   that must hold under CONCURRENT/batched load (e.g. "under N simultaneous deliveries
+   touching the same aggregate, the high-water mark never regresses and no applied
+   content is lost"). The happy-path-only acceptance is how a silent data-loss race
+   ships to deploy: UC-ADIX-006's last-writer-wins race regressed `lastAppliedPosition`
+   and permanently lost push-only content, and the acceptance said only "observe one gap
+   heal" — the tester had to improvise the concurrency stressor to catch it (a rework +
+   CFR hit that a concurrency acceptance condition would have made the engineer TDD
+   first-time). A concurrent surface with no concurrency/idempotency acceptance condition
+   is incomplete. [EXP-109]
+   **For any EDGE PROTECTION the slice adds or relies on in front of an endpoint** — WAF
+   managed rules, body inspection, request-schema/size limits — you MUST author an
+   acceptance condition that exercises it with a REAL representative REQUEST PAYLOAD (e.g.
+   an actual AIDX XML `FlightLegRQ` body), NOT just empty-body / query-param / happy-path
+   probes. An edge protection is only validated by sending the payload it inspects: state
+   the observable that must hold when a real well-formed body traverses the protection
+   (it passes and reaches the handler; a genuinely malicious body is still blocked).
+   UC-ADIX-016's WAF was accepted on query-param/empty-body probes only, so
+   `AWSManagedRulesCommonRuleSet`'s `CrossSiteScripting_BODY` silently blocked every real
+   AIDX XML body until UC-ADIX-017 sent one — an escaped edge false-positive that would
+   have blocked the real consumer in prod. An edge-protection delta with no real-payload
+   acceptance condition is incomplete.
+   **For any MULTI-TENANT onboarding / provisioning surface** — a flow that makes a new
+   customer (or tenant/account) ready to be served — you MUST first ENUMERATE the FULL set
+   of per-customer resources that must exist for that customer to be served end-to-end, then
+   author acceptance conditions requiring onboarding to ensure ALL of them IDEMPOTENTLY
+   (create-if-absent), INCLUDING the migration case: a customer whose record PREDATES a
+   later-added resource must be SELF-HEALED (re-running onboarding creates the missing
+   resource for the pre-existing customer), not just the happy-path brand-new onboard. A
+   fingerprint / "already-provisioned" short-circuit that skips ensuring the resource set for
+   a pre-existing row is a completeness hole. Founding failure: UC-ADIX-019 (dynamic
+   per-customer auth) took 3 dev-validation rework cycles because the per-customer resource
+   set (EntitlementStore row, Secrets-Manager JWT key, dynamic key resolution, API-Gateway
+   API-key, usage-plan association) was discovered INCREMENTALLY and an idempotency
+   short-circuit skipped ensuring resources for pre-existing rows. State the observable that
+   must hold: after onboarding (new AND re-applied against a pre-existing customer), every
+   enumerated per-customer resource exists. Sibling of the concurrency/idempotency family
+   [EXP-109] — this extends it from single-resource idempotency to resource-SET completeness
+   + migration/self-heal. A multi-tenant provisioning delta with no enumerated resource set
+   and no self-heal/migration acceptance condition is incomplete.
+   **For any idempotent PROVISIONING ("ensure") or resource RESOLUTION against AWS** —
+   secrets, queues, eventing targets, per-container caches/resolvers — the acceptance MUST
+   enumerate the resource's STATE-MACHINE, not just the absent-vs-present dichotomy: name the
+   BAD / TRANSITIONAL states the resource can be in and state the observable that must hold in
+   each. A resource is not merely "there or not there" — it can be present-but-unusable, and
+   an "ensure/resolve" that treats present==provisioned ships a customer that looks onboarded
+   but cannot be served. Enumerate at least:
+   - a secret can be SCHEDULED-FOR-DELETION (`DescribeSecret` still returns the ARN through
+     the 7-day recovery window) → the acceptance requires `RestoreSecret`, NOT treating the
+     returned ARN as provisioned;
+   - a queue can be in the ~60s delete-recreate COOLDOWN (`QueueDeletedRecently`) → the
+     acceptance requires the caller NOT to block past its timeout (defer / heal-later), and
+     not-found is the real SDK error name (`QueueDoesNotExist`);
+   - a cross-service delivery target (e.g. an SQS DLQ for EventBridge) needs its RESOURCE
+     POLICY, not merely to exist, for delivery to succeed — acceptance asserts the policy;
+   - a per-container CACHE / key resolver must be ROTATION-AWARE — the acceptance exercises a
+     verify-failure → invalidate+refetch (or bounded TTL), so a stale-positive cache entry
+     cannot serve a rotated-out key;
+   - a freshly-created API-Gateway / EventBridge resource has a ~60s PROPAGATION lag →
+     acceptance permits bounded-retry, not an immediate-fail.
+   Founding chain: DEF-ADIX-003 revealed THREE sequential bugs in ONE offboard→reactivate flow
+   (secret marked-for-deletion → DLQ cooldown timing out the onboard Lambda → stale
+   rotation-unaware key cache), plus UC-025's three (per-customer verify, secret self-heal, DLQ
+   resource policy) — every one a "handled absent/present but not the BAD/TRANSITIONAL state"
+   gap. Extends EXP-109 + the v101 multi-tenant-completeness fold from resource-SET presence to
+   resource-STATE correctness. An ensure/resolve delta whose acceptance enumerates only
+   absent-vs-present, not the failure/transitional states of the AWS resource, is incomplete.
 4. **Maintain `architecture/dependencies/data-flow.mmd`**: the runtime data-flow
    with **platform gates as explicit nodes** — WAF, authorizers, identity-source
    checks, cache layers, TTL/lazy-deletion semantics, CSP. Express each slice's
@@ -172,24 +304,6 @@ command best-guessed `/flight-info/v2/flights` + `Ocp-Apim-Subscription-Key`
 `CodeType`). Same EXP-066 ground-truth-over-belief discipline applied to the
 interface CONTRACT, not just payload semantics. Target: GLT (no discovery detour)
 + CFR (no wrong-endpoint code).
-
-## Probe a load-bearing UNVERIFIED external CAPABILITY before building on it (EXP-112)
-Distinct from EXP-078 (which verifies an interface CONTRACT — path/header/schema): when
-the CHOSEN design's viability rests on an external-platform CAPABILITY not already
-proven in THIS system — "can a Pipe even target a cross-account bus?", "does a fresh
-`PutEvents` reset the one-bus-to-bus-forward budget?" — that capability is a load-bearing
-PREMISE, and vendor docs are NOT proof (this project was burned repeatedly on unverified
-EventBridge cross-account facts). Settle it with the CHEAPEST possible LIVE probe
-(ideally zero-infra, e.g. one `aws events put-events`) BEFORE the build commits to that
-premise. Do NOT nominate the doc-confident option as "primary" and defer the settling
-probe to post-build CI — a wrong premise then costs full deploy cycles to disprove
-(UC-XA10: the "primary" direct Pipe→Aerobus design was architecturally IMPOSSIBLE (CX-3);
-~4 deploy cycles + a false-green were spent before a ~zero-infra probe settled the real
-path (CX-5)). When two designs exist and one rests on an unproven capability, either
-probe that capability first OR build the already-PROVEN design first and keep the
-doc-confident one as the gated swap. Runbook:
-`work/OagEventSource/docs/runbooks/cross-account-pipe-target-forbidden.md`. Target: lead
-time (no multi-cycle disproof detour) + CFR (no deploy-failures disproving a premise).
 
 ## Design for local standability (v28, principles/02)
 Architecture must allow most of the system to stand up locally (hexagonal

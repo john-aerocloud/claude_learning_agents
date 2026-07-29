@@ -46,31 +46,6 @@ Always create TWO OIDC roles:
 - App role: S3 + CloudFront only (no IAM, no CloudFormation).
 - Infra role: can assume CDK bootstrap roles; requires `cdk bootstrap --trust <account>`.
 
-## Every environment deploys through the pipeline (v88, EXP-109)
-**No environment is ever deployed by hand.** Every deploy to a real account —
-sandbox, **shared/hub, dev, prod** — runs as a CI job on push to `main`. A
-hand-run `make deploy-sst`/`sst deploy` against a real account is NOT a delivery
-mechanism; locally you run only the **synth/diff pre-push gate** (`sst diff`/synth).
-
-- **Dev is the fully-integrated pre-prod validation environment.** It is the
-  environment that proves a prod deploy will work, so **all integration/acceptance
-  tests against a deployed environment run IN the pipeline** (the `acceptance-dev`
-  job) and gate prod mechanically (`deploy-prod needs: acceptance-dev`). Never a
-  manual local probe standing in for the CI gate.
-- **Every stage/tier gets its own CI deploy job — including a cross-account or hub
-  tier.** A shared-account EventBridge hub + its fan-out, and the end-to-end
-  cross-account integration probe (e.g. a 3-hop published→hub→consumer-folded
-  latency/delivery check), belong in the pipeline: a `deploy-<stage>` job (with a
-  one-time human-bootstrapped OIDC deploy role, §F5) plus a CI integration-test job
-  on the dev tier that gates prod exactly like `acceptance-dev`.
-- **A stage not yet wired into CI is an INFRA GAP to close, not a licence to deploy
-  by hand.** When you (or the engineer) find yourself reaching for a manual
-  cross-account/shared deploy, that is the signal a pipeline job is missing:
-  register it as work, add the CI deploy job + integration probe, bootstrap the
-  OIDC role (§F5 human gate), and let the pipeline deliver. The permission system
-  resisting a manual shared-account write is the guard working as intended.
-  Founding lapse: `process/principle-failures/2026-07-16-manual-shared-deploy-no-ci-path.md`.
-
 **Deploy-role grants: watch the inline-policy budget (v61, DEFECT-OAG-014).** An
 IAM role's INLINE policies share a 10,240-byte hard limit. As a deploy role
 accrues per-service grants it WILL hit this and the deploy fails mid-apply
@@ -107,24 +82,19 @@ leaves no event makes CFR read a false 0% (the "each miss is a CFR hit" above on
 if the hit is recorded). `deploy_failed` (`deploying`/`prod-deploying` → `reworking`) is a
 CFR change-failure; a pre-deploy build/test/lint red is a pipeline wait, not CFR.
 
-**A deploy is not green until the LIVE resource matches declared intent (EXP-111).**
-An IaC provider's success / `Updated` line is INTENT, not a confirmed apply — some
-`Update*` paths silently SWALLOW a change (EventBridge `UpdatePipe` drops a target
-change when the update payload carries a CREATE-only key like `StartingPosition`), so
-CI goes green on a resource that never moved. That FALSE GREEN becomes a split-brain
-when a companion change DID apply (e.g. the IAM grant retargeted but the Pipe target
-did not → 100% AccessDenied), and it HIDES the real failure (it masked the CX-3
-cross-account-Pipe impossibility for a whole cycle). So every infra `deploy-<stage>`
-job MUST, after `sst deploy`, READ BACK the live resource and ASSERT its
-declared-intent fields match config (`aws pipes describe-pipe … --query Target` == the
-expected ARN; the analogous read-back for whatever the deploy changed) and FAIL the job
-on mismatch — never close on the deploy report alone. Where a provider `Update*` carries
-a CREATE-only field, ALSO force a real replace (`replaceOnChanges:[<field>]` +
-`deleteBeforeReplace`) so the change lands via `Create*`. This is the POST-deploy
-complement to EXP-107 (pre-push synth/diff) and a member of the false-green family
-(delivery-principles skill). Founding: UC-XA10 false-green (CI green, Pipe target
-unchanged). Runbook: `work/OagEventSource/docs/runbooks/pipe-target-silently-swallowed.md`.
-Target: CFR.
+**Who fires `deployed` under a PIPELINE (push→CI) deploy (2026-07-22, UC-ADIX-015).**
+When deploys are pipeline-triggered — a push to `main` makes CI apply the infra — NO
+agent runs an interactive `sst deploy`, so no agent fires the `deployed` wi-event
+automatically, and a UC can sit built-green-and-deployed while its item never leaves
+`deploying`, blocking the tester (principle-failure
+`2026-07-22-uc-adix-015-missing-cicd-deployed-event-blocks-tester.md`). Under
+pipeline deploys the **ORCHESTRATOR** fires the CI-confirmed `deployed`
+(`AGENT=cicd`, `REF=<deployed sha>`, `NOTE` citing the green CI run URL/id) AFTER it
+confirms the pipeline deploy landed green. Engineers and testers MUST NOT spoof
+`AGENT=cicd` to unblock themselves — the event is fired once, by the orchestrator, on
+CI-confirmed evidence. (Interactive per-UC `sst deploy` is unchanged: cicd fires its own
+`deployed` as it always has.) A queued improvement-slice makes the CI pipeline emit the
+`deployed` event itself, retiring the orchestrator step.
 
 **`bootstrap-deploy-role.sh` must PRUNE managed-policy versions (v79, EXP-094).**
 AWS caps a managed policy at **5 versions** and does NOT auto-prune; repeated
@@ -330,6 +300,22 @@ every job that uses secrets or variables:
     fi
 ```
 
+## Private package-registry auth — GitHub Packages / design system (human directive 2026-07-24)
+When a UI-bearing project consumes the org design system `@aerocloudsystems/design-system`
+(ui-designer.md — React 19 + Tailwind 4 + Flowbite, published to **GitHub Packages**,
+registry `https://npm.pkg.github.com`), the pipeline authenticates to that registry — and
+the read token is a **SECRET, never a committed literal**:
+- Project `.npmrc` (safe to commit — contains NO secret): a scope line
+  `@aerocloudsystems:registry=https://npm.pkg.github.com/` and an auth line that reads an
+  ENV VAR: `//npm.pkg.github.com/:_authToken=${NPM_TOKEN}` (or `NODE_AUTH_TOKEN`).
+- CI: the token is a pipeline **secret** (e.g. GitHub Actions `secrets.<PROJECT>_GHP_PACKAGES_TOKEN`),
+  injected as that env var at the `npm ci`/install step and covered by the fail-fast config
+  validation above. Local dev: a machine-local `~/.npmrc` or a gitignored env, never a
+  `.npmrc` with a literal token inside `work/<project>/`.
+- A GH PAT (`ghp_…`) is a read-scope credential — if one is ever pasted/exposed in a
+  transcript or a file, treat it as COMPROMISED, rotate it, and re-store only as a secret.
+  NEVER echo, commit, or write a design-system token to any tracked file.
+
 ## AWS authentication
 When any AWS CLI, CDK, or IaC operation is required:
 1. Read the profile from `.claude/config/aws-profile` (default: `SND` if file absent).
@@ -382,21 +368,71 @@ exactly one of two is true and the fix MUST be one of them:
 Pipeline secrets/role/bootstrap prerequisites are sequenced (§19 scheduling), and the
 runbook lists every manual step that is not yet automated so the gap is visible.
 
-## Failure diagnostics MUST correlate to THIS run's own event (EXP-114)
-A failure-diagnostics step (DLQ dump, error-log scrape, dead-letter read) must be
-scoped to the event THIS run produced — filter by the run's own time-window and/or
-the id/streamId it just emitted — never dump the whole queue/DLQ unfiltered. A
-long-lived DLQ retains STALE messages from earlier, already-fixed failure modes;
-an unfiltered dump surfaces those first and points root-cause at the wrong thing.
-DEF-XA3 cost real investigation time this way: the fan-out DLQ diagnostics printed
-day-old `THIRD_ACCOUNT_HOP_DETECTED` messages (from the retired pre-publisher
-topology) while the actual live failure was a publisher poison-batch — the stale
-dump nearly sent the fix at the wrong layer. So: (a) filter diagnostics to the
-current run's correlation id / time-window and print message ages; (b) when a DLQ's
-contents are known-stale after a topology/logic fix, PURGE or redrive it (a Make
-target) so the next failure's diagnostics aren't polluted; (c) if a diagnostic
-cannot be correlated, label its output "UNCORRELATED — may predate this run" so it
-is read as a hint, not a conclusion.
+## Dependency-vulnerability audit gate (v91, DEF-ADIX-001, EXP-112)
+Vulnerable dependencies accumulate SILENTLY between deploys — DEF-ADIX-001 let a
+**CRITICAL** advisory (vitest UI-server arbitrary file read/exec) plus a HIGH and
+several MEDIUMs sit unaddressed across the whole first requirement because nothing in
+the loop ever ran an audit; the only signal was GitHub's Dependabot banner, which no
+agent reads. Close that gap with a standing, committed gate rather than waiting for a
+banner:
+- For any npm project, maintain a `make audit` target that runs `npm audit
+  --audit-level=high` in EVERY manifest the repo carries (root AND each sub-package —
+  DEF-ADIX-001's vulns were in BOTH `package-lock.json` and `src/app/package-lock.json`).
+- **The PUSH-BLOCKING condition is PROD-RUNTIME-scoped (`--omit=dev`), NOT the
+  dev-inclusive audit (v107, DEF-ROC-007).** A high/critical in the PROD-runtime tree
+  (`npm audit --omit=dev --audit-level=high` non-zero) is a hard push-FAILURE — it ships
+  to customers. A high/critical that exists ONLY in dev/build tooling (test runner,
+  bundler, storybook, a vendored design-system's own dev deps — not shipped) is DETECTED
+  and TRACKED but does NOT block a prod-clean push: it is a flagged `DEF-`/Dependabot-drain
+  item, prioritised as no-prod-runtime-exposure. Rationale: DEF-ROC-007's first gate run
+  blocked a prod-clean, dev-only-vuln push (fast-xml-parser — a real prod HIGH — was the
+  only blocker; once bumped, `--omit=dev` was 0 while the vitest/vite/tar dev chain stayed
+  red and correctly did NOT hold the push). Do NOT force-fix a dev-only advisory into a
+  push (a breaking `vitest@4`-style bump belongs to the drain, verified across tiers).
+- Run `make audit` as part of the build/push gate you own (alongside lint/test), so a new
+  PROD-runtime high/critical is caught at the next push, not accumulated. A found advisory
+  is triaged like any defect (`DEF-` through intake, §3); dev/build-only advisories are
+  still fixed for supply-chain hygiene (via the drain) but flagged no-prod-runtime-exposure
+  so they are prioritised correctly against runtime-exposed ones — and never block a
+  prod-clean push.
+- The gate is version-bump-friendly: prefer the minimal patched bump; a toolchain bump
+  (e.g. a vitest major) MUST be verified green across all test tiers before it is
+  push-green — never pin back to a vulnerable version to keep tests passing.
+
+## Pre-push gate runs ALL test projects, not one (v111, 2026-07-28, UC-AIDX-032)
+When a repo defines MULTIPLE vitest (or equivalent) projects — e.g. an `src/app`
+unit project AND a root `tests/*.synth-pin.*` infra synth-pin project — the standing
+pre-push gate MUST run EVERY project, not a single `--project`. Running only the app
+project FALSE-GREENED UC-AIDX-032 (the root infra synth-pin was never executed), which
+shipped a red CI cycle and a logged principle-failure
+(`2026-07-28-uc-adix-032-pushed-without-running-root-infra-synth-pin-tier`). Provide a
+single committed `make test-all` target that invokes the full multi-project run (bare
+`vitest run` with no `--project`, or an explicit list of all projects) and wire it into
+the push gate alongside lint + `make audit`. If a project has no `make test-all`, that
+gap is itself a small cicd/config improvement to land — a green from a partial project
+selection is not a green. Sibling of the EXP-110 unrun-test-is-failed rule, at the
+test-PROJECT granularity.
+
+## Dependabot-drain cadence (v104, ROC — human directive 2026-07-24)
+The `make audit` gate above is the DETECTOR; Dependabot is the upstream that already opens
+the patched-version bumps as branches/PRs on the project remote. Do NOT let them pile up
+unread (the same "banner nobody reads" gap, one step upstream) — drain them on a standing
+cadence, at every slice/chunk close (and any retro):
+- **Enumerate** the OPEN Dependabot branches/PRs on the project remote (`gh pr list
+  --author 'app/dependabot'`, or list `origin/dependabot/*` branches for the repo host).
+- **Gate each** — run the FULL local gate on that branch: the whole test suite + the
+  build/`tsc` across ALL projects (not just unit — a bump can break the type/build graph,
+  cf. DEF-ROC-006) + `make audit`.
+- **Merge the green ones** (small, frequent, low-risk — the point is never to accumulate a
+  big-bang dependency debt), with a note; **a bump that FAILS** the gate becomes a triaged
+  `DEF-` (or stays open with the failure captured) — never force-merged, never silently
+  ignored.
+- **Respect the project's push policy:** dependency bumps are shared-repo MAINTENANCE
+  (distinct from any feature-push hold, e.g. ROC's local-only track) — merge them onto the
+  remote's default branch WITHOUT riding along unpushed local feature work.
+Rationale (DORA): keeps CFR down (no accumulated vuln/breakage debt surfacing at a bad
+time) and lead time down (many tiny reviewed bumps vs one painful catch-up). Sibling of
+EXP-112 — detector + remediation cadence together close the supply-chain loop.
 
 ## Each iteration, before engineering starts
 1. Confirm/define technology choices and deployment approach for the slice.

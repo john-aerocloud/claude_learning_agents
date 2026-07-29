@@ -145,6 +145,23 @@ hardcode the profile name.
      post-push. Run the whole build locally so a type/build-graph break is caught before
      push, not at deploy. (cicd: fold the dashboard/app `npm run build` into the
      standing pre-push gate, not only the CI deploy step.)
+   - **Mirroring a stack to a new environment carries FIXTURES — strip them
+     (2026-07-29, AdixOut prod-branch).** When you stand up a NEW-environment stack by
+     mirroring a dev/reference boundary VERBATIM (especially prod), the dev/test
+     FIXTURES ride along — seed customers, hand-seeded data, and test doubles/receivers —
+     and MUST be stripped before any deploy: a real environment gets data ONLY via the
+     governed/real path, never a mirrored fixture. Founding case: the AdixOut prod branch
+     was built by mirroring dev verbatim, carrying the dev `synthetic-customer-a` seed,
+     hand-seeded legs, and the dev-only `WebhookTestReceiver` into the prod stack — caught
+     and stripped before any prod deploy. Audit a verbatim mirror for fixtures as an
+     explicit step; a mirrored fixture in a real stack is a defect.
+   - **A field with "never changes once set" semantics is derive-ONCE
+     (2026-07-29, DEF-AIDX-008 UFI-drift).** An identity field whose semantics say it is
+     fixed once set (e.g. the AIDX UFI `OriginDate`) must be derived ONCE, persisted, and
+     reused — NEVER recomputed from mutable operational data on later reads/writes.
+     `deriveOriginDate` recomputing from mutable operational timestamps drifted the UFI;
+     the fix pins it at ingest and reuses it. Derive-at-ingest + persist, never
+     recompute-from-mutable.
    - **Real-source fixtures for external/live data (v61, DEFECT-OAG-016).** When
      code consumes a shape you do not own — an API response, an event body, a
      third-party schema — the test fixtures MUST be captured from the REAL source

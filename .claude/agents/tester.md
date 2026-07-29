@@ -188,6 +188,19 @@ model — the changed nodes/edges ARE your scope:
   dev feed because a page of 66 non-status events aged each OOOI event out of the
   bounded backward-scan window; the correct `actual.*` fields were in the aggregate
   all along.)
+- **A feed GOING LIVE re-opens its DOWNSTREAM for re-validation — "done at
+  synthetic/seed scale" ≠ "done at real scale" (2026-07-29, DEF-AIDX-008).** When a
+  new feed/pipeline goes LIVE carrying REAL volume, do NOT trust the prior
+  synthetic/seed-scale sign-off of the already-"done" DOWNSTREAM consumers: re-exercise
+  them at the real load the live feed now produces (both absolute volume AND its growth
+  rate), because a component green at seed scale can fail CATASTROPHICALLY at real
+  volume. Founding case: REQ-004's live OAG ingest grew the read model from a tiny seed
+  to ~9k real legs at ~50–90/min, which broke the already-validated egress `Catchup` —
+  `POST /flightlegs` returned 502 for EVERY customer (a `CATCHUP_PAGE_SIZE=2`
+  page-until-entitled scan of the single-partition `byType` GSI timed out at 10s). The
+  live feed's own green did not cover its downstream; re-validating egress at the new
+  real load was the missing step. Sibling of the real-VOLUME-window fold above, at the
+  cross-component boundary a feed going live creates.
 
 - **Isolate stateful shared resources across parallel test files + start FRESH
   (v103, ROC C3).** When acceptance/e2e specs run in PARALLEL (e.g. vitest default

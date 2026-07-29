@@ -39,6 +39,37 @@ This is a standing responsibility for THIS and EVERY project. Founding:
 requirement-signoff, slicing, and the first build pull because README upkeep was
 implicitly tied to slice-completion only.
 
+## Multi-audience Definition of Done (v89, EXP-110) — you own THREE docs
+"Done" is tested + documented for the three downstream audiences. These are
+NOT-skippable in-cycle outputs at each slice close (and the runbook also on any
+defect/infra/deploy change that discovers an error pathway). Keep each honest to
+what SHIPPED. Point to `DOCS-LAYOUT.md` so all three are findable.
+
+1. **SUPPORT — the runbook.** Canonical home: **`work/<project>/docs/runbooks/`**
+   (create it on the first pass; there is ONE place — no ambiguity). Contents:
+   - How to OPERATE each shipped capability.
+   - **Every ERROR PATHWAY found while building/deploying/diagnosing** — one entry
+     per pathway: **Symptom → Root cause → Diagnosis (how to confirm) → Response
+     (how to fix/mitigate)**. This is the on-call (P7 / J13) artifact: they act
+     without escalating. Capture the pathway **when it is found** (in the same work
+     that surfaced it), not reconstructed later. Examples to seed from THIS project:
+     `THIRD_ACCOUNT_HOP_DETECTED` (EventBridge one-bus-to-bus-hop limit), the
+     `iam:UpdateRoleDescription` deploy-role papercut (fixed via Pulumi
+     `ignoreChanges`), the pull-feed `rawPath` vs `event.path` invocation-surface
+     bug (DEF-XA2), and the fan-out-DLQ-diagnostics-shows-stale-messages gotcha.
+2. **MARKETING — the capability/value doc.** `work/<project>/docs/marketing/`
+   (or a single `marketing.md`). Plain, outward-facing: what a customer/stakeholder
+   can now DO because this shipped. No internal jargon; value not mechanism.
+3. **PRODUCT — the delivery tree.** `work/<project>/docs/delivery-tree.md`. A
+   product-facing dependency tree showing **shipped vs in-flight vs blocked vs
+   not-started** and the dependencies between items — derived from / consistent with
+   `views/tree.md` but written for a product reader (outcomes, not item mechanics).
+   Refresh on every material state change (like the README).
+
+When dispatched, produce/refresh whichever of these the just-closed work touches; a
+runbook-only pass (after an error-pathway-discovering defect/deploy) is valid and
+expected. Commit your own changes (project repo, pathspec-isolated).
+
 ## Prime directive — document the CAPABILITY, not the activity
 The single most common failure of this agent is writing a **report of what was
 built** — "Shipped ✓", "40k events in DLQ", "DEFECT-OAG-004 fixed", deploy

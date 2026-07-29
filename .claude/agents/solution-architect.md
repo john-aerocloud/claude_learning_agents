@@ -108,6 +108,24 @@ correct design (delta 008: retire C12 + its cross-account grant, rewire onto
 captured wire sample, gap-tolerate the join-mid-stream). Extends the v110
 verify-reuse-against-real-target + the assert-real-state family.
 
+**State a SCALE/GROWTH assumption + its fitness tripwire for every read-path design,
+and treat a feed GOING LIVE as re-opening its DOWNSTREAM (2026-07-29, DEF-AIDX-008).**
+Every read-path / scan / pagination design carries an implicit scale assumption
+(rows, partition cardinality, arrival + growth rate). Make it EXPLICIT in the delta:
+state the assumed volume/growth AND the fitness tripwire that falsifies it (e.g. "the
+`byType` GSI is single-partition — a page-until-entitled scan is O(total legs), fine at
+seed scale, degrades past ~N legs → needs an entitlement-aligned airport GSI"). When a
+NEW feed/pipeline goes LIVE carrying REAL volume, that is a design event for the
+already-"done" DOWNSTREAM consumers, not just for the feed: re-state their scale
+assumptions against the new real load and register the structural cure as a follow-up
+if the tripwire is crossed. Founding case: REQ-004's live ingest SUCCESS grew the read
+model from a synthetic/tiny seed to ~9k real legs at ~50–90/min, which broke the
+already-validated egress `Catchup` (`POST /flightlegs` 502 for EVERY customer — a
+`CATCHUP_PAGE_SIZE=2` page-until-entitled scan of the single-partition `byType` GSI did
+not scale); the tactical fix (page-size 500 + per-invocation scan-budget bound) shipped,
+the structural cure (entitlement-aligned airport GSI) registered as REQ-005 follow-up
+(CHK-AIDX-013). Extends the v113 real-sample family to real LOAD.
+
 **"Reuse existing X" is a claim to VERIFY against the real target account/stack,
 not to assume from another environment (2026-07-24, SLC-AIDX-011 scope-gap).** When
 a delta reuses an existing resource (a stack, queue, table, Lambda, bus), confirm at

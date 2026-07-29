@@ -98,6 +98,30 @@ hardcode the profile name.
        pinpointed the `<placeholder>` bug). Leave an OFFLINE synth-pin behind for the
        InputTransformer/`inputPath` shape + the `DeadLetterConfig`, so this
        payload-shape class is caught offline next time, not only live.
+   - **An EXTERNAL-feed integration validated only against SYNTHETIC data is
+     built-to-a-guess, NOT done — pin against a REAL captured sample and treat the
+     live assert as a first-class acceptance step (2026-07-28, REQ-004 orphaned
+     consumer-side).** When you build ingestion/consumption of a feed whose contract
+     we do NOT own, your synth-pins must be pinned against the architect's REAL
+     captured wire sample (routing `source`/`detail-type`, delivery topology/bus,
+     envelope nesting) — not a shape you assume. A green synthetic suite proves only
+     self-consistency; it passes happily while the real contract differs on topology
+     or envelope, so it does not make the integration `built_green` in the real sense.
+     Do not report an external integration done until it has consumed a REAL message
+     from the REAL source end-to-end. Founding: REQ-004's dev consumer-side passed a
+     full synthetic suite (C12 bus, `source=oagEvents.producer`, top-level envelope)
+     yet was entirely orphaned from the real OAG feed (shared `oag-consumer-bus`,
+     `source=oag.eventstore`, envelope under `.detail`) — a large reconciliation
+     (delta 008) followed. Sibling of the EXP-115 whole-journey/live-assert family.
+   - **On a PUSH feed, a "gap" is the NORMAL join-mid-stream condition, not a dropped
+     delivery — tolerate it, do not pull-heal from a store that may not be the feed's
+     (2026-07-28, DEF-AIDX-007).** On an EventBridge (or any push/subscribe) feed the
+     first event we observe at `eventPosition > 0` means we JOINED mid-stream, not that
+     a delivery was lost — log + fold + continue (`GAP_HEAL_MODE` = tolerate). Do NOT
+     back-fill by pulling from an event store unless that store is provably the SAME
+     feed's source (DEF-007 gap-healed from the wrong/sandbox store on the push feed).
+     Select gap behaviour by feed MODE: a pull/catch-up feed heals; a push feed
+     tolerates.
    - **A TEST YOU DID NOT RUN IS A TEST FAILED (2026-07-12).** "Green" /
      `built_green` means the WHOLE suite passed — unit AND local/integration tiers.
      **Needing Docker / DynamoDB-Local / an emulator is NOT a reason to skip a

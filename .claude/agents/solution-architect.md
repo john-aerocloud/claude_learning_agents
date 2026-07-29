@@ -83,6 +83,31 @@ core-slice-false-done recurrence). The wire shape is part of the architecture
 delta, established from reality before build — never assumed from a convenient
 sibling artifact.
 
+**SPIKE the real source and CAPTURE the real sample BEFORE you design — the
+contract includes DELIVERY TOPOLOGY, not just the envelope shape; and a deferred
+"live validation" of an external integration is a standing RISK flag, NEVER a green
+checkbox (2026-07-28, REQ-004 orphaned dev consumer-side).** For any slice that
+integrates an external feed/API whose contract we do NOT control, the architecture
+gate's FIRST act is to spike the real source and capture a real on-the-wire sample —
+then pin the design + the engineer's synth-pins against THAT sample. "Contract" here
+means the whole integration surface: routing attributes (`source`, `detail-type`),
+the delivery TOPOLOGY (which bus/queue actually carries it, single- vs cross-account,
+fan-out), AND the envelope nesting — not merely the payload fields. Synthetic,
+self-consistent validation PASSES while the real contract differs on any of these,
+so a slice validated only against synthetic PUTs is **built-to-a-guess, NOT done** —
+its "live validation" must be a first-class acceptance step, and while it is deferred
+the integration carries an explicit RISK flag (it may be entirely orphaned against
+reality), never a `validated` checkbox. Founding case: REQ-004's entire dev
+consumer-side was designed + synth-validated green against a GUESSED OAG contract (a
+separate C12 bus, `source=oagEvents.producer`, a top-level envelope) and was ENTIRELY
+orphaned — OAG actually fans `Aerobus` → a SHARED `oag-consumer-bus` in our account
+(~42k/day live) with `source=oag.eventstore` / `detail-type=OagCanonicalEvent` and the
+canonical envelope nested under `.detail`. Only consulting the real feed forced the
+correct design (delta 008: retire C12 + its cross-account grant, rewire onto
+`oag-consumer-bus` with the real pattern + `inputPath:$.detail`, pin against a real
+captured wire sample, gap-tolerate the join-mid-stream). Extends the v110
+verify-reuse-against-real-target + the assert-real-state family.
+
 **"Reuse existing X" is a claim to VERIFY against the real target account/stack,
 not to assume from another environment (2026-07-24, SLC-AIDX-011 scope-gap).** When
 a delta reuses an existing resource (a stack, queue, table, Lambda, bus), confirm at

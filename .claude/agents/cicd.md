@@ -399,6 +399,20 @@ banner:
   (e.g. a vitest major) MUST be verified green across all test tiers before it is
   push-green — never pin back to a vulnerable version to keep tests passing.
 
+## Pre-push gate runs ALL test projects, not one (v111, 2026-07-28, UC-AIDX-032)
+When a repo defines MULTIPLE vitest (or equivalent) projects — e.g. an `src/app`
+unit project AND a root `tests/*.synth-pin.*` infra synth-pin project — the standing
+pre-push gate MUST run EVERY project, not a single `--project`. Running only the app
+project FALSE-GREENED UC-AIDX-032 (the root infra synth-pin was never executed), which
+shipped a red CI cycle and a logged principle-failure
+(`2026-07-28-uc-adix-032-pushed-without-running-root-infra-synth-pin-tier`). Provide a
+single committed `make test-all` target that invokes the full multi-project run (bare
+`vitest run` with no `--project`, or an explicit list of all projects) and wire it into
+the push gate alongside lint + `make audit`. If a project has no `make test-all`, that
+gap is itself a small cicd/config improvement to land — a green from a partial project
+selection is not a green. Sibling of the EXP-110 unrun-test-is-failed rule, at the
+test-PROJECT granularity.
+
 ## Dependabot-drain cadence (v104, ROC — human directive 2026-07-24)
 The `make audit` gate above is the DETECTOR; Dependabot is the upstream that already opens
 the patched-version bumps as branches/PRs on the project remote. Do NOT let them pile up

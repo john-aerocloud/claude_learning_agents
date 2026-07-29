@@ -125,6 +125,17 @@ model — the changed nodes/edges ARE your scope:
    waiver per item). The tool's exit 2 on any uncovered node is ADVISORY (your
    tick-off, not CI-blocking) — never skip the uncovered list because it is
    non-empty.
+   **Pick the right SINCE for a multi-UC slice (v115, recurring on UC-H2/H3/I2/J1/J2).**
+   The immediately-prior UC's validated ref UNDER-REPORTS scope whenever the slice's
+   ARCHITECTURE GATE front-loaded the `:::changed` marks in ONE commit at slice-
+   registration (the norm here): those marks PREDATE the prior-UC window, so
+   `impacted-tests` returns "no changed nodes" or a thin set. When the result looks
+   empty/thin but code+`.mmd` clearly moved, re-run with SINCE = the slice's
+   PRE-REGISTRATION baseline (the last validated ref BEFORE this slice started) which
+   spans the arch-gate commit — never accept a false-clean (same trap as point 4, at
+   slice-window granularity). Also ADD a spec's `@covers <node-id>` tag AT AUTHORING —
+   the recurring `idinput`/`ratectrl`/`analyst`/`UCG1` gaps were behaviourally-covered
+   nodes missing only the literal tag, each costing a re-derivation cycle.
 2. **Reassess validity, don't just re-run**: when a node a spec covers has
    changed, ask whether the spec's assertions still encode the contract. A
    green-but-stale spec is a false assurance — a covered contract spec needs

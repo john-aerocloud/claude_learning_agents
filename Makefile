@@ -325,6 +325,27 @@ e2e-fids-uc-es3:
 e2e-fids:
 	$(if $(FIDS_URL),FIDS_URL=$(FIDS_URL) ,)npm --prefix $(FIDS) run test:e2e
 
+# --- ROC test tiers (DEF-ROC-010) ----------------------------------------------
+ROC_APP := work/ROC/src/app
+# LOCAL acceptance tier (real SB/EH/Azurite emulators). Requires the stack up
+# (`make roc-local-up`). Batch-runnable in ONE pass on a fresh stack; the older
+# specs now run-scope their Azure tables so re-runs never collide.
+#   make roc-acceptance
+roc-acceptance:
+	npm --prefix $(ROC_APP) run test:acceptance
+# Fresh emulator stack up/down (Azurite has no volume, so `up` is a clean slate).
+roc-local-up:
+	npm --prefix $(ROC_APP) run local:up
+roc-local-down:
+	npm --prefix $(ROC_APP) run local:down
+# The dashboard e2e BATTERY: runs the whole tests/e2e suite in ONE command by
+# resetting + seeding each spec's own precondition (see local/e2eBattery.ts).
+# Long-running (a fresh-stack reset per spec). Pass filter substrings to subset.
+#   make roc-e2e-battery
+#   make roc-e2e-battery ROC_E2E_SPECS="uc-roc-046 uc-roc-069"
+roc-e2e-battery:
+	npm --prefix $(ROC_APP) run local:e2e-battery $(if $(ROC_E2E_SPECS),-- $(ROC_E2E_SPECS),)
+
 # --- UI accessibility scan (ui-designer; design-ops, root Makefile only) -------
 # Runs the axe/Playwright a11y + geometry specs (WCAG 2.2 AA contrast +
 # visual-structural GEO assertions, ui-design.md §4) over the observatory SPA.
@@ -551,7 +572,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove sso-login retro-debt retro-mark wi-append wi-project wi-validate wi-migrate doc-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3
+.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove sso-login retro-debt retro-mark wi-append wi-project wi-validate wi-migrate doc-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery
 
 # --- Viggo-fix UC-W7: Country/Nationality ID remediation (T-SQL) --------------
 # Data-driven, self-building T-SQL remediation script set + its local stand-up

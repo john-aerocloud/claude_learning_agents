@@ -161,3 +161,13 @@ The v89→v116 fold-forward adopted main's canonical board-projection tool (`.cl
 
 ## OI — OAG 2026-07-29 retro change-set (apply as v117 on this reconciled base)
 Re-apply the still-valid, main-lacks deltas as v117: (1) pipeline-only environment deploys [check main first]; (2) multi-audience Definition of Done [check main first]; (3) state-graph `deploying/registered → blocked` edges (state-graphs.json). Renumber any experiment rows to the next free EXP (main runs to EXP-118 → start 119). tester render computed-style gate + engineer bundle-drift guard + cicd deploy-role-whole-namespace guard: ADD ONLY if main's evolved agent files (post-merge) lack them (main EXP-118 painted-faithfulness / EXP-114 painted-pixel may already cover the render gate). See principle-failures/reconcile-latency-instance-vskew.md.
+
+## retro-debt classifier: dev-tooling defect-resolve should batch as routine, not trip the immediate incident gate (2026-07-29, ROC v119 — DEFERRED)
+`make retro-debt` scores ANY `defect-resolve` event as an IMMEDIATE incident (§F8), but the
+incident intent is a PROD defect / deploy-failure. DEF-ROC-010 was a DEV-caught test-tooling
+defect (zero prod exposure) yet tripped an immediate retro. Refinement: the event fold should
+distinguish prod-exposed defect-resolves (immediate) from dev-only tooling/test defect-resolves
+(routine-batch) — needs a clean prod-exposure signal derivable from the item's events (e.g. the
+defect ever reached a prod-* state, or a `severity`/`prod_exposed` marker on the `reported`
+event). Low urgency: over-tripping only costs one cheap focused retro. Owner: work-items machinery
+(retro-debt classifier).

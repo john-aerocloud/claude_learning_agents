@@ -39,8 +39,19 @@ wrapped continuation lines into the complete criterion) and is proven by
    jobs resolved from `product/personas.md`/`jtbd-map.md`, parent chain from the parent item
    files), maps `derived.state` → Linear status, sets the `job:<Jn>`/`defect`/`blocked`/
    `needs-acceptance` labels + project/milestone/parent, upserts the issue (create-or-edit via
-   the id→issue map in `secrets/linear.json`), and persists any new mapping. It NEVER prints
-   the api_key and NEVER writes the item file.
+   the id→issue map in `secrets/linear.json`), and persists any new mapping. It NEVER writes
+   the item file.
+
+   **SECRETS — hard rule (credential-leak guard).** NEVER `cat`/`tail`/`head`/`grep`/`print`/
+   `Read` the raw contents of `work/<project>/secrets/linear.json` (or any `secrets/*` file) —
+   it holds a LIVE `api_key`, and dumping the file materialises that token into the transcript.
+   `linear-project.py` is the ONLY thing that reads it; you pass its path, never its contents.
+   Do not "verify the mapping was persisted" by reading the file — trust the script's exit and
+   its reported issue id. If you genuinely must inspect the id→issue map, query ONLY that key
+   and never the whole object, e.g.
+   `python3 -c 'import json;print(json.load(open("work/<p>/secrets/linear.json"))["id_to_issue"])'`
+   — which cannot surface `api_key`. Printing the secrets file (even incidentally, even to
+   check something else) is a process failure.
 2. **Full-sweep mode** = loop the command over every active+done item id for the project.
 3. Report what the command did (created/updated + Linear identifier + status); on a non-zero
    exit, relay its (key-free) error — the API call is best-effort, the next sweep reconciles.

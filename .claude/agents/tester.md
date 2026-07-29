@@ -68,13 +68,18 @@ that path was never exercised — yet it was called "verified". Rules that follo
     reachable only via the test harness, not the human's command, is NOT verified.
   - **A validation-as-code spec you COMMIT must be build-graph-clean before you land it
     (DEF-006-class, ROC v112).** When you author + commit an e2e/Playwright (or any) spec
-    as validation-as-code, run the FULL build graph (`tsc -b` INCLUDING the `tests/e2e`
-    project, the DEF-006 lesson) after adding it — the engineer's pre-`built_green` bar
-    gates the engineer's OWN commits, not a spec you push afterward, so a committed spec
-    with a type error lands false-green and breaks the next build graph (ROC: UC-062's
-    committed history e2e spec broke dashboard `tsc -b`, rolled-forward by the UC-063
-    engineer). Your committed spec is part of the trunk's green bar — verify it, don't
-    assume `playwright test` running means it type-checks.
+    as validation-as-code, run the FULL build graph after adding it — that means BOTH
+    `tsc -b` (INCLUDING the `tests/e2e` project — the original DEF-006 lesson) AND the
+    LINTER the CI gate runs (`eslint .` for `src/app`, `oxlint` for the dashboard). The
+    engineer's pre-`built_green` bar gates the engineer's OWN commits, not a spec you push
+    afterward, so a committed spec that type-errors OR trips a lint rule lands false-green
+    and breaks the next build graph / the CI lint gate. Two confirmed recurrences: UC-062's
+    committed history e2e spec broke dashboard `tsc -b` (rolled-forward by the UC-063
+    engineer); UC-068's committed live spec tripped `@typescript-eslint/no-empty-object-type`
+    and left `src/app` lint RED on trunk (caught by the UC-067 engineer, fixed by the
+    orchestrator). `tsc` passing does NOT imply lint passes — run the linter too. Your
+    committed spec is part of the trunk's green bar — verify it against the SAME gates CI
+    runs, don't assume `playwright test`/`vitest` running means it type-checks or lints.
   - **Validate the JTBD OUTCOME end-to-end, not merely that the changed code path runs
     (2026-07-24, DEF-ADIX-003).** When validating a fix or feature, exercise the ACTUAL
     user-facing outcome / job-to-be-done live end-to-end — a code path that executes is
@@ -120,6 +125,17 @@ model — the changed nodes/edges ARE your scope:
    waiver per item). The tool's exit 2 on any uncovered node is ADVISORY (your
    tick-off, not CI-blocking) — never skip the uncovered list because it is
    non-empty.
+   **Pick the right SINCE for a multi-UC slice (v115, recurring on UC-H2/H3/I2/J1/J2).**
+   The immediately-prior UC's validated ref UNDER-REPORTS scope whenever the slice's
+   ARCHITECTURE GATE front-loaded the `:::changed` marks in ONE commit at slice-
+   registration (the norm here): those marks PREDATE the prior-UC window, so
+   `impacted-tests` returns "no changed nodes" or a thin set. When the result looks
+   empty/thin but code+`.mmd` clearly moved, re-run with SINCE = the slice's
+   PRE-REGISTRATION baseline (the last validated ref BEFORE this slice started) which
+   spans the arch-gate commit — never accept a false-clean (same trap as point 4, at
+   slice-window granularity). Also ADD a spec's `@covers <node-id>` tag AT AUTHORING —
+   the recurring `idinput`/`ratectrl`/`analyst`/`UCG1` gaps were behaviourally-covered
+   nodes missing only the literal tag, each costing a re-derivation cycle.
 2. **Reassess validity, don't just re-run**: when a node a spec covers has
    changed, ask whether the spec's assertions still encode the contract. A
    green-but-stale spec is a false assurance — a covered contract spec needs

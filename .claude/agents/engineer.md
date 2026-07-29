@@ -508,10 +508,23 @@ ancestor above the scroll panels can itself scroll (residual `h-screen`/nav slac
 Simulator diverged from the driven pipeline. For a pipeline/consumer slice, add a
 committed acceptance that BOOTS THE REAL COMPOSITION (`composeConsumer`) against a
 POPULATED store and drives an event through `consume()` end-to-end — never assert
-pickup/parity through a mocked seam. Each class was offline-GREEN, live-BROKEN: leave
+pickup/parity through a mocked seam. (4) **house design-system component VARIANTS are
+not all themed for AA non-text contrast, and it is invisible offline (ROC C4, THREE
+live rejects: UC-056/064/069).** `ACBadge color="warning"` fill paints 1.11:1;
+`ACTextInput`'s settled border 1.47:1; `ACButton color="success"` is an UNSTYLED code
+path → transparent fill + 0 border = 1.00:1. jsdom axe and vitest-browser's APPROXIMATED
+CSS both pass these — only a real painted-pixel measure catches them. So, for any UI
+control: NEVER rely on an un-themed house color/variant prop for a painted affordance
+(prefer the DS's default painted variant, or an explicit `src/index.css` override);
+and EVERY new `data-testid`'d control that carries a house component with a color/variant
+prop or a border MUST be added to the shared `index.css` non-text-contrast override AND
+pinned in `index.css.contrast.test.ts` (the offline source pin) IN THE SAME CHANGE — the
+pin is REQUIRED coverage, not optional, because the enumerative pin only protects the
+testids already listed; a new un-pinned control silently re-inherits the failing default.
+Each class was offline-GREEN, live-BROKEN: leave
 the earliest catchable pin behind (composed-driven acceptance, painted-pixel/live-axe
-spec) per the live-caught→offline-pin rule below, and run the fully-themed live axe +
-composed-driven check before you call it `built_green`.
+spec, `index.css.contrast.test.ts` pin) per the live-caught→offline-pin rule below, and
+run the fully-themed live axe + composed-driven check before you call it `built_green`.
 
 **Probe a new mechanism end-to-end before building on it.** When your slice
 introduces a NEW platform-integration mechanism (first WebSocket, first CDN

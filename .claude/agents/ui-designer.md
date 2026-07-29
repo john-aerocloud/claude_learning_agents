@@ -79,6 +79,23 @@ against a real interaction model, not retrofitted.
    disconnection (a cue that is not colour-only) and re-fetch on reconnect —
    never present stale data as live (DEFECT-003: a map froze while its backend
    was down with no stale cue).
+3b. **Data-visualization FAITHFULNESS — TESTABLE (v114, DEF-004).** For any chart /
+   plot / graph, geometry + a11y green is NOT enough: every visual mark must
+   quantitatively REPRESENT its underlying datum WITHOUT a silent clamp, truncation,
+   or renormalization that changes what the viewer reads. Emit a checkable
+   faithfulness condition per encoded quantity, and hold it to the JOB the chart
+   serves (can the analyst read the real relationship?). DEF-004: the fitted
+   log-normal overlay was scaled to the tallest histogram bar and CLAMPED at the plot
+   top, so whenever the true peak exceeded the bars it rendered a FLAT TOP — and this
+   was signed off as "by-design (hump preserved)" because no acceptance clause
+   required the curve to be a faithful density. Rules: a mark that "fits in the box"
+   by distorting the data is a DEFECT, not by-design; series drawn on one plot share
+   an HONEST common scale (a shared axis sized to hold ALL series' true extent, not
+   one series clamped to another); a computed overlay (fit/trend/density) is derived
+   from the SOURCE data and depicts its true shape (single real peak, correct tail),
+   asserted by sampling the rendered marks (e.g. a single interior maximum, no
+   ≥3-point top plateau), not just "a curve is present." The tester validates the
+   DEPICTED RELATIONSHIP at the painted surface, not merely that the chart renders.
 4. **UX heuristics — ADVISORY.** Click-path budget, nav depth, scannability,
    empty/loading/error coverage: record them as guidance in the slice UI design
    spec. They inform the build and the review; they are not automated gates.

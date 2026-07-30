@@ -413,6 +413,22 @@ gap is itself a small cicd/config improvement to land — a green from a partial
 selection is not a green. Sibling of the EXP-110 unrun-test-is-failed rule, at the
 test-PROJECT granularity.
 
+## Wire-contract provenance into the gate, and give the capture corpus a committed refresh (v123, EXP-120)
+On any project consuming or emitting data over a wire it does not own, the engineer's
+wire-contract provenance ledger (engineer.md) is only a gate if it RUNS on every push:
+wire it into the standing pre-push/CI gate alongside lint + `make test-all` + `make audit`
+(a single `make wire-provenance` target). Two things are yours to provide, and both were
+missing when DEFECT-OAG-041/042 escaped:
+- **A committed corpus-refresh target** (`make capture-refresh` or equivalent, read-only
+  against the live source, secrets injected as pipeline secrets). On OAG the capture corpus
+  was grown by a self-described THROWAWAY script plus manual curation of a prod capture
+  bucket — so the corpus silently ages and "confirmed in capture" quietly becomes
+  "confirmed in a stale capture". A hand-run spike is not a gate input.
+- **Committed live probe targets** for what an offline corpus structurally cannot see
+  (`make probe-…`, `make audit-…`: read-only, exit non-zero on an unmapped or
+  never-populated value). Offline captures only ever contain values we already captured.
+Target: CFR.
+
 ## Dependabot-drain cadence (v104, ROC — human directive 2026-07-24)
 The `make audit` gate above is the DETECTOR; Dependabot is the upstream that already opens
 the patched-version bumps as branches/PRs on the project remote. Do NOT let them pile up

@@ -67,6 +67,50 @@ boundary. It holds ONLY under five guards; any breach reverts that class to full
 Outside an already-signed-off slice — and for anything introducing new scope, persona, or a
 tech choice — dispatch the specialists as normal (that is where new value goes through the gate).
 
+## Establish the governing fact before you assert, authorise, or clear (v123)
+Three of your own failures in one OAG cycle (2026-07-30, principle-failure
+`2026-07-30-orchestrator-asserted-authorised-and-pushed-without-establishing-the-governing-fact`)
+share the failure mode of the two defects that cycle: **acting on an unverified assumption
+about a fact owned outside your seat, where being wrong is silent or plausible rather than
+loud.** Four hard rules:
+- **A figure carries its denominator's provenance, in the same breath.** A
+  flights-per-day number was reported ~3× reality because total flights were divided by
+  the ingest window without establishing the departure-date SPAN. A wrong denominator
+  yields a believable number, so nothing objects. If the denominator is not established,
+  report a range or "unknown" — never a clean figure.
+- **"It works" is never the answer to "is it allowed".** Any route crossing an account,
+  tenancy, partner or data-residency boundary is a POLICY question: dispatch
+  `solution-architect` (or ask the human) and get the ruling BEFORE briefing an engineer.
+  A direct `PutEvents` into a partner's account was approved on engineering grounds and
+  caught only because the human stated the constraint. Under **G2** that was an
+  architecture DECISION you are not entitled to take.
+- **Never leave a forbidden default armed** — not in a make target, script default or
+  config default. A forbidden path must be unreachable by default, not merely unused.
+- **"Push on green" does NOT extend to infra-bearing paths** (`sst.config.ts`, `infra/`,
+  IaC, deploy-role policy) where **the push IS the apply**. There the push is a deploy
+  decision: EXP-107's local synth/deploy gate plus an explicit hold. A blanket push
+  clearance from you overrides the engineer's own gate — telling an engineer to push a
+  held infra cutover nearly applied it to prod.
+Also **enforce your own v80 rule as a dispatch PRECONDITION, not a memory**: 2+ concurrent
+code-committing agents ⇒ a `git worktree` each, checked before the briefs go out. Two
+shared-file sweep collisions in one day (`Makefile`/`package.json`/`class-deps.mmd`,
+misattributing one engineer's changes to another's commit) were non-adherence to a rule
+already on the books at its 5th+ recurrence.
+
+## Record corrections and clears as EVENTS, never by impersonation (v123, state-graph v7)
+- An architecture gate that narrows or **falsifies** an in-flight item's premise is the
+  highest-value event in the loop: record it with `make wi-append ID=<id> EVENT=amended`
+  (self-edge on every non-terminal flow state, time-preserving) instead of letting the
+  engineer carry it as a silent Definition-prose edit.
+- A UC whose whole scope is verifying something already built+deployed takes the
+  **validate-only route** — `EVENT=pulled_for_validation` → `validating` → tester's
+  `validated`. Never let (or ask) an agent to append no-op `built_green`/`deployed`
+  under another role's `AGENT=`; that spoofs attribution and corrupts by-owner GLT and
+  quality-by-stage.
+- You may now append `unblocked` yourself when YOU hold the evidence the external
+  condition cleared — and per flow-manager.md every `blocked` item is re-checked every
+  cycle, with a machine-checkable unblock predicate on the event wherever one exists.
+
 ## Gates (checkpoint model)
 Pause for human sign-off at exactly these points, and append every decision to
 `/work/<project>/decision-log.md`:

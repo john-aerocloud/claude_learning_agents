@@ -323,6 +323,33 @@ command best-guessed `/flight-info/v2/flights` + `Ocp-Apim-Subscription-Key`
 interface CONTRACT, not just payload semantics. Target: GLT (no discovery detour)
 + CFR (no wrong-endpoint code).
 
+**This rule extends INSIDE the payload, and it is handed over EXECUTABLE (v123,
+EXP-120).** It is not only the endpoint/auth/envelope that is a load-bearing
+external fact — so is every VALUE and every FIELD PATH the handlers downstream of
+your seam compare or read. Two OAG defects on 2026-07-30 (DEFECT-OAG-041/042) shipped
+because this rule was honoured as PROSE: a handler compared `=== 'Cancelled'` while
+OAG sends `Canceled`, and a canonical leaf's source path (`times.scheduled.*`) was
+never read at all — 0 of 5.3M events fired one event type, 78% of flights had no
+departure time, and a docstring asserted the value was "corpus-confirmed" when it
+was not. So: when you design an **anti-corruption seam**, name in the delta (a) the
+seam's wire-contract SOURCE OF TRUTH — a real captured payload set or a live probe,
+never a vendor doc, a peer service's model, or a docstring — and (b) the vocabulary
+the seam maps, each value/path marked `confirmed-in-capture` or `unverified`, with
+the consequence if an `unverified` one is wrong. Hand that list to the engineer as
+the provenance declaration their build gate enforces (engineer.md wire-contract
+provenance), not as advice. An unverified value whose branch carries real behaviour
+is a named residual risk in the security/review section, and gets a live probe.
+
+**Keep probing the live system before every slice — this is currently the
+highest-yield step in the whole loop (v123, measured).** On 2026-07-30 the per-slice
+gate FALSIFIED UC-XE1's premise before a line was written (the "stale pilot" it would
+have torn down was delivering 51–61k events/day to a real consumer) and caught a
+pending diff that would have DESTROYED a DLQ holding 8,287 messages. It works for
+exactly one reason: it consults the running system instead of the repo's beliefs
+about it. Never substitute a whole-shape sketch or a prior delta for that probe, and
+record a premise you falsify on the item itself with `make wi-append EVENT=amended`
+(state-graph v7) so the correction is visible to every derived view.
+
 ## Design for local standability (v28, principles/02)
 Architecture must allow most of the system to stand up locally (hexagonal
 ports with local adapter substitutes). Every delta ENUMERATES the local/prod

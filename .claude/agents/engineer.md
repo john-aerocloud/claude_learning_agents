@@ -602,6 +602,45 @@ a prod `AccessDenied` waiting for the first real event — it hit OagEventSource
 THREE times (ingest missing `dynamodb:Query`, then `kms:Decrypt`, then the append
 loadStreams read) before the grant was completed. [EXP-060]
 
+## Wire-contract provenance — never compare against a hand-typed guess (v123, EXP-120)
+**For data crossing a wire you do not own** (third-party feed, partner API, another
+team's bus/event contract), every literal you compare against and every field path
+you read is an EXTERNAL fact. Being wrong about one is **silent**: a branch that never
+runs, a field never read. Your own test then encodes the same guess, so red→green
+proves only that your code agrees with your guess — DEFECT-OAG-041/042 passed a
+1,525-test green suite forever while `OagFlightCancelled` fired **0 times in
+5,308,984 events** (`=== 'Cancelled'` vs OAG's real `Canceled`) and 78% of flights
+had no departure time (the canonical leaf's source path was never read at all). The
+only occurrences of the wrong spelling anywhere in the repo were **our own test
+expectations**, and the handler's docstring claimed the value was "corpus-confirmed".
+
+So a claim about the wire is an executable assertion against captured real traffic,
+never a comment:
+1. **Declare, don't assume.** Every wire literal compared and every canonical
+   output leaf's source path(s) carries a **provenance declaration**: `confirmed`
+   (present as a value for that key in ≥1 REAL capture) or `unverified` (still
+   ABSENT from every capture) with the consequence if it is wrong. Get the initial
+   list from the architect's anti-corruption-seam delta.
+2. **Assert both directions.** `confirmed` ⇒ must be present in a real capture AND
+   (for a field) must actually POPULATE the canonical leaf when that capture is fed
+   through the real read path. `unverified` ⇒ must still be absent — so the day the
+   wire starts sending it, the build turns red instead of the behaviour silently
+   changing meaning.
+3. **Completeness, not just correctness.** The gate must fail on a MISSING
+   declaration too — a new wire comparison or a new canonical leaf added with no
+   entry. A ledger that only catches entries that became false is half a gate.
+4. **Only real captures confirm.** Never let a synthetic/derived/hand-authored
+   fixture confirm a literal; keep the confirmable corpus provably-real and separate.
+5. **Offline can only see what was captured** — pair the offline ledger with a live
+   probe (a committed read-only `make` target that exits non-zero on an unmapped or
+   never-populated value) and a committed corpus-refresh target, so the corpus does
+   not silently age.
+6. **An unmapped/unknown inbound value raises**, deduped and structured — never a
+   silent no-op. Preserve the raw value verbatim on the aggregate.
+Founding ledgers to copy the shape from:
+`work/OagEventSource/src/app/tests/defect-oag-04{1,2}-wire-*-provenance.test.ts`.
+Target: CFR (a wire mismatch dies in the build, not after 5M events) + MTTR.
+
 ## v82 — event-sourced pull-based flow (process STAGE F)
 You build per **pulled use-case** inside the continuous loop. **State lives ONLY
 in the item file; state = fold(events).** Your role's state events are appended

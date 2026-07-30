@@ -35,3 +35,6 @@ __pycache__/
 /process/dora/statusline.json
 
 node_modules
+
+# Machine-local permission/env overrides — per-worktree, never shared (CLAUDE.md: novel patterns go in settings.json). Tracking it dirtied every worktree and deferred fold-forward (v121, EXP-113).
+.claude/settings.local.json

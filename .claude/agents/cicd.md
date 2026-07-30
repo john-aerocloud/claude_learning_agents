@@ -120,6 +120,25 @@ role. Founding: SLC-039 UC-CA-PROD-PROMOTE — prod `apigateway:PUT AccessDenied
 because `--stage prod` was never run though the prod policy content was correct
 (8a425ea). Target: CFR on cross-stage promotions + deploy MTTR.
 
+**A FIRST-EVER deploy into a FRESH account needs the FIRST-USE auto-provisioned
+resources granted — dev MASKS these (v121, EXP-119).** dev green does NOT prove a
+fresh prod account will deploy: AWS/SST/EventBridge lazily create account-level
+bootstrap singletons on **first use**, and dev stopped exercising that path long ago
+because those singletons already exist there. So a first prod deploy hits
+`AccessDenied` on a create the deploy/exec role was never granted — invisible in dev.
+Confirmed TWICE in one session (AdixOut first prod stand-up): (1) `ecr:CreateRepository`
+on the SST `sst-asset` asset repo (SST Ion bootstrap, deploy role); (2)
+`iam:CreateServiceLinkedRole` for `AWSServiceRoleForAmazonEventBridgeApiDestinations`
+(first webhook Connection, onboarding EXEC role). BEFORE any first-ever deploy into a
+fresh account, audit BOTH the deploy role AND every runtime exec role for the create
+permissions of the first-use resources the stack implies: the SST/CDK asset store (S3 +
+**ECR** `sst-asset`), and a scoped `iam:CreateServiceLinkedRole` (ARN + `iam:AWSServiceName`
+condition, never `*`) for EVERY AWS service the app uses that provisions an SLR on first
+call (EventBridge API-destinations, and any other). Grant them in BOTH stages' policy
+source so a fresh account self-heals and dev↔prod stay at parity. Prefer a committed,
+executable preflight over memory — queued as improvement-slice IMP-026. Target: CFR on
+first-account deploys + deploy MTTR (each miss here is a failed prod deploy + rework loop).
+
 ## Release versioning & prod-resource tagging (process §18a, ISO)
 The deploy pipeline you build is what stamps release identity on every dev→prod
 promotion — this is an ISO traceability capability, not an afterthought:
@@ -412,6 +431,17 @@ the push gate alongside lint + `make audit`. If a project has no `make test-all`
 gap is itself a small cicd/config improvement to land — a green from a partial project
 selection is not a green. Sibling of the EXP-110 unrun-test-is-failed rule, at the
 test-PROJECT granularity.
+
+**The full local gate applies to EVERY push — including probe/tooling/script and
+one-line fix commits, not just feature UCs (v121).** AdixOut's first prod deploy was
+bounced TWICE by CI because a committed probe script carried an eslint unused-var
+(`ORG_ID`) that `eslint --max-warnings=0` would have caught, but neither the tester (who
+committed the probe) nor the engineer (a follow-on fix) ran `lint` locally first —
+"it's just a probe / a one-liner" is exactly when the gate gets skipped and a CI
+round-trip is spent. Any agent that pushes (engineer, tester, cicd) runs the SAME local
+gate — lint + typecheck + `make test-all` (+ `make audit` for dependency-bearing changes)
+— before every push regardless of how small or non-feature the change looks. Founding:
+principle-failure `2026-07-30-adixout-first-prod-deploy-fresh-account-bootstrap-gaps.md`.
 
 ## Dependabot-drain cadence (v104, ROC — human directive 2026-07-24)
 The `make audit` gate above is the DETECTOR; Dependabot is the upstream that already opens

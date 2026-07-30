@@ -374,3 +374,19 @@ wire-provenance` in the push gate; both are cicd deliverables per cicd.md v123. 
 known-unexploded holes to closure: `irregularOperationType='Recovery'` and `diversionType` (both in
 ZERO captures) must be corpus-confirmed or converted to declared+probed holes. Owner: OAG
 engineer + cicd, via a registered work item; EXP-120 scores it.
+
+## OI — untracking `.claude/settings.local.json` DELETES it in every other worktree on fold-forward (2026-07-30, v123)
+The v123 fix untracked `.claude/settings.local.json` so a machine-local file could stop deferring
+every instance's fold-back. It works — but untracking is a **deletion** in git terms, so the next
+`make project-update` in ANY other worktree removes that tree's copy from disk, silently losing its
+local `env` + `permissions` grants. Observed immediately: the OagEventSource worktree lost its copy
+on the very next fold-forward and had to be restored with
+`git show <pre-merge-sha>:.claude/settings.local.json > .claude/settings.local.json`.
+**AdixOut, ROC and OperationalFlowSimulator still hold theirs and WILL lose them on their next
+fold-forward.** Mitigations, in order of preference: (1) have `.claude/scripts/worktree update`
+back the file up before merging and restore it afterwards — it is the only place that knows a
+fold-forward is happening, and this makes the whole class safe, not just this file; (2) failing that,
+each instance restores from the pre-merge sha as above. Recovery is always possible because the file
+is in history up to the untrack commit — but it is silent, which is the actual defect: an agent that
+does not notice will run on with the project's default permissions and no `env`. Owner: worktree
+tooling (`.claude/scripts/worktree`).

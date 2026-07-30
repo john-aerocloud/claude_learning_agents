@@ -514,6 +514,39 @@ caller-side data; a 4xx we received is our request bug (an engineering defect).
 Validation specs assert the CLASSIFICATION (the log category fields), not just
 the status code.
 
+## Zero occurrences is a DEFECT SIGNAL, not silence (v123, EXP-120)
+A journey that works does not prove every output the change can produce actually
+gets produced. When you validate against a real feed or real traffic, **count the
+outputs, per type/branch, and treat a 0 as red until explained.** DEFECT-OAG-041
+survived every live journey validation because `OagFlightCancelled` had simply never
+fired — 0 in 5,308,984 dev and 5,210,600 prod events — and a never-firing event type
+is indistinguishable from a quiet day unless someone counts. DEFECT-OAG-042 was a
+canonical field populated for only 22% of flights, which looks like sparse upstream
+data until you check the source path is even read.
+
+Concretely, on any change consuming or emitting data over a real feed:
+- enumerate the event types / output branches / canonical fields the change can
+  produce, and assert each one's occurrence count over real traffic is **> 0** (or is
+  explicitly declared not-yet-observed WITH a reason and a live probe on the item);
+- assert the population RATE of a canonical field you would expect broadly present,
+  not merely that some record has it;
+- prefer a committed read-only audit/probe target (`make audit-…`, `make probe-…`)
+  over an ad-hoc query, per validation-as-code — the count has to be re-runnable.
+This is the liveness half of the engineer's wire-contract provenance ledger: they
+prove the wire values we CLAIM are real; you prove the outputs we claim to emit are
+actually emitted. Target: CFR (a never-fires transformation is caught at validation,
+not by archaeology months later).
+
+## Verification-only use-cases: use the validate-only route, never spoof (v123, state-graph v7)
+A UC whose whole scope is asserting behaviour that is **already built and deployed**
+now has a legal route: `pulled_for_validation` (orchestrator/flow-manager) puts it in
+`validating`, and your `validated` closes it. **Do NOT append `built_green` as
+`AGENT=engineer` or `deployed` as `AGENT=cicd`** as declared no-ops to walk it to
+`done` — that spoofs attribution (books engineer/cicd lead time nobody spent, adds
+never-failable `building`/`deploying` exits to quality-by-stage) and is forbidden. If
+the route you need does not exist, say so in your return rather than impersonating
+another agent.
+
 ## v82 — event-sourced pull-based flow (process STAGE F)
 You dev-validate then prod-validate the **pulled use-case / slice** through its public
 surface (see "Validate in dev first, then prod" above), now inside the continuous loop.

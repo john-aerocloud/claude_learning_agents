@@ -1,9 +1,11 @@
 ---
-process_version: 120
-effective_from: 2026-07-29
-supersedes: v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
+process_version: 123
+effective_from: 2026-07-30
+supersedes: v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
 status: active
 ---
+<!-- v123 (GAP-CLOSING retro, OagEventSource 2026-07-30; §F8 retro-debt INCIDENT gate — DEFECT-OAG-041 + DEFECT-OAG-042 resolves + SLC-045/046 closes. On main v120, tree already byte-identical to main, so a clean bump; the session brief's "current v117" was stale — v117 was OAG's own contribution and main folded forward through v118/v119/v120 since). HEADLINE — the two defects are ONE failure mode, not two lessons: **we compared against a hand-typed guess at an external wire value, and being wrong produced SILENCE rather than an error.** DEFECT-041: OAG sends `Canceled`, the handler tested `=== 'Cancelled'` ⇒ **0 `OagFlightCancelled` in 5,308,984 dev + 5,210,600 prod events** — the type had NEVER fired; its docstring claimed the value was "corpus-confirmed"; the only 4 occurrences of the UK spelling in the entire repo were OUR OWN TEST EXPECTATIONS, so it passed a 1,525-test suite forever while never working on real data. DEFECT-042: `times.scheduled` was never read on the FlightStatus path at all ⇒ 78% of flights with no departure time, whole airlines invisible on departures boards. Two more of the class known+unexploded (`irregularOperationType='Recovery'`, `diversionType`, both in ZERO captures). WHY NO GATE CAUGHT IT: every gate consulted OUR DECLARATION of the wire contract, never the wire — TDD red→green proves the code agrees with the guess; the tester's live journey validation asks "does the journey work?", never "did every type we can emit actually emit?" (0 occurrences ≡ a quiet day); the architect reviews the seam's shape, not the vocabulary crossing it. Sharpest finding: the RULE ALREADY EXISTED (EXP-078 "verify external-interface facts at the authoritative SOURCE") but as PROSE it is unfalsifiable — so the fix is NOT another prose rule but making the claim EXECUTABLE. ONE experiment: **EXP-120** (engineer.md + tester.md + solution-architect.md + cicd.md) — generalise the two provenance ledgers the engineer built during the fixes into a standing gate: literal provenance asserted both directions, canonical-leaf source-path coverage (present in a real capture AND actually populates the leaf through the real read path — this limb would have failed 042 on day one), and OUTPUT LIVENESS over real traffic; closing the seed's three holes (fail on a MISSING declaration, only provably-real captures may confirm, committed corpus-refresh + live-probe targets). Target CFR + MTTR, 3 external-contract slices/defects, applies-to = any project consuming/emitting data across a wire it does not own. NEW GLOBAL RULES: **§17b** (a claim about a wire you do not own is executable, never prose) and **§11b.5/6/7** — the state-graph goes **v6 → v7** with (5) a VALIDATE-ONLY route (`ready --pulled_for_validation--> validating --validated--> done`) because verification-only UCs were forcing agents to SPOOF `built_green` as AGENT=engineer and `deployed` as AGENT=cicd (UC-XC4, citing UC-XC2/XC3 as precedent — the prohibition was dead letter because obeying it made the item uncloseable; the damage is phantom engineer/cicd GLT + never-failable stage exits), (6) an `amended` SELF-EDGE on every non-terminal flow state so an architecture gate that FALSIFIES an in-flight premise is recordable, and (7) `unblocked` symmetric with `blocked`. Also §14: no push-on-green clearance extends to infra-bearing paths where THE PUSH IS THE APPLY. CONSTRAINT — the honest answer is that ATTRIBUTION IS BROKEN in both directions, so `queue 36.5%` cannot be trusted: UC-OB1 spent ~256k s in `deploying` (booked to **cicd**) actually awaiting a human-supplied secret, while UC-OA2's 193,448s `blocked` span was 91.5% our own failure to re-check a permission set created 4.5h in (that ONE span = 24% of all recorded blocked time, laundered as `external`, which is why `external` reads a flattering 1.80%). Fix the measurement before exploiting: **IMP-027** (unblock predicate on the `blocked` event + a cycle sweep that auto-appends `unblocked`) + flow-manager.md re-checks every blocked item every cycle. POSITIVE, recorded deliberately: the per-slice architecture gate is the **highest-yield step in the loop** — it falsified UC-XE1's premise before a line was written (the item would have torn down a live consumer feed carrying 51–61k events/day) and caught a pending diff that would have destroyed a DLQ holding 8,287 messages; it works because it probes the RUNNING SYSTEM instead of the repo's beliefs about it (protected in solution-architect.md). ORCHESTRATOR FAILURES logged unsoftened (principle-failures/2026-07-30-orchestrator-asserted-authorised-and-pushed-without-establishing-the-governing-fact): reported a flights-per-day figure ~3x reality with an unestablished denominator (the forced investigation found DEFECT-OAG-043 — prod holds 116 airports, 34% out of scope); AUTHORISED a policy-forbidden cross-account publish path on engineering grounds without establishing permission (a G2 breach, caught only by the human, with a forbidden default left armed in a make target); told an engineer "push on green" on infra-bearing paths, nearly applying a held prod cutover; and dispatched 2 concurrent code-committers into ONE tree, causing 2 shared-file sweep collisions — non-adherence to the standing v80 worktree rule, now a CHECKED dispatch precondition. Scores: EXP-113 POSITIVE 2/3 (session ran on main's current process vs the v117 retro's 114-commit drift); **EXP-115 honest BOUNDARY, NOT counted positive** (it was in force and passing while two transformations had never worked — it validates the journey, not whether every output actually occurs); EXP-107 near-miss reinforced; EXP-101 no opportunity (the DEFECT graph has no dev/prod split — logged to open-items). Registry 7 → **8 active, AT cap** — next retro must retire one to open one. Verified: 107-test machinery suite green against the real v7 graph, `wi-validate` clean, `wi-project` regenerates; v7 edge regression tests queued in IMP-027 (the orchestrator does not write machinery test code). -->
+
 <!-- v118 (FOCUSED retro, AdixOut 2026-07-29; RECONCILED onto main v117 via fold-forward-then-reapply — main advanced v113→v117 (OFS v114/v115, ROC v116, OAG v117) while this AdixOut retro was in flight, so renumbered v114→v118; §F8 retro-debt INCIDENT gate — DEF-AIDX-008 resolve + the dedicated-fan-out increment closes: dev `AidxOut-dev-IngestBus` + dual-run UC-034/035 live zero-gap, dev handoff UC-036 to OAG, prod branch UC-038 built+stripped deploy-ready/human-gated; DEF-AIDX-008 egress outage + UFI-drift fixed). Constraint UNCHANGED — `registered`/`queue` 76.26% of GLT (the established multi-session/dependency ARTIFACT, not squeezable in-system, budget NOT spent, constraint-gate); the squeezable in-system cost is engineer 17.31%. TIGHT: THREE plain-practice folds (NO experiment rows), all from the DEF-AIDX-008 root story — REQ-004's live ingest SUCCESS grew the read model from a synthetic/tiny seed to ~9k real legs at ~50–90/min, which BROKE the already-"done"/validated egress `Catchup` (`POST /flightlegs` 502 for EVERY customer, 10s timeout — a `CATCHUP_PAGE_SIZE=2` page-until-entitled scan of the single-partition `byType` GSI didn't scale); fixed (page-size 500 + per-invocation scan-budget bound + 15s + metrics); adversarial validation then found the AIDX UFI/`OriginDate` drift (`deriveOriginDate` recomputed from mutable operational timestamps → fixed to derive-once + pin-at-ingest); the tight-SLO structural cure (entitlement-aligned airport GSI) registered as REQ-005 follow-up CHK-AIDX-013. FOLD 1 (THE BIG ONE → tester.md primary + solution-architect.md): "done at synthetic/seed scale" ≠ "done at real scale" — a feed GOING LIVE re-opens its DOWNSTREAM consumers for re-validation; the architect states a scale/growth assumption + its fitness tripwire on every read-path design, the tester re-exercises downstream at the real load when a feed goes live rather than trusting prior synthetic-scale sign-off. Extends the v113 real-sample family to real LOAD. FOLD 2 (→ engineer.md): mirroring a stack to a new environment (esp. prod) VERBATIM carries dev/test FIXTURES — seed customers, hand-seeded data, test doubles/receivers — which MUST be stripped (real envs get data only via the governed/real path); founding = the prod-branch strip (`synthetic-customer-a` seed + seed legs + `WebhookTestReceiver`). FOLD 3 (→ engineer.md): an identity field with "never changes once set" semantics (AIDX UFI `OriginDate`) is derive-ONCE + persist + reuse, never recompute-from-mutable (DEF-008 UFI-drift). EXP-115 (whole-journey/live+adversarial validation) scored STRONG POSITIVE again + dated note — live/adversarial validation caught the egress outage, the UFI drift, AND the prod-fixture leak, all of which prior synthetic-scale sign-off passed. CFR HONESTY: DEF-008 + the reworks are real DEV-caught change-failures (EXP-108 integrity) — the process WORKING (caught in dev before prod), not decay. Registry unchanged: 8 active — AT cap-8, no rows added/retired. No global-section rules changed; routed changes = tester.md (fold 1) + solution-architect.md (fold 1) + engineer.md (folds 2+3) + EXP-115 confirming note. -->
 
 <!-- v117 (OagEventSource, 2026-07-29; retro-debt INCIDENT gate — DEF-OA1 + DEF-XA4 defect-resolves; RECONCILED onto main v116 via fold-forward-then-reapply after the OAG instance drifted 114 commits / v89→v116 behind main across the multi-day REQ-OAGADMIN + SLC-045 session — a §0a Rule-4 batched-integration failure, logged in principle-failures/reconcile-latency-instance-vskew.md). The divergence was LARGELY SELF-CORRECTING: main independently evolved equivalents of nearly every instance delta, so those were DROPPED at the merge — fold-forward-on-resume (main EXP-113), probe-first (solution-architect.md), false-green read-back (cicd.md), batch/poison (engineer.md), and the render gate (main tester.md EXP-114 painted-pixel is STRONGER than the proposed computed-style check, catching the DEF-OA1 unstyled-render class). Main's canonical board-projection tool (.claude/tools/linear-project.py) superseded this instance's parallel board-projection skill (orphaned; cleanup in open-items). The ONE genuinely net-new delta re-applied: state-graphs.json v5→v6 adds `deploying → blocked` and `registered → blocked` (use-case), so an item built-but-awaiting-an-external-input (e.g. UC-OB1 awaiting the OAG Alerts key, stuck in `deploying`) or registered-but-blocked can be attributed to `external` instead of masquerading as cicd/queue GLT — the exact misattribution this retro's constraint analysis found (external read 1.22% when it was the dominant reality). DEFERRED (parked in open-items, human-reviewed follow-up — too uncertain to force onto main's evolved process autonomously): re-applying pipeline-only-environment-deploys + multi-audience-DoD as explicit rules (main references CI/CD pervasively but lacks the exact mandates). No new experiment row (the graph edge is a machinery correctness fix, not a falsifiable hypothesis; registry left at main's cap-managed state). -->
@@ -562,6 +564,33 @@ build→deploy→probe loop on trunk:
    the tester fires `validated` directly from `dev-validating` (→done) and there is no
    separate prod deploy; dev-first is the DEFAULT and straight-to-prod only this explicit
    local-only exception.
+5. **Verification-only UCs take the VALIDATE-ONLY route — never spoof another role's
+   event [v123, state-graph v7].** A UC whose entire scope is asserting behaviour that is
+   ALREADY built and deployed goes `ready --pulled_for_validation(orchestrator|flow-manager)-->
+   validating --validated(tester)--> done` (`rejected` → `reworking` as usual). Before v7 the
+   only route to `done` ran through `building` + `deploying`, so UC-XC4 was closed by the
+   tester appending `built_green` AS `AGENT=engineer` and `deployed` AS `AGENT=cicd` as
+   declared no-ops — and it cited UC-XC2/XC3 as precedent, i.e. the no-spoofing prohibition
+   had become **dead letter because obeying it made the item uncloseable**. The damage is
+   measurement: phantom engineer/cicd gross-lead-time nobody spent, plus fake
+   never-failable `building`/`deploying` exits in quality-by-stage. Rule: use the route; if
+   the route you need does not exist, SAY SO rather than impersonating another agent.
+6. **Record a definition correction as an EVENT, not a prose edit [v123, state-graph v7].**
+   Every non-terminal flow state has an `amended` self-edge (agents: solution-architect,
+   product, flow-manager, orchestrator) for a correction to an already-pulled item —
+   above all when an architecture gate NARROWS or **FALSIFIES** its premise. On 2026-07-30
+   the gate falsified UC-XE1's premise (the item would have had the engineer tear down a
+   LIVE consumer feed carrying 51–61k events/day) and that — the highest-value event in the
+   loop — was invisible to `fold(events)` because the only way to record it was editing the
+   Definition prose. The self-edge is time-preserving, so it never distorts GLT.
+7. **`unblocked` is symmetric with `blocked` [v123]** — both carry
+   `[flow-manager, orchestrator]`: whoever holds the evidence that the external condition
+   cleared records it. And per flow-manager.md every in-flight `blocked` item is
+   **re-evaluated every cycle** against a machine-checkable unblock predicate where one is
+   expressible. An `external` block is a decaying hypothesis, not a fact: UC-OA2 sat blocked
+   two days on a permission set created 4.5h after the block, and that single un-noticed
+   span was 24% of all recorded blocked time — laundered as `external` wait when it was our
+   own latency (IMP-027).
 
 **Infra-flag — defer an unconfirmed external dependency, don't block the skeleton.**
 The §40 use-case-flag pattern extends to INFRA: when an infra capability depends on an
@@ -712,6 +741,13 @@ passes inside the done-condition, not discovered post-commit).
   statement that passes offline shape-tests can still be rejected at the AWS API on deploy
   (e.g. an invalid principal). Pushing infra green-locally-but-unsynthed is a deploy-failure
   waiting to turn CI red. Rationale: `principle-failures/2026-07-12-infra-pushed-green-locally-red-in-ci`.
+  **And no standing "push on green" clearance extends to these paths [v123].** For an
+  infra-bearing path CI auto-applies, so **the push IS the apply** — it is a deploy decision,
+  not a code decision. The orchestrator's blanket push-on-green authorisation (a trunk-based
+  rule about ordinary code) must NOT be issued for such a change, and an agent must not accept
+  it as overriding this gate: telling an engineer to push a HELD infra cutover on 2026-07-30
+  nearly applied it to prod. Rationale:
+  `principle-failures/2026-07-30-orchestrator-asserted-authorised-and-pushed-without-establishing-the-governing-fact`.
 - **Conventional Commits format.** Subject `type(scope): <intent>`, `type` ∈ {feat,fix,
   docs,style,refactor,perf,test,build,ci,chore,revert}; append `!` / `BREAKING CHANGE:`
   footer for a breaking change; keep the `Co-Authored-By` trailer.
@@ -802,6 +838,29 @@ resolution, walking-skeleton probe with a REAL browser, wire-on-deploy contract 
 the "defect not closed until the end-to-end USER symptom is reproduced" rule) lives in the
 **`delivery-principles` skill** — load it before synth/build/validate design. Per-role
 mechanics live in the agent files. Target: tester constraint, CFR, MTTR.
+
+**17b. A claim about a wire you do not own is an EXECUTABLE assertion, never prose
+[v123, EXP-120].** For data crossing a boundary the repo does not define (third-party feed,
+partner API, another team's bus/event contract), every literal compared and every field path
+read is an EXTERNAL fact, and **being wrong about one is SILENT** — a branch that never runs,
+a field never read. Nothing that consults only in-repo artifacts can see it, because the
+discriminating fact lives outside the repo: on 2026-07-30 a handler tested `=== 'Cancelled'`
+while OAG sends `Canceled`, so its event type fired **0 times in 5,308,984 events** while a
+1,525-test suite stayed green (the only occurrences of the wrong spelling in the whole repo
+were **our own test expectations**), and separately a canonical leaf's source path was never
+read at all (78% of records missing the field). Note the belief was ALREADY in the process
+(EXP-078 "verify external-interface facts at the authoritative source") — as prose it is
+unfalsifiable, since a docstring claiming verification is indistinguishable from a real one.
+So, cross-agent: **solution-architect** names the seam's wire-contract source of truth (a real
+captured payload set or a live probe — never a vendor doc, a peer service's model, or a
+docstring) and hands over the vocabulary marked confirmed/unverified; **engineer** turns that
+into a provenance ledger asserted BOTH directions (confirmed ⇒ present in a real capture AND
+actually populates the leaf through the real read path; unverified ⇒ still absent) that also
+fails on a MISSING declaration; **tester** asserts output LIVENESS over real traffic (a
+zero-occurrence type/branch is red until explained, not silence); **cicd** runs it in the
+push gate and owns the committed corpus-refresh + live-probe targets, because an offline
+corpus can only ever contain what we already captured. An unmapped inbound value RAISES
+(deduped, structured, raw value preserved) — never a silent no-op. Target: CFR, MTTR.
 
 ## 17a. Test evidence attaches to the item
 When the tester validates a use-case **in prod** (§11b), it attaches its validation

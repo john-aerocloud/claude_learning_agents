@@ -87,6 +87,27 @@ a cancelled child does NOT block the parent — the parent is `done` when all ch
 (done or cancelled) and at least one is done; if ALL children are cancelled the aggregate itself
 folds to `cancelled`.
 
+**Verification-only use-cases [state-graph v7].** A UC whose entire scope is asserting behaviour
+that is ALREADY built and deployed takes the **validate-only route**:
+`ready --pulled_for_validation(orchestrator|flow-manager)--> validating --validated(tester)--> done`
+(`rejected` → `reworking` as usual). Use it — do NOT walk such an item through `building`/`deploying`
+by appending no-op `built_green`/`deployed` events under `AGENT=engineer`/`AGENT=cicd`. That
+**spoofs attribution**: it books engineer/cicd gross-lead-time nobody spent and injects
+never-failable `building`/`deploying` exits into quality-by-stage. Spoofing is forbidden and is now
+also unnecessary.
+
+**Recording a definition correction [state-graph v7].** Every non-terminal flow state has an
+`amended` **self-edge** (agents: solution-architect, product, flow-manager, orchestrator) for a
+correction to an ALREADY-PULLED item's definition — most importantly when an architecture gate
+narrows or **falsifies** an in-flight item's premise. Append `amended` with the reason in `note`
+rather than silently editing the Definition prose, so the fact that the definition changed is
+visible to `fold(events)` and every derived view. The self-edge is time-preserving (it closes and
+reopens the same state at the same instant), so it never distorts gross lead time.
+
+**Observing an external block clear [state-graph v7].** `unblocked` now carries the same agent list
+as `blocked` (flow-manager, orchestrator) on both flow graphs: whoever holds the evidence that the
+external condition cleared records it.
+
 ## 3. Projections (queue generation + statistics = machinery, run after each loop)
 
 `work-items project --project <p>` recomputes ALL views from the item set (pure functions):

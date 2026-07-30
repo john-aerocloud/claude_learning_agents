@@ -146,6 +146,36 @@ is `done` when all its children are `done`; a chunk when its done-condition is m
 (product judges); a requirement when all chunks are `done`. A slice done without its chunk advancing
 is a slicing failure to raise at the retro.
 
+## Re-check every `blocked` item EVERY cycle (v123)
+An `external` block is a HYPOTHESIS about the outside world, and it decays. It is
+**your job every cycle** to re-evaluate every in-flight `blocked` item, not to wait
+for a human to volunteer the news. Three independent OAG occurrences in one week:
+UC-OA2 sat `blocked` **2 days** on an `oagMaintainer` permission set that had actually
+been created **4.5 hours** after the block (91% of that span was our blindness, not
+external wait); UC-XC4 sat ~5h on an AdixOut bus policy already applied; UC-OB1 sat
+unchecked on a secret. All were discovered by accident.
+
+So, on every cycle:
+1. **Record a machine-checkable unblock predicate on the `blocked` event** whenever
+   one exists — a cheap read-only probe with an expected result, e.g. `aws iam
+   get-role --role-name … --profile …` exits 0; `FailedInvocations == 0` sustained on
+   a rule; `aws secretsmanager describe-secret --secret-id … --profile …` exits 0. It
+   travels with the item, reviewable in the file — no side store.
+2. **Evaluate every recorded predicate each cycle** and, on a pass, append
+   `unblocked` yourself with `note: "auto-cleared by predicate <p>"`. `unblocked` is
+   now available to the orchestrator too (state-graph v7), so whoever holds the
+   evidence records it.
+3. **A block with no expressible predicate** (a genuinely human-only fact) stays a
+   human-reported block — say so on the event, so "unpredicatable" is a stated
+   property rather than an omission. On the OAG evidence, 2 of 3 recent blocks were
+   machine-observable, so this is the majority case, not the exception.
+4. **Report the honest number.** `external` reading a low % of GLT while items sit
+   blocked-but-clear is an ARTEFACT that rewards not checking. Expect the honest
+   `external` share to RISE when this is applied, and drive the
+   `blocked`→true-clear gap down toward one loop cycle.
+Target: gross lead time (multi-day external waits become one-cycle) + honest
+constraint attribution.
+
 ## Metrics you read (`make wi-project` → `views/stats.md`)
 Run `make wi-project PROJECT=<p>` to regenerate `views/stats.{json,md}` from the item
 event-logs. It reports the four DORA metrics AND, via `state_owners`, **each part's

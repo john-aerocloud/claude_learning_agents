@@ -202,3 +202,55 @@ and attributed to `engineer` — the same misattribution class as the UC-OB1 `de
 this cycle also fixed. Consider an `agent_failed` annotation event (depends on the `amended`
 self-edge OI above) so harness-induced rework is measurable and can be told apart from engineer
 rework in `by_owner`/quality stats. Owner: orchestrator definition + work-items machinery.
+
+## OI — `blocked`/`unblocked` agent-list asymmetry on flow items (2026-07-30, OAG v117)
+Both `use-case` and `defect` graphs grant `blocked` to `["flow-manager", "orchestrator"]` but
+`unblocked` to `["flow-manager"]` ONLY (`state-graphs.json`). In practice this is backwards: the
+orchestrator is typically the role that OBSERVES the external condition clear — on UC-XC4 the
+orchestrator verified from CloudWatch (fan-out rule `FailedInvocations` 100pct -> 0, DLQ arrivals
+stopped) that AdixOut had applied their prod bus policy, i.e. it held the evidence that the block
+had lifted, yet it could not itself append `unblocked` and had to hand the fact to flow-manager to
+transcribe. It CAN record the block starting but not the block ending, though both are the same
+class of external-condition observation. Two ways to close this, either is fine, but the asymmetry
+should be resolved deliberately rather than left as an accident of the v6 state-graph write-up:
+(a) widen `unblocked` to `agents: ["flow-manager", "orchestrator"]` to match `blocked`'s agent
+list exactly (symmetry-by-construction); or (b) keep `unblocked` flow-manager-only DELIBERATELY
+and say why in this file (e.g. "clearing a block is a flow decision — re-admitting an item to Ready
+is queue policy, not evidence-recording, so the flow-manager is the accountable last hand even when
+another agent supplies the evidence" — plausible, but currently unstated, so an agent hitting the
+rejected-append has no way to tell "not yet built" from "deliberately restricted"). Owner: work-items
+machinery (state-graphs.json is edited only via the retro/version-bump gate, §current file header).
+Do NOT change `state-graphs.json` outside that gate.
+
+## OI — verification-only UCs force agents to SPOOF build/deploy events (2026-07-30, OAG v117)
+The `use-case` flow graph has exactly ONE route to `done`: `ready → building → deploying →
+dev-validating → … → validated`. A UC whose entire scope is **validating something already built
+and deployed** therefore cannot reach `done` honestly. Live case: UC-XC4 ("prod live-delivery smoke
+— AdixOut receives a real event") needed no build and no deploy (the fan-out shipped under UC-XC3;
+the only missing precondition was AdixOut's own bus policy). To close it, the **tester appended
+`built_green` with `AGENT=engineer` and `deployed` with `AGENT=cicd`, both as declared no-ops** —
+precisely the spoofing that process-current.md forbids ("engineers/testers must NOT spoof
+`AGENT=cicd`"), and it cited UC-XC2/UC-XC3 as established precedent, so this is systemic, not a
+one-off lapse. Consequences: `by_owner` attribution gains phantom engineer/cicd effort that nobody
+spent, quality-by-stage gains fake `building`/`deploying` exits that can never fail, and the
+prohibition is dead letter because following it makes the item uncloseable. Fix options: (a) add a
+`validate_only` route (`ready → validating` via a `pulled_for_validation`-style event) for UCs that
+assert existing behaviour; or (b) let a UC declare `no_build: true` in frontmatter and have the fold
+skip the build/deploy segments. (a) is preferred — it keeps the fold total and makes the intent
+explicit at pull time. Owner: work-items machinery. This is the second graph-expressiveness gap
+found today (see the missing `amended` annotation edge) and both were discovered the same way: an
+agent needed to record something true and the graph had no legal way to say it.
+
+## OI — EventBridge invocation-attempt/latency metrics stop emitting on the prod fan-out rules (2026-07-30, OAG v117)
+Found by the tester during the UC-XC4 prod validation. On prod-shared 928618308042, for
+`oag-aerobus-fanout-adixout` the metrics `IngestionToInvocationSuccessLatency`,
+`InvocationAttempts`, `SuccessfulInvocationAttempts`, `IngestionToInvocationStartLatency` and
+`IngestionToInvocationCompleteLatency` **stopped publishing around 12:20 UTC** while
+`Invocations`/`MatchedEvents`/`TriggeredRules` continued healthy; for `oag-aerobus-fanout-fids`
+(passenger-facing, live in prod) they **never publish at all**. Delivery health was correct
+throughout — this is an observability-emission gap, not a delivery failure, and it did NOT block
+UC-XC4. But it means latency and attempt-level regressions on the two live prod consumer legs are
+currently unobservable, so a slow-but-succeeding fan-out would look identical to a healthy one.
+Relates to `OI-XE-CONSUMER-LIST-SOLE-SOURCE` (post-deploy live assertions on both hubs). Needs
+registration as a work item; assess whether it is an AWS-side emission condition (e.g. metrics only
+publish on certain target types) before treating it as our defect. Owner: cicd/solution-architect.

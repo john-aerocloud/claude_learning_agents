@@ -328,6 +328,20 @@ discipline (a). Owner: cicd/engineer (file-split) + orchestrator (serialisation-
 rule). Track occurrences; a third recurrence on the same file class should force the refactor rather than
 another deferral.
 
+## OI — fold-back of instance/OagEventSource v123 is OWED (integration tree dirty) (2026-07-30)
+`make project-foldback PROJECT=OagEventSource` returned **exit 3 (DEFERRED)** at the v123 retro
+close: the integration tree (`…/Claufe_Code_agent_design`, on `main`) has ONE uncommitted tracked
+file — `.claude/settings.local.json`, a MACHINE-LOCAL config file. It was deliberately not touched
+(discarding it would destroy the human's local permission grants, and no agent may change
+permission settings). So v123 (commits `f4bb86d` + `f7cc4f9`, tag `process-v123`) sits on
+`instance/OagEventSource` un-reconciled, which is live gross-lead-time cost under §0a Rule 4.
+Two ways it clears, either is fine: (a) run `make project-foldback PROJECT=OagEventSource` once
+the integration tree is clean; or (b) land AdixOut's already-authored **untrack
+`.claude/settings.local.json`** fix (on `instance/AdixOut`, part of its v121 retro / EXP-113 fix) on
+`main` — that removes the recurring cause, since a machine-local file being TRACKED means every
+integration tree is permanently dirty and every fold-back is permanently deferred. (b) is the real
+fix; note it is the second instance to be blocked by this.
+
 ## OI — the `defect` graph has no dev-first leg, so EXP-101 is inexpressible for a defect fix (2026-07-30, OAG v123)
 `use-case` carries the locked dev→prod path (`dev-validating --dev_validated--> prod-deploying
 --promoted--> prod-validating --validated--> done`), but `defect` goes `fixing --fixed--> validating

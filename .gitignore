@@ -35,3 +35,8 @@ __pycache__/
 /process/dora/statusline.json
 
 node_modules
+
+# Machine-local Claude Code config — per-tree, never committed.
+# While tracked, every worktree edit leaves the integration tree dirty and
+# defers EVERY project fold-back (blocked 2 instances: OagEventSource v123, AdixOut v121).
+.claude/settings.local.json

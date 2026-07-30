@@ -171,3 +171,34 @@ distinguish prod-exposed defect-resolves (immediate) from dev-only tooling/test 
 defect ever reached a prod-* state, or a `severity`/`prod_exposed` marker on the `reported`
 event). Low urgency: over-tripping only costs one cheap focused retro. Owner: work-items machinery
 (retro-debt classifier).
+
+## OI — no `amended` (annotation) edge for in-flight use-case/slice items (2026-07-30, OAG v117)
+The `use-case` state graph has NO self-edge / annotation event, so a **definition correction
+discovered by the per-slice architecture gate on an already-pulled item cannot be recorded as an
+event**. Live case: the SLC-047/SLC-048 gate corrected UC-OC1's scope (the read seam already
+served the whole config object) and outright **falsified** UC-XE1's premise (the "stale pilot"
+was delivering 51–61k events/day to a real consumer; the item's Definition pointed the engineer
+at a file whose edit would have torn down a LIVE consumer). Both corrections had to be carried as
+Definition-prose edits by the engineers, citing the deltas — so the *fact that the definition
+changed*, and why, is invisible to `fold(events)` and to every derived view and metric. The
+`requirement` type has `amended`; flow items do not. Fix: add an annotation transition
+(`amended`, from any non-terminal state to itself, agents `[solution-architect, product,
+flow-manager, orchestrator]`) to the flow-item graphs in `state-graphs.json`. Owner: work-items
+machinery. Worth doing: a gate that falsifies a premise is the highest-value event in the loop and
+is currently unrecordable.
+
+## OI — dispatched-agent mid-build death is an unmeasured time thief; resume protocol undocumented (2026-07-30, OAG v117)
+Both concurrently-dispatched engineers on the UC-OC1 / UC-XE1 pull died mid-build from harness
+causes, not code: one on `API Error: Connection closed mid-response`, one on `Agent stalled: no
+progress for 600s (stream watchdog did not recover)`. Each left **partial uncommitted work** in
+the shared working tree (one had 1 commit in, 4 of its own TDD-red specs still failing). Two gaps:
+(1) **No documented resume protocol** — the recovery that worked was *verify tree state first*
+(run the full suite to establish exactly what is green/red and who owns each failure), *then*
+resume the agent from its transcript with that state handed to it, rather than restarting the
+build from scratch and re-incurring the whole token cost. This should be written into the
+orchestrator/loop definition. (2) **The cost is invisible**: an agent death mid-`building` produces
+no event, so the wasted wall-clock and tokens are silently folded into the item's `building` time
+and attributed to `engineer` — the same misattribution class as the UC-OB1 `deploying`/cicd bug
+this cycle also fixed. Consider an `agent_failed` annotation event (depends on the `amended`
+self-edge OI above) so harness-induced rework is measurable and can be told apart from engineer
+rework in `by_owner`/quality stats. Owner: orchestrator definition + work-items machinery.

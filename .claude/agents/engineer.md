@@ -641,6 +641,50 @@ Founding ledgers to copy the shape from:
 `work/OagEventSource/src/app/tests/defect-oag-04{1,2}-wire-*-provenance.test.ts`.
 Target: CFR (a wire mismatch dies in the build, not after 5M events) + MTTR.
 
+## A control that is OPTIONAL on a shared primitive is a control some lane omits (v124, EXP-121)
+**An enforcement control must be a REQUIRED dependency of the primitive it guards, and
+every composition that reaches that primitive must be ENUMERATED by a committed gate.**
+DEFECT-OAG-043: prod ran **two** live ingest lanes into one event store and only one was
+scope-gated. `IngestHandlerDeps` had **no `inScope` field at all** and the shared
+`consume-and-ingest` primitive documented an absent predicate as *"no filtering
+(pre-OB6 behaviour preserved)"*. UC-OB6 wired the gate into the ECS composition; nothing
+forced the Lambda composition to declare a decision. Result: **27,537 events / 2,144
+streams** appended over 4 days, ~25,100 outside the declared scope, **all republished to
+live external consumers** (the event store is the transactional outbox, so there is no
+second gate downstream). The un-gated lane wrote precisely what the gated lane refused.
+
+Why nothing caught it: the omission was **silent and green**. A back-compat-permissive
+fallback ("absent ⇒ don't enforce") converts a missing control into normal operation, so
+there is no error to observe, no failing test to write, and the lane that omits it looks
+identical to the lane that honours it. TDD cannot help — you never write a test for a
+field you did not know a caller must supply.
+
+So, for any primitive that appends/publishes/persists/spends behind a control (scope,
+tenancy, entitlement, redaction, rate/cost bound):
+1. **REQUIRED, not optional.** The control is a non-optional field of the primitive's
+   deps type, so `tsc`/the compiler fails on an omitted control at the point a new lane is
+   composed. Never `control?: …`, never a default that means "off".
+2. **No permissive fallback — the fail-safe direction is CLOSED.** If the control's
+   configuration is absent at runtime, enforce the code-constant fail-safe (and log it),
+   never "no filtering". "Preserve pre-existing behaviour" is not a reason to ship an
+   unguarded path; if back-compat is genuinely needed it is an EXPLICIT, named, tested
+   decision on that lane, not an implicit consequence of `undefined`.
+3. **Lane-coverage completeness gate.** Commit a source-level gate that ENUMERATES every
+   module reaching the guarded primitive and **fails the build on an undeclared lane**.
+   Each declared lane states its control decision AND its trigger; a
+   continuously-triggered lane may not be unfiltered. A lane declared inert must assert
+   *why* it is inert (e.g. "operator-only, no deployed compute") — an assertion, not a
+   comment.
+4. **A rollback/standby asset is a LIVE lane until it is proven inert.** The Lambda was
+   documented as the "ECS rollback asset" while its EventBridge rule sat **ENABLED** on a
+   1-minute schedule. Documented-as-dormant is not dormant; the deployed trigger state is
+   the fact.
+5. **Derive the control from ONE source (EXP-047).** Both lanes must resolve the control
+   from the same store, one-directionally — never two independently-configured copies.
+Founding fix (copy the shape): DEFECT-OAG-043 — required `inScope` + the 6-module ingest
+lane-coverage gate, `work/OagEventSource/items/done/DEFECT-OAG-043.md`.
+Target: CFR + MTTR (an omitted control dies at compile time, not 27k events later).
+
 ## v82 — event-sourced pull-based flow (process STAGE F)
 You build per **pulled use-case** inside the continuous loop. **State lives ONLY
 in the item file; state = fold(events).** Your role's state events are appended

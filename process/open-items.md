@@ -424,3 +424,26 @@ different remotes and the engineer obeyed it literally and correctly.
    the shared one, or have the agent work on a branch of the shared repo. A disposable container for
    non-disposable work is the actual design error.
 4. Until (1)-(3) land, treat worktree isolation as **unsafe for committing agents**.
+
+**v124 retro disposition (2026-07-31).** Fixes (1) and (2) above are now COMMITTED RULES in
+`.claude/agents/orchestrator.md` ("Brief the ESCAPE ROUTE…"): the remote is named in every push
+instruction (bare "do not push" is banned), every brief carries a durable-ref requirement that the
+return must QUOTE, nothing is reclaimed without it, and v80 isolation is redefined as an explicit
+`git worktree add` on the PROJECT repo — never the Agent tool's auto-cleaned `isolation: "worktree"`
+for a project whose repo is a nested gitignored clone. Fix (3) — the bootstrap should not clone the
+project repo at all — is **still OWED and is the real fix** (a disposable container for
+non-disposable work); until it lands, (4) stands: worktree isolation via the Agent tool is unsafe
+for committing agents. Recorded alongside it: the isolation trial MEASURED WELL on its stated
+benefit (2 concurrent engineers, zero cross-contamination, both suites green at start, zero
+feature-code conflicts, ~9-15s setup via APFS copy-on-write, only append-only operational-file
+conflicts) against FOUR contamination incidents in the shared tree the same day — fix the
+substrate, do not abandon the isolation.
+
+**Metering non-adherence (v124, orchestrator-owned).** Token coverage is **2.6%** and duration
+coverage **0.2%** of 1,220 events, so §E plumbing-vs-delivery and §F agent-cycle-time are both
+uncomputable — including DEFECT-OAG-043's own `validated` event, appended `tokens: 0` with no
+`duration_ms` for a real ~40-minute tester dispatch. This is the orchestrator's own §E/§F rule
+unmet by the orchestrator. It is the SUBORDINATE step under this cycle's constraint (the
+push/deploy-cascade wait laundered as tester time) and cannot be fixed by machinery — only by
+passing `TOKENS=`/`DURATION_MS=` from the dispatch return on the same `wi-append`.
+

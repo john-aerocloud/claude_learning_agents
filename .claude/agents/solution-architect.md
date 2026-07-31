@@ -350,6 +350,30 @@ about it. Never substitute a whole-shape sketch or a prior delta for that probe,
 record a premise you falsify on the item itself with `make wi-append EVENT=amended`
 (state-graph v7) so the correction is visible to every derived view.
 
+**A doubt you RECORD but do not schedule is a doubt you did not raise (v124, EXP-120
+extension).** Delta `029-slc028-…` (2026-06-26) already wrote down the exact suspicion that
+the coded diversion wire shape (`body.diversion.airport`, nested) might not match OAG's
+documented shape (root `irregularOperationType` + flat `diversionAirport`), and closed with
+*"re-verify when a real diversion is first captured"*. Thirteen months of events later,
+`OagFlightDiverted` had fired **0 times in 5,300,655 prod events** — the **4th** instance of
+the never-fired-capability class (after `OagFlightCancelled` 0/10.5M,
+`departure.scheduledTimeUtc` never read, `irregularOperationType='Recovery'` zero captures).
+Nothing was wrong with the analysis; the gap is that **prose in a delta has no mechanism to
+become work**, and "re-verify when X first happens" is a trigger nobody watches.
+
+So a `unverified` mark or a "re-verify when…" sentence is never the end of the thought. In
+the same act, EITHER:
+- **make it executable** — hand the engineer a provenance entry whose `unverified` limb goes
+  RED the day the wire sends the value (engineer.md), so the trigger fires the build, not a
+  human's memory; **or**
+- **register it** — an item (or `open-items.md` row) whose acceptance is the verification
+  itself, with a machine-checkable predicate (an output-liveness/live-probe target that exits
+  non-zero while the value has never been observed), owned and scheduled.
+Never both-neither. **At every slice gate, sweep the deltas you are building on for
+outstanding `unverified` marks and unactioned "re-verify when…" notes** and either close them
+or restate them as one of the two forms above. A capability that has never once fired in
+production is a defect signal, not a quiet day — say so in the delta, with the count.
+
 ## Design for local standability (v28, principles/02)
 Architecture must allow most of the system to stand up locally (hexagonal
 ports with local adapter substitutes). Every delta ENUMERATES the local/prod

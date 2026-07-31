@@ -368,6 +368,34 @@ exactly one of two is true and the fix MUST be one of them:
 Pipeline secrets/role/bootstrap prerequisites are sequenced (§19 scheduling), and the
 runbook lists every manual step that is not yet automated so the gap is visible.
 
+## A deploy lane may NOT ship a sha another lane has already rejected (v124, DEFECT-OAG-043)
+**Every build-integrity gate that runs on a sha is a precondition of EVERY deploy of that
+sha — across workflow files.** On 2026-07-31 the first push (`5095849`) went correctly
+**RED** on the app-CI *Bundle diff gate*: `infra/assets/ingest-handler/handler.mjs` was a
+stale bundle that did not contain the scope control. But `infra.yml` declares no
+dependency on the app-CI lane, so its deploy job ran on to `SST deploy [prod]` and
+**succeeded** — shipping source-correct / artifact-stale / **deployed-code-wrong**, leaving
+the un-gated ingest lane live. The gate worked. The pipeline TOPOLOGY did not: two lanes
+read the same sha and reached opposite verdicts, and the one that said "ship" won.
+
+So when you own the pipeline:
+- **Model the dependency, don't rely on ordering or luck.** A deploy job must be
+  *unreachable* while any integrity gate on the same sha is red — via
+  `workflow_run: conclusion == success`, a required-check branch rule, a gating job the
+  deploy `needs:`, or a single lane that runs gates then deploys. Two independent
+  workflows triggered by the same push are NOT sequenced.
+- **Audit for the inverse too.** Enumerate every workflow that can deploy, and for each,
+  every integrity gate that exists anywhere in the repo; a gate that no deploy path
+  depends on is decoration. Report the matrix, don't assume it.
+- **A gate that guards the SHIPPED ARTIFACT is the highest-value member of that set.**
+  Source-level green says nothing about a committed/prebuilt artifact (bundle, image
+  digest, lock file, IaC asset) — that class is exactly why the bundle-diff gate exists
+  (DEFECT-OAG-030). Never let those run in a lane the deploy ignores.
+- **"Green" must name what it proved.** When you report a pipeline as green, state which
+  gates ran on that sha and which artifact each one read. A green that read no shipped
+  artifact is not evidence the shipped artifact is right.
+Target: CFR (a rejected sha cannot reach an environment) + MTTR.
+
 ## Dependency-vulnerability audit gate (v91, DEF-ADIX-001, EXP-112)
 Vulnerable dependencies accumulate SILENTLY between deploys — DEF-ADIX-001 let a
 **CRITICAL** advisory (vitest UI-server arbitrary file read/exec) plus a HIGH and

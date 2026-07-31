@@ -676,3 +676,30 @@ awkward.
 
 **Scoring horizon:** the next multi-agent cycle with 4+ concurrent agents in one tree. Score
 positive if no sweep occurs and no agent reports the form as blocking.
+
+### Third occurrence, found after registering this — and it BROKE CI
+
+A third sweep surfaced the same day, and unlike the first two it was not merely an
+attribution problem: commit **`f624dff`** — a `UC-ROC-082` *item/docs* commit — swept an
+unrelated **in-flight file move** (`src/app/local/evaluateApi.ts` →
+`src/app/src/api/evaluateApi.ts`) onto trunk **ahead of its importer updates**. The runner
+then failed with `ENOENT` on the old path, turning CI red over `9928840`. It self-cleared on
+the next run (`25123f9`, success) once the importers landed.
+
+**This is the cost case the first two occurrences did not demonstrate.** A swept *content*
+change is bad attribution; a swept *refactor mid-flight* is a broken build on trunk. And it
+landed via a **docs-only commit**, from an agent that touched no source at all — so no
+amount of care about one's own files prevents it. That is what makes the two-step form
+unsafe rather than merely untidy: the hazard is not proportional to what you are committing.
+
+Note also how it was diagnosed: the engineer who hit the red CI stood up a **clean detached
+worktree at HEAD without their change** and reproduced the failure there, rather than
+assuming it was or was not theirs. Worth reinforcing — that technique separated three
+distinct pre-existing failures from their own work in one pass.
+
+**Deliberately NOT registered as a defect.** The root cause is this experiment's subject and
+is already fixed in `CLAUDE.md`; the symptom self-resolved on the following run; and the
+broken state no longer exists on trunk. A defect record would inflate the count without
+adding a fix or a fact. Recorded here as evidence instead — if a fourth sweep occurs AFTER
+the atomic-pathspec instruction is in place, that is a different finding and does warrant its
+own defect, because it would mean the instruction is not being followed or is insufficient.

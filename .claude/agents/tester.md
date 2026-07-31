@@ -537,6 +537,47 @@ prove the wire values we CLAIM are real; you prove the outputs we claim to emit 
 actually emitted. Target: CFR (a never-fires transformation is caught at validation,
 not by archaeology months later).
 
+## `validated` requires an OBSERVATION of real data — never an input we authored (v125, EXP-122)
+Five OAG capabilities read `done`/`validated` while never once working on real data
+(`OagFlightCancelled` 0 of 10,519,584 events; `departure.scheduledTimeUtc` 78% null and
+never read; `irregularOperationType='Recovery'` 0 captures; `OagFlightDiverted` 0 of
+5,300,655; `deriveAirports()` structurally unable to route a diversion airport). Every
+one passed a 1,525-test green suite. The reason is not carelessness — it is that
+**every gate ran ONE direction: code → expectation, over inputs we wrote.** Your
+validation is the step that owns the inverse direction, so:
+
+- **The input must come from reality, not from us.** A test or smoke that FABRICATES its
+  own input proves a code path, never that reality exercises it. DEFECT-OAG-044's prod
+  smoke invoked the deployed publisher Lambda with synthetic data and was read as proof
+  the prod path worked. **An injected input is a diagnostic, never a validation.** If the
+  only way you can make the capability fire is to fire it yourself, the honest state is
+  not-yet-observed (below).
+- **Your evidence on a `validated` event must include an OBSERVATION POINTER** — a real
+  record id (stream id + event id, or a provenance-stamped capture) produced by input the
+  system did not author. "The journey worked" without a pointer is the shape of all five
+  failures above.
+- **Count over the POPULATION, both directions.** Per type: has reality ever produced this
+  output? Per real inbound field: does our code read it, and does it populate a leaf?
+  Prefer the committed census (`make conformance-census`, IMP-028) over an ad-hoc query.
+- **Sequences, not only fields.** Replay a real STREAM (the ordered events of one real
+  flight) through the real fold and assert the terminal aggregate. The two worst instances
+  were INTERACTION failures a per-field test cannot see: `scheduledTimeUtc` was a two-feed
+  coincidence, and a diversion needs three airports in a routing key built from two.
+- **Rare branches get a statistical verdict, not a binary.** For an expected base rate `p`
+  (with a SOURCED denominator, per the governing-fact rule) and exposure `N`, 0 observations
+  is RED when `P(0 | p, N) < α`. Do not invent a threshold at validation time; use the
+  declared rate.
+- **`not-yet-observed` is a first-class, DECLARED outcome — and it does NOT reach `done`.**
+  If a capability has not been observed on real data, say so in your return and do not fire
+  `validated`: the item belongs in `awaiting_observation` with the census query as its
+  machine-checkable predicate. Passing an unobserved capability as `done` is the artifact
+  that produced all five failures.
+- **An unrunnable tier is a RED tier.** `make test-fids-integration` times out in its own
+  300s `beforeAll`; by our own standard ("an unrun test is a failure") it has been failing
+  silently. A tier that cannot run must be fixed or deleted — never left as decoration —
+  and the same applies to any standing-red gate (`make render-diagrams`). Report it; do not
+  route around it.
+
 ## Verification-only use-cases: use the validate-only route, never spoof (v123, state-graph v7)
 A UC whose whole scope is asserting behaviour that is **already built and deployed**
 now has a legal route: `pulled_for_validation` (orchestrator/flow-manager) puts it in

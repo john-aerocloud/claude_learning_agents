@@ -374,6 +374,35 @@ outstanding `unverified` marks and unactioned "re-verify when…" notes** and ei
 or restate them as one of the two forms above. A capability that has never once fired in
 production is a defect signal, not a quiet day — say so in the delta, with the count.
 
+## A routing/partition key is derived from the SET OF PARTIES that must receive the record (v125)
+The 5th instance of the never-working-capability class was found by **reading code — no test,
+no query, no gate**: `deriveAirports()` in `canonical-envelope-builder.ts` derives
+`metadata.airports` from **departure + arrival only**, and every consumer fan-out rule filters
+on that key. A diversion must reach **three** airports — origin, intended destination, and the
+diversion airport — so the airport an aircraft is actually ARRIVING AT is structurally
+unreachable. Even with detection fixed, the event cannot be delivered to the party that most
+needs it.
+
+This is not a wire-contract failure and no data oracle catches it: **nobody had ever stated
+the invariant.** It is a specification failure with an architectural signature, so it is yours
+to prevent:
+- **Derive the key from the job, and enumerate the parties.** For any routing/partition/fan-out
+  key, the delta must name the SET of consumers that must receive the record — answered from
+  the job ("whose board must show this flight?"), not from the fields that happen to be handy.
+  A key built from the convenient fields silently defines the audience as whoever those fields
+  reach.
+- **Every new BRANCH re-opens the key.** A branch that adds a party (diversion adds an airport;
+  a codeshare adds a carrier; a re-route adds a station) invalidates the existing key
+  derivation. When a delta introduces a branch, state explicitly whether the key's party set
+  changes — and if it does, the key change ships WITH the branch, never after.
+- **Assert the key on a real SEQUENCE, not a single event.** A key defect only appears in the
+  interaction (post-`TakenOff` diversion), so the acceptance is a real replayed stream whose
+  terminal routing key contains all three parties — see IMP-028 S3.
+- Where a party set cannot be settled without a product call, that is a discovery/product
+  question ("who must see this?") — raise it, do not infer it.
+Target: CFR (an undeliverable-to-the-right-party record is caught at design, not by someone
+reading the builder months later).
+
 ## Design for local standability (v28, principles/02)
 Architecture must allow most of the system to stand up locally (hexagonal
 ports with local adapter substitutes). Every delta ENUMERATES the local/prod

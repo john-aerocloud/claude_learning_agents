@@ -457,6 +457,35 @@ missing when DEFECT-OAG-041/042 escaped:
   never-populated value). Offline captures only ever contain values we already captured.
 Target: CFR.
 
+## A gate that cannot run, or is permanently red, is worse than no gate (v125)
+Two standing gates on OAG trunk were dead and nobody noticed: `make test-fids-integration`
+**times out in its own 300s `beforeAll`** walking the live feed to head (so by our own
+"an unrun test is a failure" standard that whole tier has been failing silently), and
+`make render-diagrams` is **red on trunk** over 3 untouched files. A permanently-red or
+unrunnable gate trains everyone to read red as noise, which is how a REAL red gets ignored.
+- **Every committed gate must be either green on trunk or deleted.** There is no third
+  state. If a tier cannot run in its budget, fix the budget or the design (a `beforeAll`
+  that walks a live feed to head is not a test fixture, it is an unbounded dependency on
+  production) — do not leave it timing out.
+- **Report the gate INVENTORY with its health**, not just the run you happened to look at:
+  every target, whether it ran, and what it read. This pairs with "green must name what it
+  proved" above.
+
+## Wire the real-data conformance census as a SCHEDULED lane (v125, IMP-028, EXP-122)
+Push-time gates can only read the repo. The invariants that actually caught five
+never-working capabilities are **population queries over the real store**, and they need a
+lane the repo cannot provide:
+- `make conformance-census` — read-only against the real event store, enumerating emittable
+  types from source and reporting per-type occurrence counts, per-leaf population %, and
+  real inbound keys nothing reads. **Emit a committed, diffable snapshot; the gate is the
+  DIFF** (same shape as the bundle-diff gate — no thresholds to invent).
+- `make corpus-refresh` — re-harvests provenance-stamped exemplars and **FAILS on
+  staleness**, so the oracle ages honestly instead of decaying back into a fixture.
+- Run both on a **schedule** (and the source-enumeration limbs on push), with read-only
+  credentials injected as pipeline secrets. A capability that never fires is invisible to a
+  push-triggered gate by construction: nothing about that push is wrong.
+Target: CFR + MTTR. Full plan: `process/improvement-slices/IMP-028-real-data-conformance-census.md`.
+
 ## Dependabot-drain cadence (v104, ROC — human directive 2026-07-24)
 The `make audit` gate above is the DETECTOR; Dependabot is the upstream that already opens
 the patched-version bumps as branches/PRs on the project remote. Do NOT let them pile up

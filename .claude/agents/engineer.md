@@ -652,6 +652,30 @@ never a comment:
    not silently age.
 6. **An unmapped/unknown inbound value raises**, deduped and structured — never a
    silent no-op. Preserve the raw value verbatim on the aggregate.
+7. **Sweep the INVERSE direction: every key reality SENDS must be read or declared
+   ignored (v125).** Steps 1–6 all start from what OUR code does and check it against
+   reality. The complementary sweep starts from REALITY and checks it against our code:
+   for every key present in ≥X% of real captures, either some code path reads it or it
+   carries an explicit `ignored: <reason>`. This is the invariant that would have failed
+   DEFECT-OAG-042 on day one — `times.scheduled` was in **all 109** real captures and
+   read by nothing, so reality was sitting in the repo, unexamined. It is also what forces
+   an undeclared field like `diversionAirport` to become a question somebody answers.
+8. **Build the test FROM the real record, not from a value you type (v125).** For anything
+   crossing a wire you do not own, the test's INPUT is a provenance-stamped real capture
+   (source + resolvable id + raw-body hash); a hand-authored input is permitted only for
+   edge cases reality has not produced, and then it is marked synthetic and can confirm
+   nothing. A test whose input we authored and whose expectation we authored is a
+   self-consistent pair that stays green while the system never works.
+9. **Exercise a lane against REAL data before you claim what it will do (v125).** A
+   read-only dry-run against the real feed is the cheapest and most productive step
+   available and it belongs BEFORE the build claim, not after. On UC-HF041 a 28-day
+   dry-run over real REST data falsified the item's own premise in one pass: **1,005**
+   events would be written, not the 361 predicted; **644 (64%)** were unforecast collateral
+   field-diffs; **274 historical flights** would have been minted into prod as if new; and a
+   retention-based residual would have been fabricated from an un-measured horizon.
+   Reasoning, review and a green suite found none of it. If a lane writes, publishes or
+   spends, dry-run it against real data and report the real numbers — a predicted volume
+   with no measured denominator is an assumption, not a figure.
 Founding ledgers to copy the shape from:
 `work/OagEventSource/src/app/tests/defect-oag-04{1,2}-wire-*-provenance.test.ts`.
 Target: CFR (a wire mismatch dies in the build, not after 5M events) + MTTR.

@@ -68,8 +68,18 @@ See `README.md` for the full system. In short:
   unrelated.)
 - **Two repositories — project output vs the agent system (v50).** Each
   `work/<project>/` is its **own independent git repo** (so a project can be
-  lifted out and live standalone). Commit **project output** inside it:
-  `git -C work/<project> add <paths> && git -C work/<project> commit -m "…"`.
+  lifted out and live standalone). Commit **project output** inside it — and when
+  more than one agent is live in the tree, **commit ATOMICALLY with a pathspec**:
+  `git -C work/<project> commit -m "…" -- <paths>`
+  **NOT** `add <paths> && commit`. The two-step form has a race window: the index
+  is shared, so a co-worker's `git add` landing between your `add` and your
+  `commit` silently sweeps THEIR staged work into YOUR commit. This has bitten
+  twice (2026-07-31, cicd recording deploys — once sweeping 25 files of another
+  agent's in-flight work). The pathspec form takes its content from the working
+  tree and never consults the shared index, so the window does not exist. If you
+  discover you have swept someone's work, the non-destructive repair is
+  `reset --soft HEAD~1` → `reset HEAD -- .` → re-add only your paths; never
+  rewrite a commit another agent has already built on.
   Commit **agent-structure / process** changes (`.claude/`, `process/` incl.
   `process/machinery/`, `CLAUDE.md`, `README.md`) in THIS parent repo. The parent `.gitignore`s
   `/work/*/`, so it never tracks project contents; `work/README.md` and

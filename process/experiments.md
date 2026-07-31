@@ -634,3 +634,45 @@ and whether anyone doing incident correlation is actually misled in practice. Do
 pre-emptively filter the derivation on the strength of the original reasoning — the
 mechanism was misidentified, and the honest `agent` discriminator is already in place for
 whoever needs it.
+
+## EXP-120 — atomic pathspec commits in a shared working tree
+**Registered:** 2026-07-31 (ROC) · **Status:** OPEN · **Applies-to:** any project where
+more than one agent works concurrently in ONE working tree (i.e. the normal case today —
+agents share a worktree; only *projects* get separate worktrees).
+
+**The gap.** Every agent was instructed to commit as
+`git -C work/<p> add <paths> && git -C work/<p> commit -m "…"`. The git **index is shared**
+across concurrent agents in one working tree, so a co-worker's `git add` landing between
+your `add` and your `commit` sweeps their staged work into your commit. Observed **twice on
+2026-07-31**: the cicd agent recording deploy events accidentally committed 25 files of
+another engineer's in-flight UC-ROC-084 work (`91f0404`), and on the retry the same
+engineer's own commit (`c67e588`) picked up cicd's three item files. Nothing was lost either
+time — both agents noticed and repaired non-destructively — but attribution is now wrong in
+the history, and it cost two agents real time to detect and unwind.
+
+**Change made.** `CLAUDE.md` now instructs `git -C work/<p> commit -m "…" -- <paths>`
+(atomic, pathspec form) and explains why: the pathspec form takes content from the WORKING
+TREE and never consults the shared index, so the race window does not exist. It also records
+the non-destructive repair (`reset --soft HEAD~1` → `reset HEAD -- .` → re-add own paths)
+and the rule not to rewrite a commit another agent has built on.
+
+**Why not a lock.** A mutex around git writes was the other candidate. Rejected as the
+first move: it adds a coordination mechanism (and a deadlock/staleness failure mode) to
+solve a problem that a different command form eliminates outright. Revisit only if the
+pathspec form proves insufficient — e.g. if agents need multi-step staging that genuinely
+cannot be expressed as one pathspec commit.
+
+**Note this was ALREADY the emergent practice.** Several engineers independently arrived at
+"explicit pathspec, never `git add` sweep" and said so in their reports; one even recommended
+this exact form in a commit message. The gap was that the instruction told them otherwise, so
+the safe behaviour depended on individual diligence rather than the documented default.
+
+**Target metric:** change failure rate, and gross lead time's rework component —
+mis-attributed commits produce false blame during later diagnosis and cost detection time.
+
+**Anticipated effect:** zero further cross-agent index sweeps. Watch for the opposite
+failure too: an agent that needed staged-but-uncommitted state and finds the pathspec form
+awkward.
+
+**Scoring horizon:** the next multi-agent cycle with 4+ concurrent agents in one tree. Score
+positive if no sweep occurs and no agent reports the form as blocking.

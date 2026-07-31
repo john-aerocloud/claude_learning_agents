@@ -390,3 +390,37 @@ each instance restores from the pre-merge sha as above. Recovery is always possi
 is in history up to the untrack commit — but it is silent, which is the actual defect: an agent that
 does not notice will run on with the project's default permissions and no `env`. Owner: worktree
 tooling (`.claude/scripts/worktree`).
+
+## OI — CRITICAL: agent-worktree auto-clean DESTROYED a completed engineer's work (2026-07-31)
+**Real loss, same day the worktree-isolation approach was validated.** The DEFECT-OAG-045 engineer
+finished, committed (`74dd4aa`, `1fea9a9`, `6bad51d`, `dc71a54`) and reported in full — then its
+worktree was auto-cleaned and **every commit went with it**. Confirmed unrecoverable: no branch, no
+directory, no object, nothing in the shared repo touching `hosted-build-guard`. Lost: the vite
+`.env.local`-leaks-into-production-builds fix, the hosted-build guard, the fail-closed artifact
+byte-scan, 17 tests, and a stale-doc correction — ~3h wall-clock and ~218k tokens.
+
+**Mechanism (exact).** The harness auto-cleans an isolation worktree that is *unchanged*, judged
+against the **PARENT** repo's tree. But the project repo lives at `work/<project>/`, which the parent
+**gitignores** — and in an agent worktree it is absent, so each engineer *clones it inside the
+worktree*. All real work therefore lands in a gitignored nested clone that is **invisible to the
+changed-check**. The DEFECT-OAG-044 engineer survived only by accident: it happened to also make a
+*parent-repo* commit (a principle-failure log), which marked its worktree changed. 045 made no parent
+commit, so it was judged pristine and deleted.
+
+**Root cause is the dispatch brief, i.e. mine.** I wrote "DO NOT PUSH" meaning *do not trigger the
+deploy pipeline* (push to `origin/main` on GitHub IS the apply). But a `git clone --local` of the
+shared project repo has **the local shared repo as its `origin`** — so pushing there is harmless,
+local, and is the ONLY way the work escapes the disposable worktree. The instruction conflated two
+different remotes and the engineer obeyed it literally and correctly.
+
+**Fixes, in order:**
+1. **Every worktree-isolated dispatch brief must say: push your project-repo commits to your clone's
+   `origin` (the local shared repo) before you finish.** Separately and explicitly: never push to
+   GitHub `origin/main`. Two remotes, two rules, never one sentence.
+2. The orchestrator must **fetch each finished agent's clone into the shared repo** before the
+   worktree can be reclaimed (`git fetch <worktree>/work/<project> 'refs/heads/*:refs/remotes/wt<id>/*'`) —
+   done for 044 as `wt044/main`, too late for 045.
+3. Better: **the worktree bootstrap should not clone the project repo at all** — bind-mount/symlink
+   the shared one, or have the agent work on a branch of the shared repo. A disposable container for
+   non-disposable work is the actual design error.
+4. Until (1)-(3) land, treat worktree isolation as **unsafe for committing agents**.

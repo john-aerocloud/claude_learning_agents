@@ -595,3 +595,42 @@ under a role it does not hold.
 **How it could be wrong.** If `deployed` for a docs item turns out to mislead a reader into
 thinking a runtime deployment occurred, the fix is a distinct docs path, not reverting this.
 Watch for that in the retro rather than assuming the semantic holds.
+
+### Follow-up 2026-07-31 — the documenter's own assessment, and a correction to it
+
+The documenter that hit this gap was asked to judge whether `deployed` would mislead a
+future reader. Its answer was better than the question: the risk is **not in prose** — a
+human reading the item cannot be misled, because the note's first clause states there is no
+runtime artifact — but in **derived metrics and incident correlation**. It also argued,
+correctly, that `deploying` was the genuinely dishonest state (a no-op) while `deployed` is
+substantively true for a runbook, since the artifact reaches its reader the instant it is on
+trunk. It recommended keeping the graph as amended and guarding the derivation instead,
+noting that the amendment made this possible by keeping the `agent` field an honest
+discriminator (`documenter` vs `cicd`) rather than filing doc work under `cicd`.
+
+**Correction — its proposed guard rested on a premise that does not hold.** It proposed
+excluding `deployed` events whose agent is `documenter` from the deployment-frequency and
+change-failure-rate derivations. I checked `_compute_dora` in
+`.claude/skills/work-items/scripts/work-items.py` before implementing that, and
+**deployment frequency does not count `deployed` events at all**: it counts each item's
+TERMINAL event (`validated` / `closed` / `deploy`, falling back to
+`not_reproduced` / `declined`) per active day (`work-items.py:1180-1188`). So filtering on
+the `deployed` agent would have changed nothing, and implementing it would have added dead
+code plus a false sense that a risk had been closed.
+
+**What survives the correction:**
+- **Concern 1 (frequency inflation) partially stands, by a different route.** A docs-only
+  item still reaches `validated`/`done` and so still increments the terminal count. Whether
+  that is *wrong* is genuinely arguable — a delivered runbook IS delivered work — so this is
+  a question for the retro, not a bug to patch. What is NOT true is that it inflates via a
+  `deployed`-event count.
+- **Concern 2 (incident correlation) stands unchanged and needs no code.** Someone asking
+  "what deployed just before this incident?" can find a docs `deployed` event in the window
+  and waste time on a markdown commit. The mitigation is exactly the honest `agent` field
+  this amendment preserved — a one-predicate filter for whoever writes that query.
+
+**Watch in the retro:** whether docs-only items materially move the terminal-event count,
+and whether anyone doing incident correlation is actually misled in practice. Do NOT
+pre-emptively filter the derivation on the strength of the original reasoning — the
+mechanism was misidentified, and the honest `agent` discriminator is already in place for
+whoever needs it.

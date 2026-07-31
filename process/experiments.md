@@ -554,3 +554,44 @@ file holds ONLY the live experiments under test; everything retired is in
 - **EXP-100 (walk the full ToC loop)** — POSITIVE data point (1/3). This retro walked exploit→subordinate→elevate (not identify-only): named the constraint (engineer rework / `queue` wait with the calendar-time confound called out), took the EXPLOIT move (remove the rework at source via EXP-109 concurrency acceptance), noted the SUBORDINATE lever (the `registered` 28.7% inventory) but deferred it as confounded rather than spend budget off-constraint, opened a `principle-failures/` entry for the recurring root cause, and gated the change-set on the constraint. Remains `active`.
 - **EXP-102 (defect-vs-rework fork)** — POSITIVE data point (2nd opp → 2/3; main scored the 1st at v83), limb (b). The tester's UC-ADIX-006 concurrency failure was correctly classified as `rejected` (rework on the UC under validation, a deploy-failure, no `DEF-` raised) — not conflated into a defect against shipped work. CFR counted it as a deploy-failure per §3, MTTR tracked the validation-rejection recovery (2434 s median). 0 misclassifications this cycle. Remains `active`.
 - **EXP-101 (dev-then-prod validation)** — N/A this cycle (no scoring data): AdixOut is sandbox/local-only for the live-bus slice (the `dev-shared` bus is not yet live), so UC-ADIX-006 took the documented local-only collapse (`validated` fired straight from `dev-validating`, dev==prod). Not a violation — the collapse case is explicitly in-scope. No cloud/hosted dev→prod promotion occurred to score.
+
+## EXP-119 — a `documenter` can advance its own docs-only work item
+**Registered:** 2026-07-31 (ROC) · **Status:** OPEN · **Applies-to:** any project with a
+docs-only or runbook-bearing use-case.
+
+**The gap.** `documenter` appeared **zero times** in
+`process/machinery/state-graphs.json`. `built_green` was restricted to `engineer`, so a
+docs-only use-case could not be advanced by the agent that actually built it. On ROC's
+`UC-ROC-082` (the SSO-outage runbook, a tracked acceptance condition of a signed-off
+requirement) the documenter had to append under the `engineer` slot and record the
+attribution truth in the note — an honest workaround, but the event log now misattributes
+who did the work, which is exactly the property the event-sourced model exists to get right.
+It then stranded the item in `deploying`, whose only forward event is `deployed (cicd)` —
+a dead end for an item with no runtime artifact to deploy.
+
+**Amendment made.** `documenter` added to the `agents` list of the `use-case` transitions
+`built_green` (building → deploying) and `deployed` (deploying → dev-validating). Minimal
+and additive: no new state, no new event, no change to any existing agent's rights.
+
+**Why not a separate docs-only path?** A new state or a `deploying`-skipping edge is the
+tempting design, but docs DO ship — via commit and push to trunk — so `deployed` is
+semantically honest for them rather than a fiction, and it keeps one graph instead of two.
+Revisit only if a docs item genuinely needs a different validation shape from a code item.
+
+**Target metric:** gross lead time — specifically the queue/blocked component. The failure
+mode this removes is an item sitting in a dead-end state until a human notices and
+hand-resolves it, which is pure blocked time attributable to the machinery rather than the
+work.
+
+**Anticipated effect:** docs-bearing use-cases flow to `dev-validating` without
+orchestrator intervention, and the event log attributes doc work to `documenter` instead of
+to `engineer`. Also expected: honest `time_by_owner` for documenters, which today reads as
+zero because they cannot own a transition.
+
+**Scoring horizon:** the next three docs-bearing use-cases across any project. Score as
+positive if each advanced without an orchestrator unblock and without an agent appending
+under a role it does not hold.
+
+**How it could be wrong.** If `deployed` for a docs item turns out to mislead a reader into
+thinking a runtime deployment occurred, the fix is a distinct docs path, not reverting this.
+Watch for that in the retro rather than assuming the semantic holds.

@@ -51,8 +51,8 @@
       "transitions": [
         {"from": "registered",     "to": "ready",           "event": "made_ready",   "agents": ["flow-manager"]},
         {"from": "ready",          "to": "building",         "event": "pulled",       "agents": ["orchestrator", "flow-manager"]},
-        {"from": "building",       "to": "deploying",        "event": "built_green",  "agents": ["engineer"]},
-        {"from": "deploying",      "to": "dev-validating",   "event": "deployed",     "agents": ["cicd"]},
+        {"from": "building",       "to": "deploying",        "event": "built_green",  "agents": ["engineer", "documenter"]},
+        {"from": "deploying",      "to": "dev-validating",   "event": "deployed",     "agents": ["cicd", "documenter"]},
         {"from": "building",       "to": "reworking",        "event": "build_failed", "agents": ["engineer", "cicd"]},
         {"from": "deploying",      "to": "reworking",        "event": "deploy_failed","agents": ["cicd", "engineer"]},
         {"from": "dev-validating", "to": "prod-deploying",   "event": "dev_validated","agents": ["tester"]},

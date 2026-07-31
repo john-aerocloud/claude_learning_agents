@@ -67,6 +67,7 @@
         {"from": "building",       "to": "blocked",          "event": "blocked",      "agents": ["flow-manager", "orchestrator"]},
         {"from": "dev-validating", "to": "blocked",          "event": "blocked",      "agents": ["flow-manager", "orchestrator"]},
         {"from": "prod-validating","to": "blocked",          "event": "blocked",      "agents": ["flow-manager", "orchestrator"]},
+        {"from": "prod-deploying", "to": "blocked",          "event": "blocked",      "agents": ["flow-manager", "orchestrator"]},
         {"from": "deploying",      "to": "blocked",          "event": "blocked",      "agents": ["flow-manager", "orchestrator"]},
         {"from": "registered",     "to": "blocked",          "event": "blocked",      "agents": ["flow-manager", "orchestrator"]},
         {"from": "blocked",        "to": "ready",            "event": "unblocked",    "agents": ["flow-manager"]},

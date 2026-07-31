@@ -703,3 +703,56 @@ broken state no longer exists on trunk. A defect record would inflate the count 
 adding a fix or a fact. Recorded here as evidence instead — if a fourth sweep occurs AFTER
 the atomic-pathspec instruction is in place, that is a different finding and does warrant its
 own defect, because it would mean the instruction is not being followed or is insufficient.
+
+## EXP-121 — `prod-deploying` needs a `blocked` exit for single-environment projects
+**Registered:** 2026-07-31 (ROC) · **Status:** OPEN · **Applies-to:** any project that has no
+production environment yet, or whose prod promotion is externally blocked.
+
+**The gap.** `prod-deploying` was the ONLY wip state in the `use-case` graph with **no
+`blocked` exit** — `ready`, `building`, `deploying`, `dev-validating` and `prod-validating`
+all had one. Its only exits were `promoted` (cicd → prod-validating) and `deploy_failed`
+(cicd → reworking). That reads as an oversight rather than a design choice.
+
+**How it bit.** ROC has **no production environment**: its Terraform has never been applied,
+`deploy-ROC.yml` deploys only to `aas-test`, and no prod Function App exists. A tester
+validating `UC-ROC-084` fired `dev_validated` (dev-validating → prod-deploying) — a
+perfectly legal event — and the item stranded. Both remaining exits would have required
+asserting something false: `promoted` claims a prod deploy that cannot have happened, and
+`deploy_failed` claims a failure when nothing failed. The honest state ("waiting on a prod
+environment that does not exist") was inexpressible.
+
+Note the trap is not the tester's error. `dev-validating` offers BOTH `validated` (→ done,
+the correct path for a single-environment project) and `dev_validated` (→ prod-deploying).
+Nothing in the graph signals which applies, and the more specific-sounding name is the wrong
+one here. Every earlier ROC use-case happened to take `validated`.
+
+**Amendment made.** Added `{"from": "prod-deploying", "to": "blocked", "event": "blocked",
+"agents": ["flow-manager", "orchestrator"]}` — consistent with the five states that already
+have it. Minimal and additive: no new state, no new event name, no existing agent's rights
+changed, and it makes the honest state expressible.
+
+**Why not remove `dev_validated`, or auto-route single-env projects to `done`?** Both were
+tempting and both are wrong for now. Removing it breaks projects that genuinely promote to
+prod. Auto-routing would need the machinery to know whether a project has a prod
+environment, which it currently has no way to know and which would be a much larger change
+than the problem justifies. A `blocked` exit costs one line and keeps the fact visible in the
+queue rather than hiding it.
+
+**Guidance that goes with it (the recurrence fix):** in a project with no prod environment,
+the tester's terminal event from `dev-validating` is **`validated`**, not `dev_validated`.
+`dev_validated` is only correct when a prod promotion will actually follow.
+
+**Target metric:** gross lead time — the blocked component. A stranded item accrues wip time
+invisibly and needs a human to notice, which is precisely the failure EXP-119 addressed in a
+different corner of the same graph.
+
+**Anticipated effect:** no item strands in `prod-deploying`; a genuinely unavailable prod
+environment shows up in the `waiting` queue where the flow view can see it.
+
+**Scoring horizon:** the next three use-cases reaching `dev-validating` on a project without
+prod. Score positive if none strand and none are advanced by an event that asserts something
+untrue.
+
+**How it could be wrong.** If items start routinely sitting `blocked` in `prod-deploying`
+rather than being closed via `validated`, the guidance is not landing and the real fix is
+making the graph itself aware of whether a prod environment exists. Watch for that.

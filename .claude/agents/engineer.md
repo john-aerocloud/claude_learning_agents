@@ -349,6 +349,21 @@ product, and you route against it:
   still named `sNNNchanged`: a delivered node left wearing `:::s009changed`
   misleads every later human reader of the model even though the diff-sourced
   tool ignores it (OI-42).
+- **Cheap marker first, narrative last — sub-step commits are NOT exempt (v124,
+  DEFECT-OAG-044).** The v95 "commit at each green sub-step" rule and the same-commit
+  `.mmd` rule pull against each other when a fix lands as three red→green increments,
+  and DEFECT-OAG-044 resolved that tension the wrong way: two of three commits added
+  dependency edges (a new `synthetic-event-guard` node on the **production publish
+  path**, and an edge into it) with the graph brought up to date only one commit later.
+  The delivered head was correct; the intermediate shas were **false-clean** — anyone
+  running `make impacted-tests` against either would have seen "no changed nodes" while
+  a new domain gate had just been introduced. The rule exists to keep that MECHANICAL
+  signal honest at **every sha a tool might read**, so: put the node/edge **and its
+  `:::changed` mark** in the same commit as the code — a two-line diff, never deferred —
+  and let the `edge-ledger.md` row and any prose narrative land with the commit that
+  COMPLETES the item. Same family as the OFS v115 finding from the other direction
+  (front-loading all marks in one registration commit made a UC's SINCE-window
+  false-clean): the graph must be truthful at the sha, not just at the boundary.
 - **A behaviour change to a modelled node MUST mark that node `:::changed` in the
   SAME commit (2026-07-16, UC-ADIX-013).** When a change alters the BEHAVIOUR of a
   node represented in `architecture/dependencies/*.mmd` (e.g. the MAP/serialize

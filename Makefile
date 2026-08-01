@@ -179,8 +179,18 @@ retro-mark:
 #                         only a dispatch missing). Push state is read from GIT
 #                         in work/<p>/ (its own repo, v50), NEVER from note prose.
 #   2 ready-below-floor   depth(ready) < ready.min_items  (queues/policy.csv)
-#   3 queue-over-cap      any queue depth > its wip_limit (queues/policy.csv)
+#   3 queue-over-cap      a queue depth > its wip_limit (queues/policy.csv), at
+#                         TWO SEVERITIES (v126 addendum): a WIP-STAGE queue (ready/wip/
+#                         rework) BLOCKS; a BACKLOG queue (intake) is ADVISORY
+#                         and does NOT affect the exit code. Little's Law governs
+#                         WIP, not backlog depth — blocking the pull for a deep
+#                         backlog inverts the constraint (the remedy IS the pull)
+#                         and pressures agents to close real findings. Declared
+#                         per queue as a `kind` row in queues/policy.csv.
 #   4 retro-debt          delegated to the retro-debt computation
+#
+# Exit 2 iff a BLOCKING check fired. An advisory-only run exits 0, says so, and
+# still prints the advisory (`!` line) so it cannot be read as satisfied.
 #
 # make loop-gate PROJECT=OagEventSource [STALE_HOURS=4] [THRESHOLD=3]
 loop-gate:

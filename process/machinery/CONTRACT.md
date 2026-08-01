@@ -96,7 +96,10 @@ by appending no-op `built_green`/`deployed` events under `AGENT=engineer`/`AGENT
 never-failable `building`/`deploying` exits into quality-by-stage. Spoofing is forbidden and is now
 also unnecessary.
 
-**Recording a definition correction [state-graph v7].** Every non-terminal flow state has an
+**Recording a definition correction [state-graph v7; completed on all three flow graphs at
+v8].** Every non-terminal flow state of every flow type — use-case, defect **and open-item**
+(v7 delivered only the first two; the `open`/`scheduled` self-edges landed at v8 after a
+flow-manager could not record a legitimate scope-narrowing on an open item) — has an
 `amended` **self-edge** (agents: solution-architect, product, flow-manager, orchestrator) for a
 correction to an ALREADY-PULLED item's definition — most importantly when an architecture gate
 narrows or **falsifies** an in-flight item's premise. Append `amended` with the reason in `note`

@@ -30,12 +30,23 @@ state and flow decisions.
 > dispatch the tester once a fix is green and live, replenish below the Ready floor, respect
 > a queue's `wip_limit` — were prose, and all three were skipped: two fixes already pushed
 > AND deployed sat 35.5h and 27.3h awaiting a dispatch nobody made, Ready sat at 1 against a
-> floor of 3, and intake sat at 14 against a cap of 10.
+> floor of 3, and intake sat at 14 against a cap of 10 (that last one is now an ADVISORY, not
+> a block — see check 3 below).
 >
 > It checks (1) **stalled validation** — an item dwelling past `--stale-hours` (default 4) in
 > a validation state whose latest `fixed`/`built_green`/`deployed` carries a `ref:`, i.e. the
-> work is DONE and only a dispatch is missing; (2) Ready below `min_items`; (3) any queue over
+> work is DONE and only a dispatch is missing; (2) Ready below `min_items`; (3) a queue over
 > `wip_limit`; (4) retro debt due (§F8). Fix what it names, then re-run to confirm exit 0.
+>
+> **Check 3 has TWO severities (v126 addendum) — Little's Law governs WIP, not backlog depth.** A
+> **WIP-stage** queue over cap (`ready`/`wip`/`rework`) BLOCKS (`-` line, exit 2). A
+> **BACKLOG** queue over cap (`intake`) is **ADVISORY** (`!` line): reported with depth,
+> overage and remedy, but it does NOT block — blocking on a deep backlog inverts the
+> constraint, because the remedy is to deliver faster and the block prevents exactly that,
+> while creating pressure to close real findings to shrink the number. An advisory-only run
+> exits 0 and says so; the advisory is still outstanding, NOT satisfied — hand it to the
+> flow-manager/retro as throughput work, and never close a verified-real finding to clear it.
+> The classification is declared in `queues/policy.csv` as a `kind` row, not hardcoded.
 >
 > **Never conclude "it's pushed / it's deployed" from an event NOTE.** The gate derives it
 > from the structured `ref:` plus `git merge-base --is-ancestor <ref> origin/main` in the

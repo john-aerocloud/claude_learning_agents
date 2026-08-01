@@ -1835,7 +1835,9 @@ def cmd_retro_mark(a):
 #      i.e. the work is DONE and only a dispatch is missing. Highest-value check;
 #      this is the 35.5h case.
 #   2. ready-below-floor   depth(ready) < ready.min_items from queues/policy.csv.
-#   3. queue-over-cap      any queue depth > its wip_limit.
+#   3. queue-over-cap      a queue depth > its wip_limit. TWO SEVERITIES (v126 addendum):
+#      BLOCKING for a WIP-STAGE queue, ADVISORY-only for a BACKLOG queue — see
+#      the QUEUE KIND block below for why.
 #   4. retro-debt          DELEGATED to compute_retro_debt (never re-implemented).
 #
 # NEVER derive "is it pushed / is it deployed" from event-note PROSE. That exact
@@ -1867,6 +1869,43 @@ POLICY_DEFAULTS = {
 # Candidate trunk refs, in order, for the push-state check.
 TRUNK_CANDIDATES = ("origin/HEAD", "origin/main", "origin/master")
 
+# --- QUEUE KIND (v126 addendum) — what decides whether over-cap BLOCKS or merely warns --
+# Little's Law governs WORK IN PROGRESS, not backlog depth.
+#   * a WIP-STAGE queue over its cap (ready / wip / rework / any future in-flight
+#     stage) is real concurrent-work harm — aging, context-switching — and BLOCKS.
+#   * a BACKLOG queue over its cap (`intake`: unstarted demand) is ADVISORY. Its
+#     depth says "more is wanted than is being delivered"; the remedy is to
+#     DELIVER FASTER — which is exactly the pull a block would prevent. Blocking
+#     on it INVERTS the constraint and creates pressure to close real findings
+#     just to shrink the number.
+# Founding case (2026-08-01, first real run of this gate): a legitimate
+# differential sweep produced ~15 verified-real sub-cost-4 findings; the
+# flow-manager correctly refused to close any of them, and the loop halted for
+# having done good discovery work.
+#
+# DECLARE the classification in queues/policy.csv. That file is LONG-format
+# (queue,param,value,…), so `kind` is a new PARAM ROW — `intake,kind,backlog,…` —
+# never a new column; no other reader's columns change and old files stay valid.
+# The maps below are the FALLBACK for a policy.csv predating the row; an
+# undeclared queue defaults to `wip`, i.e. fail-CLOSED (a future in-flight stage
+# blocks until somebody classifies it). Keep this knowledge here, in one place.
+QUEUE_KIND_BACKLOG = "backlog"
+QUEUE_KIND_WIP = "wip"
+DEFAULT_QUEUE_KINDS = {"intake": QUEUE_KIND_BACKLOG}
+# policy params whose value is a WORD, not a count (read_queue_policy would
+# otherwise drop them when int() fails).
+POLICY_STR_PARAMS = ("kind",)
+
+
+def queue_kind(policy, queue):
+    """'backlog' | 'wip' for `queue`: the policy.csv `kind` row if declared, else
+    DEFAULT_QUEUE_KINDS, else 'wip' (fail-closed). An unrecognised declared value
+    falls back rather than inventing a third severity."""
+    declared = str(policy.get(queue, {}).get("kind", "")).strip().lower()
+    if declared in (QUEUE_KIND_BACKLOG, QUEUE_KIND_WIP):
+        return declared
+    return DEFAULT_QUEUE_KINDS.get(queue, QUEUE_KIND_WIP)
+
 
 def read_queue_policy(project):
     """Parse work/<project>/queues/policy.csv into {queue: {param: int}}, layered
@@ -1883,6 +1922,9 @@ def read_queue_policy(project):
                 p = (row.get("param") or "").strip()
                 v = (row.get("value") or "").strip()
                 if not q or not p:
+                    continue
+                if p in POLICY_STR_PARAMS:
+                    pol.setdefault(q, {})[p] = v
                     continue
                 try:
                     pol.setdefault(q, {})[p] = int(v)
@@ -1968,7 +2010,10 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
     Returns a list of finding dicts, each with:
       check    — 'stalled-validation' | 'ready-below-floor' | 'queue-over-cap'
                  | 'retro-debt'
-      severity — 'block' (exit 2) | 'unknown' (advisory; we could not establish it)
+      severity — 'block'    exit 2; the loop may not pull until it is cleared
+                 'advisory' exit UNAFFECTED; real, reported, but not WIP harm
+                            (a BACKLOG queue over cap — see the QUEUE KIND block)
+                 'unknown'  exit UNAFFECTED; we could not establish it either way
       ids      — the work-item ids involved
       message  — one actionable line: what is wrong AND the remedy
     """
@@ -2052,21 +2097,34 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
                         f"'expected' or tolerated."),
         })
 
-    # --- 3. queue over cap ---------------------------------------------------
+    # --- 3. queue over cap (two severities — see the QUEUE KIND block) --------
     for q in sorted(depths):
         cap = policy.get(q, {}).get("wip_limit")
         if cap is None:
             continue                     # no cap declared for this queue
-        if depths[q] > cap:
-            findings.append({
-                "check": "queue-over-cap", "severity": "block",
-                "ids": members[q], "queue": q, "depth": depths[q], "cap": cap,
-                "message": (f"[queue-over-cap] {q} depth {depths[q]} > wip_limit "
-                            f"{cap} — over by {depths[q] - cap}. Remedy: drain "
-                            f"{depths[q] - cap} before admitting more (close / "
-                            f"decline / schedule); the cap targets gross lead "
-                            f"time (§F2), work cannot be allowed to age."),
-            })
+        if depths[q] <= cap:
+            continue
+        over = depths[q] - cap
+        kind = queue_kind(policy, q)
+        common = {"check": "queue-over-cap", "ids": members[q], "queue": q,
+                  "depth": depths[q], "cap": cap, "over": over, "kind": kind}
+        if kind == QUEUE_KIND_BACKLOG:
+            # ADVISORY: reported prominently, never affects the exit code.
+            findings.append(dict(common, severity="advisory", message=(
+                f"ADVISORY (does NOT block the pull) [queue-over-cap] {q} depth "
+                f"{depths[q]} > wip_limit {cap} — over by {over}. {q} is a BACKLOG "
+                f"queue, and it is STILL over cap: unaddressed, not satisfied. "
+                f"Little's Law governs WIP, not backlog depth — the remedy is to "
+                f"DELIVER FASTER (raise throughput; decline or defer what will "
+                f"never be pulled), never to close real findings to shrink the "
+                f"number, and never to stop pulling, which only makes it worse.")))
+        else:
+            findings.append(dict(common, severity="block", message=(
+                f"[queue-over-cap] {q} depth {depths[q]} > wip_limit {cap} — over "
+                f"by {over}. {q} is a WIP STAGE: concurrent work in flight past "
+                f"the cap is real harm (aging, context-switching). Remedy: drain "
+                f"{over} to done before admitting more; the cap targets gross lead "
+                f"time (§F2), work cannot be allowed to age.")))
 
     # --- 4. retro debt (DELEGATED — do not duplicate that logic) -------------
     routine, incidents, due, _detail, marker = compute_retro_debt(
@@ -2097,15 +2155,26 @@ def cmd_loop_gate(a):
     findings = compute_loop_gate(graphs, a.project, stale_hours=stale_hours,
                                 threshold=a.threshold, now=now)
     blocking = [f for f in findings if f["severity"] == "block"]
+    advisory = [f for f in findings if f["severity"] == "advisory"]
     unknown = [f for f in findings if f["severity"] == "unknown"]
     stamp = (now or parse_ts(now_iso())).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # ADVISORY findings NEVER affect the verdict or the exit code — but they are
+    # always printed, and an advisory-only run says so explicitly so "may pull"
+    # can never be read as "everything is satisfied".
+    adv_tail = (f"; {len(advisory)} advisory (non-blocking, still outstanding)"
+                if advisory else "")
     verdict = (f"BLOCKED ({len(blocking)} violated precondition"
                f"{'' if len(blocking) == 1 else 's'}) — do NOT pull until cleared"
-               if blocking else "OK — all preconditions hold, the loop may pull")
+               if blocking else
+               ("OK — no BLOCKING precondition violated, the loop may pull"
+                if advisory else
+                "OK — all preconditions hold, the loop may pull"))
     print(f"loop-gate[{a.project}] @ {stamp} (stale-hours {stale_hours}) "
-          f"=> {verdict}")
+          f"=> {verdict}{adv_tail}")
     for f in blocking:
         print(f"  - {f['message']}")
+    for f in advisory:
+        print(f"  ! {f['message']}")
     for f in unknown:
         print(f"  ? {f['message']}")
     sys.exit(2 if blocking else 0)

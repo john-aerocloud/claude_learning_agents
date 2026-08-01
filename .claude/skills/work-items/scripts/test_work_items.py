@@ -343,6 +343,96 @@ class TestAppend(Base):
 
 
 # --------------------------------------------------------------------------- #
+# The `amended` self-edge invariant (CONTRACT.md §2, state-graph v7/v8).
+#
+# CONTRACT.md already ASSERTS it — "Every non-terminal flow state has an
+# `amended` self-edge" — but v7 delivered it on two of the THREE flow graphs;
+# `open-item` was missed. Consequence observed 2026-08-01: the flow-manager could
+# not record a legitimate scope-narrowing on the open-item OI-CHUNKS-STALE-REF
+# and (correctly) refused to hand-work-around the graph. So the invariant is
+# asserted GENERICALLY here, across every flow type and every reachable
+# non-terminal state, so a future type cannot reintroduce the gap.
+# --------------------------------------------------------------------------- #
+class TestAmendedSelfEdge(Base):
+    AMEND_AGENTS = ["solution-architect", "product", "flow-manager", "orchestrator"]
+
+    def _states(self, itype):
+        """Every non-terminal state reachable in `itype`'s graph."""
+        g = self.graphs
+        trans = g.transitions(itype)
+        terminal = set(g.terminals(itype))
+        seen = {g.initial(itype)}
+        for t in trans:
+            seen.add(t["from"])
+            seen.add(t["to"])
+        return sorted(s for s in seen if s not in terminal)
+
+    def test_every_flow_type_has_amended_on_every_nonterminal_state(self):
+        flow_types = [t for t in self.graphs.types if self.graphs.kind(t) == "flow"]
+        self.assertIn("open-item", flow_types)
+        for itype in flow_types:
+            edges = {t["from"] for t in self.graphs.transitions(itype)
+                     if t["event"] == "amended" and t["to"] == t["from"]}
+            for state in self._states(itype):
+                self.assertIn(state, edges,
+                              f"{itype}/{state} has no `amended` self-edge")
+
+    def test_amend_agents_are_uniform(self):
+        for itype in [t for t in self.graphs.types
+                      if self.graphs.kind(t) == "flow"]:
+            for t in self.graphs.transitions(itype):
+                if t["event"] == "amended":
+                    self.assertEqual(sorted(t["agents"]),
+                                     sorted(self.AMEND_AGENTS), f"{itype}/{t}")
+
+    def test_open_item_can_record_an_amendment(self):
+        """The founding case, end to end through the real writer: an open item is
+        amended and STAYS in its state, with the reason on the event."""
+        self.write_item("active", "OI-X", "open-item",
+                        [{"ts": "2026-06-10T00:00:00Z", "event": "open",
+                          "agent": "orchestrator"}])
+        with contextlib.redirect_stdout(io.StringIO()):
+            wi.cmd_append(argparse.Namespace(
+                project=self.project, id="OI-X", event="amended",
+                agent="flow-manager", note="scope narrowed", ref=None,
+                ts="2026-06-11T00:00:00Z", tokens=None, duration_ms=None))
+        items, _ = wi.load_all_items(self.project)
+        st = wi.compute_states(self.graphs, items)
+        self.assertEqual(st["OI-X"], "open")          # self-edge: state unchanged
+        self.assertEqual(items["OI-X"].events[-1]["event"], "amended")
+        self.assertEqual(items["OI-X"].events[-1]["note"], "scope narrowed")
+
+    def test_amend_a_scheduled_open_item(self):
+        self.write_item("active", "OI-S", "open-item",
+                        [{"ts": "2026-06-10T00:00:00Z", "event": "open",
+                          "agent": "orchestrator"},
+                         {"ts": "2026-06-10T01:00:00Z", "event": "scheduled",
+                          "agent": "flow-manager"}])
+        with contextlib.redirect_stdout(io.StringIO()):
+            wi.cmd_append(argparse.Namespace(
+                project=self.project, id="OI-S", event="amended",
+                agent="product", note="narrowed", ref=None,
+                ts="2026-06-11T00:00:00Z", tokens=None, duration_ms=None))
+        items, _ = wi.load_all_items(self.project)
+        self.assertEqual(wi.compute_states(self.graphs, items)["OI-S"], "scheduled")
+
+    def test_open_item_amend_is_time_preserving(self):
+        """The self-edge must not distort dwell: an amend closes and reopens the
+        same state, so `open` is still one contiguous 2-day stretch."""
+        evs = [{"ts": "2026-06-10T00:00:00Z", "event": "open",
+                "agent": "orchestrator"},
+               {"ts": "2026-06-11T00:00:00Z", "event": "amended",
+                "agent": "flow-manager"}]
+        self.write_item("active", "OI-T", "open-item", evs)
+        items, _ = wi.load_all_items(self.project)
+        segs = wi.walk_states(self.graphs, items["OI-T"],
+                              wi.parse_ts("2026-06-12T00:00:00Z"))
+        self.assertEqual({s for s, _e, _x in segs}, {"open"})
+        total = sum((x - e).total_seconds() for _s, e, x in segs)
+        self.assertEqual(total, 2 * 86400)
+
+
+# --------------------------------------------------------------------------- #
 # queue_map projection
 # --------------------------------------------------------------------------- #
 class TestQueueMap(Base):
@@ -1583,6 +1673,15 @@ class TestLoopGate(Base):
             for q, p, v in rows:
                 f.write(f"{q},{p},{v},count,flow-manager,throughput,2026-06-01,EXP-022\n")
 
+    def _building_uc(self, iid, day=10):
+        return [{"ts": _dt(day, 0), "event": "registered", "agent": "flow-manager"},
+                {"ts": _dt(day, 1), "event": "made_ready", "agent": "flow-manager"},
+                {"ts": _dt(day, 2), "event": "pulled", "agent": "orchestrator"}]
+
+    def _reworking_uc(self, iid, day=10):
+        return self._building_uc(iid, day) + [
+            {"ts": _dt(day, 3), "event": "build_failed", "agent": "engineer"}]
+
     def _default_policy(self):
         # the shipped OagEventSource defaults
         self._policy([("intake", "min_items", 2), ("intake", "wip_limit", 10),
@@ -1623,6 +1722,9 @@ class TestLoopGate(Base):
 
     def _checks(self, findings):
         return [f["check"] for f in findings if f["severity"] == "block"]
+
+    def _advisories(self, findings):
+        return [f for f in findings if f["severity"] == "advisory"]
 
     # ---- all clear -----------------------------------------------------------
     def test_all_preconditions_hold_exits_zero(self):
@@ -1814,25 +1916,95 @@ class TestLoopGate(Base):
         self.assertNotIn("ready-below-floor", self._checks(self._gate()))
 
     # ---- check 3: queue over cap -------------------------------------------
-    def test_intake_over_cap_blocks(self):
+    # TWO SEVERITIES (v126 addendum). A WIP-STAGE queue over cap is real concurrent-work
+    # harm and BLOCKS. A BACKLOG queue (intake) over cap is ADVISORY: Little's Law
+    # governs WIP, not backlog depth, and blocking the pull for a deep backlog
+    # INVERTS the constraint — the remedy for a deep backlog is to deliver faster,
+    # which is exactly what the block prevents. Founding case (2026-08-01): a
+    # legitimate differential sweep produced ~15 verified-real sub-cost-4 findings;
+    # the flow-manager correctly refused to close any of them and the loop halted
+    # for having done good discovery work.
+    def test_intake_over_cap_is_advisory_not_blocking(self):
+        """PROOF CASE 1: backlog over cap ALONE => exit 0, advisory printed."""
         self._policy([("ready", "min_items", 0), ("intake", "wip_limit", 10)])
         for i in range(14):
             self.write_item("active", f"OI-{i:02d}", "open-item", [
                 {"ts": _dt(10, 0), "event": "open", "agent": "orchestrator"}])
         findings = self._gate()
+        self.assertNotIn("queue-over-cap", self._checks(findings))   # NOT blocking
+        adv = self._advisories(findings)
+        self.assertEqual([f["queue"] for f in adv], ["intake"], findings)
+        f = adv[0]
+        self.assertEqual((f["check"], f["queue"], f["depth"], f["cap"], f["over"]),
+                         ("queue-over-cap", "intake", 14, 10, 4))
+        self.assertEqual(f["kind"], wi.QUEUE_KIND_BACKLOG)
+        code, out = self._run()
+        self.assertEqual(code, 0)                                    # exit 0
+        self.assertIn("may pull", out)
+        # the advisory is still reported PROMINENTLY, with depth + overage + remedy,
+        # and is unmistakably NOT satisfied
+        self.assertIn("ADVISORY", out)
+        self.assertIn("intake depth 14 > wip_limit 10", out)
+        self.assertIn("over by 4", out)
+        self.assertIn("deliver faster", out.lower())
+
+    def test_wip_stage_over_cap_blocks(self):
+        """PROOF CASE 2: a WIP-stage queue over cap => exit 2."""
+        self._policy([("ready", "min_items", 0), ("wip", "wip_limit", 1)])
+        for i in range(3):
+            self.write_item("active", f"UC-B{i}", "use-case", self._building_uc(i))
+        findings = self._gate()
         self.assertIn("queue-over-cap", self._checks(findings))
         f = [x for x in findings if x["check"] == "queue-over-cap"][0]
-        self.assertEqual((f["queue"], f["depth"], f["cap"]), ("intake", 14, 10))
+        self.assertEqual((f["queue"], f["depth"], f["cap"], f["kind"]),
+                         ("wip", 3, 1, wi.QUEUE_KIND_WIP))
         code, out = self._run()
         self.assertEqual(code, 2)
-        self.assertIn("intake depth 14 > wip_limit 10", out)
+        self.assertIn("wip depth 3 > wip_limit 1", out)
+
+    def test_ready_over_cap_blocks(self):
+        self._policy([("ready", "min_items", 0), ("ready", "wip_limit", 2)])
+        for i in range(4):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        f = [x for x in self._gate() if x["check"] == "queue-over-cap"][0]
+        self.assertEqual((f["severity"], f["queue"], f["depth"]), ("block", "ready", 4))
+        self.assertEqual(self._run()[0], 2)
+
+    def test_rework_over_cap_blocks(self):
+        self._policy([("ready", "min_items", 0), ("rework", "wip_limit", 1)])
+        for i in range(2):
+            self.write_item("active", f"UC-RW{i}", "use-case", self._reworking_uc(i))
+        f = [x for x in self._gate() if x["check"] == "queue-over-cap"][0]
+        self.assertEqual((f["severity"], f["queue"], f["depth"]), ("block", "rework", 2))
+        self.assertEqual(self._run()[0], 2)
+
+    def test_backlog_advisory_and_wip_block_together(self):
+        """PROOF CASE 3: both together => exit 2, advisory STILL shown alongside."""
+        self._policy([("ready", "min_items", 0), ("intake", "wip_limit", 1),
+                      ("wip", "wip_limit", 1)])
+        for i in range(3):
+            self.write_item("active", f"OI-{i}", "open-item", [
+                {"ts": _dt(10, 0), "event": "open", "agent": "orchestrator"}])
+        for i in range(2):
+            self.write_item("active", f"UC-B{i}", "use-case", self._building_uc(i))
+        findings = self._gate()
+        by_sev = {f["queue"]: f["severity"] for f in findings
+                  if f["check"] == "queue-over-cap"}
+        self.assertEqual(by_sev, {"intake": "advisory", "wip": "block"})
+        code, out = self._run()
+        self.assertEqual(code, 2)                       # the WIP violation blocks
+        self.assertIn("wip depth 2 > wip_limit 1", out)  # blocking line
+        self.assertIn("intake depth 3 > wip_limit 1", out)  # advisory line STILL shown
+        self.assertIn("ADVISORY", out)
 
     def test_queue_at_cap_does_not_block(self):
         self._policy([("ready", "min_items", 0), ("intake", "wip_limit", 10)])
         for i in range(10):
             self.write_item("active", f"OI-{i:02d}", "open-item", [
                 {"ts": _dt(10, 0), "event": "open", "agent": "orchestrator"}])
-        self.assertNotIn("queue-over-cap", self._checks(self._gate()))
+        findings = self._gate()
+        self.assertNotIn("queue-over-cap", self._checks(findings))
+        self.assertEqual(self._advisories(findings), [])   # at cap: not even advisory
 
     def test_every_over_cap_queue_is_reported_not_just_the_first(self):
         self._policy([("ready", "min_items", 0), ("intake", "wip_limit", 1),
@@ -1840,13 +2012,84 @@ class TestLoopGate(Base):
         for i in range(3):
             self.write_item("active", f"OI-{i}", "open-item", [
                 {"ts": _dt(10, 0), "event": "open", "agent": "orchestrator"}])
-        self.write_item("active", "UC-RW", "use-case", [
-            {"ts": _dt(10, 0), "event": "registered", "agent": "flow-manager"},
-            {"ts": _dt(10, 1), "event": "made_ready", "agent": "flow-manager"},
-            {"ts": _dt(10, 2), "event": "pulled", "agent": "orchestrator"},
-            {"ts": _dt(10, 3), "event": "build_failed", "agent": "engineer"}])
+        self.write_item("active", "UC-RW", "use-case", self._reworking_uc(10))
         qs = sorted(f["queue"] for f in self._gate() if f["check"] == "queue-over-cap")
         self.assertEqual(qs, ["intake", "rework"])
+
+    # ---- the backlog/wip classification is DECLARED, not a hardcoded name ----
+    def test_queue_kind_declared_in_policy_csv(self):
+        """policy.csv is long-format (queue,param,value), so `kind` is a new PARAM
+        ROW — no column change, so no other reader of the file is affected."""
+        self._policy([("ready", "min_items", 0), ("rework", "wip_limit", 1),
+                      ("rework", "kind", "backlog")])
+        for i in range(2):
+            self.write_item("active", f"UC-RW{i}", "use-case", self._reworking_uc(i))
+        findings = self._gate()
+        self.assertNotIn("queue-over-cap", self._checks(findings))   # declared backlog
+        self.assertEqual([f["queue"] for f in self._advisories(findings)], ["rework"])
+        self.assertEqual(self._run()[0], 0)
+
+    def test_policy_csv_can_declare_intake_as_wip(self):
+        """The declaration is authoritative in BOTH directions — the default map is
+        only a fallback, never an override."""
+        self._policy([("ready", "min_items", 0), ("intake", "wip_limit", 1),
+                      ("intake", "kind", "wip")])
+        for i in range(3):
+            self.write_item("active", f"OI-{i}", "open-item", [
+                {"ts": _dt(10, 0), "event": "open", "agent": "orchestrator"}])
+        self.assertIn("queue-over-cap", self._checks(self._gate()))
+        self.assertEqual(self._run()[0], 2)
+
+    def test_undeclared_queue_defaults_to_wip_fail_closed(self):
+        """A future in-flight stage nobody classified BLOCKS (fail-closed); only
+        `intake` defaults to backlog."""
+        self.assertEqual(wi.queue_kind({}, "wip"), wi.QUEUE_KIND_WIP)
+        self.assertEqual(wi.queue_kind({}, "rework"), wi.QUEUE_KIND_WIP)
+        self.assertEqual(wi.queue_kind({}, "ready"), wi.QUEUE_KIND_WIP)
+        self.assertEqual(wi.queue_kind({}, "some-future-stage"), wi.QUEUE_KIND_WIP)
+        self.assertEqual(wi.queue_kind({}, "intake"), wi.QUEUE_KIND_BACKLOG)
+
+    def test_unrecognised_kind_value_falls_back_to_default(self):
+        self.assertEqual(wi.queue_kind({"wip": {"kind": "nonsense"}}, "wip"),
+                         wi.QUEUE_KIND_WIP)
+        self.assertEqual(wi.queue_kind({"intake": {"kind": "nonsense"}}, "intake"),
+                         wi.QUEUE_KIND_BACKLOG)
+        self.assertEqual(wi.queue_kind({"intake": {"kind": " BACKLOG "}}, "intake"),
+                         wi.QUEUE_KIND_BACKLOG)
+
+    def test_template_seed_policy_csv_declares_the_kinds(self):
+        """The `work/_TEMPLATE` seed (agent-system state, not project data) DECLARES
+        the classification, so every new project ships it visible where the retro
+        tunes the buffers — not only in code. Existing projects whose policy.csv
+        predates the `kind` row are covered by the fallback map, which is why the
+        row is additive and nothing breaks."""
+        path = os.path.join(self._orig_root, "work", "_TEMPLATE", "queues",
+                            "policy.csv")
+        rows = [r for r in open(path, encoding="utf-8").read().splitlines()
+                if r.strip()][1:]
+        kinds = {r.split(",")[0]: r.split(",")[2] for r in rows
+                 if r.split(",")[1] == "kind"}
+        self.assertEqual(kinds.get("intake"), "backlog", kinds)
+        for q in ("ready", "rework", "deploy"):
+            self.assertEqual(kinds.get(q), "wip", f"{q}: {kinds}")
+        # and the header/column set is UNCHANGED — `kind` is a new row, not a column
+        header = open(path, encoding="utf-8").readline().strip()
+        self.assertEqual(header, "queue,param,value,unit,owner,target_metric,"
+                                 "last_tuned,experiment")
+
+    def test_advisory_only_run_says_it_may_pull_and_still_shows_advisory(self):
+        """An advisory-only run must be unmistakable: exit 0, 'may pull', AND the
+        advisory reported so it cannot be read as satisfied."""
+        self._policy([("ready", "min_items", 0), ("intake", "wip_limit", 2)])
+        for i in range(5):
+            self.write_item("active", f"OI-{i}", "open-item", [
+                {"ts": _dt(10, 0), "event": "open", "agent": "orchestrator"}])
+        code, out = self._run()
+        self.assertEqual(code, 0)
+        self.assertIn("may pull", out)
+        self.assertNotIn("BLOCKED", out)
+        self.assertIn("ADVISORY", out)
+        self.assertIn("1 advisory", out.lower())
 
     # ---- check 4: retro debt (DELEGATED to compute_retro_debt, not re-coded) --
     def test_retro_debt_due_blocks(self):
@@ -1903,10 +2146,12 @@ class TestLoopGate(Base):
 
     # ---- reports EVERY violation, not just the first ------------------------
     def test_reports_all_violated_preconditions(self):
-        self._policy([("intake", "wip_limit", 1), ("ready", "min_items", 3)])
+        self._policy([("intake", "wip_limit", 1), ("ready", "min_items", 3),
+                      ("rework", "wip_limit", 0)])
         for i in range(3):
             self.write_item("active", f"OI-{i}", "open-item", [
                 {"ts": _dt(10, 0), "event": "open", "agent": "orchestrator"}])
+        self.write_item("active", "UC-RW", "use-case", self._reworking_uc(10))
         self.write_item("active", "DEF-STALE", "defect",
                         self._validating_defect(20, 12, ref="5095849"))
         self.write_item("done", "DEF-RESOLVED", "defect", [
@@ -1915,13 +2160,16 @@ class TestLoopGate(Base):
             {"ts": _dt(15, 2), "event": "confirmed", "agent": "engineer"},
             {"ts": _dt(15, 3), "event": "fixed", "agent": "engineer", "ref": "f00d"},
             {"ts": _dt(15, 5), "event": "validated", "agent": "tester"}])
-        checks = set(self._checks(self._gate()))
+        findings = self._gate()
+        checks = set(self._checks(findings))
         self.assertEqual(checks, {"stalled-validation", "ready-below-floor",
                                   "queue-over-cap", "retro-debt"})
+        # and the backlog advisory rides ALONGSIDE the four blocking violations
+        self.assertEqual([f["queue"] for f in self._advisories(findings)], ["intake"])
         code, out = self._run()
         self.assertEqual(code, 2)
         for token in ("stalled-validation", "ready-below-floor",
-                      "queue-over-cap", "retro-debt"):
+                      "queue-over-cap", "retro-debt", "ADVISORY"):
             self.assertIn(token, out)
 
     # ---- policy.csv handling ------------------------------------------------

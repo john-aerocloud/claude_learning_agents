@@ -104,21 +104,50 @@ Makefile wraps each.
 ## The two MECHANICAL gates (exit 2 = stop; never orchestrator discretion)
 `wi-validate` above guards DRIFT. Two further targets guard the loop's OBLIGATIONS —
 both in the same shape (read the item event-logs, print every violation with the ids
-and the remedy, exit 0 = proceed / exit 2 = stop):
+and the remedy, exit 0 = proceed / exit 2 = stop). A gate blocks only on **harm that
+stopping actually relieves**; a real finding that stopping would only make worse is
+reported as an **ADVISORY** that does not touch the exit code (see check 3 below).
 
 - **`make retro-debt PROJECT=P [THRESHOLD=3]`** — the §F8 cadence gate. Exit 2 = RETRO
   DUE; `make retro-mark PROJECT=P` drains it at the retro's close.
 - **`make loop-gate PROJECT=P [STALE_HOURS=4] [THRESHOLD=3]`** — the §F8a **pull
-  precondition** gate; run it before EVERY pull (`loop-run.md` step 0b). Four blocking
-  checks:
+  precondition** gate; run it before EVERY pull (`loop-run.md` step 0b). Four checks:
   1. **stalled-validation** — an item in `validating`/`dev-validating`/`prod-validating`
      dwelling past `STALE_HOURS` whose latest `fixed`/`built_green`/`deployed`/`promoted`
      event carries a `ref:`. The highest-value check: the work is DONE and only a
      dispatch is missing. (Founding case: 35.5h and 27.3h, both pushed AND deployed.)
+     BLOCKING.
   2. **ready-below-floor** — `depth(ready) < ready.min_items` from `queues/policy.csv`.
-  3. **queue-over-cap** — any queue depth > its `wip_limit` (a cap enforced nowhere
-     before v126: intake sat at 22 against 10).
+     BLOCKING.
+  3. **queue-over-cap** — a queue depth > its `wip_limit`. **TWO SEVERITIES (v126 addendum) —
+     Little's Law governs WIP, not backlog depth:**
+     - a **WIP-STAGE** queue over cap (`ready`, `wip`, `rework`, any future in-flight
+       stage) is **BLOCKING** — concurrent work past the cap is real harm (aging,
+       context-switching).
+     - a **BACKLOG** queue over cap (`intake` — unstarted demand) is **ADVISORY**: it is
+       reported prominently with its depth, overage and remedy, and it does **NOT**
+       affect the exit code. Blocking on it INVERTS the constraint — the remedy for a
+       deep backlog is to DELIVER FASTER, which is exactly the pull a block prevents,
+       and the block creates pressure to close real findings just to shrink the number.
+       (Founding case, this gate's first real run: a legitimate differential sweep
+       produced ~15 verified-real sub-cost-4 findings, the flow-manager correctly
+       refused to close any of them, and the loop halted for having done good
+       discovery work.) An advisory-only run exits **0**, says `no BLOCKING
+       precondition violated, the loop may pull; N advisory (non-blocking, still
+       outstanding)`, and still prints the `!` line — "may pull" never means the
+       advisory is satisfied.
+     The classification is **DECLARED**, not a hardcoded name list: `policy.csv` is
+     long-format, so it takes a `kind` **param row** — `intake,kind,backlog,…`,
+     `ready,kind,wip,…` (the `_TEMPLATE` seed ships them; no column changed, so every
+     existing reader and every older `policy.csv` stays valid). A queue with no `kind`
+     row falls back to one named map in the machinery (`DEFAULT_QUEUE_KINDS`: only
+     `intake` is a backlog) and an **undeclared queue defaults to `wip`, i.e.
+     fail-CLOSED** — a future in-flight stage blocks until somebody classifies it.
   4. **retro-debt** — DELEGATED to the `retro-debt` computation, never reimplemented.
+     BLOCKING.
+
+  Output prefixes: `-` blocking (exit 2), `!` advisory (exit unaffected), `?` UNKNOWN
+  (exit unaffected — could not be established).
 
   **Push/deploy state is DERIVED from git, never from event-note PROSE.** The gate reads
   the structured `ref:` and runs `git merge-base --is-ancestor <ref> origin/<trunk>` in

@@ -1809,6 +1809,309 @@ def cmd_retro_mark(a):
 
 
 # ---------------------------------------------------------------------------
+# Subcommand: loop-gate — the MECHANICAL pull-precondition gate (v126)
+#
+# WHY THIS EXISTS (retro evidence, OagEventSource 2026-08-01): STAGE F documents
+# several loop preconditions as orchestrator JUDGEMENT, and they are reliably
+# skipped. Measured: DEFECT-OAG-045 sat in `validating` 127,636s (35.5h) and
+# DEFECT-OAG-048 98,224s — both already pushed AND deployed, both merely awaiting
+# a tester dispatch nobody made; Ready sat at 1 against a `min_items` floor of 3;
+# Intake sat at 14 against a `wip_limit` of 10 with the cap enforced NOWHERE.
+# Meanwhile the ONE obligation that IS mechanised — `retro-debt` (exit 2 = RETRO
+# DUE) — fired correctly and forced a retro that would otherwise have been
+# skipped. The pattern is unambiguous: **the mechanised gate is obeyed; the
+# documented one is not.** So this mechanises the rest, in the SAME shape as
+# retro-debt (same launcher, --project, human-readable lines, exit 0/2).
+#
+# Reports EVERY violated precondition (never just the first), then exits:
+#   exit 0 — all preconditions hold, the loop may pull.
+#   exit 2 — one or more BLOCKING preconditions violated; each printed as one
+#            actionable line naming the ids involved and the remedy.
+#
+# Checks:
+#   1. stalled-validation  an item in validating/dev-validating/prod-validating
+#      whose dwell > --stale-hours (default 4) AND whose latest ref-bearing
+#      done-work event (fixed/built_green/deployed/promoted) carries a `ref:` —
+#      i.e. the work is DONE and only a dispatch is missing. Highest-value check;
+#      this is the 35.5h case.
+#   2. ready-below-floor   depth(ready) < ready.min_items from queues/policy.csv.
+#   3. queue-over-cap      any queue depth > its wip_limit.
+#   4. retro-debt          DELEGATED to compute_retro_debt (never re-implemented).
+#
+# NEVER derive "is it pushed / is it deployed" from event-note PROSE. That exact
+# mistake produced a confident, precisely-quantified, WRONG conclusion: a note
+# reading "NOT pushed — push is the prod apply" was ~35h stale while the commit
+# had been on origin/main the whole time. Push state comes from the STRUCTURED
+# `ref:` field verified against git (`merge-base --is-ancestor <ref> origin/…`)
+# inside the project's OWN repo at work/<p>/ (v50: separate repo, gitignored by
+# the parent — hence `git -C`). An unresolvable ref reports UNKNOWN; we never
+# assume either way.
+# ---------------------------------------------------------------------------
+# The states where "work done, only a dispatch missing" can strand an item.
+# (VALIDATING_STATES is the same set the CFR/quality metrics fold over.)
+STALL_STATES = VALIDATING_STATES
+# Events that carry a `ref:` to FINISHED work. `fixed` = defect graph;
+# `built_green`/`deployed` = use-case dev lane; `promoted` = the cicd event that
+# ENTERS prod-validating (without it, a prod-validating stall would be a blind
+# spot in one of the three states this check names).
+DONE_WORK_REF_EVENTS = ("fixed", "built_green", "deployed", "promoted")
+DEFAULT_STALE_HOURS = 4.0
+# §F2 seed defaults, used only when queues/policy.csv lacks the row. The retro
+# TUNES these in policy.csv — they are never the authority, just the fallback.
+POLICY_DEFAULTS = {
+    "intake": {"min_items": 2, "wip_limit": 10},
+    "ready": {"min_items": 3, "wip_limit": 4},
+    "deploy": {"min_items": 0, "wip_limit": 1},
+    "rework": {"min_items": 0, "wip_limit": 2},
+}
+# Candidate trunk refs, in order, for the push-state check.
+TRUNK_CANDIDATES = ("origin/HEAD", "origin/main", "origin/master")
+
+
+def read_queue_policy(project):
+    """Parse work/<project>/queues/policy.csv into {queue: {param: int}}, layered
+    over POLICY_DEFAULTS. The buffer knobs are OWNED BY THE RETRO and held in that
+    config — never hardcoded here (§F2)."""
+    pol = {q: dict(v) for q, v in POLICY_DEFAULTS.items()}
+    path = os.path.join(ROOT, "work", project, "queues", "policy.csv")
+    if not os.path.exists(path):
+        return pol
+    try:
+        with open(path, newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                q = (row.get("queue") or "").strip()
+                p = (row.get("param") or "").strip()
+                v = (row.get("value") or "").strip()
+                if not q or not p:
+                    continue
+                try:
+                    pol.setdefault(q, {})[p] = int(v)
+                except ValueError:
+                    continue
+    except OSError:
+        pass
+    return pol
+
+
+def _project_repo(project):
+    return os.path.join(ROOT, "work", project)
+
+
+def _git(repo, *args):
+    """Run git in `repo`; return (rc, stdout). rc None when git/repo unusable."""
+    try:
+        r = subprocess.run(["git", "-C", repo, *args], capture_output=True,
+                           text=True, check=False)
+        return r.returncode, (r.stdout or "").strip()
+    except Exception:
+        return None, ""
+
+
+def _ref_on_trunk(project, ref):
+    """True/False iff `ref` IS/IS-NOT an ancestor of the project repo's origin
+    trunk; None = UNKNOWN (no repo, git unavailable, ref or trunk unresolvable).
+
+    The whole point: push state is a fact in GIT, never a claim in an event note."""
+    if not ref:
+        return None
+    ref = str(ref)
+    repo = _project_repo(project)
+    if not os.path.exists(os.path.join(repo, ".git")):
+        return None
+    rc, _ = _git(repo, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
+    if rc != 0:
+        return None                     # ref not resolvable here -> UNKNOWN
+    for trunk in TRUNK_CANDIDATES:
+        rc, _ = _git(repo, "rev-parse", "--verify", "--quiet", f"{trunk}^{{commit}}")
+        if rc != 0:
+            continue
+        rc, _ = _git(repo, "merge-base", "--is-ancestor", ref, trunk)
+        if rc == 0:
+            return True
+        if rc == 1:
+            return False
+        return None                     # git error -> UNKNOWN, never a guess
+    return None                         # no origin trunk -> UNKNOWN
+
+
+def _last_ref_event(item, event_names):
+    """The LAST event in `event_names` that carries a structured `ref:` (or None).
+    Prose in `note:` is deliberately never consulted."""
+    found = None
+    for ev in item.events:
+        if ev.get("event") in event_names and ev.get("ref"):
+            found = ev
+    return found
+
+
+def _current_segment(graphs, item, now):
+    """(state, entered_ts) for the item's still-open segment, or (None, None)."""
+    segs = walk_states(graphs, item, now)
+    if not segs:
+        return None, None
+    state, entered, _exited = segs[-1]
+    return state, entered
+
+
+def _hms(seconds):
+    if seconds is None:
+        return "—"
+    h = seconds / 3600.0
+    return f"{h:.1f}h" if h < 48 else f"{h / 24:.1f}d"
+
+
+def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
+                      threshold=3, now=None):
+    """PURE-ish computation (the only impurity is the read-only git query, which
+    is injected via the module-level `_ref_on_trunk` so tests can substitute it).
+
+    Returns a list of finding dicts, each with:
+      check    — 'stalled-validation' | 'ready-below-floor' | 'queue-over-cap'
+                 | 'retro-debt'
+      severity — 'block' (exit 2) | 'unknown' (advisory; we could not establish it)
+      ids      — the work-item ids involved
+      message  — one actionable line: what is wrong AND the remedy
+    """
+    items, _dup = load_all_items(project)
+    states = compute_states(graphs, items)
+    policy = read_queue_policy(project)
+    if now is None:
+        now = parse_ts(now_iso())
+    findings = []
+
+    # --- 1. stalled validation (the 35.5h case) ------------------------------
+    stale_s = float(stale_hours) * 3600.0
+    for iid in sorted(items):
+        it = items[iid]
+        if states.get(iid) not in STALL_STATES:
+            continue
+        state, entered = _current_segment(graphs, it, now)
+        if state not in STALL_STATES or entered is None:
+            continue
+        dwell = (now - entered).total_seconds()
+        if dwell <= stale_s:
+            continue
+        ev = _last_ref_event(it, DONE_WORK_REF_EVENTS)
+        if ev is None:
+            # dwell is long but NO structured ref => we cannot establish the work
+            # is finished. Report UNKNOWN; never assume either way.
+            findings.append({
+                "check": "stalled-validation", "severity": "unknown",
+                "ids": [iid], "state": state, "dwell_s": dwell, "ref": None,
+                "on_trunk": None,
+                "message": (f"[stalled-validation] UNKNOWN: {iid} has been in "
+                            f"'{state}' for {_hms(dwell)} (>{stale_hours}h) but no "
+                            f"{'/'.join(DONE_WORK_REF_EVENTS)} event carries a "
+                            f"`ref:` — cannot establish whether the work is done. "
+                            f"Remedy: append the missing ref (make wi-append … "
+                            f"REF=<sha>) or dispatch the tester."),
+            })
+            continue
+        # str(): an all-digit short sha (e.g. DEFECT-OAG-045's 5095849) is parsed
+        # back from the item file as an int by the frontmatter scalar reader.
+        ref = str(ev.get("ref"))
+        on_trunk = _ref_on_trunk(project, ref)
+        push = ("on origin trunk" if on_trunk is True else
+                "NOT on origin trunk" if on_trunk is False else
+                "push state UNKNOWN (ref unresolvable in work/%s)" % project)
+        findings.append({
+            "check": "stalled-validation", "severity": "block",
+            "ids": [iid], "state": state, "dwell_s": dwell, "ref": ref,
+            "on_trunk": on_trunk, "event": ev.get("event"),
+            "message": (f"[stalled-validation] {iid} has been in '{state}' for "
+                        f"{_hms(dwell)} (>{stale_hours}h); the work is DONE "
+                        f"({ev.get('event')} ref {ref}, {push}) — only a dispatch "
+                        f"is missing. Remedy: dispatch the tester now, then "
+                        f"`make wi-append PROJECT={project} ID={iid} "
+                        f"EVENT=validated|rejected AGENT=tester`."),
+        })
+
+    # --- derived queue depths (pure function of state via queue_map) ----------
+    depths = defaultdict(int)
+    members = defaultdict(list)
+    for iid in sorted(items):
+        q = graphs.queue_for(states.get(iid))
+        if q:
+            depths[q] += 1
+            members[q].append(iid)
+
+    # --- 2. ready below floor ------------------------------------------------
+    floor = policy.get("ready", {}).get("min_items",
+                                        POLICY_DEFAULTS["ready"]["min_items"])
+    ready_depth = depths.get("ready", 0)
+    if ready_depth < floor:
+        findings.append({
+            "check": "ready-below-floor", "severity": "block",
+            "ids": members.get("ready", []), "queue": "ready",
+            "depth": ready_depth, "floor": floor,
+            "message": (f"[ready-below-floor] ready depth {ready_depth} < "
+                        f"min_items {floor} "
+                        f"({', '.join(members.get('ready', [])) or 'empty'}). "
+                        f"Remedy: replenish NOW, in parallel (§F3) — product "
+                        f"decomposes the next use-cases; below-floor is never "
+                        f"'expected' or tolerated."),
+        })
+
+    # --- 3. queue over cap ---------------------------------------------------
+    for q in sorted(depths):
+        cap = policy.get(q, {}).get("wip_limit")
+        if cap is None:
+            continue                     # no cap declared for this queue
+        if depths[q] > cap:
+            findings.append({
+                "check": "queue-over-cap", "severity": "block",
+                "ids": members[q], "queue": q, "depth": depths[q], "cap": cap,
+                "message": (f"[queue-over-cap] {q} depth {depths[q]} > wip_limit "
+                            f"{cap} — over by {depths[q] - cap}. Remedy: drain "
+                            f"{depths[q] - cap} before admitting more (close / "
+                            f"decline / schedule); the cap targets gross lead "
+                            f"time (§F2), work cannot be allowed to age."),
+            })
+
+    # --- 4. retro debt (DELEGATED — do not duplicate that logic) -------------
+    routine, incidents, due, _detail, marker = compute_retro_debt(
+        graphs, project, threshold, now)
+    if due:
+        reason = ("incident (immediate)" if incidents
+                  else f"routine {len(routine)}>={threshold}")
+        ids = [i for i, _t in incidents] + [i for i, _t in routine]
+        findings.append({
+            "check": "retro-debt", "severity": "block", "ids": ids,
+            "routine": len(routine), "incidents": len(incidents),
+            "threshold": threshold,
+            "message": (f"[retro-debt] RETRO DUE [{reason}] — routine "
+                        f"{len(routine)}/{threshold}, incidents "
+                        f"{len(incidents)} since "
+                        f"{marker.strftime('%Y-%m-%dT%H:%M:%SZ')} "
+                        f"({', '.join(ids) or '—'}). Remedy: fire /retro, then "
+                        f"`make retro-mark PROJECT={project}` to drain it."),
+        })
+
+    return findings
+
+
+def cmd_loop_gate(a):
+    graphs = Graphs.load()
+    now = parse_ts(getattr(a, "now", None)) if getattr(a, "now", None) else None
+    stale_hours = getattr(a, "stale_hours", DEFAULT_STALE_HOURS)
+    findings = compute_loop_gate(graphs, a.project, stale_hours=stale_hours,
+                                threshold=a.threshold, now=now)
+    blocking = [f for f in findings if f["severity"] == "block"]
+    unknown = [f for f in findings if f["severity"] == "unknown"]
+    stamp = (now or parse_ts(now_iso())).strftime("%Y-%m-%dT%H:%M:%SZ")
+    verdict = (f"BLOCKED ({len(blocking)} violated precondition"
+               f"{'' if len(blocking) == 1 else 's'}) — do NOT pull until cleared"
+               if blocking else "OK — all preconditions hold, the loop may pull")
+    print(f"loop-gate[{a.project}] @ {stamp} (stale-hours {stale_hours}) "
+          f"=> {verdict}")
+    for f in blocking:
+        print(f"  - {f['message']}")
+    for f in unknown:
+        print(f"  ? {f['message']}")
+    sys.exit(2 if blocking else 0)
+
+
+# ---------------------------------------------------------------------------
 # Subcommand: validate — the drift GATE (invariants I1–I4)
 # ---------------------------------------------------------------------------
 def cmd_validate(a):
@@ -2316,6 +2619,23 @@ def main(argv=None):
     rm.add_argument("--project", required=True)
     rm.add_argument("--now", help="marker timestamp (ISO-8601 UTC); default: real now")
     rm.set_defaults(func=cmd_retro_mark)
+
+    lg = sub.add_parser("loop-gate",
+                        help="MECHANICAL pull-precondition gate: exit 2 if any "
+                             "blocking precondition is violated (stalled "
+                             "validation / ready below floor / queue over cap / "
+                             "retro due)")
+    lg.add_argument("--project", required=True)
+    lg.add_argument("--stale-hours", dest="stale_hours", type=float,
+                    default=DEFAULT_STALE_HOURS,
+                    help="dwell in validating/dev-validating/prod-validating "
+                         f"beyond which a done-but-undispatched item BLOCKS the "
+                         f"loop (default {DEFAULT_STALE_HOURS})")
+    lg.add_argument("--threshold", type=int, default=3,
+                    help="retro-debt routine threshold (passed through to the "
+                         "retro-debt computation this delegates to)")
+    lg.add_argument("--now", help="reference 'now' (ISO-8601 UTC) for deterministic tests")
+    lg.set_defaults(func=cmd_loop_gate)
 
     a = p.parse_args(argv)
     a.func(a)

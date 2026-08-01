@@ -101,6 +101,36 @@ Makefile wraps each.
 4. **`make wi-migrate PROJECT=P`** — one-shot migration from the legacy
    `items.csv` + ledger into per-item files. Run once per project; not part of the loop.
 
+## The two MECHANICAL gates (exit 2 = stop; never orchestrator discretion)
+`wi-validate` above guards DRIFT. Two further targets guard the loop's OBLIGATIONS —
+both in the same shape (read the item event-logs, print every violation with the ids
+and the remedy, exit 0 = proceed / exit 2 = stop):
+
+- **`make retro-debt PROJECT=P [THRESHOLD=3]`** — the §F8 cadence gate. Exit 2 = RETRO
+  DUE; `make retro-mark PROJECT=P` drains it at the retro's close.
+- **`make loop-gate PROJECT=P [STALE_HOURS=4] [THRESHOLD=3]`** — the §F8a **pull
+  precondition** gate; run it before EVERY pull (`loop-run.md` step 0b). Four blocking
+  checks:
+  1. **stalled-validation** — an item in `validating`/`dev-validating`/`prod-validating`
+     dwelling past `STALE_HOURS` whose latest `fixed`/`built_green`/`deployed`/`promoted`
+     event carries a `ref:`. The highest-value check: the work is DONE and only a
+     dispatch is missing. (Founding case: 35.5h and 27.3h, both pushed AND deployed.)
+  2. **ready-below-floor** — `depth(ready) < ready.min_items` from `queues/policy.csv`.
+  3. **queue-over-cap** — any queue depth > its `wip_limit` (a cap enforced nowhere
+     before v126: intake sat at 22 against 10).
+  4. **retro-debt** — DELEGATED to the `retro-debt` computation, never reimplemented.
+
+  **Push/deploy state is DERIVED from git, never from event-note PROSE.** The gate reads
+  the structured `ref:` and runs `git merge-base --is-ancestor <ref> origin/<trunk>` in
+  the project's OWN repo (`git -C work/P`, v50). Event notes are append-only and are not
+  corrected when the world moves on — a note reading `"NOT pushed"` was ~35h stale while
+  its commit had been on `origin/main` throughout. An unresolvable ref, or a long dwell
+  with NO `ref:` at all, is reported `UNKNOWN` (a `?` advisory line that does NOT block),
+  never assumed either way (§17c).
+
+  `make test-wi` runs the machinery's own unit tests (temp-dir fixtures; never real
+  project data) through the same resolved interpreter.
+
 ## Reading metrics (from views/stats.md — the live metric source)
 `stats.md`/`stats.json` are recomputed from event timestamps by `wi-project`; read
 them instead of any ledger. They carry, overall and per item-type:

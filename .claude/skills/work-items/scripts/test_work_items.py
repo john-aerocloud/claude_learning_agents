@@ -1563,5 +1563,402 @@ class TestAgentCycleTime(Base):
         self.assertIn("No agent duration recorded", md)
 
 
+# --------------------------------------------------------------------------- #
+# loop-gate — the MECHANICAL §F pull-precondition gate (v126). Four blocking
+# checks: stalled validation, ready-below-floor, queue-over-cap, retro debt.
+# Modelled on retro-debt: same launcher, --project, human-readable lines,
+# exit 0 = may pull / exit 2 = BLOCKED.
+#
+# All timestamps are explicit and `--now` is passed, so every assertion is
+# deterministic. Git is NEVER touched from a test (ROOT is a temp dir with no
+# project repo, so push-state resolves UNKNOWN unless monkeypatched).
+# --------------------------------------------------------------------------- #
+class TestLoopGate(Base):
+    def _policy(self, rows):
+        """Write work/<P>/queues/policy.csv from (queue, param, value) rows."""
+        d = os.path.join(self.tmp, "work", self.project, "queues")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "policy.csv"), "w", encoding="utf-8") as f:
+            f.write("queue,param,value,unit,owner,target_metric,last_tuned,experiment\n")
+            for q, p, v in rows:
+                f.write(f"{q},{p},{v},count,flow-manager,throughput,2026-06-01,EXP-022\n")
+
+    def _default_policy(self):
+        # the shipped OagEventSource defaults
+        self._policy([("intake", "min_items", 2), ("intake", "wip_limit", 10),
+                      ("ready", "min_items", 3), ("ready", "wip_limit", 4),
+                      ("deploy", "min_items", 0), ("deploy", "wip_limit", 1),
+                      ("rework", "min_items", 0), ("rework", "wip_limit", 2)])
+
+    def _ready_uc(self, iid, day=10):
+        return [{"ts": _dt(day, 0), "event": "registered", "agent": "flow-manager"},
+                {"ts": _dt(day, 1), "event": "made_ready", "agent": "flow-manager"}]
+
+    def _validating_defect(self, day, hour, ref="abc1234", fixed_ref=True):
+        """A defect parked in `validating` since day/hour — fix done (ref), only
+        a tester dispatch missing. This is the DEFECT-OAG-045 shape."""
+        evs = [{"ts": _dt(day, 0), "event": "reported", "agent": "orchestrator"},
+               {"ts": _dt(day, 1), "event": "triaged", "agent": "orchestrator"},
+               {"ts": _dt(day, 2), "event": "confirmed", "agent": "engineer"},
+               {"ts": _dt(day, hour), "event": "fixed", "agent": "engineer"}]
+        if fixed_ref:
+            evs[-1]["ref"] = ref
+        return evs
+
+    def _gate(self, stale_hours=4.0, threshold=3, now=NOW):
+        return wi.compute_loop_gate(self.graphs, self.project,
+                                    stale_hours=stale_hours, threshold=threshold,
+                                    now=wi.parse_ts(now))
+
+    def _run(self, stale_hours=4.0, threshold=3, now=NOW):
+        ns = argparse.Namespace(project=self.project, stale_hours=stale_hours,
+                                threshold=threshold, now=now)
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            try:
+                wi.cmd_loop_gate(ns)
+                code = 0
+            except SystemExit as e:
+                code = e.code
+        return code, out.getvalue()
+
+    def _checks(self, findings):
+        return [f["check"] for f in findings if f["severity"] == "block"]
+
+    # ---- all clear -----------------------------------------------------------
+    def test_all_preconditions_hold_exits_zero(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        findings = self._gate()
+        self.assertEqual(self._checks(findings), [], findings)
+        code, out = self._run()
+        self.assertEqual(code, 0)
+        self.assertIn("may pull", out)
+
+    # ---- check 1: stalled validation ----------------------------------------
+    def test_stalled_validation_blocks(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        # fixed@d20 12:00 with a ref; now = d30 -> ~10 days in `validating`
+        self.write_item("active", "DEF-STALE", "defect",
+                        self._validating_defect(20, 12, ref="5095849"))
+        findings = self._gate()
+        self.assertIn("stalled-validation", self._checks(findings))
+        f = [x for x in findings if x["check"] == "stalled-validation"][0]
+        self.assertIn("DEF-STALE", f["ids"])
+        self.assertEqual(f["state"], "validating")
+        self.assertEqual(f["ref"], "5095849")
+        self.assertGreater(f["dwell_s"], 4 * 3600)
+        code, out = self._run()
+        self.assertEqual(code, 2)
+        self.assertIn("DEF-STALE", out)
+        self.assertIn("stalled-validation", out)
+
+    def test_validation_within_threshold_does_not_block(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        # fixed 2h before `now` -> under the 4h default
+        self.write_item("active", "DEF-FRESH", "defect",
+                        self._validating_defect(29, 22, ref="deadbee"))
+        findings = self._gate()
+        self.assertNotIn("stalled-validation", self._checks(findings))
+        self.assertEqual(self._run()[0], 0)
+
+    def test_stale_hours_is_overridable(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self.write_item("active", "DEF-FRESH", "defect",
+                        self._validating_defect(29, 22, ref="deadbee"))  # 2h dwell
+        self.assertNotIn("stalled-validation", self._checks(self._gate(stale_hours=4)))
+        self.assertIn("stalled-validation", self._checks(self._gate(stale_hours=1)))
+
+    def test_stalled_validation_without_ref_is_unknown_not_block(self):
+        """No structured ref => we CANNOT establish the work is done. Report
+        UNKNOWN (advisory), never assume either way."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self.write_item("active", "DEF-NOREF", "defect",
+                        self._validating_defect(20, 12, fixed_ref=False))
+        findings = self._gate()
+        self.assertNotIn("stalled-validation", self._checks(findings))
+        unknown = [f for f in findings if f["severity"] == "unknown"]
+        self.assertTrue(any("DEF-NOREF" in f["ids"] for f in unknown), findings)
+        self.assertEqual(self._run()[0], 0)   # UNKNOWN does not block
+
+    def test_uc_dev_validating_stall_blocks_on_deployed_ref(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self.write_item("active", "UC-STALE", "use-case", [
+            {"ts": _dt(20, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(20, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(20, 2), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(20, 3), "event": "built_green", "agent": "engineer", "ref": "aaa111"},
+            {"ts": _dt(20, 4), "event": "deployed", "agent": "cicd", "ref": "bbb222"},
+        ])
+        f = [x for x in self._gate() if x["check"] == "stalled-validation"][0]
+        self.assertIn("UC-STALE", f["ids"])
+        self.assertEqual(f["state"], "dev-validating")
+        self.assertEqual(f["ref"], "bbb222")     # LATEST ref-bearing done-work event
+
+    def test_prod_validating_stall_blocks(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self.write_item("active", "UC-PROD", "use-case", [
+            {"ts": _dt(20, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(20, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(20, 2), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(20, 3), "event": "built_green", "agent": "engineer", "ref": "aaa111"},
+            {"ts": _dt(20, 4), "event": "deployed", "agent": "cicd", "ref": "bbb222"},
+            {"ts": _dt(20, 5), "event": "dev_validated", "agent": "tester"},
+            {"ts": _dt(20, 6), "event": "promoted", "agent": "cicd", "ref": "ccc333"},
+        ])
+        f = [x for x in self._gate() if x["check"] == "stalled-validation"][0]
+        self.assertIn("UC-PROD", f["ids"])
+        self.assertEqual(f["state"], "prod-validating")
+
+    def test_stalled_validation_clears_when_validated(self):
+        """Proof-of-fire pair: RED with the item parked in validating, GREEN once
+        the tester's `validated` event lands."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        evs = self._validating_defect(20, 12, ref="5095849")
+        self.write_item("active", "DEF-STALE", "defect", evs)
+        self.assertEqual(self._run()[0], 2)
+        # tester dispatched -> validated. (Set the retro marker past the resolve so
+        # the now-resolved defect's retro debt — check 4 — isn't what we measure.)
+        os.remove(os.path.join(self._items("active"), "DEF-STALE.md"))
+        self.write_item("done", "DEF-STALE", "defect",
+                        evs + [{"ts": _dt(21, 0), "event": "validated", "agent": "tester"}])
+        wi.cmd_retro_mark(argparse.Namespace(project=self.project,
+                                            now="2026-06-22T00:00:00Z"))
+        self.assertEqual(self._run()[0], 0)
+
+    # ---- push state comes from GIT, never from event-note PROSE --------------
+    def test_push_state_from_git_not_note_prose(self):
+        """The founding error: an event NOTE claiming 'NOT pushed' was 35h stale
+        while the ref WAS on origin/main. The note must never be consulted."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        evs = self._validating_defect(20, 12, ref="5095849")
+        evs[-1]["note"] = "NOT pushed — push is the prod apply"
+        self.write_item("active", "DEF-STALE", "defect", evs)
+        calls = []
+
+        def fake(project, ref):
+            calls.append((project, ref))
+            return True                      # git says: on trunk
+
+        orig = wi._ref_on_trunk
+        wi._ref_on_trunk = fake
+        try:
+            f = [x for x in self._gate() if x["check"] == "stalled-validation"][0]
+        finally:
+            wi._ref_on_trunk = orig
+        self.assertEqual(calls, [(self.project, "5095849")])
+        self.assertIs(f["on_trunk"], True)    # git, not the stale note
+        self.assertIn("on origin trunk", f["message"])
+
+    def test_unresolvable_ref_reports_unknown_push_state(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self.write_item("active", "DEF-STALE", "defect",
+                        self._validating_defect(20, 12, ref="notasha"))
+        orig = wi._ref_on_trunk
+        wi._ref_on_trunk = lambda p, r: None       # cannot resolve
+        try:
+            f = [x for x in self._gate() if x["check"] == "stalled-validation"][0]
+        finally:
+            wi._ref_on_trunk = orig
+        self.assertIsNone(f["on_trunk"])
+        self.assertIn("UNKNOWN", f["message"])
+
+    def test_ref_on_trunk_returns_none_without_repo(self):
+        # ROOT is a temp dir: work/<P> is not a git repo -> UNKNOWN, never a guess
+        self.assertIsNone(wi._ref_on_trunk(self.project, "5095849"))
+
+    # ---- check 2: ready below floor -----------------------------------------
+    def test_ready_below_floor_blocks(self):
+        self._default_policy()
+        self.write_item("active", "UC-XC5", "use-case", self._ready_uc(10))   # ready=1
+        findings = self._gate()
+        self.assertIn("ready-below-floor", self._checks(findings))
+        f = [x for x in findings if x["check"] == "ready-below-floor"][0]
+        self.assertEqual((f["depth"], f["floor"]), (1, 3))
+        code, out = self._run()
+        self.assertEqual(code, 2)
+        self.assertIn("ready depth 1 < min_items 3", out)
+
+    def test_ready_at_floor_does_not_block(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self.assertNotIn("ready-below-floor", self._checks(self._gate()))
+
+    def test_scheduled_open_items_count_toward_ready(self):
+        # queue_map: both `ready` and `scheduled` map to the ready queue
+        self._default_policy()
+        self.write_item("active", "UC-R0", "use-case", self._ready_uc(10))
+        for i in range(2):
+            self.write_item("active", f"OI-{i}", "open-item", [
+                {"ts": _dt(10, 0), "event": "open", "agent": "orchestrator"},
+                {"ts": _dt(10, 1), "event": "scheduled", "agent": "flow-manager"}])
+        self.assertNotIn("ready-below-floor", self._checks(self._gate()))
+
+    # ---- check 3: queue over cap -------------------------------------------
+    def test_intake_over_cap_blocks(self):
+        self._policy([("ready", "min_items", 0), ("intake", "wip_limit", 10)])
+        for i in range(14):
+            self.write_item("active", f"OI-{i:02d}", "open-item", [
+                {"ts": _dt(10, 0), "event": "open", "agent": "orchestrator"}])
+        findings = self._gate()
+        self.assertIn("queue-over-cap", self._checks(findings))
+        f = [x for x in findings if x["check"] == "queue-over-cap"][0]
+        self.assertEqual((f["queue"], f["depth"], f["cap"]), ("intake", 14, 10))
+        code, out = self._run()
+        self.assertEqual(code, 2)
+        self.assertIn("intake depth 14 > wip_limit 10", out)
+
+    def test_queue_at_cap_does_not_block(self):
+        self._policy([("ready", "min_items", 0), ("intake", "wip_limit", 10)])
+        for i in range(10):
+            self.write_item("active", f"OI-{i:02d}", "open-item", [
+                {"ts": _dt(10, 0), "event": "open", "agent": "orchestrator"}])
+        self.assertNotIn("queue-over-cap", self._checks(self._gate()))
+
+    def test_every_over_cap_queue_is_reported_not_just_the_first(self):
+        self._policy([("ready", "min_items", 0), ("intake", "wip_limit", 1),
+                      ("rework", "wip_limit", 0)])
+        for i in range(3):
+            self.write_item("active", f"OI-{i}", "open-item", [
+                {"ts": _dt(10, 0), "event": "open", "agent": "orchestrator"}])
+        self.write_item("active", "UC-RW", "use-case", [
+            {"ts": _dt(10, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(10, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(10, 2), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(10, 3), "event": "build_failed", "agent": "engineer"}])
+        qs = sorted(f["queue"] for f in self._gate() if f["check"] == "queue-over-cap")
+        self.assertEqual(qs, ["intake", "rework"])
+
+    # ---- check 4: retro debt (DELEGATED to compute_retro_debt, not re-coded) --
+    def test_retro_debt_due_blocks(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        # a resolved defect since the marker = an INCIDENT -> immediate retro debt
+        self.write_item("done", "DEF-RESOLVED", "defect", [
+            {"ts": _dt(15, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(15, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(15, 2), "event": "confirmed", "agent": "engineer"},
+            {"ts": _dt(15, 3), "event": "fixed", "agent": "engineer", "ref": "f00d"},
+            {"ts": _dt(15, 5), "event": "validated", "agent": "tester"}])
+        findings = self._gate()
+        self.assertIn("retro-debt", self._checks(findings))
+        code, out = self._run()
+        self.assertEqual(code, 2)
+        self.assertIn("RETRO DUE", out)
+
+    def test_retro_debt_clears_after_retro_mark(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self.write_item("done", "DEF-RESOLVED", "defect", [
+            {"ts": _dt(15, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(15, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(15, 2), "event": "confirmed", "agent": "engineer"},
+            {"ts": _dt(15, 3), "event": "fixed", "agent": "engineer", "ref": "f00d"},
+            {"ts": _dt(15, 5), "event": "validated", "agent": "tester"}])
+        self.assertEqual(self._run()[0], 2)
+        wi.cmd_retro_mark(argparse.Namespace(project=self.project,
+                                            now="2026-06-16T00:00:00Z"))
+        self.assertNotIn("retro-debt", self._checks(self._gate()))
+        self.assertEqual(self._run()[0], 0)
+
+    def test_retro_debt_delegates_to_compute_retro_debt(self):
+        """DRY: loop-gate must CALL the existing retro-debt logic, not clone it."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        calls = []
+        orig = wi.compute_retro_debt
+
+        def spy(graphs, project, threshold, now):
+            calls.append((project, threshold))
+            return ([], [], False, [], wi.parse_ts("2026-06-01T00:00:00Z"))
+
+        wi.compute_retro_debt = spy
+        try:
+            self._gate(threshold=7)
+        finally:
+            wi.compute_retro_debt = orig
+        self.assertEqual(calls, [(self.project, 7)])
+
+    # ---- reports EVERY violation, not just the first ------------------------
+    def test_reports_all_violated_preconditions(self):
+        self._policy([("intake", "wip_limit", 1), ("ready", "min_items", 3)])
+        for i in range(3):
+            self.write_item("active", f"OI-{i}", "open-item", [
+                {"ts": _dt(10, 0), "event": "open", "agent": "orchestrator"}])
+        self.write_item("active", "DEF-STALE", "defect",
+                        self._validating_defect(20, 12, ref="5095849"))
+        self.write_item("done", "DEF-RESOLVED", "defect", [
+            {"ts": _dt(15, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(15, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(15, 2), "event": "confirmed", "agent": "engineer"},
+            {"ts": _dt(15, 3), "event": "fixed", "agent": "engineer", "ref": "f00d"},
+            {"ts": _dt(15, 5), "event": "validated", "agent": "tester"}])
+        checks = set(self._checks(self._gate()))
+        self.assertEqual(checks, {"stalled-validation", "ready-below-floor",
+                                  "queue-over-cap", "retro-debt"})
+        code, out = self._run()
+        self.assertEqual(code, 2)
+        for token in ("stalled-validation", "ready-below-floor",
+                      "queue-over-cap", "retro-debt"):
+            self.assertIn(token, out)
+
+    # ---- policy.csv handling ------------------------------------------------
+    def test_missing_policy_csv_uses_documented_defaults(self):
+        # no policy.csv at all -> the §F2 seed defaults (ready 3/4, intake 2/10)
+        self.write_item("active", "UC-R0", "use-case", self._ready_uc(10))
+        f = [x for x in self._gate() if x["check"] == "ready-below-floor"][0]
+        self.assertEqual(f["floor"], 3)
+
+    def test_policy_csv_is_read_not_hardcoded(self):
+        self._policy([("ready", "min_items", 1)])
+        self.write_item("active", "UC-R0", "use-case", self._ready_uc(10))
+        self.assertNotIn("ready-below-floor", self._checks(self._gate()))
+
+    def test_read_queue_policy_parses_rows(self):
+        self._default_policy()
+        pol = wi.read_queue_policy(self.project)
+        self.assertEqual(pol["ready"]["min_items"], 3)
+        self.assertEqual(pol["intake"]["wip_limit"], 10)
+
+    # ---- CLI wiring ---------------------------------------------------------
+    def test_cli_subcommand_registered(self):
+        # `loop-gate` is a real subcommand and --project is required
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as cm:
+                wi.main(["loop-gate"])
+        self.assertEqual(cm.exception.code, 2)   # argparse usage error, not "invalid choice"
+
+    def test_cli_end_to_end_exit_two(self):
+        self._default_policy()
+        self.write_item("active", "UC-R0", "use-case", self._ready_uc(10))
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            with self.assertRaises(SystemExit) as cm:
+                wi.main(["loop-gate", "--project", self.project, "--now", NOW])
+        self.assertEqual(cm.exception.code, 2)
+        self.assertIn("BLOCKED", out.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -28,7 +28,9 @@ Frontmatter fields:
 - `parents:` — UPWARD hierarchical container(s). REQUIRED (except `requirement`).
 - `deps:` — peer prerequisites; the DAG edges the pull uses to form the independent set. May be empty.
 - `created_ts` — UTC registration time.
-- `events:` — **append-only** list of `{ts, event, agent, [ref], [note]}`. NEVER add a `state:` field.
+- `events:` — **append-only** list of `{ts, event, agent, [ref], [observe], [note]}`. NEVER add a `state:` field.
+  `observe:` is the machine-checkable liveness predicate of an `awaiting_observation` park
+  (state-graph v9) — REQUIRED on `not_yet_observed`; see "Shipped but UNPROVEN" below.
 - `derived:` — the DERIVED block (state, queue, children, ancestors). **Do not hand-edit** — it is re-rendered by `wi-project`.
 
 Edges are stored one-directional (each item names its `parents`/`deps`). `children`
@@ -96,7 +98,9 @@ Makefile wraps each.
    non-zero if any invariant is violated: (I1) every event in every item is a legal
    transition; (I2) no terminal item sits in a non-null queue; (I3) every
    `parents`/`deps` id resolves and `deps` has no cycles; (I4) exactly one file per
-   id across active/+done/, and a `done` item lives in `done/`.
+   id across active/+done/, and a `done` item lives in `done/`; (I6) an
+   `awaiting_observation` flow item carries a valid observation predicate. **I5 is
+   RESERVED** for IMP-011's still-owed CORE-job invariant and is not reused.
 
 4. **`make wi-migrate PROJECT=P`** — one-shot migration from the legacy
    `items.csv` + ledger into per-item files. Run once per project; not part of the loop.
@@ -110,8 +114,9 @@ reported as an **ADVISORY** that does not touch the exit code (see check 3 below
 
 - **`make retro-debt PROJECT=P [THRESHOLD=3]`** — the §F8 cadence gate. Exit 2 = RETRO
   DUE; `make retro-mark PROJECT=P` drains it at the retro's close.
-- **`make loop-gate PROJECT=P [STALE_HOURS=4] [THRESHOLD=3]`** — the §F8a **pull
-  precondition** gate; run it before EVERY pull (`loop-run.md` step 0b). Four checks:
+- **`make loop-gate PROJECT=P [STALE_HOURS=4] [THRESHOLD=3] [NO_OBSERVE=1]
+  [OBSERVE_TIMEOUT=120] [NOW=…]`** — the §F8a **pull precondition** gate; run it before
+  EVERY pull (`loop-run.md` step 0b). Five checks:
   1. **stalled-validation** — an item in `validating`/`dev-validating`/`prod-validating`
      dwelling past `STALE_HOURS` whose latest `fixed`/`built_green`/`deployed`/`promoted`
      event carries a `ref:`. The highest-value check: the work is DONE and only a
@@ -145,6 +150,16 @@ reported as an **ADVISORY** that does not touch the exit code (see check 3 below
      fail-CLOSED** — a future in-flight stage blocks until somebody classifies it.
   4. **retro-debt** — DELEGATED to the `retro-debt` computation, never reimplemented.
      BLOCKING.
+  5. **awaiting-observation** [v9] — every item parked in `awaiting_observation`
+     (shipped, green, UNPROVEN) is reported AND its liveness predicate **RE-EVALUATED**,
+     exactly as `blocked` is re-checked each cycle. `OBSERVATION: observed` ⇒ **BLOCKING**
+     (reality produced the record, so a tester dispatch is now actionable);
+     `OBSERVATION: not-yet` ⇒ **ADVISORY**; a broken or absent predicate ⇒ **BLOCKING**
+     (an unrunnable liveness predicate is not a predicate, §17c.2). `NO_OBSERVE=1` skips
+     the evaluation and reports each parked item as NOT EVALUATED — a skipped run can
+     never read as satisfied. Note check 1 deliberately does NOT fire on a parked item:
+     it HAS been dispatched and the tester recorded a machine-checkable reason it could
+     not conclude — check 5 carries it instead, and blocks the moment the predicate flips.
 
   Output prefixes: `-` blocking (exit 2), `!` advisory (exit unaffected), `?` UNKNOWN
   (exit unaffected — could not be established).
@@ -156,6 +171,33 @@ reported as an **ADVISORY** that does not touch the exit code (see check 3 below
   its commit had been on `origin/main` throughout. An unresolvable ref, or a long dwell
   with NO `ref:` at all, is reported `UNKNOWN` (a `?` advisory line that does NOT block),
   never assumed either way (§17c).
+
+## Shipped but UNPROVEN — `awaiting_observation` (state-graph v9)
+A capability is not `done` until it has been OBSERVED working on data the system did not
+author (§17c.1). When an item is built, deployed and re-verified green but the capability
+has had **no opportunity to occur** (it ships inert behind a flag; its trigger is genuinely
+rare), the **tester** parks it:
+
+```
+make wi-append PROJECT=P ID=<ID> EVENT=not_yet_observed AGENT=tester \
+  OBSERVE=make:<probe-target> NOTE="<what is awaited + what WAS established>"
+```
+
+`OBSERVE=` is **REQUIRED — the append is REFUSED without it** (a reason in `NOTE` can never
+come back negative, §17c Layer 2). It names a **committed, re-runnable target in
+`work/P/Makefile`** that **exits 0** and prints `OBSERVATION: observed` once the record
+exists, or `OBSERVATION: not-yet` while it does not. Anything else — no sentinel, both
+sentinels, a non-zero exit, a missing target, a timeout — is a **BROKEN** predicate and
+blocks the loop, so a probe that does not exist can never masquerade as "not observed yet".
+Do NOT signal the verdict with an exit code: **`make` does not propagate a recipe's exit
+status** (a recipe exiting 3 makes `make` itself exit 2).
+
+The state is **non-terminal**, owner `external` (never the tester's effort), queue
+`waiting`, and **an awaiting child can never let its parent aggregate read `done`** (the
+parent reads `awaiting_observation`). Exit with `validated` (observation landed — put the
+pointer in `NOTE`) or `rejected` (the observation FALSIFIED the capability). Correct a wrong
+probe with `EVENT=amended … OBSERVE=make:<new-target>`; the predicate in force is the LAST
+event carrying one. Not available on `open-item` (no deployable capability to observe).
 
   `make test-wi` runs the machinery's own unit tests (temp-dir fixtures; never real
   project data) through the same resolved interpreter.

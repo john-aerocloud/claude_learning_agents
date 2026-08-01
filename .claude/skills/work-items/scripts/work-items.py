@@ -155,6 +155,130 @@ def fold_state(graphs, itype, events):
     return state
 
 
+# ---------------------------------------------------------------------------
+# The observation predicate [state-graph v9] — what an `awaiting_observation`
+# item is waiting to observe, in a form a MACHINE can evaluate every cycle.
+#
+# v125 §17c Layer 2: "the load-bearing claim lives in PROSE, where it cannot be
+# false." A park whose reason is only a `note:` is exactly that — it can never
+# come back negative, so it never ends. So the state cannot be ENTERED without a
+# predicate (`append` refuses it; `validate` I6 catches a hand-edit), and the
+# predicate is a COMMITTED, RE-RUNNABLE command (§17c.4), not a sentence.
+#
+# Grammar, deliberately narrow: `make:<target> [VAR=VALUE ...]`, run as
+#   make -C work/<project> <target> [VAR=VALUE ...]
+# in the PROJECT's own Makefile (project-owned probes over real data; the root
+# Makefile is agent-ops). The `make:` scheme is REQUIRED — an unknown or absent
+# scheme is never guessed at, and no shell metacharacter is accepted, so the spec
+# can never become a shell string. Invocation is argv-list, never shell=True.
+#
+# The verdict is a REQUIRED SENTINEL LINE ON STDOUT, and the probe must exit 0:
+#   `OBSERVATION: observed`  -> the record exists; a tester dispatch is now
+#                               ACTIONABLE (loop-gate BLOCKS for it).
+#   `OBSERVATION: not-yet`   -> the probe ran and honestly found nothing yet
+#                               (legitimate; advisory, re-checked every cycle).
+#   anything else            -> BROKEN. No sentinel, both sentinels, a non-zero
+#                               exit, a missing target, a crash, a timeout. Fail
+#                               CLOSED: a probe that does not exist can never
+#                               masquerade as "not observed yet" — that confusion
+#                               is the `make wire-provenance` class itself.
+#
+# WHY A SENTINEL AND NOT AN EXIT CODE (caught live, 2026-08-01, first real run):
+# the first cut of this used exit 0 / 3 / other. It passed its unit tests — which
+# STUBBED subprocess.run and therefore only proved the mapping agreed with itself.
+# Driven against a REAL `make`, every probe read BROKEN: **make does not propagate
+# a recipe's exit status.** A recipe exiting 3 makes make print "Error 3" and then
+# exit **2** itself, so a three-way exit-code contract is not expressible through
+# `make` at all. Exactly the "a mock encodes your belief about platform semantics"
+# failure, found only by running the real thing. `test_run_observation_against_a_
+# real_make` now pins the verdict against a REAL make invocation so this cannot
+# regress into a stub-only agreement again.
+# ---------------------------------------------------------------------------
+OBSERVE_SCHEME = "make:"
+OBS_SENTINEL = "OBSERVATION:"
+OBS_OBSERVED = "observed"
+OBS_NOT_YET = "not-yet"
+_OBS_SENTINEL_RE = re.compile(r"^\s*" + OBS_SENTINEL + r"\s*(\S+)\s*$",
+                              re.IGNORECASE | re.MULTILINE)
+DEFAULT_OBSERVE_TIMEOUT = 120.0
+_OBS_TARGET_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_OBS_ARG_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=[A-Za-z0-9._:/@,+-]*$")
+
+
+def parse_observe_spec(spec):
+    """`make:<target> [VAR=VALUE ...]` -> ['<target>', 'VAR=VALUE', ...].
+    Raises ValueError (with the reason) on anything else. Nothing is ever guessed:
+    a spec that does not parse is BROKEN, never silently reinterpreted."""
+    if not isinstance(spec, str) or not spec.strip():
+        raise ValueError("observe spec is empty — an `awaiting_observation` item "
+                         "must carry a machine-checkable predicate")
+    s = spec.strip()
+    if not s.startswith(OBSERVE_SCHEME):
+        raise ValueError(f"observe spec {s!r} has no '{OBSERVE_SCHEME}' scheme "
+                         f"(the only supported form is "
+                         f"'{OBSERVE_SCHEME}<target> [VAR=VALUE ...]')")
+    parts = s[len(OBSERVE_SCHEME):].split()
+    if not parts:
+        raise ValueError(f"observe spec {s!r} names no make target")
+    target, args = parts[0], parts[1:]
+    if not _OBS_TARGET_RE.match(target):
+        raise ValueError(f"observe spec target {target!r} is not a plain make "
+                         f"target name (no shell, no paths, no metacharacters)")
+    for arg in args:
+        if not _OBS_ARG_RE.match(arg):
+            raise ValueError(f"observe spec argument {arg!r} is not a plain "
+                             f"VAR=VALUE make override")
+    return [target] + args
+
+
+def observe_spec_in_effect(item):
+    """The predicate CURRENTLY in effect for `item`: the `observe:` of the LAST
+    event that carries one (so a wrong probe is corrected by appending `amended`
+    with a new one, never by editing the historical event). None if there is none."""
+    spec = None
+    for ev in item.events:
+        if ev.get("observe"):
+            spec = str(ev.get("observe"))
+    return spec
+
+
+def _run_observation(project, spec, timeout=DEFAULT_OBSERVE_TIMEOUT):
+    """Evaluate an observation predicate NOW. Returns (verdict, detail) where
+    verdict is 'observed' | 'not-yet' | 'broken'. Module-level so the loop-gate
+    tests can substitute it (same seam as `_ref_on_trunk`)."""
+    try:
+        argv = parse_observe_spec(spec)
+    except ValueError as e:
+        return "broken", f"malformed observe spec: {e}"
+    repo = _project_repo(project)
+    try:
+        r = subprocess.run(["make", "-C", repo] + argv, capture_output=True,
+                           text=True, check=False, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return "broken", (f"predicate did not complete within {timeout}s (timeout) "
+                          f"— a predicate that cannot be evaluated is not a predicate")
+    except Exception as e:                      # make missing, repo absent, ...
+        return "broken", f"could not run the predicate: {e}"
+    out = r.stdout or ""
+    tail = (out + (r.stderr or "")).strip()[-400:]
+    if r.returncode != 0:
+        return "broken", (f"the probe exited {r.returncode} — an observation probe "
+                          f"must exit 0 and report its verdict on stdout as "
+                          f"`{OBS_SENTINEL} {OBS_OBSERVED}|{OBS_NOT_YET}`: {tail}")
+    verdicts = {m.group(1).strip().lower() for m in _OBS_SENTINEL_RE.finditer(out)}
+    verdicts &= {OBS_OBSERVED, OBS_NOT_YET}
+    if verdicts == {OBS_OBSERVED}:
+        return "observed", out.strip()[-400:]
+    if verdicts == {OBS_NOT_YET}:
+        return "not-yet", out.strip()[-400:]
+    if len(verdicts) > 1:
+        return "broken", (f"the probe reported BOTH verdicts — ambiguous, so it "
+                          f"establishes nothing: {tail}")
+    return "broken", (f"the probe printed no `{OBS_SENTINEL} {OBS_OBSERVED}` or "
+                      f"`{OBS_SENTINEL} {OBS_NOT_YET}` line, so its verdict is "
+                      f"unreadable: {tail}")
+
+
 def check_transition(graphs, itype, state, event, agent):
     """Return (ok, to_state, legal_here). ok iff `event` is a legal transition
     from `state` for this type AND `agent` is in that transition's agents."""
@@ -381,6 +505,11 @@ def _render_event(ev):
              f"agent: {_q(ev.get('agent'))}"]
     if ev.get("ref") not in (None, ""):
         parts.append(f"ref: {_q(ev.get('ref'))}")
+    # observe: the MACHINE-CHECKABLE liveness predicate of an `awaiting_observation`
+    # park [v9] — `make:<target> [VAR=V]`. Required on `not_yet_observed`, optional
+    # on the `amended` self-edge (where it REPLACES the predicate in effect).
+    if ev.get("observe") not in (None, ""):
+        parts.append(f"observe: {_q(ev.get('observe'))}")
     # tokens: OPTIONAL subagent token cost of producing this transition. Rendered
     # only when present (absent ⇒ unknown, treated as 0 by the cost-split fold).
     if ev.get("tokens") not in (None, ""):
@@ -537,6 +666,14 @@ _DONE_STATES = {"done", "resolved"}
 # A cancelled child is terminal-but-not-delivered: it must NOT block an aggregate
 # from completing, but it also does not, by itself, make the aggregate "done".
 _TERMINAL_RESOLVED = _DONE_STATES | {"cancelled"}
+# [state-graph v9] SHIPPED, GREEN, UNPROVEN. Deliberately absent from _DONE_STATES
+# and _TERMINAL_RESOLVED: an item awaiting its observation is NOT done and must
+# never let a parent aggregate fold to `done`. That fold is precisely what made
+# CFR and rework read clean for the five v125 capabilities while nothing worked.
+AWAITING_OBSERVATION = "awaiting_observation"
+# Non-terminal states in which NOTHING is in flight — the aggregate is waiting on
+# the outside world, not being worked. Both are owner-class `external`.
+_PARKED_STATES = {"blocked", AWAITING_OBSERVATION}
 
 
 def _bubble(graphs, items, kids, states, agg_item=None):
@@ -560,12 +697,21 @@ def _bubble(graphs, items, kids, states, agg_item=None):
         # else (all cancelled) the aggregate itself is cancelled.
         return "done" if any(states.get(k) in _DONE_STATES for k in kids) else "cancelled"
     # An aggregate whose only non-terminal (not-yet-delivered) children are ALL
-    # `blocked` is itself blocked: no work can progress until they clear. This
-    # keeps a parked-on-external aggregate out of the "in_progress" view (queues,
-    # stats, board) instead of masquerading as actively-worked. As soon as one
-    # non-terminal child is unblocked/working, it falls through to in_progress.
+    # PARKED is itself parked: no work can progress until the outside world moves.
+    # This keeps a parked aggregate out of the "in_progress" view (queues, stats,
+    # board) instead of masquerading as actively-worked. As soon as one non-terminal
+    # child is unblocked/working, it falls through to in_progress.
+    #
+    # [v9] Two parked kinds, and `awaiting_observation` takes PRECEDENCE over
+    # `blocked` when both are present: both are external waits, but the unproven-
+    # capability fact is the one a reader most needs AND the one that can silently
+    # read `done` later, so it is the one the aggregate must announce. Neither is in
+    # _TERMINAL_RESOLVED, so either way the aggregate CANNOT read `done` — that is
+    # the load-bearing half of the rule; the label is the informative half.
     non_terminal = [k for k in kids if states.get(k) not in _TERMINAL_RESOLVED]
-    if non_terminal and all(states.get(k) == "blocked" for k in non_terminal):
+    if non_terminal and all(states.get(k) in _PARKED_STATES for k in non_terminal):
+        if any(states.get(k) == AWAITING_OBSERVATION for k in non_terminal):
+            return AWAITING_OBSERVATION
         return "blocked"
     if any(_child_past_initial(graphs, items, k, states) for k in kids):
         return "in_progress"
@@ -673,10 +819,52 @@ def cmd_append(a):
               "do not hand-edit item state.", file=sys.stderr)
         sys.exit(1)
 
+    # --- the observation predicate is REQUIRED, not optional [v9] -------------
+    # An `awaiting_observation` park with no machine-checkable predicate is a PROSE
+    # park: nothing can ever evaluate whether the observation has landed, so the
+    # item sits there for ever and the state becomes a hiding place. Make it
+    # unrepresentable at the write, which is the earliest possible catch (v124/
+    # EXP-121: an enforcement control must be a REQUIRED dependency, never optional
+    # with a permissive default).
+    observe = getattr(a, "observe", None)
+    if to == AWAITING_OBSERVATION:
+        if observe:
+            try:
+                parse_observe_spec(observe)
+            except ValueError as e:
+                print(f"append REJECTED: {a.id}: {e}", file=sys.stderr)
+                print(f"  the predicate must be '{OBSERVE_SCHEME}<target> "
+                      f"[VAR=VALUE ...]' naming a COMMITTED, RE-RUNNABLE target in "
+                      f"work/{a.project}/Makefile that exits 0 and prints "
+                      f"`{OBS_SENTINEL} {OBS_OBSERVED}` once the observation has "
+                      f"landed, or `{OBS_SENTINEL} {OBS_NOT_YET}` while it has not.",
+                      file=sys.stderr)
+                sys.exit(1)
+        elif a.event == "not_yet_observed":
+            print(f"append REJECTED: {a.id}: entering '{AWAITING_OBSERVATION}' "
+                  f"requires --observe (a machine-checkable liveness predicate).",
+                  file=sys.stderr)
+            print(f"  This state means SHIPPED, GREEN and UNPROVEN — it is only "
+                  f"honest if something can decide when the observation lands. A "
+                  f"reason in --note cannot come back negative (§17c Layer 2), so "
+                  f"it is not enough.", file=sys.stderr)
+            print(f"  e.g. --observe '{OBSERVE_SCHEME}probe-<capability>-observed' "
+                  f"— it must exit 0 and print `{OBS_SENTINEL} {OBS_OBSERVED}` or "
+                  f"`{OBS_SENTINEL} {OBS_NOT_YET}`; anything else is a BROKEN "
+                  f"predicate and blocks the loop.", file=sys.stderr)
+            sys.exit(1)
+    elif observe:
+        print(f"append REJECTED: {a.id}: --observe is only meaningful on a "
+              f"transition into '{AWAITING_OBSERVATION}' (got '{a.event}' -> "
+              f"'{to}').", file=sys.stderr)
+        sys.exit(1)
+
     ts = a.ts or now_iso()
     new_event = {"ts": ts, "event": a.event, "agent": a.agent}
     if a.ref:
         new_event["ref"] = a.ref
+    if observe:
+        new_event["observe"] = observe
     # tokens: the subagent_tokens the dispatched specialist spent producing this
     # transition. Optional — rides the state event so cost-split is a pure fold.
     if getattr(a, "tokens", None) is not None:
@@ -1839,6 +2027,22 @@ def cmd_retro_mark(a):
 #      BLOCKING for a WIP-STAGE queue, ADVISORY-only for a BACKLOG queue — see
 #      the QUEUE KIND block below for why.
 #   4. retro-debt          DELEGATED to compute_retro_debt (never re-implemented).
+#   5. awaiting-observation [v9] every item in `awaiting_observation` is reported
+#      AND its liveness predicate RE-EVALUATED, exactly as `blocked` is re-checked
+#      each cycle. observed -> BLOCK (a tester dispatch is now actionable);
+#      not-yet -> ADVISORY (legitimate, outstanding, never "satisfied"); broken or
+#      absent predicate -> BLOCK (an unverifiable park is the prose-remedy class).
+#
+# WHY check 1 AND check 5 (the honest fix, 2026-08-01): UC-ML1 was dwelling in
+# `dev-validating` with a green `ref:`, so check 1 read it as "work done, only a
+# dispatch missing" — FALSE: the dispatch happened and the tester correctly
+# declined, because the capability ships INERT and cannot be observed until armed.
+# The fix is NOT to exclude a state and move on. `awaiting_observation` leaves
+# STALL_STATES, so check 1 stops firing, but the item is then carried by check 5,
+# which re-runs its predicate every cycle and BLOCKS the moment the observation
+# lands. So a legitimate park is distinguishable from an undispatched item by a
+# recorded, machine-evaluated reason — and parking cannot be used to hide, because
+# entering the state without a predicate is refused at the write.
 #
 # NEVER derive "is it pushed / is it deployed" from event-note PROSE. That exact
 # mistake produced a confident, precisely-quantified, WRONG conclusion: a note
@@ -1851,6 +2055,9 @@ def cmd_retro_mark(a):
 # ---------------------------------------------------------------------------
 # The states where "work done, only a dispatch missing" can strand an item.
 # (VALIDATING_STATES is the same set the CFR/quality metrics fold over.)
+# `awaiting_observation` is deliberately NOT here: an item there HAS been dispatched
+# and the tester recorded a machine-checkable reason it could not conclude. It is
+# carried by check 5 instead — see the WHY block above.
 STALL_STATES = VALIDATING_STATES
 # Events that carry a `ref:` to FINISHED work. `fixed` = defect graph;
 # `built_green`/`deployed` = use-case dev lane; `promoted` = the cicd event that
@@ -2003,13 +2210,15 @@ def _hms(seconds):
 
 
 def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
-                      threshold=3, now=None):
-    """PURE-ish computation (the only impurity is the read-only git query, which
-    is injected via the module-level `_ref_on_trunk` so tests can substitute it).
+                      threshold=3, now=None, observe=True,
+                      observe_timeout=DEFAULT_OBSERVE_TIMEOUT):
+    """PURE-ish computation (the impurities are the read-only git query and the
+    observation predicate, both injected via the module-level `_ref_on_trunk` /
+    `_run_observation` so tests can substitute them).
 
     Returns a list of finding dicts, each with:
       check    — 'stalled-validation' | 'ready-below-floor' | 'queue-over-cap'
-                 | 'retro-debt'
+                 | 'retro-debt' | 'awaiting-observation'
       severity — 'block'    exit 2; the loop may not pull until it is cleared
                  'advisory' exit UNAFFECTED; real, reported, but not WIP harm
                             (a BACKLOG queue over cap — see the QUEUE KIND block)
@@ -2126,6 +2335,78 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
                 f"{over} to done before admitting more; the cap targets gross lead "
                 f"time (§F2), work cannot be allowed to age.")))
 
+    # --- 5. awaiting observation: RE-CHECK the predicate, every cycle [v9] ----
+    for iid in sorted(items):
+        if states.get(iid) != AWAITING_OBSERVATION:
+            continue
+        it = items[iid]
+        # FLOW items only. An aggregate BUBBLES into this state from a child and has
+        # no own event stream, so it carries no predicate — reporting it would be a
+        # phantom "no predicate" block for every ancestor of one parked use-case.
+        if graphs.kind(it.type) != "flow":
+            continue
+        _st, entered = _current_segment(graphs, it, now)
+        dwell = (now - entered).total_seconds() if entered else None
+        spec = observe_spec_in_effect(it)
+        common = {"check": "awaiting-observation", "ids": [iid],
+                  "state": AWAITING_OBSERVATION, "dwell_s": dwell, "spec": spec}
+        if not spec:
+            # Only reachable by a hand-edit (append refuses it; validate I6 flags
+            # it). An unverifiable park is a PROSE park — fail CLOSED and loud.
+            findings.append(dict(common, severity="block", verdict="no-predicate",
+                                 message=(
+                f"[awaiting-observation] {iid} has been parked in "
+                f"'{AWAITING_OBSERVATION}' for {_hms(dwell)} but carries NO "
+                f"observation predicate — nothing can decide when it is done, so it "
+                f"would sit here for ever. Remedy: `make wi-append PROJECT={project} "
+                f"ID={iid} EVENT=amended AGENT=solution-architect "
+                f"OBSERVE={OBSERVE_SCHEME}<target>` naming a committed re-runnable "
+                f"probe (exit 0, printing `{OBS_SENTINEL} {OBS_OBSERVED}` or "
+                f"`{OBS_SENTINEL} {OBS_NOT_YET}`).")))
+            continue
+        if not observe:
+            findings.append(dict(common, severity="unknown", verdict="not-evaluated",
+                                 message=(
+                f"[awaiting-observation] {iid}: predicate '{spec}' was NOT evaluated "
+                f"(--no-observe). Parked {_hms(dwell)}; SHIPPED AND GREEN BUT "
+                f"UNPROVEN and NOT done. This run establishes nothing about it — "
+                f"re-run without --no-observe before concluding anything.")))
+            continue
+        verdict, detail = _run_observation(project, spec, observe_timeout)
+        if verdict == "observed":
+            findings.append(dict(common, severity="block", verdict=verdict,
+                                 detail=detail, message=(
+                f"[awaiting-observation] {iid}: the observation HAS LANDED "
+                f"(predicate '{spec}' reported {OBS_SENTINEL} {OBS_OBSERVED}"
+                f"{'; ' + detail if detail else ''}) — the "
+                f"capability has now been seen working on data we did not author, "
+                f"after {_hms(dwell)} parked. A tester dispatch is ACTIONABLE. "
+                f"Remedy: dispatch the tester to validate against that real record, "
+                f"then `make wi-append PROJECT={project} ID={iid} "
+                f"EVENT=validated|rejected AGENT=tester` with the observation "
+                f"pointer in NOTE.")))
+        elif verdict == "not-yet":
+            findings.append(dict(common, severity="advisory", verdict=verdict,
+                                 detail=detail, message=(
+                f"ADVISORY (does NOT block the pull) [awaiting-observation] {iid} "
+                f"parked {_hms(dwell)}: '{spec}' reports NOT YET OBSERVED. SHIPPED "
+                f"AND GREEN BUT UNPROVEN — it is NOT done, it must never fold into a "
+                f"`done` aggregate, and this is re-checked every cycle. Legitimate "
+                f"while the trigger genuinely has not occurred; if the wait is "
+                f"unbounded, arm it, force the trigger, or judge it statistically "
+                f"(§12d.3) — never conclude it works.")))
+        else:
+            findings.append(dict(common, severity="block", verdict="broken",
+                                 detail=detail, message=(
+                f"[awaiting-observation] {iid}: its observation predicate CANNOT BE "
+                f"EVALUATED ('{spec}': {detail}). An unrunnable liveness predicate "
+                f"is not a predicate (§17c.2) — the item would sit parked for ever "
+                f"with no mechanism, which is the `make wire-provenance` class this "
+                f"state exists to prevent. Remedy: fix the probe (it must exit 0 "
+                f"printing `{OBS_SENTINEL} {OBS_OBSERVED}`/`{OBS_SENTINEL} "
+                f"{OBS_NOT_YET}`) or record a corrected one "
+                f"with `make wi-append … EVENT=amended … OBSERVE=…`.")))
+
     # --- 4. retro debt (DELEGATED — do not duplicate that logic) -------------
     routine, incidents, due, _detail, marker = compute_retro_debt(
         graphs, project, threshold, now)
@@ -2152,8 +2433,10 @@ def cmd_loop_gate(a):
     graphs = Graphs.load()
     now = parse_ts(getattr(a, "now", None)) if getattr(a, "now", None) else None
     stale_hours = getattr(a, "stale_hours", DEFAULT_STALE_HOURS)
-    findings = compute_loop_gate(graphs, a.project, stale_hours=stale_hours,
-                                threshold=a.threshold, now=now)
+    findings = compute_loop_gate(
+        graphs, a.project, stale_hours=stale_hours, threshold=a.threshold, now=now,
+        observe=getattr(a, "observe", True),
+        observe_timeout=getattr(a, "observe_timeout", None) or DEFAULT_OBSERVE_TIMEOUT)
     blocking = [f for f in findings if f["severity"] == "block"]
     advisory = [f for f in findings if f["severity"] == "advisory"]
     unknown = [f for f in findings if f["severity"] == "unknown"]
@@ -2163,11 +2446,16 @@ def cmd_loop_gate(a):
     # can never be read as "everything is satisfied".
     adv_tail = (f"; {len(advisory)} advisory (non-blocking, still outstanding)"
                 if advisory else "")
+    # UNKNOWN findings likewise never affect the exit code, but they MUST reach the
+    # headline: an `awaiting_observation` item whose predicate was not evaluated
+    # (--no-observe) or a stalled item whose ref will not resolve is a thing this
+    # run FAILED TO ESTABLISH, and "all preconditions hold" would read as if it had.
+    adv_tail += (f"; {len(unknown)} NOT ESTABLISHED (see ? lines)" if unknown else "")
     verdict = (f"BLOCKED ({len(blocking)} violated precondition"
                f"{'' if len(blocking) == 1 else 's'}) — do NOT pull until cleared"
                if blocking else
                ("OK — no BLOCKING precondition violated, the loop may pull"
-                if advisory else
+                if (advisory or unknown) else
                 "OK — all preconditions hold, the loop may pull"))
     print(f"loop-gate[{a.project}] @ {stamp} (stale-hours {stale_hours}) "
           f"=> {verdict}{adv_tail}")
@@ -2191,7 +2479,7 @@ def cmd_validate(a):
         for v in violations:
             print(f"  - {v}", file=sys.stderr)
         sys.exit(1)
-    print(f"validate: {a.project} clean — I1–I4 all hold.")
+    print(f"validate: {a.project} clean — I1–I4 + I6 all hold.")
 
 
 def validate_items(graphs, project):
@@ -2239,6 +2527,29 @@ def validate_items(graphs, project):
         is_terminal = state in ("done", "resolved", "wontfix", "cancelled")
         if is_terminal and q is not None:
             violations.append(f"(I2) {iid}: terminal state '{state}' but queue '{q}' is non-null")
+
+        # I6: an `awaiting_observation` FLOW item carries a VALID machine-checkable
+        # observation predicate. `append` refuses the transition without one, so a
+        # violation here means a hand-edit — the same role I2 plays for the
+        # terminal/queue pair. (I5 is RESERVED for IMP-011's CORE-job invariant,
+        # which is still owed; this is deliberately NOT that number.)
+        # AGGREGATES are exempt by construction: a slice/chunk BUBBLES into this
+        # state from a child and has no own event stream to carry a predicate — the
+        # predicate lives on the child, which is checked in its own right.
+        if state == AWAITING_OBSERVATION and graphs.kind(it.type) == "flow":
+            spec = observe_spec_in_effect(it)
+            if not spec:
+                violations.append(
+                    f"(I6) {iid}: in '{AWAITING_OBSERVATION}' with NO observation "
+                    f"predicate — nothing can decide when it is done. Record one "
+                    f"via `wi-append … EVENT=amended … OBSERVE={OBSERVE_SCHEME}"
+                    f"<target>`; do not hand-edit item state.")
+            else:
+                try:
+                    parse_observe_spec(spec)
+                except ValueError as e:
+                    violations.append(
+                        f"(I6) {iid}: observation predicate is not evaluable: {e}")
 
         # I4b: a done FLOW item must live in done/ (aggregates always stay in
         # active/ — their state is DERIVED from children, not their own stream,
@@ -2652,6 +2963,16 @@ def main(argv=None):
     ap.add_argument("--ref")
     ap.add_argument("--note")
     ap.add_argument("--ts")
+    ap.add_argument("--observe",
+                    help="REQUIRED when entering `awaiting_observation` (event "
+                         "not_yet_observed): the machine-checkable liveness "
+                         f"predicate, '{OBSERVE_SCHEME}<target> [VAR=VALUE ...]' — a "
+                         "committed re-runnable make target in work/<project>/ that "
+                         f"exits 0 and prints `{OBS_SENTINEL} {OBS_OBSERVED}` once "
+                         f"the observation has landed (or `{OBS_SENTINEL} "
+                         f"{OBS_NOT_YET}` while it has not). Also accepted on the "
+                         "`amended` self-edge, where it REPLACES the predicate in "
+                         "effect. Rejected on any other event.")
     ap.add_argument("--tokens", type=int,
                     help="subagent_tokens the dispatched specialist spent producing "
                          "this transition (optional; feeds the plumbing-vs-delivery "
@@ -2693,8 +3014,18 @@ def main(argv=None):
                         help="MECHANICAL pull-precondition gate: exit 2 if any "
                              "blocking precondition is violated (stalled "
                              "validation / ready below floor / queue over cap / "
-                             "retro due)")
+                             "retro due / observation landed)")
     lg.add_argument("--project", required=True)
+    lg.add_argument("--no-observe", dest="observe", action="store_false",
+                    default=True,
+                    help="skip re-evaluating `awaiting_observation` liveness "
+                         "predicates (they can be slow real-data queries). Each "
+                         "parked item is then reported as NOT EVALUATED — a skipped "
+                         "run can never read as satisfied.")
+    lg.add_argument("--observe-timeout", dest="observe_timeout", type=float,
+                    default=DEFAULT_OBSERVE_TIMEOUT,
+                    help="seconds an observation predicate may take before it is "
+                         f"BROKEN (default {DEFAULT_OBSERVE_TIMEOUT})")
     lg.add_argument("--stale-hours", dest="stale_hours", type=float,
                     default=DEFAULT_STALE_HOURS,
                     help="dwell in validating/dev-validating/prod-validating "

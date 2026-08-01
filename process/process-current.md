@@ -676,11 +676,12 @@ So the definition of done gains a third obligation and the state graph gains a s
    requires an **observation pointer to a real record the system did not author** (§17a).
    Where the capability has not been observed — including because its trigger is genuinely
    rare — the item does **NOT** become `done`: it enters **`awaiting_observation`**, a
-   non-terminal state carrying a machine-checkable liveness predicate (the census query,
-   IMP-028), re-checked every cycle exactly as `blocked` is, and exiting via `validated`
-   when the observation lands. Rare branches are judged statistically — for a declared base
-   rate `p` (with a sourced denominator) and exposure `N`, zero observations is RED when
-   `P(0 | p, N) < α` — never by a binary someone invents at validation time.
+   non-terminal state carrying a machine-checkable liveness predicate, re-checked every cycle
+   exactly as `blocked` is, and exiting via `validated` when the observation lands (or
+   `rejected` when the observation falsifies the capability). Rare branches are judged
+   statistically — for a declared base rate `p` (with a sourced denominator) and exposure `N`,
+   zero observations is RED when `P(0 | p, N) < α` — never by a binary someone invents at
+   validation time.
 This is the honest state the five items should have occupied: shipped, green, and unproven.
 Recording them as `done` is what made CFR and rework read clean while nothing worked, so
 this is a change to the ARTIFACT that could not detect the failure, as required. Note the
@@ -688,9 +689,32 @@ multi-audience DoD (test + runbook + marketing + delivery-tree, v89) did not hel
 and could not: **all four audiences document INTENT** — the runbook describes error pathways
 we imagined, marketing the capability we believe we shipped, the delivery tree the item we
 closed. None of the four is an observation. Observation is the missing fifth audience.
-The state-graph edit + the I5/`awaiting_observation` predicate is machinery work, registered
-as an item (the orchestrator does not write machinery code); until it lands, the tester
-reports `not-yet-observed` in its return and the item is held out of `done` by hand. [EXP-122]
+
+**LANDED 2026-08-01 (state-graph v9) — the hand-hold is gone.** `awaiting_observation` was the
+THIRD v125 remedy that existed only as prose (with `make wire-provenance`, which did not
+exist, and the corpus provenance markers no gate read): v125's changelog listed it as a
+COMPLETED change and it had never been added, while this section carried an interim
+"held out of `done` by hand" instruction. It now EXISTS and its mechanism has been observed
+firing (§17c.2). Concretely:
+- **`awaiting_observation`** on the `use-case` and `defect` graphs, non-terminal, owner
+  `external`, queue `waiting`. Entered by the **tester** with
+  `make wi-append … EVENT=not_yet_observed AGENT=tester OBSERVE=make:<target>` from any
+  validation state (`dev-validating`/`prod-validating`/`validating`); exits `validated` →
+  `done`/`resolved` or `rejected` → `reworking`/`fixing`. NOT on `open-item` (no deployable
+  capability, no observation surface).
+- **The predicate is REQUIRED, not optional**: `append` REFUSES the transition without
+  `OBSERVE=`, because a reason in `note:` can never come back negative (§17c Layer 2). It is a
+  committed re-runnable target in `work/<project>/Makefile` that exits 0 and prints
+  `OBSERVATION: observed` / `OBSERVATION: not-yet`; anything else is a BROKEN predicate.
+- **Re-checked every cycle** by `make loop-gate` **check 5**: observed ⇒ BLOCKS (a tester
+  dispatch is now actionable), not-yet ⇒ ADVISORY (real, outstanding, never "satisfied"),
+  broken/absent ⇒ BLOCKS. `wi-validate` **I6** catches a hand-edited predicate-less park.
+- **It can never fold into `done`**: an `awaiting_observation` child holds its parent
+  aggregate out of `done` (the parent reads `awaiting_observation`).
+The tester therefore no longer reports `not-yet-observed` in prose and no item is held out of
+`done` by hand — it is a state, with a predicate, on a cadence. Contract:
+`process/machinery/CONTRACT.md`; the still-owed IMP-011 CORE-job invariant keeps the number
+**I5**, which is reserved and NOT reused. [EXP-122]
 
 ## 12e. Cancelling obsoleted work items [v87]
 Work items have a **`cancelled`** terminal (state-graphs v5) for the item that is no longer
@@ -1549,6 +1573,18 @@ the first). It checks:
 2. **Ready below floor** — `len(ready) < min_items` (§F2). BLOCKING.
 3. **Queue over cap** — a queue depth > its `wip_limit` (§F2), at **two severities**.
 4. **Retro debt due** — delegating to §F8's existing logic, never reimplementing it.
+5. **Awaiting observation** [state-graph v9, §12d.3] — every item parked in
+   `awaiting_observation` is reported AND its liveness predicate **re-evaluated on this run**,
+   exactly as `blocked` is re-checked each cycle. `OBSERVATION: observed` ⇒ **BLOCKING** (a
+   tester dispatch is now actionable — the same lever as check 1); `OBSERVATION: not-yet` ⇒
+   **ADVISORY** (legitimate, outstanding, never "satisfied"); a broken or absent predicate ⇒
+   **BLOCKING**, because an unrunnable liveness predicate is not a predicate (§17c.2). Check 1
+   deliberately does not also fire on a parked item: it HAS been dispatched and the tester
+   recorded a machine-checkable reason it could not conclude. That is not an exemption —
+   check 5 carries it and blocks the moment the predicate flips, so parking cannot hide a
+   missing dispatch. `NO_OBSERVE=1` skips the evaluation and then reports each parked item as
+   NOT EVALUATED, and the run's headline says `NOT ESTABLISHED` rather than "all preconditions
+   hold" — a skipped check may never read as satisfied.
 
 **A gate blocks only on harm that STOPPING relieves (v126 addendum) — Little's Law governs WIP, not
 backlog depth.** Check 3 originally blocked on ANY queue over its cap; that was a modelling

@@ -188,14 +188,28 @@ retro-mark:
 #                         and pressures agents to close real findings. Declared
 #                         per queue as a `kind` row in queues/policy.csv.
 #   4 retro-debt          delegated to the retro-debt computation
+#   5 awaiting-observation [state-graph v9] every item parked in
+#                         `awaiting_observation` (shipped, green, UNPROVEN) is
+#                         reported AND its liveness predicate RE-EVALUATED, exactly
+#                         as `blocked` is re-checked each cycle. observed (probe
+#                         exit 0) BLOCKS — a tester dispatch is now actionable;
+#                         not-yet (exit 3) is ADVISORY; a broken/absent predicate
+#                         BLOCKS, because an unrunnable liveness predicate is not a
+#                         predicate (v125 §17c.2).
 #
 # Exit 2 iff a BLOCKING check fired. An advisory-only run exits 0, says so, and
 # still prints the advisory (`!` line) so it cannot be read as satisfied.
 #
 # make loop-gate PROJECT=OagEventSource [STALE_HOURS=4] [THRESHOLD=3]
+#                                       [NO_OBSERVE=1] [OBSERVE_TIMEOUT=120]
+# NO_OBSERVE=1 skips re-evaluating the observation predicates (they can be slow
+#   real-data queries); each parked item is then reported NOT EVALUATED, so a
+#   skipped run can never read as satisfied.
 loop-gate:
 	$(WORKITEMS) loop-gate --project $(PROJECT) \
-	  $(if $(STALE_HOURS),--stale-hours $(STALE_HOURS),) $(if $(THRESHOLD),--threshold $(THRESHOLD),)
+	  $(if $(STALE_HOURS),--stale-hours $(STALE_HOURS),) $(if $(THRESHOLD),--threshold $(THRESHOLD),) \
+	  $(if $(NO_OBSERVE),--no-observe,) $(if $(OBSERVE_TIMEOUT),--observe-timeout $(OBSERVE_TIMEOUT),) \
+	  $(if $(NOW),--now "$(NOW)",)
 
 # Unit tests for the work-item machinery itself (stdlib unittest; temp-dir
 # fixtures, never the real project data). Uses the SAME cross-platform
@@ -208,18 +222,29 @@ test-wi:
 # State lives ONLY in the per-item files (work/$(PROJECT)/items/{active,done}/<ID>.md);
 # queues, stats and the dependency tree are DERIVED here, never stored-and-hand-synced.
 # Append an edge-checked event (the ONLY way to change item state; rejects illegal transitions):
-# make wi-append PROJECT=P ID=UC-1 EVENT=made_ready AGENT=flow-manager [REF=<sha>] [NOTE="..."] [TOKENS=<n>] [DURATION_MS=<n>]
+# make wi-append PROJECT=P ID=UC-1 EVENT=made_ready AGENT=flow-manager [REF=<sha>] [NOTE="..."] [TOKENS=<n>] [DURATION_MS=<n>] [OBSERVE=make:<target>]
 # TOKENS = subagent_tokens the dispatched specialist spent producing this transition (optional).
 # DURATION_MS = the dispatched agent's REAL cycle time in ms for this transition (optional;
 #   the dispatch layer's reported duration_ms). Feeds §F agent-cycle-time-vs-GLT in wi-project.
+# OBSERVE = the machine-checkable liveness predicate, REQUIRED on EVENT=not_yet_observed
+#   (entering `awaiting_observation`, state-graph v9). Form: `make:<target> [VAR=VALUE ...]`
+#   — a COMMITTED, RE-RUNNABLE target in work/$(PROJECT)/Makefile that exits 0 when the
+#   observation has landed and 3 when it has not (anything else = a BROKEN predicate,
+#   which blocks the loop; `make` itself exits 1/2, so a missing probe can never
+#   masquerade as "not observed yet"). Also accepted on the `amended` self-edge, where it
+#   REPLACES the predicate in effect. Rejected on any other event. A reason in NOTE is
+#   NOT a substitute: prose cannot come back negative (v125 §17c Layer 2).
 wi-append:
 	$(WORKITEMS) append --project $(PROJECT) --id $(ID) --event $(EVENT) --agent $(AGENT) \
-	  $(if $(REF),--ref "$(REF)",) $(if $(NOTE),--note "$(NOTE)",) $(if $(TOKENS),--tokens "$(TOKENS)",) $(if $(DURATION_MS),--duration-ms "$(DURATION_MS)",)
+	  $(if $(REF),--ref "$(REF)",) $(if $(NOTE),--note "$(NOTE)",) $(if $(TOKENS),--tokens "$(TOKENS)",) $(if $(DURATION_MS),--duration-ms "$(DURATION_MS)",) $(if $(OBSERVE),--observe "$(OBSERVE)",)
 # Recompute ALL views (queues + stats + tree + re-render each item's derived block). Run after each loop.
 # make wi-project PROJECT=OagEventSource
 wi-project:
 	$(WORKITEMS) project --project $(PROJECT) $(if $(NOW),--now "$(NOW)",)
-# Drift GATE by construction (invariants I1-I4). Exit non-zero on any violation. Run before pulling.
+# Drift GATE by construction (invariants I1-I4 + I6). Exit non-zero on any violation. Run before pulling.
+# I6 [v9] = an `awaiting_observation` flow item carries a VALID observation predicate
+#   (append refuses the transition without one, so a violation here means a hand-edit).
+#   I5 stays RESERVED for IMP-011's still-owed CORE-job aggregate invariant.
 # make wi-validate PROJECT=OagEventSource
 wi-validate:
 	$(WORKITEMS) validate --project $(PROJECT)

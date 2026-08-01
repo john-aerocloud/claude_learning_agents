@@ -24,6 +24,10 @@ parents: [SLC-032]        # UPWARD edges only: hierarchical container(s). REQUIR
 deps: [UC-C0]             # peer prerequisites (DAG edges the pull uses for the independent set). may be empty.
 created_ts: 2026-06-17T21:30:00Z
 events:                   # append-only. state = fold(events) through the type graph. NEVER store a `state:` field.
+                          # a `not_yet_observed` event MUST carry `observe: make:<target> [VAR=V]` —
+                          # the machine-checkable liveness predicate of an `awaiting_observation`
+                          # park [v9]. Also accepted on the `amended` self-edge, where it REPLACES
+                          # the predicate in effect (the one in force is the LAST event carrying one).
                           # each event MAY carry an OPTIONAL `tokens: <int>` — the subagent_tokens the
                           # dispatched specialist spent producing that transition. Absent ⇒ unknown/0
                           # (parsing is tolerant). Feeds the plumbing-vs-delivery cost-split in stats.
@@ -107,6 +111,59 @@ rather than silently editing the Definition prose, so the fact that the definiti
 visible to `fold(events)` and every derived view. The self-edge is time-preserving (it closes and
 reopens the same state at the same instant), so it never distorts gross lead time.
 
+**Shipped, green and UNPROVEN — `awaiting_observation` [state-graph v9].** A capability is
+not `done` until it has been OBSERVED working on data the system did not author (§17c.1).
+When an item is built, deployed and independently re-verified green but the capability has
+had **no opportunity to occur** — it ships inert behind a flag, or its trigger is genuinely
+rare — the honest state is `awaiting_observation`, reached by
+`dev-validating|prod-validating|validating --not_yet_observed(tester)--> awaiting_observation`
+(defect graph: from `validating`). It exits via `validated` (→ `done`/`resolved`, the
+observation landed) or `rejected` (→ `reworking`/`fixing`, the observation FALSIFIED the
+capability), plus the `amended` self-edge and `cancelled`. It is **NON-TERMINAL**: owner
+`external` (the wait is outside the system, never booked as the tester's effort), queue
+`waiting`, and it is deliberately absent from the aggregate done-set.
+
+The transition **REQUIRES a machine-checkable liveness predicate** — `append` refuses it
+without one, because a park whose reason is only a `note:` can never come back negative and
+therefore never ends (§17c Layer 2). Record it with
+`make wi-append … EVENT=not_yet_observed AGENT=tester OBSERVE=make:<target> [VAR=VALUE ...]`.
+The predicate is a **committed, re-runnable target in `work/<project>/Makefile`** (§17c.4)
+that **exits 0** and prints a sentinel line on stdout:
+
+| probe output | verdict | `loop-gate` |
+| --- | --- | --- |
+| `OBSERVATION: observed` | reality produced the record | **BLOCKS** — a tester dispatch is now actionable |
+| `OBSERVATION: not-yet` | ran, honestly found nothing yet | **ADVISORY** — legitimate, outstanding, never "satisfied" |
+| anything else | BROKEN predicate | **BLOCKS** — an unrunnable predicate is not a predicate (§17c.2) |
+
+"Anything else" includes a missing target, a crash, both sentinels (ambiguous), a non-zero
+exit and a timeout, so a probe that **does not exist** can never masquerade as "not observed
+yet" — that confusion is the `make wire-provenance` class this state exists to prevent. The
+verdict is a stdout sentinel and NOT an exit code because **`make` does not propagate a
+recipe's exit status** (a recipe exiting 3 makes `make` itself exit 2); that was found by
+driving a real `make`, after a stubbed test had passed against a three-way exit-code
+contract, and is pinned by `test_run_observation_against_a_real_make`.
+
+`loop-gate` **check 5** re-evaluates every parked item's predicate on **every run**, exactly
+as `blocked` is re-checked each cycle; `--no-observe` skips the evaluation and then reports
+each item as NOT EVALUATED (a skipped run can never read as satisfied). An `awaiting_observation`
+item is deliberately outside check 1 (stalled-validation): it HAS been dispatched and the
+tester recorded a reason it could not conclude. That is not an exemption — check 5 carries it
+instead and BLOCKS the moment the predicate flips, so parking cannot be used to hide.
+
+**`awaiting_observation` and aggregates.** `awaiting_observation` is not in the aggregate
+done-set, so **an awaiting child can never let its parent read `done`** — that fold is what
+made CFR and rework read clean for the five v125 capabilities while nothing worked. An
+aggregate whose non-terminal children are ALL parked (`blocked` or `awaiting_observation`)
+bubbles to `awaiting_observation` if any of them is awaiting, else to `blocked`: both are
+external waits, but the unproven-capability fact is the one a reader most needs AND the one
+that could silently read `done` later, so it takes precedence. One non-terminal child in real
+work still wins (`in_progress`). Aggregates are exempt from the predicate requirement (I6):
+they bubble into the state and have no own event stream — the predicate lives on the child.
+Not added to `open-item`: an open item is a finding/decision-debt note with no deployable
+capability and no observation surface; one whose closure needs an observation belongs
+registered as a use-case or defect.
+
 **Observing an external block clear [state-graph v7].** `unblocked` now carries the same agent list
 as `blocked` (flow-manager, orchestrator) on both flow graphs: whoever holds the evidence that the
 external condition cleared records it.
@@ -155,6 +212,12 @@ Exits non-zero if ANY invariant is violated:
 - (I2) no item is both `done`/terminal and in a non-null queue (the UC-SF3 / UC-O8 hazard — now impossible to *represent*, this catches hand-edits that try).
 - (I3) edge consistency: every `parents`/`deps` id resolves to an existing item; no cycles in `deps`.
 - (I4) exactly one file per id across active/ + done/; a `done` item lives in done/.
+- (I5) **RESERVED** for IMP-011's CORE-job invariant (a CORE-job aggregate may not be `done`
+  without either a job-success validation event in its subtree or a registered, not-yet-done
+  remainder child). **Still owed** — the number is held so it is not silently reused.
+- (I6) an `awaiting_observation` FLOW item carries a VALID observation predicate [v9]. `append`
+  refuses the transition without one, so a violation here means a hand-edit — the same role I2
+  plays for the terminal/queue pair. Aggregates are exempt (they bubble into the state).
 
 ## 4. Statistics reset
 

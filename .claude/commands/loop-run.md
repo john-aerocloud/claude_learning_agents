@@ -36,7 +36,11 @@ state and flow decisions.
 > It checks (1) **stalled validation** — an item dwelling past `--stale-hours` (default 4) in
 > a validation state whose latest `fixed`/`built_green`/`deployed` carries a `ref:`, i.e. the
 > work is DONE and only a dispatch is missing; (2) Ready below `min_items`; (3) a queue over
-> `wip_limit`; (4) retro debt due (§F8). Fix what it names, then re-run to confirm exit 0.
+> `wip_limit`; (4) retro debt due (§F8); (5) **awaiting observation** — every item parked in
+> `awaiting_observation` (shipped, green, UNPROVEN) has its liveness predicate RE-RUN on this
+> invocation, so an observation that has now landed BLOCKS for a tester dispatch, and a
+> predicate that cannot be evaluated BLOCKS too (state-graph v9, §12d.3/§17c). Fix what it
+> names, then re-run to confirm exit 0.
 >
 > **Check 3 has TWO severities (v126 addendum) — Little's Law governs WIP, not backlog depth.** A
 > **WIP-stage** queue over cap (`ready`/`wip`/`rework`) BLOCKS (`-` line, exit 2). A

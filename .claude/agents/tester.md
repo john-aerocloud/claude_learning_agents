@@ -568,10 +568,24 @@ validation is the step that owns the inverse direction, so:
   is RED when `P(0 | p, N) < α`. Do not invent a threshold at validation time; use the
   declared rate.
 - **`not-yet-observed` is a first-class, DECLARED outcome — and it does NOT reach `done`.**
-  If a capability has not been observed on real data, say so in your return and do not fire
-  `validated`: the item belongs in `awaiting_observation` with the census query as its
-  machine-checkable predicate. Passing an unobserved capability as `done` is the artifact
-  that produced all five failures.
+  If a capability has not been observed on real data, do **not** fire `validated`. **It is a
+  STATE, not a note in your return** (state-graph v9, landed 2026-08-01): fire
+  `make wi-append PROJECT=<p> ID=<item> EVENT=not_yet_observed AGENT=tester
+  OBSERVE=make:<probe-target> NOTE="<what is being waited for + what you DID establish>"`,
+  which moves it to **`awaiting_observation`** — non-terminal, owner `external`, and unable to
+  let its parent slice read `done`. `loop-gate` check 5 re-runs your predicate every cycle and
+  BLOCKS the loop for a tester dispatch the moment the observation lands, so nothing is left to
+  a human remembering.
+  - **`OBSERVE=` is REQUIRED — the append is REFUSED without it.** The predicate is a
+    committed, re-runnable target in `work/<p>/Makefile` that **exits 0** and prints
+    `OBSERVATION: observed` once the record exists, or `OBSERVATION: not-yet` while it does
+    not (anything else = a BROKEN predicate, which blocks the loop). Do not use an exit code
+    to signal "not yet": `make` does not propagate a recipe's exit status. If no such probe
+    exists yet, **that probe is part of the work** — name it in your return so it is built;
+    a park you cannot evaluate is the prose-remedy failure §17c exists to prevent.
+  - Exit the state with `validated` (the observation landed — put the observation pointer in
+    `NOTE`) or `rejected` (the observation FALSIFIED the capability → `reworking`).
+  Passing an unobserved capability as `done` is the artifact that produced all five failures.
 - **An unrunnable tier is a RED tier.** `make test-fids-integration` times out in its own
   300s `beforeAll`; by our own standard ("an unrun test is a failure") it has been failing
   silently. A tier that cannot run must be fixed or deleted — never left as decoration —

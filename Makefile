@@ -481,9 +481,38 @@ impacted-tests:
 	node .claude/tools/impacted-tests.js --since $(SINCE) --project $(PROJECT)
 
 # Self-tests for the cross-project agent-ops tooling under .claude/tools/
-# (IMP-007 impacted-tests.js). node's built-in runner, no creds, no network.
+# (IMP-007 impacted-tests.js, test-requirement-gate.js). node's built-in runner,
+# no creds, no network.
 test-tools:
 	node --test .claude/tools/*.test.js
+
+# --- §17d test-requirement gate — "the ONLY thing tests validate is the requirements" -
+# Human ruling, 2026-08-02. TWO LIMBS over the committed test sources:
+#   LIMB 1  every test case declares the acceptance criterion it validates, in the
+#           AC-<ID>.<n> vocabulary the codebase already uses. An untagged case is
+#           either WASTE (delete it) or an UNDISCOVERED acceptance criterion
+#           (register it — and the discovery gap earns a retro). The gate makes the
+#           choice unavoidable; it never makes the choice.
+#   LIMB 2  no AUTHORED PRECONDITIONS. A test that builds its prior by mutating a
+#           real capture (`delete capture.x.y`, an override spread over a
+#           corpus-loaded fixture, a hand-set folded field, a stubbed exec boundary)
+#           authored the world, so it can only confirm the code. Fold the prior from
+#           events, or harvest it.
+# Config + committed allowlist + ratchet baseline:
+#   .claude/config/test-requirement-gate/<PROJECT>.json
+# `make` cannot express a three-way exit (a recipe exiting 3 makes make print
+# `Error 3` and exit 2), so the verdict rides a STDOUT SENTINEL — `TRG-VERDICT:` —
+# and the exit code is only 0 or 2. Also wired as loop-gate check 6, so it runs
+# before EVERY pull; a gate in no workflow is not a gate.
+#   make test-requirement-gate [PROJECT=OagEventSource] [MODE=enforce|ratchet|report]
+#   make test-requirement-gate VERBOSE=1      # every limb-1 line
+#   make test-requirement-gate-baseline       # re-cut the ratchet floor (SHRINK only)
+test-requirement-gate:
+	node .claude/tools/test-requirement-gate.js --project $(PROJECT) \
+	  $(if $(MODE),--mode $(MODE),) $(if $(VERBOSE),--verbose,) $(if $(JSON),--json,)
+
+test-requirement-gate-baseline:
+	node .claude/tools/test-requirement-gate.js --project $(PROJECT) --write-baseline
 
 # --- IMP-008 WAF runner-IP exclusion helpers ----------------------------------
 # Add/remove a CIDR from the oxo-test-runner-ips WAFv2 IP set (us-east-1,
@@ -645,7 +674,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove sso-login retro-debt retro-mark loop-gate test-wi wi-append wi-project wi-validate wi-migrate doc-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery
+.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove sso-login retro-debt retro-mark loop-gate test-wi wi-append wi-project wi-validate wi-migrate doc-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools test-requirement-gate test-requirement-gate-baseline board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery
 
 # --- Viggo-fix UC-W7: Country/Nationality ID remediation (T-SQL) --------------
 # Data-driven, self-building T-SQL remediation script set + its local stand-up

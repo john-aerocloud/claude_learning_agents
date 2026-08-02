@@ -2426,7 +2426,108 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
                         f"`make retro-mark PROJECT={project}` to drain it."),
         })
 
+    # --- 6. the test-requirement gate (§17d) — DELEGATED to the real analyser --
+    findings.extend(compute_test_requirement_gate(project))
+
     return findings
+
+
+# ---------------------------------------------------------------------------
+# loop-gate check 6 — the §17d test-requirement gate (human ruling, 2026-08-02)
+#
+#   "The ONLY thing tests should be validating is the requirements. If we are
+#    making up tests for coverage that do not map onto requirements then either
+#    (a) we are wasting time, or (b) we have identified a new acceptance criteria
+#    and we need to retro as to why it wasn't discovered earlier."
+#
+# The analysis itself lives in ONE place — .claude/tools/test-requirement-gate.js —
+# and is DELEGATED to here, never re-implemented (the DRY rule check 4 already
+# follows for retro-debt). This is the loop's only continuously-running workflow,
+# so it is where the gate has to hang: a gate in no workflow is not a gate.
+#
+# SEVERITY, per §F8a ("a gate blocks only on harm that stopping relieves"):
+#   FAIL  (a count ABOVE the committed ratchet baseline) -> BLOCK. A NEW test that
+#         cannot validate a requirement just landed; stopping the line is exactly
+#         the remedy, and the fix is one file.
+#   PASS  (at or below baseline)                          -> ADVISORY. The standing
+#         debt is real and reported every cycle so it stays visible and shrinking,
+#         but blocking the pull on it would halt delivery for a backlog — the same
+#         constraint inversion the v126 addendum corrected on the intake queue.
+#   NOT-CONFIGURED / UNRUNNABLE                           -> UNKNOWN ("? " line).
+#         Never silent, never counted as satisfied: an unevaluated precondition is
+#         not a met one (v9/§17c.2).
+#
+# The verdict is read from the STDOUT SENTINEL, not the exit status — `make`
+# cannot express a three-way exit (a recipe exiting 3 makes make print `Error 3`
+# and exit 2) and the same lesson applies to any wrapper.
+# ---------------------------------------------------------------------------
+TRG_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "..", "..", "..", "tools", "test-requirement-gate.js")
+TRG_SENTINEL = "TRG-VERDICT:"
+TRG_TIMEOUT = 120.0
+
+
+def compute_test_requirement_gate(project, timeout=TRG_TIMEOUT):
+    """Run the committed analyser over `project` and return 0 or 1 finding."""
+    common = {"check": "test-requirement-gate", "ids": []}
+    try:
+        proc = subprocess.run(
+            ["node", os.path.normpath(TRG_SCRIPT), "--project", project,
+             "--repo-root", ROOT, "--json"],
+            capture_output=True, text=True, timeout=timeout)
+        report = json.loads(proc.stdout)
+    except Exception as exc:                                    # noqa: BLE001
+        return [dict(common, severity="unknown", verdict="UNRUNNABLE", ac=None,
+                     authored=None, message=(
+            f"[test-requirement-gate] NOT ESTABLISHED — the analyser would not run "
+            f"({type(exc).__name__}: {str(exc)[:160]}). An unrunnable gate is not a "
+            f"clean one. Remedy: `make test-requirement-gate PROJECT={project}` and "
+            f"fix what it reports."))]
+
+    verdict = report.get("verdict")
+    counts = report.get("counts", {})
+    ac, authored = counts.get("ac", 0), counts.get("authored", 0)
+    base = report.get("baseline") or {}
+    common = dict(common, verdict=verdict, ac=ac, authored=authored)
+
+    if verdict == "NOT-CONFIGURED":
+        return [dict(common, severity="unknown", message=(
+            f"[test-requirement-gate] NOT ESTABLISHED — no "
+            f".claude/config/test-requirement-gate/{project}.json, so nothing was "
+            f"checked. That is not the same as clean: no test in this project is "
+            f"known to declare the acceptance criterion it validates, and no "
+            f"authored-precondition rule ran. Remedy: copy the OagEventSource "
+            f"config, measure the honest baseline, commit it."))]
+
+    detail = (f"limb1 untagged={ac} (baseline {base.get('ac', 0)}), "
+              f"limb2 authored-preconditions={authored} "
+              f"(baseline {base.get('authored', 0)}), "
+              f"allowlist={counts.get('allowlistEntries', 0)} entries "
+              f"suppressing {counts.get('allowlisted', 0)}")
+
+    if verdict == "FAIL":
+        worst = "; ".join(
+            f"{v['rule']} {v['file']}:{v['line']}"
+            for v in report.get("violations", []) if v.get("limb") == "authored")[:600]
+        cfg_err = "; ".join(report.get("configErrors", []))[:400]
+        return [dict(common, severity="block", message=(
+            f"[test-requirement-gate] REGRESSION above the committed ratchet — "
+            f"{detail}. A test that cannot validate a requirement has just landed. "
+            f"Per the ruling it is either WASTE (delete it) or an UNDISCOVERED "
+            f"acceptance criterion (register it, and the discovery gap earns a "
+            f"retro). Remedy: `make test-requirement-gate PROJECT={project} "
+            f"VERBOSE=1`." + (f" Limb-2 hits: {worst}." if worst else "")
+            + (f" CONFIG ERRORS: {cfg_err}." if cfg_err else "")))]
+
+    if ac or authored:
+        return [dict(common, severity="advisory", message=(
+            f"ADVISORY (does NOT block the pull) [test-requirement-gate] standing "
+            f"debt at the ratchet floor: {detail}. Every one of these is, per the "
+            f"ruling, either waste or an undiscovered acceptance criterion — the "
+            f"number may only SHRINK (`make test-requirement-gate-baseline` refuses "
+            f"to raise it). Reported every cycle so it cannot quietly become normal."))]
+
+    return []
 
 
 def cmd_loop_gate(a):

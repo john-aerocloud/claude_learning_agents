@@ -116,7 +116,7 @@ reported as an **ADVISORY** that does not touch the exit code (see check 3 below
   DUE; `make retro-mark PROJECT=P` drains it at the retro's close.
 - **`make loop-gate PROJECT=P [STALE_HOURS=4] [THRESHOLD=3] [NO_OBSERVE=1]
   [OBSERVE_TIMEOUT=120] [NOW=…]`** — the §F8a **pull precondition** gate; run it before
-  EVERY pull (`loop-run.md` step 0b). Five checks:
+  EVERY pull (`loop-run.md` step 0b). Six checks:
   1. **stalled-validation** — an item in `validating`/`dev-validating`/`prod-validating`
      dwelling past `STALE_HOURS` whose latest `fixed`/`built_green`/`deployed`/`promoted`
      event carries a `ref:`. The highest-value check: the work is DONE and only a
@@ -160,6 +160,18 @@ reported as an **ADVISORY** that does not touch the exit code (see check 3 below
      never read as satisfied. Note check 1 deliberately does NOT fire on a parked item:
      it HAS been dispatched and the tester recorded a machine-checkable reason it could
      not conclude — check 5 carries it instead, and blocks the moment the predicate flips.
+  6. **test-requirement-gate** [v127, §17d] — DELEGATED to the committed analyser
+     `.claude/tools/test-requirement-gate.js` (`make test-requirement-gate PROJECT=P`),
+     never reimplemented here. Two limbs over the project's test sources: every test case
+     declares the `AC-<ID>.<n>` it validates, and no test AUTHORS its precondition by
+     mutating a real capture. **Severity follows §F8a — a gate blocks only on harm that
+     stopping relieves:** a count ABOVE the committed ratchet baseline is **BLOCKING** (a
+     test that cannot validate a requirement has just landed; the fix is one file), the
+     standing debt at the baseline is **ADVISORY** and reported every cycle so it stays
+     visible and shrinking, and **NOT-CONFIGURED / UNRUNNABLE is `?` UNKNOWN** — never a
+     silent pass, because a gate nobody could run is not a clean one. The verdict is read
+     from the analyser's stdout sentinel (`TRG-VERDICT:`), not from its exit status.
+     Config, allowlist and baseline: `.claude/config/test-requirement-gate/<P>.json`.
 
   Output prefixes: `-` blocking (exit 2), `!` advisory (exit unaffected), `?` UNKNOWN
   (exit unaffected — could not be established).

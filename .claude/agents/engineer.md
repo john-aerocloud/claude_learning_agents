@@ -162,6 +162,35 @@ hardcode the profile name.
      `deriveOriginDate` recomputing from mutable operational timestamps drifted the UFI;
      the fix pins it at ingest and reuses it. Derive-at-ingest + persist, never
      recompute-from-mutable.
+   - **A TEST VALIDATES A REQUIREMENT, OR IT IS NOT A TEST — and a PRECONDITION MAY NOT BE
+     AUTHORED (v127 §17d, human ruling 2026-08-02).** Two obligations on every test you
+     write, both mechanised as `make test-requirement-gate PROJECT=<p>` and as `loop-gate`
+     check 6, so they are checked before every pull rather than remembered:
+     (1) **Name the acceptance criterion.** Every test case carries the `AC-<ID>.<n>` it
+     validates, in its own title, its suite title, or its comment. Coverage is NOT a goal
+     and is never a justification. A test that maps to no AC is exactly one of two things
+     and YOU must say which: **waste — delete it**, or **an acceptance criterion nobody
+     wrote down** — register it as a real AC and flag the discovery gap for the retro.
+     A file-level `@covers AC-x` does not discharge this: it is a claim about the module,
+     not about this case.
+     (2) **Never author the precondition.** If your prior is built by MUTATING a real
+     capture — `delete capture.x.y`, an override spread over a corpus-loaded fixture, a
+     hand-set FOLD-DERIVED field like `{state:'Cancelled'}` — you have authored the world,
+     and the test can only confirm the code. **Fold the prior from events, or harvest it.**
+     And never stub the boundary your claim is ABOUT: a fact about what a real command DOES
+     cannot be established by stubbing the exec boundary. Founding evidence, three
+     independent instances in ONE session: `uc-hf041-cancellation-recovery.test.ts` built
+     its "pre-fix stream" by re-ingesting a REAL capture with `statusDetails[].state`
+     DELETED — exactly the leaf whose presence breaks the heal — and stayed green at
+     2,171 tests while **nine real cancellations sat unhealed in prod** on the
+     passenger-facing feed, including the flight a customer reported; the
+     `awaiting_observation` probe test stubbed `subprocess.run` so it "only proved the
+     mapping agreed with itself", and against a real `make` every probe read BROKEN; and
+     the provenance ledger's `read` dispositions were declared, not proven — 8 fell when
+     tested differentially. The gate ships in RATCHET mode against a committed baseline
+     that may ONLY SHRINK; a count above it BLOCKS the loop. **Clearing the baseline by
+     mass-tagging is a FAILED experiment, not progress** (EXP-124) — it reproduces exactly
+     the coverage theatre the ruling rejects.
    - **Real-source fixtures for external/live data (v61, DEFECT-OAG-016).** When
      code consumes a shape you do not own — an API response, an event body, a
      third-party schema — the test fixtures MUST be captured from the REAL source

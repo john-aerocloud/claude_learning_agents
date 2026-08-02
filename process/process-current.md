@@ -1051,8 +1051,38 @@ session** (2026-08-01), which is why this is a rule and not an incident:
 4. **A green suite is evidence about the tests, not about the system**, until §17c.1's
    observation pointer exists. The three instances above were all green.
 Target: CFR (a defect of this class is caught by the gate rather than by a customer) +
-MTTR. Mechanism: the AC-traceability + authored-precondition gate [EXP-124] — this rule is
-executable, per §17c.5, and is not discharged by this paragraph.
+MTTR. Mechanism: the AC-traceability + authored-precondition gate [EXP-124].
+
+**THE MECHANISM, committed 2026-08-02 — this rule is now executable and no longer prose.**
+`make test-requirement-gate PROJECT=<p>` (`.claude/tools/test-requirement-gate.js`,
+zero-dependency, no creds, no network; self-tests under `make test-tools`). Per-project
+config, committed allowlist and ratchet baseline live in
+`.claude/config/test-requirement-gate/<PROJECT>.json`. It is **`loop-gate` check 6**, so it
+runs before EVERY pull — a gate in no workflow is not a gate, which is the whole reason
+`make render-diagrams` sat red on trunk for 20 days.
+- **Limb 1** flags a test case with no `AC-<ID>.<n>` in its title, its suite, or its own
+  comments. A file-level `@covers AC-x` deliberately does NOT satisfy it (that is a claim
+  about the module, not about this case) and is reported as a separate number.
+- **Limb 2** flags five static shapes: `delete` on a corpus-derived value; an override
+  spread over one; an assignment into one; an object literal setting a FOLD-DERIVED field
+  cast to an aggregate; and a stubbed process-exec boundary. Occurrences inside an
+  `expect(...)`/matcher argument are excluded — normalising an OBSERVED value is the
+  opposite act to authoring a PRECONDITION.
+- **Verdict rides a stdout sentinel** (`TRG-VERDICT: PASS|FAIL|NOT-CONFIGURED`), because
+  `make` cannot express a three-way exit — a recipe exiting 3 makes `make` print `Error 3`
+  and exit 2. That is instance 2's own lesson, applied to the gate built from it.
+- **It ships in RATCHET mode with a committed baseline that may only shrink.** The
+  OagEventSource first measurement (2026-08-02, honest and un-mass-tagged) is **1,801
+  untagged of 2,728 cases (66%), of which 606 carry only a file-level `@covers`**, and
+  **22 authored preconditions across 9 files**, with a **1-entry** allowlist. A count ABOVE
+  baseline BLOCKS the pull; the standing debt is ADVISORY and reported every cycle so it
+  cannot quietly become normal. `--write-baseline` REFUSES to raise the number. Per
+  EXP-124, clearing the baseline by mass-tagging counts as FAILED.
+- **Two limits, stated rather than left silent.** A folded field hand-set through a local
+  builder (`prior({ state: 'Cancelled' })`) is not caught — the same rule would flag the
+  CORRECTED test verbatim, so recall was traded for precision. And instance 3's shape (a
+  ledger disposition declared, not proven) is not statically decidable; it is closed by the
+  differential census, which is this discipline in a different mechanism.
 
 ## 17a. Test evidence attaches to the item
 When the tester validates a use-case **in prod** (§11b), it attaches its validation

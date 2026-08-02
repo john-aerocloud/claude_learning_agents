@@ -2519,6 +2519,113 @@ class TestLoopGate(Base):
         self.assertEqual(verdict, "broken")
         self.assertIn("timeout", detail.lower())
 
+    # ---- check 6: the test-requirement gate (§17d, human ruling 2026-08-02) --
+    #
+    # These drive the REAL `.claude/tools/test-requirement-gate.js` over REAL test
+    # sources written into the temp tree. Nothing is stubbed — stubbing the exec
+    # boundary here would be founding-evidence instance 2 reproduced inside the
+    # check that exists to catch it, and the gate's own exec-boundary rule would
+    # (rightly) flag this file for it.
+
+    def _trg_config(self, cfg):
+        d = os.path.join(self.tmp, ".claude", "config", "test-requirement-gate")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, f"{self.project}.json"), "w", encoding="utf-8") as f:
+            json.dump(cfg, f)
+
+    def _trg_tests(self, name, body):
+        d = os.path.join(self.tmp, "work", self.project, "src", "tests")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, name), "w", encoding="utf-8") as f:
+            f.write(body)
+
+    def _trg_scaffold(self, baseline_ac, cases):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self._trg_config({
+            "project": self.project, "mode": "ratchet",
+            "roots": [{"path": f"work/{self.project}/src", "limbs": ["ac", "authored"]}],
+            "baseline": {"ac": baseline_ac, "authored": 0},
+        })
+        self._trg_tests("a.test.ts",
+                        "describe('g', () => {\n"
+                        + "".join(f"  it('case {i}', () => {{}})\n" for i in range(cases))
+                        + "})\n")
+
+    def test_trg_at_baseline_is_advisory_and_never_blocks(self):
+        self._trg_scaffold(baseline_ac=2, cases=2)
+        findings = self._gate()
+        self.assertNotIn("test-requirement-gate", self._checks(findings))
+        adv = [f for f in self._advisories(findings) if f["check"] == "test-requirement-gate"]
+        self.assertEqual(len(adv), 1, findings)
+        self.assertEqual(adv[0]["verdict"], "PASS")
+        self.assertEqual(adv[0]["ac"], 2)
+        code, out = self._run()
+        self.assertEqual(code, 0)
+        self.assertIn("test-requirement-gate", out)
+
+    def test_trg_regression_above_baseline_BLOCKS_the_pull(self):
+        """A NEW untagged test case landed. Stopping the line relieves exactly that
+        harm (§F8a), so unlike the standing debt this one blocks."""
+        self._trg_scaffold(baseline_ac=2, cases=3)
+        findings = self._gate()
+        self.assertIn("test-requirement-gate", self._checks(findings))
+        f = [x for x in findings if x["check"] == "test-requirement-gate"][0]
+        self.assertEqual(f["verdict"], "FAIL")
+        self.assertEqual(f["ac"], 3)
+        code, out = self._run()
+        self.assertEqual(code, 2)
+        self.assertIn("test-requirement-gate", out)
+
+    def test_trg_limb2_authored_precondition_BLOCKS(self):
+        """The founding shape, end to end through the loop gate: a real capture with
+        a leaf deleted off it."""
+        self._trg_scaffold(baseline_ac=0, cases=0)
+        self._trg_tests("b.test.ts",
+                        "import { readConfirmingRecords } from '../src/adapters/fixture-corpus-reader.js'\n"
+                        "const record = readConfirmingRecords()[0]\n"
+                        "describe('AC-X.1 g', () => {\n"
+                        "  it('one', () => { delete record.statusDetails })\n"
+                        "})\n")
+        findings = self._gate()
+        self.assertIn("test-requirement-gate", self._checks(findings))
+        f = [x for x in findings if x["check"] == "test-requirement-gate"][0]
+        self.assertEqual(f["authored"], 1)
+        self.assertIn("delete-on-real-capture", f["message"])
+
+    def test_trg_absent_config_is_reported_NOT_ESTABLISHED_never_silent(self):
+        """A project with no gate config must not read as satisfied — the whole
+        §F8a point is that an unevaluated precondition is not a met one."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        findings = self._gate()
+        f = [x for x in findings if x["check"] == "test-requirement-gate"]
+        self.assertEqual(len(f), 1, findings)
+        self.assertEqual(f[0]["severity"], "unknown")
+        self.assertEqual(f[0]["verdict"], "NOT-CONFIGURED")
+        code, out = self._run()
+        self.assertEqual(code, 0)
+        self.assertIn("NOT ESTABLISHED", out)
+
+    def test_trg_unrunnable_tool_is_unknown_never_a_silent_pass(self):
+        """If the analyser cannot run at all, that is a thing this cycle FAILED TO
+        ESTABLISH. It must never be indistinguishable from clean."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self._trg_config({"project": self.project, "mode": "ratchet", "roots": []})
+        orig = wi.TRG_SCRIPT
+        wi.TRG_SCRIPT = os.path.join(self.tmp, "no-such-tool.js")
+        try:
+            findings = self._gate()
+        finally:
+            wi.TRG_SCRIPT = orig
+        f = [x for x in findings if x["check"] == "test-requirement-gate"][0]
+        self.assertEqual(f["severity"], "unknown")
+        self.assertEqual(f["verdict"], "UNRUNNABLE")
+
     # ---- policy.csv handling ------------------------------------------------
     def test_missing_policy_csv_uses_documented_defaults(self):
         # no policy.csv at all -> the §F2 seed defaults (ready 3/4, intake 2/10)

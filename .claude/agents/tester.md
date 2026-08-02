@@ -514,6 +514,23 @@ caller-side data; a 4xx we received is our request bug (an engineering defect).
 Validation specs assert the CLASSIFICATION (the log category fields), not just
 the status code.
 
+## A green suite is evidence about the TESTS, not the system (v127 §17d)
+The suite certifies everything else, so it was the last place where authoring the world was
+still permitted. When you judge a change, **run `make test-requirement-gate PROJECT=<p>`**
+(it is also `loop-gate` check 6) and read the two limbs as part of your verdict:
+- **limb 1** — a test case naming no `AC-<ID>.<n>` validates no requirement. Per the human
+  ruling it is either waste (it should be deleted) or an acceptance criterion nobody wrote
+  down (it should be registered, and the discovery gap earns a retro). Neither answer is
+  "it improves coverage".
+- **limb 2** — a test whose PRECONDITION was authored (a real capture with a field deleted,
+  an override spread over a corpus fixture, a hand-set folded value, a stubbed exec
+  boundary) cannot come back negative about reality. Treat a limb-2 hit on the code path you
+  are validating as reason to distrust the green, and go and get an observation instead.
+**A REGRESSION above the committed ratchet baseline is a rejection-grade finding**, not a
+style note: it means a test that cannot validate a requirement landed with the change you
+are judging. Founding case: 2,171 tests green while nine real cancellations sat unhealed in
+prod, because the test deleted the exact leaf whose presence breaks the heal.
+
 ## Zero occurrences is a DEFECT SIGNAL, not silence (v123, EXP-120)
 A journey that works does not prove every output the change can produce actually
 gets produced. When you validate against a real feed or real traffic, **count the

@@ -1722,6 +1722,21 @@ prod apply"` was ~35 hours stale while its commit had been on `origin/main` the 
 and reasoning from it produced a confident, precisely-quantified, WRONG constraint diagnosis.
 An unresolvable ref is reported UNKNOWN, never assumed either way (§17c).
 
+**Always `git -C <path>` / `make -C <path>` — a bare git command resolves against the WRONG
+repository, silently [v127].** This is a two-repo tree (§v50: `work/<project>/` is its own
+independent repo, gitignored by the parent) and the Bash tool's working directory **resets
+between calls** rather than persisting after a `cd`. So a bare `git log origin/main` run by an
+agent that believes it is "in" the project repo actually answers about the INTEGRATION tree —
+returning real, plausible, entirely wrong output. Observed 2026-08-02: a tester derived push
+state for a project item from the parent repo's `main` and caught it only because the commit
+subjects were obviously unrelated (process-layer work vs the item's commits). Nothing in the
+output says which repo answered.
+This hazard **directly attacks the rule above**: §F8a mandates deriving push/deploy state from
+`git merge-base --is-ancestor`, and run in the wrong repo that produces a confidently wrong
+answer of exactly the class the rule exists to prevent. Therefore: every git/make invocation
+against a project names its path explicitly, and any derived push-state claim states WHICH
+repo it was read from. A claim that cannot name its repo is UNKNOWN, not true.
+
 **A hold on a push needs a NAMED precondition on the HELD ITEM, and the hold is SCOPED to the
 paths that actually deploy.** v124 prescribed "push on green" against a misdiagnosis and the
 prescription was followed while the dwell continued — because the missing act was the

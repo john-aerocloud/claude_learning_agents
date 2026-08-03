@@ -171,3 +171,22 @@ distinguish prod-exposed defect-resolves (immediate) from dev-only tooling/test 
 defect ever reached a prod-* state, or a `severity`/`prod_exposed` marker on the `reported`
 event). Low urgency: over-tripping only costs one cheap focused retro. Owner: work-items machinery
 (retro-debt classifier).
+
+## traceability: a job's acceptance criteria / fitness functions must be carried into the implementing use-case at `/slice-next` (2026-08-03, QUEUED)
+The traceability contract (`/requirement` §"traceability") forces every use-case created at
+`/slice-next` to tag `personas:` + `job:` from the dossier — but it does NOT force a job's
+ACCEPTANCE CRITERIA / fitness functions into the implementing use-case's `## Acceptance conditions`.
+A POSITIVE feature AC becomes an acceptance condition naturally (it is the happy path); a
+NEGATIVE/INVARIANT AC (a guard — "never emit X as a side effect") can silently drop between the
+signed-off dossier and the build, because it is not the feature being demonstrated. Tighten the
+contract (`/requirement` traceability rule + `/slice-next`): when a use-case implements a job that
+carries an AC / fitness function in the dossier, that AC MUST be copied into the use-case's
+`## Acceptance conditions` as a red-first condition, and any standing INVARIANT AC MUST be realized
+as a PINNED regression guard (synth-pin-class), not a one-shot test — so a guard cannot regress in a
+later change. Make it a checkable property (a use-case whose job has a dossier AC not covered by its
+acceptance conditions is a slice gap, not Ready). Founding instance: a discovery-drafted "guard" was
+demoted from a fake job to a job fitness function, and on inspection nothing in the machinery would
+have carried it into the slice's acceptance — the dossier AC had to be hand-flagged build-binding.
+Sibling of the AC-vs-job discovery-method lesson (a "why" that reveals a side-effect to AVOID is an
+acceptance criterion, not a job — fold into the `requirements-discovery` skill). Owner: traceability
+contract (`process-current.md`) + `/slice-next`.

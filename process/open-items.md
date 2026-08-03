@@ -190,3 +190,14 @@ have carried it into the slice's acceptance — the dossier AC had to be hand-fl
 Sibling of the AC-vs-job discovery-method lesson (a "why" that reveals a side-effect to AVOID is an
 acceptance criterion, not a job — fold into the `requirements-discovery` skill). Owner: traceability
 contract (`process-current.md`) + `/slice-next`.
+
+## /requirement skill: "append EVENT=registered" step is stale for aggregate requirements (2026-08-03, QUEUED)
+The `/requirement` skill step 3 instructs `make wi-append ... EVENT=registered AGENT=flow-manager`
+as a requirement's birth event, but the current machinery treats a requirement as a pure AGGREGATE
+whose state bubbles from children — `wi-append` rejects a flow event on it ("you do not append flow
+events to it"). A requirement is now registered simply by writing its valid item file (state derives
+to `planned`); no birth event. Legacy requirements (e.g. REQ-005) carry a `registered` event from the
+older model, which is where the skill text came from. Fix: update the `/requirement` skill (and any
+mirror in `requirement-new`) — registration = write the item file + `make wi-project` (+ mirror to
+board); drop the `EVENT=registered` append for aggregate types. Founding: REQ-006 registration
+(2026-08-03) hit the rejection. Owner: `.claude/commands/requirement.md` + `requirement-new`.

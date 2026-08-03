@@ -704,6 +704,50 @@ adding a fix or a fact. Recorded here as evidence instead — if a fourth sweep 
 the atomic-pathspec instruction is in place, that is a different finding and does warrant its
 own defect, because it would mean the instruction is not being followed or is insufficient.
 
+### FOURTH occurrence — and it proves this amendment is INSUFFICIENT, not unfollowed
+
+A fourth sweep happened on 2026-08-03, **with both agents correctly using the atomic
+pathspec form**. `DEF-ROC-016`'s commit `883ebd8` swept ~112 lines of `DEF-ROC-019`'s
+then-uncommitted edits to `architecture/dependencies/class-deps.mmd`. Nothing was lost — all
+the DEF-ROC-019 model nodes/edges are on trunk — but they are attributed to the wrong commit,
+and only one line rode in the correct one.
+
+**So my framing above was wrong, and this correction matters more than the original
+experiment.** I wrote that the pathspec form "takes its content from the working tree and
+never consults the shared index, so the window does not exist." The first half is true and
+the second half does **not** follow. Taking content from the working tree is *precisely* the
+problem for a **CO-OWNED file**: if another agent has uncommitted hunks in a path you name in
+your pathspec, you commit THEIR hunks along with yours, deterministically and with no race
+window at all. The atomic form eliminates the *index* race for disjoint files; it gives no
+protection whatsoever where two agents legitimately edit the same file.
+
+`class-deps.mmd` is exactly that file — the change-impact model every engineer is required to
+update in the same commit as their code. So the process actively directs concurrent agents
+into a shared path and then offers them a rule that does not cover it.
+
+**Candidate fixes, none yet chosen** (deliberately not decided unilaterally — this needs a
+judgement about how much machinery is warranted):
+1. **Split the diagram** so each item's claims live in a separate file that is later composed.
+   Removes co-ownership at the cost of a build/compose step.
+2. **Per-hunk staging** (`git hash-object -w` + `git update-index --cacheinfo`, which one
+   engineer already used successfully). Precise, but needs allowlist additions and is easy to
+   get wrong under time pressure.
+3. **Serialise model updates** — the model edit becomes a follow-up commit, accepting that it
+   is briefly out of step with the code it describes. Cheapest, and weakens the
+   same-commit guarantee the model relies on.
+4. **Accept mis-attribution on co-owned files** and note it in commit messages. Honest, zero
+   machinery, loses per-item traceability of model changes.
+
+Note one engineer already worked around this correctly and unprompted (building a mine-only
+blob and `update-index`-ing it), and another **waited** for the co-owner to commit before
+landing its own hunk. Both are evidence the problem is real and that agents can handle it —
+but both were individual diligence, which is what this experiment set out to replace with a
+documented default.
+
+**Revised scoring:** score EXP-120 positive for disjoint-file commits only. Co-owned-file
+mis-attribution is a SEPARATE open problem and should not be counted against or in favour of
+the atomic-pathspec rule.
+
 ## EXP-121 — `prod-deploying` needs a `blocked` exit for single-environment projects
 **Registered:** 2026-07-31 (ROC) · **Status:** OPEN · **Applies-to:** any project that has no
 production environment yet, or whose prod promotion is externally blocked.

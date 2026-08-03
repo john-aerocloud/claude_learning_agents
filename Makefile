@@ -265,13 +265,26 @@ wi-migrate:
 # Store stub and falls back to uv). linear-project.py is stdlib-only.
 #   make board-project PROJECT=ROC ID=UC-ROC-015   -> upsert one item's issue
 #   make test-board-project                         -> offline renderer unit test
+#   make board-audit [PROJECT=OagEventSource]       -> STATE_STATUS drift audit
+#
+# board-audit (OI-LINEAR-CANCELLED-STATE-UNMAPPED): the state->board-status table
+# is hand-maintained; the state graph is not. When they drifted, an unmapped state
+# rendered as *Backlog* with no signal — a terminal `cancelled` item read as
+# unstarted work for every version from state-graph v5 on. The audit compares the
+# table against process/machinery/state-graphs.json in BOTH directions and, with
+# PROJECT, checks every real item's (type,state) actually projects. Offline: no
+# network, no secret. Non-zero on any finding. The same audit runs inside
+# test-board-project, so the drift cannot reach the board unnoticed.
 BOARDPY ?= $(shell sh .claude/skills/work-items/scripts/work-items --python)
-.PHONY: board-project test-board-project
+.PHONY: board-project test-board-project board-audit
 board-project:
 	$(BOARDPY) .claude/tools/linear-project.py --project $(PROJECT) --id $(ID)
 
 test-board-project:
 	$(BOARDPY) .claude/tools/linear-project.test.py
+
+board-audit:
+	$(BOARDPY) .claude/tools/linear-project.py --audit $(if $(PROJECT),--project $(PROJECT),)
 
 # --- Process-doc conformance gate (process §27.5) -----------------------------
 # Scans the LIVE process/agent/skill/root docs for a DENYLIST of RETIRED

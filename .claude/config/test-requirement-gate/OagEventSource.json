@@ -68,8 +68,8 @@
     }
   ],
   "baseline": {
-    "ac": 1801,
-    "authored": 22
+    "ac": 1795,
+    "authored": 15
   },
   "_baseline_why": "Measured 2026-08-02 at the first run, honestly and without mass-tagging. `ac` = 1801 test cases with no AC reference in their own title, their suite, or their comments, out of 2728 scanned (66%); 606 of the 1801 carry a file-level @covers AC and nothing per-case. `authored` = 22 static hits across 9 files, read one by one at the first run with zero known false positives remaining (three were found and removed by tightening the rules: a runaway destructuring regex, an `expect(...)` argument, and a fixture embedded in a template literal). The ratchet refuses to write a HIGHER number (`--write-baseline` exits 2 unless --allow-baseline-growth), so these two integers can only fall."
 }

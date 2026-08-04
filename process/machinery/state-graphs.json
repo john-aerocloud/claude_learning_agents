@@ -88,9 +88,9 @@
       "terminal": ["resolved", "wontfix", "cancelled"],
       "transitions": [
         {"from": "reported",    "to": "reproducing", "event": "triaged",       "agents": ["orchestrator"]},
-        {"from": "reproducing", "to": "fixing",      "event": "confirmed",     "agents": ["orchestrator", "engineer"]},
+        {"from": "reproducing", "to": "fixing",      "event": "confirmed",     "agents": ["orchestrator", "engineer", "cicd"]},
         {"from": "reproducing", "to": "wontfix",     "event": "not_reproduced","agents": ["orchestrator"]},
-        {"from": "fixing",      "to": "validating",  "event": "fixed",         "agents": ["engineer"]},
+        {"from": "fixing",      "to": "validating",  "event": "fixed",         "agents": ["engineer", "cicd"]},
         {"from": "validating",  "to": "resolved",    "event": "validated",     "agents": ["tester"]},
         {"from": "validating",  "to": "fixing",      "event": "rejected",      "agents": ["tester"]},
         {"from": "fixing",      "to": "blocked",     "event": "blocked",       "agents": ["flow-manager", "orchestrator"]},

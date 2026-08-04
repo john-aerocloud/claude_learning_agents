@@ -800,3 +800,51 @@ untrue.
 **How it could be wrong.** If items start routinely sitting `blocked` in `prod-deploying`
 rather than being closed via `validated`, the guidance is not landing and the real fix is
 making the graph itself aware of whether a prod environment exists. Watch for that.
+
+## EXP-122 — a `cicd` agent can advance an infra-owned defect
+**Registered:** 2026-08-04 (ROC) · **Status:** OPEN · **Applies-to:** any defect whose fix is
+infrastructure, pipeline or deploy-configuration rather than application code.
+
+**The gap.** The `defect` graph restricted `confirmed` (reproducing → fixing) to
+`orchestrator`/`engineer` and `fixed` (fixing → validating) to `engineer` alone. But defects
+are not all code: `DEF-ROC-020` was a **shared-ownership infrastructure** defect — two
+uncoordinated writers to the same Azure Function App's `app_settings`, where a platform-infra
+service principal's apply erased the `BUILD_SHA` our pipeline stamps. It was dispatched to
+`cicd` deliberately, because the remedy is Terraform / workflow / a drift check / a cross-team
+ask, not application code. The machinery then refused every transition it needed, so it fired
+them as `AGENT=engineer` and said so in its report.
+
+That is the second instance of this exact shape (see **EXP-119**, where `documenter` appeared
+zero times in the graph and a docs-only use-case could not be advanced by its actual builder).
+Both times the agent behaved correctly — attributed honestly in the note and escalated rather
+than hand-editing state — and both times the event log ended up naming the wrong role, which
+is precisely the property an event-sourced model exists to get right. It also skews
+`time_by_owner`: infra work is billed to `engineer` and `cicd` reads as idle.
+
+**Amendment made.** `cicd` added to the `agents` list of the `defect` transitions `confirmed`
+and `fixed`. Minimal and additive — no new state, no new event, no existing agent's rights
+changed.
+
+**Why only those two.** `validated` stays tester-only: cicd fixing its own defect and then
+validating it would collapse the gate that caught `DEF-ROC-013`'s misdiagnosis. And
+`not_reproduced` stays orchestrator-only, since declining a defect is a judgement call about
+scope rather than a technical step.
+
+**The pattern worth noticing, and the reason this is registered rather than just fixed:** the
+graph was written assuming defects are code and use-cases are built by engineers. Two agent
+roles have now hit that assumption from different directions within a week. The next one is
+probably `solution-architect` (an architecture-delta defect) or `product` (a
+requirement-framing defect). Rather than wait for a third instance, the retro should ask
+whether the per-transition agent allowlists are the right mechanism at all, or whether
+"who may fire this" should derive from the item's own declared owner.
+
+**Target metric:** gross lead time's blocked component, plus the integrity of
+`time_by_owner`. The concrete failure removed is an agent stalling on a legal-looking
+transition it may not fire, or firing it under a role it does not hold.
+
+**Anticipated effect:** infra-owned defects flow without an orchestrator unblock, and
+`time_by_owner` starts attributing infra work to `cicd`.
+
+**Scoring horizon:** the next three defects dispatched to a non-engineer role. Score positive
+if each advanced without an orchestrator intervention and without any agent appending under a
+role it does not hold.

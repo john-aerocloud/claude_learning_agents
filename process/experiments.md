@@ -848,3 +848,57 @@ transition it may not fire, or firing it under a role it does not hold.
 **Scoring horizon:** the next three defects dispatched to a non-engineer role. Score positive
 if each advanced without an orchestrator intervention and without any agent appending under a
 role it does not hold.
+
+## EXP-123 — an aggregate can read `done` while signed-off scope was never registered
+**Registered:** 2026-08-05 (ROC) · **Status:** OPEN · **Applies-to:** every project using the
+event-sourced work-item model with aggregate types (requirement / chunk / slice).
+
+**The gap, found by accident.** `REQ-ROC-002` and `CHK-ROC-004` had bubbled to **`done`** — and
+were wrong. `SLC-ROC-006` was the only child ever turned into a work item, so when it finished,
+the aggregates folded to `done` by construction. But the signed-off dossier for that requirement
+contained further scope (the J20 pace-control / named-scenario replay work) that was
+**explicitly deferred, not descoped** — and because deferred-but-agreed scope was never
+registered as children, the model had no way to know it existed. The requirement therefore
+reported complete while part of what a human had signed off was untracked.
+
+Product found this only while looking for decomposable work behind a *different* closing chunk.
+Nothing surfaced it: `wi-validate` passes (I1–I4 all hold — the fold is internally consistent),
+the derived views are correct, and the tree looks healthy. **The invariant that is missing is
+not about consistency of the fold; it is about coverage of the dossier.**
+
+**Why this matters more than one requirement.** `done` on an aggregate is read by humans and by
+the metrics as "this value was delivered". If registration is the only thing that makes scope
+visible, then any scope agreed at sign-off but deferred to later is invisible the moment its
+registered siblings complete — and the gap grows silently with every deferral. This project has
+deferred scope at sign-off repeatedly and deliberately (connectivity statuses in REQ-ROC-006,
+multi-role RBAC in REQ-ROC-005, template creation in CHK-ROC-009), all of them legitimate
+decisions. Each is a candidate instance of the same trap.
+
+**Not yet fixed — the right mechanism needs a judgement I should not make alone.** Candidates:
+1. **A dossier-coverage check**: require every signed-off dossier to enumerate its scope items,
+   and refuse to let an aggregate fold to `done` while any enumerated item lacks a registered
+   child or an explicit descope record. Strongest, and the most machinery.
+2. **Register deferred scope immediately as `blocked`/`open-item` children** rather than leaving
+   it in prose. Cheap, keeps the tree honest, but inflates `waiting` with things nobody intends
+   to pull soon — and this project already has 14 items in `waiting`.
+3. **A `deferred_scope:` frontmatter field on aggregates**, checked at fold time, so `done`
+   requires it to be empty or explicitly waived.
+4. Accept it and rely on the retro to re-read dossiers before closing a requirement — no
+   machinery, relies on diligence, which is what failed here.
+
+**Target metric:** none of the four DORA metrics directly — this is a **truthfulness** defect in
+the delivery record, which corrupts every metric derived from it. The observable proxy: the
+number of aggregates that transition out of `done` after being found incomplete (this instance
+is one; `CHK-ROC-004`/`REQ-ROC-002` were flipped back to `in_progress` when the missing scope was
+registered as `SLC-ROC-025`).
+
+**Anticipated effect:** an aggregate reading `done` means the signed-off scope was delivered or
+explicitly descoped — not merely that its registered children finished.
+
+**Scoring horizon:** the next three requirements to close. Score positive if each was checked
+against its dossier before closing, and negative if any is later found to have had untracked
+signed-off scope.
+
+**How this could be wrong.** Option 1 could make deferral so expensive that agents stop
+recording it in the dossier at all, which would be worse — the prose record is currently the
+only reason this was findable. Whatever is chosen must keep deferral cheap to *state*.

@@ -86,3 +86,44 @@ engineer refused to promote a ledger entry on wire evidence without the read pat
 path turned out **not** to reach the field. The tester refused a synth plan as authority for
 AC-054.3 and asserted deployed state instead. Every one of those was a correct refusal against an
 instruction that would have accepted less.
+
+---
+
+## Addendum — focused gap retro for `DEFECT-OAG-053`'s RESOLVE (2026-08-05T17:23Z)
+
+§F8 trips immediately on a prod-defect resolve and never batches it. v130 was written at 13:12Z,
+**before** this resolve, so although it covers 053's substance at length, three findings from the
+**validation** postdate it. Recording them here rather than opening a version bump for a
+constraint that has not shifted in four hours.
+
+**What let the original defect through — the latent cause, not the code fix.** The OCC guard was
+structurally incapable of firing, and *nothing* caught it because **two blindfolds composed**: the
+in-process fake compared `expectedSeq` to the tail and so refused **correctly**, making every
+offline test pass; and the adapter suite's `makeEvent` pinned a constant `id: 'evt'`, which
+**manufactured the guard's only success case** and documented the manufacture in a comment that read
+as reassurance. Neither is a missing test. Both are tests that asserted agreement with themselves.
+
+That is already ruled — §17d (a precondition may not be authored) and delta-057's M1 gate. **The gap
+this resolve adds is narrower and it is about evidence, not tests:**
+
+1. **The OCC retry in `normaliser-core` is a silent `continue`.** So "zero OCC errors in prod" is
+   **uninformative** — the mechanism this defect fixed emits no telemetry when it works. We spent the
+   session reading zeros as health; this one could never have been anything else. Routed: the retry
+   must emit, and a zero must be distinguishable from a silence. This is §17f's rule applied to a
+   **log**: a count of zero whose subject is "events that are never written" measures nothing.
+2. **The ":8010-only" assurance was overstated and I relayed it.** A foreign
+   `OagFeed-EventStore-Test` with 40 items, created `2026-08-04T15:47:30Z`, sits in AdixOut's `:8000`
+   container — inside the fix session. So `DEFECT-OAG-059`'s premise is **realised**, not merely
+   reachable. Routed to that item.
+3. **Fail-closed made a latent harness hazard always-live.** Two adapter suites use fixed table names
+   with `afterAll DeleteTable`, so two processes on one shared container collide deterministically.
+   A false-fail from contention — and the false-fail is the guard working. Routed to
+   `DEFECT-OAG-059`.
+
+**No new experiment row.** The registry is at its hard cap of 8 and this cycle already opened
+EXP-126. Per §25a the correct route for behaviour that needs no falsifiable trial is straight into
+the owning agent file as plain practice: **a control that emits nothing when it succeeds cannot be
+cited as evidence that it succeeded.** That belongs with the engineer and tester, not in a trial.
+
+**Constraint unchanged** — `queue` at 47.18%, four hours old, no re-walk. The exploit move routed at
+v130 (decline-or-schedule aged intake) is unstarted and remains the standing action.

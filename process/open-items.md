@@ -447,3 +447,33 @@ unmet by the orchestrator. It is the SUBORDINATE step under this cycle's constra
 push/deploy-cascade wait laundered as tester time) and cannot be fixed by machinery — only by
 passing `TOKENS=`/`DURATION_MS=` from the dispatch return on the same `wi-append`.
 
+
+## traceability: a job's acceptance criteria / fitness functions must be carried into the implementing use-case at `/slice-next` (2026-08-03, AdixOut REQ-006 — QUEUED)
+The traceability contract (`/requirement` §"traceability") forces every use-case created at
+`/slice-next` to tag `personas:` + `job:` — but NOT a job's ACCEPTANCE CRITERIA / fitness functions
+into the use-case's `## Acceptance conditions`. A POSITIVE feature AC becomes an acceptance condition
+naturally; a NEGATIVE/INVARIANT AC (a guard — "never emit X as a side effect") can silently drop
+between the signed-off dossier and the build. Tighten (`/requirement` traceability rule + `/slice-next`):
+a use-case implementing a job that carries an AC/fitness function MUST copy it into
+`## Acceptance conditions` as a red-first condition, and any standing INVARIANT AC MUST be a PINNED
+regression guard (synth-pin-class), not a one-shot test. Make it a checkable Ready property. Founding:
+REQ-006's demoted-from-fake-job guard (AC-3) — nothing in the machinery would have carried it into the
+slice; the dossier AC had to be hand-flagged build-binding. Sibling of the AC-vs-job discovery-method
+lesson. Owner: traceability contract (`process-current.md`) + `/slice-next`.
+
+## `/requirement` skill: "append EVENT=registered" step is stale for aggregate requirements (2026-08-03, AdixOut REQ-006 — QUEUED)
+`/requirement` step 3 says `make wi-append ... EVENT=registered AGENT=flow-manager` as a requirement's
+birth event, but the machinery treats a requirement as a pure AGGREGATE (state bubbles from children);
+`wi-append` rejects a flow event on it. A requirement is registered simply by writing its valid item
+file (state derives to `planned`). Fix: update `/requirement` (+ `requirement-new`) — registration =
+write item file + `make wi-project` (+ board mirror); drop the `EVENT=registered` append for aggregate
+types. Founding: REQ-006 registration hit the rejection. Owner: `.claude/commands/requirement.md`.
+
+## EXP-119 (fresh-account first-deploy bootstrap-parity) registry row DEFERRED at the v129 reconcile (2026-08-05, AdixOut — QUEUED)
+At the v122→v128 fold-forward reconcile, main's experiment registry was at the hard cap of 8 (all
+OagEventSource's), so AdixOut's novel EXP-119 (fresh-account first-deploy bootstrap-parity — cicd.md
+practice + IMP-026, founding principle-failure 2026-07-30-adixout-first-prod-deploy-fresh-account-bootstrap-gaps.md)
+could not take a slot without retiring another instance's scored row (not a merge-time call). The
+BEHAVIOUR is live as plain cicd.md practice; only the SCORED registry row is deferred. Next retro:
+score/adopt-or-retire across the merged set and give bootstrap-parity a row (target: CFR on first-account
+deploys) if a slot frees. Owner: next AdixOut retro (§25a registry prune).

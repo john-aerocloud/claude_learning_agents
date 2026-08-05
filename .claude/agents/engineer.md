@@ -162,6 +162,35 @@ hardcode the profile name.
      `deriveOriginDate` recomputing from mutable operational timestamps drifted the UFI;
      the fix pins it at ingest and reuses it. Derive-at-ingest + persist, never
      recompute-from-mutable.
+   - **A TEST VALIDATES A REQUIREMENT, OR IT IS NOT A TEST — and a PRECONDITION MAY NOT BE
+     AUTHORED (v127 §17d, human ruling 2026-08-02).** Two obligations on every test you
+     write, both mechanised as `make test-requirement-gate PROJECT=<p>` and as `loop-gate`
+     check 6, so they are checked before every pull rather than remembered:
+     (1) **Name the acceptance criterion.** Every test case carries the `AC-<ID>.<n>` it
+     validates, in its own title, its suite title, or its comment. Coverage is NOT a goal
+     and is never a justification. A test that maps to no AC is exactly one of two things
+     and YOU must say which: **waste — delete it**, or **an acceptance criterion nobody
+     wrote down** — register it as a real AC and flag the discovery gap for the retro.
+     A file-level `@covers AC-x` does not discharge this: it is a claim about the module,
+     not about this case.
+     (2) **Never author the precondition.** If your prior is built by MUTATING a real
+     capture — `delete capture.x.y`, an override spread over a corpus-loaded fixture, a
+     hand-set FOLD-DERIVED field like `{state:'Cancelled'}` — you have authored the world,
+     and the test can only confirm the code. **Fold the prior from events, or harvest it.**
+     And never stub the boundary your claim is ABOUT: a fact about what a real command DOES
+     cannot be established by stubbing the exec boundary. Founding evidence, three
+     independent instances in ONE session: `uc-hf041-cancellation-recovery.test.ts` built
+     its "pre-fix stream" by re-ingesting a REAL capture with `statusDetails[].state`
+     DELETED — exactly the leaf whose presence breaks the heal — and stayed green at
+     2,171 tests while **nine real cancellations sat unhealed in prod** on the
+     passenger-facing feed, including the flight a customer reported; the
+     `awaiting_observation` probe test stubbed `subprocess.run` so it "only proved the
+     mapping agreed with itself", and against a real `make` every probe read BROKEN; and
+     the provenance ledger's `read` dispositions were declared, not proven — 8 fell when
+     tested differentially. The gate ships in RATCHET mode against a committed baseline
+     that may ONLY SHRINK; a count above it BLOCKS the loop. **Clearing the baseline by
+     mass-tagging is a FAILED experiment, not progress** (EXP-124) — it reproduces exactly
+     the coverage theatre the ruling rejects.
    - **Real-source fixtures for external/live data (v61, DEFECT-OAG-016).** When
      code consumes a shape you do not own — an API response, an event body, a
      third-party schema — the test fixtures MUST be captured from the REAL source
@@ -349,6 +378,21 @@ product, and you route against it:
   still named `sNNNchanged`: a delivered node left wearing `:::s009changed`
   misleads every later human reader of the model even though the diff-sourced
   tool ignores it (OI-42).
+- **Cheap marker first, narrative last — sub-step commits are NOT exempt (v124,
+  DEFECT-OAG-044).** The v95 "commit at each green sub-step" rule and the same-commit
+  `.mmd` rule pull against each other when a fix lands as three red→green increments,
+  and DEFECT-OAG-044 resolved that tension the wrong way: two of three commits added
+  dependency edges (a new `synthetic-event-guard` node on the **production publish
+  path**, and an edge into it) with the graph brought up to date only one commit later.
+  The delivered head was correct; the intermediate shas were **false-clean** — anyone
+  running `make impacted-tests` against either would have seen "no changed nodes" while
+  a new domain gate had just been introduced. The rule exists to keep that MECHANICAL
+  signal honest at **every sha a tool might read**, so: put the node/edge **and its
+  `:::changed` mark** in the same commit as the code — a two-line diff, never deferred —
+  and let the `edge-ledger.md` row and any prose narrative land with the commit that
+  COMPLETES the item. Same family as the OFS v115 finding from the other direction
+  (front-loading all marks in one registration commit made a UC's SINCE-window
+  false-clean): the graph must be truthful at the sha, not just at the boundary.
 - **A behaviour change to a modelled node MUST mark that node `:::changed` in the
   SAME commit (2026-07-16, UC-ADIX-013).** When a change alters the BEHAVIOUR of a
   node represented in `architecture/dependencies/*.mmd` (e.g. the MAP/serialize
@@ -601,6 +645,113 @@ grant covers exactly that set. A write-only grant on a reads-then-writes path is
 a prod `AccessDenied` waiting for the first real event — it hit OagEventSource
 THREE times (ingest missing `dynamodb:Query`, then `kms:Decrypt`, then the append
 loadStreams read) before the grant was completed. [EXP-060]
+
+## Wire-contract provenance — never compare against a hand-typed guess (v123, EXP-120)
+**For data crossing a wire you do not own** (third-party feed, partner API, another
+team's bus/event contract), every literal you compare against and every field path
+you read is an EXTERNAL fact. Being wrong about one is **silent**: a branch that never
+runs, a field never read. Your own test then encodes the same guess, so red→green
+proves only that your code agrees with your guess — DEFECT-OAG-041/042 passed a
+1,525-test green suite forever while `OagFlightCancelled` fired **0 times in
+5,308,984 events** (`=== 'Cancelled'` vs OAG's real `Canceled`) and 78% of flights
+had no departure time (the canonical leaf's source path was never read at all). The
+only occurrences of the wrong spelling anywhere in the repo were **our own test
+expectations**, and the handler's docstring claimed the value was "corpus-confirmed".
+
+So a claim about the wire is an executable assertion against captured real traffic,
+never a comment:
+1. **Declare, don't assume.** Every wire literal compared and every canonical
+   output leaf's source path(s) carries a **provenance declaration**: `confirmed`
+   (present as a value for that key in ≥1 REAL capture) or `unverified` (still
+   ABSENT from every capture) with the consequence if it is wrong. Get the initial
+   list from the architect's anti-corruption-seam delta.
+2. **Assert both directions.** `confirmed` ⇒ must be present in a real capture AND
+   (for a field) must actually POPULATE the canonical leaf when that capture is fed
+   through the real read path. `unverified` ⇒ must still be absent — so the day the
+   wire starts sending it, the build turns red instead of the behaviour silently
+   changing meaning.
+3. **Completeness, not just correctness.** The gate must fail on a MISSING
+   declaration too — a new wire comparison or a new canonical leaf added with no
+   entry. A ledger that only catches entries that became false is half a gate.
+4. **Only real captures confirm.** Never let a synthetic/derived/hand-authored
+   fixture confirm a literal; keep the confirmable corpus provably-real and separate.
+5. **Offline can only see what was captured** — pair the offline ledger with a live
+   probe (a committed read-only `make` target that exits non-zero on an unmapped or
+   never-populated value) and a committed corpus-refresh target, so the corpus does
+   not silently age.
+6. **An unmapped/unknown inbound value raises**, deduped and structured — never a
+   silent no-op. Preserve the raw value verbatim on the aggregate.
+7. **Sweep the INVERSE direction: every key reality SENDS must be read or declared
+   ignored (v125).** Steps 1–6 all start from what OUR code does and check it against
+   reality. The complementary sweep starts from REALITY and checks it against our code:
+   for every key present in ≥X% of real captures, either some code path reads it or it
+   carries an explicit `ignored: <reason>`. This is the invariant that would have failed
+   DEFECT-OAG-042 on day one — `times.scheduled` was in **all 109** real captures and
+   read by nothing, so reality was sitting in the repo, unexamined. It is also what forces
+   an undeclared field like `diversionAirport` to become a question somebody answers.
+8. **Build the test FROM the real record, not from a value you type (v125).** For anything
+   crossing a wire you do not own, the test's INPUT is a provenance-stamped real capture
+   (source + resolvable id + raw-body hash); a hand-authored input is permitted only for
+   edge cases reality has not produced, and then it is marked synthetic and can confirm
+   nothing. A test whose input we authored and whose expectation we authored is a
+   self-consistent pair that stays green while the system never works.
+9. **Exercise a lane against REAL data before you claim what it will do (v125).** A
+   read-only dry-run against the real feed is the cheapest and most productive step
+   available and it belongs BEFORE the build claim, not after. On UC-HF041 a 28-day
+   dry-run over real REST data falsified the item's own premise in one pass: **1,005**
+   events would be written, not the 361 predicted; **644 (64%)** were unforecast collateral
+   field-diffs; **274 historical flights** would have been minted into prod as if new; and a
+   retention-based residual would have been fabricated from an un-measured horizon.
+   Reasoning, review and a green suite found none of it. If a lane writes, publishes or
+   spends, dry-run it against real data and report the real numbers — a predicted volume
+   with no measured denominator is an assumption, not a figure.
+Founding ledgers to copy the shape from:
+`work/OagEventSource/src/app/tests/defect-oag-04{1,2}-wire-*-provenance.test.ts`.
+Target: CFR (a wire mismatch dies in the build, not after 5M events) + MTTR.
+
+## A control that is OPTIONAL on a shared primitive is a control some lane omits (v124, EXP-121)
+**An enforcement control must be a REQUIRED dependency of the primitive it guards, and
+every composition that reaches that primitive must be ENUMERATED by a committed gate.**
+DEFECT-OAG-043: prod ran **two** live ingest lanes into one event store and only one was
+scope-gated. `IngestHandlerDeps` had **no `inScope` field at all** and the shared
+`consume-and-ingest` primitive documented an absent predicate as *"no filtering
+(pre-OB6 behaviour preserved)"*. UC-OB6 wired the gate into the ECS composition; nothing
+forced the Lambda composition to declare a decision. Result: **27,537 events / 2,144
+streams** appended over 4 days, ~25,100 outside the declared scope, **all republished to
+live external consumers** (the event store is the transactional outbox, so there is no
+second gate downstream). The un-gated lane wrote precisely what the gated lane refused.
+
+Why nothing caught it: the omission was **silent and green**. A back-compat-permissive
+fallback ("absent ⇒ don't enforce") converts a missing control into normal operation, so
+there is no error to observe, no failing test to write, and the lane that omits it looks
+identical to the lane that honours it. TDD cannot help — you never write a test for a
+field you did not know a caller must supply.
+
+So, for any primitive that appends/publishes/persists/spends behind a control (scope,
+tenancy, entitlement, redaction, rate/cost bound):
+1. **REQUIRED, not optional.** The control is a non-optional field of the primitive's
+   deps type, so `tsc`/the compiler fails on an omitted control at the point a new lane is
+   composed. Never `control?: …`, never a default that means "off".
+2. **No permissive fallback — the fail-safe direction is CLOSED.** If the control's
+   configuration is absent at runtime, enforce the code-constant fail-safe (and log it),
+   never "no filtering". "Preserve pre-existing behaviour" is not a reason to ship an
+   unguarded path; if back-compat is genuinely needed it is an EXPLICIT, named, tested
+   decision on that lane, not an implicit consequence of `undefined`.
+3. **Lane-coverage completeness gate.** Commit a source-level gate that ENUMERATES every
+   module reaching the guarded primitive and **fails the build on an undeclared lane**.
+   Each declared lane states its control decision AND its trigger; a
+   continuously-triggered lane may not be unfiltered. A lane declared inert must assert
+   *why* it is inert (e.g. "operator-only, no deployed compute") — an assertion, not a
+   comment.
+4. **A rollback/standby asset is a LIVE lane until it is proven inert.** The Lambda was
+   documented as the "ECS rollback asset" while its EventBridge rule sat **ENABLED** on a
+   1-minute schedule. Documented-as-dormant is not dormant; the deployed trigger state is
+   the fact.
+5. **Derive the control from ONE source (EXP-047).** Both lanes must resolve the control
+   from the same store, one-directionally — never two independently-configured copies.
+Founding fix (copy the shape): DEFECT-OAG-043 — required `inScope` + the 6-module ingest
+lane-coverage gate, `work/OagEventSource/items/done/DEFECT-OAG-043.md`.
+Target: CFR + MTTR (an omitted control dies at compile time, not 27k events later).
 
 ## v82 — event-sourced pull-based flow (process STAGE F)
 You build per **pulled use-case** inside the continuous loop. **State lives ONLY

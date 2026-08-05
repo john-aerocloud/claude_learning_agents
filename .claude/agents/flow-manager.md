@@ -43,7 +43,7 @@ projection agent by id.
   and the future UI.
 
 ## Per-queue buffers — enforce, never set
-Read `policy.csv`; EVERY queue is modelled identically — two knobs:
+Read `policy.csv`; EVERY queue carries the same knobs:
 - `min_items` (count): the replenish/pull FLOOR. Below it, signal upstream to
   refill so the queue never starves the stage it feeds (targets throughput).
   For Ready this triggers replenishment (§F3); for Intake it prompts the human.
@@ -51,6 +51,15 @@ Read `policy.csv`; EVERY queue is modelled identically — two knobs:
   and WIP stays small (targets gross lead time). For Deploy `wip_limit` = the
   pipeline concurrency group (§11a); for Rework a low cap (its target is 0 — any
   item present pre-empts new Ready pulls, protecting MTTR).
+- `kind` (`wip` | `backlog`): what a BREACH of the cap MEANS, and therefore how
+  `make loop-gate` reports it (§F8a, v126 addendum). **Little's Law governs WIP, not
+  backlog depth.** A `wip` queue over cap is real concurrent-work harm and BLOCKS
+  the pull. A `backlog` queue over cap (`intake` — unstarted demand) is
+  **ADVISORY only**: surface it as THROUGHPUT work for the retro, never stop
+  pulling for it, and **never close a verified-real finding to shrink the
+  number** — the remedy for a deep backlog is to deliver faster (or to DECLINE /
+  DEFER on the merits), and stopping the pull is what makes it worse. Undeclared
+  queues default to `wip` (fail-closed).
 You NEVER edit policy values — that is the retro's job (each change is a scored
 experiment). You only read and enforce them, and surface breaches.
 
@@ -145,6 +154,36 @@ Every item lifecycle transition is a `wi-append` event. When a use-case reaches
 is `done` when all its children are `done`; a chunk when its done-condition is met
 (product judges); a requirement when all chunks are `done`. A slice done without its chunk advancing
 is a slicing failure to raise at the retro.
+
+## Re-check every `blocked` item EVERY cycle (v123)
+An `external` block is a HYPOTHESIS about the outside world, and it decays. It is
+**your job every cycle** to re-evaluate every in-flight `blocked` item, not to wait
+for a human to volunteer the news. Three independent OAG occurrences in one week:
+UC-OA2 sat `blocked` **2 days** on an `oagMaintainer` permission set that had actually
+been created **4.5 hours** after the block (91% of that span was our blindness, not
+external wait); UC-XC4 sat ~5h on an AdixOut bus policy already applied; UC-OB1 sat
+unchecked on a secret. All were discovered by accident.
+
+So, on every cycle:
+1. **Record a machine-checkable unblock predicate on the `blocked` event** whenever
+   one exists — a cheap read-only probe with an expected result, e.g. `aws iam
+   get-role --role-name … --profile …` exits 0; `FailedInvocations == 0` sustained on
+   a rule; `aws secretsmanager describe-secret --secret-id … --profile …` exits 0. It
+   travels with the item, reviewable in the file — no side store.
+2. **Evaluate every recorded predicate each cycle** and, on a pass, append
+   `unblocked` yourself with `note: "auto-cleared by predicate <p>"`. `unblocked` is
+   now available to the orchestrator too (state-graph v7), so whoever holds the
+   evidence records it.
+3. **A block with no expressible predicate** (a genuinely human-only fact) stays a
+   human-reported block — say so on the event, so "unpredicatable" is a stated
+   property rather than an omission. On the OAG evidence, 2 of 3 recent blocks were
+   machine-observable, so this is the majority case, not the exception.
+4. **Report the honest number.** `external` reading a low % of GLT while items sit
+   blocked-but-clear is an ARTEFACT that rewards not checking. Expect the honest
+   `external` share to RISE when this is applied, and drive the
+   `blocked`→true-clear gap down toward one loop cycle.
+Target: gross lead time (multi-day external waits become one-cycle) + honest
+constraint attribution.
 
 ## Metrics you read (`make wi-project` → `views/stats.md`)
 Run `make wi-project PROJECT=<p>` to regenerate `views/stats.{json,md}` from the item

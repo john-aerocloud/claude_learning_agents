@@ -155,6 +155,130 @@ def fold_state(graphs, itype, events):
     return state
 
 
+# ---------------------------------------------------------------------------
+# The observation predicate [state-graph v9] — what an `awaiting_observation`
+# item is waiting to observe, in a form a MACHINE can evaluate every cycle.
+#
+# v125 §17c Layer 2: "the load-bearing claim lives in PROSE, where it cannot be
+# false." A park whose reason is only a `note:` is exactly that — it can never
+# come back negative, so it never ends. So the state cannot be ENTERED without a
+# predicate (`append` refuses it; `validate` I6 catches a hand-edit), and the
+# predicate is a COMMITTED, RE-RUNNABLE command (§17c.4), not a sentence.
+#
+# Grammar, deliberately narrow: `make:<target> [VAR=VALUE ...]`, run as
+#   make -C work/<project> <target> [VAR=VALUE ...]
+# in the PROJECT's own Makefile (project-owned probes over real data; the root
+# Makefile is agent-ops). The `make:` scheme is REQUIRED — an unknown or absent
+# scheme is never guessed at, and no shell metacharacter is accepted, so the spec
+# can never become a shell string. Invocation is argv-list, never shell=True.
+#
+# The verdict is a REQUIRED SENTINEL LINE ON STDOUT, and the probe must exit 0:
+#   `OBSERVATION: observed`  -> the record exists; a tester dispatch is now
+#                               ACTIONABLE (loop-gate BLOCKS for it).
+#   `OBSERVATION: not-yet`   -> the probe ran and honestly found nothing yet
+#                               (legitimate; advisory, re-checked every cycle).
+#   anything else            -> BROKEN. No sentinel, both sentinels, a non-zero
+#                               exit, a missing target, a crash, a timeout. Fail
+#                               CLOSED: a probe that does not exist can never
+#                               masquerade as "not observed yet" — that confusion
+#                               is the `make wire-provenance` class itself.
+#
+# WHY A SENTINEL AND NOT AN EXIT CODE (caught live, 2026-08-01, first real run):
+# the first cut of this used exit 0 / 3 / other. It passed its unit tests — which
+# STUBBED subprocess.run and therefore only proved the mapping agreed with itself.
+# Driven against a REAL `make`, every probe read BROKEN: **make does not propagate
+# a recipe's exit status.** A recipe exiting 3 makes make print "Error 3" and then
+# exit **2** itself, so a three-way exit-code contract is not expressible through
+# `make` at all. Exactly the "a mock encodes your belief about platform semantics"
+# failure, found only by running the real thing. `test_run_observation_against_a_
+# real_make` now pins the verdict against a REAL make invocation so this cannot
+# regress into a stub-only agreement again.
+# ---------------------------------------------------------------------------
+OBSERVE_SCHEME = "make:"
+OBS_SENTINEL = "OBSERVATION:"
+OBS_OBSERVED = "observed"
+OBS_NOT_YET = "not-yet"
+_OBS_SENTINEL_RE = re.compile(r"^\s*" + OBS_SENTINEL + r"\s*(\S+)\s*$",
+                              re.IGNORECASE | re.MULTILINE)
+DEFAULT_OBSERVE_TIMEOUT = 120.0
+_OBS_TARGET_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_OBS_ARG_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=[A-Za-z0-9._:/@,+-]*$")
+
+
+def parse_observe_spec(spec):
+    """`make:<target> [VAR=VALUE ...]` -> ['<target>', 'VAR=VALUE', ...].
+    Raises ValueError (with the reason) on anything else. Nothing is ever guessed:
+    a spec that does not parse is BROKEN, never silently reinterpreted."""
+    if not isinstance(spec, str) or not spec.strip():
+        raise ValueError("observe spec is empty — an `awaiting_observation` item "
+                         "must carry a machine-checkable predicate")
+    s = spec.strip()
+    if not s.startswith(OBSERVE_SCHEME):
+        raise ValueError(f"observe spec {s!r} has no '{OBSERVE_SCHEME}' scheme "
+                         f"(the only supported form is "
+                         f"'{OBSERVE_SCHEME}<target> [VAR=VALUE ...]')")
+    parts = s[len(OBSERVE_SCHEME):].split()
+    if not parts:
+        raise ValueError(f"observe spec {s!r} names no make target")
+    target, args = parts[0], parts[1:]
+    if not _OBS_TARGET_RE.match(target):
+        raise ValueError(f"observe spec target {target!r} is not a plain make "
+                         f"target name (no shell, no paths, no metacharacters)")
+    for arg in args:
+        if not _OBS_ARG_RE.match(arg):
+            raise ValueError(f"observe spec argument {arg!r} is not a plain "
+                             f"VAR=VALUE make override")
+    return [target] + args
+
+
+def observe_spec_in_effect(item):
+    """The predicate CURRENTLY in effect for `item`: the `observe:` of the LAST
+    event that carries one (so a wrong probe is corrected by appending `amended`
+    with a new one, never by editing the historical event). None if there is none."""
+    spec = None
+    for ev in item.events:
+        if ev.get("observe"):
+            spec = str(ev.get("observe"))
+    return spec
+
+
+def _run_observation(project, spec, timeout=DEFAULT_OBSERVE_TIMEOUT):
+    """Evaluate an observation predicate NOW. Returns (verdict, detail) where
+    verdict is 'observed' | 'not-yet' | 'broken'. Module-level so the loop-gate
+    tests can substitute it (same seam as `_ref_on_trunk`)."""
+    try:
+        argv = parse_observe_spec(spec)
+    except ValueError as e:
+        return "broken", f"malformed observe spec: {e}"
+    repo = _project_repo(project)
+    try:
+        r = subprocess.run(["make", "-C", repo] + argv, capture_output=True,
+                           text=True, check=False, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return "broken", (f"predicate did not complete within {timeout}s (timeout) "
+                          f"— a predicate that cannot be evaluated is not a predicate")
+    except Exception as e:                      # make missing, repo absent, ...
+        return "broken", f"could not run the predicate: {e}"
+    out = r.stdout or ""
+    tail = (out + (r.stderr or "")).strip()[-400:]
+    if r.returncode != 0:
+        return "broken", (f"the probe exited {r.returncode} — an observation probe "
+                          f"must exit 0 and report its verdict on stdout as "
+                          f"`{OBS_SENTINEL} {OBS_OBSERVED}|{OBS_NOT_YET}`: {tail}")
+    verdicts = {m.group(1).strip().lower() for m in _OBS_SENTINEL_RE.finditer(out)}
+    verdicts &= {OBS_OBSERVED, OBS_NOT_YET}
+    if verdicts == {OBS_OBSERVED}:
+        return "observed", out.strip()[-400:]
+    if verdicts == {OBS_NOT_YET}:
+        return "not-yet", out.strip()[-400:]
+    if len(verdicts) > 1:
+        return "broken", (f"the probe reported BOTH verdicts — ambiguous, so it "
+                          f"establishes nothing: {tail}")
+    return "broken", (f"the probe printed no `{OBS_SENTINEL} {OBS_OBSERVED}` or "
+                      f"`{OBS_SENTINEL} {OBS_NOT_YET}` line, so its verdict is "
+                      f"unreadable: {tail}")
+
+
 def check_transition(graphs, itype, state, event, agent):
     """Return (ok, to_state, legal_here). ok iff `event` is a legal transition
     from `state` for this type AND `agent` is in that transition's agents."""
@@ -381,6 +505,11 @@ def _render_event(ev):
              f"agent: {_q(ev.get('agent'))}"]
     if ev.get("ref") not in (None, ""):
         parts.append(f"ref: {_q(ev.get('ref'))}")
+    # observe: the MACHINE-CHECKABLE liveness predicate of an `awaiting_observation`
+    # park [v9] — `make:<target> [VAR=V]`. Required on `not_yet_observed`, optional
+    # on the `amended` self-edge (where it REPLACES the predicate in effect).
+    if ev.get("observe") not in (None, ""):
+        parts.append(f"observe: {_q(ev.get('observe'))}")
     # tokens: OPTIONAL subagent token cost of producing this transition. Rendered
     # only when present (absent ⇒ unknown, treated as 0 by the cost-split fold).
     if ev.get("tokens") not in (None, ""):
@@ -537,6 +666,14 @@ _DONE_STATES = {"done", "resolved"}
 # A cancelled child is terminal-but-not-delivered: it must NOT block an aggregate
 # from completing, but it also does not, by itself, make the aggregate "done".
 _TERMINAL_RESOLVED = _DONE_STATES | {"cancelled"}
+# [state-graph v9] SHIPPED, GREEN, UNPROVEN. Deliberately absent from _DONE_STATES
+# and _TERMINAL_RESOLVED: an item awaiting its observation is NOT done and must
+# never let a parent aggregate fold to `done`. That fold is precisely what made
+# CFR and rework read clean for the five v125 capabilities while nothing worked.
+AWAITING_OBSERVATION = "awaiting_observation"
+# Non-terminal states in which NOTHING is in flight — the aggregate is waiting on
+# the outside world, not being worked. Both are owner-class `external`.
+_PARKED_STATES = {"blocked", AWAITING_OBSERVATION}
 
 
 def _bubble(graphs, items, kids, states, agg_item=None):
@@ -560,12 +697,21 @@ def _bubble(graphs, items, kids, states, agg_item=None):
         # else (all cancelled) the aggregate itself is cancelled.
         return "done" if any(states.get(k) in _DONE_STATES for k in kids) else "cancelled"
     # An aggregate whose only non-terminal (not-yet-delivered) children are ALL
-    # `blocked` is itself blocked: no work can progress until they clear. This
-    # keeps a parked-on-external aggregate out of the "in_progress" view (queues,
-    # stats, board) instead of masquerading as actively-worked. As soon as one
-    # non-terminal child is unblocked/working, it falls through to in_progress.
+    # PARKED is itself parked: no work can progress until the outside world moves.
+    # This keeps a parked aggregate out of the "in_progress" view (queues, stats,
+    # board) instead of masquerading as actively-worked. As soon as one non-terminal
+    # child is unblocked/working, it falls through to in_progress.
+    #
+    # [v9] Two parked kinds, and `awaiting_observation` takes PRECEDENCE over
+    # `blocked` when both are present: both are external waits, but the unproven-
+    # capability fact is the one a reader most needs AND the one that can silently
+    # read `done` later, so it is the one the aggregate must announce. Neither is in
+    # _TERMINAL_RESOLVED, so either way the aggregate CANNOT read `done` — that is
+    # the load-bearing half of the rule; the label is the informative half.
     non_terminal = [k for k in kids if states.get(k) not in _TERMINAL_RESOLVED]
-    if non_terminal and all(states.get(k) == "blocked" for k in non_terminal):
+    if non_terminal and all(states.get(k) in _PARKED_STATES for k in non_terminal):
+        if any(states.get(k) == AWAITING_OBSERVATION for k in non_terminal):
+            return AWAITING_OBSERVATION
         return "blocked"
     if any(_child_past_initial(graphs, items, k, states) for k in kids):
         return "in_progress"
@@ -673,10 +819,52 @@ def cmd_append(a):
               "do not hand-edit item state.", file=sys.stderr)
         sys.exit(1)
 
+    # --- the observation predicate is REQUIRED, not optional [v9] -------------
+    # An `awaiting_observation` park with no machine-checkable predicate is a PROSE
+    # park: nothing can ever evaluate whether the observation has landed, so the
+    # item sits there for ever and the state becomes a hiding place. Make it
+    # unrepresentable at the write, which is the earliest possible catch (v124/
+    # EXP-121: an enforcement control must be a REQUIRED dependency, never optional
+    # with a permissive default).
+    observe = getattr(a, "observe", None)
+    if to == AWAITING_OBSERVATION:
+        if observe:
+            try:
+                parse_observe_spec(observe)
+            except ValueError as e:
+                print(f"append REJECTED: {a.id}: {e}", file=sys.stderr)
+                print(f"  the predicate must be '{OBSERVE_SCHEME}<target> "
+                      f"[VAR=VALUE ...]' naming a COMMITTED, RE-RUNNABLE target in "
+                      f"work/{a.project}/Makefile that exits 0 and prints "
+                      f"`{OBS_SENTINEL} {OBS_OBSERVED}` once the observation has "
+                      f"landed, or `{OBS_SENTINEL} {OBS_NOT_YET}` while it has not.",
+                      file=sys.stderr)
+                sys.exit(1)
+        elif a.event == "not_yet_observed":
+            print(f"append REJECTED: {a.id}: entering '{AWAITING_OBSERVATION}' "
+                  f"requires --observe (a machine-checkable liveness predicate).",
+                  file=sys.stderr)
+            print(f"  This state means SHIPPED, GREEN and UNPROVEN — it is only "
+                  f"honest if something can decide when the observation lands. A "
+                  f"reason in --note cannot come back negative (§17c Layer 2), so "
+                  f"it is not enough.", file=sys.stderr)
+            print(f"  e.g. --observe '{OBSERVE_SCHEME}probe-<capability>-observed' "
+                  f"— it must exit 0 and print `{OBS_SENTINEL} {OBS_OBSERVED}` or "
+                  f"`{OBS_SENTINEL} {OBS_NOT_YET}`; anything else is a BROKEN "
+                  f"predicate and blocks the loop.", file=sys.stderr)
+            sys.exit(1)
+    elif observe:
+        print(f"append REJECTED: {a.id}: --observe is only meaningful on a "
+              f"transition into '{AWAITING_OBSERVATION}' (got '{a.event}' -> "
+              f"'{to}').", file=sys.stderr)
+        sys.exit(1)
+
     ts = a.ts or now_iso()
     new_event = {"ts": ts, "event": a.event, "agent": a.agent}
     if a.ref:
         new_event["ref"] = a.ref
+    if observe:
+        new_event["observe"] = observe
     # tokens: the subagent_tokens the dispatched specialist spent producing this
     # transition. Optional — rides the state event so cost-split is a pure fold.
     if getattr(a, "tokens", None) is not None:
@@ -1809,6 +1997,579 @@ def cmd_retro_mark(a):
 
 
 # ---------------------------------------------------------------------------
+# Subcommand: loop-gate — the MECHANICAL pull-precondition gate (v126)
+#
+# WHY THIS EXISTS (retro evidence, OagEventSource 2026-08-01): STAGE F documents
+# several loop preconditions as orchestrator JUDGEMENT, and they are reliably
+# skipped. Measured: DEFECT-OAG-045 sat in `validating` 127,636s (35.5h) and
+# DEFECT-OAG-048 98,224s — both already pushed AND deployed, both merely awaiting
+# a tester dispatch nobody made; Ready sat at 1 against a `min_items` floor of 3;
+# Intake sat at 14 against a `wip_limit` of 10 with the cap enforced NOWHERE.
+# Meanwhile the ONE obligation that IS mechanised — `retro-debt` (exit 2 = RETRO
+# DUE) — fired correctly and forced a retro that would otherwise have been
+# skipped. The pattern is unambiguous: **the mechanised gate is obeyed; the
+# documented one is not.** So this mechanises the rest, in the SAME shape as
+# retro-debt (same launcher, --project, human-readable lines, exit 0/2).
+#
+# Reports EVERY violated precondition (never just the first), then exits:
+#   exit 0 — all preconditions hold, the loop may pull.
+#   exit 2 — one or more BLOCKING preconditions violated; each printed as one
+#            actionable line naming the ids involved and the remedy.
+#
+# Checks:
+#   1. stalled-validation  an item in validating/dev-validating/prod-validating
+#      whose dwell > --stale-hours (default 4) AND whose latest ref-bearing
+#      done-work event (fixed/built_green/deployed/promoted) carries a `ref:` —
+#      i.e. the work is DONE and only a dispatch is missing. Highest-value check;
+#      this is the 35.5h case.
+#   2. ready-below-floor   depth(ready) < ready.min_items from queues/policy.csv.
+#   3. queue-over-cap      a queue depth > its wip_limit. TWO SEVERITIES (v126 addendum):
+#      BLOCKING for a WIP-STAGE queue, ADVISORY-only for a BACKLOG queue — see
+#      the QUEUE KIND block below for why.
+#   4. retro-debt          DELEGATED to compute_retro_debt (never re-implemented).
+#   5. awaiting-observation [v9] every item in `awaiting_observation` is reported
+#      AND its liveness predicate RE-EVALUATED, exactly as `blocked` is re-checked
+#      each cycle. observed -> BLOCK (a tester dispatch is now actionable);
+#      not-yet -> ADVISORY (legitimate, outstanding, never "satisfied"); broken or
+#      absent predicate -> BLOCK (an unverifiable park is the prose-remedy class).
+#
+# WHY check 1 AND check 5 (the honest fix, 2026-08-01): UC-ML1 was dwelling in
+# `dev-validating` with a green `ref:`, so check 1 read it as "work done, only a
+# dispatch missing" — FALSE: the dispatch happened and the tester correctly
+# declined, because the capability ships INERT and cannot be observed until armed.
+# The fix is NOT to exclude a state and move on. `awaiting_observation` leaves
+# STALL_STATES, so check 1 stops firing, but the item is then carried by check 5,
+# which re-runs its predicate every cycle and BLOCKS the moment the observation
+# lands. So a legitimate park is distinguishable from an undispatched item by a
+# recorded, machine-evaluated reason — and parking cannot be used to hide, because
+# entering the state without a predicate is refused at the write.
+#
+# NEVER derive "is it pushed / is it deployed" from event-note PROSE. That exact
+# mistake produced a confident, precisely-quantified, WRONG conclusion: a note
+# reading "NOT pushed — push is the prod apply" was ~35h stale while the commit
+# had been on origin/main the whole time. Push state comes from the STRUCTURED
+# `ref:` field verified against git (`merge-base --is-ancestor <ref> origin/…`)
+# inside the project's OWN repo at work/<p>/ (v50: separate repo, gitignored by
+# the parent — hence `git -C`). An unresolvable ref reports UNKNOWN; we never
+# assume either way.
+# ---------------------------------------------------------------------------
+# The states where "work done, only a dispatch missing" can strand an item.
+# (VALIDATING_STATES is the same set the CFR/quality metrics fold over.)
+# `awaiting_observation` is deliberately NOT here: an item there HAS been dispatched
+# and the tester recorded a machine-checkable reason it could not conclude. It is
+# carried by check 5 instead — see the WHY block above.
+STALL_STATES = VALIDATING_STATES
+# Events that carry a `ref:` to FINISHED work. `fixed` = defect graph;
+# `built_green`/`deployed` = use-case dev lane; `promoted` = the cicd event that
+# ENTERS prod-validating (without it, a prod-validating stall would be a blind
+# spot in one of the three states this check names).
+DONE_WORK_REF_EVENTS = ("fixed", "built_green", "deployed", "promoted")
+DEFAULT_STALE_HOURS = 4.0
+# §F2 seed defaults, used only when queues/policy.csv lacks the row. The retro
+# TUNES these in policy.csv — they are never the authority, just the fallback.
+POLICY_DEFAULTS = {
+    "intake": {"min_items": 2, "wip_limit": 10},
+    "ready": {"min_items": 3, "wip_limit": 4},
+    "deploy": {"min_items": 0, "wip_limit": 1},
+    "rework": {"min_items": 0, "wip_limit": 2},
+}
+# Candidate trunk refs, in order, for the push-state check.
+TRUNK_CANDIDATES = ("origin/HEAD", "origin/main", "origin/master")
+
+# --- QUEUE KIND (v126 addendum) — what decides whether over-cap BLOCKS or merely warns --
+# Little's Law governs WORK IN PROGRESS, not backlog depth.
+#   * a WIP-STAGE queue over its cap (ready / wip / rework / any future in-flight
+#     stage) is real concurrent-work harm — aging, context-switching — and BLOCKS.
+#   * a BACKLOG queue over its cap (`intake`: unstarted demand) is ADVISORY. Its
+#     depth says "more is wanted than is being delivered"; the remedy is to
+#     DELIVER FASTER — which is exactly the pull a block would prevent. Blocking
+#     on it INVERTS the constraint and creates pressure to close real findings
+#     just to shrink the number.
+# Founding case (2026-08-01, first real run of this gate): a legitimate
+# differential sweep produced ~15 verified-real sub-cost-4 findings; the
+# flow-manager correctly refused to close any of them, and the loop halted for
+# having done good discovery work.
+#
+# DECLARE the classification in queues/policy.csv. That file is LONG-format
+# (queue,param,value,…), so `kind` is a new PARAM ROW — `intake,kind,backlog,…` —
+# never a new column; no other reader's columns change and old files stay valid.
+# The maps below are the FALLBACK for a policy.csv predating the row; an
+# undeclared queue defaults to `wip`, i.e. fail-CLOSED (a future in-flight stage
+# blocks until somebody classifies it). Keep this knowledge here, in one place.
+QUEUE_KIND_BACKLOG = "backlog"
+QUEUE_KIND_WIP = "wip"
+DEFAULT_QUEUE_KINDS = {"intake": QUEUE_KIND_BACKLOG}
+# policy params whose value is a WORD, not a count (read_queue_policy would
+# otherwise drop them when int() fails).
+POLICY_STR_PARAMS = ("kind",)
+
+
+def queue_kind(policy, queue):
+    """'backlog' | 'wip' for `queue`: the policy.csv `kind` row if declared, else
+    DEFAULT_QUEUE_KINDS, else 'wip' (fail-closed). An unrecognised declared value
+    falls back rather than inventing a third severity."""
+    declared = str(policy.get(queue, {}).get("kind", "")).strip().lower()
+    if declared in (QUEUE_KIND_BACKLOG, QUEUE_KIND_WIP):
+        return declared
+    return DEFAULT_QUEUE_KINDS.get(queue, QUEUE_KIND_WIP)
+
+
+def read_queue_policy(project):
+    """Parse work/<project>/queues/policy.csv into {queue: {param: int}}, layered
+    over POLICY_DEFAULTS. The buffer knobs are OWNED BY THE RETRO and held in that
+    config — never hardcoded here (§F2)."""
+    pol = {q: dict(v) for q, v in POLICY_DEFAULTS.items()}
+    path = os.path.join(ROOT, "work", project, "queues", "policy.csv")
+    if not os.path.exists(path):
+        return pol
+    try:
+        with open(path, newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                q = (row.get("queue") or "").strip()
+                p = (row.get("param") or "").strip()
+                v = (row.get("value") or "").strip()
+                if not q or not p:
+                    continue
+                if p in POLICY_STR_PARAMS:
+                    pol.setdefault(q, {})[p] = v
+                    continue
+                try:
+                    pol.setdefault(q, {})[p] = int(v)
+                except ValueError:
+                    continue
+    except OSError:
+        pass
+    return pol
+
+
+def _project_repo(project):
+    return os.path.join(ROOT, "work", project)
+
+
+def _git(repo, *args):
+    """Run git in `repo`; return (rc, stdout). rc None when git/repo unusable."""
+    try:
+        r = subprocess.run(["git", "-C", repo, *args], capture_output=True,
+                           text=True, check=False)
+        return r.returncode, (r.stdout or "").strip()
+    except Exception:
+        return None, ""
+
+
+def _ref_on_trunk(project, ref):
+    """True/False iff `ref` IS/IS-NOT an ancestor of the project repo's origin
+    trunk; None = UNKNOWN (no repo, git unavailable, ref or trunk unresolvable).
+
+    The whole point: push state is a fact in GIT, never a claim in an event note."""
+    if not ref:
+        return None
+    ref = str(ref)
+    repo = _project_repo(project)
+    if not os.path.exists(os.path.join(repo, ".git")):
+        return None
+    rc, _ = _git(repo, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
+    if rc != 0:
+        return None                     # ref not resolvable here -> UNKNOWN
+    for trunk in TRUNK_CANDIDATES:
+        rc, _ = _git(repo, "rev-parse", "--verify", "--quiet", f"{trunk}^{{commit}}")
+        if rc != 0:
+            continue
+        rc, _ = _git(repo, "merge-base", "--is-ancestor", ref, trunk)
+        if rc == 0:
+            return True
+        if rc == 1:
+            return False
+        return None                     # git error -> UNKNOWN, never a guess
+    return None                         # no origin trunk -> UNKNOWN
+
+
+def _last_ref_event(item, event_names):
+    """The LAST event in `event_names` that carries a structured `ref:` (or None).
+    Prose in `note:` is deliberately never consulted."""
+    found = None
+    for ev in item.events:
+        if ev.get("event") in event_names and ev.get("ref"):
+            found = ev
+    return found
+
+
+def _current_segment(graphs, item, now):
+    """(state, entered_ts) for the item's still-open segment, or (None, None)."""
+    segs = walk_states(graphs, item, now)
+    if not segs:
+        return None, None
+    state, entered, _exited = segs[-1]
+    return state, entered
+
+
+def _hms(seconds):
+    if seconds is None:
+        return "—"
+    h = seconds / 3600.0
+    return f"{h:.1f}h" if h < 48 else f"{h / 24:.1f}d"
+
+
+def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
+                      threshold=3, now=None, observe=True,
+                      observe_timeout=DEFAULT_OBSERVE_TIMEOUT):
+    """PURE-ish computation (the impurities are the read-only git query and the
+    observation predicate, both injected via the module-level `_ref_on_trunk` /
+    `_run_observation` so tests can substitute them).
+
+    Returns a list of finding dicts, each with:
+      check    — 'stalled-validation' | 'ready-below-floor' | 'queue-over-cap'
+                 | 'retro-debt' | 'awaiting-observation'
+      severity — 'block'    exit 2; the loop may not pull until it is cleared
+                 'advisory' exit UNAFFECTED; real, reported, but not WIP harm
+                            (a BACKLOG queue over cap — see the QUEUE KIND block)
+                 'unknown'  exit UNAFFECTED; we could not establish it either way
+      ids      — the work-item ids involved
+      message  — one actionable line: what is wrong AND the remedy
+    """
+    items, _dup = load_all_items(project)
+    states = compute_states(graphs, items)
+    policy = read_queue_policy(project)
+    if now is None:
+        now = parse_ts(now_iso())
+    findings = []
+
+    # --- 1. stalled validation (the 35.5h case) ------------------------------
+    stale_s = float(stale_hours) * 3600.0
+    for iid in sorted(items):
+        it = items[iid]
+        if states.get(iid) not in STALL_STATES:
+            continue
+        state, entered = _current_segment(graphs, it, now)
+        if state not in STALL_STATES or entered is None:
+            continue
+        dwell = (now - entered).total_seconds()
+        if dwell <= stale_s:
+            continue
+        ev = _last_ref_event(it, DONE_WORK_REF_EVENTS)
+        if ev is None:
+            # dwell is long but NO structured ref => we cannot establish the work
+            # is finished. Report UNKNOWN; never assume either way.
+            findings.append({
+                "check": "stalled-validation", "severity": "unknown",
+                "ids": [iid], "state": state, "dwell_s": dwell, "ref": None,
+                "on_trunk": None,
+                "message": (f"[stalled-validation] UNKNOWN: {iid} has been in "
+                            f"'{state}' for {_hms(dwell)} (>{stale_hours}h) but no "
+                            f"{'/'.join(DONE_WORK_REF_EVENTS)} event carries a "
+                            f"`ref:` — cannot establish whether the work is done. "
+                            f"Remedy: append the missing ref (make wi-append … "
+                            f"REF=<sha>) or dispatch the tester."),
+            })
+            continue
+        # str(): an all-digit short sha (e.g. DEFECT-OAG-045's 5095849) is parsed
+        # back from the item file as an int by the frontmatter scalar reader.
+        ref = str(ev.get("ref"))
+        on_trunk = _ref_on_trunk(project, ref)
+        push = ("on origin trunk" if on_trunk is True else
+                "NOT on origin trunk" if on_trunk is False else
+                "push state UNKNOWN (ref unresolvable in work/%s)" % project)
+        findings.append({
+            "check": "stalled-validation", "severity": "block",
+            "ids": [iid], "state": state, "dwell_s": dwell, "ref": ref,
+            "on_trunk": on_trunk, "event": ev.get("event"),
+            "message": (f"[stalled-validation] {iid} has been in '{state}' for "
+                        f"{_hms(dwell)} (>{stale_hours}h); the work is DONE "
+                        f"({ev.get('event')} ref {ref}, {push}) — only a dispatch "
+                        f"is missing. Remedy: dispatch the tester now, then "
+                        f"`make wi-append PROJECT={project} ID={iid} "
+                        f"EVENT=validated|rejected AGENT=tester`."),
+        })
+
+    # --- derived queue depths (pure function of state via queue_map) ----------
+    depths = defaultdict(int)
+    members = defaultdict(list)
+    for iid in sorted(items):
+        q = graphs.queue_for(states.get(iid))
+        if q:
+            depths[q] += 1
+            members[q].append(iid)
+
+    # --- 2. ready below floor ------------------------------------------------
+    floor = policy.get("ready", {}).get("min_items",
+                                        POLICY_DEFAULTS["ready"]["min_items"])
+    ready_depth = depths.get("ready", 0)
+    if ready_depth < floor:
+        findings.append({
+            "check": "ready-below-floor", "severity": "block",
+            "ids": members.get("ready", []), "queue": "ready",
+            "depth": ready_depth, "floor": floor,
+            "message": (f"[ready-below-floor] ready depth {ready_depth} < "
+                        f"min_items {floor} "
+                        f"({', '.join(members.get('ready', [])) or 'empty'}). "
+                        f"Remedy: replenish NOW, in parallel (§F3) — product "
+                        f"decomposes the next use-cases; below-floor is never "
+                        f"'expected' or tolerated."),
+        })
+
+    # --- 3. queue over cap (two severities — see the QUEUE KIND block) --------
+    for q in sorted(depths):
+        cap = policy.get(q, {}).get("wip_limit")
+        if cap is None:
+            continue                     # no cap declared for this queue
+        if depths[q] <= cap:
+            continue
+        over = depths[q] - cap
+        kind = queue_kind(policy, q)
+        common = {"check": "queue-over-cap", "ids": members[q], "queue": q,
+                  "depth": depths[q], "cap": cap, "over": over, "kind": kind}
+        if kind == QUEUE_KIND_BACKLOG:
+            # ADVISORY: reported prominently, never affects the exit code.
+            findings.append(dict(common, severity="advisory", message=(
+                f"ADVISORY (does NOT block the pull) [queue-over-cap] {q} depth "
+                f"{depths[q]} > wip_limit {cap} — over by {over}. {q} is a BACKLOG "
+                f"queue, and it is STILL over cap: unaddressed, not satisfied. "
+                f"Little's Law governs WIP, not backlog depth — the remedy is to "
+                f"DELIVER FASTER (raise throughput; decline or defer what will "
+                f"never be pulled), never to close real findings to shrink the "
+                f"number, and never to stop pulling, which only makes it worse.")))
+        else:
+            findings.append(dict(common, severity="block", message=(
+                f"[queue-over-cap] {q} depth {depths[q]} > wip_limit {cap} — over "
+                f"by {over}. {q} is a WIP STAGE: concurrent work in flight past "
+                f"the cap is real harm (aging, context-switching). Remedy: drain "
+                f"{over} to done before admitting more; the cap targets gross lead "
+                f"time (§F2), work cannot be allowed to age.")))
+
+    # --- 5. awaiting observation: RE-CHECK the predicate, every cycle [v9] ----
+    for iid in sorted(items):
+        if states.get(iid) != AWAITING_OBSERVATION:
+            continue
+        it = items[iid]
+        # FLOW items only. An aggregate BUBBLES into this state from a child and has
+        # no own event stream, so it carries no predicate — reporting it would be a
+        # phantom "no predicate" block for every ancestor of one parked use-case.
+        if graphs.kind(it.type) != "flow":
+            continue
+        _st, entered = _current_segment(graphs, it, now)
+        dwell = (now - entered).total_seconds() if entered else None
+        spec = observe_spec_in_effect(it)
+        common = {"check": "awaiting-observation", "ids": [iid],
+                  "state": AWAITING_OBSERVATION, "dwell_s": dwell, "spec": spec}
+        if not spec:
+            # Only reachable by a hand-edit (append refuses it; validate I6 flags
+            # it). An unverifiable park is a PROSE park — fail CLOSED and loud.
+            findings.append(dict(common, severity="block", verdict="no-predicate",
+                                 message=(
+                f"[awaiting-observation] {iid} has been parked in "
+                f"'{AWAITING_OBSERVATION}' for {_hms(dwell)} but carries NO "
+                f"observation predicate — nothing can decide when it is done, so it "
+                f"would sit here for ever. Remedy: `make wi-append PROJECT={project} "
+                f"ID={iid} EVENT=amended AGENT=solution-architect "
+                f"OBSERVE={OBSERVE_SCHEME}<target>` naming a committed re-runnable "
+                f"probe (exit 0, printing `{OBS_SENTINEL} {OBS_OBSERVED}` or "
+                f"`{OBS_SENTINEL} {OBS_NOT_YET}`).")))
+            continue
+        if not observe:
+            findings.append(dict(common, severity="unknown", verdict="not-evaluated",
+                                 message=(
+                f"[awaiting-observation] {iid}: predicate '{spec}' was NOT evaluated "
+                f"(--no-observe). Parked {_hms(dwell)}; SHIPPED AND GREEN BUT "
+                f"UNPROVEN and NOT done. This run establishes nothing about it — "
+                f"re-run without --no-observe before concluding anything.")))
+            continue
+        verdict, detail = _run_observation(project, spec, observe_timeout)
+        if verdict == "observed":
+            findings.append(dict(common, severity="block", verdict=verdict,
+                                 detail=detail, message=(
+                f"[awaiting-observation] {iid}: the observation HAS LANDED "
+                f"(predicate '{spec}' reported {OBS_SENTINEL} {OBS_OBSERVED}"
+                f"{'; ' + detail if detail else ''}) — the "
+                f"capability has now been seen working on data we did not author, "
+                f"after {_hms(dwell)} parked. A tester dispatch is ACTIONABLE. "
+                f"Remedy: dispatch the tester to validate against that real record, "
+                f"then `make wi-append PROJECT={project} ID={iid} "
+                f"EVENT=validated|rejected AGENT=tester` with the observation "
+                f"pointer in NOTE.")))
+        elif verdict == "not-yet":
+            findings.append(dict(common, severity="advisory", verdict=verdict,
+                                 detail=detail, message=(
+                f"ADVISORY (does NOT block the pull) [awaiting-observation] {iid} "
+                f"parked {_hms(dwell)}: '{spec}' reports NOT YET OBSERVED. SHIPPED "
+                f"AND GREEN BUT UNPROVEN — it is NOT done, it must never fold into a "
+                f"`done` aggregate, and this is re-checked every cycle. Legitimate "
+                f"while the trigger genuinely has not occurred; if the wait is "
+                f"unbounded, arm it, force the trigger, or judge it statistically "
+                f"(§12d.3) — never conclude it works.")))
+        else:
+            findings.append(dict(common, severity="block", verdict="broken",
+                                 detail=detail, message=(
+                f"[awaiting-observation] {iid}: its observation predicate CANNOT BE "
+                f"EVALUATED ('{spec}': {detail}). An unrunnable liveness predicate "
+                f"is not a predicate (§17c.2) — the item would sit parked for ever "
+                f"with no mechanism, which is the `make wire-provenance` class this "
+                f"state exists to prevent. Remedy: fix the probe (it must exit 0 "
+                f"printing `{OBS_SENTINEL} {OBS_OBSERVED}`/`{OBS_SENTINEL} "
+                f"{OBS_NOT_YET}`) or record a corrected one "
+                f"with `make wi-append … EVENT=amended … OBSERVE=…`.")))
+
+    # --- 4. retro debt (DELEGATED — do not duplicate that logic) -------------
+    routine, incidents, due, _detail, marker = compute_retro_debt(
+        graphs, project, threshold, now)
+    if due:
+        reason = ("incident (immediate)" if incidents
+                  else f"routine {len(routine)}>={threshold}")
+        ids = [i for i, _t in incidents] + [i for i, _t in routine]
+        findings.append({
+            "check": "retro-debt", "severity": "block", "ids": ids,
+            "routine": len(routine), "incidents": len(incidents),
+            "threshold": threshold,
+            "message": (f"[retro-debt] RETRO DUE [{reason}] — routine "
+                        f"{len(routine)}/{threshold}, incidents "
+                        f"{len(incidents)} since "
+                        f"{marker.strftime('%Y-%m-%dT%H:%M:%SZ')} "
+                        f"({', '.join(ids) or '—'}). Remedy: fire /retro, then "
+                        f"`make retro-mark PROJECT={project}` to drain it."),
+        })
+
+    # --- 6. the test-requirement gate (§17d) — DELEGATED to the real analyser --
+    findings.extend(compute_test_requirement_gate(project))
+
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# loop-gate check 6 — the §17d test-requirement gate (human ruling, 2026-08-02)
+#
+#   "The ONLY thing tests should be validating is the requirements. If we are
+#    making up tests for coverage that do not map onto requirements then either
+#    (a) we are wasting time, or (b) we have identified a new acceptance criteria
+#    and we need to retro as to why it wasn't discovered earlier."
+#
+# The analysis itself lives in ONE place — .claude/tools/test-requirement-gate.js —
+# and is DELEGATED to here, never re-implemented (the DRY rule check 4 already
+# follows for retro-debt). This is the loop's only continuously-running workflow,
+# so it is where the gate has to hang: a gate in no workflow is not a gate.
+#
+# SEVERITY, per §F8a ("a gate blocks only on harm that stopping relieves"):
+#   FAIL  (a count ABOVE the committed ratchet baseline) -> BLOCK. A NEW test that
+#         cannot validate a requirement just landed; stopping the line is exactly
+#         the remedy, and the fix is one file.
+#   PASS  (at or below baseline)                          -> ADVISORY. The standing
+#         debt is real and reported every cycle so it stays visible and shrinking,
+#         but blocking the pull on it would halt delivery for a backlog — the same
+#         constraint inversion the v126 addendum corrected on the intake queue.
+#   NOT-CONFIGURED / UNRUNNABLE                           -> UNKNOWN ("? " line).
+#         Never silent, never counted as satisfied: an unevaluated precondition is
+#         not a met one (v9/§17c.2).
+#
+# The verdict is read from the STDOUT SENTINEL, not the exit status — `make`
+# cannot express a three-way exit (a recipe exiting 3 makes make print `Error 3`
+# and exit 2) and the same lesson applies to any wrapper.
+# ---------------------------------------------------------------------------
+TRG_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "..", "..", "..", "tools", "test-requirement-gate.js")
+TRG_SENTINEL = "TRG-VERDICT:"
+TRG_TIMEOUT = 120.0
+
+
+def compute_test_requirement_gate(project, timeout=TRG_TIMEOUT):
+    """Run the committed analyser over `project` and return 0 or 1 finding."""
+    common = {"check": "test-requirement-gate", "ids": []}
+    try:
+        proc = subprocess.run(
+            ["node", os.path.normpath(TRG_SCRIPT), "--project", project,
+             "--repo-root", ROOT, "--json"],
+            capture_output=True, text=True, timeout=timeout)
+        report = json.loads(proc.stdout)
+    except Exception as exc:                                    # noqa: BLE001
+        return [dict(common, severity="unknown", verdict="UNRUNNABLE", ac=None,
+                     authored=None, message=(
+            f"[test-requirement-gate] NOT ESTABLISHED — the analyser would not run "
+            f"({type(exc).__name__}: {str(exc)[:160]}). An unrunnable gate is not a "
+            f"clean one. Remedy: `make test-requirement-gate PROJECT={project}` and "
+            f"fix what it reports."))]
+
+    verdict = report.get("verdict")
+    counts = report.get("counts", {})
+    ac, authored = counts.get("ac", 0), counts.get("authored", 0)
+    base = report.get("baseline") or {}
+    common = dict(common, verdict=verdict, ac=ac, authored=authored)
+
+    if verdict == "NOT-CONFIGURED":
+        return [dict(common, severity="unknown", message=(
+            f"[test-requirement-gate] NOT ESTABLISHED — no "
+            f".claude/config/test-requirement-gate/{project}.json, so nothing was "
+            f"checked. That is not the same as clean: no test in this project is "
+            f"known to declare the acceptance criterion it validates, and no "
+            f"authored-precondition rule ran. Remedy: copy the OagEventSource "
+            f"config, measure the honest baseline, commit it."))]
+
+    detail = (f"limb1 untagged={ac} (baseline {base.get('ac', 0)}), "
+              f"limb2 authored-preconditions={authored} "
+              f"(baseline {base.get('authored', 0)}), "
+              f"allowlist={counts.get('allowlistEntries', 0)} entries "
+              f"suppressing {counts.get('allowlisted', 0)}")
+
+    if verdict == "FAIL":
+        worst = "; ".join(
+            f"{v['rule']} {v['file']}:{v['line']}"
+            for v in report.get("violations", []) if v.get("limb") == "authored")[:600]
+        cfg_err = "; ".join(report.get("configErrors", []))[:400]
+        return [dict(common, severity="block", message=(
+            f"[test-requirement-gate] REGRESSION above the committed ratchet — "
+            f"{detail}. A test that cannot validate a requirement has just landed. "
+            f"Per the ruling it is either WASTE (delete it) or an UNDISCOVERED "
+            f"acceptance criterion (register it, and the discovery gap earns a "
+            f"retro). Remedy: `make test-requirement-gate PROJECT={project} "
+            f"VERBOSE=1`." + (f" Limb-2 hits: {worst}." if worst else "")
+            + (f" CONFIG ERRORS: {cfg_err}." if cfg_err else "")))]
+
+    if ac or authored:
+        return [dict(common, severity="advisory", message=(
+            f"ADVISORY (does NOT block the pull) [test-requirement-gate] standing "
+            f"debt at the ratchet floor: {detail}. Every one of these is, per the "
+            f"ruling, either waste or an undiscovered acceptance criterion — the "
+            f"number may only SHRINK (`make test-requirement-gate-baseline` refuses "
+            f"to raise it). Reported every cycle so it cannot quietly become normal."))]
+
+    return []
+
+
+def cmd_loop_gate(a):
+    graphs = Graphs.load()
+    now = parse_ts(getattr(a, "now", None)) if getattr(a, "now", None) else None
+    stale_hours = getattr(a, "stale_hours", DEFAULT_STALE_HOURS)
+    findings = compute_loop_gate(
+        graphs, a.project, stale_hours=stale_hours, threshold=a.threshold, now=now,
+        observe=getattr(a, "observe", True),
+        observe_timeout=getattr(a, "observe_timeout", None) or DEFAULT_OBSERVE_TIMEOUT)
+    blocking = [f for f in findings if f["severity"] == "block"]
+    advisory = [f for f in findings if f["severity"] == "advisory"]
+    unknown = [f for f in findings if f["severity"] == "unknown"]
+    stamp = (now or parse_ts(now_iso())).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # ADVISORY findings NEVER affect the verdict or the exit code — but they are
+    # always printed, and an advisory-only run says so explicitly so "may pull"
+    # can never be read as "everything is satisfied".
+    adv_tail = (f"; {len(advisory)} advisory (non-blocking, still outstanding)"
+                if advisory else "")
+    # UNKNOWN findings likewise never affect the exit code, but they MUST reach the
+    # headline: an `awaiting_observation` item whose predicate was not evaluated
+    # (--no-observe) or a stalled item whose ref will not resolve is a thing this
+    # run FAILED TO ESTABLISH, and "all preconditions hold" would read as if it had.
+    adv_tail += (f"; {len(unknown)} NOT ESTABLISHED (see ? lines)" if unknown else "")
+    verdict = (f"BLOCKED ({len(blocking)} violated precondition"
+               f"{'' if len(blocking) == 1 else 's'}) — do NOT pull until cleared"
+               if blocking else
+               ("OK — no BLOCKING precondition violated, the loop may pull"
+                if (advisory or unknown) else
+                "OK — all preconditions hold, the loop may pull"))
+    print(f"loop-gate[{a.project}] @ {stamp} (stale-hours {stale_hours}) "
+          f"=> {verdict}{adv_tail}")
+    for f in blocking:
+        print(f"  - {f['message']}")
+    for f in advisory:
+        print(f"  ! {f['message']}")
+    for f in unknown:
+        print(f"  ? {f['message']}")
+    sys.exit(2 if blocking else 0)
+
+
+# ---------------------------------------------------------------------------
 # Subcommand: validate — the drift GATE (invariants I1–I4)
 # ---------------------------------------------------------------------------
 def cmd_validate(a):
@@ -1819,7 +2580,7 @@ def cmd_validate(a):
         for v in violations:
             print(f"  - {v}", file=sys.stderr)
         sys.exit(1)
-    print(f"validate: {a.project} clean — I1–I4 all hold.")
+    print(f"validate: {a.project} clean — I1–I4 + I6 all hold.")
 
 
 def validate_items(graphs, project):
@@ -1867,6 +2628,29 @@ def validate_items(graphs, project):
         is_terminal = state in ("done", "resolved", "wontfix", "cancelled")
         if is_terminal and q is not None:
             violations.append(f"(I2) {iid}: terminal state '{state}' but queue '{q}' is non-null")
+
+        # I6: an `awaiting_observation` FLOW item carries a VALID machine-checkable
+        # observation predicate. `append` refuses the transition without one, so a
+        # violation here means a hand-edit — the same role I2 plays for the
+        # terminal/queue pair. (I5 is RESERVED for IMP-011's CORE-job invariant,
+        # which is still owed; this is deliberately NOT that number.)
+        # AGGREGATES are exempt by construction: a slice/chunk BUBBLES into this
+        # state from a child and has no own event stream to carry a predicate — the
+        # predicate lives on the child, which is checked in its own right.
+        if state == AWAITING_OBSERVATION and graphs.kind(it.type) == "flow":
+            spec = observe_spec_in_effect(it)
+            if not spec:
+                violations.append(
+                    f"(I6) {iid}: in '{AWAITING_OBSERVATION}' with NO observation "
+                    f"predicate — nothing can decide when it is done. Record one "
+                    f"via `wi-append … EVENT=amended … OBSERVE={OBSERVE_SCHEME}"
+                    f"<target>`; do not hand-edit item state.")
+            else:
+                try:
+                    parse_observe_spec(spec)
+                except ValueError as e:
+                    violations.append(
+                        f"(I6) {iid}: observation predicate is not evaluable: {e}")
 
         # I4b: a done FLOW item must live in done/ (aggregates always stay in
         # active/ — their state is DERIVED from children, not their own stream,
@@ -2280,6 +3064,16 @@ def main(argv=None):
     ap.add_argument("--ref")
     ap.add_argument("--note")
     ap.add_argument("--ts")
+    ap.add_argument("--observe",
+                    help="REQUIRED when entering `awaiting_observation` (event "
+                         "not_yet_observed): the machine-checkable liveness "
+                         f"predicate, '{OBSERVE_SCHEME}<target> [VAR=VALUE ...]' — a "
+                         "committed re-runnable make target in work/<project>/ that "
+                         f"exits 0 and prints `{OBS_SENTINEL} {OBS_OBSERVED}` once "
+                         f"the observation has landed (or `{OBS_SENTINEL} "
+                         f"{OBS_NOT_YET}` while it has not). Also accepted on the "
+                         "`amended` self-edge, where it REPLACES the predicate in "
+                         "effect. Rejected on any other event.")
     ap.add_argument("--tokens", type=int,
                     help="subagent_tokens the dispatched specialist spent producing "
                          "this transition (optional; feeds the plumbing-vs-delivery "
@@ -2316,6 +3110,33 @@ def main(argv=None):
     rm.add_argument("--project", required=True)
     rm.add_argument("--now", help="marker timestamp (ISO-8601 UTC); default: real now")
     rm.set_defaults(func=cmd_retro_mark)
+
+    lg = sub.add_parser("loop-gate",
+                        help="MECHANICAL pull-precondition gate: exit 2 if any "
+                             "blocking precondition is violated (stalled "
+                             "validation / ready below floor / queue over cap / "
+                             "retro due / observation landed)")
+    lg.add_argument("--project", required=True)
+    lg.add_argument("--no-observe", dest="observe", action="store_false",
+                    default=True,
+                    help="skip re-evaluating `awaiting_observation` liveness "
+                         "predicates (they can be slow real-data queries). Each "
+                         "parked item is then reported as NOT EVALUATED — a skipped "
+                         "run can never read as satisfied.")
+    lg.add_argument("--observe-timeout", dest="observe_timeout", type=float,
+                    default=DEFAULT_OBSERVE_TIMEOUT,
+                    help="seconds an observation predicate may take before it is "
+                         f"BROKEN (default {DEFAULT_OBSERVE_TIMEOUT})")
+    lg.add_argument("--stale-hours", dest="stale_hours", type=float,
+                    default=DEFAULT_STALE_HOURS,
+                    help="dwell in validating/dev-validating/prod-validating "
+                         f"beyond which a done-but-undispatched item BLOCKS the "
+                         f"loop (default {DEFAULT_STALE_HOURS})")
+    lg.add_argument("--threshold", type=int, default=3,
+                    help="retro-debt routine threshold (passed through to the "
+                         "retro-debt computation this delegates to)")
+    lg.add_argument("--now", help="reference 'now' (ISO-8601 UTC) for deterministic tests")
+    lg.set_defaults(func=cmd_loop_gate)
 
     a = p.parse_args(argv)
     a.func(a)

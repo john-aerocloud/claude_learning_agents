@@ -157,6 +157,172 @@ def test_labels_and_status():
           lp.resolve_state_id(cstates, lp.desired_status_names("defect", "wontfix")) == "c1")
 
 
+# --------------------------------------------------------------------------- #
+# OI-LINEAR-CANCELLED-STATE-UNMAPPED — the STATE_STATUS drift gate.
+#
+# Root cause of the defect: STATE_STATUS was HAND-maintained against
+# process/machinery/state-graphs.json and drifted from it (the graph gained
+# `cancelled` at v5 and `awaiting_observation` at v9; neither reached the table),
+# and `desired_status_names` degraded an unmapped state to ["Backlog"] SILENTLY —
+# so a terminal cancelled item rendered as unstarted work with no signal anywhere.
+# These tests derive the expected coverage FROM the graph, so the table can never
+# again drift without the build going red, and pin the loud failure.
+# --------------------------------------------------------------------------- #
+# The team's REAL workflow states (probed live from the Linear workspace,
+# 2026-08-03) — the only names a candidate list can actually resolve against.
+REAL_TEAM_STATES = [
+    {"id": "s-backlog", "name": "Backlog", "type": "backlog"},
+    {"id": "s-cancel", "name": "Canceled", "type": "canceled"},
+    {"id": "s-done", "name": "Done", "type": "completed"},
+    {"id": "s-dup", "name": "Duplicate", "type": "duplicate"},
+    {"id": "s-blocked", "name": "Blocked", "type": "started"},
+    {"id": "s-prog", "name": "In Progress", "type": "started"},
+    {"id": "s-review", "name": "In Review", "type": "started"},
+    {"id": "s-ready", "name": "Ready", "type": "unstarted"},
+    {"id": "s-todo", "name": "Todo", "type": "unstarted"},
+]
+
+FLOW_TYPES = ["use-case", "defect", "open-item"]
+AGG_TYPES = ["slice", "chunk", "requirement"]
+
+
+def test_state_status_covers_every_graph_state():
+    """AC-OI-LINEAR-CANCELLED-STATE-UNMAPPED.4 — completeness, derived from the
+    graph rather than hand-listed: every state an item of a type can HOLD has a
+    STATE_STATUS entry. This is the check whose absence let v5 -> now go unnoticed."""
+    graphs = lp.load_state_graphs()
+    gaps = lp.audit_state_status(graphs)
+    forward = [g for g in gaps if g[0] == "unmapped"]
+    check(f"no state the graph defines is unmapped (gaps: {forward})", not forward)
+    # and the gate must actually be capable of SEEING a gap (a gate that cannot
+    # fail is not a gate) — remove a mapping and it must report exactly that one.
+    saved = lp.STATE_STATUS["use-case"].pop("cancelled", None)
+    try:
+        seeded = lp.audit_state_status(graphs)
+        check(
+            "gate DETECTS a seeded missing mapping",
+            any(g[0] == "unmapped" and g[1] == "use-case" and g[2] == "cancelled"
+                for g in seeded),
+        )
+    finally:
+        if saved is not None:
+            lp.STATE_STATUS["use-case"]["cancelled"] = saved
+
+
+def test_state_status_has_no_state_the_graph_does_not_define():
+    """AC-OI-LINEAR-CANCELLED-STATE-UNMAPPED.4 (inverse sweep) — a table key that
+    names no real graph state is stale editorial debt and must not accumulate."""
+    graphs = lp.load_state_graphs()
+    extras = [g for g in lp.audit_state_status(graphs) if g[0] == "unknown-state"]
+    check(f"no stale table key absent from the graph (extras: {extras})", not extras)
+
+
+def test_graph_states_are_derived_not_hand_listed():
+    """AC-OI-LINEAR-CANCELLED-STATE-UNMAPPED.4 — the expected set comes from the
+    graph file: flow types from their transition table, aggregates from the
+    bubble's range (initial + terminal + working + the external-wait states,
+    which are themselves read from `state_owners`, not typed in here)."""
+    graphs = lp.load_state_graphs()
+    uc = lp.graph_states(graphs, "use-case")
+    for s in ["registered", "ready", "building", "deploying", "dev-validating",
+              "prod-deploying", "prod-validating", "validating", "reworking",
+              "blocked", "awaiting_observation", "done", "cancelled"]:
+        check(f"use-case graph state derived: {s}", s in uc)
+    check("use-case has no invented state", "wontfix" not in uc)
+    dfx = lp.graph_states(graphs, "defect")
+    for s in ["reported", "reproducing", "fixing", "validating", "blocked",
+              "awaiting_observation", "resolved", "wontfix", "cancelled"]:
+        check(f"defect graph state derived: {s}", s in dfx)
+    oi = lp.graph_states(graphs, "open-item")
+    check("open-item states derived",
+          oi == {"open", "scheduled", "done", "wontfix", "cancelled"})
+    agg = lp.graph_states(graphs, "slice")
+    for s in ["planned", "in_progress", "done", "cancelled", "blocked",
+              "awaiting_observation"]:
+        check(f"aggregate bubble state derived: {s}", s in agg)
+    check("aggregate range excludes flow-only states", "building" not in agg)
+
+
+def test_cancelled_resolves_to_a_real_terminal_status():
+    """AC-OI-LINEAR-CANCELLED-STATE-UNMAPPED.1 + .2 — THE defect. A cancelled item
+    of every type that has the terminal must render as the workspace's real
+    cancelled status, never Backlog."""
+    for itype in FLOW_TYPES + AGG_TYPES:
+        names = lp.desired_status_names(itype, "cancelled")
+        check(f"{itype}/cancelled is not Backlog", names != ["Backlog"])
+        check(
+            f"{itype}/cancelled resolves to the real 'Canceled' state",
+            lp.resolve_state_id(REAL_TEAM_STATES, names) == "s-cancel",
+        )
+
+
+def test_awaiting_observation_resolves_to_a_parked_status():
+    """AC-OI-LINEAR-CANCELLED-STATE-UNMAPPED.4 — the second live gap the audit
+    found (state-graph v9). An item shipped-but-unproven is an EXTERNAL wait, so
+    it must read as parked, never as unstarted Backlog (UC-ML1/UC-XC5 were both
+    projecting as Backlog while deployed and verified)."""
+    for itype in ["use-case", "defect"] + AGG_TYPES:
+        names = lp.desired_status_names(itype, "awaiting_observation")
+        check(f"{itype}/awaiting_observation is not Backlog", names != ["Backlog"])
+        check(
+            f"{itype}/awaiting_observation resolves to the real 'Blocked' state",
+            lp.resolve_state_id(REAL_TEAM_STATES, names) == "s-blocked",
+        )
+    check(
+        "awaiting_observation carries a distinguishing label (parked != blocked)",
+        "awaiting-observation" in lp.compose_labels(
+            {"type": "use-case", "state": "awaiting_observation", "acceptance": [1]}
+        ),
+    )
+
+
+def test_unmapped_state_is_loud_not_silently_backlog():
+    """AC-OI-LINEAR-CANCELLED-STATE-UNMAPPED.5 — the ACTUAL fix. An unmapped state
+    must be impossible to pass quietly: it raises, naming the state and type. The
+    silent ["Backlog"] fallback is what let this defect survive from v5 to now."""
+    try:
+        got = lp.desired_status_names("use-case", "no-such-state")
+        check(f"unmapped state RAISES (got {got!r} instead)", False)
+    except lp.UnmappedStateError as e:
+        msg = str(e)
+        check("unmapped state raises UnmappedStateError", True)
+        check("error names the offending state", "no-such-state" in msg)
+        check("error names the item type", "use-case" in msg)
+        check("error names the table to fix", "STATE_STATUS" in msg)
+        check("error names the source of truth", "state-graphs.json" in msg)
+    # An unknown item TYPE was the same class of silent fallback (it degraded to
+    # the use-case table), and so was a missing derived.state.
+    for bad_type in ["not-a-type", ""]:
+        try:
+            lp.desired_status_names(bad_type, "done")
+            check(f"unknown type {bad_type!r} RAISES", False)
+        except lp.UnmappedStateError:
+            check(f"unknown type {bad_type!r} raises", True)
+    try:
+        lp.desired_status_names("use-case", None)
+        check("absent derived.state RAISES", False)
+    except lp.UnmappedStateError:
+        check("absent derived.state raises", True)
+    # It must be catchable by main()'s existing handler -> exit 1, not a traceback.
+    check("UnmappedStateError is a LinearError", issubclass(lp.UnmappedStateError, lp.LinearError))
+
+
+def test_every_real_item_state_is_projectable():
+    """AC-OI-LINEAR-CANCELLED-STATE-UNMAPPED.4 — the audit against REALITY, not
+    just against the graph: every (type, state) pair actually present in this
+    project's item files must resolve to a status without raising. This is the
+    sweep that would have caught the live UC-HF042 and UC-ML1 misrenders."""
+    pairs = lp.project_state_pairs("OagEventSource")
+    check("real item pairs were found (audit is not vacuous)", len(pairs) > 0)
+    unresolvable = []
+    for itype, state in sorted(pairs):
+        try:
+            lp.desired_status_names(itype, state)
+        except lp.UnmappedStateError as e:
+            unresolvable.append(f"{itype}/{state}: {e}")
+    check(f"every real (type,state) projects (bad: {unresolvable})", not unresolvable)
+
+
 def run():
     for fn in [
         test_parse_acceptance_joins_wrapped_lines,
@@ -164,6 +330,13 @@ def run():
         test_reference_resolution,
         test_render_description_sections,
         test_labels_and_status,
+        test_state_status_covers_every_graph_state,
+        test_state_status_has_no_state_the_graph_does_not_define,
+        test_graph_states_are_derived_not_hand_listed,
+        test_cancelled_resolves_to_a_real_terminal_status,
+        test_awaiting_observation_resolves_to_a_parked_status,
+        test_unmapped_state_is_loud_not_silently_backlog,
+        test_every_real_item_state_is_projectable,
     ]:
         print(f"* {fn.__name__}")
         fn()

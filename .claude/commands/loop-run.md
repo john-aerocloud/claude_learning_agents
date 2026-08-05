@@ -22,6 +22,49 @@ state and flow decisions.
 > surface it (the one escalation automation cannot resolve). Skip only if `$1` has no
 > `instance/$1` branch (non-worktree/standalone project).
 
+> **STEP 0b — LOOP PRECONDITION GATE (v126, EXP-123, process §F8a).** Before EVERY pull —
+> not just the first — run `make loop-gate PROJECT=$1`. **Exit 2 BLOCKS the pull**; the only
+> permitted actions are the remedies it names. It is mechanical, never orchestrator
+> discretion, for the reason §F8a records: in one cycle the four loop preconditions came due
+> and the ONLY one honoured was the one that returned non-zero (`retro-debt`). The others —
+> dispatch the tester once a fix is green and live, replenish below the Ready floor, respect
+> a queue's `wip_limit` — were prose, and all three were skipped: two fixes already pushed
+> AND deployed sat 35.5h and 27.3h awaiting a dispatch nobody made, Ready sat at 1 against a
+> floor of 3, and intake sat at 14 against a cap of 10 (that last one is now an ADVISORY, not
+> a block — see check 3 below).
+>
+> It checks (1) **stalled validation** — an item dwelling past `--stale-hours` (default 4) in
+> a validation state whose latest `fixed`/`built_green`/`deployed` carries a `ref:`, i.e. the
+> work is DONE and only a dispatch is missing; (2) Ready below `min_items`; (3) a queue over
+> `wip_limit`; (4) retro debt due (§F8); (5) **awaiting observation** — every item parked in
+> `awaiting_observation` (shipped, green, UNPROVEN) has its liveness predicate RE-RUN on this
+> invocation, so an observation that has now landed BLOCKS for a tester dispatch, and a
+> predicate that cannot be evaluated BLOCKS too (state-graph v9, §12d.3/§17c). Fix what it
+> names, then re-run to confirm exit 0.
+>
+> **Check 3 has TWO severities (v126 addendum) — Little's Law governs WIP, not backlog depth.** A
+> **WIP-stage** queue over cap (`ready`/`wip`/`rework`) BLOCKS (`-` line, exit 2). A
+> **BACKLOG** queue over cap (`intake`) is **ADVISORY** (`!` line): reported with depth,
+> overage and remedy, but it does NOT block — blocking on a deep backlog inverts the
+> constraint, because the remedy is to deliver faster and the block prevents exactly that,
+> while creating pressure to close real findings to shrink the number. An advisory-only run
+> exits 0 and says so; the advisory is still outstanding, NOT satisfied — hand it to the
+> flow-manager/retro as throughput work, and never close a verified-real finding to clear it.
+> The classification is declared in `queues/policy.csv` as a `kind` row, not hardcoded.
+>
+> **Never conclude "it's pushed / it's deployed" from an event NOTE.** The gate derives it
+> from the structured `ref:` plus `git merge-base --is-ancestor <ref> origin/main` in the
+> project repo (`git -C work/$1`); you must too. A note reading "NOT pushed" was ~35h stale
+> while its commit had been on `origin/main` the whole time, and reasoning from it produced a
+> confident, precisely-quantified, WRONG diagnosis (§17c Layer 2, against our own metrics).
+>
+> **The push and the tester dispatch are ONE act.** A turn that pushes green work without
+> dispatching its validation has not finished — dispatch it, or record the deferral and the
+> named precondition on the HELD item. And before holding any push, check the actual trigger
+> paths (`git diff --name-only origin/main..HEAD`): "the push is the apply" is true only of
+> the declared paths (`sst.config.ts`/`src/app/**`/`infra/**`), and generalising it into a
+> habit is what produced the 35.5h hold on a path that never deploys.
+
 > **v82 CUTOVER (process §F0).** State is event-sourced in per-item files
 > (`work/$1/items/{active,done}/<ID>.md`); state = `fold(events)`. Change state ONLY via
 > `make wi-append PROJECT=$1 ID=<id> EVENT=<e> AGENT=<role>` (edge-checked) — the stage

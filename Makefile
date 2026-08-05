@@ -30,6 +30,9 @@ INFRA   := work/$(PROJECT)/src/infra
 WORKITEMS := sh .claude/skills/work-items/scripts/work-items
 AWS_PROFILE ?= $(shell cat .claude/config/aws-profile 2>/dev/null)
 PY      ?= $(shell sh .claude/skills/dora-ledger/scripts/dora --python)
+# The interpreter the WORK-ITEMS launcher resolves (deferred: `?=` keeps the
+# $(shell) out of every make parse). Used by test-wi — never bare python3.
+WIPY    ?= $(shell sh .claude/skills/work-items/scripts/work-items --python)
 SQLCMD       ?= C:/Program Files/Microsoft SQL Server/Client SDK/ODBC/170/Tools/Binn/sqlcmd.exe
 REMED_SERVER ?= (localdb)\MSSQLLocalDB
 REMED_DB     ?= viggo_remed_test
@@ -156,22 +159,92 @@ retro-debt:
 retro-mark:
 	$(WORKITEMS) retro-mark --project $(PROJECT)
 
+# MECHANICAL loop PRECONDITION gate. Run it BEFORE every pull; exit 2 = do NOT
+# pull until the printed violations are cleared (same exit-code discipline as
+# retro-debt, which it delegates check 4 to).
+#
+# WHY: STAGE F documents these preconditions as orchestrator JUDGEMENT and they
+# are reliably skipped — measured this cycle, DEFECT-OAG-045 sat in `validating`
+# 35.5h and DEFECT-OAG-048 27.3h, both already pushed AND deployed, both merely
+# awaiting a tester dispatch nobody made; Ready sat at 1 against a min_items
+# floor of 3; Intake sat at 14 against a wip_limit of 10 enforced NOWHERE. The
+# one mechanised obligation (retro-debt) fired and WAS obeyed. The mechanised
+# gate is obeyed; the documented one is not — so this mechanises the rest.
+#
+# Reports EVERY violated precondition (not just the first), each as one
+# actionable line naming the ids and the remedy:
+#   1 stalled-validation  item in validating/dev-validating/prod-validating
+#                         dwelling > STALE_HOURS whose latest fixed/built_green/
+#                         deployed/promoted event carries a `ref:` (= work done,
+#                         only a dispatch missing). Push state is read from GIT
+#                         in work/<p>/ (its own repo, v50), NEVER from note prose.
+#   2 ready-below-floor   depth(ready) < ready.min_items  (queues/policy.csv)
+#   3 queue-over-cap      a queue depth > its wip_limit (queues/policy.csv), at
+#                         TWO SEVERITIES (v126 addendum): a WIP-STAGE queue (ready/wip/
+#                         rework) BLOCKS; a BACKLOG queue (intake) is ADVISORY
+#                         and does NOT affect the exit code. Little's Law governs
+#                         WIP, not backlog depth — blocking the pull for a deep
+#                         backlog inverts the constraint (the remedy IS the pull)
+#                         and pressures agents to close real findings. Declared
+#                         per queue as a `kind` row in queues/policy.csv.
+#   4 retro-debt          delegated to the retro-debt computation
+#   5 awaiting-observation [state-graph v9] every item parked in
+#                         `awaiting_observation` (shipped, green, UNPROVEN) is
+#                         reported AND its liveness predicate RE-EVALUATED, exactly
+#                         as `blocked` is re-checked each cycle. observed (probe
+#                         exit 0) BLOCKS — a tester dispatch is now actionable;
+#                         not-yet (exit 3) is ADVISORY; a broken/absent predicate
+#                         BLOCKS, because an unrunnable liveness predicate is not a
+#                         predicate (v125 §17c.2).
+#
+# Exit 2 iff a BLOCKING check fired. An advisory-only run exits 0, says so, and
+# still prints the advisory (`!` line) so it cannot be read as satisfied.
+#
+# make loop-gate PROJECT=OagEventSource [STALE_HOURS=4] [THRESHOLD=3]
+#                                       [NO_OBSERVE=1] [OBSERVE_TIMEOUT=120]
+# NO_OBSERVE=1 skips re-evaluating the observation predicates (they can be slow
+#   real-data queries); each parked item is then reported NOT EVALUATED, so a
+#   skipped run can never read as satisfied.
+loop-gate:
+	$(WORKITEMS) loop-gate --project $(PROJECT) \
+	  $(if $(STALE_HOURS),--stale-hours $(STALE_HOURS),) $(if $(THRESHOLD),--threshold $(THRESHOLD),) \
+	  $(if $(NO_OBSERVE),--no-observe,) $(if $(OBSERVE_TIMEOUT),--observe-timeout $(OBSERVE_TIMEOUT),) \
+	  $(if $(NOW),--now "$(NOW)",)
+
+# Unit tests for the work-item machinery itself (stdlib unittest; temp-dir
+# fixtures, never the real project data). Uses the SAME cross-platform
+# interpreter the work-items launcher resolves — never bare python3.
+# make test-wi
+test-wi:
+	$(WIPY) -m unittest discover -s .claude/skills/work-items/scripts -p 'test_work_items.py'
+
 # --- Event-sourced work-item machinery (design-rationale/work-item-state-model.md, process/machinery/CONTRACT.md) ---
 # State lives ONLY in the per-item files (work/$(PROJECT)/items/{active,done}/<ID>.md);
 # queues, stats and the dependency tree are DERIVED here, never stored-and-hand-synced.
 # Append an edge-checked event (the ONLY way to change item state; rejects illegal transitions):
-# make wi-append PROJECT=P ID=UC-1 EVENT=made_ready AGENT=flow-manager [REF=<sha>] [NOTE="..."] [TOKENS=<n>] [DURATION_MS=<n>]
+# make wi-append PROJECT=P ID=UC-1 EVENT=made_ready AGENT=flow-manager [REF=<sha>] [NOTE="..."] [TOKENS=<n>] [DURATION_MS=<n>] [OBSERVE=make:<target>]
 # TOKENS = subagent_tokens the dispatched specialist spent producing this transition (optional).
 # DURATION_MS = the dispatched agent's REAL cycle time in ms for this transition (optional;
 #   the dispatch layer's reported duration_ms). Feeds §F agent-cycle-time-vs-GLT in wi-project.
+# OBSERVE = the machine-checkable liveness predicate, REQUIRED on EVENT=not_yet_observed
+#   (entering `awaiting_observation`, state-graph v9). Form: `make:<target> [VAR=VALUE ...]`
+#   — a COMMITTED, RE-RUNNABLE target in work/$(PROJECT)/Makefile that exits 0 when the
+#   observation has landed and 3 when it has not (anything else = a BROKEN predicate,
+#   which blocks the loop; `make` itself exits 1/2, so a missing probe can never
+#   masquerade as "not observed yet"). Also accepted on the `amended` self-edge, where it
+#   REPLACES the predicate in effect. Rejected on any other event. A reason in NOTE is
+#   NOT a substitute: prose cannot come back negative (v125 §17c Layer 2).
 wi-append:
 	$(WORKITEMS) append --project $(PROJECT) --id $(ID) --event $(EVENT) --agent $(AGENT) \
-	  $(if $(REF),--ref "$(REF)",) $(if $(NOTE),--note "$(NOTE)",) $(if $(TOKENS),--tokens "$(TOKENS)",) $(if $(DURATION_MS),--duration-ms "$(DURATION_MS)",)
+	  $(if $(REF),--ref "$(REF)",) $(if $(NOTE),--note "$(NOTE)",) $(if $(TOKENS),--tokens "$(TOKENS)",) $(if $(DURATION_MS),--duration-ms "$(DURATION_MS)",) $(if $(OBSERVE),--observe "$(OBSERVE)",)
 # Recompute ALL views (queues + stats + tree + re-render each item's derived block). Run after each loop.
 # make wi-project PROJECT=OagEventSource
 wi-project:
 	$(WORKITEMS) project --project $(PROJECT) $(if $(NOW),--now "$(NOW)",)
-# Drift GATE by construction (invariants I1-I4). Exit non-zero on any violation. Run before pulling.
+# Drift GATE by construction (invariants I1-I4 + I6). Exit non-zero on any violation. Run before pulling.
+# I6 [v9] = an `awaiting_observation` flow item carries a VALID observation predicate
+#   (append refuses the transition without one, so a violation here means a hand-edit).
+#   I5 stays RESERVED for IMP-011's still-owed CORE-job aggregate invariant.
 # make wi-validate PROJECT=OagEventSource
 wi-validate:
 	$(WORKITEMS) validate --project $(PROJECT)
@@ -192,13 +265,26 @@ wi-migrate:
 # Store stub and falls back to uv). linear-project.py is stdlib-only.
 #   make board-project PROJECT=ROC ID=UC-ROC-015   -> upsert one item's issue
 #   make test-board-project                         -> offline renderer unit test
+#   make board-audit [PROJECT=OagEventSource]       -> STATE_STATUS drift audit
+#
+# board-audit (OI-LINEAR-CANCELLED-STATE-UNMAPPED): the state->board-status table
+# is hand-maintained; the state graph is not. When they drifted, an unmapped state
+# rendered as *Backlog* with no signal — a terminal `cancelled` item read as
+# unstarted work for every version from state-graph v5 on. The audit compares the
+# table against process/machinery/state-graphs.json in BOTH directions and, with
+# PROJECT, checks every real item's (type,state) actually projects. Offline: no
+# network, no secret. Non-zero on any finding. The same audit runs inside
+# test-board-project, so the drift cannot reach the board unnoticed.
 BOARDPY ?= $(shell sh .claude/skills/work-items/scripts/work-items --python)
-.PHONY: board-project test-board-project
+.PHONY: board-project test-board-project board-audit
 board-project:
 	$(BOARDPY) .claude/tools/linear-project.py --project $(PROJECT) --id $(ID)
 
 test-board-project:
 	$(BOARDPY) .claude/tools/linear-project.test.py
+
+board-audit:
+	$(BOARDPY) .claude/tools/linear-project.py --audit $(if $(PROJECT),--project $(PROJECT),)
 
 # --- Process-doc conformance gate (process §27.5) -----------------------------
 # Scans the LIVE process/agent/skill/root docs for a DENYLIST of RETIRED
@@ -408,9 +494,38 @@ impacted-tests:
 	node .claude/tools/impacted-tests.js --since $(SINCE) --project $(PROJECT)
 
 # Self-tests for the cross-project agent-ops tooling under .claude/tools/
-# (IMP-007 impacted-tests.js). node's built-in runner, no creds, no network.
+# (IMP-007 impacted-tests.js, test-requirement-gate.js). node's built-in runner,
+# no creds, no network.
 test-tools:
 	node --test .claude/tools/*.test.js
+
+# --- §17d test-requirement gate — "the ONLY thing tests validate is the requirements" -
+# Human ruling, 2026-08-02. TWO LIMBS over the committed test sources:
+#   LIMB 1  every test case declares the acceptance criterion it validates, in the
+#           AC-<ID>.<n> vocabulary the codebase already uses. An untagged case is
+#           either WASTE (delete it) or an UNDISCOVERED acceptance criterion
+#           (register it — and the discovery gap earns a retro). The gate makes the
+#           choice unavoidable; it never makes the choice.
+#   LIMB 2  no AUTHORED PRECONDITIONS. A test that builds its prior by mutating a
+#           real capture (`delete capture.x.y`, an override spread over a
+#           corpus-loaded fixture, a hand-set folded field, a stubbed exec boundary)
+#           authored the world, so it can only confirm the code. Fold the prior from
+#           events, or harvest it.
+# Config + committed allowlist + ratchet baseline:
+#   .claude/config/test-requirement-gate/<PROJECT>.json
+# `make` cannot express a three-way exit (a recipe exiting 3 makes make print
+# `Error 3` and exit 2), so the verdict rides a STDOUT SENTINEL — `TRG-VERDICT:` —
+# and the exit code is only 0 or 2. Also wired as loop-gate check 6, so it runs
+# before EVERY pull; a gate in no workflow is not a gate.
+#   make test-requirement-gate [PROJECT=OagEventSource] [MODE=enforce|ratchet|report]
+#   make test-requirement-gate VERBOSE=1      # every limb-1 line
+#   make test-requirement-gate-baseline       # re-cut the ratchet floor (SHRINK only)
+test-requirement-gate:
+	node .claude/tools/test-requirement-gate.js --project $(PROJECT) \
+	  $(if $(MODE),--mode $(MODE),) $(if $(VERBOSE),--verbose,) $(if $(JSON),--json,)
+
+test-requirement-gate-baseline:
+	node .claude/tools/test-requirement-gate.js --project $(PROJECT) --write-baseline
 
 # --- IMP-008 WAF runner-IP exclusion helpers ----------------------------------
 # Add/remove a CIDR from the oxo-test-runner-ips WAFv2 IP set (us-east-1,
@@ -572,7 +687,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove sso-login retro-debt retro-mark wi-append wi-project wi-validate wi-migrate doc-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery
+.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove sso-login retro-debt retro-mark loop-gate test-wi wi-append wi-project wi-validate wi-migrate doc-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools test-requirement-gate test-requirement-gate-baseline board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery
 
 # --- Viggo-fix UC-W7: Country/Nationality ID remediation (T-SQL) --------------
 # Data-driven, self-building T-SQL remediation script set + its local stand-up

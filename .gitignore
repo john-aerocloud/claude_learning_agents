@@ -36,5 +36,15 @@ __pycache__/
 
 node_modules
 
-# Machine-local permission/env overrides — per-worktree, never shared (CLAUDE.md: novel patterns go in settings.json). Tracking it dirtied every worktree and deferred fold-forward (v121, EXP-113).
+# Machine-local Claude Code config — per-tree, never committed.
+# While tracked, every worktree edit leaves the integration tree dirty and
+# defers EVERY project fold-back (blocked 2 instances: OagEventSource v123, AdixOut v121).
 .claude/settings.local.json
+
+# Agent-tool isolation worktrees — machine-local, disposable scaffolding, never committed.
+# Left untracked they still dirty the INTEGRATION tree and defer every fold-back
+# (blocked OagEventSource v124). Nothing here is tracked today, so ignoring deletes
+# nothing in any worktree (contrast the settings.local.json untracking, which does).
+# NOTE (v124/DEFECT-OAG-045): a project repo is a gitignored NESTED clone, invisible to
+# the auto-clean's changed-check — never let a committing agent's only copy live here.
+.claude/worktrees/

@@ -514,6 +514,111 @@ caller-side data; a 4xx we received is our request bug (an engineering defect).
 Validation specs assert the CLASSIFICATION (the log category fields), not just
 the status code.
 
+## A green suite is evidence about the TESTS, not the system (v127 §17d)
+The suite certifies everything else, so it was the last place where authoring the world was
+still permitted. When you judge a change, **run `make test-requirement-gate PROJECT=<p>`**
+(it is also `loop-gate` check 6) and read the two limbs as part of your verdict:
+- **limb 1** — a test case naming no `AC-<ID>.<n>` validates no requirement. Per the human
+  ruling it is either waste (it should be deleted) or an acceptance criterion nobody wrote
+  down (it should be registered, and the discovery gap earns a retro). Neither answer is
+  "it improves coverage".
+- **limb 2** — a test whose PRECONDITION was authored (a real capture with a field deleted,
+  an override spread over a corpus fixture, a hand-set folded value, a stubbed exec
+  boundary) cannot come back negative about reality. Treat a limb-2 hit on the code path you
+  are validating as reason to distrust the green, and go and get an observation instead.
+**A REGRESSION above the committed ratchet baseline is a rejection-grade finding**, not a
+style note: it means a test that cannot validate a requirement landed with the change you
+are judging. Founding case: 2,171 tests green while nine real cancellations sat unhealed in
+prod, because the test deleted the exact leaf whose presence breaks the heal.
+
+## Zero occurrences is a DEFECT SIGNAL, not silence (v123, EXP-120)
+A journey that works does not prove every output the change can produce actually
+gets produced. When you validate against a real feed or real traffic, **count the
+outputs, per type/branch, and treat a 0 as red until explained.** DEFECT-OAG-041
+survived every live journey validation because `OagFlightCancelled` had simply never
+fired — 0 in 5,308,984 dev and 5,210,600 prod events — and a never-firing event type
+is indistinguishable from a quiet day unless someone counts. DEFECT-OAG-042 was a
+canonical field populated for only 22% of flights, which looks like sparse upstream
+data until you check the source path is even read.
+
+Concretely, on any change consuming or emitting data over a real feed:
+- enumerate the event types / output branches / canonical fields the change can
+  produce, and assert each one's occurrence count over real traffic is **> 0** (or is
+  explicitly declared not-yet-observed WITH a reason and a live probe on the item);
+- assert the population RATE of a canonical field you would expect broadly present,
+  not merely that some record has it;
+- prefer a committed read-only audit/probe target (`make audit-…`, `make probe-…`)
+  over an ad-hoc query, per validation-as-code — the count has to be re-runnable.
+This is the liveness half of the engineer's wire-contract provenance ledger: they
+prove the wire values we CLAIM are real; you prove the outputs we claim to emit are
+actually emitted. Target: CFR (a never-fires transformation is caught at validation,
+not by archaeology months later).
+
+## `validated` requires an OBSERVATION of real data — never an input we authored (v125, EXP-122)
+Five OAG capabilities read `done`/`validated` while never once working on real data
+(`OagFlightCancelled` 0 of 10,519,584 events; `departure.scheduledTimeUtc` 78% null and
+never read; `irregularOperationType='Recovery'` 0 captures; `OagFlightDiverted` 0 of
+5,300,655; `deriveAirports()` structurally unable to route a diversion airport). Every
+one passed a 1,525-test green suite. The reason is not carelessness — it is that
+**every gate ran ONE direction: code → expectation, over inputs we wrote.** Your
+validation is the step that owns the inverse direction, so:
+
+- **The input must come from reality, not from us.** A test or smoke that FABRICATES its
+  own input proves a code path, never that reality exercises it. DEFECT-OAG-044's prod
+  smoke invoked the deployed publisher Lambda with synthetic data and was read as proof
+  the prod path worked. **An injected input is a diagnostic, never a validation.** If the
+  only way you can make the capability fire is to fire it yourself, the honest state is
+  not-yet-observed (below).
+- **Your evidence on a `validated` event must include an OBSERVATION POINTER** — a real
+  record id (stream id + event id, or a provenance-stamped capture) produced by input the
+  system did not author. "The journey worked" without a pointer is the shape of all five
+  failures above.
+- **Count over the POPULATION, both directions.** Per type: has reality ever produced this
+  output? Per real inbound field: does our code read it, and does it populate a leaf?
+  Prefer the committed census (`make conformance-census`, IMP-028) over an ad-hoc query.
+- **Sequences, not only fields.** Replay a real STREAM (the ordered events of one real
+  flight) through the real fold and assert the terminal aggregate. The two worst instances
+  were INTERACTION failures a per-field test cannot see: `scheduledTimeUtc` was a two-feed
+  coincidence, and a diversion needs three airports in a routing key built from two.
+- **Rare branches get a statistical verdict, not a binary.** For an expected base rate `p`
+  (with a SOURCED denominator, per the governing-fact rule) and exposure `N`, 0 observations
+  is RED when `P(0 | p, N) < α`. Do not invent a threshold at validation time; use the
+  declared rate.
+- **`not-yet-observed` is a first-class, DECLARED outcome — and it does NOT reach `done`.**
+  If a capability has not been observed on real data, do **not** fire `validated`. **It is a
+  STATE, not a note in your return** (state-graph v9, landed 2026-08-01): fire
+  `make wi-append PROJECT=<p> ID=<item> EVENT=not_yet_observed AGENT=tester
+  OBSERVE=make:<probe-target> NOTE="<what is being waited for + what you DID establish>"`,
+  which moves it to **`awaiting_observation`** — non-terminal, owner `external`, and unable to
+  let its parent slice read `done`. `loop-gate` check 5 re-runs your predicate every cycle and
+  BLOCKS the loop for a tester dispatch the moment the observation lands, so nothing is left to
+  a human remembering.
+  - **`OBSERVE=` is REQUIRED — the append is REFUSED without it.** The predicate is a
+    committed, re-runnable target in `work/<p>/Makefile` that **exits 0** and prints
+    `OBSERVATION: observed` once the record exists, or `OBSERVATION: not-yet` while it does
+    not (anything else = a BROKEN predicate, which blocks the loop). Do not use an exit code
+    to signal "not yet": `make` does not propagate a recipe's exit status. If no such probe
+    exists yet, **that probe is part of the work** — name it in your return so it is built;
+    a park you cannot evaluate is the prose-remedy failure §17c exists to prevent.
+  - Exit the state with `validated` (the observation landed — put the observation pointer in
+    `NOTE`) or `rejected` (the observation FALSIFIED the capability → `reworking`).
+  Passing an unobserved capability as `done` is the artifact that produced all five failures.
+- **An unrunnable tier is a RED tier.** `make test-fids-integration` times out in its own
+  300s `beforeAll`; by our own standard ("an unrun test is a failure") it has been failing
+  silently. A tier that cannot run must be fixed or deleted — never left as decoration —
+  and the same applies to any standing-red gate (`make render-diagrams`). Report it; do not
+  route around it.
+
+## Verification-only use-cases: use the validate-only route, never spoof (v123, state-graph v7)
+A UC whose whole scope is asserting behaviour that is **already built and deployed**
+now has a legal route: `pulled_for_validation` (orchestrator/flow-manager) puts it in
+`validating`, and your `validated` closes it. **Do NOT append `built_green` as
+`AGENT=engineer` or `deployed` as `AGENT=cicd`** as declared no-ops to walk it to
+`done` — that spoofs attribution (books engineer/cicd lead time nobody spent, adds
+never-failable `building`/`deploying` exits to quality-by-stage) and is forbidden. If
+the route you need does not exist, say so in your return rather than impersonating
+another agent.
+
 ## v82 — event-sourced pull-based flow (process STAGE F)
 You dev-validate then prod-validate the **pulled use-case / slice** through its public
 surface (see "Validate in dev first, then prod" above), now inside the continuous loop.

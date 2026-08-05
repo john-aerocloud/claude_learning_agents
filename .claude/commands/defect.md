@@ -20,6 +20,18 @@ membership is DERIVED — no manual enqueue, no ledger row.
    *cannot reproduce* → record `unconfirmed` with what was tried, STOP and report (do not
    fix what you cannot see); *reproduced but different* → the real behaviour is now the
    defect. Classify ownership (our bug / caller data / dependency).
+   **CONFIRM = a live reproduction of the symptom against CURRENT state — NOT a trusted
+   report plus a plausible root-cause (v122, DEF-AIDX-010).** A report (especially a
+   relayed/external one) can be STALE: assert the current live signal FIRST (the actual
+   metric/response/state — e.g. current delivery/error rate, not an invocation count or a
+   standing backlog that merely looks like failure). If the symptom does NOT reproduce
+   NOW, it is `unconfirmed`/`not_reproduced` (the report was stale or already-resolved) —
+   STOP, do not register-and-"fix" a non-current defect (a fix that changes nothing while
+   you tell the reporter it was the cause is worse than no fix). DEF-AIDX-010: an external
+   "100% NO_PERMISSIONS" report + a structural policy diff were taken as confirmation and a
+   prod IAM change shipped, when a 30-second live check (rule invocations succeeding, read
+   model growing) showed delivery already working and the report stale. assert-real-state
+   (EXP-115) applies to the DIAGNOSIS, before the fix — not only to post-fix validation.
    → **HUMAN GATE: the human accepts the framed defect + its importance.** Log to
    `decision-log.md`. Then dispatch `flow-manager` to register: create
    `work/<project>/items/active/<ID>.md` (frontmatter: `id`, `type: defect`, `title`,

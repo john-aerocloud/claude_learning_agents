@@ -82,7 +82,7 @@ backfill is removed.
   measured figure; per-state backfill share printed beside it. **4 new tests, 209 green.**
 - Every `by_state`/`by_owner` row carries `median_per_item_s` + `n_items` — v128's owed fix, implemented.
 - The `loop-gate` backlog advisory now reports median in-queue **age** and names the oldest item.
-- Process **v132 §17f limbs 3–4**: no constraint may be named from a figure without stating its backfill
+- Process **v132 §17f limbs 6–7**: no constraint may be named from a figure without stating its backfill
   share and per-item median; and **a metric fix a retro routes MUST land as code in that same retro.**
 - Registered as **EXP-128**, falsifiable, with KILL stated: if fixing the instrument changes neither where
   retros aim nor whether lead time moves, kill the row rather than re-prescribe it — which is precisely

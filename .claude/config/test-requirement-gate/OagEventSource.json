@@ -1,7 +1,7 @@
 {
   "project": "OagEventSource",
   "_ruling": "A test was written to match the code. I do not care AT ALL about code coverage. The ONLY thing tests should be validating is the requirements. If we are making up tests for coverage that do not map onto requirements then either (a) we are wasting time, or (b) we have identified a new acceptance criteria and we need to retro as to why it wasn't discovered earlier. (human, 2026-08-02)",
-  "_mode_why": "RATCHET, not enforce. The honest first measurement is 1801 untagged cases of 2728 and 22 authored preconditions. Enforcing would turn trunk red on day one for work nobody has triaged, and a gate that is red for everything is a gate everyone learns to ignore — which is exactly how `make render-diagrams` sat red on trunk for 20 days. So the committed baseline is the floor and it may ONLY SHRINK: a NEW violation blocks, the existing debt is reported every run until the retro decides, per the ruling, whether each is waste or an undiscovered acceptance criterion.",
+  "_mode_why": "RATCHET, not enforce. The honest first measurement is 1801 untagged cases of 2728 and 22 authored preconditions. Enforcing would turn trunk red on day one for work nobody has triaged, and a gate that is red for everything is a gate everyone learns to ignore \u2014 which is exactly how `make render-diagrams` sat red on trunk for 20 days. So the committed baseline is the floor and it may ONLY SHRINK: a NEW violation blocks, the existing debt is reported every run until the retro decides, per the ruling, whether each is waste or an undiscovered acceptance criterion.",
   "mode": "ratchet",
   "fileHeaderCoversCounts": false,
   "_fileHeaderCoversCounts_why": "A file-level `@covers AC-x` is a coverage claim about the MODULE; the ruling asks what THIS CASE validates. Kept strict, and the number it costs is reported separately as `file-header-only` (606 of the 1801) so the retro can see the price of the strictness and change this flag if it disagrees.",
@@ -12,7 +12,7 @@
         "ac",
         "authored"
       ],
-      "why": "The product test corpus — app, fids-app, admin-app, adapters, integration and e2e. Both limbs apply."
+      "why": "The product test corpus \u2014 app, fids-app, admin-app, adapters, integration and e2e. Both limbs apply."
     },
     {
       "path": ".claude/tools",
@@ -55,16 +55,17 @@
     "fields": [
       "state",
       "cancellationEmitted",
+      "withdrawn",
       "milestones",
       "phase"
     ],
-    "_why": "Fields the FOLD derives from the event-TYPE progression. Hand-setting one builds a prior no real stream can hold — which is precisely how the born-cancelled suppression guard stayed green while nine real prod flights could never heal (UC-HF041, 4e76014)."
+    "_why": "Fields the FOLD derives from the event-TYPE progression. Hand-setting one builds a prior no real stream can hold - which is precisely how the born-cancelled suppression guard stayed green while nine real prod flights could never heal (UC-HF041, 4e76014). `withdrawn` joins the list with delta-061/DEFECT-OAG-063: it is set ONLY by the presence of a literal OagFlightWithdrawn event type and by NO delta leaf, so a test that hand-sets it has authored a stream reality cannot produce - and the fact it asserts, that a leg's lifecycle ENDED, is exactly the kind a consumer strikes a row on."
   },
   "allowlist": [
     {
       "path": ".claude/tools/*.test.js",
       "limb": "ac",
-      "why": "Agent-system MACHINERY invariant tests. They assert a tool's own contract (impacted-tests' node->spec lookup; this gate's own rules) and there is no product acceptance criterion for them to name — the requirement they serve is a PROCESS obligation, not a customer one. Limb 2 still applies to them in full."
+      "why": "Agent-system MACHINERY invariant tests. They assert a tool's own contract (impacted-tests' node->spec lookup; this gate's own rules) and there is no product acceptance criterion for them to name \u2014 the requirement they serve is a PROCESS obligation, not a customer one. Limb 2 still applies to them in full."
     }
   ],
   "baseline": {

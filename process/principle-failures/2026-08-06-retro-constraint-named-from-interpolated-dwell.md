@@ -87,3 +87,51 @@ backfill is removed.
 - Registered as **EXP-128**, falsifiable, with KILL stated: if fixing the instrument changes neither where
   retros aim nor whether lead time moves, kill the row rather than re-prescribe it — which is precisely
   the mistake made with v128's prose.
+
+---
+
+## POSTSCRIPT — the subordinate move was executed, and the evidence partly FALSIFIES it
+
+v130 routed *decline-or-schedule aged intake* as the exploit for this constraint; v131 re-routed it. This
+retro executed it: the product agent gave an explicit disposition to all **56** non-terminal findings in
+intake. Result:
+
+| disposition | count |
+|---|---|
+| SCHEDULE | 45 |
+| DEFER with a real date | 5 |
+| MERGE into a host item | 3 |
+| already correctly dispositioned | 1 |
+| **DECLINE** | **0** |
+
+**Intake moved 64 → 61.** Three items, all merges. The constraint is essentially unmoved.
+
+**This is a result, not a failure of the pass.** Product looked hard and declined nothing because there is
+nothing to decline: nearly every item is an architect- or engineer-ruled census/audit finding with its
+acceptance already specified — not a speculative wishlist. That matches v130's own diagnosis (registration
+throughput vastly exceeds delivery; investigation is *generative* — one ground-truthed reproduction
+produced 6 items plus 5 corrections).
+
+*Therefore the routed subordinate move cannot fix this constraint.* **You cannot decline your way out of a
+backlog that is not junk.** The remedy the `loop-gate` advisory names first — *deliver faster* — is the
+only limb that applies here, and two retros spent their subordinate slot on the limb that does not.
+The next retro should stop re-routing admission control and put its subordinate move on **throughput**:
+the merge class is the only one that removed inventory without losing evidence, and finding merges is
+cheap (product found a fourth, `OI-OAG-SCHEDULE-UPDATE-UNREACHABLE` → `OI-OAG-SCHEDULE-STREAM-IDENTITY`,
+beyond the three named in its brief).
+
+## POSTSCRIPT 2 — "SCHEDULE" the disposition is not `scheduled` the state (§17f again)
+
+The 45 SCHEDULE dispositions were recorded as `amended` notes and **deliberately NOT executed as state
+transitions.** `queue_map` sends `scheduled` → the **`ready` queue**, whose `wip_limit` is **4** and which
+was already at **4/4**. Firing them would have taken ready to **49 against a cap of 4** — and `ready` is a
+WIP-STAGE queue, so the gate would have gone to exit 2 and **blocked the loop outright.**
+
+Product meant "this is worth doing, keep it in priority order". The state graph means "admitted to WIP,
+pullable now". **Same word, two subjects** — the §17f failure one layer up, in the vocabulary shared
+between an agent's disposition and the machinery's state name. It nearly converted a correct decision into
+a self-inflicted stall, and it would have looked like progress: intake would have fallen 61 → 16 with
+nothing delivered.
+
+The decisions live where they belong — as reasoned `amended` events on each item — and only items actually
+being pulled next should ever enter `scheduled`.

@@ -79,7 +79,7 @@ against a real interaction model, not retrofitted.
    disconnection (a cue that is not colour-only) and re-fetch on reconnect —
    never present stale data as live (DEFECT-003: a map froze while its backend
    was down with no stale cue).
-3b. **Data-visualization FAITHFULNESS — TESTABLE (v114, DEF-004).** For any chart /
+3b. **Data-visualization FAITHFULNESS — TESTABLE.** For any chart /
    plot / graph, geometry + a11y green is NOT enough: every visual mark must
    quantitatively REPRESENT its underlying datum WITHOUT a silent clamp, truncation,
    or renormalization that changes what the viewer reads. Emit a checkable

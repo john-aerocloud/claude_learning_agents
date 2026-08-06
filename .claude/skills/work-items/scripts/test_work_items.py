@@ -771,6 +771,76 @@ class TestStats(Base):
         by_owner = self._stats()["overall"]["gross_lead_time"]["by_owner"]
         self.assertAlmostEqual(by_owner["cicd"]["total_s"], 7200, places=1)   # 2h deploying
 
+    # ---- v132: backfill interpolation is held APART from measured dwell ----
+    def _backfilled_uc(self):
+        """A MIGRATED item: its timestamps were synthesised by spreading a span
+        evenly across its transitions, so every state segment is exactly 2h. Real
+        work never produces >=3 consecutive identical segments."""
+        return [
+            {"ts": _dt(12, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(12, 2), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(12, 4), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(12, 6), "event": "built_green", "agent": "engineer"},
+            {"ts": _dt(12, 8), "event": "deployed", "agent": "cicd"},
+            {"ts": _dt(12, 10), "event": "validated", "agent": "tester"},
+        ]
+
+    def test_interpolated_dwell_excluded_from_measured_totals(self):
+        """The whole point: a backfilled item must not move the time-thief
+        ranking. Its dwell is reported in its own column, never pooled."""
+        self.write_item("done", "UC-1", "use-case", self._clean_uc("UC-1"))
+        self.write_item("done", "UC-BF", "use-case", self._backfilled_uc())
+        s = self._stats()["overall"]["gross_lead_time"]
+        by_state = s["by_state"]
+        # measured totals are IDENTICAL to the clean-item-only case
+        self.assertAlmostEqual(by_state["registered"]["total_s"], 3600, places=1)
+        self.assertAlmostEqual(by_state["building"]["total_s"], 10800, places=1)
+        self.assertAlmostEqual(s["gross_lead_time_total_s"], 43200, places=1)
+        # the interpolated 2h-per-state shows up only as backfill
+        self.assertAlmostEqual(by_state["registered"]["backfill_s"], 7200, places=1)
+        self.assertAlmostEqual(by_state["building"]["backfill_s"], 7200, places=1)
+        # and a backfilled item is not counted as a completed measurement
+        self.assertEqual(s["n_completed_items"], 1)
+
+    def test_backfill_share_and_counts_reported(self):
+        self.write_item("done", "UC-1", "use-case", self._clean_uc("UC-1"))
+        self.write_item("done", "UC-BF", "use-case", self._backfilled_uc())
+        s = self._stats()["overall"]["gross_lead_time"]
+        self.assertEqual(s["n_backfill_items"], 1)
+        self.assertEqual(s["n_measured_items"], 1)
+        # 5 states x 2h = 36000s interpolated vs 43200s measured
+        self.assertAlmostEqual(s["backfill_total_s"], 36000, places=1)
+        self.assertAlmostEqual(s["backfill_share_of_reported_pct"],
+                               100 * 36000 / (36000 + 43200), places=1)
+        # per-state share is visible so a constraint call can be refused
+        self.assertAlmostEqual(
+            s["by_state"]["registered"]["backfill_pct_of_state"],
+            100 * 7200 / (7200 + 3600), places=1)
+
+    def test_two_equal_segments_is_not_interpolation(self):
+        """Guard against false positives: agreeing twice is coincidence, and
+        wrongly excluding real dwell would be worse than pooling it."""
+        self.assertFalse(wi._is_interpolated([3600, 3600]))
+        self.assertFalse(wi._is_interpolated([3600, 3600, 7200]))
+        self.assertTrue(wi._is_interpolated([3600, 3600, 3600]))
+        # zero-length segments must not make an item look uniform
+        self.assertFalse(wi._is_interpolated([0, 0, 0, 5]))
+
+    def test_median_per_item_dwell_is_count_independent(self):
+        """v128 routed this and it never landed; it is the number that tells
+        'work waits longer' from 'there is more work'. Adding items at the SAME
+        dwell must move the share but NOT the median."""
+        self.write_item("done", "UC-1", "use-case", self._clean_uc("UC-1"))
+        one = self._stats()["overall"]["gross_lead_time"]["by_state"]["registered"]
+        self.assertAlmostEqual(one["median_per_item_s"], 3600, places=1)
+        self.assertEqual(one["n_items"], 1)
+        for n in (2, 3, 4):
+            self.write_item("done", f"UC-{n}", "use-case", self._clean_uc(f"UC-{n}"))
+        many = self._stats()["overall"]["gross_lead_time"]["by_state"]["registered"]
+        self.assertAlmostEqual(many["total_s"], 4 * 3600, places=1)   # share grew
+        self.assertAlmostEqual(many["median_per_item_s"], 3600, places=1)  # median did not
+        self.assertEqual(many["n_items"], 4)
+
     def test_in_flight_uses_now(self):
         # a UC still building since d20 06:00; now=d30 00:00 => open segment counted
         self.write_item("active", "UC-IF", "use-case", [

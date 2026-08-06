@@ -1426,44 +1426,107 @@ def _compute_dora(graphs, flow_items, states, now, window_days):
     }
 
 
+def _is_interpolated(durations):
+    """True when an item's state dwell is BACKFILL INTERPOLATION rather than
+    measurement.
+
+    A migrated/backfilled item has its event timestamps synthesised by spreading
+    a known start..end span evenly across its transitions, so every state segment
+    comes out with the SAME duration to the second. Real work never does that: a
+    stream of >=3 consecutive segments agreeing to within a second is a signature
+    of linear interpolation, not of a process.
+
+    This matters because backfill is not distributed evenly across the state
+    space — it lands only on the states the migrated items walked through — so
+    pooling it with measured dwell silently biases the time-thief ranking toward
+    whichever stages the migration happened to touch. §17f: a number whose
+    subject is 'measurement OR interpolation, unknown which' is not a
+    measurement. Segregate, never pool.
+    """
+    nz = [d for d in durations if d > 0]
+    if len(nz) < 3:
+        return False
+    return (max(nz) - min(nz)) <= max(1.0, 0.0005 * max(nz))
+
+
 def _compute_glt(graphs, flow_items, now):
     """Section B — gross-lead-time decomposition. by_state (time thieves) and
     by_owner (each part's contribution via state_owners). Only DONE items have a
     real gross lead time (genesis->terminal); in-flight items contribute their
-    partial time-in-state so 'now' cost is visible too."""
+    partial time-in-state so 'now' cost is visible too.
+
+    Every figure is reported against the MEASURED denominator and carries its
+    backfill share beside it, plus a count-independent MEDIAN per-item dwell so a
+    rising share can be told apart from a rising item count (v128 routed this and
+    it did not land; v132 implements it)."""
     by_state = defaultdict(float)
     by_owner = defaultdict(float)
-    gross_totals = []  # per-DONE-item gross lead time
+    bf_state = defaultdict(float)          # interpolated, held apart
+    bf_owner = defaultdict(float)
+    dwell_state = defaultdict(list)        # per-ITEM dwell, measured items only
+    dwell_owner = defaultdict(list)
+    gross_totals = []                      # per-DONE-item gross lead time
+    n_backfill = 0
     for it in flow_items:
-        segs = walk_states(graphs, it, now)
-        for state, a, b in segs:
-            dur = (b - a).total_seconds()
-            if dur < 0:
-                continue
-            by_state[state] += dur
+        segs = [(s, (b - a).total_seconds())
+                for s, a, b in walk_states(graphs, it, now)]
+        segs = [(s, d) for s, d in segs if d >= 0]
+        interpolated = _is_interpolated([d for _, d in segs])
+        n_backfill += 1 if interpolated else 0
+        per_item_state = defaultdict(float)
+        per_item_owner = defaultdict(float)
+        for state, dur in segs:
             owner = graphs.owner_of(state) or "unowned"
-            by_owner[owner] += dur
+            if interpolated:
+                bf_state[state] += dur
+                bf_owner[owner] += dur
+            else:
+                by_state[state] += dur
+                by_owner[owner] += dur
+                per_item_state[state] += dur
+                per_item_owner[owner] += dur
+        for st, t in per_item_state.items():
+            if t > 0:
+                dwell_state[st].append(t)
+        for o, t in per_item_owner.items():
+            if t > 0:
+                dwell_owner[o].append(t)
         # gross lead time for terminal items = terminal ts - genesis ts
         gen = _first_ts(it, GENESIS_EVENTS)
         term = _last_ts(it, ("validated", "closed", "not_reproduced", "declined"))
-        if gen and term and term >= gen:
+        if gen and term and term >= gen and not interpolated:
             gross_totals.append((term - gen).total_seconds())
-    total_time = sum(by_state.values())
-    by_state_out = {
-        s: {"total_s": round(t, 2), "pct_of_glt": (round(100 * t / total_time, 2) if total_time else None)}
-        for s, t in sorted(by_state.items(), key=lambda kv: -kv[1])
-    }
-    by_owner_out = {
-        o: {"total_s": round(t, 2), "pct_of_glt": (round(100 * t / total_time, 2) if total_time else None)}
-        for o, t in sorted(by_owner.items(), key=lambda kv: -kv[1])
-    }
+    total_time = sum(by_state.values())          # MEASURED denominator
+    backfill_total = sum(bf_state.values())
+
+    def pack(measured, backfill, dwell):
+        out = {}
+        for k in sorted(set(measured) | set(backfill),
+                        key=lambda k: -measured.get(k, 0.0)):
+            m, b = measured.get(k, 0.0), backfill.get(k, 0.0)
+            out[k] = {
+                "total_s": round(m, 2),
+                "pct_of_glt": (round(100 * m / total_time, 2) if total_time else None),
+                "median_per_item_s": _median(dwell.get(k, [])),
+                "n_items": len(dwell.get(k, [])),
+                "backfill_s": round(b, 2),
+                "backfill_pct_of_state": (round(100 * b / (m + b), 2) if (m + b) else None),
+            }
+        return out
+
     return {
         "gross_lead_time_total_s": round(total_time, 2),
         "gross_lead_time_median_s": _median(gross_totals),
         "gross_lead_time_p85_s": _percentile(gross_totals, 0.85),
         "n_completed_items": len(gross_totals),
-        "by_state": by_state_out,
-        "by_owner": by_owner_out,
+        "backfill_total_s": round(backfill_total, 2),
+        "backfill_share_of_reported_pct": (
+            round(100 * backfill_total / (total_time + backfill_total), 2)
+            if (total_time + backfill_total) else None),
+        "n_backfill_items": n_backfill,
+        "n_measured_items": len(flow_items) - n_backfill,
+        "by_state": pack(by_state, bf_state, dwell_state),
+        "by_owner": pack(by_owner, bf_owner, dwell_owner),
     }
 
 
@@ -1739,22 +1802,43 @@ def _render_stats_md(stats):
         L.append(f"- Per-item gross lead time: median **{_fmt(g['gross_lead_time_median_s'])} s**, "
                  f"p85 **{_fmt(g['gross_lead_time_p85_s'])} s** "
                  f"({g['n_completed_items']} completed items)\n")
-        L.append("**Time thieves — by state (ranked)**\n")
-        L.append("| State | total time (s) | % of GLT |")
-        L.append("|-------|----------------|----------|")
+        if g["n_backfill_items"]:
+            L.append(f"- **BACKFILL HELD APART: {_fmt(g['backfill_total_s'])} s across "
+                     f"{g['n_backfill_items']} interpolated items "
+                     f"({_fmt(g['backfill_share_of_reported_pct'], '%')} of the naive total) "
+                     f"is EXCLUDED from every figure below.** Those items' event "
+                     f"timestamps were synthesised by spreading a span evenly across "
+                     f"their transitions, so each state got an identical duration — "
+                     f"interpolation, not measurement. It is not spread evenly across "
+                     f"states, so pooling it biases the ranking toward whichever "
+                     f"stages the migration touched. Per-state backfill share is in "
+                     f"the last column; **do not name a constraint from a state whose "
+                     f"backfill share is high** (§17f).")
+        L.append(f"- Denominator below = **measured dwell only** "
+                 f"({g['n_measured_items']} organically-timed items)\n")
+        L.append("**Time thieves — by state (ranked on MEASURED dwell)**\n")
+        L.append("| State | measured (s) | % of GLT | median/item (s) | n | backfill (s) | backfill % of state |")
+        L.append("|-------|--------------|----------|-----------------|---|--------------|---------------------|")
         for st, d in g["by_state"].items():
-            L.append(f"| {st} | {_fmt(d['total_s'])} | {_fmt(d['pct_of_glt'], '%')} |")
+            L.append(f"| {st} | {_fmt(d['total_s'])} | {_fmt(d['pct_of_glt'], '%')} "
+                     f"| {_fmt(d['median_per_item_s'])} | {d['n_items']} "
+                     f"| {_fmt(d['backfill_s'])} | {_fmt(d['backfill_pct_of_state'], '%')} |")
         if not g["by_state"]:
-            L.append("| _(no timed segments)_ | — | — |")
+            L.append("| _(no timed segments)_ | — | — | — | — | — | — |")
         L.append("\n**Contribution to gross lead time — by owner**  "
                  "_(each part of the process reads its own share here; "
-                 "`queue` = pure wait latency, `external` = blocked outside the system)_\n")
-        L.append("| Owner | total time (s) | % of GLT |")
-        L.append("|-------|----------------|----------|")
+                 "`queue` = pure wait latency, `external` = blocked outside the system. "
+                 "`median/item` is COUNT-INDEPENDENT: read it, not the share, to tell "
+                 "\"work waits longer\" from \"there is more work\" — the confound that "
+                 "made EXP-123's share metric unscoreable.)_\n")
+        L.append("| Owner | measured (s) | % of GLT | median/item (s) | n | backfill (s) | backfill % of owner |")
+        L.append("|-------|--------------|----------|-----------------|---|--------------|---------------------|")
         for o, d in g["by_owner"].items():
-            L.append(f"| {o} | {_fmt(d['total_s'])} | {_fmt(d['pct_of_glt'], '%')} |")
+            L.append(f"| {o} | {_fmt(d['total_s'])} | {_fmt(d['pct_of_glt'], '%')} "
+                     f"| {_fmt(d['median_per_item_s'])} | {d['n_items']} "
+                     f"| {_fmt(d['backfill_s'])} | {_fmt(d['backfill_pct_of_state'], '%')} |")
         if not g["by_owner"]:
-            L.append("| _(no timed segments)_ | — | — |")
+            L.append("| _(no timed segments)_ | — | — | — | — | — | — |")
 
         # C. quality
         q = s["quality"]["all_time"]
@@ -2319,14 +2403,41 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
                   "depth": depths[q], "cap": cap, "over": over, "kind": kind}
         if kind == QUEUE_KIND_BACKLOG:
             # ADVISORY: reported prominently, never affects the exit code.
-            findings.append(dict(common, severity="advisory", message=(
+            # DEPTH ALONE CANNOT BE ACTED ON (v132). A backlog of 60 items that
+            # each clear in an hour is healthy; a backlog of 12 that have each sat
+            # three days is the constraint. Report the count-independent AGE
+            # beside the count, and name the oldest — the retro needs to know
+            # WHICH items are aging, not merely how many exist.
+            ages = []
+            for mid in members[q]:
+                _st, ent = _current_segment(graphs, items[mid], now)
+                if ent is not None:
+                    ages.append(((now - ent).total_seconds(), mid))
+            ages.sort(reverse=True)
+            age_txt = ""
+            if ages:
+                med = _median([a for a, _ in ages])
+                oldest_s, oldest_id = ages[0]
+                age_txt = (
+                    f" AGE (count-independent — read this, not the depth): median "
+                    f"{med / 86400.0:.1f}d in-queue across {len(ages)} items, "
+                    f"oldest {oldest_id} at {oldest_s / 86400.0:.1f}d."
+                    f" Aging inventory is the single largest measured contributor "
+                    f"to gross lead time; every item here is either scheduled for a"
+                    f" pull or owes an explicit decline/defer-with-date.")
+            findings.append(dict(common, severity="advisory",
+                                 median_age_s=(_median([a for a, _ in ages]) if ages else None),
+                                 oldest_id=(ages[0][1] if ages else None),
+                                 oldest_age_s=(ages[0][0] if ages else None),
+                                 message=(
                 f"ADVISORY (does NOT block the pull) [queue-over-cap] {q} depth "
                 f"{depths[q]} > wip_limit {cap} — over by {over}. {q} is a BACKLOG "
                 f"queue, and it is STILL over cap: unaddressed, not satisfied. "
                 f"Little's Law governs WIP, not backlog depth — the remedy is to "
                 f"DELIVER FASTER (raise throughput; decline or defer what will "
                 f"never be pulled), never to close real findings to shrink the "
-                f"number, and never to stop pulling, which only makes it worse.")))
+                f"number, and never to stop pulling, which only makes it worse."
+                + age_txt)))
         else:
             findings.append(dict(common, severity="block", message=(
                 f"[queue-over-cap] {q} depth {depths[q]} > wip_limit {cap} — over "

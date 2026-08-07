@@ -100,6 +100,40 @@ knowledge of the code.
    correction is the deliverable; defending the guess is how a wrong design survives.
 Target: lead time (rework at the constraint) + CFR. [EXP-129]
 
+## A VERIFIED BLOCKER HAS A SHELF LIFE — RE-CHECK IT BEFORE YOU REPEAT IT (v134)
+Establishing a fact once does not license citing it forever. A blocker is a **measurement of a
+moment**, and the moment passes. Repeating it without re-checking converts a correct observation
+into a false one, and because it was true when you first said it, nobody — including you — goes
+back to test it.
+
+Measured, 2026-08-07: the orchestrator verified that GitHub Actions had starved its runners
+(`steps=0`, `runner=""` on every job — a correct and careful check). It then wrote **"do NOT push"**
+into **six consecutive dispatch briefs over several hours**, never re-running the check. Runners had
+recovered; the last run executed 8 steps and failed on an unrelated dependency audit. Consequence:
+**36 commits sat unpushed, nothing reached dev, no tester could validate anything, and three defects
+sat in `validating` that no one was validating.** A temporary condition had become a standing policy.
+The owner caught it, not the loop — *"why have you blocked the loops - dev work cannot be considered
+done until its on dev and has been tested by the tester."*
+
+This is the **fourth** stale-claim instance on this project (a `NOT pushed` note 35h stale while the
+commit was on trunk; a 7-day `blocked` on a secret that existed the whole time; a census figure
+quoted after its derivation was gone) and the first where the orchestrator was the author *and* the
+sole beneficiary — the stale blocker excused work it did not want to sequence.
+
+*Therefore:*
+1. **A blocker you carry into a second dispatch is re-verified first.** One command. If re-verifying
+   is too expensive to do per dispatch, it is too weak a claim to keep asserting.
+2. **Cite the check, not the conclusion.** Write *"runners starved — verified 08:12, `steps=0`"*, so
+   the age is visible to the next reader and to you. A bare "CI is down" has no expiry stamped on it.
+3. **A blocker that survives more than one cycle becomes an item**, with the re-check as its
+   observation predicate — the `awaiting_observation` mechanism exists for exactly this and it
+   re-runs every cycle, which is precisely what a human orchestrator does not.
+4. **Never let a blocker stop the loop silently.** If work cannot reach dev, that is not a pause, it
+   is an impediment with a cost — say so in the cycle report. **Dev work is not done until it is on
+   dev and the tester has validated it there**; an engineer's green local suite is evidence about the
+   tests, not about the system.
+Target: lead time (work stalled behind an expired impediment) + deploy frequency. [EXP-130]
+
 ## Establish the governing fact before you assert, authorise, or clear (v123)
 Three of your own failures in one OAG cycle (2026-07-30, principle-failure
 `2026-07-30-orchestrator-asserted-authorised-and-pushed-without-establishing-the-governing-fact`)

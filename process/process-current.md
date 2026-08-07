@@ -1,9 +1,11 @@
 ---
-process_version: 136
+process_version: 137
 effective_from: 2026-08-07
-supersedes: v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
+supersedes: v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
 status: active
 ---
+
+<!-- v137 (OWNER-RAISED retro, OagEventSource 2026-08-07). FOCUS QUESTION, owner's words: *"we should consider using dynamodb container per engineer"*. ANSWER: yes — but the exposure is NOT the one the question implies, and finding that out changed the fix. **Test DATA was already safe.** The adapter suite namespaces its tables per run (`OagFeed-EventStore-PortContract-<runid>-N`; MEASURED 27 tables across 3 run ids on the live container), so two concurrent engineers could never corrupt each other's rows. **THE CONTAINER ITSELF was the exposure, in two ways.** (1) `container_name` was HARDCODED in docker-compose.yml, so `OAG_DDB_PORT` moved the port while the name stayed fixed — a container per engineer was therefore IMPOSSIBLE, and a second `docker compose up -d` RECREATES the one container on the new port, yanking the endpoint out from under an in-flight suite whose tests then fail with a connection error **indistinguishable from a code failure**. That is the worst kind of phantom: it points an engineer at its own correct code. (2) `ddb-local-assert-ours` could only ask *is this container OAG's* — never *is it MINE* — so it green-lit engineer B onto engineer A's database. Corroborating context: two engineers were building concurrently and BOTH had independently discovered they must hand-override `OAG_DDB_PORT=8010`, because a sibling project holds 8000. A workaround two agents find separately is a missing mechanism. FIX (§F2c, new): container identity is DERIVED, never hardcoded — `OAG_DDB_NAME` (defaulting to the LEGACY name so every existing invocation is byte-identical), a per-name compose project so two stacks are separate objects to compose, `assert-ours` comparing the publisher against `$(OAG_DDB_NAME)`, and `make ddb-local-mine DISPATCH=<id>` deriving BOTH port and name from one dispatch id. Derived rather than hand-picked for exactly the reason a threshold is: a hand-picked port looks fine and collides silently. VERIFIED AT LANDING, not asserted: `ddb-local-mine DISPATCH=retro-probe` brought up its own container on derived port 8603 ALONGSIDE the live shared container on 8010 and a sibling project's on 8000 — three coexisting — without disturbing two engineers mid-suite; NON-VACUITY proven in both directions, and the failing case is precisely the one the OLD guard PASSED. CONSTRAINT: UNCHANGED for a fourth retro — `queue` 59.82% / `open` 42.36% (median 329,907s = 3.8d/item, n=57, 0% backfill). This change is NOT aimed at it and is justified under §5b as a **defect-preventing safety fix that is also an exploit move**: a phantom failure reading as a code failure generates a re-dispatch and can generate a FALSE finding, and false findings inflate the very `open` backlog that IS the constraint. EXP-131's aged-inventory gate is one retro old and has not yet had time to move `open`; `open`'s n rose 54 → 57 purely because this session registered three real new findings. Registered as EXP-133, cap-neutral (EXP-125 ADOPTED and archived — a red gate is a defect, fired three times this session unprompted and uncited: DEFECT-OAG-072's false red registered rather than softened, the FIDS timeout BOUNDED rather than its timeout raised, and the component-map alias gap registered). EXP-127 scored 1/2 POSITIVE with an honest correction: a watchdog stall occurred at load 7.57 against that row's own 14.68-during-failures baseline, so load average was never the mechanism — the CONTAINER was, which is what EXP-133 now tests. -->
 
 <!-- v136 (OWNER RULING, OagEventSource 2026-08-07, minutes after v135). HEADLINE — **two standing rules genuinely contradicted, and the contradiction was costing the whole session.** §F8 says an INCIDENT (defect resolve) is NEVER batched, so it trips a full retro immediately. `/loop-run` step 5a says a STABLE constraint should not pay full-retro overhead. MEASURED COLLISION: the v135 retro closed at **13:17:51Z**; DEFECT-OAG-060's resolve re-armed the gate at **13:23:43Z** — **six minutes later, on an unchanged constraint**. With a backlog of ~15 defects the owner had just asked to clear, that rule pair spends the session running retros that re-derive the same answer. Escalated to the owner rather than resolved silently, because the alternative was to soften a gate on my own authority — the §17e / EXP-125 failure this project has already recorded (*"a gate that cries wolf needs to be FIXED"*, and a control softened once becomes a rhetorical device). OWNER RULING 2026-08-07: run the cheap parts-check per resolve and escalate to a FULL retro only when the constraint SHIFTS. **THE FIX IS MACHINERY, NOT PERMISSION (§F8b, new): `make parts-check PROJECT=<p>`.** It reads the constraint from the DERIVED `views/stats.json`, compares it to the constraint recorded at the last close, and drains the INCIDENT arm of retro debt **only when it is provably unchanged**. Everything else ESCALATES, exit 2: constraint SHIFTED (names the move, and does NOT touch the marker — an escalation may never drain debt); constraint UNREADABLE (*an instrument that cannot be read is not evidence of stability*); NO PRIOR RECORD (stability cannot be established from nothing); ROUTINE debt at threshold (parts-check drains the incident arm only — a slice-close backlog is a different signal and keeps its batched full retro). **WHY THIS IS NOT A SOFTENING, and the distinction is the whole point:** the cheap path is gated on a machine-checked fact, and THE MACHINERY DECIDES, NOT THE ORCHESTRATOR — so the expensive path stays mandatory in precisely the case a retro exists for, namely that where time goes has changed. `retro-mark` now also records the constraint, so the two paths cannot drift. The constraint reader inherits §17f.6/EXP-128: **an owner or state whose backfill share exceeds 50% is never named the constraint**, or parts-check could "confirm" a phantom. 221 unit tests green (+6 new, 5 of which assert REFUSAL rather than success); NON-VACUITY PROVEN by disabling the stability control — the shifted-constraint test fails with a witness. Registered as EXP-132, cap-neutral (EXP-121 ADOPTED and archived — its `inScope`-required-by-type mechanism is compile-time enforced and its pattern was independently re-derived this session by REQ-OAG-DELIVERY-INTEGRITY's J31, the two-live-writer lane). Verified live: escalated correctly with no prior record, then drained DEFECT-OAG-060 once the marker carried v135's own measured constraint. -->
 
@@ -756,6 +758,40 @@ Mechanised, not documented: `make loop-gate` reports orphaned remote branches an
 as advisories (§F8a — a gate blocks only on harm that stopping relieves; stale inventory does
 not become safer by halting the loop). Target: gross lead time (work stops completing
 invisibly) + CFR (a ten-day-old unapplied security fix is an exposure, and was).
+
+## F2c. A contended local container is per-DISPATCH, and its identity is DERIVED [v137, EXP-133]
+§F2b says schedule by RESOURCE CLASS. This is the first named resource. A shared local
+container (DynamoDB Local, Azurite, any emulator) is **mutable shared state with a single
+name**, and a hardcoded `container_name` makes per-engineer isolation impossible however
+many ports you offer:
+
+- A second `docker compose up -d` with a different port **recreates the one container** on
+  the new port and yanks the endpoint from an in-flight suite. Its tests fail with a
+  connection error **indistinguishable from a code failure** — a phantom that points an
+  engineer at its own correct code.
+- An ownership guard that checks only *is this container ours* cannot answer *is it mine*,
+  so it green-lights one engineer onto another's database.
+
+*Therefore:* derive container identity, never hardcode it. Name and compose project are
+derived from one dispatch id together with the port, so they cannot diverge; the ownership
+guard compares against the derived name; and the legacy default is preserved so existing
+invocations are byte-identical. `make ddb-local-mine DISPATCH=<id>` is the entry point.
+
+**Derived, not hand-picked** — a hand-picked port is the same class of decision as a
+hand-picked threshold: it looks fine and collides silently. Two dispatches with different
+ids cannot collide, and a re-dispatch idempotently reuses its own container.
+
+**The signal that this mechanism was missing:** two engineers independently discovered the
+same `OAG_DDB_PORT` workaround in one session. **A workaround that two agents find
+separately is a missing mechanism, not a tip** — write it down as machinery or it will be
+rediscovered indefinitely.
+
+Note what was NOT the problem: test DATA was already isolated by per-run table namespacing.
+Check where the sharing actually bites before isolating the thing that merely looks shared.
+
+Target: CFR (a phantom connection failure is a false defect signal) + lead time (removed
+re-dispatches). **Watch for the inverse failure** — if engineers keep hand-overriding the
+port because the helper is more friction than the workaround, revert rather than re-prescribe.
 
 ## F8b. The cheap parts-check, and when it is NOT allowed [v136, EXP-132]
 §F8 never batches an incident; step 5a says a stable constraint should not pay

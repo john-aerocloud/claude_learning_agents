@@ -57,13 +57,15 @@ class Base(unittest.TestCase):
         return os.path.join(self.tmp, "work", self.project, "items", sub)
 
     def write_item(self, sub, iid, itype, events, parents=None, deps=None,
-                   title="t", body="\n## Definition\nstub\n"):
-        item = wi.Item(os.path.join(self._items(sub), f"{iid}.md"),
-                       {"id": iid, "type": itype, "title": title,
-                        "job": "J0", "value": 1, "cost": 0.5,
-                        "parents": parents or [], "deps": deps or [],
-                        "created_ts": "2026-06-17T00:00:00Z", "events": events},
-                       body)
+                   title="t", body="\n## Definition\nstub\n", extra_fm=None):
+        fm = {"id": iid, "type": itype, "title": title,
+              "job": "J0", "value": 1, "cost": 0.5,
+              "parents": parents or [], "deps": deps or [],
+              "created_ts": "2026-06-17T00:00:00Z", "events": events}
+        # extra scalar frontmatter (e.g. v135 `defer_until:`) rides the
+        # future-proof extra-fields path in render_item
+        fm.update(extra_fm or {})
+        item = wi.Item(os.path.join(self._items(sub), f"{iid}.md"), fm, body)
         with open(item.path, "w", encoding="utf-8") as f:
             f.write(wi.render_item(item, {"state": None, "queue": None,
                                           "children": [], "ancestors": []}))
@@ -1774,17 +1776,27 @@ class TestLoopGate(Base):
             evs[-1]["ref"] = ref
         return evs
 
+    # NEVER_AGES: a max-backlog-age so large the v135 age check cannot fire. The
+    # depth-focused tests below use it to isolate DEPTH from AGE — the two are
+    # deliberately different quantities with different severities, and a test for
+    # one must not be perturbed by the other.
+    NEVER_AGES = 10_000.0
+
     def _gate(self, stale_hours=4.0, threshold=3, now=NOW, observe=True,
-              observe_timeout=None):
+              observe_timeout=None,
+              max_backlog_age_days=wi.DEFAULT_MAX_BACKLOG_AGE_DAYS):
         return wi.compute_loop_gate(
             self.graphs, self.project, stale_hours=stale_hours,
             threshold=threshold, now=wi.parse_ts(now), observe=observe,
             observe_timeout=(wi.DEFAULT_OBSERVE_TIMEOUT if observe_timeout is None
-                             else observe_timeout))
+                             else observe_timeout),
+            max_backlog_age_days=max_backlog_age_days)
 
-    def _run(self, stale_hours=4.0, threshold=3, now=NOW, observe=True):
+    def _run(self, stale_hours=4.0, threshold=3, now=NOW, observe=True,
+             max_backlog_age_days=wi.DEFAULT_MAX_BACKLOG_AGE_DAYS):
         ns = argparse.Namespace(project=self.project, stale_hours=stale_hours,
                                 threshold=threshold, now=now, observe=observe,
+                                max_backlog_age_days=max_backlog_age_days,
                                 observe_timeout=wi.DEFAULT_OBSERVE_TIMEOUT)
         with contextlib.redirect_stdout(io.StringIO()) as out:
             try:
@@ -2009,7 +2021,7 @@ class TestLoopGate(Base):
         for i in range(14):
             self.write_item("active", f"OI-{i:02d}", "open-item", [
                 {"ts": _dt(10, 0), "event": "open", "agent": "orchestrator"}])
-        findings = self._gate()
+        findings = self._gate(max_backlog_age_days=self.NEVER_AGES)
         self.assertNotIn("queue-over-cap", self._checks(findings))   # NOT blocking
         adv = self._advisories(findings)
         self.assertEqual([f["queue"] for f in adv], ["intake"], findings)
@@ -2017,7 +2029,7 @@ class TestLoopGate(Base):
         self.assertEqual((f["check"], f["queue"], f["depth"], f["cap"], f["over"]),
                          ("queue-over-cap", "intake", 14, 10, 4))
         self.assertEqual(f["kind"], wi.QUEUE_KIND_BACKLOG)
-        code, out = self._run()
+        code, out = self._run(max_backlog_age_days=self.NEVER_AGES)
         self.assertEqual(code, 0)                                    # exit 0
         self.assertIn("may pull", out)
         # the advisory is still reported PROMINENTLY, with depth + overage + remedy,
@@ -2103,10 +2115,10 @@ class TestLoopGate(Base):
                       ("rework", "kind", "backlog")])
         for i in range(2):
             self.write_item("active", f"UC-RW{i}", "use-case", self._reworking_uc(i))
-        findings = self._gate()
+        findings = self._gate(max_backlog_age_days=self.NEVER_AGES)
         self.assertNotIn("queue-over-cap", self._checks(findings))   # declared backlog
         self.assertEqual([f["queue"] for f in self._advisories(findings)], ["rework"])
-        self.assertEqual(self._run()[0], 0)
+        self.assertEqual(self._run(max_backlog_age_days=self.NEVER_AGES)[0], 0)
 
     def test_policy_csv_can_declare_intake_as_wip(self):
         """The declaration is authoritative in BOTH directions — the default map is
@@ -2163,7 +2175,7 @@ class TestLoopGate(Base):
         for i in range(5):
             self.write_item("active", f"OI-{i}", "open-item", [
                 {"ts": _dt(10, 0), "event": "open", "agent": "orchestrator"}])
-        code, out = self._run()
+        code, out = self._run(max_backlog_age_days=self.NEVER_AGES)
         self.assertEqual(code, 0)
         self.assertIn("may pull", out)
         self.assertNotIn("BLOCKED", out)
@@ -2224,6 +2236,69 @@ class TestLoopGate(Base):
         self.assertEqual(calls, [(self.project, 7)])
 
     # ---- reports EVERY violation, not just the first ------------------------
+    # ---- check 4b: aged backlog item with NO DECISION (v135, EXP-131) --------
+    # The constraint these guard: `open` was the top GLT contributor for two
+    # consecutive retros. The gate blocks on AGE-WITHOUT-A-DECISION, which is
+    # count-independent, and NEVER on depth (that stays advisory — Little's Law).
+    def _open_items(self, n, day=10, extra_fm=None):
+        self._policy([("ready", "min_items", 0)])   # no depth cap at all
+        for i in range(n):
+            self.write_item("active", f"OI-A{i}", "open-item",
+                            [{"ts": _dt(day, 0), "event": "open",
+                              "agent": "orchestrator"}],
+                            extra_fm=extra_fm)
+
+    def test_aged_backlog_item_with_no_decision_blocks(self):
+        """20d old, no decision => BLOCK. Note there is NO wip_limit here at all,
+        so this cannot be the depth check firing under another name."""
+        self._open_items(2, day=10)                       # NOW is 2026-06-30
+        findings = self._gate()
+        self.assertIn("aged-backlog-undecided", self._checks(findings))
+        f = [x for x in findings if x["check"] == "aged-backlog-undecided"][0]
+        self.assertEqual(sorted(f["ids"]), ["OI-A0", "OI-A1"])
+        code, out = self._run()
+        self.assertEqual(code, 2)
+        self.assertIn("aged-backlog-undecided", out)
+        # the remedy must offer the CHEAP path, and must forbid the harmful one
+        self.assertIn("defer_until", out)
+        self.assertIn("Do NOT close a real finding", out)
+
+    def test_young_backlog_item_does_not_block(self):
+        """Age is the trigger. A fresh item is fine however many there are."""
+        self._open_items(25, day=28)                      # 2d old at NOW
+        self.assertNotIn("aged-backlog-undecided", self._checks(self._gate()))
+        self.assertEqual(self._run()[0], 0)
+
+    def test_in_date_defer_clears_the_block(self):
+        """A dated defer IS a decision — one line, and the gate goes green."""
+        self._open_items(2, day=10, extra_fm={"defer_until": "2026-07-15"})
+        self.assertNotIn("aged-backlog-undecided", self._checks(self._gate()))
+        self.assertEqual(self._run()[0], 0)
+
+    def test_expired_defer_re_blocks(self):
+        """A defer has a SHELF LIFE (the EXP-130 lesson applied to inventory):
+        once the date passes it is no longer a decision and the item returns."""
+        self._open_items(2, day=10, extra_fm={"defer_until": "2026-06-20"})
+        findings = self._gate()                            # NOW = 06-30, expired
+        self.assertIn("aged-backlog-undecided", self._checks(findings))
+        code, out = self._run()
+        self.assertEqual(code, 2)
+        self.assertIn("DEFER EXPIRED", out)
+
+    def test_unparseable_defer_is_not_a_decision(self):
+        """FAIL CLOSED: a typo'd date must never silence the gate."""
+        self._open_items(2, day=10, extra_fm={"defer_until": "soon-ish"})
+        self.assertIn("aged-backlog-undecided", self._checks(self._gate()))
+        self.assertEqual(self._run()[0], 2)
+
+    def test_wip_queue_is_untouched_by_the_age_check(self):
+        """The check is scoped to BACKLOG queues; a WIP stage has its own cap and
+        its own severity, and must not acquire a second, overlapping block."""
+        self._policy([("ready", "min_items", 0), ("wip", "wip_limit", 99)])
+        for i in range(2):
+            self.write_item("active", f"UC-B{i}", "use-case", self._building_uc(i))
+        self.assertNotIn("aged-backlog-undecided", self._checks(self._gate()))
+
     def test_reports_all_violated_preconditions(self):
         self._policy([("intake", "wip_limit", 1), ("ready", "min_items", 3),
                       ("rework", "wip_limit", 0)])
@@ -2239,13 +2314,13 @@ class TestLoopGate(Base):
             {"ts": _dt(15, 2), "event": "confirmed", "agent": "engineer"},
             {"ts": _dt(15, 3), "event": "fixed", "agent": "engineer", "ref": "f00d"},
             {"ts": _dt(15, 5), "event": "validated", "agent": "tester"}])
-        findings = self._gate()
+        findings = self._gate(max_backlog_age_days=self.NEVER_AGES)
         checks = set(self._checks(findings))
         self.assertEqual(checks, {"stalled-validation", "ready-below-floor",
                                   "queue-over-cap", "retro-debt"})
         # and the backlog advisory rides ALONGSIDE the four blocking violations
         self.assertEqual([f["queue"] for f in self._advisories(findings)], ["intake"])
-        code, out = self._run()
+        code, out = self._run(max_backlog_age_days=self.NEVER_AGES)
         self.assertEqual(code, 2)
         for token in ("stalled-validation", "ready-below-floor",
                       "queue-over-cap", "retro-debt", "ADVISORY"):

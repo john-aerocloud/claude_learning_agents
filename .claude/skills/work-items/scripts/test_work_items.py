@@ -1242,6 +1242,130 @@ class TestRetro(Base):
         self.assertEqual(d["retro_debt_X"], 2)
 
 
+class TestPartsCheck(Base):
+    """v136 / EXP-132 — the cheap per-close constraint read.
+
+    The property under test is NOT "it drains debt". It is that the cheap path is
+    available ONLY when stability is PROVEN, and that every other case escalates.
+    A parts-check that could pass on a shifted or unreadable constraint would be
+    the softening §17e/EXP-125 forbid, so most of these tests assert REFUSAL.
+    """
+    def _defect(self, day):
+        return [
+            {"ts": _dt(day, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(day, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(day, 2), "event": "confirmed", "agent": "engineer"},
+            {"ts": _dt(day, 3), "event": "fixed", "agent": "engineer"},
+            {"ts": _dt(day, 5), "event": "validated", "agent": "tester"}]
+
+    def _stats(self, owner, state, owner_backfill_pct=0.0):
+        """Write a minimal views/stats.json with a known constraint."""
+        d = os.path.join(self.tmp, "work", self.project, "views")
+        os.makedirs(d, exist_ok=True)
+        doc = {"overall": {"gross_lead_time": {
+            "by_owner": {
+                owner: {"pct_of_glt": 60.0,
+                        "backfill_pct_of_state": owner_backfill_pct},
+                "engineer": {"pct_of_glt": 5.0, "backfill_pct_of_state": 0.0}},
+            "by_state": {
+                state: {"pct_of_glt": 42.0, "backfill_pct_of_state": 0.0},
+                "fixing": {"pct_of_glt": 3.0, "backfill_pct_of_state": 0.0}}}}}
+        with open(os.path.join(d, "stats.json"), "w", encoding="utf-8") as f:
+            json.dump(doc, f)
+
+    def _marker(self, ts="2026-06-01T00:00:00Z", constraint=None):
+        p = wi._retro_marker_path(self.project)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(ts + "\n")
+        if constraint:
+            wi._write_constraint_marker(self.project, constraint)
+
+    def _run(self, threshold=3, now=NOW):
+        ns = argparse.Namespace(project=self.project, threshold=threshold, now=now)
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            try:
+                wi.cmd_parts_check(ns)
+                code = 0
+            except SystemExit as e:
+                code = e.code
+        return code, out.getvalue()
+
+    def test_stable_constraint_drains_the_incident(self):
+        self._marker(constraint={"owner": "queue", "state": "open"})
+        self._stats("queue", "open")
+        self.write_item("done", "DEF-1", "defect", self._defect(15))
+        code, out = self._run()
+        self.assertEqual(code, 0, out)
+        self.assertIn("STABLE", out)
+        self.assertIn("DEF-1", out)
+        # and the debt is genuinely drained, not merely reported as fine
+        self.assertGreater(wi._read_retro_marker(self.project),
+                           wi.parse_ts("2026-06-14T00:00:00Z"))
+
+    def test_shifted_constraint_escalates_and_does_NOT_drain(self):
+        self._marker(ts="2026-06-01T00:00:00Z",
+                     constraint={"owner": "queue", "state": "open"})
+        self._stats("tester", "validating")          # both moved
+        self.write_item("done", "DEF-1", "defect", self._defect(15))
+        code, out = self._run()
+        self.assertEqual(code, 2, out)
+        self.assertIn("CONSTRAINT SHIFTED", out)
+        self.assertIn("queue/open -> tester/validating", out)
+        # the marker must be UNTOUCHED — an escalation may never drain debt
+        self.assertEqual(wi._read_retro_marker(self.project),
+                         wi.parse_ts("2026-06-01T00:00:00Z"))
+
+    def test_unreadable_constraint_escalates(self):
+        """An instrument that cannot be read is NOT evidence of stability."""
+        self._marker(constraint={"owner": "queue", "state": "open"})
+        # no stats.json at all
+        self.write_item("done", "DEF-1", "defect", self._defect(15))
+        code, out = self._run()
+        self.assertEqual(code, 2, out)
+        self.assertIn("could not be read", out)
+
+    def test_no_prior_record_escalates(self):
+        self._marker()                                # marker but NO constraint
+        self._stats("queue", "open")
+        self.write_item("done", "DEF-1", "defect", self._defect(15))
+        code, out = self._run()
+        self.assertEqual(code, 2, out)
+        self.assertIn("no prior constraint on record", out)
+
+    def test_routine_debt_at_threshold_still_escalates(self):
+        """parts-check drains the INCIDENT arm only; a slice-close backlog is a
+        different signal and keeps its batched full retro."""
+        self._marker(constraint={"owner": "queue", "state": "open"})
+        self._stats("queue", "open")
+        for i in range(3):
+            self._make_slice_close(i)
+        code, out = self._run(threshold=3)
+        self.assertEqual(code, 2, out)
+        self.assertIn("ROUTINE debt", out)
+
+    def _make_slice_close(self, i):
+        uc = f"UC-P{i}"
+        self.write_item("done", uc, "use-case", [
+            {"ts": _dt(15, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(15, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(15, 2), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(15, 3), "event": "built_green", "agent": "engineer"},
+            {"ts": _dt(15, 4), "event": "deployed", "agent": "cicd"},
+            {"ts": _dt(15, 12), "event": "validated", "agent": "tester"}],
+            parents=[f"SLC-P{i}"])
+        self.write_item("done", f"SLC-P{i}", "slice", [
+            {"ts": _dt(14, 0), "event": "registered", "agent": "flow-manager"}])
+
+    def test_high_backfill_owner_is_never_named_the_constraint(self):
+        """§17f.6 / EXP-128 — interpolation is not measurement, and the rule binds
+        this instrument too, or parts-check could 'confirm' a phantom constraint."""
+        self._stats("queue", "open", owner_backfill_pct=88.0)   # queue is mostly backfill
+        con = wi._read_constraint(self.project)
+        self.assertIsNotNone(con)
+        self.assertEqual(con["owner"], "engineer")   # the clean runner-up, not queue
+
+
 class TestProjectStatusline(Base):
     def test_project_writes_dora_statusline_keys(self):
         wi.STATUSLINE = os.path.join(self.tmp, "process", "dora", "statusline.json")

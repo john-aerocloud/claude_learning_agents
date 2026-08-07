@@ -1,9 +1,11 @@
 ---
-process_version: 135
+process_version: 136
 effective_from: 2026-08-07
-supersedes: v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
+supersedes: v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
 status: active
 ---
+
+<!-- v136 (OWNER RULING, OagEventSource 2026-08-07, minutes after v135). HEADLINE — **two standing rules genuinely contradicted, and the contradiction was costing the whole session.** §F8 says an INCIDENT (defect resolve) is NEVER batched, so it trips a full retro immediately. `/loop-run` step 5a says a STABLE constraint should not pay full-retro overhead. MEASURED COLLISION: the v135 retro closed at **13:17:51Z**; DEFECT-OAG-060's resolve re-armed the gate at **13:23:43Z** — **six minutes later, on an unchanged constraint**. With a backlog of ~15 defects the owner had just asked to clear, that rule pair spends the session running retros that re-derive the same answer. Escalated to the owner rather than resolved silently, because the alternative was to soften a gate on my own authority — the §17e / EXP-125 failure this project has already recorded (*"a gate that cries wolf needs to be FIXED"*, and a control softened once becomes a rhetorical device). OWNER RULING 2026-08-07: run the cheap parts-check per resolve and escalate to a FULL retro only when the constraint SHIFTS. **THE FIX IS MACHINERY, NOT PERMISSION (§F8b, new): `make parts-check PROJECT=<p>`.** It reads the constraint from the DERIVED `views/stats.json`, compares it to the constraint recorded at the last close, and drains the INCIDENT arm of retro debt **only when it is provably unchanged**. Everything else ESCALATES, exit 2: constraint SHIFTED (names the move, and does NOT touch the marker — an escalation may never drain debt); constraint UNREADABLE (*an instrument that cannot be read is not evidence of stability*); NO PRIOR RECORD (stability cannot be established from nothing); ROUTINE debt at threshold (parts-check drains the incident arm only — a slice-close backlog is a different signal and keeps its batched full retro). **WHY THIS IS NOT A SOFTENING, and the distinction is the whole point:** the cheap path is gated on a machine-checked fact, and THE MACHINERY DECIDES, NOT THE ORCHESTRATOR — so the expensive path stays mandatory in precisely the case a retro exists for, namely that where time goes has changed. `retro-mark` now also records the constraint, so the two paths cannot drift. The constraint reader inherits §17f.6/EXP-128: **an owner or state whose backfill share exceeds 50% is never named the constraint**, or parts-check could "confirm" a phantom. 221 unit tests green (+6 new, 5 of which assert REFUSAL rather than success); NON-VACUITY PROVEN by disabling the stability control — the shifted-constraint test fails with a witness. Registered as EXP-132, cap-neutral (EXP-121 ADOPTED and archived — its `inScope`-required-by-type mechanism is compile-time enforced and its pattern was independently re-derived this session by REQ-OAG-DELIVERY-INTEGRITY's J31, the two-live-writer lane). Verified live: escalated correctly with no prior record, then drained DEFECT-OAG-060 once the marker carried v135's own measured constraint. -->
 
 <!-- v135 (INCIDENT retro, OagEventSource 2026-08-07 — DEFECT-OAG-070's resolve; §F8 never batches an incident and the gate named the retro, which is the mechanism working). HEADLINE — **the constraint has not moved for THREE consecutive retros, and the reason is that the system generates findings and retires nothing.** Measured now: state `open` is **42.18% of measured GLT** (median **326,331s = 3.8d/item**, n=54, **backfill 0.00%** — clean), against 42.09% at v134 and 39.73% at v132. By owner, `queue` is **59.69%** (median 240,945s = 2.8d, n=115). Intake holds **65 items, median age 2.2d, oldest 8.0d**, while defect arrivals are **36 in trailing-30d against 38 all-time** — i.e. essentially ALL discovery is recent, and the discovery rate structurally exceeds the retirement rate. WHY-CHAIN: (1) `open` dominates because 54 findings dwell a median 3.8d unpulled; (2) they dwell because every gate, census, probe and agent-read MANUFACTURES an OI row, while the loop pulls only from `ready` and nothing ever promotes or retires an OI; (3) there is no forcing function because the loop-gate's intake check is deliberately ADVISORY (v126, correctly — blocking on DEPTH inverts the constraint), but the advisory has NO CONSUMER: it prints depth and age every cycle and nothing is obliged to answer it; (4) retiring a finding needs an explicit decline/defer decision and there was no cheap mechanised path for one, so every OI is implicitly "someone will do this" and the queue only grows. ROOT CAUSE: **a rich finding-GENERATION mechanism with no finding-RETIREMENT mechanism.** This is the THIRD recurrence of EXP-123's founding pattern — *documented obligations are skipped, mechanised ones are honoured* — so it opens a principle-failure as a chronic constraint the system has failed to smooth, per retro step 1a. THE FIX (§F8a.1, new): `make loop-gate` gains a BLOCKING check on **age-without-a-decision** — a BACKLOG item older than `--max-backlog-age-days` (default 7) with no in-date `defer_until:` blocks the pull. **This deliberately REFINES the standing §F8a rule** *"a gate blocks only on harm that stopping relieves; stale inventory does not become safer by halting the loop"* — which remains true of DEPTH and of mere staleness, and is why check 3 stays advisory. The refinement: this gate is cleared by a DECISION, not by delivery. Writing `defer_until: 2026-09-01` costs one line and seconds, so the loop is never held hostage to throughput; what is blocked is only the act of pulling MORE work while undated inventory ages invisibly. THE ASYMMETRY IS LOAD-BEARING AND DELIBERATE: the cheapest path to green is a dated defer, NEVER a close — a gate whose cheapest remedy were "close it" would manufacture pressure to close real findings, which §F8a bans outright, so the remedy text says so explicitly. A defer EXPIRES and re-blocks (the EXP-130 stale-blocker lesson applied to inventory); an UNPARSEABLE date fails CLOSED and does not count as a decision, so a typo can never silence the gate. Verified on the real project: it names **4 items of 65** (OI-CHUNKS-STALE-REF 8.0d, OI-CFG-ENDPOINT-DERIVE 7.9d, OI-FIDS-INTEGRATION-TIMEOUT 7.8d, OI-E2E-TYPECHECK-GAP 7.1d) — the aged tail, not the backlog. 215 unit tests green (+6 new), and NON-VACUITY PROVEN by disabling the control: 3 of the 6 fail with one witness each. Registered as EXP-131, cap-neutral (EXP-113 ADOPTED and archived — 3rd POSITIVE, already integrated as loop-run STEP 0, and it scored POSITIVE again this session: `make project-update` exit 0 and the loop began on the current process). ToC: this is the EXPLOIT move (remove waste at the constraint — undated inventory corrupts both the age median and the depth signal). SUBORDINATE is named but NOT built (an OI should carry a schedule-or-defer AT CREATION, capping the generator); ELEVATE (raise N) is explicitly NOT taken while exploit and subordinate are untried. -->
 
@@ -754,6 +756,38 @@ Mechanised, not documented: `make loop-gate` reports orphaned remote branches an
 as advisories (§F8a — a gate blocks only on harm that stopping relieves; stale inventory does
 not become safer by halting the loop). Target: gross lead time (work stops completing
 invisibly) + CFR (a ten-day-old unapplied security fix is an exposure, and was).
+
+## F8b. The cheap parts-check, and when it is NOT allowed [v136, EXP-132]
+§F8 never batches an incident; step 5a says a stable constraint should not pay
+full-retro overhead. Those contradicted, measurably: v135 closed at 13:17:51Z and a
+defect resolve re-armed the gate at 13:23:43Z on an unchanged constraint. Owner ruling
+(2026-08-07): parts-check per resolve, full retro on a SHIFT.
+
+*Therefore:* `make parts-check PROJECT=<p>` drains the **INCIDENT** arm of retro debt
+**iff the constraint is provably unchanged**. It escalates (exit 2, full `/retro` due)
+in every other case:
+
+| case | why it escalates |
+|---|---|
+| constraint **SHIFTED** | real learning; a retro must walk exploit/subordinate/elevate. The marker is left UNTOUCHED — an escalation may never drain debt |
+| constraint **UNREADABLE** | an instrument that cannot be read is not evidence of stability |
+| **no prior record** | stability cannot be established from nothing |
+| **routine debt ≥ threshold** | parts-check drains the incident arm only; a slice-close backlog is a separate signal |
+
+**This is not a softening of §F8, and the difference is the point.** The cheap path is
+gated on a machine-checked fact and **the machinery decides, not the orchestrator** — so
+the expensive path remains mandatory in exactly the case a retro exists for: where time
+goes has changed. Compare §17e — a control the orchestrator may waive at its own
+discretion has already stopped being a control. `retro-mark` records the constraint too,
+so the two paths cannot drift apart.
+
+The constraint reader inherits §17f.6: **an owner or state whose backfill share exceeds
+50% is never named the constraint**, or parts-check could confirm a phantom one.
+
+Target: lead time for changes (defect throughput stops being consumed by retro
+overhead). Anticipated: more defects resolved per session at unchanged CFR. **Watch for
+the inverse failure** — if a constraint shift is ever missed, or CFR/MTTR worsen because
+real learning went uncaptured, this reverts.
 
 ## 12d.1 Aged inventory blocks on the DECISION, never on the depth [v135, EXP-131]
 `open` has been the top contributor to gross lead time for **three consecutive retros**

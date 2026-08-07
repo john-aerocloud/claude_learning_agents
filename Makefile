@@ -159,6 +159,15 @@ retro-debt:
 retro-mark:
 	$(WORKITEMS) retro-mark --project $(PROJECT)
 
+# The CHEAP per-close constraint read (v136, EXP-132). Drains INCIDENT retro debt
+# ONLY while the constraint is provably unchanged — the machinery decides, not the
+# orchestrator. Exit 2 = the constraint SHIFTED (or cannot be read, or routine debt
+# hit its threshold) and a FULL /retro is genuinely due. This is not a softening of
+# §F8: the expensive path stays mandatory in exactly the case a retro exists for.
+# make parts-check PROJECT=<p>
+parts-check:
+	$(WORKITEMS) parts-check --project $(PROJECT) $(if $(THRESHOLD),--threshold $(THRESHOLD),)
+
 # MECHANICAL loop PRECONDITION gate. Run it BEFORE every pull; exit 2 = do NOT
 # pull until the printed violations are cleared (same exit-code discipline as
 # retro-debt, which it delegates check 4 to).

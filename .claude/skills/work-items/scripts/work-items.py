@@ -2071,13 +2071,164 @@ def cmd_retro_debt(a):
 
 def cmd_retro_mark(a):
     """Write the last-retro marker = now — the reset `/retro` calls at close to
-    drain the debt."""
+    drain the debt. ALSO records the constraint as of this retro, so a later
+    `parts-check` can tell a stable constraint from a shifted one (v136)."""
     ts = a.now or now_iso()
     p = _retro_marker_path(a.project)
     os.makedirs(os.path.dirname(p), exist_ok=True)
     with open(p, "w", encoding="utf-8") as f:
         f.write(ts.strip() + "\n")
     print(f"retro-mark: {a.project} last-retro set to {ts.strip()}")
+    con = _read_constraint(a.project)
+    if con is not None:
+        _write_constraint_marker(a.project, con)
+        print(f"retro-mark: {a.project} constraint recorded as "
+              f"owner={con['owner']} state={con['state']}")
+    else:
+        # Do NOT fail the retro close on this; but say so loudly, because a
+        # missing record means the next parts-check MUST escalate to a full retro.
+        print(f"retro-mark: {a.project} WARNING — could not read the constraint "
+              f"from views/stats.json; the next `parts-check` will escalate to a "
+              f"full retro rather than assume stability.")
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: parts-check — the CHEAP per-close constraint read (v136, EXP-132)
+#
+# WHY (owner ruling 2026-08-07): §F8 never batches an INCIDENT, so every defect
+# resolve tripped a full retro. With a large defect backlog that spends the whole
+# session on retros re-deriving an unchanged answer — measured: the v135 retro
+# closed at 13:17:51Z and DEFECT-OAG-060's resolve re-armed the gate at 13:23:43Z,
+# six minutes later, on the same constraint. Meanwhile /loop-run step 5a already
+# says a STABLE constraint should not pay full-retro overhead. The two rules
+# genuinely conflicted.
+#
+# THIS IS NOT A SOFTENING, AND THE DISTINCTION IS THE WHOLE POINT (§17e, EXP-125).
+# The cheap path is available ONLY while the constraint is provably unchanged, and
+# THE MACHINERY DECIDES THAT, NOT THE ORCHESTRATOR. If the constraint has SHIFTED —
+# or if it cannot be read at all — parts-check REFUSES and the full retro stands.
+# So the expensive path is still mandatory in exactly the case a retro exists for:
+# something about where time goes has changed.
+# ---------------------------------------------------------------------------
+def _constraint_marker_path(project):
+    return os.path.join(ROOT, "process", "dora", "retro-marker",
+                        f"{project}.constraint.txt")
+
+
+def _read_constraint(project):
+    """The current constraint from the DERIVED views: the top GLT-share owner and
+    the top GLT-share state. Returns None if it cannot be read — which callers
+    must treat as "escalate", never as "unchanged"."""
+    p = os.path.join(ROOT, "work", project, "views", "stats.json")
+    try:
+        with open(p, encoding="utf-8") as f:
+            d = json.load(f)
+        glt = d["overall"]["gross_lead_time"]
+    except (OSError, KeyError, ValueError):
+        return None
+
+    def top(section):
+        rows = glt.get(section) or {}
+        best, best_pct = None, None
+        for name, row in rows.items():
+            try:
+                pct = float(row.get("pct_of_glt"))
+            except (TypeError, ValueError):
+                continue
+            # Never name a constraint from a state that is mostly interpolation
+            # (§17f.6 / EXP-128) — the whole reason v132 aimed three retros wrong.
+            try:
+                if float(row.get("backfill_pct_of_state") or 0.0) > 50.0:
+                    continue
+            except (TypeError, ValueError):
+                pass
+            if best_pct is None or pct > best_pct:
+                best, best_pct = name, pct
+        return best, best_pct
+
+    owner, owner_pct = top("by_owner")
+    state, state_pct = top("by_state")
+    if owner is None or state is None:
+        return None
+    return {"owner": owner, "owner_pct": owner_pct,
+            "state": state, "state_pct": state_pct}
+
+
+def _write_constraint_marker(project, con):
+    p = _constraint_marker_path(project)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(f"{con['owner']}\t{con['state']}\n")
+
+
+def _read_constraint_marker(project):
+    p = _constraint_marker_path(project)
+    if not os.path.exists(p):
+        return None
+    try:
+        with open(p, encoding="utf-8") as f:
+            parts = f.readline().rstrip("\n").split("\t")
+        return (parts[0], parts[1]) if len(parts) >= 2 else None
+    except OSError:
+        return None
+
+
+def cmd_parts_check(a):
+    """Drain INCIDENT retro debt with a cheap constraint read — but ONLY while the
+    constraint is provably unchanged. Exit 0 = drained. Exit 2 = a full retro is
+    genuinely due (constraint shifted, unreadable, or routine debt at threshold)."""
+    graphs = Graphs.load()
+    now = parse_ts(getattr(a, "now", None)) if getattr(a, "now", None) else None
+    routine, incidents, _due, _detail, marker = compute_retro_debt(
+        graphs, a.project, a.threshold, now)
+
+    cur = _read_constraint(a.project)
+    prev = _read_constraint_marker(a.project)
+    stamp = (now.strftime("%Y-%m-%dT%H:%M:%SZ") if now else now_iso())
+
+    if cur is None:
+        print(f"parts-check[{a.project}] @ {stamp} => ESCALATE — the constraint "
+              f"could not be read from views/stats.json. An unreadable instrument "
+              f"is NOT evidence of stability. Run `make wi-project PROJECT="
+              f"{a.project}` then a FULL /retro.")
+        sys.exit(2)
+
+    line = (f"constraint = {cur['owner']} ({cur['owner_pct']}% of GLT) / state "
+            f"{cur['state']} ({cur['state_pct']}%)")
+
+    if prev is None:
+        print(f"parts-check[{a.project}] @ {stamp} => ESCALATE — {line}; no prior "
+              f"constraint on record, so stability cannot be established. A FULL "
+              f"/retro is due; it will record the constraint for next time.")
+        sys.exit(2)
+
+    if (cur["owner"], cur["state"]) != prev:
+        print(f"parts-check[{a.project}] @ {stamp} => ESCALATE — CONSTRAINT "
+              f"SHIFTED: {prev[0]}/{prev[1]} -> {cur['owner']}/{cur['state']}. "
+              f"{line}. This is real learning and a FULL /retro must walk it "
+              f"(exploit / subordinate / elevate). The cheap path is NOT available.")
+        sys.exit(2)
+
+    # Routine debt still batches to its own threshold — parts-check drains the
+    # INCIDENT arm only. A slice/chunk close backlog is a different signal.
+    if len(routine) >= a.threshold:
+        print(f"parts-check[{a.project}] @ {stamp} => ESCALATE — {line} "
+              f"(unshifted), but ROUTINE debt is {len(routine)}/{a.threshold}. "
+              f"parts-check drains the INCIDENT arm only; a batched full /retro "
+              f"is due on the routine arm.")
+        sys.exit(2)
+
+    # Stable + only incident debt => the cheap path is legitimate. Drain it.
+    ts = stamp
+    with open(_retro_marker_path(a.project), "w", encoding="utf-8") as f:
+        f.write(ts + "\n")
+    print(f"parts-check[{a.project}] @ {stamp} => OK (constraint STABLE) — {line}; "
+          f"shifted since last close? n. Drained {len(incidents)} incident(s): "
+          f"{', '.join(i for i, _t in incidents) or 'none'}. "
+          f"Full-retro overhead NOT paid, per the owner ruling of 2026-08-07; the "
+          f"full retro remains mandatory the moment the constraint moves.")
+    write_statusline({f"retro_debt_{a.project}": 0, f"retro_due_{a.project}": False})
+    sys.exit(0)
 
 
 # ---------------------------------------------------------------------------
@@ -3312,6 +3463,18 @@ def main(argv=None):
     rm.add_argument("--project", required=True)
     rm.add_argument("--now", help="marker timestamp (ISO-8601 UTC); default: real now")
     rm.set_defaults(func=cmd_retro_mark)
+
+    pc = sub.add_parser("parts-check",
+                        help="CHEAP per-close constraint read: drains INCIDENT "
+                             "retro debt ONLY while the constraint is provably "
+                             "unchanged; exit 2 escalates to a full retro")
+    pc.add_argument("--project", required=True)
+    pc.add_argument("--threshold", type=int, default=3,
+                    help="routine-debt batch threshold (default 3); parts-check "
+                         "drains the INCIDENT arm only and escalates if routine "
+                         "debt has reached this")
+    pc.add_argument("--now", help="reference timestamp (ISO-8601 UTC)")
+    pc.set_defaults(func=cmd_parts_check)
 
     lg = sub.add_parser("loop-gate",
                         help="MECHANICAL pull-precondition gate: exit 2 if any "

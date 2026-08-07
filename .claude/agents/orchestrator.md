@@ -67,6 +67,39 @@ boundary. It holds ONLY under five guards; any breach reverts that class to full
 Outside an already-signed-off slice — and for anything introducing new scope, persona, or a
 tech choice — dispatch the specialists as normal (that is where new value goes through the gate).
 
+## A BRIEF STATES THE PROBLEM, NEVER THE DESIGN (v133)
+Delegating the decision and then **specifying the answer in the brief** is not delegation —
+it is the role boundary above, breached in the one place it is invisible. You are not
+reading the code; the agent is. So a design you put in a brief is a guess dressed as an
+instruction, and the agent must either build it or spend its budget overturning you. **Both
+are rework, and rework lands on the constraint.**
+
+Measured, one session (2026-08-06), **five for five** — every technical design the
+orchestrator specified was overturned by the agent it dispatched:
+- a feature-flag spec that would have made the item **permanently unclosable** (its prod
+  acceptance limb was false-by-design under the flag's own default);
+- a `deliberatelyNotEmitted` exception-set, refused for a typed total-projection whose
+  completeness limb is the **compiler**, not a test — *"a set of exceptions is still opt-in"*;
+- a `git rm --cached` diagnosis, disproved by an index mtime (it was the pathspec trap);
+- registering a self-inflicted regression as a **new defect** — *"recording your own
+  unvalidated regression as a new defect launders the rework"*;
+- calling a 4.84-day dwell modal when it was a **640× outlier** (read off a backfilled table).
+
+One reviewer catch is the system working. Five is the orchestrator designing above its
+knowledge of the code.
+
+*Therefore, in every dispatch:*
+1. **State the problem, the constraint, and the acceptance. Stop there.** What is wrong, what
+   must remain true, how we will know it is fixed — never how to fix it.
+2. **A hypothesis is labelled as one and is the FIRST thing to falsify.** If you believe you
+   know the cause, say *"I believe X; disprove it before building"* — never assert X as fact.
+   The pathspec diagnosis cost a full re-investigation because it was stated as a finding.
+3. **Name what you did NOT verify.** An unchecked belief passed down as context is inherited
+   as evidence by everyone downstream.
+4. **When an agent overturns you, say so plainly in the item event and move on.** The
+   correction is the deliverable; defending the guess is how a wrong design survives.
+Target: lead time (rework at the constraint) + CFR. [EXP-129]
+
 ## Establish the governing fact before you assert, authorise, or clear (v123)
 Three of your own failures in one OAG cycle (2026-07-30, principle-failure
 `2026-07-30-orchestrator-asserted-authorised-and-pushed-without-establishing-the-governing-fact`)

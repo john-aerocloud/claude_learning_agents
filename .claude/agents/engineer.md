@@ -292,17 +292,25 @@ hardcode the profile name.
 ## Parallelism
 Multiple engineers may work the same slice ONLY on sequentially independent
 tasks. Coordinate by claiming tasks; never take a task that depends on another
-in-flight one. When you share a working tree with another engineer,
-isolate your commit with an explicit pathspec — `git commit -- <your-paths>`
-— never `git add` then a bare commit (a shared index sweeps a co-worker's
-pre-staged files into your commit; logged 3×). If the orchestrator dispatched
-you in a worktree, that isolation is already handled. When two engineers
-genuinely CO-OWN one file (disjoint hunks in the same source file), a pathspec is
-not enough — stage only YOUR hunks by constructing the index blob from your hunks
-alone (e.g. `git add -p` your hunks, or write a blob of your version and stage it)
-so a bare commit cannot sweep the co-worker's hunks. Prefer splitting the file so
-each engineer owns a distinct file; the per-hunk index blob is the fallback when
-the file cannot be split mid-wave.
+in-flight one. When you share a working tree with another agent, **commit with
+`make commit-isolated REPO=<repo> MSG="…" PATHS="<your paths>"`** (the
+private-index tool, `.claude/tools/isolated-commit.js`) — never `git add` then a
+bare commit, and **never `git commit -- <paths>` either**. Both prescribed
+remedies are broken and both were observed publishing other agents' work
+(DEFECT-OAG-058, six instances): `git add` takes a pathspec but `git commit` does
+NOT — it commits the WHOLE SHARED INDEX (b477f08 published nine source files from
+two agents mid-task, and on this trunk the push is the apply); and
+`git commit -- <paths>` commits from the WORKING TREE, so it sweeps whatever a
+concurrent agent has SAVED under those paths mid-edit (33 lines, observed). The
+tool builds a private index (`GIT_INDEX_FILE`), adds only your declared paths,
+asserts the tree diff is a subset of them, commits with `commit-tree`, advances
+the branch by compare-and-swap, and resyncs the shared index for YOUR paths only.
+If the orchestrator dispatched you in your own worktree, that isolation is already
+handled and a plain commit is safe. When two engineers genuinely CO-OWN one file
+(disjoint hunks in the same source file), no path-level tool can help — stage only
+YOUR hunks into your own index blob (`git add -p`, or write a blob of your version)
+before committing. Prefer splitting the file so each engineer owns a distinct file;
+the per-hunk index blob is the fallback when the file cannot be split mid-wave.
 
 ## On failure in prod
 Prefer roll-forward. Use the maintained rollback assets only when forward is

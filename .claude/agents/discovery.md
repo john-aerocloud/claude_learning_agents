@@ -56,6 +56,18 @@ lives in the artifacts. Log the sign-off to `decision-log.md`.
 - A requirement with no signed-off dossier is NOT registerable. The sign-off line is the
   gate `/requirement` checks before it frames value/cost and registers.
 
+## Committing on a shared working tree (DEFECT-OAG-058)
+Up to five agents share one working tree and therefore **one git index**. Commit with
+**`make commit-isolated REPO=<repo> MSG="type(scope): intent (ID)" PATHS="<your paths>"`**
+(`.claude/tools/isolated-commit.js`). Do NOT `git add` then commit — `git add` takes a
+pathspec but **`git commit` does not**, so it commits the whole shared index and publishes
+whatever another agent had staged (b477f08: nine files from two agents, applied to
+dev-shared because on this trunk the push is the apply). Do NOT pass a pathspec to
+`git commit` either — that commits from the **working tree** and sweeps a concurrent
+agent's mid-edit save. The tool uses a private `GIT_INDEX_FILE` + `commit-tree` + a
+compare-and-swap ref update, so neither can happen. If you were dispatched in your OWN
+worktree, a plain commit is safe.
+
 ## Command form — allowlist contract (§33)
 Every Bash command runs from the project root and matches the committed allowlist in
 `.claude/settings.json`. NEVER `cd … && …` / `source … && …`. Use allowlist-shaped

@@ -979,10 +979,27 @@ passes inside the done-condition, not discovered post-commit).
   repo, a file boundary is not enough — `git add` over a shared index sweeps a co-worker's
   staged files into your commit. Dispatch such committers in git WORKTREE isolation
   (`git worktree add`, private index). The ONE §14 exception to the no-worktree default,
-  orthogonal to §40 flag-isolation; single-committer cycles keep the plain trunk tree with
-  explicit-pathspec (`git commit -- <your-paths>`) as the fallback. [EXP-097]
+  orthogonal to §40 flag-isolation; single-committer cycles keep the plain trunk tree.
+  [EXP-097]
+- **The within-tree commit form is `make commit-isolated`, and BOTH earlier remedies are
+  broken (DEFECT-OAG-058, six instances).** `git add -- <mine>` followed by `git commit`
+  commits the WHOLE SHARED INDEX — `git add` takes a pathspec, **`git commit` does not** —
+  which published 102 files including nine belonging to two other agents mid-task and, on a
+  trunk where the push IS the apply, applied their untested code (b477f08). The remedy
+  prescribed six times in response, a pathspec passed to `git commit`, commits from the
+  **WORKING TREE**, so it sweeps whatever a concurrent agent has SAVED under those paths
+  mid-edit (33 lines, observed live) — it narrows the path set without isolating the
+  CONTENT. The race-free form takes content from an index nobody else can write:
+  `make commit-isolated REPO=<repo> MSG="…" PATHS="<yours>"`
+  (`.claude/tools/isolated-commit.js`) — private `GIT_INDEX_FILE` seeded from HEAD, only
+  the declared paths added, a declared-subset assertion, `commit-tree`, a compare-and-swap
+  ref update so a concurrent commit is retried rather than lost, and a resync of the shared
+  index for YOUR paths only (a stale shared-index entry silently REVERTS your file at the
+  next whole-index commit). Its self-tests are differential — each asserts the pre-fix form
+  publishing the foreign file — and are wired into `make test-tools`. This is a MECHANISM,
+  not advice: discipline failed six times and the sixth failure was the advice itself.
 - **Never `git stash` a shared tree** — stash-all hides OTHER agents' uncommitted work.
-  Commit ONLY your explicit pathspec; `git pull --rebase --autostash` for just your own
+  Commit with `make commit-isolated`; `git pull --rebase --autostash` for just your own
   staged change; leave every file you do not own untouched.
 
 ## 15. Command form — the allowlist contract (all agents)

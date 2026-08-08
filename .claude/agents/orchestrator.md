@@ -288,11 +288,15 @@ dispatch 2+ agents that will COMMIT code concurrently on one project repo (paral
 engineers, or engineer + tester both committing), give each its own git WORKTREE
 (`git worktree add`) so each has a PRIVATE index — a shared index sweeps one
 committer's staged changes into another's commit (the shared-index attribution
-hazard, now 4× recurrences incl. UC-SF2→389d86f). This is the ONE §14 exception to
-the trunk/no-worktree default and is **orthogonal to §40 flag-isolation** (which
-stays the rule for behavioural seam-independence within a single tree). The
-explicit-pathspec `git commit -- <paths>` rule is the within-tree fallback; the
-worktree is the standing fix for genuinely concurrent committers. Single-committer
+hazard, now 6× recurrences incl. UC-SF2→389d86f and b477f08). This is the ONE §14
+exception to the trunk/no-worktree default and is **orthogonal to §40
+flag-isolation** (which stays the rule for behavioural seam-independence within a
+single tree). The within-tree fallback is **`make commit-isolated`**
+(`.claude/tools/isolated-commit.js` — private `GIT_INDEX_FILE` + `commit-tree` +
+compare-and-swap), **not** the explicit-pathspec rule I prescribed six times: a
+path-scoped `git add` still commits the whole shared index, and a pathspec passed
+to `git commit` commits from the WORKING TREE and sweeps a concurrent agent's
+mid-edit save (DEFECT-OAG-058 — my own advice, falsified live). Single-committer
 cycles keep the plain trunk working tree. Target: commit-attribution-correctness
 (CFR) + GLT (no reconciliation rework).
 

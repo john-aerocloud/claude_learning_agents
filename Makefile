@@ -485,6 +485,24 @@ impacted-tests:
 test-tools:
 	node --test .claude/tools/*.test.js
 
+# --- DEFECT-OAG-058 commit-isolated: the ONLY safe commit on a shared tree ----
+# Up to five agents share one working tree and therefore ONE git index. Neither
+# previously-prescribed remedy works: `git add -- <mine>` + `git commit` commits
+# the WHOLE INDEX (b477f08 published nine files belonging to two other agents,
+# and on this trunk the push IS the apply); `git commit -- <mine>` commits from
+# the WORKING TREE, so it sweeps a concurrent agent's mid-edit save.
+# This builds a PRIVATE index (GIT_INDEX_FILE), adds only the declared paths,
+# asserts the tree diff is a subset of them, commits with commit-tree and moves
+# the branch by COMPARE-AND-SWAP, then resyncs the shared index for MY paths
+# only (a stale entry silently reverts my file at the next whole-index commit).
+# Pure git + filesystem; NO creds, NO network.
+# Exit 3 = declared-subset assertion fired (nothing committed); 4 = nothing to
+# commit for those paths; 5 = branch could not be advanced.
+#   make commit-isolated REPO=work/OagEventSource MSG="fix(x): intent (DEF-…)" \
+#                        PATHS="src/app/src/a.ts src/app/tests/a.test.ts"
+commit-isolated:
+	node .claude/tools/isolated-commit.js --repo "$(REPO)" --message "$(MSG)" -- $(PATHS)
+
 # --- IMP-008 WAF runner-IP exclusion helpers ----------------------------------
 # Add/remove a CIDR from the oxo-test-runner-ips WAFv2 IP set (us-east-1,
 # CLOUDFRONT scope). The IP set is named 'oxo-test-runner-ips'; these targets
@@ -645,7 +663,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove sso-login retro-debt retro-mark loop-gate test-wi wi-append wi-project wi-validate wi-migrate doc-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery
+.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove sso-login retro-debt retro-mark loop-gate test-wi wi-append wi-project wi-validate wi-migrate doc-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery
 
 # --- Viggo-fix UC-W7: Country/Nationality ID remediation (T-SQL) --------------
 # Data-driven, self-building T-SQL remediation script set + its local stand-up

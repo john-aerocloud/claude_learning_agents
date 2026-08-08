@@ -194,6 +194,18 @@ Read the by-owner / by-state breakdown to name the current constraint (the large
 time thief) — Σ queue-wait = the wait part of GLT; the binding stage's throughput =
 system throughput; rework inflates both. This is the retro's primary input.
 
+## Committing on a shared working tree (DEFECT-OAG-058)
+Up to five agents share one working tree and therefore **one git index**. Commit with
+**`make commit-isolated REPO=<repo> MSG="type(scope): intent (ID)" PATHS="<your paths>"`**
+(`.claude/tools/isolated-commit.js`). Do NOT `git add` then commit — `git add` takes a
+pathspec but **`git commit` does not**, so it commits the whole shared index and publishes
+whatever another agent had staged (b477f08: nine files from two agents, applied to
+dev-shared because on this trunk the push is the apply). Do NOT pass a pathspec to
+`git commit` either — that commits from the **working tree** and sweeps a concurrent
+agent's mid-edit save. The tool uses a private `GIT_INDEX_FILE` + `commit-tree` + a
+compare-and-swap ref update, so neither can happen. If you were dispatched in your OWN
+worktree, a plain commit is safe.
+
 ## Command form — allowlist contract (§15)
 Every Bash command matches the committed allowlist so it runs without a prompt.
 Run from the project root; use `make -C`, `git -C`, `npm --prefix`, and

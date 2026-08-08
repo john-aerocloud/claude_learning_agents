@@ -356,3 +356,78 @@ test('AC-DEFECT-OAG-058.8 no declared paths and no message are refused', () => {
   assert.equal(runCli(repo, ['--repo', repo, '--message', 'm']).status, 2);
   assert.equal(runCli(repo, ['--repo', repo, '--', 'items/']).status, 2);
 });
+
+// --- AC-DEFECT-OAG-058.9 — the wiring (item limb 2, and DEFECT-OAG-056's lesson)
+//
+// A mechanism no agent is routed to is not a fix, it is a file. These assert the
+// process layer actually points at it — and, crucially, that the DISCREDITED
+// `git commit -- <pathspec>` form is nowhere left standing as the remedy.
+
+const REPO_ROOT = path.resolve(__dirname, '..', '..');
+
+/**
+ * EVERY agent file is enumerated, with its commit decision. A file that commits
+ * must route to the tool. A NEW agent file fails this gate until it declares —
+ * an omitted lane is exactly how DEFECT-OAG-043 happened.
+ */
+const AGENT_COMMIT_LANES = {
+  'engineer.md': 'commits',
+  'tester.md': 'commits',
+  'documenter.md': 'commits',
+  'cicd.md': 'commits',
+  'orchestrator.md': 'commits',
+  'flow-manager.md': 'commits',
+  'product.md': 'commits',
+  'solution-architect.md': 'commits',
+  'ui-designer.md': 'commits',
+  'discovery.md': 'commits',
+  'linear.md': 'does-not-commit',
+  'jira.md': 'does-not-commit',
+};
+
+test('AC-DEFECT-OAG-058.9 every agent file declares a commit lane (an undeclared lane is how the control gets omitted)', () => {
+  const onDisk = fs.readdirSync(path.join(REPO_ROOT, '.claude', 'agents')).filter((f) => f.endsWith('.md')).sort();
+  assert.deepEqual(onDisk, Object.keys(AGENT_COMMIT_LANES).sort());
+});
+
+test('AC-DEFECT-OAG-058.9 every committing agent routes to the isolated-commit tool', () => {
+  const missing = [];
+  for (const [file, lane] of Object.entries(AGENT_COMMIT_LANES)) {
+    if (lane !== 'commits') continue;
+    const text = fs.readFileSync(path.join(REPO_ROOT, '.claude', 'agents', file), 'utf8');
+    if (!text.includes('isolated-commit')) missing.push(file);
+  }
+  assert.deepEqual(missing, [], 'these agents commit but are not routed to the private-index tool');
+});
+
+test('AC-DEFECT-OAG-058.9 the discredited `git commit -- <pathspec>` form is never left standing as the remedy', () => {
+  const files = [
+    ...fs
+      .readdirSync(path.join(REPO_ROOT, '.claude', 'agents'))
+      .filter((f) => f.endsWith('.md'))
+      .map((f) => path.join(REPO_ROOT, '.claude', 'agents', f)),
+    path.join(REPO_ROOT, 'process', 'process-current.md'),
+  ];
+  const offenders = [];
+  for (const abs of files) {
+    // paragraph-scoped: the correction must travel with the form, but may be a
+    // sentence away rather than on the same physical line.
+    for (const para of fs.readFileSync(abs, 'utf8').split(/\n\s*\n/)) {
+      if (!/git commit\s+--(?!\S)/.test(para)) continue;
+      if (/isolated-commit|DEFECT-OAG-058/.test(para)) continue;
+      offenders.push(`${path.relative(REPO_ROOT, abs)}: ${para.trim().slice(0, 160)}`);
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    'this form commits from the WORKING TREE and sweeps a concurrent agent\'s mid-edit save — it may only appear alongside its correction',
+  );
+});
+
+test('AC-DEFECT-OAG-058.9 the root Makefile exposes the tool as a parameterised, PHONY target', () => {
+  const mk = fs.readFileSync(path.join(REPO_ROOT, 'Makefile'), 'utf8');
+  assert.match(mk, /^commit-isolated:/m, 'no `commit-isolated` target');
+  assert.match(mk, /node \.claude\/tools\/isolated-commit\.js/, 'the target must invoke the tool');
+  assert.match(mk, /^\.PHONY:.*\bcommit-isolated\b/m, '`commit-isolated` must be declared PHONY');
+});

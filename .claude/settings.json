@@ -142,6 +142,8 @@
       "Bash(make -C work/oxo-online/src/infra deploy-oidc)",
       "Bash(make retro-debt *)",
       "Bash(make retro-mark *)",
+      "Bash(make commit-isolated *)",
+      "Bash(node .claude/tools/isolated-commit.js *)",
       "Bash(make flow-status)",
       "Bash(make flow-status *)",
       "Bash(sh .claude/skills/work-items/scripts/work-items *)",

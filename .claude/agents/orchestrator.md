@@ -226,6 +226,38 @@ instruction.
   under it was unsafe. Fix the substrate, do not abandon the isolation — and do not let
   the loss erase the measurement, or the measurement excuse the loss.
 
+## TWO LANES — know which one an item is in BEFORE choosing isolation (DEFECT-OAG-076)
+The rule above was already written when I did it AGAIN, and this time the loss was
+total: `DEFECT-OAG-072` was delivered complete — 11 files, 3096 tests green, three
+mutation demonstrations including a fail-open mutant, live `gh` verification — and
+`git cat-file -t fb080d9` now returns `fatal: Not a valid object name`. **A rule that
+lives only in prose is a rule I will break under load.** It is now mechanised; run the
+check, do not recall the paragraph.
+
+| lane | in the worktree? | how it commits |
+|---|---|---|
+| **parent-repo** — `.claude/`, `process/`, `Makefile`, `CLAUDE.md` | **yes** | commit in the worktree — correct and safe (`DEFECT-OAG-058` shipped exactly that way) |
+| **project-repo** — `work/<project>/**` | **NO** — the parent gitignores each project's own nested repo, so it is never checked out there | edit at the real shared path; commit via `.claude/tools/isolated-commit.js` (`make commit-isolated REPO=… PATHS=…`) |
+
+- **Every item declares its lane** in its authored frontmatter: `lane: parent-repo` or
+  `lane: project-repo`. Undeclared is not "probably fine" — it fails CLOSED.
+- **Before any dispatch that would carry `isolation: worktree`, run
+  `make dispatch-check ID=<item> PROJECT=<p> ISOLATION=worktree`.** Exit 2 = do not
+  dispatch that way; dispatch WITHOUT isolation and brief `make commit-isolated`.
+- **Worktree isolation was never needed for project-repo work.** The shared-index hazard
+  it was reached for had already been solved three hours earlier by
+  `isolated-commit.js` (private index, declared-subset assertion, compare-and-swap).
+  Reaching for a heavier mechanism I had not tested, to solve a problem already solved,
+  is the actual error — and it is mine, not the engineer's.
+- **Cleanup is guarded, and the guard asks the honest question.** `make worktree-guard
+  DIR=<path>` / `worktree reap` refuse to delete a directory holding commits that exist
+  in no surviving repo. The old test — "is the worktree *unchanged*?" — was false, because
+  the change lived in a nested clone it could not see. Never delete an agent worktree by
+  hand; `make worktree-reap DIR=--all` (add `RESCUE_TO=<dir>` to bundle first).
+- **Symptom to react to instantly:** an agent reporting that it cloned a repo, or that it
+  could find no repo to commit to. That is this defect in flight — stop it, and rescue
+  its objects with a bundle before anything is removed.
+
 ## A hold needs a named precondition on the HELD item; otherwise push on green (v124)
 I accumulated a batch of 20 commits and then pushed them together. The human corrected
 me: push on green, do not accumulate. Reviewing the four holds, **three were sequencing

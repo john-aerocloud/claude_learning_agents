@@ -306,11 +306,40 @@ tool builds a private index (`GIT_INDEX_FILE`), adds only your declared paths,
 asserts the tree diff is a subset of them, commits with `commit-tree`, advances
 the branch by compare-and-swap, and resyncs the shared index for YOUR paths only.
 If the orchestrator dispatched you in your own worktree, that isolation is already
-handled and a plain commit is safe. When two engineers genuinely CO-OWN one file
+handled and a plain commit is safe — **but only for the parent-repo lane; check which
+lane you are in before you commit anything (DEFECT-OAG-076, below).** When two engineers genuinely CO-OWN one file
 (disjoint hunks in the same source file), no path-level tool can help — stage only
 YOUR hunks into your own index blob (`git add -p`, or write a blob of your version)
 before committing. Prefer splitting the file so each engineer owns a distinct file;
 the per-hunk index blob is the fallback when the file cannot be split mid-wave.
+
+## Two lanes — and NEVER clone a repo to have something to commit to (DEFECT-OAG-076)
+Before your first commit, establish which lane your item is in. Getting this wrong is
+not a style error: it silently DESTROYS the whole delivery. `DEFECT-OAG-072` was
+delivered complete — 11 files, 3096 tests green, three mutation demonstrations, live
+`gh` verification — and `git cat-file -t fb080d9` now returns `fatal: Not a valid
+object name`.
+
+| lane | in the worktree? | how you commit |
+|---|---|---|
+| **parent-repo** — `.claude/`, `process/`, `Makefile`, `CLAUDE.md` | **yes** | commit in the worktree, explicit pathspec — correct and safe |
+| **project-repo** — `work/<project>/**` | **NO**: the parent gitignores each project's own nested repo, so it is never in a parent-repo worktree | edit at the REAL shared path and commit via `.claude/tools/isolated-commit.js` (`make commit-isolated REPO=… PATHS=…`) |
+
+- **If you are in a worktree and the thing you were asked to edit is not there, STOP and
+  say so.** Do not clone the project repo into your worktree to have somewhere to commit.
+  It is locally reasonable and globally fatal: the clone carries its own `.git`, and the
+  worktree auto-clean takes those objects with it — the cleanup is documented safe
+  because it removes an *unchanged* worktree, and it cannot see inside a nested clone.
+  A missing repo is a mis-briefed dispatch (§F7 collision-class): flag it, do not
+  engineer around it.
+- **If you have already committed inside a nested clone, make it durable BEFORE you
+  return** and QUOTE the ref: push to the LOCAL shared repo, or
+  `git -C <clone> bundle create <scratchpad>/rescue.bundle --all`. Then run
+  `make worktree-guard DIR=<your worktree>` — a non-zero exit means your work would die
+  with your tree.
+- **Worktree isolation was never needed for project-repo work.** `isolated-commit.js`
+  (private index, declared-subset assertion, compare-and-swap) already solves the
+  shared-index hazard — it landed three hours before the loss it would have prevented.
 
 ## On failure in prod
 Prefer roll-forward. Use the maintained rollback assets only when forward is

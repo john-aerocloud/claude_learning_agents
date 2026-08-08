@@ -64,6 +64,43 @@ project-update:
 project-worktree-remove:
 	$(WORKTREE) remove $(PROJECT)
 
+# --- DEFECT-OAG-076: the two lanes, and never delete work that exists nowhere else
+# `isolation: worktree` on a PROJECT-REPO item destroyed DEFECT-OAG-072 outright
+# (`git cat-file -t fb080d9` => `fatal: Not a valid object name`). The parent
+# gitignores each project's own nested repo, so a parent-repo worktree NEVER
+# CONTAINS work/<project>: the agent finds nothing to edit and no legal way to
+# commit, clones the project repo inside its worktree, commits there, and the
+# auto-clean takes the objects with it. Two lanes, and a dispatch must know which:
+#
+#   parent-repo  (.claude/ process/ Makefile CLAUDE.md)  IS in the worktree
+#                -> committing in the worktree is correct and safe
+#   project-repo (work/<project>/**)                     is NOT in the worktree
+#                -> edit at the real shared path; commit via `make commit-isolated`
+#                   (.claude/tools/isolated-commit.js — the private index, which had
+#                    already landed as DEFECT-OAG-058 three hours before the loss)
+#
+#   make dispatch-check ID=DEFECT-OAG-076 [PROJECT=P] [ISOLATION=worktree|none]
+#        -> exit 2 (loud) if this item may not take worktree isolation. The lane is
+#           DECLARED on the item (`lane:`); undeclared/unrecognised fails CLOSED.
+#   make worktree-guard DIR=<path> [RESCUE_TO=<dir>]
+#        -> exit 2 if removing DIR would destroy commits that exist in no surviving
+#           repo (RESCUE_TO first writes a recoverable bundle). DIR=--all sweeps every
+#           registered worktree plus .claude/worktrees/*.
+# Pure git + filesystem; NO creds, NO network.
+dispatch-check:
+	node .claude/tools/worktree-guard.js dispatch-check --item $(ID) \
+	  $(if $(PROJECT),--project $(PROJECT),) --isolation $(if $(ISOLATION),$(ISOLATION),worktree)
+
+worktree-guard:
+	@node .claude/tools/worktree-guard.js \
+	  $(if $(filter --all,$(DIR)),scan-all,scan $(if $(DIR),$(DIR),.)) \
+	  $(if $(RESCUE_TO),--rescue-to $(RESCUE_TO),)
+
+# GUARDED cleanup of a finished AGENT worktree — refuses rather than destroying.
+#   make worktree-reap DIR=<path>|--all
+worktree-reap:
+	$(WORKTREE) reap $(if $(DIR),$(DIR),--all)
+
 # --- AWS SSO login -------------------------------------------------------------
 # Re-authenticate the project's SSO profile when the cached token has expired
 # (symptom: any aws CLI call fails with "Token has expired and refresh failed").
@@ -713,7 +750,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove sso-login retro-debt retro-mark loop-gate test-wi wi-append wi-project wi-validate wi-migrate doc-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated test-requirement-gate test-requirement-gate-baseline board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery
+.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap sso-login retro-debt retro-mark loop-gate test-wi wi-append wi-project wi-validate wi-migrate doc-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated test-requirement-gate test-requirement-gate-baseline board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery
 
 # --- Viggo-fix UC-W7: Country/Nationality ID remediation (T-SQL) --------------
 # Data-driven, self-building T-SQL remediation script set + its local stand-up

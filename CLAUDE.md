@@ -126,3 +126,22 @@ See `README.md` for the full system. In short:
   removed the shared-index race, EXP-097; `process/dora/ledger*.csv` is a frozen
   archive). Run the machinery only via the cross-platform launcher
   (`sh .claude/skills/work-items/scripts/work-items`), never bare `python3`.
+- **TWO LANES, and a worktree contains only ONE of them (DEFECT-OAG-076).** Because the
+  parent gitignores each project's own nested repo, a parent-repo worktree **never
+  contains `work/<project>/`**. So:
+
+  | lane | in a worktree? | how it commits |
+  |---|---|---|
+  | **parent-repo** — `.claude/`, `process/`, `Makefile`, `CLAUDE.md` | **yes** | commit in the worktree — correct and safe |
+  | **project-repo** — `work/<project>/**` | **no** | edit at the real shared path; commit via `.claude/tools/isolated-commit.js` (`make commit-isolated`) |
+
+  Every work item declares `lane:` in its authored frontmatter, and a dispatch that would
+  carry worktree isolation must first pass **`make dispatch-check ID=<item>
+  ISOLATION=worktree`** (undeclared fails CLOSED). **Never delete an agent worktree by
+  hand** — use `make worktree-reap DIR=--all` / `make worktree-guard DIR=<path>`, which
+  refuse to destroy a nested repo whose commits exist nowhere else. This is not
+  hypothetical: `DEFECT-OAG-072` was delivered complete and destroyed exactly this way
+  (`git cat-file -t fb080d9` → `fatal: Not a valid object name`), because an agent with
+  no project repo in its worktree cloned one in and committed there. **An agent that
+  reports it cloned a repo, or found nothing to commit to, has hit this — stop and
+  rescue its objects before anything is removed.**

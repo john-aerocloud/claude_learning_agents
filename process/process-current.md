@@ -975,12 +975,32 @@ passes inside the done-condition, not discovered post-commit).
   and stop. Verified → push trunk each time a UC's full done-condition is met (suite + lint
   green); one UC's green trunk is one push, never accumulate. Each push sets off the
   non-blocking CI watch (§19b); a green-local / red-CI run is a defect (§19b), never silent.
-- **Parallel-committer isolation = worktree.** When 2+ agents COMMIT concurrently on one
-  repo, a file boundary is not enough — `git add` over a shared index sweeps a co-worker's
-  staged files into your commit. Dispatch such committers in git WORKTREE isolation
-  (`git worktree add`, private index). The ONE §14 exception to the no-worktree default,
-  orthogonal to §40 flag-isolation; single-committer cycles keep the plain trunk tree.
-  [EXP-097]
+- **Parallel-committer isolation = worktree — FOR THE PARENT-REPO LANE ONLY.** When 2+
+  agents COMMIT concurrently on one repo, a file boundary is not enough — `git add` over a
+  shared index sweeps a co-worker's staged files into your commit. Dispatch such committers
+  in git WORKTREE isolation (`git worktree add`, private index). The ONE §14 exception to
+  the no-worktree default, orthogonal to §40 flag-isolation; single-committer cycles keep
+  the plain trunk tree. [EXP-097]
+- **TWO LANES, and a parent-repo worktree contains only ONE of them (DEFECT-OAG-076).**
+  Because the parent gitignores each project's own nested repo, `work/<project>/**` is
+  **never checked out in a parent-repo worktree**. So worktree isolation applies to the
+  **parent-repo** lane (`.claude/`, `process/`, `Makefile`, `CLAUDE.md` — committing in the
+  worktree is correct and safe) and **never** to the **project-repo** lane (edit at the real
+  shared path; commit via `make commit-isolated`). Dispatched onto a project-repo item with
+  worktree isolation, an agent finds nothing to edit and no legal way to commit; the only
+  move left is to clone the project repo inside its worktree and commit there, and the
+  auto-clean then takes those objects with it. That is not hypothetical: `DEFECT-OAG-072`
+  was delivered complete and destroyed exactly this way (`git cat-file -t fb080d9` →
+  `fatal: Not a valid object name`), while the correct tool — `isolated-commit.js`, which
+  solves the very hazard worktree isolation was reached for — had landed three hours
+  earlier. Mechanised, because the prose form of this rule (v124) was already written and
+  was broken under load: every item declares `lane:` in its authored frontmatter;
+  **`make dispatch-check ID=<item> ISOLATION=worktree`** must pass before such a dispatch
+  (undeclared fails CLOSED); and **no cleanup path deletes a directory without
+  `make worktree-guard`**, which refuses when a nested repo holds commits that exist in no
+  surviving repo — replacing the "is the worktree *unchanged*?" test, which was false
+  precisely because the change lived where it could not look. Never remove an agent worktree
+  by hand: `make worktree-reap DIR=--all [RESCUE_TO=<dir>]`.
 - **The within-tree commit form is `make commit-isolated`, and BOTH earlier remedies are
   broken (DEFECT-OAG-058, six instances).** `git add -- <mine>` followed by `git commit`
   commits the WHOLE SHARED INDEX — `git add` takes a pathspec, **`git commit` does not** —

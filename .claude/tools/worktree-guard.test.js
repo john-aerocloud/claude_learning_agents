@@ -531,6 +531,7 @@ const LANE_DOCS = [
   '.claude/agents/orchestrator.md',
   '.claude/agents/engineer.md',
   'CLAUDE.md',
+  'process/process-current.md',
 ];
 
 for (const rel of LANE_DOCS) {

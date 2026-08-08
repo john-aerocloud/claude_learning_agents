@@ -2780,6 +2780,9 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
     # --- 6. the test-requirement gate (§17d) — DELEGATED to the real analyser --
     findings.extend(compute_test_requirement_gate(project))
 
+    # --- 7. unrecoverable work in a worktree (DEFECT-OAG-076) — DELEGATED ------
+    findings.extend(compute_worktree_guard())
+
     return findings
 
 
@@ -2879,6 +2882,84 @@ def compute_test_requirement_gate(project, timeout=TRG_TIMEOUT):
             f"to raise it). Reported every cycle so it cannot quietly become normal."))]
 
     return []
+
+
+# ---------------------------------------------------------------------------
+# loop-gate check 7 — unrecoverable work in a worktree (DEFECT-OAG-076)
+#
+# `DEFECT-OAG-072` was delivered complete — 11 files, 3096 tests green, three
+# mutation demonstrations, live `gh` verification — and destroyed by a worktree
+# auto-clean: `git cat-file -t fb080d9` => `fatal: Not a valid object name`. An
+# agent dispatched with `isolation: worktree` onto a PROJECT-REPO item finds no
+# project repo (the parent gitignores each project's own nested repo, so it is
+# never in the worktree) and no legal way to commit, so it CLONES the project
+# repo inside its worktree and commits there — and the clean-up takes the objects
+# with it. The cleanup is documented safe because it removes an *unchanged*
+# worktree; the change lived in a nested repo that check cannot see.
+#
+# Prevention lives at the dispatch (`make dispatch-check`) and at every removal
+# path (`make worktree-guard`). This is the DETECTION limb, and it hangs here
+# because the loop is the only continuously-running workflow: it finds the work
+# WHILE THE OBJECTS STILL EXIST, when a `git bundle` still rescues them.
+#
+# The analysis lives in ONE place — .claude/tools/worktree-guard.js — and is
+# DELEGATED to, never re-implemented (the DRY rule checks 4 and 6 already follow).
+#
+# SEVERITY, per §F8a ("a gate blocks only on harm that stopping relieves"):
+#   at-risk work found -> BLOCK. Pulling more work does not make it recoverable;
+#         stopping is precisely the remedy, and the remedy is one command.
+#   unrunnable         -> UNKNOWN ("? " line). Never silent, never counted as
+#         satisfied: an unevaluated precondition is not a met one (§17c.2).
+# ---------------------------------------------------------------------------
+WTG_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "..", "..", "..", "tools", "worktree-guard.js")
+WTG_TIMEOUT = 120.0
+
+
+def compute_worktree_guard(timeout=WTG_TIMEOUT):
+    """Sweep every worktree a cleanup could delete; report work that exists only
+    there. Returns 0 or 1 finding."""
+    common = {"check": "worktree-guard", "ids": []}
+    try:
+        proc = subprocess.run(
+            ["node", os.path.normpath(WTG_SCRIPT), "scan-all",
+             "--repo-root", ROOT, "--json"],
+            capture_output=True, text=True, timeout=timeout)
+        report = json.loads(proc.stdout)
+    except Exception as exc:                                    # noqa: BLE001
+        return [dict(common, severity="unknown", message=(
+            f"[worktree-guard] NOT ESTABLISHED — the guard would not run "
+            f"({type(exc).__name__}: {str(exc)[:160]}). An unrunnable guard is not "
+            f"a clean one, and this is the check that stands between a finished "
+            f"agent's commits and DEFECT-OAG-072's fate. Remedy: "
+            f"`make worktree-guard DIR=--all`."))]
+
+    if report.get("safe"):
+        return []
+
+    at_risk = []
+    for res in report.get("results", []):
+        if res.get("safe"):
+            continue
+        for r in res.get("repos", []):
+            if not r.get("unsafe"):
+                continue
+            at_risk.append((res.get("root", "?"), r.get("repo", "?"),
+                            len(r.get("atRisk", [])), len(r.get("dirty", []))))
+    detail = "; ".join(
+        f"{repo} ({n} commit(s) at risk, {d} uncommitted)" for _root, repo, n, d in at_risk
+    )[:800] or "see `make worktree-guard DIR=--all`"
+    roots = sorted({root for root, _repo, _n, _d in at_risk})
+    return [dict(common, severity="block", ids=[], roots=roots, message=(
+        f"[worktree-guard] WORK THAT EXISTS NOWHERE ELSE is sitting in a worktree "
+        f"a cleanup can delete: {detail}. This is how DEFECT-OAG-072 was destroyed "
+        f"(git cat-file -t fb080d9 => Not a valid object name) — and the objects are "
+        f"STILL ON DISK right now, which is the only reason it is recoverable. "
+        f"Remedy: make it durable (push to the LOCAL shared repo, or "
+        f"`make worktree-guard DIR=--all RESCUE_TO=<dir>` to bundle it), then re-run. "
+        f"Fix the cause too: a project-repo item must never take worktree isolation "
+        f"(`make dispatch-check ID=<item> ISOLATION=worktree`). Affected: "
+        f"{', '.join(roots) or '—'}."))]
 
 
 def cmd_loop_gate(a):

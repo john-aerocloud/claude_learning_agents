@@ -2895,6 +2895,109 @@ class TestLoopGate(Base):
         self.assertEqual(f["severity"], "unknown")
         self.assertEqual(f["verdict"], "UNRUNNABLE")
 
+    # ---- check 7: unrecoverable work in a worktree (DEFECT-OAG-076) ---------
+    #
+    # DEFECT-OAG-072 was delivered complete and DESTROYED by a worktree auto-clean
+    # (`git cat-file -t fb080d9` => `fatal: Not a valid object name`). The loop is
+    # the only continuously-running workflow, so it is where the detection has to
+    # hang: work that exists nowhere else must be found while the objects still
+    # exist, not after they are gone. These drive the REAL guard over a REAL git
+    # topology built in the temp tree — nothing is stubbed.
+
+    def _git(self, repo, *args):
+        subprocess.run(["git", "-C", repo, *args], check=True,
+                       capture_output=True, text=True)
+
+    def _init_repo(self, d):
+        os.makedirs(d, exist_ok=True)
+        subprocess.run(["git", "init", "-q", "-b", "main", d], check=True,
+                       capture_output=True, text=True)
+        self._git(d, "config", "user.email", "a@b.test")
+        self._git(d, "config", "user.name", "A")
+        self._git(d, "config", "commit.gpgsign", "false")
+        return d
+
+    def _write_file(self, root, rel, text):
+        p = os.path.join(root, rel)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(text)
+
+    def _parent_topology(self):
+        """The real shape: a parent repo that gitignores each project's own nested
+        repo, plus a worktree that therefore does NOT contain it."""
+        parent = self._init_repo(os.path.join(self.tmp, "parent"))
+        self._write_file(parent, ".gitignore", "/work/*/\n")
+        self._write_file(parent, "CLAUDE.md", "agent system\n")
+        self._git(parent, "add", "-A")
+        self._git(parent, "commit", "-q", "-m", "base")
+        proj = self._init_repo(os.path.join(parent, "work", "DemoProject"))
+        self._write_file(proj, "src/a.ts", "a\n")
+        self._git(proj, "add", "-A")
+        self._git(proj, "commit", "-q", "-m", "project base")
+        wt = os.path.join(self.tmp, "agent-wt")
+        self._git(parent, "worktree", "add", "-q", wt, "-b", "worktree-agent-1", "main")
+        return parent, proj, wt
+
+    def test_worktree_guard_clean_tree_produces_no_finding(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        parent, _proj, _wt = self._parent_topology()
+        orig, wi.ROOT = wi.ROOT, parent
+        try:
+            findings = self._gate()
+        finally:
+            wi.ROOT = orig
+        self.assertNotIn("worktree-guard",
+                         [f["check"] for f in findings])
+
+    def test_worktree_guard_unrecoverable_work_BLOCKS_the_pull(self):
+        """The fb080d9 shape: an agent with no project repo in its worktree cloned
+        one in and committed there. Stopping the loop relieves exactly that harm —
+        the objects are still on disk and can be rescued (§F8a)."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        parent, proj, wt = self._parent_topology()
+        clone = os.path.join(wt, "work", "DemoProject")
+        subprocess.run(["git", "clone", "-q", proj, clone], check=True,
+                       capture_output=True, text=True)
+        self._git(clone, "config", "user.email", "a@b.test")
+        self._git(clone, "config", "user.name", "A")
+        self._write_file(clone, "src/delivered.ts", "delivered\n")
+        self._git(clone, "add", "-A")
+        self._git(clone, "commit", "-q", "-m", "the work that would be destroyed")
+
+        orig, wi.ROOT = wi.ROOT, parent
+        try:
+            findings = self._gate()
+            f = [x for x in findings if x["check"] == "worktree-guard"]
+            self.assertEqual(len(f), 1, findings)
+            self.assertEqual(f[0]["severity"], "block")
+            self.assertIn("agent-wt", f[0]["message"])
+            code, out = self._run()
+        finally:
+            wi.ROOT = orig
+        self.assertEqual(code, 2)
+        self.assertIn("worktree-guard", out)
+
+    def test_worktree_guard_unrunnable_is_unknown_never_a_silent_pass(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        parent, _proj, _wt = self._parent_topology()
+        orig_root, wi.ROOT = wi.ROOT, parent
+        orig_script, wi.WTG_SCRIPT = wi.WTG_SCRIPT, os.path.join(self.tmp, "nope.js")
+        try:
+            findings = self._gate()
+        finally:
+            wi.ROOT, wi.WTG_SCRIPT = orig_root, orig_script
+        f = [x for x in findings if x["check"] == "worktree-guard"]
+        self.assertEqual(len(f), 1, findings)
+        self.assertEqual(f[0]["severity"], "unknown")
+        self.assertIn("NOT ESTABLISHED", f[0]["message"])
+
     # ---- policy.csv handling ------------------------------------------------
     def test_missing_policy_csv_uses_documented_defaults(self):
         # no policy.csv at all -> the §F2 seed defaults (ready 3/4, intake 2/10)

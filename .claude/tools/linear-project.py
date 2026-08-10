@@ -131,16 +131,34 @@ def parse_defect_fields(body):
     return out
 
 
+#: Matches the acceptance heading AS THE CORPUS ACTUALLY WRITES IT, at level 2 or 3,
+#: with anything after the word (e.g. "### Acceptance (to be authored on pull)").
+#: OI-BOARD-ACCEPTANCE-PARSER-MATCHES-NOTHING: the old pattern demanded the literal
+#: `## Acceptance criteria`, which essentially NO item uses, so the parser matched
+#: NOTHING tree-wide and every item was labelled `needs-acceptance` — a label applied
+#: to 100% of items conveys zero information and cannot discriminate an item with ten
+#: tagged conditions from one with none. Measured instances: DEFECT-OAG-054 (10 AC ids)
+#: and UC-XE1 (13 AC ids, pushed to Linear as DONE *and* needs-acceptance), then
+#: UC-DP2/DP3/DP4/DP5 on 2026-08-10. §17e — a gate that cries wolf is fixed, not tolerated.
+_ACCEPTANCE_HEADING = re.compile(r"^#{2,3}\s+Acceptance\b")
+#: Any level-2 or level-3 heading ends the section. This MUST allow `###` too: with the
+#: old `^##\s+` terminator a `### Acceptance` section would never be closed, so the
+#: parser would swallow every following `###` section as acceptance bullets. Fixing the
+#: start pattern alone would have traded a false negative for a false positive.
+_SECTION_HEADING = re.compile(r"^#{2,3}\s+")
+
+
 def parse_acceptance(body):
-    """THE FIX. Parse the `## Acceptance criteria …` section into a list of
-    COMPLETE criteria, joining hard-wrapped continuation lines (subsequent
-    indented lines belonging to the same bullet) into one string with wrap
-    newlines + indentation collapsed to single spaces."""
+    """Parse the acceptance section into a list of COMPLETE criteria, joining
+    hard-wrapped continuation lines (subsequent indented lines belonging to the same
+    bullet) into one string with wrap newlines + indentation collapsed to single
+    spaces. Accepts `## Acceptance`, `### Acceptance`, `## Acceptance criteria`, and
+    any parenthetical suffix."""
     lines = body.split("\n")
-    # locate the acceptance-criteria heading
+    # locate the acceptance heading
     start = None
     for i, line in enumerate(lines):
-        if re.match(r"^##\s+Acceptance criteria", line):
+        if _ACCEPTANCE_HEADING.match(line):
             start = i + 1
             break
     if start is None:
@@ -148,9 +166,25 @@ def parse_acceptance(body):
     criteria = []
     current = None
     for line in lines[start:]:
-        if re.match(r"^##\s+", line):  # next top-level section ends the list
+        if _SECTION_HEADING.match(line):  # next level-2/3 section ends the list
             break
-        bullet = re.match(r"^[-*]\s+(.*)$", line)
+        # BOTH bullet styles the corpus actually uses. Measured 2026-08-10 across
+        # items/active: 25 items carry tagged AC, and they are split between `- **AC-x**`
+        # (SLC-042/045/046, OI-OAG-NULL-COHORT-GROWTH, the UC-DP* family …) and NUMBERED
+        # `1. **AC-x**` (DEFECT-OAG-080/081/082/084/086, REQ-OAG-CODESHARE-PARENT, the
+        # SLC-CSP* family …). Matching only `[-*]` would have left every numbered item
+        # still reading zero — i.e. fixing the heading alone would have left half the
+        # corpus mis-flagged and looked like a fix.
+        # THIRD format: a markdown TABLE row, `| **AC-OB1.1** | criterion … |`.
+        # UC-OB1 transcribes nine criteria that way. Skip the header/separator rows
+        # (`| AC | Criterion |` and `|---|---|`) by requiring an AC-shaped first cell.
+        trow = re.match(r"^\|\s*\**\s*(AC-[A-Za-z0-9][\w.]*)\s*\**\s*\|(.*)\|?\s*$", line)
+        if trow:
+            if current is not None:
+                criteria.append(_collapse(current))
+            current = "%s %s" % (trow.group(1), trow.group(2).strip().rstrip("|").strip())
+            continue
+        bullet = re.match(r"^(?:[-*]|\d+\.)\s+(.*)$", line)
         if bullet:
             if current is not None:
                 criteria.append(_collapse(current))
@@ -366,7 +400,36 @@ def compose_labels(item):
     if item.get("state") == "awaiting_observation":
         labels.append("awaiting-observation")
     if itype == "use-case" and not item.get("acceptance"):
-        labels.append("needs-acceptance")
+        # THE PIN owed by OI-BOARD-ACCEPTANCE-PARSER-MATCHES-NOTHING. Before claiming an
+        # item lacks acceptance, prove the PARSER is not the thing at fault: if the raw
+        # body carries tagged `AC-…` ids while we extracted none, the parser is broken and
+        # this label would be actively wrong. Per §17c the acceptance of that fix is the
+        # parser OBSERVED extracting the ids — not a regex that merely looks permissive —
+        # so this raises rather than mislabelling. It is the difference between "this item
+        # has no acceptance" and "I could not read its acceptance", which is exactly the
+        # measurement-that-cannot-come-back-negative class the open item named.
+        body = item.get("_body") or ""  # NB: `_body`, not `body` — see compose()
+        tagged = sorted(set(re.findall(r"\bAC-[A-Za-z0-9][\w.]*", body)))
+        if tagged:
+            # DISTINGUISH "has no acceptance" from "I could not READ its acceptance".
+            # Conflating them is the original defect: a label that cannot come back
+            # negative. So this emits a DIFFERENT label and a loud warning — it does
+            # NOT raise. Deliberate severity choice per §F8a (a gate blocks only on
+            # harm that stopping relieves): taking the whole board sync down over a
+            # label would be worse than the mislabel, and a sweep hits every historical
+            # item at once. Measured 2026-08-10: 19 items across active+done still
+            # carry AC ids the parser cannot read, so a raise here would have made the
+            # sync unrunnable.
+            sys.stderr.write(
+                "WARN acceptance-parser: %s carries %d tagged AC id(s) (e.g. %s) but "
+                "parse_acceptance() extracted ZERO — labelling `acceptance-unparsed`, "
+                "NOT `needs-acceptance`. The item is not at fault; the parser is. "
+                "See OI-BOARD-ACCEPTANCE-PARSER-MATCHES-NOTHING.\n"
+                % (item.get("id", "<unknown>"), len(tagged), tagged[0])
+            )
+            labels.append("acceptance-unparsed")
+        else:
+            labels.append("needs-acceptance")
     return labels
 
 

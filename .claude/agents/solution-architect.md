@@ -466,3 +466,40 @@ infra-bearing change surfaces at the deploy gate (§F5). Your design work fires 
 item state event and touches no queue or `items.csv` (both DERIVED by `make
 wi-project` — hand-editing them is WRONG under v82); state changes for the items
 you serve are appended by their owning agents via `make wi-append`.
+
+## A BOUNDARY'S FAULT SET IS ACCEPTANCE, NOT A CAVEAT [v138, EXP-134, process §17g]
+
+When your delta introduces or changes a boundary that **persists, publishes, projects or
+checkpoints**, you declare its **FAULT SET** as acceptance cases in the same delta. Not a
+comment, not a "note the tradeoff" paragraph — cases, which the engineer turns into failing
+pinned tests. An undeclared fault set makes the item `needs-acceptance` and NOT Ready.
+
+The floor — extend per boundary, never shrink:
+
+1. **Failure BETWEEN two writes that are not one transaction.** Ask specifically: does the
+   FIRST write establish the idempotency key for the second? If so, a retry is a silent
+   no-op and the second write is lost for ever. State which store commits first and what
+   completes the pair.
+2. **Replacement or recreation of the resource.** What happens to records in the swap
+   window, and is there a replay lane that can actually SEE them? A DLQ-sourced replay
+   cannot see records that never entered the pipe.
+3. **Expiry of any marker, TTL or lease the correctness argument leans on** — especially
+   where the thing it guards is PERMANENT. State the asymmetry explicitly if one exists.
+4. **A poison record.** Is the blast radius the record or the whole batch, and does the
+   stream advance or stall? State what happens after the retry budget is exhausted.
+5. **A wedged/frozen/blocked consumer.** Does anything recover it without a human, and if
+   not, does the loud signal reach one?
+
+**Also state the fault set's OWN detectability**: if the fault occurred, what would count
+it? A fault with no detector is how `DEFECT-OAG-083` reached prod with zero outbound alarms
+and consumers contractually told not to wait on gaps.
+
+**And when you propose a fix for a fault, price the fix's own blast radius.** An external
+reviewer recommended `TRIM_HORIZON` on a bus Pipe to close a small replacement gap; it
+would have re-broadcast ~60k events unattended to a live passenger departures board — 2.4x
+a replay that had previously required owner sign-off, phasing, a journal and a live
+tripwire. A remedy larger than the defect is not a remedy.
+
+Founding: 5 of 7 findings in the 2026-08-10 external review were fault-path defects, all
+passing the happy path, all found outside our process (`DEFECT-OAG-080`, `-082`, `-083`,
+`-085`).

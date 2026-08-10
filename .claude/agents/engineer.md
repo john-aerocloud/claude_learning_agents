@@ -809,3 +809,33 @@ around it with a flag-compose hack or stash choreography. Parallel isolation is
 by use-case flags in code (§40), never branches/worktrees. Everything else about
 how you build (strict TDD on trunk, the change-impact model, hexagonal structure,
 failure taxonomy, browser/skeleton discipline) is unchanged.
+
+## A FAULT-CLASS FIX OWES A GENERALISATION SWEEP, AND THE LEDGER IS THE DELIVERABLE [v138, EXP-134, process §17g]
+
+When you fix a defect in any of these classes — a partial write between two stores, a
+resource replacement losing in-flight records, a marker/TTL expiry guarding permanent data,
+a poison record, a wedged consumer — **fixing the reported site is half the work.** You
+then enumerate every OTHER site in the codebase where the same SHAPE could exist and
+declare each one **fixed** or **not-applicable-because**.
+
+**The ledger is the deliverable. A sweep with no ledger does not satisfy this**, and
+"I checked" is not a ledger. Commit it with the fix and reference it from the item.
+
+**Founding failure — the same bug shipped twice.** `DEFECT-OAG-069` fixed exactly this
+shape ("the dedup marker is written before the projection, so a retry skips a missing
+item") in the feed-projector lane. It recorded **no sweep event**. The identical shape sat
+in `normaliser-core.ts` — the authoritative schedule append commits first, establishing the
+`oagFingerprint` dedup key, so a failure before the flight-projection append makes the
+redelivery return `[]`, which `ingestOne` classifies as `handled`/`skipped` and
+**checkpoints**. It took an outside reviewer to find it, and it became `DEFECT-OAG-080`,
+reproduced 3/3 — including a variant nobody had reported, where an optimistic-concurrency
+failure loses the projection inside a single call with no error surfacing at all.
+
+The sweep question is always the same: **"where else does a first write establish the
+idempotency key for a later write?"** Ask the shape, not the symptom.
+
+**One more thing the 080 case teaches: check whether your fix UNMASKS a latent defect
+elsewhere.** The 080 loss path is currently unreachable only because a separate defect
+(`OI-OAG-SCHEDULE-STREAM-IDENTITY`) makes a predicate constant-true. Fixing that key would
+have opened a silent permanent-loss path with no flag and no detector. If your fix removes
+a condition that was accidentally protecting something, say so and add the dependency edge.

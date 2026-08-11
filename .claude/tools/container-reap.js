@@ -111,6 +111,67 @@
  * under the machine-local lease dir. It NEVER touches the working tree — no git, no
  * repo file, no project file (AC-091.4). No network, no credentials.
  *
+ * ---------------------------------------------------------------------------------
+ * GENERALISATION SWEEP LEDGER (§17g, v138) — DEFECT-OAG-091, 2026-08-11
+ * ---------------------------------------------------------------------------------
+ * THE FAULT CLASS, stated as a shape rather than a symptom: **a resource created
+ * PER DISPATCH whose cleanup depends on the agent that created it calling a teardown
+ * command.** Ask that question, not "are there stray containers", because an agent
+ * that dies is precisely the one that will not call the teardown — and dying is
+ * common here. Every site in the system, declared fixed or not-applicable-because:
+ *
+ *   1. per-dispatch DynamoDB Local CONTAINER (`ddb-local-mine`)
+ *      => FIXED. This tool + loop-gate check 8 + the lease.
+ *   2. per-dispatch COMPOSE NETWORK (`<project>_default`)
+ *      => FIXED, and FOUND BY THIS SWEEP, not by the report. `docker rm` does not
+ *         remove a compose network; only `compose down` does, so the manual
+ *         mitigation of 13 containers left NINETEEN networks behind (ages to 3.1
+ *         days) that nobody had noticed. Its failure mode is worse than load: it
+ *         exhausts docker's finite bridge address pool.
+ *   3. per-dispatch LEASE FILE
+ *      => FIXED. `pruneLeases` drops a lease whose container is gone, and
+ *         `ddb-local-down` releases it on the tidy path.
+ *   4. per-dispatch GIT WORKTREE
+ *      => ALREADY FIXED, by the sibling of this defect: `worktree-reap` +
+ *         `worktree-guard` + loop-gate check 7 (DEFECT-OAG-076). The item's own
+ *         provenance names it: "the parent repo already learned this lesson for
+ *         worktrees; the same shape of tool was never built for containers."
+ *   5. per-run DynamoDB TABLES (`OagFeed-EventStore-PortContract-<runid>-N`, 15
+ *      observed in one container)
+ *      => NOT APPLICABLE. The container runs `-inMemory`, so the tables die with it.
+ *         Reaping the container IS reaping the tables.
+ *   6. per-run TEMP DIRS in the test harnesses
+ *      => NOT APPLICABLE. Removed in `finally`, and under the OS temp dir, which the
+ *         OS reclaims.
+ *   7. per-run EPHEMERAL AWS resources from probes
+ *      => NOT APPLICABLE HERE. OAG's probes write only to a `PROBE#` partition and
+ *         clean up; the cross-project rule that a probe must decide pass/fail AFTER
+ *         cleanup (never `process.exit()` inside a `try`) already covers the shape.
+ *   8. ORPHANED REMOTE BRANCHES
+ *      => SAME SHAPE, ALREADY REGISTERED as OI-ORPHANED-REMOTE-BRANCHES. Not
+ *         widened into this fix.
+ *   9. long-lived AGENT-STARTED HOST PROCESSES (a dev server, a signing proxy)
+ *      => NOT FIXED — REAL AND OPEN, found by this sweep. A ROC vite dev server has
+ *         been running for **11 DAYS 15 HOURS** (pid 9762, from a
+ *         ROC-worktree agent long gone). Identical shape, different resource, and
+ *         NOT reapable by this tool: it belongs to ANOTHER PROJECT, and killing it
+ *         would be exactly the over-reach AC-091.5 forbids. Flagged for its own item
+ *         rather than silently widened.
+ *  10. DANGLING DOCKER VOLUMES / IMAGE LAYERS
+ *      => NOT FIXED — REAL AND OPEN, found by this sweep. **1,205 of 1,214 volumes
+ *         are dangling**; `docker system df` reports 8.16GB (70%) of images
+ *         reclaimable. Same accumulation class, but machine-wide and cross-project,
+ *         so it is NOT attributable to OAG by any predicate this tool could apply
+ *         safely (OAG's compose declares no volumes at all — `-inMemory`). Flagged
+ *         for its own item; a `docker volume prune` here would be an unowned,
+ *         cross-project destructive act.
+ *
+ * WHAT THE SWEEP TEACHES, kept because it is the transferable part: entries 2, 9 and
+ * 10 were all invisible from the report and all found by asking the SHAPE question
+ * once. Entry 4 is the one that should have prevented this defect — the tool already
+ * existed for worktrees and nobody generalised it to containers, which is precisely
+ * the failure §17g exists to stop.
+ *
  * Usage:
  *   node .claude/tools/container-reap.js scan   --project P [--repo-root R] [--json]
  *   node .claude/tools/container-reap.js reap   --project P [--dry-run] [--json]

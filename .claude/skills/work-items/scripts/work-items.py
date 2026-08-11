@@ -2827,6 +2827,9 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
     # --- 7. unrecoverable work in a worktree (DEFECT-OAG-076) — DELEGATED ------
     findings.extend(compute_worktree_guard())
 
+    # --- 8. orphaned local containers (DEFECT-OAG-091) — DELEGATED, AND IT REAPS
+    findings.extend(compute_container_reap(project))
+
     return findings
 
 
@@ -3004,6 +3007,124 @@ def compute_worktree_guard(timeout=WTG_TIMEOUT):
         f"Fix the cause too: a project-repo item must never take worktree isolation "
         f"(`make dispatch-check ID=<item> ISOLATION=worktree`). Affected: "
         f"{', '.join(roots) or '—'}."))]
+
+
+# ---------------------------------------------------------------------------
+# loop-gate check 8 — orphaned local containers, AND THE REAP ITSELF
+# (DEFECT-OAG-091)
+#
+# EXP-133 (v137) correctly gave every dispatch its OWN DynamoDB Local container —
+# a shared one let engineer B recreate engineer A's container under an in-flight
+# suite — but it moved the cost from COLLISION to ACCUMULATION and shipped no
+# reaper. `ddb-local-down` is per-dispatch and must be called by the agent that
+# created the container, so any agent that dies, stalls or forgets leaks its
+# container FOREVER, and dying is common here.
+#
+# Measured 2026-08-10T23:31Z with no agent having run for two days:
+#     load averages: 19.85 18.46 16.18
+#     19 containers running, 13 of them OAG DynamoDB Local (ten of them 2 DAYS old)
+# A two-file test run took 301 SECONDS; 877 MILLISECONDS after reaping — 340x. Four
+# consecutive agent deaths immediately preceded it and had all been attributed to
+# agent-side causes. The worse harm is evidential: engineers reported reds that were
+# green in isolation, and one misread file ownership under load badly enough to
+# nearly revert another agent's uncommitted work.
+#
+# WHY IT REAPS RATHER THAN REPORTS. §17e: "a reaper nobody invokes is the same class
+# of failure as the missing one". Leaving the removal to a remembered command leaves
+# it to exactly the agent discipline that leaked the containers. The loop is the only
+# continuously-running workflow here, so this is where the sweep has to happen —
+# before EVERY pull, automatically. It is safe to do inside a gate because every one
+# of the reaper's five predicates fails safe toward KEEPING (ownership by compose
+# provenance, an age floor, a live lease, an established-connection veto, and a full
+# TTL of grace for an unleased container) and because it touches nothing but docker
+# objects and a machine-local lease dir — never the working tree (AC-091.4).
+# `CONTAINER_REAP_MODE=scan` makes it read-only for anyone who wants that.
+#
+# The analysis and the removal live in ONE place — .claude/tools/container-reap.js —
+# and are DELEGATED to, never re-implemented (checks 4, 6 and 7 already follow).
+#
+# SEVERITY, per §F8a ("a gate blocks only on harm that stopping relieves"):
+#   orphans found/removed -> ADVISORY. Blocking would be perverse: the sweep has
+#         already relieved the harm, and idle containers are not a reason to stop the
+#         line. Reported every cycle so a recurring leak stays visible.
+#   a removal FAILED      -> ADVISORY, named. Stopping the loop does not un-wedge a
+#         container, but a silently-swallowed failure is how this defect came back.
+#   NOT-CONFIGURED /
+#   UNRUNNABLE            -> UNKNOWN ("? " line). Never silent, never counted as
+#         satisfied: an unevaluated precondition is not a met one (§17c.2).
+# ---------------------------------------------------------------------------
+CREAP_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "..", "..", "..", "tools", "container-reap.js")
+CREAP_TIMEOUT = 180.0
+
+
+def compute_container_reap(project, timeout=CREAP_TIMEOUT):
+    """Sweep (and by default REMOVE) this project's orphaned local containers and
+    compose networks. Returns 0 or 1 finding."""
+    common = {"check": "container-reap", "ids": []}
+    mode = os.environ.get("CONTAINER_REAP_MODE", "reap")
+    if mode not in ("reap", "scan"):
+        mode = "reap"
+    try:
+        proc = subprocess.run(
+            ["node", os.path.normpath(CREAP_SCRIPT), mode, "--project", project,
+             "--repo-root", ROOT, "--json"],
+            capture_output=True, text=True, timeout=timeout)
+        report = json.loads(proc.stdout)
+    except Exception as exc:                                    # noqa: BLE001
+        return [dict(common, severity="unknown", verdict="UNRUNNABLE", message=(
+            f"[container-reap] NOT ESTABLISHED — the reaper would not run "
+            f"({type(exc).__name__}: {str(exc)[:160]}). An unrunnable reaper is not a "
+            f"clean machine, and this is the check that stands between the next wave "
+            f"of dispatches and a load average of 19.85 (a two-file test run at 301s "
+            f"instead of 877ms). Remedy: `make container-reap PROJECT={project}`."))]
+
+    verdict = report.get("verdict")
+    if verdict != "OK":
+        return [dict(common, severity="unknown", verdict=verdict, message=(
+            f"[container-reap] NOT ESTABLISHED ({verdict}) — "
+            f"{report.get('message', 'no detail')}. Nothing was checked, which is not "
+            f"the same as clean: this project's local containers are undeclared, so "
+            f"an orphan wave would accumulate unseen. Remedy: commit "
+            f".claude/config/container-reap/{project}.json (copy the OagEventSource "
+            f"one) and re-run `make container-reap PROJECT={project}`."))]
+
+    removed = report.get("removed") or {"containers": [], "networks": []}
+    reapable = report.get("reap") or {"containers": [], "networks": []}
+    failed = report.get("failed") or []
+    n_rc, n_rn = len(removed.get("containers", [])), len(removed.get("networks", []))
+    n_pc, n_pn = len(reapable.get("containers", [])), len(reapable.get("networks", []))
+    if not (n_rc or n_rn or n_pc or n_pn or failed):
+        return []
+
+    owned = report.get("owned") or {}
+    if mode == "reap":
+        head = (f"REAPED {n_rc} container(s) + {n_rn} network(s)"
+                if (n_rc or n_rn) else
+                f"{n_pc} container(s) + {n_pn} network(s) reapable but NOT removed")
+    else:
+        head = (f"scan-only (CONTAINER_REAP_MODE=scan): {n_pc} container(s) + "
+                f"{n_pn} network(s) ORPHANED and left in place")
+    names = ", ".join((removed.get("containers") or reapable.get("containers") or [])
+                      + (removed.get("networks") or reapable.get("networks") or []))
+    fail_tail = ("  FAILED: " + "; ".join(
+        f"{f.get('kind')} {f.get('name')}: {str(f.get('err'))[:120]}"
+        for f in failed)) if failed else ""
+    probe = report.get("establishedProbe")
+    probe_tail = ("" if probe == "ok" else
+                  f" The in-use probe was {probe}, so the mid-write veto could not be "
+                  f"evaluated — reaps in this sweep record inUse=unknown.")
+    return [dict(common, severity="advisory", verdict=verdict,
+                 removed=removed, reapable=reapable, failed=failed, message=(
+        f"ADVISORY (does NOT block the pull) [container-reap] {head} for {project} "
+        f"({owned.get('containers', '?')} owned, {owned.get('running', '?')} running): "
+        f"{names[:400]}. Every orphan is a dead dispatch's container that nothing else "
+        f"would ever remove — thirteen of them once drove load to 19.85 and made a "
+        f"two-file test run take 301s instead of 877ms (340x), killing four agents in "
+        f"a row and producing reds that were green in isolation. A RECURRING nonzero "
+        f"count here means dispatches are dying before `ddb-local-down`, which is a "
+        f"defect about the dispatch, not about the reaper."
+        + probe_tail + fail_tail))]
 
 
 def cmd_loop_gate(a):

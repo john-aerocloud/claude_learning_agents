@@ -101,6 +101,33 @@ worktree-guard:
 worktree-reap:
 	$(WORKTREE) reap $(if $(DIR),$(DIR),--all)
 
+# --- orphaned LOCAL CONTAINERS (DEFECT-OAG-091) ---------------------------------
+# The container equivalent of worktree-reap, and the tool EXP-133 should have
+# shipped with the container-per-engineer. `ddb-local-down` is per-dispatch and must
+# be called by the agent that created the container, so any agent that dies, stalls
+# or forgets leaks its container FOREVER. On 2026-08-10 that was thirteen orphans
+# (ten of them 2 DAYS old), load average 19.85, and a two-file test run at 301
+# SECONDS which took 877 MILLISECONDS after reaping — 340x — having first killed
+# four agents in a row and produced reds that were green in isolation.
+#
+# It is SAFE TO RUN AT ANY TIME and is wired into `loop-gate` (check 8) so it runs
+# before EVERY pull rather than when someone remembers (§17e). Every predicate fails
+# safe toward KEEPING: ownership by compose provenance (never a name list), an age
+# floor, a live LEASE (renewed at every gated test-tier entry, so another instance's
+# live container is protected), an established-connection veto for the mid-write
+# case, and a full TTL of grace for an unleased container. It touches docker objects
+# and a machine-local lease dir ONLY — never the working tree.
+#
+#   make container-reap PROJECT=OagEventSource              # sweep and remove
+#   make container-reap PROJECT=OagEventSource DRY_RUN=1    # say what it WOULD do
+#   make container-orphans PROJECT=OagEventSource           # read-only report
+container-reap:
+	@node .claude/tools/container-reap.js reap --project $(PROJECT) \
+	  $(if $(DRY_RUN),--dry-run,) $(if $(JSON),--json,)
+
+container-orphans:
+	@node .claude/tools/container-reap.js scan --project $(PROJECT) $(if $(JSON),--json,)
+
 # --- AWS SSO login -------------------------------------------------------------
 # Re-authenticate the project's SSO profile when the cached token has expired
 # (symptom: any aws CLI call fails with "Token has expired and refresh failed").
@@ -818,7 +845,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap sso-login retro-debt retro-mark loop-gate test-wi wi-append wi-project wi-validate wi-migrate doc-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated test-requirement-gate test-requirement-gate-baseline board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery
+.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap container-reap container-orphans sso-login retro-debt retro-mark loop-gate test-wi wi-append wi-project wi-validate wi-migrate doc-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated test-requirement-gate test-requirement-gate-baseline board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery
 
 # --- Viggo-fix UC-W7: Country/Nationality ID remediation (T-SQL) --------------
 # Data-driven, self-building T-SQL remediation script set + its local stand-up

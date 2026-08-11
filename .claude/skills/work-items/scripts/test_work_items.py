@@ -2998,6 +2998,143 @@ class TestLoopGate(Base):
         self.assertEqual(f[0]["severity"], "unknown")
         self.assertIn("NOT ESTABLISHED", f[0]["message"])
 
+    # ---- check 8: orphaned local containers (DEFECT-OAG-091) -----------------
+    #
+    # THE HARM. EXP-133 gave every dispatch its own DynamoDB Local container and
+    # shipped no reaper, so a dying agent leaks its container forever. Measured
+    # 2026-08-10T23:31Z: load 19.85, thirteen orphaned OAG containers (ten of them
+    # 2 DAYS old), a two-file test run at 301 SECONDS that took 877ms after reaping
+    # — 340x — and four consecutive agent deaths that had been blamed on the agents.
+    #
+    # WHY IT HANGS HERE. §17e: a reaper nobody invokes is the same class of failure
+    # as the missing one. The loop is the only continuously-running workflow, so the
+    # gate is where the reap has to happen — BEFORE every pull, automatically, never
+    # on request. That is also why check 8 REAPS rather than merely scanning.
+    #
+    # SEAM. These cases substitute the delegated SCRIPT (as checks 6 and 7 already
+    # do) because the claim under test is the finding's SEVERITY and MESSAGE — that
+    # orphans never block the pull and that an unrunnable reaper is never silent.
+    # What the reaper does to real docker objects is pinned against REAL containers
+    # in .claude/tools/container-reap.test.js, not here.
+    def _fake_creap(self, payload, argv_log=None, exit_code=0):
+        js = os.path.join(self.tmp, "fake-creap.js")
+        log = argv_log or os.path.join(self.tmp, "creap-argv.json")
+        with open(js, "w", encoding="utf-8") as f:
+            f.write("require('fs').writeFileSync(%s, JSON.stringify(process.argv.slice(2)));\n"
+                    % json.dumps(log))
+            f.write("console.log(JSON.stringify(%s));\n" % json.dumps(payload))
+            f.write("process.exit(%d);\n" % exit_code)
+        return js, log
+
+    def _gate_with_creap(self, payload, **kw):
+        js, log = self._fake_creap(payload)
+        orig, wi.CREAP_SCRIPT = wi.CREAP_SCRIPT, js
+        try:
+            findings = self._gate(**kw)
+        finally:
+            wi.CREAP_SCRIPT = orig
+        with open(log, encoding="utf-8") as f:
+            argv = json.load(f)
+        return findings, argv
+
+    def _creap(self, findings):
+        return [f for f in findings if f["check"] == "container-reap"]
+
+    def test_container_reap_orphans_are_an_ADVISORY_and_never_block_the_pull(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        findings, _argv = self._gate_with_creap({
+            "verdict": "OK", "orphanCount": 13, "establishedProbe": "ok",
+            "reap": {"containers": ["oag-dynamodb-local-defect-051"], "networks": []},
+            "removed": {"containers": ["oag-dynamodb-local-defect-051"],
+                        "networks": ["oag-dynamodb-local-defect-051_default"]},
+            "failed": [], "owned": {"containers": 4, "running": 3},
+        })
+        f = self._creap(findings)
+        self.assertEqual(len(f), 1, findings)
+        self.assertEqual(f[0]["severity"], "advisory")
+        self.assertIn("1 container", f[0]["message"])
+        self.assertIn("1 network", f[0]["message"])
+        self.assertNotIn("container-reap", self._checks(findings))
+
+    def test_container_reap_runs_the_REAPER_not_merely_a_scan(self):
+        """§17e — the whole point. A gate that only counted orphans would leave the
+        removal to the same agent discipline that leaked them."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        _findings, argv = self._gate_with_creap({
+            "verdict": "OK", "orphanCount": 0, "establishedProbe": "ok",
+            "reap": {"containers": [], "networks": []},
+            "removed": {"containers": [], "networks": []}, "failed": [],
+            "owned": {"containers": 0, "running": 0},
+        })
+        self.assertEqual(argv[0], "reap",
+                         "the loop-gate must REAP, not merely scan: %s" % argv)
+        self.assertIn("--project", argv)
+        self.assertIn(self.project, argv)
+
+    def test_container_reap_clean_machine_produces_no_finding(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        findings, _argv = self._gate_with_creap({
+            "verdict": "OK", "orphanCount": 0, "establishedProbe": "ok",
+            "reap": {"containers": [], "networks": []},
+            "removed": {"containers": [], "networks": []}, "failed": [],
+            "owned": {"containers": 1, "running": 1},
+        })
+        self.assertEqual(self._creap(findings), [])
+
+    def test_container_reap_failed_removal_is_reported_not_swallowed(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        findings, _argv = self._gate_with_creap({
+            "verdict": "OK", "orphanCount": 1, "establishedProbe": "unavailable",
+            "reap": {"containers": ["oag-dynamodb-local-x"], "networks": []},
+            "removed": {"containers": [], "networks": []},
+            "failed": [{"kind": "container", "name": "oag-dynamodb-local-x",
+                        "err": "device or resource busy"}],
+            "owned": {"containers": 1, "running": 1},
+        })
+        f = self._creap(findings)
+        self.assertEqual(len(f), 1, findings)
+        self.assertIn("FAILED", f[0]["message"])
+        self.assertIn("oag-dynamodb-local-x", f[0]["message"])
+        # a failed removal still must not stop the line (§F8a)
+        self.assertEqual(f[0]["severity"], "advisory")
+
+    def test_container_reap_unrunnable_is_unknown_never_a_silent_pass(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        orig, wi.CREAP_SCRIPT = wi.CREAP_SCRIPT, os.path.join(self.tmp, "nope.js")
+        try:
+            findings = self._gate()
+        finally:
+            wi.CREAP_SCRIPT = orig
+        f = self._creap(findings)
+        self.assertEqual(len(f), 1, findings)
+        self.assertEqual(f[0]["severity"], "unknown")
+        self.assertIn("NOT ESTABLISHED", f[0]["message"])
+
+    def test_container_reap_not_configured_is_unknown_never_clean(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        findings, _argv = self._gate_with_creap({
+            "verdict": "NOT-CONFIGURED", "orphanCount": None,
+            "message": "no container-reap config for TestProj",
+            "reap": {"containers": [], "networks": []},
+            "removed": {"containers": [], "networks": []}, "failed": [],
+        })
+        f = self._creap(findings)
+        self.assertEqual(len(f), 1, findings)
+        self.assertEqual(f[0]["severity"], "unknown")
+        self.assertIn("NOT ESTABLISHED", f[0]["message"])
+
     # ---- policy.csv handling ------------------------------------------------
     def test_missing_policy_csv_uses_documented_defaults(self):
         # no policy.csv at all -> the §F2 seed defaults (ready 3/4, intake 2/10)

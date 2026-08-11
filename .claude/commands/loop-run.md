@@ -39,8 +39,17 @@ state and flow decisions.
 > `wip_limit`; (4) retro debt due (§F8); (5) **awaiting observation** — every item parked in
 > `awaiting_observation` (shipped, green, UNPROVEN) has its liveness predicate RE-RUN on this
 > invocation, so an observation that has now landed BLOCKS for a tester dispatch, and a
-> predicate that cannot be evaluated BLOCKS too (state-graph v9, §12d.3/§17c). Fix what it
-> names, then re-run to confirm exit 0.
+> predicate that cannot be evaluated BLOCKS too (state-graph v9, §12d.3/§17c). It also runs three DELEGATED checks: (6) the §17d
+> **test-requirement gate**, (7) the DEFECT-OAG-076 **worktree guard**, and (8) the
+> DEFECT-OAG-091 **container reap** — which does not merely COUNT orphaned per-dispatch
+> containers, it REMOVES them, because a reaper nobody invokes is the same class of failure
+> as the missing one (§17e) and the loop is the only continuously-running workflow. Thirteen
+> leaked DynamoDB Local containers once drove load average to 19.85 and made a two-file test
+> run take 301 SECONDS instead of 877ms — 340x — killing four agents in a row and producing
+> reds that were green in isolation, so this sweep is also what keeps every test result on
+> this machine trustworthy. Its finding is ADVISORY and never blocks; a RECURRING nonzero
+> count means dispatches are dying before `ddb-local-down`, which is a defect about the
+> dispatch. Fix what it names, then re-run to confirm exit 0.
 >
 > **Check 3 has TWO severities (v126 addendum) — Little's Law governs WIP, not backlog depth.** A
 > **WIP-stage** queue over cap (`ready`/`wip`/`rework`) BLOCKS (`-` line, exit 2). A

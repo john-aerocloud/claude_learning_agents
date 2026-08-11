@@ -261,8 +261,12 @@ loop-gate:
 # fixtures, never the real project data). Uses the SAME cross-platform
 # interpreter the work-items launcher resolves — never bare python3.
 # make test-wi
+# The pattern is `test_*.py`, not the single file it used to name: a second test module
+# added beside it (test_wi_durable_prose.py, OI-WI-APPEND-NOTE-PATH-MANGLES-CONTENT) was
+# silently not discovered, which is a committed-test-that-never-runs — the same
+# false-green shape as a gate in a lane nothing depends on.
 test-wi:
-	$(WIPY) -m unittest discover -s .claude/skills/work-items/scripts -p 'test_work_items.py'
+	$(WIPY) -m unittest discover -s .claude/skills/work-items/scripts -p 'test_*.py'
 
 # --- Event-sourced work-item machinery (design-rationale/work-item-state-model.md, process/machinery/CONTRACT.md) ---
 # State lives ONLY in the per-item files (work/$(PROJECT)/items/{active,done}/<ID>.md);
@@ -280,9 +284,44 @@ test-wi:
 #   masquerade as "not observed yet"). Also accepted on the `amended` self-edge, where it
 #   REPLACES the predicate in effect. Rejected on any other event. A reason in NOTE is
 #   NOT a substitute: prose cannot come back negative (v125 §17c Layer 2).
+#
+# DURABLE PROSE MUST NOT TRANSIT A SHELL (OI-WI-APPEND-NOTE-PATH-MANGLES-CONTENT).
+# `--note "$(NOTE)"` crossed make's variable expansion and then a shell double-quoted
+# string, so `$` was expanded away (UC-XE1's `^…{12}$` end-anchor became an UNANCHORED
+# regex in the permanent record — a different claim about the world) and a backtick was
+# EXECUTED (a commit message lost a word to the macOS `open` binary actually running).
+# macOS ships GNU Make 3.81, which has no `$(file …)`, so there is NO way to move prose
+# out of a make variable without it crossing a shell command line.
+#
+# Therefore: NOTE_FILE is the safe route — a PATH has no metacharacters, so nothing can
+# eat it (the same reason `git commit -F` exists) — and a NOTE= carrying a shell-active
+# character is REFUSED rather than silently mangled. Fail closed: a corrupted audit
+# record must not be representable.
+#
+#   SAFE:  printf '%s' "…prose with \$ and \` and , …" > /tmp/note.txt
+#          make wi-append PROJECT=P ID=UC-1 EVENT=built_green AGENT=engineer NOTE_FILE=/tmp/note.txt
+#   OK:    NOTE="plain prose, commas are fine now"      (the comma bug is closed)
+#   REFUSED: NOTE="… ^x{12}$ …"  /  NOTE="… \`cmd\` …"   -> use NOTE_FILE
+#
+# Pinned by .claude/skills/work-items/scripts/test_wi_durable_prose.py, which drives
+# these REAL targets (the Python API never saw the corruption — transport did).
+#
+# The probe emits only `1` or nothing — never the offending character itself. Echoing
+# what it found into the guard's own shell string would reproduce the bug inside the
+# check for it (a `"` in NOTE would break the `[ -n "…" ]` quoting).
+NOTE_HAZARD = $(if $(strip $(findstring $$,$(value NOTE))$(findstring `,$(value NOTE))$(findstring ",$(value NOTE))$(findstring \,$(value NOTE))),1,)
 wi-append:
+	@if [ -n "$(NOTE_HAZARD)" ]; then \
+	  echo "wi-append REFUSED: NOTE= contains a character a shell eats or EXECUTES (\$$ \` \" \\)."; \
+	  echo "  It would be corrupted on the way into the permanent audit record, silently:"; \
+	  echo "  a \$$ is expanded away and a backtick is RUN as a command."; \
+	  echo "  Use the file route, which cannot be corrupted:"; \
+	  echo "    printf '%s' '<your note>' > /tmp/note.txt"; \
+	  echo "    make wi-append PROJECT=$(PROJECT) ID=$(ID) EVENT=$(EVENT) AGENT=$(AGENT) NOTE_FILE=/tmp/note.txt"; \
+	  exit 1; \
+	fi
 	$(WORKITEMS) append --project $(PROJECT) --id $(ID) --event $(EVENT) --agent $(AGENT) \
-	  $(if $(REF),--ref "$(REF)",) $(if $(NOTE),--note "$(NOTE)",) $(if $(TOKENS),--tokens "$(TOKENS)",) $(if $(DURATION_MS),--duration-ms "$(DURATION_MS)",) $(if $(OBSERVE),--observe "$(OBSERVE)",)
+	  $(if $(REF),--ref "$(REF)",) $(if $(NOTE),--note "$(NOTE)",) $(if $(NOTE_FILE),--note-file "$(NOTE_FILE)",) $(if $(TOKENS),--tokens "$(TOKENS)",) $(if $(DURATION_MS),--duration-ms "$(DURATION_MS)",) $(if $(OBSERVE),--observe "$(OBSERVE)",)
 # Recompute ALL views (queues + stats + tree + re-render each item's derived block). Run after each loop.
 # make wi-project PROJECT=OagEventSource
 wi-project:
@@ -585,10 +624,39 @@ test-requirement-gate-baseline:
 # Pure git + filesystem; NO creds, NO network.
 # Exit 3 = declared-subset assertion fired (nothing committed); 4 = nothing to
 # commit for those paths; 5 = branch could not be advanced.
-#   make commit-isolated REPO=work/OagEventSource MSG="fix(x): intent (DEF-…)" \
-#                        PATHS="src/app/src/a.ts src/app/tests/a.test.ts"
+#
+# THE MESSAGE IS DURABLE PROSE, so it gets the same treatment as an event note
+# (OI-WI-APPEND-NOTE-PATH-MANGLES-CONTENT). `--message "$(MSG)"` is the identical shape
+# to the `--note "$(NOTE)"` that corrupted the audit record, and it has already produced
+# two live instances: a backticked word EXECUTED by zsh (the macOS `open` binary really
+# ran; the word vanished from the committed message with no signal), and a multi-line
+# message REFUSED outright — `/bin/sh: -c: line 0: unexpected EOF while looking for
+# matching '"'`. So MSG_FILE is the route for anything multi-line or metacharacter-bearing
+# (a PATH cannot be eaten — the reason `git commit -F` exists), and a hazardous MSG= is
+# refused rather than silently mangled. A permanent commit nobody re-reads is exactly
+# where silent corruption survives longest.
+#
+#   SAFE (use this by default):
+#     make commit-isolated REPO=work/OagEventSource MSG_FILE=/tmp/msg.txt \
+#                          PATHS="src/app/src/a.ts src/app/tests/a.test.ts"
+#   OK for a one-liner with no metacharacters:
+#     make commit-isolated REPO=work/OagEventSource MSG="fix(x): intent (DEF-…)" PATHS="a b"
+MSG_HAZARD = $(if $(strip $(findstring $$,$(value MSG))$(findstring `,$(value MSG))$(findstring ",$(value MSG))$(findstring \,$(value MSG))),1,)
 commit-isolated:
-	node .claude/tools/isolated-commit.js --repo "$(REPO)" --message "$(MSG)" -- $(PATHS)
+	@if [ -n "$(MSG_HAZARD)" ]; then \
+	  echo "commit-isolated REFUSED: MSG= contains a character a shell eats or EXECUTES (\$$ \` \" \\)."; \
+	  echo "  A commit message is a permanent audit record and nobody re-reads it, so"; \
+	  echo "  corruption here survives indefinitely: a \$$ is expanded away and a backtick"; \
+	  echo "  is RUN as a command (this really happened — the macOS 'open' binary ran)."; \
+	  echo "  Use the file route, which cannot be corrupted:"; \
+	  echo "    cat > /tmp/msg.txt <<'EOF'"; \
+	  echo "    <your message, metacharacters and all>"; \
+	  echo "    EOF"; \
+	  echo "    make commit-isolated REPO=$(REPO) MSG_FILE=/tmp/msg.txt PATHS=\"$(PATHS)\""; \
+	  exit 1; \
+	fi
+	node .claude/tools/isolated-commit.js --repo "$(REPO)" \
+	  $(if $(MSG),--message "$(MSG)",) $(if $(MSG_FILE),--message-file "$(MSG_FILE)",) -- $(PATHS)
 
 # --- IMP-008 WAF runner-IP exclusion helpers ----------------------------------
 # Add/remove a CIDR from the oxo-test-runner-ips WAFv2 IP set (us-east-1,

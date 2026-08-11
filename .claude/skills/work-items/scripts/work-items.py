@@ -789,7 +789,51 @@ def find_item_path(project, iid):
     return None, None
 
 
+def resolve_note(a):
+    """The note's ONLY safe transport is a file; validate whatever route was used.
+
+    OI-WI-APPEND-NOTE-PATH-MANGLES-CONTENT. Three real corruptions of durable prose,
+    all in TRANSPORT rather than storage: a `$` expanded away by make (UC-XE1's regex
+    end-anchor, recorded as a DIFFERENT claim about the world), a backtick EXECUTED by
+    zsh (the macOS `open` binary really ran and the word vanished from a commit
+    message), and a `"` that refused a commit outright. The storage layer round-trips
+    `$`, commas, backticks and quotes correctly — it is the command line that eats them.
+
+    So `--note-file` is the route to use, and the remaining silent-corruption mode at
+    the storage layer is closed here by REJECTION rather than by quiet alteration: an
+    event is rendered as a ONE-LINE inline map, so an embedded newline truncates the
+    note (`'a\\nb'` was stored and re-read as `'a'`, losing the tail and the character
+    before it). Fail closed — a corrupted audit record must not be representable.
+    """
+    note_file = getattr(a, "note_file", None)
+    if note_file and a.note:
+        sys.exit("append REJECTED: pass EITHER --note or --note-file, not both.\n"
+                 "  They would disagree, and there is no correct way to choose.")
+    note = a.note
+    if note_file:
+        try:
+            with open(note_file, encoding="utf-8") as f:
+                note = f.read()
+        except OSError as e:
+            sys.exit(f"append REJECTED: cannot read --note-file {note_file}: {e}")
+        # One trailing newline is the FILE FORMAT, not the prose — every editor and
+        # `printf '%s\n'` adds it, so rejecting it would reject the safe route itself.
+        if note.endswith("\n"):
+            note = note[:-1]
+    if note and re.search(r"[\r\n]", note):
+        print("append REJECTED: the note contains a newline.", file=sys.stderr)
+        print("  An event is stored as a ONE-LINE inline map, so a newline would "
+              "SILENTLY TRUNCATE the note at that point (and lose the character "
+              "before it). It is rejected rather than altered because a corrupted "
+              "audit record must not be representable.", file=sys.stderr)
+        print("  Write the note as a single line — long is fine, the field has no "
+              "length limit.", file=sys.stderr)
+        sys.exit(1)
+    return note
+
+
 def cmd_append(a):
+    a.note = resolve_note(a)
     graphs = Graphs.load()
     path, sub = find_item_path(a.project, a.id)
     if not path:
@@ -3497,6 +3541,19 @@ def main(argv=None):
     ap.add_argument("--agent", required=True)
     ap.add_argument("--ref")
     ap.add_argument("--note")
+    ap.add_argument("--note-file", dest="note_file",
+                    help="read the note from a FILE instead of the command line — the "
+                         "ONLY route that cannot corrupt it "
+                         "(OI-WI-APPEND-NOTE-PATH-MANGLES-CONTENT). Prose on a command "
+                         "line crosses make's variable expansion and then a shell "
+                         "double-quoted string: `$` is expanded away (a real audit "
+                         "note lost a regex's end-anchor this way) and a backtick is "
+                         "EXECUTED (a real commit message lost a word to the macOS "
+                         "`open` binary actually running). A PATH has no "
+                         "metacharacters, so nothing can eat it. Same idea as "
+                         "`git commit -F`. One trailing newline is stripped; any other "
+                         "newline is REJECTED, because the event is stored as a "
+                         "one-line inline map and would be silently truncated.")
     ap.add_argument("--ts")
     ap.add_argument("--observe",
                     help="REQUIRED when entering `awaiting_observation` (event "

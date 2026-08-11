@@ -286,6 +286,21 @@ function parseArgv(argv) {
       break;
     } else if (a === '--repo') out.repo = argv[++i];
     else if (a === '--message' || a === '-m') out.message = argv[++i];
+    // --message-file / -F: the ONLY route a commit message cannot be corrupted on
+    // (OI-WI-APPEND-NOTE-PATH-MANGLES-CONTENT). A message on a command line crosses
+    // make's expansion and then a shell double-quoted string: `$` is expanded away, a
+    // backtick is EXECUTED (the macOS `open` binary really ran and the word vanished
+    // from a committed message), and a `"` refuses the commit outright with
+    // `unexpected EOF while looking for matching '"'`. A PATH has no metacharacters.
+    // Same reason `git commit -F` exists.
+    else if (a === '--message-file' || a === '-F') {
+      const p = argv[++i];
+      try {
+        out.message = require('fs').readFileSync(p, 'utf-8');
+      } catch (e) {
+        return { error: `cannot read --message-file ${p}: ${e.message}` };
+      }
+    }
     else if (a === '--no-sync-index') out.syncIndex = false;
     else if (a === '--json') out.json = true;
     else if (a === '--help' || a === '-h') out.help = true;
@@ -294,11 +309,15 @@ function parseArgv(argv) {
   return out;
 }
 
-const USAGE = `usage: node .claude/tools/isolated-commit.js --repo <dir> --message <msg> [--no-sync-index] [--json] -- <path>...
+const USAGE = `usage: node .claude/tools/isolated-commit.js --repo <dir> (--message <msg> | --message-file <path>) [--no-sync-index] [--json] -- <path>...
 
 Commits ONLY the declared paths, taking content from a PRIVATE index, so a
 concurrent agent's staged or mid-edit work on a shared tree cannot ride along.
-Prefer the Makefile form:  make commit-isolated REPO=<dir> MSG="..." PATHS="a b"`;
+Prefer the Makefile form:  make commit-isolated REPO=<dir> MSG_FILE=<path> PATHS="a b"
+
+Use --message-file / MSG_FILE for any message that is multi-line or carries a
+metacharacter. A message on a command line crosses a shell: \`$\` is expanded away,
+a backtick is EXECUTED, and a double quote refuses the commit outright.`;
 
 function main(argv) {
   const opts = parseArgv(argv);

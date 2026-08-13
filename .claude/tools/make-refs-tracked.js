@@ -85,10 +85,19 @@ function parseMakeVars(text) {
   return vars;
 }
 
-// Functions whose arguments may contain a path we care about. Collapsed to their
-// comma-separated arguments joined by a space, which is enough to expose the path
-// without pretending to evaluate make.
-const MAKE_FN = /\$\((if|or|and|shell|wildcard|firstword|lastword|sort|strip|abspath|realpath|notdir|dir|addprefix|addsuffix)\s+([^()]*)\)/g;
+// `$(if a,b,c)`, `$(or …)`, `$(and …)` are the ONLY functions collapsed to their
+// comma-separated arguments, because their arguments are the literal ALTERNATIVES and
+// one of them really is the text make will use.
+const MAKE_ALT_FN = /\$\((?:if|or|and)\s+([^()]*)\)/g;
+
+// Every OTHER function computes its value, so offline we cannot know it. Collapsing one
+// to its arguments INVENTS a path: `$(shell cat work/ACTIVE 2>/dev/null)` spliced into
+// `work/$(PROJECT)/scripts/x.js` produced a finding for the non-existent
+// `2>/dev/null/scripts/x.js` (seven of them, found by running this tool on its own
+// repo). A checker that reports files nobody wrote is a checker people switch off —
+// which is the exact fate of the control this whole item is about. So a computed
+// function POISONS the reference and it is dropped.
+const MAKE_COMPUTED_FN = /\$\([A-Za-z][A-Za-z0-9_-]*\s+[^()]*\)/g;
 
 function expandMakeVars(str, vars, depth = 12) {
   // `$$` is an escaped dollar destined for the shell, not a make reference.
@@ -97,7 +106,8 @@ function expandMakeVars(str, vars, depth = 12) {
     const before = out;
     out = out.replace(/\$[({]([A-Za-z_][A-Za-z0-9_]*)[)}]/g,
       (_w, name) => (name in vars ? vars[name] : UNRESOLVED));
-    out = out.replace(MAKE_FN, (_w, _fn, args) => args.split(',').join(' '));
+    out = out.replace(MAKE_ALT_FN, (_w, args) => args.split(',').join(' '));
+    out = out.replace(MAKE_COMPUTED_FN, UNRESOLVED);
     if (out === before) break;
   }
   return out.split('\u0002').join('$');
@@ -187,11 +197,16 @@ function outputsIn(text, baseDir, vars) {
  */
 function analyse(world) {
   const { tracked, exists } = world;
+  const nestedRepoTracked = world.nestedRepoTracked || (() => null);
+  const foreignTerritory = world.foreignTerritory || (() => false);
   // `untracked` and `dangling` are counted separately because the loop-gate wiring
   // gives them DIFFERENT severities (§F8a): an untracked file still exists on a disk,
   // so stopping the line is the remedy and it BLOCKS; a dangling one is already gone,
   // so stopping recovers nothing and it is advisory.
-  const counts = { makefilesScanned: 0, refs: 0, tracked: 0, generated: 0, untracked: 0, dangling: 0 };
+  const counts = {
+    makefilesScanned: 0, refs: 0, tracked: 0, generated: 0, foreign: 0,
+    untracked: 0, dangling: 0,
+  };
   const findings = [];
 
   // Only COMMITTED makefiles. An untracked one is not a committed make target.
@@ -231,7 +246,30 @@ function analyse(world) {
         const cands = baseDirs.map((d) => path.posix.join(d, ref));
         if (cands.some((c) => generated.has(c))) { counts.generated++; continue; }
         if (cands.some((c) => tracked.has(c))) { counts.tracked++; continue; }
+
+        // ANOTHER REPO'S TERRITORY. A multi-project orchestrating makefile (the
+        // agent-system root Makefile) runs files that live inside nested project repos
+        // it deliberately gitignores, so "do YOU track this?" is the wrong question.
+        // Delegate to the owning repo when it is present; skip when it is not, because
+        // whether a sibling project is checked out is machine-local and says nothing
+        // about trunk. Ownership is a STRUCTURAL fact — never the ignore rule alone,
+        // which would have excused all six founding firings.
+        // ORDER MATTERS, and both possible mistakes were made and caught here.
+        //
+        // A reference is tried against every candidate base dir, so a spurious candidate
+        // can land in an unrelated nested repo or in ignored, foreign ground. Taking the
+        // first ownership answer let a spurious `false` report a real foreign file as
+        // dangling. Then taking territory too early did the OPPOSITE and far worse: a
+        // spurious foreign candidate exonerated a genuinely untracked file, and deleting
+        // this very tool from the index produced NO finding — the check went blind to its
+        // own disappearance while still saying PASS.
+        //
+        // So the candidates are consulted STRONGEST EVIDENCE FIRST, and PRESENCE IN THE
+        // SCANNED REPO OUTRANKS TERRITORY: a file that is sitting right there, untracked,
+        // is the defect, whatever some other candidate path would have been.
+        if (cands.some((c) => nestedRepoTracked(c) === true)) { counts.foreign++; continue; }
         const present = cands.find((c) => exists(c));
+        if (!present && cands.some((c) => foreignTerritory(c))) { counts.foreign++; continue; }
         findings.push(present
           ? {
             kind: 'untracked', ref, resolved: present, makefile: mk.path, line: i + 1,
@@ -273,8 +311,56 @@ function collectRepo(repoDir, label) {
     try { packageJsons.push({ path: p, json: JSON.parse(read(p)) }); } catch { /* not our problem */ }
   }
 
+  // --- another repo's territory (real-world side of the two predicates) -----
+  // A path is foreign when a DIFFERENT git repository owns the ground it sits on. That
+  // is a structural fact about repositories, deliberately NOT "the scanned repo ignores
+  // it" — an ignore rule as the excuse would have excused all six founding firings,
+  // since src/app/scripts was itself ignored. Territory therefore additionally requires
+  // that the scanned repo track NOTHING beneath the directory.
+  const trackedPrefixes = new Set();
+  for (const p of listed) {
+    const parts = p.split('/');
+    for (let i = 1; i <= parts.length - 1; i++) trackedPrefixes.add(parts.slice(0, i).join('/'));
+  }
+
+  const ancestors = (rel) => {
+    const parts = rel.split('/');
+    const out = [];
+    for (let i = parts.length - 1; i >= 1; i--) out.push(parts.slice(0, i).join('/'));
+    return out;                                        // nearest-first
+  };
+
+  const nestedRepoTracked = (rel) => {
+    for (const dir of ancestors(rel)) {
+      if (!fs.existsSync(path.join(repoDir, dir, '.git'))) continue;
+      const sub = rel.slice(dir.length + 1);
+      try {
+        const out = execFileSync('git', ['-C', path.join(repoDir, dir), 'ls-files', '-z', '--', sub],
+          { encoding: 'utf8' }).split('\0').filter(Boolean);
+        return out.length > 0;
+      } catch { return false; }
+    }
+    return null;                                       // no nested repo owns it
+  };
+
+  // The TRAILING SLASH matters. A directory-only pattern (`/work/*/`) does not match a
+  // path git cannot see is a directory, and a sibling project that is not checked out is
+  // exactly that case — so `check-ignore work/Viggo-fix` says "not ignored" while
+  // `check-ignore work/Viggo-fix/` correctly says it is. Ask both.
+  const ignoredDir = (dir) => [dir, dir + '/'].some((d) => {
+    try {
+      execFileSync('git', ['-C', repoDir, 'check-ignore', '-q', '--', d], { stdio: 'ignore' });
+      return true;
+    } catch { return false; }
+  });
+
+  const foreignTerritory = (rel) => ancestors(rel).some(
+    (dir) => !trackedPrefixes.has(dir) && ignoredDir(dir));
+
   return {
     repo: label || repoDir,
+    nestedRepoTracked,
+    foreignTerritory,
     makefiles,
     packageJsons,
     tracked,

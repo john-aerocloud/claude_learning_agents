@@ -62,13 +62,19 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const OAG = path.join(REPO_ROOT, 'work', 'OagEventSource');
 
 /** A tiny in-memory world: makefiles, package.json scripts, a tracked set, a disk. */
-function world({ makefiles = {}, packageJsons = {}, tracked = [], onDisk = [] } = {}) {
+function world({
+  makefiles = {}, packageJsons = {}, tracked = [], onDisk = [],
+  nestedRepoTracked = () => null,     // null = no nested repo owns this path
+  foreignTerritory = () => false,     // another repo's ground, not checked out here
+} = {}) {
   const disk = new Set([...onDisk, ...tracked]);
   return {
     makefiles: Object.entries(makefiles).map(([p, text]) => ({ path: p, text })),
     packageJsons: Object.entries(packageJsons).map(([p, json]) => ({ path: p, json })),
     tracked: new Set(tracked),
     exists: (p) => disk.has(p),
+    nestedRepoTracked,
+    foreignTerritory,
   };
 }
 
@@ -225,12 +231,139 @@ test('AC-GI.3d a path relative to a workspace the recipe enters is resolved ther
   assert.equal(r.verdict, 'PASS', kinds(r).join(', '));
 });
 
+test('AC-GI.3d a COMPUTED make function is UNRESOLVED, never collapsed to its arguments', () => {
+  // FOUND BY SELF-APPLICATION, and it was a real bug in this tool. An earlier version
+  // collapsed any `$(fn args)` to its comma-separated ARGUMENTS. For `$(if a,b,c)` that
+  // is sound — the arguments are the literal alternatives. For `$(shell …)` it is
+  // nonsense: `PROJECT ?= $(shell cat work/ACTIVE 2>/dev/null)` collapsed into the path,
+  // and the tool reported a finding for the invented file
+  // `2>/dev/null/scripts/board-stream-skeleton.js`. Seven of those in one run.
+  //
+  // A function whose value is COMPUTED cannot be known offline, so it must poison the
+  // reference and drop it. Inventing a path is worse than missing one: a checker that
+  // reports files nobody wrote is a checker people switch off, and this whole item
+  // exists because a control became something to be worked around.
+  const vars = tool.parseMakeVars('PROJECT ?= $(shell cat work/ACTIVE 2>/dev/null)\n');
+  const refs = tool.refsInLine('\tnode work/$(PROJECT)/scripts/board-stream-skeleton.js',
+    vars, [''], () => false);
+  assert.deepEqual(refs, [], 'a computed path must yield NO reference, not an invented one');
+});
+
+test('AC-GI.3d $(if …) still collapses, because its arguments are literal alternatives', () => {
+  const r = tool.analyse(world({
+    makefiles: { Makefile: 'x:\n\t$(if $(NODE_BIN),$(NODE_BIN)/node,node) scripts/t.mjs\n' },
+    tracked: ['Makefile'],
+    onDisk: ['scripts/t.mjs'],
+  }));
+  assert.deepEqual(kinds(r), ['untracked:scripts/t.mjs']);
+});
+
 test('AC-GI.3d an absolute path and a path outside the repo are out of scope', () => {
   const r = tool.analyse(world({
     makefiles: { Makefile: 'x:\n\t/usr/local/bin/node /etc/thing.mjs\n\tpython3 ../../.claude/tools/other.py\n' },
     tracked: ['Makefile'],
   }));
   assert.equal(r.verdict, 'PASS', kinds(r).join(', '));
+});
+
+// --- AC-GI.3d — another repo's territory is not this repo's to track -------
+// Also found by self-application. The PARENT repo's Makefile is a multi-project
+// orchestrator: it runs files that live inside `work/<project>/`, each its own nested
+// git repo which the parent deliberately gitignores. Four findings came from asking
+// the parent "do you track this?" — the wrong question. One of them
+// (work/OagEventSource/src/fids-app/playwright.uc-es3.config.ts) IS tracked, in its
+// OWN repo; the others belong to projects not checked out on this machine, so their
+// absence says nothing about trunk.
+//
+// THE DISCRIMINATOR IS REPO OWNERSHIP, NOT THE IGNORE RULE. Using "the repo ignores
+// it" as the excuse would excuse the FOUNDING DEFECT — src/app/scripts/*.mjs was
+// ignored, and that is the whole point. So territory requires BOTH that the directory
+// is ignored as a whole AND that the scanned repo tracks nothing beneath it.
+
+test('AC-GI.3d a path inside a NESTED repo is judged by THAT repo, not the scanned one', () => {
+  const r = tool.analyse(world({
+    makefiles: { Makefile: 'x:\n\tnode work/proj/scripts/t.mjs\n' },
+    tracked: ['Makefile'],
+    onDisk: ['work/proj/scripts/t.mjs'],
+    nestedRepoTracked: () => true,             // the owning repo has it on ITS trunk
+  }));
+  assert.equal(r.verdict, 'PASS', kinds(r).join(', '));
+  assert.equal(r.counts.foreign, 1);
+});
+
+test('AC-GI.3d a nested repo that does NOT track it is still a finding', () => {
+  // Delegating ownership must not become a way to disappear. If the owning repo has
+  // not committed it either, the file is still on one machine only.
+  const r = tool.analyse(world({
+    makefiles: { Makefile: 'x:\n\tnode work/proj/scripts/t.mjs\n' },
+    tracked: ['Makefile'],
+    onDisk: ['work/proj/scripts/t.mjs'],
+    nestedRepoTracked: () => false,
+  }));
+  assert.deepEqual(kinds(r), ['untracked:work/proj/scripts/t.mjs']);
+});
+
+test('AC-GI.3d another repo\'s territory that is NOT checked out is skipped, not dangling', () => {
+  // `make browser-observatory-real-data` names a file in work/observatory, a project
+  // not present on this machine. Whether a sibling project is checked out is
+  // machine-local, so its absence carries NO information about trunk.
+  const r = tool.analyse(world({
+    makefiles: { Makefile: 'x:\n\tnode work/absent/e2e/s005.spec.js\n' },
+    tracked: ['Makefile'],
+    foreignTerritory: () => true,
+  }));
+  assert.equal(r.verdict, 'PASS', kinds(r).join(', '));
+  assert.equal(r.counts.foreign, 1);
+});
+
+test('AC-GI.3d one spurious candidate must not poison a territory verdict', () => {
+  // A REAL false positive this produced. A reference is tried against several candidate
+  // base dirs (every --prefix/-C/chdir the makefile uses), so one candidate can land
+  // inside an UNRELATED nested repo which of course does not track it. Taking the first
+  // non-null ownership answer let that `false` override a later candidate that was
+  // plainly another project's territory, and the reference was reported dangling.
+  const r = tool.analyse(world({
+    makefiles: { Makefile: 'x:\n\tnpm --prefix other/pkg run t -- work/absent/e2e/s005.spec.js\n' },
+    tracked: ['Makefile'],
+    // the `other/pkg/work/absent/...` candidate lands in a nested repo that lacks it…
+    nestedRepoTracked: (p) => (p.startsWith('other/pkg/') ? false : null),
+    // …while the real candidate is another project's ground
+    foreignTerritory: (p) => p.startsWith('work/absent/'),
+  }));
+  assert.equal(r.verdict, 'PASS', kinds(r).join(', '));
+  assert.equal(r.counts.foreign, 1);
+});
+
+test('AC-GI.3d a file PRESENT in the scanned repo outranks any foreign candidate', () => {
+  // THE VACUITY THIS TOOL ALMOST SHIPPED WITH, found by running it on its own repo.
+  // A reference is tried against every --prefix/-C/chdir base dir, so `.claude/tools/x.js`
+  // also generates a candidate like `work/<project>/src/app/.claude/tools/x.js` — which
+  // lands in ignored, foreign ground. With territory checked before presence, that
+  // spurious candidate EXONERATED the real one: deleting this very tool from the index
+  // produced NO finding. The check was blind to its own disappearance.
+  //
+  // Presence in the scanned repo is the strongest evidence available and must be
+  // consulted first: a file that is right there, untracked, is the defect.
+  const r = tool.analyse(world({
+    makefiles: { Makefile: 'x:\n\tnpm --prefix work/proj/app run t\n\tnode .claude/tools/x.js\n' },
+    tracked: ['Makefile'],
+    onDisk: ['.claude/tools/x.js'],
+    foreignTerritory: (p) => p.startsWith('work/proj/'),
+  }));
+  assert.deepEqual(kinds(r), ['untracked:.claude/tools/x.js']);
+});
+
+test('AC-GI.3d territory can NEVER excuse the founding defect', () => {
+  // THE GUARD THAT MATTERS. src/app/scripts was ignored by a blanket rule and holds
+  // tracked files. If "the repo ignores it" alone conferred territory, this tool would
+  // have excused all six firings — so territory requires that the scanned repo track
+  // NOTHING beneath the directory, which is false here and must stay a finding.
+  const r = tool.analyse(world({
+    makefiles: { Makefile: 'x:\n\tnode src/app/scripts/swallowed.mjs\n' },
+    tracked: ['Makefile', 'src/app/scripts/already-committed.mjs'],
+    onDisk: ['src/app/scripts/swallowed.mjs'],
+  }));
+  assert.deepEqual(kinds(r), ['untracked:src/app/scripts/swallowed.mjs']);
 });
 
 // --- AC-GI.3e — it would have caught the REAL six -------------------------

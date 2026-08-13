@@ -3135,6 +3135,157 @@ class TestLoopGate(Base):
         self.assertEqual(f[0]["severity"], "unknown")
         self.assertIn("NOT ESTABLISHED", f[0]["message"])
 
+    # ---- check 9: a file a committed make target RUNS must be on trunk -------
+    #
+    # (OI-GITIGNORE-SWALLOWS-COMMITTED-TOOLS, AC-GI.3.) A blanket .gitignore on
+    # `src/app/scripts/*.mjs` silently swallowed a committed tool SIX times in one
+    # project: tool written, make target wired, `git add` says nothing, suite green,
+    # tool on exactly one machine. The DEF-ROC-001 / v89 FALSE GREEN — nothing goes red
+    # because nothing was looking, and the remedy had become "append a negation line",
+    # so the negation list became a written record of the trap firing.
+    #
+    # It hangs HERE because the loop is the only continuously-running workflow (as
+    # checks 6, 7 and 8 already are), and because it finds the omission WHILE THE FILE
+    # STILL EXISTS ON DISK — one `git add` from safe. It also CANNOT hang in the
+    # project's own CI: the analyser lives in the agent-system repo, which a project
+    # clone does not contain.
+    #
+    # SEVERITY, per §F8a ("a gate blocks only on harm that stopping relieves"):
+    #   untracked -> BLOCK. The file exists on someone's disk right now; pulling more
+    #        work is how it gets lost, and the remedy is one command.
+    #   dangling  -> ADVISORY. The file is already gone; stopping recovers nothing.
+    #   unrunnable -> UNKNOWN. Never silent (§17c.2) — "clean" being indistinguishable
+    #        from "did not run" IS the shape of the defect.
+    #
+    # NOTHING IS STUBBED HERE. These drive the REAL .claude/tools/make-refs-tracked.js
+    # against a REAL git repo with a REAL index and REAL ignore rules, because the
+    # claim is "the loop gate goes red on an untracked tool" and the git index is the
+    # seam that claim is ABOUT (§17d limb 2). An earlier draft substituted the script
+    # and passed while `cmd_loop_gate` — which re-invokes the real analyser — still
+    # exited 0. Stubbing would have shipped a wiring that never fired.
+
+    def _mrt_repo(self, makefile, present=(), tracked=(), gitignore=None):
+        """A REAL git repo at work/<project>: real files, real index, real ignores."""
+        repo = os.path.join(self.tmp, "work", self.project)
+        os.makedirs(repo, exist_ok=True)
+        with open(os.path.join(repo, "Makefile"), "w", encoding="utf-8") as f:
+            f.write(makefile)
+        if gitignore is not None:
+            with open(os.path.join(repo, ".gitignore"), "w", encoding="utf-8") as f:
+                f.write(gitignore)
+        for rel in set(present) | set(tracked):
+            p = os.path.join(repo, rel)
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "w", encoding="utf-8") as f:
+                f.write("// a committed tool\n")
+
+        def git(*args):
+            subprocess.run(["git", "-C", repo, *args], check=True,
+                           capture_output=True, text=True)
+        git("init", "-q")
+        git("config", "user.email", "t@t")
+        git("config", "user.name", "t")
+        git("add", "Makefile", *(([".gitignore"] if gitignore is not None else [])))
+        for rel in tracked:
+            git("add", "-f", rel)
+        git("commit", "-qm", "scaffold")
+        return repo
+
+    def _mrt(self, findings):
+        return [f for f in findings if f["check"] == "make-refs-tracked"]
+
+    def _mrt_scaffold(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+
+    def test_mrt_untracked_tool_BLOCKS_the_pull(self):
+        """The file is on a disk RIGHT NOW and one `git add` from safe. Stopping the
+        line relieves exactly that harm (§F8a), so this one blocks."""
+        self._mrt_scaffold()
+        self._mrt_repo(
+            "capture:\n\tnode scripts/capture-ddb-stream-records.mjs\n",
+            present=["scripts/capture-ddb-stream-records.mjs"],
+            gitignore="scripts/*.mjs\n")
+        findings = self._gate()
+        self.assertIn("make-refs-tracked", self._checks(findings))
+        f = self._mrt(findings)[0]
+        self.assertEqual(f["severity"], "block")
+        self.assertEqual(f["untracked"], 1)
+        self.assertIn("capture-ddb-stream-records.mjs", f["message"])
+        code, out = self._run()
+        self.assertEqual(code, 2)
+        self.assertIn("make-refs-tracked", out)
+
+    def test_mrt_the_same_tool_committed_is_clean(self):
+        """The discriminating other half: identical repo, file tracked -> no finding.
+        Without this the block above could be firing on something else entirely."""
+        self._mrt_scaffold()
+        self._mrt_repo(
+            "capture:\n\tnode scripts/capture-ddb-stream-records.mjs\n",
+            tracked=["scripts/capture-ddb-stream-records.mjs"],
+            gitignore="scripts/*.mjs\n")
+        findings = self._gate()
+        self.assertEqual(self._mrt(findings), [], findings)
+        code, _out = self._run()
+        self.assertEqual(code, 0)
+
+    def test_mrt_dangling_ref_is_ADVISORY_and_never_blocks(self):
+        """The file is already gone, so stopping recovers nothing — but it is reported
+        every cycle so a dead target cannot quietly become normal."""
+        self._mrt_scaffold()
+        self._mrt_repo("sync:\n\tpython3 scripts/sync-linear.py --dry-run\n")
+        findings = self._gate()
+        self.assertNotIn("make-refs-tracked", self._checks(findings))
+        adv = [f for f in self._advisories(findings) if f["check"] == "make-refs-tracked"]
+        self.assertEqual(len(adv), 1, findings)
+        self.assertEqual(adv[0]["dangling"], 1)
+        self.assertIn("sync-linear.py", adv[0]["message"])
+        code, out = self._run()
+        self.assertEqual(code, 0)
+        self.assertIn("make-refs-tracked", out)
+
+    def test_mrt_untracked_blocks_even_when_a_dangling_ref_is_also_present(self):
+        """A mixed verdict must take the WORST severity, not the first one seen."""
+        self._mrt_scaffold()
+        self._mrt_repo(
+            "a:\n\tnode scripts/here.mjs\nb:\n\tpython3 scripts/gone.py\n",
+            present=["scripts/here.mjs"], gitignore="scripts/*.mjs\n")
+        findings = self._gate()
+        self.assertIn("make-refs-tracked", self._checks(findings))
+        f = self._mrt(findings)[0]
+        self.assertEqual(f["severity"], "block")
+        self.assertEqual((f["untracked"], f["dangling"]), (1, 1))
+        self.assertIn("gone.py", f["message"], "the advisory limb must still be reported")
+
+    def test_mrt_generated_artifact_is_not_a_finding(self):
+        """The exemption is DERIVED from a committed generator's --outfile=, never a
+        hand-kept list — a hand-kept list is the negation list this item deletes."""
+        self._mrt_scaffold()
+        self._mrt_repo(
+            "build:\n\tesbuild src/main.ts --outfile=build/main.mjs\nrun:\n\tnode build/main.mjs\n",
+            present=["build/main.mjs"], tracked=["src/main.ts"],
+            gitignore="build/\n")
+        findings = self._gate()
+        self.assertEqual(self._mrt(findings), [], findings)
+
+    def test_mrt_unrunnable_is_unknown_never_a_silent_pass(self):
+        """An unevaluated precondition is not a met one (§17c.2). A checker that cannot
+        run must not be indistinguishable from a clean one — that asymmetry IS the
+        shape of the defect this check exists for."""
+        self._mrt_scaffold()
+        orig = wi.MRT_SCRIPT
+        wi.MRT_SCRIPT = os.path.join(self.tmp, "not-a-script.js")   # does not exist
+        try:
+            findings = self._gate()
+        finally:
+            wi.MRT_SCRIPT = orig
+        f = self._mrt(findings)
+        self.assertEqual(len(f), 1, findings)
+        self.assertEqual(f[0]["severity"], "unknown")
+        self.assertIn("NOT ESTABLISHED", f[0]["message"])
+        self.assertNotIn("make-refs-tracked", self._checks(findings))
+
     # ---- policy.csv handling ------------------------------------------------
     def test_missing_policy_csv_uses_documented_defaults(self):
         # no policy.csv at all -> the §F2 seed defaults (ready 3/4, intake 2/10)

@@ -101,6 +101,44 @@ worktree-guard:
 worktree-reap:
 	$(WORKTREE) reap $(if $(DIR),$(DIR),--all)
 
+# --- a file a committed make target RUNS must be on trunk -----------------------
+# (OI-GITIGNORE-SWALLOWS-COMMITTED-TOOLS, AC-GI.3)
+#
+# A blanket `.gitignore` on `src/app/scripts/*.mjs` swallowed a committed tool SIX
+# times in one project. Each time: an engineer writes a re-runnable tool, wires a make
+# target to it, `git add`s it, git says NOTHING, the suite is green, and the tool is on
+# exactly one machine. That is the DEF-ROC-001 / v89 FALSE GREEN — nothing goes red
+# because nothing was looking. The remedy had become "append another negation line", so
+# the ignore file's negation list had turned into a written record of the trap firing.
+#
+# This is the general form and it is deliberately indifferent to WHICH ignore rule,
+# directory or project caused the omission (the founding instance, DEF-ROC-001, was a
+# different project). Four verdicts per reference:
+#   tracked    fine.
+#   generated  fine — some committed generator declares it as an output (`--outfile=`
+#              in a makefile recipe or a package.json script), so it is reproducible
+#              from trunk. THE EXEMPTION IS DERIVED, never a hand-kept list: a
+#              hand-kept list is the negation list again, and a `build/`-by-name rule
+#              would have EXCUSED the sixth firing rather than caught it.
+#   untracked  FINDING — on this machine and nowhere else.
+#   dangling   FINDING — on no machine: the target outlived its file. Same false green
+#              from the other side (`make sync-linear` sat on trunk for months after
+#              its script was retired; this check is what found it).
+#
+# Not flooding is part of the job (§F8a): only COMMITTED makefiles are scanned, and
+# globs, prose inside an `echo`, absolute paths, paths outside the repo and unresolvable
+# variables are not findings. There is deliberately NO ratchet baseline — the honest
+# count is ZERO, so any finding is a regression and there is no floor to erode.
+#
+# Wired as `loop-gate` check 9, so it runs before EVERY pull: a gate in no workflow is
+# not a gate. Self-tests run under `make test-tools`.
+# Pure git + filesystem; NO creds, NO network. Exit 1 = findings, 2 = could not run.
+#   make make-refs-tracked [PROJECT=OagEventSource] [JSON=1]
+#   make make-refs-tracked REPO=work/OagEventSource
+make-refs-tracked:
+	@node .claude/tools/make-refs-tracked.js \
+	  $(if $(REPO),--repo $(REPO),--project $(PROJECT) --repo-root .) $(if $(JSON),--json,)
+
 # --- orphaned LOCAL CONTAINERS (DEFECT-OAG-091) ---------------------------------
 # The container equivalent of worktree-reap, and the tool EXP-133 should have
 # shipped with the container-per-engineer. `ddb-local-down` is per-dispatch and must
@@ -845,7 +883,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap container-reap container-orphans sso-login retro-debt retro-mark loop-gate test-wi wi-append wi-project wi-validate wi-migrate doc-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated test-requirement-gate test-requirement-gate-baseline board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery
+.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap make-refs-tracked container-reap container-orphans sso-login retro-debt retro-mark loop-gate test-wi wi-append wi-project wi-validate wi-migrate doc-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated test-requirement-gate test-requirement-gate-baseline board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery
 
 # --- Viggo-fix UC-W7: Country/Nationality ID remediation (T-SQL) --------------
 # Data-driven, self-building T-SQL remediation script set + its local stand-up

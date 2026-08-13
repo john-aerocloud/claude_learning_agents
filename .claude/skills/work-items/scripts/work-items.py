@@ -2830,6 +2830,12 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
     # --- 8. orphaned local containers (DEFECT-OAG-091) — DELEGATED, AND IT REAPS
     findings.extend(compute_container_reap(project))
 
+    # --- 9. a file a committed make target RUNS must be on trunk — DELEGATED ---
+    #        (OI-GITIGNORE-SWALLOWS-COMMITTED-TOOLS). This is the ONLY workflow that
+    #        can run it: the analyser lives in the agent-system repo, so a project's
+    #        own CI cannot see it.
+    findings.extend(compute_make_refs_tracked(project))
+
     return findings
 
 
@@ -3007,6 +3013,105 @@ def compute_worktree_guard(timeout=WTG_TIMEOUT):
         f"Fix the cause too: a project-repo item must never take worktree isolation "
         f"(`make dispatch-check ID=<item> ISOLATION=worktree`). Affected: "
         f"{', '.join(roots) or '—'}."))]
+
+
+# ---------------------------------------------------------------------------
+# loop-gate check 9 — a file a committed `make` target RUNS must be on trunk
+# (OI-GITIGNORE-SWALLOWS-COMMITTED-TOOLS, AC-GI.3)
+#
+# A blanket `.gitignore` on `src/app/scripts/*.mjs` silently swallowed a COMMITTED
+# TOOL SIX TIMES in one project. Every firing is identical: an engineer writes a
+# re-runnable tool, wires a make target to it, `git add`s it, GIT SAYS NOTHING, the
+# suite is green, and the tool exists on exactly one machine. The most recent
+# (DEFECT-OAG-070) was the tool producing the real AWS-shaped fixture that whole fix
+# depended on.
+#
+# That is the DEF-ROC-001 / v89 FALSE GREEN: nothing goes red, because nothing was
+# looking. The established remedy had become "append another negation line", which is
+# why the ignore file's negation list had become a written record of the trap firing —
+# and each negation made the next firing MORE likely, because nine curated exceptions
+# read as deliberate rather than broken.
+#
+# The analysis lives in ONE place — .claude/tools/make-refs-tracked.js — and is
+# DELEGATED to, never re-implemented (the DRY rule checks 4, 6, 7 and 8 follow).
+#
+# WHY IT HANGS HERE. Two reasons, and the second is the load-bearing one:
+#   1. The loop is the only continuously-running workflow. A gate in no workflow is
+#      not a gate — and this project found THREE controls in one day that existed and
+#      were invoked nowhere.
+#   2. The project's own CI CANNOT run it. The analyser lives in the agent-system
+#      repo; a project clone does not contain `.claude/tools/`. So the pull loop is
+#      the only place the general form can hang at all. (The project ALSO carries a
+#      narrow local pin of the same property in its own suite, which its CI does run.)
+# And it catches the omission WHILE THE FILE STILL EXISTS ON DISK — one `git add`
+# from safe, which is the whole reason to check before a pull rather than after.
+#
+# SEVERITY, per §F8a ("a gate blocks only on harm that stopping relieves"):
+#   untracked -> BLOCK. The file is on someone's disk RIGHT NOW; pulling more work is
+#         how it gets lost, and the remedy is one command.
+#   dangling  -> ADVISORY. The file is already gone, so stopping recovers nothing —
+#         but it is reported every cycle so a dead target cannot become normal.
+#   unrunnable -> UNKNOWN ("? " line). Never silent, never counted as satisfied: an
+#         unevaluated precondition is not a met one (§17c.2), and "clean" being
+#         indistinguishable from "did not run" IS the shape of the defect.
+# ---------------------------------------------------------------------------
+MRT_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "..", "..", "..", "tools", "make-refs-tracked.js")
+MRT_TIMEOUT = 120.0
+
+
+def compute_make_refs_tracked(project, timeout=MRT_TIMEOUT):
+    """Assert every file a committed make target runs is on trunk. 0 or 1 finding."""
+    common = {"check": "make-refs-tracked", "ids": []}
+    try:
+        proc = subprocess.run(
+            ["node", os.path.normpath(MRT_SCRIPT), "--project", project,
+             "--repo-root", ROOT, "--json"],
+            capture_output=True, text=True, timeout=timeout)
+        report = json.loads(proc.stdout)
+    except Exception as exc:                                    # noqa: BLE001
+        return [dict(common, severity="unknown", untracked=None, dangling=None,
+                     message=(
+            f"[make-refs-tracked] NOT ESTABLISHED — the check would not run "
+            f"({type(exc).__name__}: {str(exc)[:160]}). An unrunnable check is not a "
+            f"clean one, and a clean answer that is indistinguishable from no answer "
+            f"is exactly the false green this check exists for. Remedy: "
+            f"`make make-refs-tracked PROJECT={project}`."))]
+
+    counts = report.get("counts") or {}
+    untracked = counts.get("untracked") or 0
+    dangling = counts.get("dangling") or 0
+    common = dict(common, untracked=untracked, dangling=dangling,
+                  refs=counts.get("refs", 0))
+
+    def named(kind, limit=5):
+        refs = [f.get("ref", "?") for f in report.get("findings", [])
+                if f.get("kind") == kind]
+        return ", ".join(refs[:limit]) + (" …" if len(refs) > limit else "")
+
+    if untracked:
+        return [dict(common, severity="block", message=(
+            f"[make-refs-tracked] {untracked} file(s) a COMMITTED MAKE TARGET RUNS "
+            f"are NOT ON TRUNK: {named('untracked')}. They exist on this machine and "
+            f"nowhere else, nothing regenerates them, and NOTHING WILL GO RED — a "
+            f"green suite here runs a file no one else has (DEF-ROC-001 / v89). This "
+            f"trap has fired six times on one directory. Caught while the file still "
+            f"EXISTS, so the remedy is one command: commit it — and if a .gitignore "
+            f"rule swallowed it, FIX THE RULE, do not add a negation."
+            + (f" Also {dangling} dangling reference(s): {named('dangling')}."
+               if dangling else "")))]
+
+    if dangling:
+        return [dict(common, severity="advisory", message=(
+            f"ADVISORY (does NOT block the pull) [make-refs-tracked] {dangling} "
+            f"committed make target(s) name a file that is NOT IN THE REPO AT ALL: "
+            f"{named('dangling')}. The target outlived its file, so it cannot run for "
+            f"anyone — the same false green from the other direction. Stopping the "
+            f"line recovers nothing, so this is advisory, but it is reported every "
+            f"cycle so a dead target cannot quietly become normal. Remedy: restore "
+            f"the file or delete the target."))]
+
+    return []
 
 
 # ---------------------------------------------------------------------------

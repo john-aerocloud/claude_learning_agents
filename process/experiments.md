@@ -922,3 +922,71 @@ not application code.
 retro should decide whether per-transition agent allowlists are the right mechanism at all, or
 whether "who may fire this" should derive from the item's own declared owner. A fourth patch would
 be evidence the mechanism is wrong, not that the list needs extending again.
+
+---
+
+## EXP-124 — "dep satisfied" is undefined, so two flow-managers read it oppositely
+
+**Registered** 2026-08-14 (ROC). **Class:** flow rule with no written definition.
+
+### What happened
+
+Two `flow-manager` instances, **in the same session**, reached opposite conclusions about the same
+promotion rule — and both were acting in good faith.
+
+- The **earlier** instance established and applied a convention *three times*: a dependency counts
+  as satisfied once it is `built_green` **on trunk**, without waiting for its own
+  deploy/validate cycle. `UC-ROC-078`'s `made_ready` note states it explicitly — *"dep satisfied =
+  green on trunk not full deploy+validate"* — and cites `UC-ROC-076`/`079`, which in turn cite the
+  same basis against `UC-ROC-075`.
+- The **later** instance searched for that convention, **found no precedent**, and declined to
+  promote `UC-ROC-092` because its deps sat in `dev-validating` rather than `done`.
+
+Both were right about what they could see. The convention exists **only in event-log notes**, never
+in a rule; the later instance searched item *states*, where it is invisible by construction.
+
+### Why it was invisible — the actual gap
+
+Three places could have carried the definition and none does:
+
+| Where | What it says about dep-satisfaction for promotion |
+|---|---|
+| `process/process-current.md` §F2/F3/F6/F7 | describes DAG / independent-set mechanics — never defines what makes a dep *satisfied* |
+| `process/machinery/CONTRACT.md` | same: edges and folding, no promotion predicate |
+| the machinery (`wi-append` edge-check, `wi-validate` I1–I4) | **no invariant on dep state at `made_ready`** |
+
+So promotion is pure flow-manager judgement, unconstrained by machinery and undocumented in
+process. That is why it diverged silently rather than failing loudly.
+
+### The experiment
+
+Pick ONE and write it down where a flow-manager will find it (§F6 + `CONTRACT.md`):
+
+1. **Codify the convention** — `built_green` on trunk satisfies a peer dep for promotion purposes.
+   Faster flow; accepts the risk that a dep is later rejected and its dependents rework.
+2. **Reject it** — require `done`. Zero rework risk; Ready starves more often, which is exactly the
+   floor breach observed this cycle (`ready=1` against `min_items=2`, with no legitimate promotion
+   available because `UC-ROC-092`'s deps were merely `dev-validating`).
+
+**Target metric:** rework count on promoted-early items, against Ready-floor breach frequency.
+Those are the two costs the choice trades between, so measuring only one would bias the answer.
+
+**Anticipated effect.** Option 1 raises throughput and should show near-zero rework *while the
+suite is trustworthy* — but the trust precondition is doing real work in that sentence, and
+`DEF-ROC-022` (an unexplained intermittent failure in the C1 walking-skeleton test) is live evidence
+the precondition is not currently met. Option 2 costs flow but cannot produce this class of rework.
+
+**Scoring horizon:** the next 10 promotions.
+
+**Applies-to predicate:** any project whose items carry `deps` edges — i.e. all of them.
+
+### How this could be wrong
+
+The divergence may be *desirable* discretion rather than a defect: a flow-manager weighing a
+specific dep's risk is doing judgement work a blanket rule would flatten. If so, the fix is not a
+rule but a **required note** — force the promoting agent to state which basis it used and why, so
+the next instance can find it in state rather than prose. That would keep the judgement and remove
+the invisibility, which is the part that actually caused harm here.
+
+**Do not score this as "the rule was written."** Score it as: did a later flow-manager, with no
+access to this session's context, reach the same promotion decision as the earlier one?

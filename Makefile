@@ -30,6 +30,9 @@ INFRA   := work/$(PROJECT)/src/infra
 WORKITEMS := sh .claude/skills/work-items/scripts/work-items
 AWS_PROFILE ?= $(shell cat .claude/config/aws-profile 2>/dev/null)
 PY      ?= $(shell sh .claude/skills/dora-ledger/scripts/dora --python)
+# The interpreter the WORK-ITEMS launcher resolves (deferred: `?=` keeps the
+# $(shell) out of every make parse). Used by test-wi — never bare python3.
+WIPY    ?= $(shell sh .claude/skills/work-items/scripts/work-items --python)
 SQLCMD       ?= C:/Program Files/Microsoft SQL Server/Client SDK/ODBC/170/Tools/Binn/sqlcmd.exe
 REMED_SERVER ?= (localdb)\MSSQLLocalDB
 REMED_DB     ?= viggo_remed_test
@@ -60,6 +63,108 @@ project-update:
 	$(WORKTREE) update $(PROJECT)
 project-worktree-remove:
 	$(WORKTREE) remove $(PROJECT)
+
+# --- DEFECT-OAG-076: the two lanes, and never delete work that exists nowhere else
+# `isolation: worktree` on a PROJECT-REPO item destroyed DEFECT-OAG-072 outright
+# (`git cat-file -t fb080d9` => `fatal: Not a valid object name`). The parent
+# gitignores each project's own nested repo, so a parent-repo worktree NEVER
+# CONTAINS work/<project>: the agent finds nothing to edit and no legal way to
+# commit, clones the project repo inside its worktree, commits there, and the
+# auto-clean takes the objects with it. Two lanes, and a dispatch must know which:
+#
+#   parent-repo  (.claude/ process/ Makefile CLAUDE.md)  IS in the worktree
+#                -> committing in the worktree is correct and safe
+#   project-repo (work/<project>/**)                     is NOT in the worktree
+#                -> edit at the real shared path; commit via `make commit-isolated`
+#                   (.claude/tools/isolated-commit.js — the private index, which had
+#                    already landed as DEFECT-OAG-058 three hours before the loss)
+#
+#   make dispatch-check ID=DEFECT-OAG-076 [PROJECT=P] [ISOLATION=worktree|none]
+#        -> exit 2 (loud) if this item may not take worktree isolation. The lane is
+#           DECLARED on the item (`lane:`); undeclared/unrecognised fails CLOSED.
+#   make worktree-guard DIR=<path> [RESCUE_TO=<dir>]
+#        -> exit 2 if removing DIR would destroy commits that exist in no surviving
+#           repo (RESCUE_TO first writes a recoverable bundle). DIR=--all sweeps every
+#           registered worktree plus .claude/worktrees/*.
+# Pure git + filesystem; NO creds, NO network.
+dispatch-check:
+	node .claude/tools/worktree-guard.js dispatch-check --item $(ID) \
+	  $(if $(PROJECT),--project $(PROJECT),) --isolation $(if $(ISOLATION),$(ISOLATION),worktree)
+
+worktree-guard:
+	@node .claude/tools/worktree-guard.js \
+	  $(if $(filter --all,$(DIR)),scan-all,scan $(if $(DIR),$(DIR),.)) \
+	  $(if $(RESCUE_TO),--rescue-to $(RESCUE_TO),)
+
+# GUARDED cleanup of a finished AGENT worktree — refuses rather than destroying.
+#   make worktree-reap DIR=<path>|--all
+worktree-reap:
+	$(WORKTREE) reap $(if $(DIR),$(DIR),--all)
+
+# --- a file a committed make target RUNS must be on trunk -----------------------
+# (OI-GITIGNORE-SWALLOWS-COMMITTED-TOOLS, AC-GI.3)
+#
+# A blanket `.gitignore` on `src/app/scripts/*.mjs` swallowed a committed tool SIX
+# times in one project. Each time: an engineer writes a re-runnable tool, wires a make
+# target to it, `git add`s it, git says NOTHING, the suite is green, and the tool is on
+# exactly one machine. That is the DEF-ROC-001 / v89 FALSE GREEN — nothing goes red
+# because nothing was looking. The remedy had become "append another negation line", so
+# the ignore file's negation list had turned into a written record of the trap firing.
+#
+# This is the general form and it is deliberately indifferent to WHICH ignore rule,
+# directory or project caused the omission (the founding instance, DEF-ROC-001, was a
+# different project). Four verdicts per reference:
+#   tracked    fine.
+#   generated  fine — some committed generator declares it as an output (`--outfile=`
+#              in a makefile recipe or a package.json script), so it is reproducible
+#              from trunk. THE EXEMPTION IS DERIVED, never a hand-kept list: a
+#              hand-kept list is the negation list again, and a `build/`-by-name rule
+#              would have EXCUSED the sixth firing rather than caught it.
+#   untracked  FINDING — on this machine and nowhere else.
+#   dangling   FINDING — on no machine: the target outlived its file. Same false green
+#              from the other side (`make sync-linear` sat on trunk for months after
+#              its script was retired; this check is what found it).
+#
+# Not flooding is part of the job (§F8a): only COMMITTED makefiles are scanned, and
+# globs, prose inside an `echo`, absolute paths, paths outside the repo and unresolvable
+# variables are not findings. There is deliberately NO ratchet baseline — the honest
+# count is ZERO, so any finding is a regression and there is no floor to erode.
+#
+# Wired as `loop-gate` check 9, so it runs before EVERY pull: a gate in no workflow is
+# not a gate. Self-tests run under `make test-tools`.
+# Pure git + filesystem; NO creds, NO network. Exit 1 = findings, 2 = could not run.
+#   make make-refs-tracked [PROJECT=OagEventSource] [JSON=1]
+#   make make-refs-tracked REPO=work/OagEventSource
+make-refs-tracked:
+	@node .claude/tools/make-refs-tracked.js \
+	  $(if $(REPO),--repo $(REPO),--project $(PROJECT) --repo-root .) $(if $(JSON),--json,)
+
+# --- orphaned LOCAL CONTAINERS (DEFECT-OAG-091) ---------------------------------
+# The container equivalent of worktree-reap, and the tool EXP-133 should have
+# shipped with the container-per-engineer. `ddb-local-down` is per-dispatch and must
+# be called by the agent that created the container, so any agent that dies, stalls
+# or forgets leaks its container FOREVER. On 2026-08-10 that was thirteen orphans
+# (ten of them 2 DAYS old), load average 19.85, and a two-file test run at 301
+# SECONDS which took 877 MILLISECONDS after reaping — 340x — having first killed
+# four agents in a row and produced reds that were green in isolation.
+#
+# It is SAFE TO RUN AT ANY TIME and is wired into `loop-gate` (check 8) so it runs
+# before EVERY pull rather than when someone remembers (§17e). Every predicate fails
+# safe toward KEEPING: ownership by compose provenance (never a name list), an age
+# floor, a live LEASE (renewed at every gated test-tier entry, so another instance's
+# live container is protected), an established-connection veto for the mid-write
+# case, and a full TTL of grace for an unleased container. It touches docker objects
+# and a machine-local lease dir ONLY — never the working tree.
+#
+#   make container-reap PROJECT=OagEventSource              # sweep and remove
+#   make container-reap PROJECT=OagEventSource DRY_RUN=1    # say what it WOULD do
+#   make container-orphans PROJECT=OagEventSource           # read-only report
+container-reap:
+	@node .claude/tools/container-reap.js reap --project $(PROJECT) \
+	  $(if $(DRY_RUN),--dry-run,) $(if $(JSON),--json,)
+
+container-orphans:
+	@node .claude/tools/container-reap.js scan --project $(PROJECT) $(if $(JSON),--json,)
 
 # --- AWS SSO login -------------------------------------------------------------
 # Re-authenticate the project's SSO profile when the cached token has expired
@@ -156,22 +261,140 @@ retro-debt:
 retro-mark:
 	$(WORKITEMS) retro-mark --project $(PROJECT)
 
+# The CHEAP per-close constraint read (v136, EXP-132). Drains INCIDENT retro debt
+# ONLY while the constraint is provably unchanged — the machinery decides, not the
+# orchestrator. Exit 2 = the constraint SHIFTED (or cannot be read, or routine debt
+# hit its threshold) and a FULL /retro is genuinely due. This is not a softening of
+# §F8: the expensive path stays mandatory in exactly the case a retro exists for.
+# make parts-check PROJECT=<p>
+parts-check:
+	$(WORKITEMS) parts-check --project $(PROJECT) $(if $(THRESHOLD),--threshold $(THRESHOLD),)
+
+# MECHANICAL loop PRECONDITION gate. Run it BEFORE every pull; exit 2 = do NOT
+# pull until the printed violations are cleared (same exit-code discipline as
+# retro-debt, which it delegates check 4 to).
+#
+# WHY: STAGE F documents these preconditions as orchestrator JUDGEMENT and they
+# are reliably skipped — measured this cycle, DEFECT-OAG-045 sat in `validating`
+# 35.5h and DEFECT-OAG-048 27.3h, both already pushed AND deployed, both merely
+# awaiting a tester dispatch nobody made; Ready sat at 1 against a min_items
+# floor of 3; Intake sat at 14 against a wip_limit of 10 enforced NOWHERE. The
+# one mechanised obligation (retro-debt) fired and WAS obeyed. The mechanised
+# gate is obeyed; the documented one is not — so this mechanises the rest.
+#
+# Reports EVERY violated precondition (not just the first), each as one
+# actionable line naming the ids and the remedy:
+#   1 stalled-validation  item in validating/dev-validating/prod-validating
+#                         dwelling > STALE_HOURS whose latest fixed/built_green/
+#                         deployed/promoted event carries a `ref:` (= work done,
+#                         only a dispatch missing). Push state is read from GIT
+#                         in work/<p>/ (its own repo, v50), NEVER from note prose.
+#   2 ready-below-floor   depth(ready) < ready.min_items  (queues/policy.csv)
+#   3 queue-over-cap      a queue depth > its wip_limit (queues/policy.csv), at
+#                         TWO SEVERITIES (v126 addendum): a WIP-STAGE queue (ready/wip/
+#                         rework) BLOCKS; a BACKLOG queue (intake) is ADVISORY
+#                         and does NOT affect the exit code. Little's Law governs
+#                         WIP, not backlog depth — blocking the pull for a deep
+#                         backlog inverts the constraint (the remedy IS the pull)
+#                         and pressures agents to close real findings. Declared
+#                         per queue as a `kind` row in queues/policy.csv.
+#   4 retro-debt          delegated to the retro-debt computation
+#   5 awaiting-observation [state-graph v9] every item parked in
+#                         `awaiting_observation` (shipped, green, UNPROVEN) is
+#                         reported AND its liveness predicate RE-EVALUATED, exactly
+#                         as `blocked` is re-checked each cycle. observed (probe
+#                         exit 0) BLOCKS — a tester dispatch is now actionable;
+#                         not-yet (exit 3) is ADVISORY; a broken/absent predicate
+#                         BLOCKS, because an unrunnable liveness predicate is not a
+#                         predicate (v125 §17c.2).
+#
+# Exit 2 iff a BLOCKING check fired. An advisory-only run exits 0, says so, and
+# still prints the advisory (`!` line) so it cannot be read as satisfied.
+#
+# make loop-gate PROJECT=OagEventSource [STALE_HOURS=4] [THRESHOLD=3]
+#                                       [NO_OBSERVE=1] [OBSERVE_TIMEOUT=120]
+# NO_OBSERVE=1 skips re-evaluating the observation predicates (they can be slow
+#   real-data queries); each parked item is then reported NOT EVALUATED, so a
+#   skipped run can never read as satisfied.
+loop-gate:
+	$(WORKITEMS) loop-gate --project $(PROJECT) \
+	  $(if $(STALE_HOURS),--stale-hours $(STALE_HOURS),) $(if $(THRESHOLD),--threshold $(THRESHOLD),) \
+	  $(if $(NO_OBSERVE),--no-observe,) $(if $(OBSERVE_TIMEOUT),--observe-timeout $(OBSERVE_TIMEOUT),) \
+	  $(if $(NOW),--now "$(NOW)",)
+
+# Unit tests for the work-item machinery itself (stdlib unittest; temp-dir
+# fixtures, never the real project data). Uses the SAME cross-platform
+# interpreter the work-items launcher resolves — never bare python3.
+# make test-wi
+# The pattern is `test_*.py`, not the single file it used to name: a second test module
+# added beside it (test_wi_durable_prose.py, OI-WI-APPEND-NOTE-PATH-MANGLES-CONTENT) was
+# silently not discovered, which is a committed-test-that-never-runs — the same
+# false-green shape as a gate in a lane nothing depends on.
+test-wi:
+	$(WIPY) -m unittest discover -s .claude/skills/work-items/scripts -p 'test_*.py'
+
 # --- Event-sourced work-item machinery (design-rationale/work-item-state-model.md, process/machinery/CONTRACT.md) ---
 # State lives ONLY in the per-item files (work/$(PROJECT)/items/{active,done}/<ID>.md);
 # queues, stats and the dependency tree are DERIVED here, never stored-and-hand-synced.
 # Append an edge-checked event (the ONLY way to change item state; rejects illegal transitions):
-# make wi-append PROJECT=P ID=UC-1 EVENT=made_ready AGENT=flow-manager [REF=<sha>] [NOTE="..."] [TOKENS=<n>] [DURATION_MS=<n>]
+# make wi-append PROJECT=P ID=UC-1 EVENT=made_ready AGENT=flow-manager [REF=<sha>] [NOTE="..."] [TOKENS=<n>] [DURATION_MS=<n>] [OBSERVE=make:<target>]
 # TOKENS = subagent_tokens the dispatched specialist spent producing this transition (optional).
 # DURATION_MS = the dispatched agent's REAL cycle time in ms for this transition (optional;
 #   the dispatch layer's reported duration_ms). Feeds §F agent-cycle-time-vs-GLT in wi-project.
+# OBSERVE = the machine-checkable liveness predicate, REQUIRED on EVENT=not_yet_observed
+#   (entering `awaiting_observation`, state-graph v9). Form: `make:<target> [VAR=VALUE ...]`
+#   — a COMMITTED, RE-RUNNABLE target in work/$(PROJECT)/Makefile that exits 0 when the
+#   observation has landed and 3 when it has not (anything else = a BROKEN predicate,
+#   which blocks the loop; `make` itself exits 1/2, so a missing probe can never
+#   masquerade as "not observed yet"). Also accepted on the `amended` self-edge, where it
+#   REPLACES the predicate in effect. Rejected on any other event. A reason in NOTE is
+#   NOT a substitute: prose cannot come back negative (v125 §17c Layer 2).
+#
+# DURABLE PROSE MUST NOT TRANSIT A SHELL (OI-WI-APPEND-NOTE-PATH-MANGLES-CONTENT).
+# `--note "$(NOTE)"` crossed make's variable expansion and then a shell double-quoted
+# string, so `$` was expanded away (UC-XE1's `^…{12}$` end-anchor became an UNANCHORED
+# regex in the permanent record — a different claim about the world) and a backtick was
+# EXECUTED (a commit message lost a word to the macOS `open` binary actually running).
+# macOS ships GNU Make 3.81, which has no `$(file …)`, so there is NO way to move prose
+# out of a make variable without it crossing a shell command line.
+#
+# Therefore: NOTE_FILE is the safe route — a PATH has no metacharacters, so nothing can
+# eat it (the same reason `git commit -F` exists) — and a NOTE= carrying a shell-active
+# character is REFUSED rather than silently mangled. Fail closed: a corrupted audit
+# record must not be representable.
+#
+#   SAFE:  printf '%s' "…prose with \$ and \` and , …" > /tmp/note.txt
+#          make wi-append PROJECT=P ID=UC-1 EVENT=built_green AGENT=engineer NOTE_FILE=/tmp/note.txt
+#   OK:    NOTE="plain prose, commas are fine now"      (the comma bug is closed)
+#   REFUSED: NOTE="… ^x{12}$ …"  /  NOTE="… \`cmd\` …"   -> use NOTE_FILE
+#
+# Pinned by .claude/skills/work-items/scripts/test_wi_durable_prose.py, which drives
+# these REAL targets (the Python API never saw the corruption — transport did).
+#
+# The probe emits only `1` or nothing — never the offending character itself. Echoing
+# what it found into the guard's own shell string would reproduce the bug inside the
+# check for it (a `"` in NOTE would break the `[ -n "…" ]` quoting).
+NOTE_HAZARD = $(if $(strip $(findstring $$,$(value NOTE))$(findstring `,$(value NOTE))$(findstring ",$(value NOTE))$(findstring \,$(value NOTE))),1,)
 wi-append:
+	@if [ -n "$(NOTE_HAZARD)" ]; then \
+	  echo "wi-append REFUSED: NOTE= contains a character a shell eats or EXECUTES (\$$ \` \" \\)."; \
+	  echo "  It would be corrupted on the way into the permanent audit record, silently:"; \
+	  echo "  a \$$ is expanded away and a backtick is RUN as a command."; \
+	  echo "  Use the file route, which cannot be corrupted:"; \
+	  echo "    printf '%s' '<your note>' > /tmp/note.txt"; \
+	  echo "    make wi-append PROJECT=$(PROJECT) ID=$(ID) EVENT=$(EVENT) AGENT=$(AGENT) NOTE_FILE=/tmp/note.txt"; \
+	  exit 1; \
+	fi
 	$(WORKITEMS) append --project $(PROJECT) --id $(ID) --event $(EVENT) --agent $(AGENT) \
-	  $(if $(REF),--ref "$(REF)",) $(if $(NOTE),--note "$(NOTE)",) $(if $(TOKENS),--tokens "$(TOKENS)",) $(if $(DURATION_MS),--duration-ms "$(DURATION_MS)",)
+	  $(if $(REF),--ref "$(REF)",) $(if $(NOTE),--note "$(NOTE)",) $(if $(NOTE_FILE),--note-file "$(NOTE_FILE)",) $(if $(TOKENS),--tokens "$(TOKENS)",) $(if $(DURATION_MS),--duration-ms "$(DURATION_MS)",) $(if $(OBSERVE),--observe "$(OBSERVE)",)
 # Recompute ALL views (queues + stats + tree + re-render each item's derived block). Run after each loop.
 # make wi-project PROJECT=OagEventSource
 wi-project:
 	$(WORKITEMS) project --project $(PROJECT) $(if $(NOW),--now "$(NOW)",)
-# Drift GATE by construction (invariants I1-I4). Exit non-zero on any violation. Run before pulling.
+# Drift GATE by construction (invariants I1-I4 + I6). Exit non-zero on any violation. Run before pulling.
+# I6 [v9] = an `awaiting_observation` flow item carries a VALID observation predicate
+#   (append refuses the transition without one, so a violation here means a hand-edit).
+#   I5 stays RESERVED for IMP-011's still-owed CORE-job aggregate invariant.
 # make wi-validate PROJECT=OagEventSource
 wi-validate:
 	$(WORKITEMS) validate --project $(PROJECT)
@@ -192,13 +415,26 @@ wi-migrate:
 # Store stub and falls back to uv). linear-project.py is stdlib-only.
 #   make board-project PROJECT=ROC ID=UC-ROC-015   -> upsert one item's issue
 #   make test-board-project                         -> offline renderer unit test
+#   make board-audit [PROJECT=OagEventSource]       -> STATE_STATUS drift audit
+#
+# board-audit (OI-LINEAR-CANCELLED-STATE-UNMAPPED): the state->board-status table
+# is hand-maintained; the state graph is not. When they drifted, an unmapped state
+# rendered as *Backlog* with no signal — a terminal `cancelled` item read as
+# unstarted work for every version from state-graph v5 on. The audit compares the
+# table against process/machinery/state-graphs.json in BOTH directions and, with
+# PROJECT, checks every real item's (type,state) actually projects. Offline: no
+# network, no secret. Non-zero on any finding. The same audit runs inside
+# test-board-project, so the drift cannot reach the board unnoticed.
 BOARDPY ?= $(shell sh .claude/skills/work-items/scripts/work-items --python)
-.PHONY: board-project test-board-project
+.PHONY: board-project test-board-project board-audit
 board-project:
 	$(BOARDPY) .claude/tools/linear-project.py --project $(PROJECT) --id $(ID)
 
 test-board-project:
 	$(BOARDPY) .claude/tools/linear-project.test.py
+
+board-audit:
+	$(BOARDPY) .claude/tools/linear-project.py --audit $(if $(PROJECT),--project $(PROJECT),)
 
 # --- Process-doc conformance gate (process §27.5) -----------------------------
 # Scans the LIVE process/agent/skill/root docs for a DENYLIST of RETIRED
@@ -433,9 +669,84 @@ impacted-tests:
 	node .claude/tools/impacted-tests.js --since $(SINCE) --project $(PROJECT)
 
 # Self-tests for the cross-project agent-ops tooling under .claude/tools/
-# (IMP-007 impacted-tests.js). node's built-in runner, no creds, no network.
+# (IMP-007 impacted-tests.js, test-requirement-gate.js). node's built-in runner,
+# no creds, no network.
 test-tools:
 	node --test .claude/tools/*.test.js
+
+# --- §17d test-requirement gate — "the ONLY thing tests validate is the requirements" -
+# Human ruling, 2026-08-02. TWO LIMBS over the committed test sources:
+#   LIMB 1  every test case declares the acceptance criterion it validates, in the
+#           AC-<ID>.<n> vocabulary the codebase already uses. An untagged case is
+#           either WASTE (delete it) or an UNDISCOVERED acceptance criterion
+#           (register it — and the discovery gap earns a retro). The gate makes the
+#           choice unavoidable; it never makes the choice.
+#   LIMB 2  no AUTHORED PRECONDITIONS. A test that builds its prior by mutating a
+#           real capture (`delete capture.x.y`, an override spread over a
+#           corpus-loaded fixture, a hand-set folded field, a stubbed exec boundary)
+#           authored the world, so it can only confirm the code. Fold the prior from
+#           events, or harvest it.
+# Config + committed allowlist + ratchet baseline:
+#   .claude/config/test-requirement-gate/<PROJECT>.json
+# `make` cannot express a three-way exit (a recipe exiting 3 makes make print
+# `Error 3` and exit 2), so the verdict rides a STDOUT SENTINEL — `TRG-VERDICT:` —
+# and the exit code is only 0 or 2. Also wired as loop-gate check 6, so it runs
+# before EVERY pull; a gate in no workflow is not a gate.
+#   make test-requirement-gate [PROJECT=OagEventSource] [MODE=enforce|ratchet|report]
+#   make test-requirement-gate VERBOSE=1      # every limb-1 line
+#   make test-requirement-gate-baseline       # re-cut the ratchet floor (SHRINK only)
+test-requirement-gate:
+	node .claude/tools/test-requirement-gate.js --project $(PROJECT) \
+	  $(if $(MODE),--mode $(MODE),) $(if $(VERBOSE),--verbose,) $(if $(JSON),--json,)
+
+test-requirement-gate-baseline:
+	node .claude/tools/test-requirement-gate.js --project $(PROJECT) --write-baseline
+# --- DEFECT-OAG-058 commit-isolated: the ONLY safe commit on a shared tree ----
+# Up to five agents share one working tree and therefore ONE git index. Neither
+# previously-prescribed remedy works: `git add -- <mine>` + `git commit` commits
+# the WHOLE INDEX (b477f08 published nine files belonging to two other agents,
+# and on this trunk the push IS the apply); `git commit -- <mine>` commits from
+# the WORKING TREE, so it sweeps a concurrent agent's mid-edit save.
+# This builds a PRIVATE index (GIT_INDEX_FILE), adds only the declared paths,
+# asserts the tree diff is a subset of them, commits with commit-tree and moves
+# the branch by COMPARE-AND-SWAP, then resyncs the shared index for MY paths
+# only (a stale entry silently reverts my file at the next whole-index commit).
+# Pure git + filesystem; NO creds, NO network.
+# Exit 3 = declared-subset assertion fired (nothing committed); 4 = nothing to
+# commit for those paths; 5 = branch could not be advanced.
+#
+# THE MESSAGE IS DURABLE PROSE, so it gets the same treatment as an event note
+# (OI-WI-APPEND-NOTE-PATH-MANGLES-CONTENT). `--message "$(MSG)"` is the identical shape
+# to the `--note "$(NOTE)"` that corrupted the audit record, and it has already produced
+# two live instances: a backticked word EXECUTED by zsh (the macOS `open` binary really
+# ran; the word vanished from the committed message with no signal), and a multi-line
+# message REFUSED outright — `/bin/sh: -c: line 0: unexpected EOF while looking for
+# matching '"'`. So MSG_FILE is the route for anything multi-line or metacharacter-bearing
+# (a PATH cannot be eaten — the reason `git commit -F` exists), and a hazardous MSG= is
+# refused rather than silently mangled. A permanent commit nobody re-reads is exactly
+# where silent corruption survives longest.
+#
+#   SAFE (use this by default):
+#     make commit-isolated REPO=work/OagEventSource MSG_FILE=/tmp/msg.txt \
+#                          PATHS="src/app/src/a.ts src/app/tests/a.test.ts"
+#   OK for a one-liner with no metacharacters:
+#     make commit-isolated REPO=work/OagEventSource MSG="fix(x): intent (DEF-…)" PATHS="a b"
+MSG_HAZARD = $(if $(strip $(findstring $$,$(value MSG))$(findstring `,$(value MSG))$(findstring ",$(value MSG))$(findstring \,$(value MSG))),1,)
+commit-isolated:
+	@if [ -n "$(MSG_HAZARD)" ]; then \
+	  echo "commit-isolated REFUSED: MSG= contains a character a shell eats or EXECUTES (\$$ \` \" \\)."; \
+	  echo "  A commit message is a permanent audit record and nobody re-reads it, so"; \
+	  echo "  corruption here survives indefinitely: a \$$ is expanded away and a backtick"; \
+	  echo "  is RUN as a command (this really happened — the macOS 'open' binary ran)."; \
+	  echo "  Use the file route, which cannot be corrupted:"; \
+	  echo "    cat > /tmp/msg.txt <<'EOF'"; \
+	  echo "    <your message, metacharacters and all>"; \
+	  echo "    EOF"; \
+	  echo "    make commit-isolated REPO=$(REPO) MSG_FILE=/tmp/msg.txt PATHS=\"$(PATHS)\""; \
+	  exit 1; \
+	fi
+	node .claude/tools/isolated-commit.js --repo "$(REPO)" \
+	  $(if $(MSG),--message "$(MSG)",) $(if $(MSG_FILE),--message-file "$(MSG_FILE)",) -- $(PATHS)
 
 # --- IMP-008 WAF runner-IP exclusion helpers ----------------------------------
 # Add/remove a CIDR from the oxo-test-runner-ips WAFv2 IP set (us-east-1,
@@ -597,7 +908,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove sso-login retro-debt retro-mark wi-append wi-project wi-validate wi-migrate doc-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery
+.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap make-refs-tracked container-reap container-orphans sso-login retro-debt retro-mark loop-gate test-wi wi-append wi-project wi-validate wi-migrate doc-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated test-requirement-gate test-requirement-gate-baseline board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery
 
 # --- Viggo-fix UC-W7: Country/Nationality ID remediation (T-SQL) --------------
 # Data-driven, self-building T-SQL remediation script set + its local stand-up

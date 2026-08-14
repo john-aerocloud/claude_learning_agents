@@ -131,16 +131,34 @@ def parse_defect_fields(body):
     return out
 
 
+#: Matches the acceptance heading AS THE CORPUS ACTUALLY WRITES IT, at level 2 or 3,
+#: with anything after the word (e.g. "### Acceptance (to be authored on pull)").
+#: OI-BOARD-ACCEPTANCE-PARSER-MATCHES-NOTHING: the old pattern demanded the literal
+#: `## Acceptance criteria`, which essentially NO item uses, so the parser matched
+#: NOTHING tree-wide and every item was labelled `needs-acceptance` — a label applied
+#: to 100% of items conveys zero information and cannot discriminate an item with ten
+#: tagged conditions from one with none. Measured instances: DEFECT-OAG-054 (10 AC ids)
+#: and UC-XE1 (13 AC ids, pushed to Linear as DONE *and* needs-acceptance), then
+#: UC-DP2/DP3/DP4/DP5 on 2026-08-10. §17e — a gate that cries wolf is fixed, not tolerated.
+_ACCEPTANCE_HEADING = re.compile(r"^#{2,3}\s+Acceptance\b")
+#: Any level-2 or level-3 heading ends the section. This MUST allow `###` too: with the
+#: old `^##\s+` terminator a `### Acceptance` section would never be closed, so the
+#: parser would swallow every following `###` section as acceptance bullets. Fixing the
+#: start pattern alone would have traded a false negative for a false positive.
+_SECTION_HEADING = re.compile(r"^#{2,3}\s+")
+
+
 def parse_acceptance(body):
-    """THE FIX. Parse the `## Acceptance criteria …` section into a list of
-    COMPLETE criteria, joining hard-wrapped continuation lines (subsequent
-    indented lines belonging to the same bullet) into one string with wrap
-    newlines + indentation collapsed to single spaces."""
+    """Parse the acceptance section into a list of COMPLETE criteria, joining
+    hard-wrapped continuation lines (subsequent indented lines belonging to the same
+    bullet) into one string with wrap newlines + indentation collapsed to single
+    spaces. Accepts `## Acceptance`, `### Acceptance`, `## Acceptance criteria`, and
+    any parenthetical suffix."""
     lines = body.split("\n")
-    # locate the acceptance-criteria heading
+    # locate the acceptance heading
     start = None
     for i, line in enumerate(lines):
-        if re.match(r"^##\s+Acceptance criteria", line):
+        if _ACCEPTANCE_HEADING.match(line):
             start = i + 1
             break
     if start is None:
@@ -148,9 +166,25 @@ def parse_acceptance(body):
     criteria = []
     current = None
     for line in lines[start:]:
-        if re.match(r"^##\s+", line):  # next top-level section ends the list
+        if _SECTION_HEADING.match(line):  # next level-2/3 section ends the list
             break
-        bullet = re.match(r"^[-*]\s+(.*)$", line)
+        # BOTH bullet styles the corpus actually uses. Measured 2026-08-10 across
+        # items/active: 25 items carry tagged AC, and they are split between `- **AC-x**`
+        # (SLC-042/045/046, OI-OAG-NULL-COHORT-GROWTH, the UC-DP* family …) and NUMBERED
+        # `1. **AC-x**` (DEFECT-OAG-080/081/082/084/086, REQ-OAG-CODESHARE-PARENT, the
+        # SLC-CSP* family …). Matching only `[-*]` would have left every numbered item
+        # still reading zero — i.e. fixing the heading alone would have left half the
+        # corpus mis-flagged and looked like a fix.
+        # THIRD format: a markdown TABLE row, `| **AC-OB1.1** | criterion … |`.
+        # UC-OB1 transcribes nine criteria that way. Skip the header/separator rows
+        # (`| AC | Criterion |` and `|---|---|`) by requiring an AC-shaped first cell.
+        trow = re.match(r"^\|\s*\**\s*(AC-[A-Za-z0-9][\w.]*)\s*\**\s*\|(.*)\|?\s*$", line)
+        if trow:
+            if current is not None:
+                criteria.append(_collapse(current))
+            current = "%s %s" % (trow.group(1), trow.group(2).strip().rstrip("|").strip())
+            continue
+        bullet = re.match(r"^(?:[-*]|\d+\.)\s+(.*)$", line)
         if bullet:
             if current is not None:
                 criteria.append(_collapse(current))
@@ -359,14 +393,79 @@ def compose_labels(item):
         labels.append("open-item")
     if item.get("state") == "blocked":
         labels.append("blocked")
+    # `awaiting_observation` shares the Blocked status (no workspace has a
+    # dedicated one) but is a DIFFERENT fact: shipped and verified, waiting on
+    # reality to confirm it. The label is what keeps the two distinguishable on
+    # the board instead of collapsing into "blocked".
+    if item.get("state") == "awaiting_observation":
+        labels.append("awaiting-observation")
     if itype == "use-case" and not item.get("acceptance"):
-        labels.append("needs-acceptance")
+        # THE PIN owed by OI-BOARD-ACCEPTANCE-PARSER-MATCHES-NOTHING. Before claiming an
+        # item lacks acceptance, prove the PARSER is not the thing at fault: if the raw
+        # body carries tagged `AC-…` ids while we extracted none, the parser is broken and
+        # this label would be actively wrong. Per §17c the acceptance of that fix is the
+        # parser OBSERVED extracting the ids — not a regex that merely looks permissive —
+        # so this raises rather than mislabelling. It is the difference between "this item
+        # has no acceptance" and "I could not read its acceptance", which is exactly the
+        # measurement-that-cannot-come-back-negative class the open item named.
+        body = item.get("_body") or ""  # NB: `_body`, not `body` — see compose()
+        tagged = sorted(set(re.findall(r"\bAC-[A-Za-z0-9][\w.]*", body)))
+        if tagged:
+            # DISTINGUISH "has no acceptance" from "I could not READ its acceptance".
+            # Conflating them is the original defect: a label that cannot come back
+            # negative. So this emits a DIFFERENT label and a loud warning — it does
+            # NOT raise. Deliberate severity choice per §F8a (a gate blocks only on
+            # harm that stopping relieves): taking the whole board sync down over a
+            # label would be worse than the mislabel, and a sweep hits every historical
+            # item at once. Measured 2026-08-10: 19 items across active+done still
+            # carry AC ids the parser cannot read, so a raise here would have made the
+            # sync unrunnable.
+            sys.stderr.write(
+                "WARN acceptance-parser: %s carries %d tagged AC id(s) (e.g. %s) but "
+                "parse_acceptance() extracted ZERO — labelling `acceptance-unparsed`, "
+                "NOT `needs-acceptance`. The item is not at fault; the parser is. "
+                "See OI-BOARD-ACCEPTANCE-PARSER-MATCHES-NOTHING.\n"
+                % (item.get("id", "<unknown>"), len(tagged), tagged[0])
+            )
+            labels.append("acceptance-unparsed")
+        else:
+            labels.append("needs-acceptance")
     return labels
+
+
+# --------------------------------------------------------------------------- #
+# Errors (declared here: the state mapping below raises, and main() catches
+# LinearError -> exit 1 with a message rather than a traceback)
+# --------------------------------------------------------------------------- #
+class LinearError(Exception):
+    pass
 
 
 # --------------------------------------------------------------------------- #
 # State -> board-status name mapping (linear-mapping §2)
 # --------------------------------------------------------------------------- #
+# Candidate status names are tried IN ORDER against the team's real workflow
+# states (resolve_state_id) — the first that exists wins, so a list can carry a
+# preferred name a given workspace may not have. Nothing here CREATES a workflow
+# state; unresolvable names simply fall through.
+#
+# CANCELLED / AWAITING-OBSERVATION: `cancelled` (state-graph v5) and
+# `awaiting_observation` (v9) were both absent from this table for their whole
+# lifetimes, and the old `table.get(state, ["Backlog"])` fallback rendered them
+# as unstarted Backlog with no signal — OI-LINEAR-CANCELLED-STATE-UNMAPPED. The
+# entries below close that; `desired_status_names` now REFUSES rather than
+# degrades, and `audit_state_status` derives coverage from state-graphs.json so
+# the table cannot silently drift from the graph again.
+_CANCELLED = ["Cancelled", "Canceled"]  # US spelling is what this workspace has
+# An `awaiting_observation` item is shipped-but-unproven: owner-class `external`,
+# derived queue `waiting` — the same PARKED class as `blocked` (work-items.py
+# _PARKED_STATES). No workspace we project to has a dedicated status, so it reads
+# as the closest honest one, Blocked, and is told apart from a true block by the
+# `awaiting-observation` LABEL (compose_labels). It must never read as Backlog:
+# the item is deployed and verified, merely unconfirmed by reality.
+_AWAITING = ["Awaiting Observation", "Blocked", "In Review", "Todo", "Backlog"]
+_BLOCKED = ["Blocked", "Todo", "Backlog"]
+
 STATE_STATUS = {
     "use-case": {
         "registered": ["Backlog"],
@@ -378,44 +477,216 @@ STATE_STATUS = {
         "prod-deploying": ["In Progress"],
         "prod-validating": ["In Review"],
         "reworking": ["In Progress (rework)", "In Progress"],
-        "blocked": ["Blocked", "Todo", "Backlog"],
+        "blocked": _BLOCKED,
+        "awaiting_observation": _AWAITING,
         "done": ["Done"],
+        "cancelled": _CANCELLED,
     },
     "defect": {
         "reported": ["Backlog"],
         "reproducing": ["In Progress"],
         "fixing": ["In Progress"],
         "validating": ["In Review"],
-        "blocked": ["Blocked", "Todo", "Backlog"],
+        "blocked": _BLOCKED,
+        "awaiting_observation": _AWAITING,
         "resolved": ["Done"],
-        "wontfix": ["Cancelled", "Canceled"],
+        "wontfix": _CANCELLED,
+        "cancelled": _CANCELLED,
     },
     "open-item": {
         "open": ["Backlog"],
         "scheduled": ["Ready", "Todo", "Backlog"],
         "done": ["Done"],
-        "wontfix": ["Cancelled", "Canceled"],
+        "wontfix": _CANCELLED,
+        "cancelled": _CANCELLED,
     },
 }
-# aggregate items (slice/chunk/requirement) reuse the flow-item table
-STATE_STATUS["slice"] = STATE_STATUS["use-case"].copy()
-STATE_STATUS["slice"].update({"planned": ["Backlog"], "in_progress": ["In Progress"]})
-STATE_STATUS["chunk"] = STATE_STATUS["slice"]
-STATE_STATUS["requirement"] = STATE_STATUS["slice"]
+# Aggregate items (slice/chunk/requirement) hold ONLY what the bubble can produce
+# (work-items.py `_bubble`), so they get their own EXACT table rather than a copy
+# of the use-case one. The copy was a superset carrying a dozen states an
+# aggregate can never hold, which defeated the inverse sweep: stale keys could
+# hide there indefinitely.
+_AGGREGATE_STATUS = {
+    "planned": ["Backlog"],
+    "in_progress": ["In Progress"],
+    "blocked": _BLOCKED,
+    "awaiting_observation": _AWAITING,
+    "done": ["Done"],
+    "cancelled": _CANCELLED,
+}
+for _agg in ("slice", "chunk", "requirement"):
+    STATE_STATUS[_agg] = dict(_AGGREGATE_STATUS)
+
+
+class UnmappedStateError(LinearError):
+    """A state the projector cannot HONESTLY render. Raised, never defaulted:
+    the whole point of OI-LINEAR-CANCELLED-STATE-UNMAPPED is that a wrong board
+    status is worse than a refused projection, because it reads as real work."""
 
 
 def desired_status_names(itype, state):
-    table = STATE_STATUS.get(itype, STATE_STATUS["use-case"])
-    return table.get(state, ["Backlog"])
+    """The board-status candidates for (itype, state).
+
+    FAIL-CLOSED. There is deliberately NO fallback: an unmapped state, an unknown
+    item type, or a missing derived.state RAISES. The previous silent degradation
+    to ["Backlog"] is exactly how a terminal `cancelled` item spent from
+    state-graph v5 until 2026-08-03 rendering as unstarted work, and how two
+    deployed-and-verified `awaiting_observation` items (UC-ML1, UC-XC5) read as
+    Backlog — with no error, log or exception anywhere to notice."""
+    table = STATE_STATUS.get(itype)
+    if table is None:
+        raise UnmappedStateError(
+            f"unknown item type {itype!r}: no STATE_STATUS table. Projection "
+            f"REFUSED (it would have silently borrowed the use-case mapping). "
+            f"Add the type to STATE_STATUS in .claude/tools/linear-project.py "
+            f"(source of truth: process/machinery/state-graphs.json). "
+            f"Known types: {sorted(STATE_STATUS)}"
+        )
+    if state is None:
+        raise UnmappedStateError(
+            f"item type {itype!r} has NO derived.state to project. Projection "
+            f"REFUSED (it would have silently rendered as Backlog). Run "
+            f"`make wi-project` to regenerate the derived block, or check the "
+            f"item's frontmatter parses (source of truth: "
+            f"process/machinery/state-graphs.json)."
+        )
+    if state not in table:
+        raise UnmappedStateError(
+            f"unmapped state {state!r} for item type {itype!r}. Projection "
+            f"REFUSED (it would have silently rendered as Backlog — i.e. as "
+            f"unstarted work). Add {state!r} to STATE_STATUS[{itype!r}] in "
+            f".claude/tools/linear-project.py; the state is defined in the "
+            f"source of truth process/machinery/state-graphs.json. "
+            f"Mapped states for {itype!r}: {sorted(table)}"
+        )
+    return table[state]
+
+
+# --------------------------------------------------------------------------- #
+# STATE_STATUS <-> state-graphs.json drift audit (pure)
+#
+# The root cause was a hand-maintained table with no mechanical tie to the graph
+# it mirrors. These helpers DERIVE the expected coverage from the graph file, so
+# the offline test (linear-project.test.py) goes red the moment a new state lands
+# unmapped — instead of the board quietly misreporting it for months.
+# --------------------------------------------------------------------------- #
+STATE_GRAPHS_PATH = ROOT / "process" / "machinery" / "state-graphs.json"
+# The aggregate bubble's own working state (work-items.py `_bubble` -> the only
+# state it emits that is neither the initial, a terminal, nor an external wait).
+AGGREGATE_WORKING_STATE = "in_progress"
+
+
+def load_state_graphs(path=None):
+    p = Path(path) if path else STATE_GRAPHS_PATH
+    return json.loads(p.read_text(encoding="utf-8"))
+
+
+def external_wait_states(graphs):
+    """The PARKED states, read from the graph's own `state_owners` rather than
+    hand-listed: owner-class `external` == waiting on the outside world. Keeps
+    the aggregate range self-maintaining if a third external wait is ever added."""
+    owners = graphs.get("state_owners", {})
+    return {s for s, owner in owners.items() if owner == "external"}
+
+
+def graph_states(graphs, itype):
+    """Every state an item of `itype` can HOLD, derived from state-graphs.json.
+
+    Flow types: initial + terminal + every `from`/`to` in the transition table.
+    Aggregate types declare no transitions (their state BUBBLES from children per
+    work-items.py `_bubble`), so their range is initial + terminal + the working
+    state + the external-wait states an all-parked aggregate bubbles to."""
+    t = graphs.get("types", {}).get(itype)
+    if t is None:
+        return set()
+    states = {t.get("initial")} | set(t.get("terminal", []))
+    if t.get("kind") == "aggregate":
+        states |= {AGGREGATE_WORKING_STATE} | external_wait_states(graphs)
+    else:
+        for tr in t.get("transitions", []):
+            states.add(tr.get("from"))
+            states.add(tr.get("to"))
+    return {s for s in states if s}
+
+
+def audit_state_status(graphs=None):
+    """Both directions (there is no half of this worth having):
+      ('unmapped', itype, state)      a state the graph defines, table lacks
+                                      -> the live defect class; board lies.
+      ('unknown-state', itype, state)  a table key naming no real graph state
+                                      -> stale editorial debt; hides drift.
+      ('untyped', itype, None)         a graph type with no table at all.
+    Returns [] when the table and the graph agree exactly."""
+    graphs = graphs if graphs is not None else load_state_graphs()
+    gaps = []
+    for itype in graphs.get("types", {}):
+        expected = graph_states(graphs, itype)
+        table = STATE_STATUS.get(itype)
+        if table is None:
+            gaps.append(("untyped", itype, None))
+            continue
+        for state in sorted(expected - set(table)):
+            gaps.append(("unmapped", itype, state))
+        for state in sorted(set(table) - expected):
+            gaps.append(("unknown-state", itype, state))
+    return gaps
+
+
+def project_state_pairs(project):
+    """The (type, state) pairs ACTUALLY present in a project's item files — the
+    audit against reality rather than against the graph. Cheap frontmatter read;
+    no machinery import (this tool stays stdlib-only and standalone)."""
+    pairs = set()
+    for sub in ("active", "done"):
+        d = ROOT / "work" / project / "items" / sub
+        if not d.is_dir():
+            continue
+        for p in sorted(d.glob("*.md")):
+            fm, _ = split_item(p.read_text(encoding="utf-8"))
+            data = parse_frontmatter(fm)
+            if data.get("type") and data.get("state"):
+                pairs.add((data["type"], data["state"]))
+    return pairs
+
+
+def run_audit(project=None):
+    """CLI `--audit`: report drift both directions, plus (with --project) every
+    real item state. Exits non-zero on any finding — usable as a standing gate."""
+    graphs = load_state_graphs()
+    gaps = audit_state_status(graphs)
+    for kind, itype, state in gaps:
+        if kind == "unmapped":
+            print(f"UNMAPPED      {itype}/{state}: graph defines it, STATE_STATUS "
+                  f"does not -> would render as Backlog")
+        elif kind == "unknown-state":
+            print(f"STALE-KEY     {itype}/{state}: STATE_STATUS maps it, the graph "
+                  f"defines no such state for this type")
+        else:
+            print(f"UNTYPED       {itype}: graph type has no STATE_STATUS table")
+    bad_real = []
+    if project:
+        print(f"real (type,state) pairs in {project} -> status candidates, tried "
+              f"in order; the FIRST that exists in the team's workflow wins "
+              f"(offline: candidates are not resolved against the live team here)")
+        for itype, state in sorted(project_state_pairs(project)):
+            try:
+                names = desired_status_names(itype, state)
+                print(f"ok  {itype}/{state} -> {' | '.join(names)}")
+            except UnmappedStateError as e:
+                bad_real.append((itype, state))
+                print(f"UNPROJECTABLE {itype}/{state}: {e}")
+    if gaps or bad_real:
+        print(f"\nAUDIT FAILED: {len(gaps)} table/graph gap(s), "
+              f"{len(bad_real)} unprojectable real item state(s)")
+        return 1
+    print("\nAUDIT CLEAN: STATE_STATUS matches state-graphs.json exactly"
+          + (f", and every real item state in {project} projects" if project else ""))
+    return 0
 
 
 # --------------------------------------------------------------------------- #
 # Linear GraphQL client
 # --------------------------------------------------------------------------- #
-class LinearError(Exception):
-    pass
-
-
 def graphql(api_key, query, variables=None):
     payload = json.dumps({"query": query, "variables": variables or {}}).encode()
     req = urllib.request.Request(
@@ -616,9 +887,24 @@ def upsert(project, item_id):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Project one work item onto its Linear issue.")
-    ap.add_argument("--project", required=True)
-    ap.add_argument("--id", required=True, dest="item_id")
+    ap.add_argument("--project", required=False)
+    ap.add_argument("--id", required=False, dest="item_id")
+    ap.add_argument(
+        "--audit",
+        action="store_true",
+        help="offline: report STATE_STATUS drift against process/machinery/"
+             "state-graphs.json (both directions) and, with --project, every real "
+             "item state. No network, no secret. Non-zero on any finding.",
+    )
     args = ap.parse_args(argv)
+    if args.audit:
+        try:
+            return run_audit(args.project)
+        except (LinearError, FileNotFoundError, KeyError) as e:
+            print(f"linear-project: ERROR: {e}", file=sys.stderr)
+            return 1
+    if not args.project or not args.item_id:
+        ap.error("--project and --id are required (or use --audit)")
     try:
         return upsert(args.project, args.item_id)
     except (LinearError, FileNotFoundError, KeyError) as e:

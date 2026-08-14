@@ -57,13 +57,15 @@ class Base(unittest.TestCase):
         return os.path.join(self.tmp, "work", self.project, "items", sub)
 
     def write_item(self, sub, iid, itype, events, parents=None, deps=None,
-                   title="t", body="\n## Definition\nstub\n"):
-        item = wi.Item(os.path.join(self._items(sub), f"{iid}.md"),
-                       {"id": iid, "type": itype, "title": title,
-                        "job": "J0", "value": 1, "cost": 0.5,
-                        "parents": parents or [], "deps": deps or [],
-                        "created_ts": "2026-06-17T00:00:00Z", "events": events},
-                       body)
+                   title="t", body="\n## Definition\nstub\n", extra_fm=None):
+        fm = {"id": iid, "type": itype, "title": title,
+              "job": "J0", "value": 1, "cost": 0.5,
+              "parents": parents or [], "deps": deps or [],
+              "created_ts": "2026-06-17T00:00:00Z", "events": events}
+        # extra scalar frontmatter (e.g. v135 `defer_until:`) rides the
+        # future-proof extra-fields path in render_item
+        fm.update(extra_fm or {})
+        item = wi.Item(os.path.join(self._items(sub), f"{iid}.md"), fm, body)
         with open(item.path, "w", encoding="utf-8") as f:
             f.write(wi.render_item(item, {"state": None, "queue": None,
                                           "children": [], "ancestors": []}))
@@ -340,6 +342,96 @@ class TestAppend(Base):
             self._run_append("UC-FP", "validated", "tester")
         self.assertFalse(os.path.exists(os.path.join(self._items("active"), "UC-FP.md")))
         self.assertTrue(os.path.exists(os.path.join(self._items("done"), "UC-FP.md")))
+
+
+# --------------------------------------------------------------------------- #
+# The `amended` self-edge invariant (CONTRACT.md §2, state-graph v7/v8).
+#
+# CONTRACT.md already ASSERTS it — "Every non-terminal flow state has an
+# `amended` self-edge" — but v7 delivered it on two of the THREE flow graphs;
+# `open-item` was missed. Consequence observed 2026-08-01: the flow-manager could
+# not record a legitimate scope-narrowing on the open-item OI-CHUNKS-STALE-REF
+# and (correctly) refused to hand-work-around the graph. So the invariant is
+# asserted GENERICALLY here, across every flow type and every reachable
+# non-terminal state, so a future type cannot reintroduce the gap.
+# --------------------------------------------------------------------------- #
+class TestAmendedSelfEdge(Base):
+    AMEND_AGENTS = ["solution-architect", "product", "flow-manager", "orchestrator"]
+
+    def _states(self, itype):
+        """Every non-terminal state reachable in `itype`'s graph."""
+        g = self.graphs
+        trans = g.transitions(itype)
+        terminal = set(g.terminals(itype))
+        seen = {g.initial(itype)}
+        for t in trans:
+            seen.add(t["from"])
+            seen.add(t["to"])
+        return sorted(s for s in seen if s not in terminal)
+
+    def test_every_flow_type_has_amended_on_every_nonterminal_state(self):
+        flow_types = [t for t in self.graphs.types if self.graphs.kind(t) == "flow"]
+        self.assertIn("open-item", flow_types)
+        for itype in flow_types:
+            edges = {t["from"] for t in self.graphs.transitions(itype)
+                     if t["event"] == "amended" and t["to"] == t["from"]}
+            for state in self._states(itype):
+                self.assertIn(state, edges,
+                              f"{itype}/{state} has no `amended` self-edge")
+
+    def test_amend_agents_are_uniform(self):
+        for itype in [t for t in self.graphs.types
+                      if self.graphs.kind(t) == "flow"]:
+            for t in self.graphs.transitions(itype):
+                if t["event"] == "amended":
+                    self.assertEqual(sorted(t["agents"]),
+                                     sorted(self.AMEND_AGENTS), f"{itype}/{t}")
+
+    def test_open_item_can_record_an_amendment(self):
+        """The founding case, end to end through the real writer: an open item is
+        amended and STAYS in its state, with the reason on the event."""
+        self.write_item("active", "OI-X", "open-item",
+                        [{"ts": "2026-06-10T00:00:00Z", "event": "open",
+                          "agent": "orchestrator"}])
+        with contextlib.redirect_stdout(io.StringIO()):
+            wi.cmd_append(argparse.Namespace(
+                project=self.project, id="OI-X", event="amended",
+                agent="flow-manager", note="scope narrowed", ref=None,
+                ts="2026-06-11T00:00:00Z", tokens=None, duration_ms=None))
+        items, _ = wi.load_all_items(self.project)
+        st = wi.compute_states(self.graphs, items)
+        self.assertEqual(st["OI-X"], "open")          # self-edge: state unchanged
+        self.assertEqual(items["OI-X"].events[-1]["event"], "amended")
+        self.assertEqual(items["OI-X"].events[-1]["note"], "scope narrowed")
+
+    def test_amend_a_scheduled_open_item(self):
+        self.write_item("active", "OI-S", "open-item",
+                        [{"ts": "2026-06-10T00:00:00Z", "event": "open",
+                          "agent": "orchestrator"},
+                         {"ts": "2026-06-10T01:00:00Z", "event": "scheduled",
+                          "agent": "flow-manager"}])
+        with contextlib.redirect_stdout(io.StringIO()):
+            wi.cmd_append(argparse.Namespace(
+                project=self.project, id="OI-S", event="amended",
+                agent="product", note="narrowed", ref=None,
+                ts="2026-06-11T00:00:00Z", tokens=None, duration_ms=None))
+        items, _ = wi.load_all_items(self.project)
+        self.assertEqual(wi.compute_states(self.graphs, items)["OI-S"], "scheduled")
+
+    def test_open_item_amend_is_time_preserving(self):
+        """The self-edge must not distort dwell: an amend closes and reopens the
+        same state, so `open` is still one contiguous 2-day stretch."""
+        evs = [{"ts": "2026-06-10T00:00:00Z", "event": "open",
+                "agent": "orchestrator"},
+               {"ts": "2026-06-11T00:00:00Z", "event": "amended",
+                "agent": "flow-manager"}]
+        self.write_item("active", "OI-T", "open-item", evs)
+        items, _ = wi.load_all_items(self.project)
+        segs = wi.walk_states(self.graphs, items["OI-T"],
+                              wi.parse_ts("2026-06-12T00:00:00Z"))
+        self.assertEqual({s for s, _e, _x in segs}, {"open"})
+        total = sum((x - e).total_seconds() for _s, e, x in segs)
+        self.assertEqual(total, 2 * 86400)
 
 
 # --------------------------------------------------------------------------- #
@@ -680,6 +772,76 @@ class TestStats(Base):
         self.write_item("done", "UC-1", "use-case", self._clean_uc("UC-1"))
         by_owner = self._stats()["overall"]["gross_lead_time"]["by_owner"]
         self.assertAlmostEqual(by_owner["cicd"]["total_s"], 7200, places=1)   # 2h deploying
+
+    # ---- v132: backfill interpolation is held APART from measured dwell ----
+    def _backfilled_uc(self):
+        """A MIGRATED item: its timestamps were synthesised by spreading a span
+        evenly across its transitions, so every state segment is exactly 2h. Real
+        work never produces >=3 consecutive identical segments."""
+        return [
+            {"ts": _dt(12, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(12, 2), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(12, 4), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(12, 6), "event": "built_green", "agent": "engineer"},
+            {"ts": _dt(12, 8), "event": "deployed", "agent": "cicd"},
+            {"ts": _dt(12, 10), "event": "validated", "agent": "tester"},
+        ]
+
+    def test_interpolated_dwell_excluded_from_measured_totals(self):
+        """The whole point: a backfilled item must not move the time-thief
+        ranking. Its dwell is reported in its own column, never pooled."""
+        self.write_item("done", "UC-1", "use-case", self._clean_uc("UC-1"))
+        self.write_item("done", "UC-BF", "use-case", self._backfilled_uc())
+        s = self._stats()["overall"]["gross_lead_time"]
+        by_state = s["by_state"]
+        # measured totals are IDENTICAL to the clean-item-only case
+        self.assertAlmostEqual(by_state["registered"]["total_s"], 3600, places=1)
+        self.assertAlmostEqual(by_state["building"]["total_s"], 10800, places=1)
+        self.assertAlmostEqual(s["gross_lead_time_total_s"], 43200, places=1)
+        # the interpolated 2h-per-state shows up only as backfill
+        self.assertAlmostEqual(by_state["registered"]["backfill_s"], 7200, places=1)
+        self.assertAlmostEqual(by_state["building"]["backfill_s"], 7200, places=1)
+        # and a backfilled item is not counted as a completed measurement
+        self.assertEqual(s["n_completed_items"], 1)
+
+    def test_backfill_share_and_counts_reported(self):
+        self.write_item("done", "UC-1", "use-case", self._clean_uc("UC-1"))
+        self.write_item("done", "UC-BF", "use-case", self._backfilled_uc())
+        s = self._stats()["overall"]["gross_lead_time"]
+        self.assertEqual(s["n_backfill_items"], 1)
+        self.assertEqual(s["n_measured_items"], 1)
+        # 5 states x 2h = 36000s interpolated vs 43200s measured
+        self.assertAlmostEqual(s["backfill_total_s"], 36000, places=1)
+        self.assertAlmostEqual(s["backfill_share_of_reported_pct"],
+                               100 * 36000 / (36000 + 43200), places=1)
+        # per-state share is visible so a constraint call can be refused
+        self.assertAlmostEqual(
+            s["by_state"]["registered"]["backfill_pct_of_state"],
+            100 * 7200 / (7200 + 3600), places=1)
+
+    def test_two_equal_segments_is_not_interpolation(self):
+        """Guard against false positives: agreeing twice is coincidence, and
+        wrongly excluding real dwell would be worse than pooling it."""
+        self.assertFalse(wi._is_interpolated([3600, 3600]))
+        self.assertFalse(wi._is_interpolated([3600, 3600, 7200]))
+        self.assertTrue(wi._is_interpolated([3600, 3600, 3600]))
+        # zero-length segments must not make an item look uniform
+        self.assertFalse(wi._is_interpolated([0, 0, 0, 5]))
+
+    def test_median_per_item_dwell_is_count_independent(self):
+        """v128 routed this and it never landed; it is the number that tells
+        'work waits longer' from 'there is more work'. Adding items at the SAME
+        dwell must move the share but NOT the median."""
+        self.write_item("done", "UC-1", "use-case", self._clean_uc("UC-1"))
+        one = self._stats()["overall"]["gross_lead_time"]["by_state"]["registered"]
+        self.assertAlmostEqual(one["median_per_item_s"], 3600, places=1)
+        self.assertEqual(one["n_items"], 1)
+        for n in (2, 3, 4):
+            self.write_item("done", f"UC-{n}", "use-case", self._clean_uc(f"UC-{n}"))
+        many = self._stats()["overall"]["gross_lead_time"]["by_state"]["registered"]
+        self.assertAlmostEqual(many["total_s"], 4 * 3600, places=1)   # share grew
+        self.assertAlmostEqual(many["median_per_item_s"], 3600, places=1)  # median did not
+        self.assertEqual(many["n_items"], 4)
 
     def test_in_flight_uses_now(self):
         # a UC still building since d20 06:00; now=d30 00:00 => open segment counted
@@ -1078,6 +1240,130 @@ class TestRetro(Base):
         self.assertEqual(d["par"], 0.25)     # not clobbered
         self.assertEqual(d["keep_me"], "x")
         self.assertEqual(d["retro_debt_X"], 2)
+
+
+class TestPartsCheck(Base):
+    """v136 / EXP-132 — the cheap per-close constraint read.
+
+    The property under test is NOT "it drains debt". It is that the cheap path is
+    available ONLY when stability is PROVEN, and that every other case escalates.
+    A parts-check that could pass on a shifted or unreadable constraint would be
+    the softening §17e/EXP-125 forbid, so most of these tests assert REFUSAL.
+    """
+    def _defect(self, day):
+        return [
+            {"ts": _dt(day, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(day, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(day, 2), "event": "confirmed", "agent": "engineer"},
+            {"ts": _dt(day, 3), "event": "fixed", "agent": "engineer"},
+            {"ts": _dt(day, 5), "event": "validated", "agent": "tester"}]
+
+    def _stats(self, owner, state, owner_backfill_pct=0.0):
+        """Write a minimal views/stats.json with a known constraint."""
+        d = os.path.join(self.tmp, "work", self.project, "views")
+        os.makedirs(d, exist_ok=True)
+        doc = {"overall": {"gross_lead_time": {
+            "by_owner": {
+                owner: {"pct_of_glt": 60.0,
+                        "backfill_pct_of_state": owner_backfill_pct},
+                "engineer": {"pct_of_glt": 5.0, "backfill_pct_of_state": 0.0}},
+            "by_state": {
+                state: {"pct_of_glt": 42.0, "backfill_pct_of_state": 0.0},
+                "fixing": {"pct_of_glt": 3.0, "backfill_pct_of_state": 0.0}}}}}
+        with open(os.path.join(d, "stats.json"), "w", encoding="utf-8") as f:
+            json.dump(doc, f)
+
+    def _marker(self, ts="2026-06-01T00:00:00Z", constraint=None):
+        p = wi._retro_marker_path(self.project)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(ts + "\n")
+        if constraint:
+            wi._write_constraint_marker(self.project, constraint)
+
+    def _run(self, threshold=3, now=NOW):
+        ns = argparse.Namespace(project=self.project, threshold=threshold, now=now)
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            try:
+                wi.cmd_parts_check(ns)
+                code = 0
+            except SystemExit as e:
+                code = e.code
+        return code, out.getvalue()
+
+    def test_stable_constraint_drains_the_incident(self):
+        self._marker(constraint={"owner": "queue", "state": "open"})
+        self._stats("queue", "open")
+        self.write_item("done", "DEF-1", "defect", self._defect(15))
+        code, out = self._run()
+        self.assertEqual(code, 0, out)
+        self.assertIn("STABLE", out)
+        self.assertIn("DEF-1", out)
+        # and the debt is genuinely drained, not merely reported as fine
+        self.assertGreater(wi._read_retro_marker(self.project),
+                           wi.parse_ts("2026-06-14T00:00:00Z"))
+
+    def test_shifted_constraint_escalates_and_does_NOT_drain(self):
+        self._marker(ts="2026-06-01T00:00:00Z",
+                     constraint={"owner": "queue", "state": "open"})
+        self._stats("tester", "validating")          # both moved
+        self.write_item("done", "DEF-1", "defect", self._defect(15))
+        code, out = self._run()
+        self.assertEqual(code, 2, out)
+        self.assertIn("CONSTRAINT SHIFTED", out)
+        self.assertIn("queue/open -> tester/validating", out)
+        # the marker must be UNTOUCHED — an escalation may never drain debt
+        self.assertEqual(wi._read_retro_marker(self.project),
+                         wi.parse_ts("2026-06-01T00:00:00Z"))
+
+    def test_unreadable_constraint_escalates(self):
+        """An instrument that cannot be read is NOT evidence of stability."""
+        self._marker(constraint={"owner": "queue", "state": "open"})
+        # no stats.json at all
+        self.write_item("done", "DEF-1", "defect", self._defect(15))
+        code, out = self._run()
+        self.assertEqual(code, 2, out)
+        self.assertIn("could not be read", out)
+
+    def test_no_prior_record_escalates(self):
+        self._marker()                                # marker but NO constraint
+        self._stats("queue", "open")
+        self.write_item("done", "DEF-1", "defect", self._defect(15))
+        code, out = self._run()
+        self.assertEqual(code, 2, out)
+        self.assertIn("no prior constraint on record", out)
+
+    def test_routine_debt_at_threshold_still_escalates(self):
+        """parts-check drains the INCIDENT arm only; a slice-close backlog is a
+        different signal and keeps its batched full retro."""
+        self._marker(constraint={"owner": "queue", "state": "open"})
+        self._stats("queue", "open")
+        for i in range(3):
+            self._make_slice_close(i)
+        code, out = self._run(threshold=3)
+        self.assertEqual(code, 2, out)
+        self.assertIn("ROUTINE debt", out)
+
+    def _make_slice_close(self, i):
+        uc = f"UC-P{i}"
+        self.write_item("done", uc, "use-case", [
+            {"ts": _dt(15, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(15, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(15, 2), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(15, 3), "event": "built_green", "agent": "engineer"},
+            {"ts": _dt(15, 4), "event": "deployed", "agent": "cicd"},
+            {"ts": _dt(15, 12), "event": "validated", "agent": "tester"}],
+            parents=[f"SLC-P{i}"])
+        self.write_item("done", f"SLC-P{i}", "slice", [
+            {"ts": _dt(14, 0), "event": "registered", "agent": "flow-manager"}])
+
+    def test_high_backfill_owner_is_never_named_the_constraint(self):
+        """§17f.6 / EXP-128 — interpolation is not measurement, and the rule binds
+        this instrument too, or parts-check could 'confirm' a phantom constraint."""
+        self._stats("queue", "open", owner_backfill_pct=88.0)   # queue is mostly backfill
+        con = wi._read_constraint(self.project)
+        self.assertIsNotNone(con)
+        self.assertEqual(con["owner"], "engineer")   # the clean runner-up, not queue
 
 
 class TestProjectStatusline(Base):
@@ -1561,6 +1847,1922 @@ class TestAgentCycleTime(Base):
         md = wi._render_stats_md(self._stats())
         self.assertIn("F. Agent cycle time", md)
         self.assertIn("No agent duration recorded", md)
+
+
+# --------------------------------------------------------------------------- #
+# loop-gate — the MECHANICAL §F pull-precondition gate (v126). Four blocking
+# checks: stalled validation, ready-below-floor, queue-over-cap, retro debt.
+# Modelled on retro-debt: same launcher, --project, human-readable lines,
+# exit 0 = may pull / exit 2 = BLOCKED.
+#
+# All timestamps are explicit and `--now` is passed, so every assertion is
+# deterministic. Git is NEVER touched from a test (ROOT is a temp dir with no
+# project repo, so push-state resolves UNKNOWN unless monkeypatched).
+# --------------------------------------------------------------------------- #
+class TestLoopGate(Base):
+    def _policy(self, rows):
+        """Write work/<P>/queues/policy.csv from (queue, param, value) rows."""
+        d = os.path.join(self.tmp, "work", self.project, "queues")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "policy.csv"), "w", encoding="utf-8") as f:
+            f.write("queue,param,value,unit,owner,target_metric,last_tuned,experiment\n")
+            for q, p, v in rows:
+                f.write(f"{q},{p},{v},count,flow-manager,throughput,2026-06-01,EXP-022\n")
+
+    def _building_uc(self, iid, day=10):
+        return [{"ts": _dt(day, 0), "event": "registered", "agent": "flow-manager"},
+                {"ts": _dt(day, 1), "event": "made_ready", "agent": "flow-manager"},
+                {"ts": _dt(day, 2), "event": "pulled", "agent": "orchestrator"}]
+
+    def _reworking_uc(self, iid, day=10):
+        return self._building_uc(iid, day) + [
+            {"ts": _dt(day, 3), "event": "build_failed", "agent": "engineer"}]
+
+    def _default_policy(self):
+        # the shipped OagEventSource defaults
+        self._policy([("intake", "min_items", 2), ("intake", "wip_limit", 10),
+                      ("ready", "min_items", 3), ("ready", "wip_limit", 4),
+                      ("deploy", "min_items", 0), ("deploy", "wip_limit", 1),
+                      ("rework", "min_items", 0), ("rework", "wip_limit", 2)])
+
+    def _ready_uc(self, iid, day=10):
+        return [{"ts": _dt(day, 0), "event": "registered", "agent": "flow-manager"},
+                {"ts": _dt(day, 1), "event": "made_ready", "agent": "flow-manager"}]
+
+    def _validating_defect(self, day, hour, ref="abc1234", fixed_ref=True):
+        """A defect parked in `validating` since day/hour — fix done (ref), only
+        a tester dispatch missing. This is the DEFECT-OAG-045 shape."""
+        evs = [{"ts": _dt(day, 0), "event": "reported", "agent": "orchestrator"},
+               {"ts": _dt(day, 1), "event": "triaged", "agent": "orchestrator"},
+               {"ts": _dt(day, 2), "event": "confirmed", "agent": "engineer"},
+               {"ts": _dt(day, hour), "event": "fixed", "agent": "engineer"}]
+        if fixed_ref:
+            evs[-1]["ref"] = ref
+        return evs
+
+    # NEVER_AGES: a max-backlog-age so large the v135 age check cannot fire. The
+    # depth-focused tests below use it to isolate DEPTH from AGE — the two are
+    # deliberately different quantities with different severities, and a test for
+    # one must not be perturbed by the other.
+    NEVER_AGES = 10_000.0
+
+    def _gate(self, stale_hours=4.0, threshold=3, now=NOW, observe=True,
+              observe_timeout=None,
+              max_backlog_age_days=wi.DEFAULT_MAX_BACKLOG_AGE_DAYS):
+        return wi.compute_loop_gate(
+            self.graphs, self.project, stale_hours=stale_hours,
+            threshold=threshold, now=wi.parse_ts(now), observe=observe,
+            observe_timeout=(wi.DEFAULT_OBSERVE_TIMEOUT if observe_timeout is None
+                             else observe_timeout),
+            max_backlog_age_days=max_backlog_age_days)
+
+    def _run(self, stale_hours=4.0, threshold=3, now=NOW, observe=True,
+             max_backlog_age_days=wi.DEFAULT_MAX_BACKLOG_AGE_DAYS):
+        ns = argparse.Namespace(project=self.project, stale_hours=stale_hours,
+                                threshold=threshold, now=now, observe=observe,
+                                max_backlog_age_days=max_backlog_age_days,
+                                observe_timeout=wi.DEFAULT_OBSERVE_TIMEOUT)
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            try:
+                wi.cmd_loop_gate(ns)
+                code = 0
+            except SystemExit as e:
+                code = e.code
+        return code, out.getvalue()
+
+    def _checks(self, findings):
+        return [f["check"] for f in findings if f["severity"] == "block"]
+
+    def _advisories(self, findings):
+        return [f for f in findings if f["severity"] == "advisory"]
+
+    # ---- all clear -----------------------------------------------------------
+    def test_all_preconditions_hold_exits_zero(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        findings = self._gate()
+        self.assertEqual(self._checks(findings), [], findings)
+        code, out = self._run()
+        self.assertEqual(code, 0)
+        self.assertIn("may pull", out)
+
+    # ---- check 1: stalled validation ----------------------------------------
+    def test_stalled_validation_blocks(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        # fixed@d20 12:00 with a ref; now = d30 -> ~10 days in `validating`
+        self.write_item("active", "DEF-STALE", "defect",
+                        self._validating_defect(20, 12, ref="5095849"))
+        findings = self._gate()
+        self.assertIn("stalled-validation", self._checks(findings))
+        f = [x for x in findings if x["check"] == "stalled-validation"][0]
+        self.assertIn("DEF-STALE", f["ids"])
+        self.assertEqual(f["state"], "validating")
+        self.assertEqual(f["ref"], "5095849")
+        self.assertGreater(f["dwell_s"], 4 * 3600)
+        code, out = self._run()
+        self.assertEqual(code, 2)
+        self.assertIn("DEF-STALE", out)
+        self.assertIn("stalled-validation", out)
+
+    def test_validation_within_threshold_does_not_block(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        # fixed 2h before `now` -> under the 4h default
+        self.write_item("active", "DEF-FRESH", "defect",
+                        self._validating_defect(29, 22, ref="deadbee"))
+        findings = self._gate()
+        self.assertNotIn("stalled-validation", self._checks(findings))
+        self.assertEqual(self._run()[0], 0)
+
+    def test_stale_hours_is_overridable(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self.write_item("active", "DEF-FRESH", "defect",
+                        self._validating_defect(29, 22, ref="deadbee"))  # 2h dwell
+        self.assertNotIn("stalled-validation", self._checks(self._gate(stale_hours=4)))
+        self.assertIn("stalled-validation", self._checks(self._gate(stale_hours=1)))
+
+    def test_stalled_validation_without_ref_is_unknown_not_block(self):
+        """No structured ref => we CANNOT establish the work is done. Report
+        UNKNOWN (advisory), never assume either way."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self.write_item("active", "DEF-NOREF", "defect",
+                        self._validating_defect(20, 12, fixed_ref=False))
+        findings = self._gate()
+        self.assertNotIn("stalled-validation", self._checks(findings))
+        unknown = [f for f in findings if f["severity"] == "unknown"]
+        self.assertTrue(any("DEF-NOREF" in f["ids"] for f in unknown), findings)
+        code, out = self._run()
+        self.assertEqual(code, 0)             # UNKNOWN does not block
+        # ...but it reaches the HEADLINE: a run that failed to establish something
+        # may never report "all preconditions hold"
+        self.assertIn("NOT ESTABLISHED", out)
+        self.assertNotIn("all preconditions hold", out)
+
+    def test_uc_dev_validating_stall_blocks_on_deployed_ref(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self.write_item("active", "UC-STALE", "use-case", [
+            {"ts": _dt(20, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(20, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(20, 2), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(20, 3), "event": "built_green", "agent": "engineer", "ref": "aaa111"},
+            {"ts": _dt(20, 4), "event": "deployed", "agent": "cicd", "ref": "bbb222"},
+        ])
+        f = [x for x in self._gate() if x["check"] == "stalled-validation"][0]
+        self.assertIn("UC-STALE", f["ids"])
+        self.assertEqual(f["state"], "dev-validating")
+        self.assertEqual(f["ref"], "bbb222")     # LATEST ref-bearing done-work event
+
+    def test_prod_validating_stall_blocks(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self.write_item("active", "UC-PROD", "use-case", [
+            {"ts": _dt(20, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(20, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(20, 2), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(20, 3), "event": "built_green", "agent": "engineer", "ref": "aaa111"},
+            {"ts": _dt(20, 4), "event": "deployed", "agent": "cicd", "ref": "bbb222"},
+            {"ts": _dt(20, 5), "event": "dev_validated", "agent": "tester"},
+            {"ts": _dt(20, 6), "event": "promoted", "agent": "cicd", "ref": "ccc333"},
+        ])
+        f = [x for x in self._gate() if x["check"] == "stalled-validation"][0]
+        self.assertIn("UC-PROD", f["ids"])
+        self.assertEqual(f["state"], "prod-validating")
+
+    def test_stalled_validation_clears_when_validated(self):
+        """Proof-of-fire pair: RED with the item parked in validating, GREEN once
+        the tester's `validated` event lands."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        evs = self._validating_defect(20, 12, ref="5095849")
+        self.write_item("active", "DEF-STALE", "defect", evs)
+        self.assertEqual(self._run()[0], 2)
+        # tester dispatched -> validated. (Set the retro marker past the resolve so
+        # the now-resolved defect's retro debt — check 4 — isn't what we measure.)
+        os.remove(os.path.join(self._items("active"), "DEF-STALE.md"))
+        self.write_item("done", "DEF-STALE", "defect",
+                        evs + [{"ts": _dt(21, 0), "event": "validated", "agent": "tester"}])
+        wi.cmd_retro_mark(argparse.Namespace(project=self.project,
+                                            now="2026-06-22T00:00:00Z"))
+        self.assertEqual(self._run()[0], 0)
+
+    # ---- push state comes from GIT, never from event-note PROSE --------------
+    def test_push_state_from_git_not_note_prose(self):
+        """The founding error: an event NOTE claiming 'NOT pushed' was 35h stale
+        while the ref WAS on origin/main. The note must never be consulted."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        evs = self._validating_defect(20, 12, ref="5095849")
+        evs[-1]["note"] = "NOT pushed — push is the prod apply"
+        self.write_item("active", "DEF-STALE", "defect", evs)
+        calls = []
+
+        def fake(project, ref):
+            calls.append((project, ref))
+            return True                      # git says: on trunk
+
+        orig = wi._ref_on_trunk
+        wi._ref_on_trunk = fake
+        try:
+            f = [x for x in self._gate() if x["check"] == "stalled-validation"][0]
+        finally:
+            wi._ref_on_trunk = orig
+        self.assertEqual(calls, [(self.project, "5095849")])
+        self.assertIs(f["on_trunk"], True)    # git, not the stale note
+        self.assertIn("on origin trunk", f["message"])
+
+    def test_unresolvable_ref_reports_unknown_push_state(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self.write_item("active", "DEF-STALE", "defect",
+                        self._validating_defect(20, 12, ref="notasha"))
+        orig = wi._ref_on_trunk
+        wi._ref_on_trunk = lambda p, r: None       # cannot resolve
+        try:
+            f = [x for x in self._gate() if x["check"] == "stalled-validation"][0]
+        finally:
+            wi._ref_on_trunk = orig
+        self.assertIsNone(f["on_trunk"])
+        self.assertIn("UNKNOWN", f["message"])
+
+    def test_ref_on_trunk_returns_none_without_repo(self):
+        # ROOT is a temp dir: work/<P> is not a git repo -> UNKNOWN, never a guess
+        self.assertIsNone(wi._ref_on_trunk(self.project, "5095849"))
+
+    # ---- check 2: ready below floor -----------------------------------------
+    def test_ready_below_floor_blocks(self):
+        self._default_policy()
+        self.write_item("active", "UC-XC5", "use-case", self._ready_uc(10))   # ready=1
+        findings = self._gate()
+        self.assertIn("ready-below-floor", self._checks(findings))
+        f = [x for x in findings if x["check"] == "ready-below-floor"][0]
+        self.assertEqual((f["depth"], f["floor"]), (1, 3))
+        code, out = self._run()
+        self.assertEqual(code, 2)
+        self.assertIn("ready depth 1 < min_items 3", out)
+
+    def test_ready_at_floor_does_not_block(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self.assertNotIn("ready-below-floor", self._checks(self._gate()))
+
+    def test_scheduled_open_items_count_toward_ready(self):
+        # queue_map: both `ready` and `scheduled` map to the ready queue
+        self._default_policy()
+        self.write_item("active", "UC-R0", "use-case", self._ready_uc(10))
+        for i in range(2):
+            self.write_item("active", f"OI-{i}", "open-item", [
+                {"ts": _dt(10, 0), "event": "open", "agent": "orchestrator"},
+                {"ts": _dt(10, 1), "event": "scheduled", "agent": "flow-manager"}])
+        self.assertNotIn("ready-below-floor", self._checks(self._gate()))
+
+    # ---- check 3: queue over cap -------------------------------------------
+    # TWO SEVERITIES (v126 addendum). A WIP-STAGE queue over cap is real concurrent-work
+    # harm and BLOCKS. A BACKLOG queue (intake) over cap is ADVISORY: Little's Law
+    # governs WIP, not backlog depth, and blocking the pull for a deep backlog
+    # INVERTS the constraint — the remedy for a deep backlog is to deliver faster,
+    # which is exactly what the block prevents. Founding case (2026-08-01): a
+    # legitimate differential sweep produced ~15 verified-real sub-cost-4 findings;
+    # the flow-manager correctly refused to close any of them and the loop halted
+    # for having done good discovery work.
+    def test_intake_over_cap_is_advisory_not_blocking(self):
+        """PROOF CASE 1: backlog over cap ALONE => exit 0, advisory printed."""
+        self._policy([("ready", "min_items", 0), ("intake", "wip_limit", 10)])
+        for i in range(14):
+            self.write_item("active", f"OI-{i:02d}", "open-item", [
+                {"ts": _dt(10, 0), "event": "open", "agent": "orchestrator"}])
+        findings = self._gate(max_backlog_age_days=self.NEVER_AGES)
+        self.assertNotIn("queue-over-cap", self._checks(findings))   # NOT blocking
+        adv = self._advisories(findings)
+        self.assertEqual([f["queue"] for f in adv], ["intake"], findings)
+        f = adv[0]
+        self.assertEqual((f["check"], f["queue"], f["depth"], f["cap"], f["over"]),
+                         ("queue-over-cap", "intake", 14, 10, 4))
+        self.assertEqual(f["kind"], wi.QUEUE_KIND_BACKLOG)
+        code, out = self._run(max_backlog_age_days=self.NEVER_AGES)
+        self.assertEqual(code, 0)                                    # exit 0
+        self.assertIn("may pull", out)
+        # the advisory is still reported PROMINENTLY, with depth + overage + remedy,
+        # and is unmistakably NOT satisfied
+        self.assertIn("ADVISORY", out)
+        self.assertIn("intake depth 14 > wip_limit 10", out)
+        self.assertIn("over by 4", out)
+        self.assertIn("deliver faster", out.lower())
+
+    def test_wip_stage_over_cap_blocks(self):
+        """PROOF CASE 2: a WIP-stage queue over cap => exit 2."""
+        self._policy([("ready", "min_items", 0), ("wip", "wip_limit", 1)])
+        for i in range(3):
+            self.write_item("active", f"UC-B{i}", "use-case", self._building_uc(i))
+        findings = self._gate()
+        self.assertIn("queue-over-cap", self._checks(findings))
+        f = [x for x in findings if x["check"] == "queue-over-cap"][0]
+        self.assertEqual((f["queue"], f["depth"], f["cap"], f["kind"]),
+                         ("wip", 3, 1, wi.QUEUE_KIND_WIP))
+        code, out = self._run()
+        self.assertEqual(code, 2)
+        self.assertIn("wip depth 3 > wip_limit 1", out)
+
+    def test_ready_over_cap_blocks(self):
+        self._policy([("ready", "min_items", 0), ("ready", "wip_limit", 2)])
+        for i in range(4):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        f = [x for x in self._gate() if x["check"] == "queue-over-cap"][0]
+        self.assertEqual((f["severity"], f["queue"], f["depth"]), ("block", "ready", 4))
+        self.assertEqual(self._run()[0], 2)
+
+    def test_rework_over_cap_blocks(self):
+        self._policy([("ready", "min_items", 0), ("rework", "wip_limit", 1)])
+        for i in range(2):
+            self.write_item("active", f"UC-RW{i}", "use-case", self._reworking_uc(i))
+        f = [x for x in self._gate() if x["check"] == "queue-over-cap"][0]
+        self.assertEqual((f["severity"], f["queue"], f["depth"]), ("block", "rework", 2))
+        self.assertEqual(self._run()[0], 2)
+
+    def test_backlog_advisory_and_wip_block_together(self):
+        """PROOF CASE 3: both together => exit 2, advisory STILL shown alongside."""
+        self._policy([("ready", "min_items", 0), ("intake", "wip_limit", 1),
+                      ("wip", "wip_limit", 1)])
+        for i in range(3):
+            self.write_item("active", f"OI-{i}", "open-item", [
+                {"ts": _dt(10, 0), "event": "open", "agent": "orchestrator"}])
+        for i in range(2):
+            self.write_item("active", f"UC-B{i}", "use-case", self._building_uc(i))
+        findings = self._gate()
+        by_sev = {f["queue"]: f["severity"] for f in findings
+                  if f["check"] == "queue-over-cap"}
+        self.assertEqual(by_sev, {"intake": "advisory", "wip": "block"})
+        code, out = self._run()
+        self.assertEqual(code, 2)                       # the WIP violation blocks
+        self.assertIn("wip depth 2 > wip_limit 1", out)  # blocking line
+        self.assertIn("intake depth 3 > wip_limit 1", out)  # advisory line STILL shown
+        self.assertIn("ADVISORY", out)
+
+    def test_queue_at_cap_does_not_block(self):
+        self._policy([("ready", "min_items", 0), ("intake", "wip_limit", 10)])
+        for i in range(10):
+            self.write_item("active", f"OI-{i:02d}", "open-item", [
+                {"ts": _dt(10, 0), "event": "open", "agent": "orchestrator"}])
+        findings = self._gate()
+        self.assertNotIn("queue-over-cap", self._checks(findings))
+        self.assertEqual(self._advisories(findings), [])   # at cap: not even advisory
+
+    def test_every_over_cap_queue_is_reported_not_just_the_first(self):
+        self._policy([("ready", "min_items", 0), ("intake", "wip_limit", 1),
+                      ("rework", "wip_limit", 0)])
+        for i in range(3):
+            self.write_item("active", f"OI-{i}", "open-item", [
+                {"ts": _dt(10, 0), "event": "open", "agent": "orchestrator"}])
+        self.write_item("active", "UC-RW", "use-case", self._reworking_uc(10))
+        qs = sorted(f["queue"] for f in self._gate() if f["check"] == "queue-over-cap")
+        self.assertEqual(qs, ["intake", "rework"])
+
+    # ---- the backlog/wip classification is DECLARED, not a hardcoded name ----
+    def test_queue_kind_declared_in_policy_csv(self):
+        """policy.csv is long-format (queue,param,value), so `kind` is a new PARAM
+        ROW — no column change, so no other reader of the file is affected."""
+        self._policy([("ready", "min_items", 0), ("rework", "wip_limit", 1),
+                      ("rework", "kind", "backlog")])
+        for i in range(2):
+            self.write_item("active", f"UC-RW{i}", "use-case", self._reworking_uc(i))
+        findings = self._gate(max_backlog_age_days=self.NEVER_AGES)
+        self.assertNotIn("queue-over-cap", self._checks(findings))   # declared backlog
+        self.assertEqual([f["queue"] for f in self._advisories(findings)], ["rework"])
+        self.assertEqual(self._run(max_backlog_age_days=self.NEVER_AGES)[0], 0)
+
+    def test_policy_csv_can_declare_intake_as_wip(self):
+        """The declaration is authoritative in BOTH directions — the default map is
+        only a fallback, never an override."""
+        self._policy([("ready", "min_items", 0), ("intake", "wip_limit", 1),
+                      ("intake", "kind", "wip")])
+        for i in range(3):
+            self.write_item("active", f"OI-{i}", "open-item", [
+                {"ts": _dt(10, 0), "event": "open", "agent": "orchestrator"}])
+        self.assertIn("queue-over-cap", self._checks(self._gate()))
+        self.assertEqual(self._run()[0], 2)
+
+    def test_undeclared_queue_defaults_to_wip_fail_closed(self):
+        """A future in-flight stage nobody classified BLOCKS (fail-closed); only
+        `intake` defaults to backlog."""
+        self.assertEqual(wi.queue_kind({}, "wip"), wi.QUEUE_KIND_WIP)
+        self.assertEqual(wi.queue_kind({}, "rework"), wi.QUEUE_KIND_WIP)
+        self.assertEqual(wi.queue_kind({}, "ready"), wi.QUEUE_KIND_WIP)
+        self.assertEqual(wi.queue_kind({}, "some-future-stage"), wi.QUEUE_KIND_WIP)
+        self.assertEqual(wi.queue_kind({}, "intake"), wi.QUEUE_KIND_BACKLOG)
+
+    def test_unrecognised_kind_value_falls_back_to_default(self):
+        self.assertEqual(wi.queue_kind({"wip": {"kind": "nonsense"}}, "wip"),
+                         wi.QUEUE_KIND_WIP)
+        self.assertEqual(wi.queue_kind({"intake": {"kind": "nonsense"}}, "intake"),
+                         wi.QUEUE_KIND_BACKLOG)
+        self.assertEqual(wi.queue_kind({"intake": {"kind": " BACKLOG "}}, "intake"),
+                         wi.QUEUE_KIND_BACKLOG)
+
+    def test_template_seed_policy_csv_declares_the_kinds(self):
+        """The `work/_TEMPLATE` seed (agent-system state, not project data) DECLARES
+        the classification, so every new project ships it visible where the retro
+        tunes the buffers — not only in code. Existing projects whose policy.csv
+        predates the `kind` row are covered by the fallback map, which is why the
+        row is additive and nothing breaks."""
+        path = os.path.join(self._orig_root, "work", "_TEMPLATE", "queues",
+                            "policy.csv")
+        rows = [r for r in open(path, encoding="utf-8").read().splitlines()
+                if r.strip()][1:]
+        kinds = {r.split(",")[0]: r.split(",")[2] for r in rows
+                 if r.split(",")[1] == "kind"}
+        self.assertEqual(kinds.get("intake"), "backlog", kinds)
+        for q in ("ready", "rework", "deploy"):
+            self.assertEqual(kinds.get(q), "wip", f"{q}: {kinds}")
+        # and the header/column set is UNCHANGED — `kind` is a new row, not a column
+        header = open(path, encoding="utf-8").readline().strip()
+        self.assertEqual(header, "queue,param,value,unit,owner,target_metric,"
+                                 "last_tuned,experiment")
+
+    def test_advisory_only_run_says_it_may_pull_and_still_shows_advisory(self):
+        """An advisory-only run must be unmistakable: exit 0, 'may pull', AND the
+        advisory reported so it cannot be read as satisfied."""
+        self._policy([("ready", "min_items", 0), ("intake", "wip_limit", 2)])
+        for i in range(5):
+            self.write_item("active", f"OI-{i}", "open-item", [
+                {"ts": _dt(10, 0), "event": "open", "agent": "orchestrator"}])
+        code, out = self._run(max_backlog_age_days=self.NEVER_AGES)
+        self.assertEqual(code, 0)
+        self.assertIn("may pull", out)
+        self.assertNotIn("BLOCKED", out)
+        self.assertIn("ADVISORY", out)
+        self.assertIn("1 advisory", out.lower())
+
+    # ---- check 4: retro debt (DELEGATED to compute_retro_debt, not re-coded) --
+    def test_retro_debt_due_blocks(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        # a resolved defect since the marker = an INCIDENT -> immediate retro debt
+        self.write_item("done", "DEF-RESOLVED", "defect", [
+            {"ts": _dt(15, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(15, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(15, 2), "event": "confirmed", "agent": "engineer"},
+            {"ts": _dt(15, 3), "event": "fixed", "agent": "engineer", "ref": "f00d"},
+            {"ts": _dt(15, 5), "event": "validated", "agent": "tester"}])
+        findings = self._gate()
+        self.assertIn("retro-debt", self._checks(findings))
+        code, out = self._run()
+        self.assertEqual(code, 2)
+        self.assertIn("RETRO DUE", out)
+
+    def test_retro_debt_clears_after_retro_mark(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self.write_item("done", "DEF-RESOLVED", "defect", [
+            {"ts": _dt(15, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(15, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(15, 2), "event": "confirmed", "agent": "engineer"},
+            {"ts": _dt(15, 3), "event": "fixed", "agent": "engineer", "ref": "f00d"},
+            {"ts": _dt(15, 5), "event": "validated", "agent": "tester"}])
+        self.assertEqual(self._run()[0], 2)
+        wi.cmd_retro_mark(argparse.Namespace(project=self.project,
+                                            now="2026-06-16T00:00:00Z"))
+        self.assertNotIn("retro-debt", self._checks(self._gate()))
+        self.assertEqual(self._run()[0], 0)
+
+    def test_retro_debt_delegates_to_compute_retro_debt(self):
+        """DRY: loop-gate must CALL the existing retro-debt logic, not clone it."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        calls = []
+        orig = wi.compute_retro_debt
+
+        def spy(graphs, project, threshold, now):
+            calls.append((project, threshold))
+            return ([], [], False, [], wi.parse_ts("2026-06-01T00:00:00Z"))
+
+        wi.compute_retro_debt = spy
+        try:
+            self._gate(threshold=7)
+        finally:
+            wi.compute_retro_debt = orig
+        self.assertEqual(calls, [(self.project, 7)])
+
+    # ---- reports EVERY violation, not just the first ------------------------
+    # ---- check 4b: aged backlog item with NO DECISION (v135, EXP-131) --------
+    # The constraint these guard: `open` was the top GLT contributor for two
+    # consecutive retros. The gate blocks on AGE-WITHOUT-A-DECISION, which is
+    # count-independent, and NEVER on depth (that stays advisory — Little's Law).
+    def _open_items(self, n, day=10, extra_fm=None):
+        self._policy([("ready", "min_items", 0)])   # no depth cap at all
+        for i in range(n):
+            self.write_item("active", f"OI-A{i}", "open-item",
+                            [{"ts": _dt(day, 0), "event": "open",
+                              "agent": "orchestrator"}],
+                            extra_fm=extra_fm)
+
+    def test_aged_backlog_item_with_no_decision_blocks(self):
+        """20d old, no decision => BLOCK. Note there is NO wip_limit here at all,
+        so this cannot be the depth check firing under another name."""
+        self._open_items(2, day=10)                       # NOW is 2026-06-30
+        findings = self._gate()
+        self.assertIn("aged-backlog-undecided", self._checks(findings))
+        f = [x for x in findings if x["check"] == "aged-backlog-undecided"][0]
+        self.assertEqual(sorted(f["ids"]), ["OI-A0", "OI-A1"])
+        code, out = self._run()
+        self.assertEqual(code, 2)
+        self.assertIn("aged-backlog-undecided", out)
+        # the remedy must offer the CHEAP path, and must forbid the harmful one
+        self.assertIn("defer_until", out)
+        self.assertIn("Do NOT close a real finding", out)
+
+    def test_young_backlog_item_does_not_block(self):
+        """Age is the trigger. A fresh item is fine however many there are."""
+        self._open_items(25, day=28)                      # 2d old at NOW
+        self.assertNotIn("aged-backlog-undecided", self._checks(self._gate()))
+        self.assertEqual(self._run()[0], 0)
+
+    def test_in_date_defer_clears_the_block(self):
+        """A dated defer IS a decision — one line, and the gate goes green."""
+        self._open_items(2, day=10, extra_fm={"defer_until": "2026-07-15"})
+        self.assertNotIn("aged-backlog-undecided", self._checks(self._gate()))
+        self.assertEqual(self._run()[0], 0)
+
+    def test_expired_defer_re_blocks(self):
+        """A defer has a SHELF LIFE (the EXP-130 lesson applied to inventory):
+        once the date passes it is no longer a decision and the item returns."""
+        self._open_items(2, day=10, extra_fm={"defer_until": "2026-06-20"})
+        findings = self._gate()                            # NOW = 06-30, expired
+        self.assertIn("aged-backlog-undecided", self._checks(findings))
+        code, out = self._run()
+        self.assertEqual(code, 2)
+        self.assertIn("DEFER EXPIRED", out)
+
+    def test_unparseable_defer_is_not_a_decision(self):
+        """FAIL CLOSED: a typo'd date must never silence the gate."""
+        self._open_items(2, day=10, extra_fm={"defer_until": "soon-ish"})
+        self.assertIn("aged-backlog-undecided", self._checks(self._gate()))
+        self.assertEqual(self._run()[0], 2)
+
+    def test_wip_queue_is_untouched_by_the_age_check(self):
+        """The check is scoped to BACKLOG queues; a WIP stage has its own cap and
+        its own severity, and must not acquire a second, overlapping block."""
+        self._policy([("ready", "min_items", 0), ("wip", "wip_limit", 99)])
+        for i in range(2):
+            self.write_item("active", f"UC-B{i}", "use-case", self._building_uc(i))
+        self.assertNotIn("aged-backlog-undecided", self._checks(self._gate()))
+
+    def test_reports_all_violated_preconditions(self):
+        self._policy([("intake", "wip_limit", 1), ("ready", "min_items", 3),
+                      ("rework", "wip_limit", 0)])
+        for i in range(3):
+            self.write_item("active", f"OI-{i}", "open-item", [
+                {"ts": _dt(10, 0), "event": "open", "agent": "orchestrator"}])
+        self.write_item("active", "UC-RW", "use-case", self._reworking_uc(10))
+        self.write_item("active", "DEF-STALE", "defect",
+                        self._validating_defect(20, 12, ref="5095849"))
+        self.write_item("done", "DEF-RESOLVED", "defect", [
+            {"ts": _dt(15, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(15, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(15, 2), "event": "confirmed", "agent": "engineer"},
+            {"ts": _dt(15, 3), "event": "fixed", "agent": "engineer", "ref": "f00d"},
+            {"ts": _dt(15, 5), "event": "validated", "agent": "tester"}])
+        findings = self._gate(max_backlog_age_days=self.NEVER_AGES)
+        checks = set(self._checks(findings))
+        self.assertEqual(checks, {"stalled-validation", "ready-below-floor",
+                                  "queue-over-cap", "retro-debt"})
+        # and the backlog advisory rides ALONGSIDE the four blocking violations
+        self.assertEqual([f["queue"] for f in self._advisories(findings)], ["intake"])
+        code, out = self._run(max_backlog_age_days=self.NEVER_AGES)
+        self.assertEqual(code, 2)
+        for token in ("stalled-validation", "ready-below-floor",
+                      "queue-over-cap", "retro-debt", "ADVISORY"):
+            self.assertIn(token, out)
+
+    # ---- check 5: awaiting-observation RE-CHECK (v9) -------------------------
+    # An item in `awaiting_observation` is shipped, green and UNPROVEN. It is not
+    # done, and the ONE thing that must happen every cycle is that its liveness
+    # predicate is re-evaluated — exactly as `blocked` is re-checked. Three
+    # verdicts, and the severities are deliberate:
+    #   observed  -> BLOCK. Reality has now produced the record; a tester dispatch
+    #                is available and ACTIONABLE. This is the whole point.
+    #   not-yet   -> ADVISORY. Legitimate (a rare branch may wait weeks) but still
+    #                outstanding, so it is printed prominently and never "satisfied".
+    #   broken    -> BLOCK. An unrunnable predicate is the `make wire-provenance`
+    #                class (§17c.2): the item would sit parked for ever with no
+    #                mechanism. Fail CLOSED and loud.
+    def _awaiting_uc(self, day=20, spec="make:probe-genesis-observed",
+                     ref="7468849", observe=True):
+        evs = [{"ts": _dt(day, 0), "event": "registered", "agent": "flow-manager"},
+               {"ts": _dt(day, 1), "event": "made_ready", "agent": "flow-manager"},
+               {"ts": _dt(day, 2), "event": "pulled", "agent": "orchestrator"},
+               {"ts": _dt(day, 3), "event": "built_green", "agent": "engineer",
+                "ref": ref},
+               {"ts": _dt(day, 4), "event": "deployed", "agent": "cicd", "ref": ref},
+               {"ts": _dt(day, 5), "event": "not_yet_observed", "agent": "tester",
+                "note": "inert behind GENESIS_PHASE_EVENTS_ENABLED=false"}]
+        if observe:
+            evs[-1]["observe"] = spec
+        return evs
+
+    def _fake_observe(self, verdict, detail="", record=None):
+        def fake(project, spec, timeout=None):
+            if record is not None:
+                record.append((project, spec, timeout))
+            return verdict, detail
+        return fake
+
+    def _with_observe(self, verdict, detail="", **kw):
+        orig = wi._run_observation
+        wi._run_observation = self._fake_observe(verdict, detail)
+        try:
+            return self._gate(**kw)
+        finally:
+            wi._run_observation = orig
+
+    def _run_with_observe(self, verdict, detail="", **kw):
+        orig = wi._run_observation
+        wi._run_observation = self._fake_observe(verdict, detail)
+        try:
+            return self._run(**kw)
+        finally:
+            wi._run_observation = orig
+
+    def test_awaiting_observation_not_yet_is_advisory_not_blocking(self):
+        """PROOF CASE: the honest park. Reported every cycle, never blocking."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self.write_item("active", "UC-ML1", "use-case", self._awaiting_uc())
+        findings = self._with_observe("not-yet")
+        self.assertNotIn("awaiting-observation", self._checks(findings))
+        adv = [f for f in findings if f["check"] == "awaiting-observation"
+               and f["severity"] == "advisory"]
+        self.assertEqual([f["ids"] for f in adv], [["UC-ML1"]], findings)
+        self.assertEqual(adv[0]["verdict"], "not-yet")
+        self.assertEqual(adv[0]["spec"], "make:probe-genesis-observed")
+        code, out = self._run_with_observe("not-yet")
+        self.assertEqual(code, 0)
+        self.assertIn("may pull", out)
+        self.assertIn("ADVISORY", out)
+        self.assertIn("UC-ML1", out)
+        self.assertIn("NOT YET OBSERVED", out)
+        self.assertIn("UNPROVEN", out)
+
+    def test_awaiting_observation_observed_blocks_and_asks_for_a_dispatch(self):
+        """PROOF CASE: the observation LANDED. That is actionable, so it BLOCKS
+        until the tester is dispatched — the same lever as check 1."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self.write_item("active", "UC-ML1", "use-case", self._awaiting_uc())
+        findings = self._with_observe("observed", "3 real OagFlightCancelled")
+        self.assertIn("awaiting-observation", self._checks(findings))
+        f = [x for x in findings if x["check"] == "awaiting-observation"][0]
+        self.assertEqual((f["severity"], f["verdict"], f["ids"]),
+                         ("block", "observed", ["UC-ML1"]))
+        code, out = self._run_with_observe("observed", "3 real OagFlightCancelled")
+        self.assertEqual(code, 2)
+        self.assertIn("HAS LANDED", out)
+        self.assertIn("dispatch the tester", out)
+        self.assertIn("AGENT=tester", out)
+
+    def test_awaiting_observation_broken_predicate_blocks(self):
+        """An observation predicate that cannot be EVALUATED is not a predicate.
+        This is the `make wire-provenance` class and it must be loud, not silent."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self.write_item("active", "UC-ML1", "use-case", self._awaiting_uc())
+        findings = self._with_observe("broken", "No rule to make target 'probe-x'")
+        self.assertIn("awaiting-observation", self._checks(findings))
+        f = [x for x in findings if x["check"] == "awaiting-observation"][0]
+        self.assertEqual(f["verdict"], "broken")
+        code, out = self._run_with_observe("broken", "No rule to make target")
+        self.assertEqual(code, 2)
+        self.assertIn("CANNOT BE EVALUATED", out)
+        self.assertIn("No rule to make target", out)
+
+    def test_awaiting_observation_without_a_predicate_blocks(self):
+        """A predicate-less park (only reachable by hand-editing the file, since
+        `append` refuses it) is a prose park: unverifiable, so it BLOCKS."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self.write_item("active", "UC-ML1", "use-case",
+                        self._awaiting_uc(observe=False))
+        findings = self._with_observe("observed")   # never consulted
+        f = [x for x in findings if x["check"] == "awaiting-observation"][0]
+        self.assertEqual((f["severity"], f["verdict"]), ("block", "no-predicate"))
+        self.assertIsNone(f["spec"])
+        code, out = self._run_with_observe("observed")
+        self.assertEqual(code, 2)
+        self.assertIn("NO observation predicate", out)
+
+    def test_no_observe_flag_reports_unknown_never_silently_clean(self):
+        """Skipping the evaluation is allowed (it can be a slow real-data query)
+        but a skipped run must be UNMISTAKABLE — never read as satisfied."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self.write_item("active", "UC-ML1", "use-case", self._awaiting_uc())
+        calls = []
+        orig = wi._run_observation
+        wi._run_observation = self._fake_observe("observed", record=calls)
+        try:
+            findings = self._gate(observe=False)
+            code, out = self._run(observe=False)
+        finally:
+            wi._run_observation = orig
+        self.assertEqual(calls, [])                       # never evaluated
+        f = [x for x in findings if x["check"] == "awaiting-observation"][0]
+        self.assertEqual((f["severity"], f["verdict"]), ("unknown", "not-evaluated"))
+        self.assertEqual(code, 0)
+        self.assertIn("NOT evaluated", out)
+        self.assertIn("UC-ML1", out)
+        # the HEADLINE must not read "all preconditions hold" when a thing was not
+        # established — that is the same false-clean shape the state exists to stop
+        self.assertNotIn("all preconditions hold", out)
+        self.assertIn("NOT ESTABLISHED", out)
+
+    def test_predicate_is_re_evaluated_every_run_like_blocked(self):
+        """`awaiting_observation` is re-checked EVERY cycle — the predicate is run
+        on each invocation, with the declared timeout, never cached."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self.write_item("active", "UC-ML1", "use-case", self._awaiting_uc())
+        calls = []
+        orig = wi._run_observation
+        wi._run_observation = self._fake_observe("not-yet", record=calls)
+        try:
+            self._gate()
+            self._gate(observe_timeout=9.0)
+        finally:
+            wi._run_observation = orig
+        self.assertEqual([c[1] for c in calls],
+                         ["make:probe-genesis-observed"] * 2)
+        self.assertEqual(calls[0][2], wi.DEFAULT_OBSERVE_TIMEOUT)
+        self.assertEqual(calls[1][2], 9.0)
+
+    def test_amended_observe_replaces_the_predicate_in_effect(self):
+        """The predicate in effect is the LAST event carrying one, so a wrong probe
+        is corrected by an `amended` — not by editing the historical event."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        evs = self._awaiting_uc(spec="make:probe-old")
+        evs.append({"ts": _dt(21, 0), "event": "amended", "agent": "solution-architect",
+                    "observe": "make:probe-new", "note": "probe corrected"})
+        self.write_item("active", "UC-ML1", "use-case", evs)
+        calls = []
+        orig = wi._run_observation
+        wi._run_observation = self._fake_observe("not-yet", record=calls)
+        try:
+            self._gate()
+        finally:
+            wi._run_observation = orig
+        self.assertEqual([c[1] for c in calls], ["make:probe-new"])
+
+    # ---- the HONEST fix to check 1: parked-with-a-reason vs nobody-dispatched --
+    def test_check1_skips_parked_item_but_still_fires_on_undispatched_one(self):
+        """BOTH DIRECTIONS IN ONE RUN. UC-PARKED and UC-NODISPATCH are identical
+        (built_green + deployed with a ref, dwelling ~10 days) except that
+        UC-PARKED recorded a machine-checkable reason and moved to
+        `awaiting_observation`. Check 1 must fire on exactly one of them.
+
+        This is not "exclude the state and move on": the parked item is only
+        parked because it carries a predicate the gate re-evaluates every cycle
+        (check 5), and the moment that predicate says `observed` the gate BLOCKS
+        for the same missing dispatch. Parking cannot be used to hide."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self.write_item("active", "UC-PARKED", "use-case", self._awaiting_uc(day=20))
+        self.write_item("active", "UC-NODISPATCH", "use-case", [
+            {"ts": _dt(20, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(20, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(20, 2), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(20, 3), "event": "built_green", "agent": "engineer", "ref": "aaa111"},
+            {"ts": _dt(20, 4), "event": "deployed", "agent": "cicd", "ref": "bbb222"},
+        ])
+        findings = self._with_observe("not-yet")
+        stalled = [f for f in findings if f["check"] == "stalled-validation"]
+        ids = sorted(i for f in stalled for i in f["ids"])
+        self.assertEqual(ids, ["UC-NODISPATCH"])          # fires on the real stall
+        self.assertNotIn("UC-PARKED", ids)                # not on the honest park
+        # ...and UC-PARKED is NOT invisible: it is reported by check 5 in the SAME run
+        aw = [f for f in findings if f["check"] == "awaiting-observation"]
+        self.assertEqual([f["ids"] for f in aw], [["UC-PARKED"]])
+        code, out = self._run_with_observe("not-yet")
+        self.assertEqual(code, 2)                          # the real stall blocks
+        self.assertIn("UC-NODISPATCH", out)
+        self.assertIn("UC-PARKED", out)                    # both named, differently
+        self.assertIn("NOT YET OBSERVED", out)
+
+    def test_parked_item_is_not_pullable_and_not_in_flight(self):
+        """queue attribution: `awaiting_observation` maps to `waiting`, the same
+        class as `blocked` — it is not pullable and not counted as WIP."""
+        self.assertEqual(self.graphs.queue_for("awaiting_observation"), "waiting")
+        self._policy([("ready", "min_items", 0), ("wip", "wip_limit", 1)])
+        self.write_item("active", "UC-ML1", "use-case", self._awaiting_uc())
+        findings = self._with_observe("not-yet")
+        self.assertNotIn("queue-over-cap", self._checks(findings))
+
+    # ---- the predicate SPEC: narrow, committed, never a shell string ---------
+    def test_observe_spec_accepts_a_make_target_with_args(self):
+        self.assertEqual(wi.parse_observe_spec("make:probe-x"), ["probe-x"])
+        self.assertEqual(
+            wi.parse_observe_spec("make:count-event-type AWS_PROFILE=prod-datain "
+                                  "OAG_EVENT_STORE_TABLE=OagFeed-EventStore"),
+            ["count-event-type", "AWS_PROFILE=prod-datain",
+             "OAG_EVENT_STORE_TABLE=OagFeed-EventStore"])
+
+    def test_observe_spec_rejects_shell_and_unknown_schemes(self):
+        for bad in ("probe-x",                       # no scheme: never guessed
+                    "sh:probe-x",                    # unknown scheme
+                    "make:probe-x; rm -rf /",        # shell metacharacter
+                    "make:probe-x && echo",
+                    "make:probe-x $(id)",
+                    "make:probe-x | tee f",
+                    "make:", "make: ", "", None,
+                    "make:probe-x NOTANARG"):        # bare word, not VAR=VALUE
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                wi.parse_observe_spec(bad)
+
+    def _probe_makefile(self, body):
+        """A REAL Makefile in the temp project, so `_run_observation` is exercised
+        against a REAL `make` — see test_run_observation_against_a_real_make."""
+        d = os.path.join(self.tmp, "work", self.project)
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "Makefile"), "w", encoding="utf-8") as f:
+            f.write(body)
+
+    def test_run_observation_against_a_real_make(self):
+        """THE PIN THAT WAS MISSING. The first cut of this predicate used a
+        three-way EXIT-CODE contract (0/3/other) and its stubbed test passed —
+        proving only that the mapping agreed with itself. Against a REAL `make`
+        every probe read BROKEN, because **make does not propagate a recipe's exit
+        status**: a recipe exiting 3 makes make print "Error 3" and exit 2. So the
+        verdict is a SENTINEL LINE on stdout, and this test drives real `make`."""
+        self._probe_makefile(
+            "yes:\n\t@echo 'OBSERVATION: observed'\n"
+            "no:\n\t@echo '0 of 5,308,984 events'\n\t@echo 'OBSERVATION: not-yet'\n"
+            "silent:\n\t@echo 'I found some stuff'\n"
+            "crashes:\n\t@echo boom >&2; exit 1\n"
+            "codeonly:\n\t@exit 3\n"
+            "both:\n\t@echo 'OBSERVATION: observed'; echo 'OBSERVATION: not-yet'\n")
+        run = lambda t: wi._run_observation(self.project, f"make:{t}")
+        self.assertEqual(run("yes")[0], "observed")
+        self.assertEqual(run("no")[0], "not-yet")
+        # a probe that says something helpful but no VERDICT establishes nothing
+        self.assertEqual(run("silent")[0], "broken")
+        self.assertEqual(run("crashes")[0], "broken")
+        # the founding bug: an exit-3-only probe is BROKEN, never "not yet"
+        self.assertEqual(run("codeonly")[0], "broken")
+        self.assertEqual(run("both")[0], "broken")          # ambiguous => broken
+        # a target that DOES NOT EXIST is broken, never "not observed yet"
+        v, detail = run("no-such-target")
+        self.assertEqual(v, "broken")
+        self.assertIn("No rule to make target", detail)
+        # and the not-yet detail carries the probe's own output for the operator
+        self.assertIn("5,308,984", run("no")[1])
+
+    def test_run_observation_invokes_the_project_makefile_without_a_shell(self):
+        seen = {}
+
+        class R:
+            returncode, stdout, stderr = 0, "OBSERVATION: observed", ""
+
+        def fake_run(argv, **kw):
+            seen["argv"], seen["kw"] = argv, kw
+            return R()
+
+        orig = wi.subprocess.run
+        wi.subprocess.run = fake_run
+        try:
+            self.assertEqual(
+                wi._run_observation(self.project,
+                                    "make:probe-x AWS_PROFILE=prod-datain")[0],
+                "observed")
+        finally:
+            wi.subprocess.run = orig
+        self.assertEqual(seen["argv"],
+                         ["make", "-C", os.path.join(self.tmp, "work", self.project),
+                          "probe-x", "AWS_PROFILE=prod-datain"])
+        self.assertNotIn("shell", seen["kw"])       # argv list, never a shell string
+
+    def test_run_observation_malformed_spec_is_broken_never_executed(self):
+        called = []
+        orig = wi.subprocess.run
+        wi.subprocess.run = lambda *a, **k: called.append(a)
+        try:
+            verdict, detail = wi._run_observation(self.project, "make:x; rm -rf /")
+        finally:
+            wi.subprocess.run = orig
+        self.assertEqual(verdict, "broken")
+        self.assertEqual(called, [])
+        self.assertIn("spec", detail.lower())
+
+    def test_run_observation_timeout_is_broken_not_not_yet(self):
+        def boom(argv, **kw):
+            raise wi.subprocess.TimeoutExpired(argv, kw.get("timeout"))
+        orig = wi.subprocess.run
+        wi.subprocess.run = boom
+        try:
+            verdict, detail = wi._run_observation(self.project, "make:probe-x",
+                                                  timeout=5)
+        finally:
+            wi.subprocess.run = orig
+        self.assertEqual(verdict, "broken")
+        self.assertIn("timeout", detail.lower())
+
+    # ---- check 6: the test-requirement gate (§17d, human ruling 2026-08-02) --
+    #
+    # These drive the REAL `.claude/tools/test-requirement-gate.js` over REAL test
+    # sources written into the temp tree. Nothing is stubbed — stubbing the exec
+    # boundary here would be founding-evidence instance 2 reproduced inside the
+    # check that exists to catch it, and the gate's own exec-boundary rule would
+    # (rightly) flag this file for it.
+
+    def _trg_config(self, cfg):
+        d = os.path.join(self.tmp, ".claude", "config", "test-requirement-gate")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, f"{self.project}.json"), "w", encoding="utf-8") as f:
+            json.dump(cfg, f)
+
+    def _trg_tests(self, name, body):
+        d = os.path.join(self.tmp, "work", self.project, "src", "tests")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, name), "w", encoding="utf-8") as f:
+            f.write(body)
+
+    def _trg_scaffold(self, baseline_ac, cases):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self._trg_config({
+            "project": self.project, "mode": "ratchet",
+            "roots": [{"path": f"work/{self.project}/src", "limbs": ["ac", "authored"]}],
+            "baseline": {"ac": baseline_ac, "authored": 0},
+        })
+        self._trg_tests("a.test.ts",
+                        "describe('g', () => {\n"
+                        + "".join(f"  it('case {i}', () => {{}})\n" for i in range(cases))
+                        + "})\n")
+
+    def test_trg_at_baseline_is_advisory_and_never_blocks(self):
+        self._trg_scaffold(baseline_ac=2, cases=2)
+        findings = self._gate()
+        self.assertNotIn("test-requirement-gate", self._checks(findings))
+        adv = [f for f in self._advisories(findings) if f["check"] == "test-requirement-gate"]
+        self.assertEqual(len(adv), 1, findings)
+        self.assertEqual(adv[0]["verdict"], "PASS")
+        self.assertEqual(adv[0]["ac"], 2)
+        code, out = self._run()
+        self.assertEqual(code, 0)
+        self.assertIn("test-requirement-gate", out)
+
+    def test_trg_regression_above_baseline_BLOCKS_the_pull(self):
+        """A NEW untagged test case landed. Stopping the line relieves exactly that
+        harm (§F8a), so unlike the standing debt this one blocks."""
+        self._trg_scaffold(baseline_ac=2, cases=3)
+        findings = self._gate()
+        self.assertIn("test-requirement-gate", self._checks(findings))
+        f = [x for x in findings if x["check"] == "test-requirement-gate"][0]
+        self.assertEqual(f["verdict"], "FAIL")
+        self.assertEqual(f["ac"], 3)
+        code, out = self._run()
+        self.assertEqual(code, 2)
+        self.assertIn("test-requirement-gate", out)
+
+    def test_trg_limb2_authored_precondition_BLOCKS(self):
+        """The founding shape, end to end through the loop gate: a real capture with
+        a leaf deleted off it."""
+        self._trg_scaffold(baseline_ac=0, cases=0)
+        self._trg_tests("b.test.ts",
+                        "import { readConfirmingRecords } from '../src/adapters/fixture-corpus-reader.js'\n"
+                        "const record = readConfirmingRecords()[0]\n"
+                        "describe('AC-X.1 g', () => {\n"
+                        "  it('one', () => { delete record.statusDetails })\n"
+                        "})\n")
+        findings = self._gate()
+        self.assertIn("test-requirement-gate", self._checks(findings))
+        f = [x for x in findings if x["check"] == "test-requirement-gate"][0]
+        self.assertEqual(f["authored"], 1)
+        self.assertIn("delete-on-real-capture", f["message"])
+
+    def test_trg_absent_config_is_reported_NOT_ESTABLISHED_never_silent(self):
+        """A project with no gate config must not read as satisfied — the whole
+        §F8a point is that an unevaluated precondition is not a met one."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        findings = self._gate()
+        f = [x for x in findings if x["check"] == "test-requirement-gate"]
+        self.assertEqual(len(f), 1, findings)
+        self.assertEqual(f[0]["severity"], "unknown")
+        self.assertEqual(f[0]["verdict"], "NOT-CONFIGURED")
+        code, out = self._run()
+        self.assertEqual(code, 0)
+        self.assertIn("NOT ESTABLISHED", out)
+
+    def test_trg_unrunnable_tool_is_unknown_never_a_silent_pass(self):
+        """If the analyser cannot run at all, that is a thing this cycle FAILED TO
+        ESTABLISH. It must never be indistinguishable from clean."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self._trg_config({"project": self.project, "mode": "ratchet", "roots": []})
+        orig = wi.TRG_SCRIPT
+        wi.TRG_SCRIPT = os.path.join(self.tmp, "no-such-tool.js")
+        try:
+            findings = self._gate()
+        finally:
+            wi.TRG_SCRIPT = orig
+        f = [x for x in findings if x["check"] == "test-requirement-gate"][0]
+        self.assertEqual(f["severity"], "unknown")
+        self.assertEqual(f["verdict"], "UNRUNNABLE")
+
+    # ---- check 7: unrecoverable work in a worktree (DEFECT-OAG-076) ---------
+    #
+    # DEFECT-OAG-072 was delivered complete and DESTROYED by a worktree auto-clean
+    # (`git cat-file -t fb080d9` => `fatal: Not a valid object name`). The loop is
+    # the only continuously-running workflow, so it is where the detection has to
+    # hang: work that exists nowhere else must be found while the objects still
+    # exist, not after they are gone. These drive the REAL guard over a REAL git
+    # topology built in the temp tree — nothing is stubbed.
+
+    def _git(self, repo, *args):
+        subprocess.run(["git", "-C", repo, *args], check=True,
+                       capture_output=True, text=True)
+
+    def _init_repo(self, d):
+        os.makedirs(d, exist_ok=True)
+        subprocess.run(["git", "init", "-q", "-b", "main", d], check=True,
+                       capture_output=True, text=True)
+        self._git(d, "config", "user.email", "a@b.test")
+        self._git(d, "config", "user.name", "A")
+        self._git(d, "config", "commit.gpgsign", "false")
+        return d
+
+    def _write_file(self, root, rel, text):
+        p = os.path.join(root, rel)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(text)
+
+    def _parent_topology(self):
+        """The real shape: a parent repo that gitignores each project's own nested
+        repo, plus a worktree that therefore does NOT contain it."""
+        parent = self._init_repo(os.path.join(self.tmp, "parent"))
+        self._write_file(parent, ".gitignore", "/work/*/\n")
+        self._write_file(parent, "CLAUDE.md", "agent system\n")
+        self._git(parent, "add", "-A")
+        self._git(parent, "commit", "-q", "-m", "base")
+        proj = self._init_repo(os.path.join(parent, "work", "DemoProject"))
+        self._write_file(proj, "src/a.ts", "a\n")
+        self._git(proj, "add", "-A")
+        self._git(proj, "commit", "-q", "-m", "project base")
+        wt = os.path.join(self.tmp, "agent-wt")
+        self._git(parent, "worktree", "add", "-q", wt, "-b", "worktree-agent-1", "main")
+        return parent, proj, wt
+
+    def test_worktree_guard_clean_tree_produces_no_finding(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        parent, _proj, _wt = self._parent_topology()
+        orig, wi.ROOT = wi.ROOT, parent
+        try:
+            findings = self._gate()
+        finally:
+            wi.ROOT = orig
+        self.assertNotIn("worktree-guard",
+                         [f["check"] for f in findings])
+
+    def test_worktree_guard_unrecoverable_work_BLOCKS_the_pull(self):
+        """The fb080d9 shape: an agent with no project repo in its worktree cloned
+        one in and committed there. Stopping the loop relieves exactly that harm —
+        the objects are still on disk and can be rescued (§F8a)."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        parent, proj, wt = self._parent_topology()
+        clone = os.path.join(wt, "work", "DemoProject")
+        subprocess.run(["git", "clone", "-q", proj, clone], check=True,
+                       capture_output=True, text=True)
+        self._git(clone, "config", "user.email", "a@b.test")
+        self._git(clone, "config", "user.name", "A")
+        self._write_file(clone, "src/delivered.ts", "delivered\n")
+        self._git(clone, "add", "-A")
+        self._git(clone, "commit", "-q", "-m", "the work that would be destroyed")
+
+        orig, wi.ROOT = wi.ROOT, parent
+        try:
+            findings = self._gate()
+            f = [x for x in findings if x["check"] == "worktree-guard"]
+            self.assertEqual(len(f), 1, findings)
+            self.assertEqual(f[0]["severity"], "block")
+            self.assertIn("agent-wt", f[0]["message"])
+            code, out = self._run()
+        finally:
+            wi.ROOT = orig
+        self.assertEqual(code, 2)
+        self.assertIn("worktree-guard", out)
+
+    def test_worktree_guard_unrunnable_is_unknown_never_a_silent_pass(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        parent, _proj, _wt = self._parent_topology()
+        orig_root, wi.ROOT = wi.ROOT, parent
+        orig_script, wi.WTG_SCRIPT = wi.WTG_SCRIPT, os.path.join(self.tmp, "nope.js")
+        try:
+            findings = self._gate()
+        finally:
+            wi.ROOT, wi.WTG_SCRIPT = orig_root, orig_script
+        f = [x for x in findings if x["check"] == "worktree-guard"]
+        self.assertEqual(len(f), 1, findings)
+        self.assertEqual(f[0]["severity"], "unknown")
+        self.assertIn("NOT ESTABLISHED", f[0]["message"])
+
+    # ---- check 8: orphaned local containers (DEFECT-OAG-091) -----------------
+    #
+    # THE HARM. EXP-133 gave every dispatch its own DynamoDB Local container and
+    # shipped no reaper, so a dying agent leaks its container forever. Measured
+    # 2026-08-10T23:31Z: load 19.85, thirteen orphaned OAG containers (ten of them
+    # 2 DAYS old), a two-file test run at 301 SECONDS that took 877ms after reaping
+    # — 340x — and four consecutive agent deaths that had been blamed on the agents.
+    #
+    # WHY IT HANGS HERE. §17e: a reaper nobody invokes is the same class of failure
+    # as the missing one. The loop is the only continuously-running workflow, so the
+    # gate is where the reap has to happen — BEFORE every pull, automatically, never
+    # on request. That is also why check 8 REAPS rather than merely scanning.
+    #
+    # SEAM. These cases substitute the delegated SCRIPT (as checks 6 and 7 already
+    # do) because the claim under test is the finding's SEVERITY and MESSAGE — that
+    # orphans never block the pull and that an unrunnable reaper is never silent.
+    # What the reaper does to real docker objects is pinned against REAL containers
+    # in .claude/tools/container-reap.test.js, not here.
+    def _fake_creap(self, payload, argv_log=None, exit_code=0):
+        js = os.path.join(self.tmp, "fake-creap.js")
+        log = argv_log or os.path.join(self.tmp, "creap-argv.json")
+        with open(js, "w", encoding="utf-8") as f:
+            f.write("require('fs').writeFileSync(%s, JSON.stringify(process.argv.slice(2)));\n"
+                    % json.dumps(log))
+            f.write("console.log(JSON.stringify(%s));\n" % json.dumps(payload))
+            f.write("process.exit(%d);\n" % exit_code)
+        return js, log
+
+    def _gate_with_creap(self, payload, **kw):
+        js, log = self._fake_creap(payload)
+        orig, wi.CREAP_SCRIPT = wi.CREAP_SCRIPT, js
+        try:
+            findings = self._gate(**kw)
+        finally:
+            wi.CREAP_SCRIPT = orig
+        with open(log, encoding="utf-8") as f:
+            argv = json.load(f)
+        return findings, argv
+
+    def _creap(self, findings):
+        return [f for f in findings if f["check"] == "container-reap"]
+
+    def test_container_reap_orphans_are_an_ADVISORY_and_never_block_the_pull(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        findings, _argv = self._gate_with_creap({
+            "verdict": "OK", "orphanCount": 13, "establishedProbe": "ok",
+            "reap": {"containers": ["oag-dynamodb-local-defect-051"], "networks": []},
+            "removed": {"containers": ["oag-dynamodb-local-defect-051"],
+                        "networks": ["oag-dynamodb-local-defect-051_default"]},
+            "failed": [], "owned": {"containers": 4, "running": 3},
+        })
+        f = self._creap(findings)
+        self.assertEqual(len(f), 1, findings)
+        self.assertEqual(f[0]["severity"], "advisory")
+        self.assertIn("1 container", f[0]["message"])
+        self.assertIn("1 network", f[0]["message"])
+        self.assertNotIn("container-reap", self._checks(findings))
+
+    def test_container_reap_runs_the_REAPER_not_merely_a_scan(self):
+        """§17e — the whole point. A gate that only counted orphans would leave the
+        removal to the same agent discipline that leaked them."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        _findings, argv = self._gate_with_creap({
+            "verdict": "OK", "orphanCount": 0, "establishedProbe": "ok",
+            "reap": {"containers": [], "networks": []},
+            "removed": {"containers": [], "networks": []}, "failed": [],
+            "owned": {"containers": 0, "running": 0},
+        })
+        self.assertEqual(argv[0], "reap",
+                         "the loop-gate must REAP, not merely scan: %s" % argv)
+        self.assertIn("--project", argv)
+        self.assertIn(self.project, argv)
+
+    def test_container_reap_clean_machine_produces_no_finding(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        findings, _argv = self._gate_with_creap({
+            "verdict": "OK", "orphanCount": 0, "establishedProbe": "ok",
+            "reap": {"containers": [], "networks": []},
+            "removed": {"containers": [], "networks": []}, "failed": [],
+            "owned": {"containers": 1, "running": 1},
+        })
+        self.assertEqual(self._creap(findings), [])
+
+    def test_container_reap_failed_removal_is_reported_not_swallowed(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        findings, _argv = self._gate_with_creap({
+            "verdict": "OK", "orphanCount": 1, "establishedProbe": "unavailable",
+            "reap": {"containers": ["oag-dynamodb-local-x"], "networks": []},
+            "removed": {"containers": [], "networks": []},
+            "failed": [{"kind": "container", "name": "oag-dynamodb-local-x",
+                        "err": "device or resource busy"}],
+            "owned": {"containers": 1, "running": 1},
+        })
+        f = self._creap(findings)
+        self.assertEqual(len(f), 1, findings)
+        self.assertIn("FAILED", f[0]["message"])
+        self.assertIn("oag-dynamodb-local-x", f[0]["message"])
+        # a failed removal still must not stop the line (§F8a)
+        self.assertEqual(f[0]["severity"], "advisory")
+
+    def test_container_reap_unrunnable_is_unknown_never_a_silent_pass(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        orig, wi.CREAP_SCRIPT = wi.CREAP_SCRIPT, os.path.join(self.tmp, "nope.js")
+        try:
+            findings = self._gate()
+        finally:
+            wi.CREAP_SCRIPT = orig
+        f = self._creap(findings)
+        self.assertEqual(len(f), 1, findings)
+        self.assertEqual(f[0]["severity"], "unknown")
+        self.assertIn("NOT ESTABLISHED", f[0]["message"])
+
+    def test_container_reap_not_configured_is_unknown_never_clean(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        findings, _argv = self._gate_with_creap({
+            "verdict": "NOT-CONFIGURED", "orphanCount": None,
+            "message": "no container-reap config for TestProj",
+            "reap": {"containers": [], "networks": []},
+            "removed": {"containers": [], "networks": []}, "failed": [],
+        })
+        f = self._creap(findings)
+        self.assertEqual(len(f), 1, findings)
+        self.assertEqual(f[0]["severity"], "unknown")
+        self.assertIn("NOT ESTABLISHED", f[0]["message"])
+
+    # ---- check 9: a file a committed make target RUNS must be on trunk -------
+    #
+    # (OI-GITIGNORE-SWALLOWS-COMMITTED-TOOLS, AC-GI.3.) A blanket .gitignore on
+    # `src/app/scripts/*.mjs` silently swallowed a committed tool SIX times in one
+    # project: tool written, make target wired, `git add` says nothing, suite green,
+    # tool on exactly one machine. The DEF-ROC-001 / v89 FALSE GREEN — nothing goes red
+    # because nothing was looking, and the remedy had become "append a negation line",
+    # so the negation list became a written record of the trap firing.
+    #
+    # It hangs HERE because the loop is the only continuously-running workflow (as
+    # checks 6, 7 and 8 already are), and because it finds the omission WHILE THE FILE
+    # STILL EXISTS ON DISK — one `git add` from safe. It also CANNOT hang in the
+    # project's own CI: the analyser lives in the agent-system repo, which a project
+    # clone does not contain.
+    #
+    # SEVERITY, per §F8a ("a gate blocks only on harm that stopping relieves"):
+    #   untracked -> BLOCK. The file exists on someone's disk right now; pulling more
+    #        work is how it gets lost, and the remedy is one command.
+    #   dangling  -> ADVISORY. The file is already gone; stopping recovers nothing.
+    #   unrunnable -> UNKNOWN. Never silent (§17c.2) — "clean" being indistinguishable
+    #        from "did not run" IS the shape of the defect.
+    #
+    # NOTHING IS STUBBED HERE. These drive the REAL .claude/tools/make-refs-tracked.js
+    # against a REAL git repo with a REAL index and REAL ignore rules, because the
+    # claim is "the loop gate goes red on an untracked tool" and the git index is the
+    # seam that claim is ABOUT (§17d limb 2). An earlier draft substituted the script
+    # and passed while `cmd_loop_gate` — which re-invokes the real analyser — still
+    # exited 0. Stubbing would have shipped a wiring that never fired.
+
+    def _mrt_repo(self, makefile, present=(), tracked=(), gitignore=None):
+        """A REAL git repo at work/<project>: real files, real index, real ignores."""
+        repo = os.path.join(self.tmp, "work", self.project)
+        os.makedirs(repo, exist_ok=True)
+        with open(os.path.join(repo, "Makefile"), "w", encoding="utf-8") as f:
+            f.write(makefile)
+        if gitignore is not None:
+            with open(os.path.join(repo, ".gitignore"), "w", encoding="utf-8") as f:
+                f.write(gitignore)
+        for rel in set(present) | set(tracked):
+            p = os.path.join(repo, rel)
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "w", encoding="utf-8") as f:
+                f.write("// a committed tool\n")
+
+        def git(*args):
+            subprocess.run(["git", "-C", repo, *args], check=True,
+                           capture_output=True, text=True)
+        git("init", "-q")
+        git("config", "user.email", "t@t")
+        git("config", "user.name", "t")
+        git("add", "Makefile", *(([".gitignore"] if gitignore is not None else [])))
+        for rel in tracked:
+            git("add", "-f", rel)
+        git("commit", "-qm", "scaffold")
+        return repo
+
+    def _mrt(self, findings):
+        return [f for f in findings if f["check"] == "make-refs-tracked"]
+
+    def _mrt_scaffold(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+
+    def test_mrt_untracked_tool_BLOCKS_the_pull(self):
+        """The file is on a disk RIGHT NOW and one `git add` from safe. Stopping the
+        line relieves exactly that harm (§F8a), so this one blocks."""
+        self._mrt_scaffold()
+        self._mrt_repo(
+            "capture:\n\tnode scripts/capture-ddb-stream-records.mjs\n",
+            present=["scripts/capture-ddb-stream-records.mjs"],
+            gitignore="scripts/*.mjs\n")
+        findings = self._gate()
+        self.assertIn("make-refs-tracked", self._checks(findings))
+        f = self._mrt(findings)[0]
+        self.assertEqual(f["severity"], "block")
+        self.assertEqual(f["untracked"], 1)
+        self.assertIn("capture-ddb-stream-records.mjs", f["message"])
+        code, out = self._run()
+        self.assertEqual(code, 2)
+        self.assertIn("make-refs-tracked", out)
+
+    def test_mrt_the_same_tool_committed_is_clean(self):
+        """The discriminating other half: identical repo, file tracked -> no finding.
+        Without this the block above could be firing on something else entirely."""
+        self._mrt_scaffold()
+        self._mrt_repo(
+            "capture:\n\tnode scripts/capture-ddb-stream-records.mjs\n",
+            tracked=["scripts/capture-ddb-stream-records.mjs"],
+            gitignore="scripts/*.mjs\n")
+        findings = self._gate()
+        self.assertEqual(self._mrt(findings), [], findings)
+        code, _out = self._run()
+        self.assertEqual(code, 0)
+
+    def test_mrt_dangling_ref_is_ADVISORY_and_never_blocks(self):
+        """The file is already gone, so stopping recovers nothing — but it is reported
+        every cycle so a dead target cannot quietly become normal."""
+        self._mrt_scaffold()
+        self._mrt_repo("sync:\n\tpython3 scripts/sync-linear.py --dry-run\n")
+        findings = self._gate()
+        self.assertNotIn("make-refs-tracked", self._checks(findings))
+        adv = [f for f in self._advisories(findings) if f["check"] == "make-refs-tracked"]
+        self.assertEqual(len(adv), 1, findings)
+        self.assertEqual(adv[0]["dangling"], 1)
+        self.assertIn("sync-linear.py", adv[0]["message"])
+        code, out = self._run()
+        self.assertEqual(code, 0)
+        self.assertIn("make-refs-tracked", out)
+
+    def test_mrt_untracked_blocks_even_when_a_dangling_ref_is_also_present(self):
+        """A mixed verdict must take the WORST severity, not the first one seen."""
+        self._mrt_scaffold()
+        self._mrt_repo(
+            "a:\n\tnode scripts/here.mjs\nb:\n\tpython3 scripts/gone.py\n",
+            present=["scripts/here.mjs"], gitignore="scripts/*.mjs\n")
+        findings = self._gate()
+        self.assertIn("make-refs-tracked", self._checks(findings))
+        f = self._mrt(findings)[0]
+        self.assertEqual(f["severity"], "block")
+        self.assertEqual((f["untracked"], f["dangling"]), (1, 1))
+        self.assertIn("gone.py", f["message"], "the advisory limb must still be reported")
+
+    def test_mrt_generated_artifact_is_not_a_finding(self):
+        """The exemption is DERIVED from a committed generator's --outfile=, never a
+        hand-kept list — a hand-kept list is the negation list this item deletes."""
+        self._mrt_scaffold()
+        self._mrt_repo(
+            "build:\n\tesbuild src/main.ts --outfile=build/main.mjs\nrun:\n\tnode build/main.mjs\n",
+            present=["build/main.mjs"], tracked=["src/main.ts"],
+            gitignore="build/\n")
+        findings = self._gate()
+        self.assertEqual(self._mrt(findings), [], findings)
+
+    def test_mrt_unrunnable_is_unknown_never_a_silent_pass(self):
+        """An unevaluated precondition is not a met one (§17c.2). A checker that cannot
+        run must not be indistinguishable from a clean one — that asymmetry IS the
+        shape of the defect this check exists for."""
+        self._mrt_scaffold()
+        orig = wi.MRT_SCRIPT
+        wi.MRT_SCRIPT = os.path.join(self.tmp, "not-a-script.js")   # does not exist
+        try:
+            findings = self._gate()
+        finally:
+            wi.MRT_SCRIPT = orig
+        f = self._mrt(findings)
+        self.assertEqual(len(f), 1, findings)
+        self.assertEqual(f[0]["severity"], "unknown")
+        self.assertIn("NOT ESTABLISHED", f[0]["message"])
+        self.assertNotIn("make-refs-tracked", self._checks(findings))
+
+    # ---- policy.csv handling ------------------------------------------------
+    def test_missing_policy_csv_uses_documented_defaults(self):
+        # no policy.csv at all -> the §F2 seed defaults (ready 3/4, intake 2/10)
+        self.write_item("active", "UC-R0", "use-case", self._ready_uc(10))
+        f = [x for x in self._gate() if x["check"] == "ready-below-floor"][0]
+        self.assertEqual(f["floor"], 3)
+
+    def test_policy_csv_is_read_not_hardcoded(self):
+        self._policy([("ready", "min_items", 1)])
+        self.write_item("active", "UC-R0", "use-case", self._ready_uc(10))
+        self.assertNotIn("ready-below-floor", self._checks(self._gate()))
+
+    def test_read_queue_policy_parses_rows(self):
+        self._default_policy()
+        pol = wi.read_queue_policy(self.project)
+        self.assertEqual(pol["ready"]["min_items"], 3)
+        self.assertEqual(pol["intake"]["wip_limit"], 10)
+
+    # ---- CLI wiring ---------------------------------------------------------
+    def test_cli_subcommand_registered(self):
+        # `loop-gate` is a real subcommand and --project is required
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as cm:
+                wi.main(["loop-gate"])
+        self.assertEqual(cm.exception.code, 2)   # argparse usage error, not "invalid choice"
+
+    def test_cli_end_to_end_exit_two(self):
+        self._default_policy()
+        self.write_item("active", "UC-R0", "use-case", self._ready_uc(10))
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            with self.assertRaises(SystemExit) as cm:
+                wi.main(["loop-gate", "--project", self.project, "--now", NOW])
+        self.assertEqual(cm.exception.code, 2)
+        self.assertIn("BLOCKED", out.getvalue())
+
+
+# --------------------------------------------------------------------------- #
+# `awaiting_observation` — state-graph v9 (process v125 §12d obligation 3 / §17c.1)
+#
+# WHY (founding case, 2026-08-01): UC-ML1 shipped, deployed and was independently
+# re-verified green AND inert (2158 offline tests, 103 against real DynamoDB Local,
+# the deployed Lambda bytes and the ECS image pulled by digest both confirmed) — and
+# then the tester correctly REFUSED to append any event, because none of
+# `dev_validated` / `validated` / `rejected` honestly represents "shipped, deployed,
+# re-verified green and inert, but UNPROVABLE until armed". The remedy had been
+# written in v125's changelog as a COMPLETED change and never existed; §12d even
+# carried an interim "held out of `done` by hand" instruction. A hand-hold is not a
+# state, so this is the state.
+#
+# The invariant that matters: an item here is NOT done and can never fold into a
+# `done` aggregate. The predicate that gets it out is MACHINE-CHECKABLE and
+# re-checked every cycle (TestLoopGate check 5), never a claim in prose (§17c
+# Layer 2 — the load-bearing claim living where it cannot be false).
+# --------------------------------------------------------------------------- #
+AWAIT = "awaiting_observation"
+
+
+class TestAwaitingObservationGraph(Base):
+    def _edge(self, itype, frm, event):
+        return [t for t in self.graphs.transitions(itype)
+                if t["from"] == frm and t["event"] == event]
+
+    def test_state_exists_on_use_case_and_defect_and_is_non_terminal(self):
+        for itype in ("use-case", "defect"):
+            states = {t["to"] for t in self.graphs.transitions(itype)}
+            self.assertIn(AWAIT, states, itype)
+            self.assertNotIn(AWAIT, self.graphs.terminals(itype), itype)
+
+    def test_open_item_deliberately_does_not_have_it(self):
+        """NOT blanket-added. An open-item is a finding/decision-debt note: it has
+        no deployable capability and no observation surface, so `closed` is a
+        bookkeeping act, not a capability claim. An open item whose closure needs an
+        observation belongs registered as a use-case or defect."""
+        states = {t["to"] for t in self.graphs.transitions("open-item")}
+        self.assertNotIn(AWAIT, states)
+
+    def test_entry_edges_from_every_validation_state(self):
+        """`prod-validating` is included deliberately: all five v125 capabilities
+        were PROD-validated and had still never fired on real data. Leaving it out
+        would make the founding class unrepresentable."""
+        for frm in ("dev-validating", "validating", "prod-validating"):
+            e = self._edge("use-case", frm, "not_yet_observed")
+            self.assertEqual(len(e), 1, frm)
+            self.assertEqual(e[0]["to"], AWAIT)
+            self.assertEqual(e[0]["agents"], ["tester"])
+        e = self._edge("defect", "validating", "not_yet_observed")
+        self.assertEqual(len(e), 1)
+        self.assertEqual((e[0]["to"], e[0]["agents"]), (AWAIT, ["tester"]))
+
+    def test_exit_edges_observed_and_falsified(self):
+        uc = {(t["event"], t["to"]) for t in self.graphs.transitions("use-case")
+              if t["from"] == AWAIT}
+        self.assertIn(("validated", "done"), uc)         # the observation landed
+        self.assertIn(("rejected", "reworking"), uc)     # it FALSIFIED the capability
+        self.assertIn(("amended", AWAIT), uc)            # v8 generic invariant
+        self.assertIn(("cancelled", "cancelled"), uc)    # descoped, never stuck
+        d = {(t["event"], t["to"]) for t in self.graphs.transitions("defect")
+             if t["from"] == AWAIT}
+        self.assertIn(("validated", "resolved"), d)
+        self.assertIn(("rejected", "fixing"), d)
+        self.assertIn(("amended", AWAIT), d)
+        self.assertIn(("cancelled", "cancelled"), d)
+
+    def test_exit_events_are_the_testers(self):
+        for itype in ("use-case", "defect"):
+            for t in self.graphs.transitions(itype):
+                if t["from"] == AWAIT and t["event"] in ("validated", "rejected",
+                                                         "not_yet_observed"):
+                    self.assertEqual(t["agents"], ["tester"], t)
+
+    def test_time_is_attributed_to_external_not_to_the_tester(self):
+        """A WAIT must never wear the tester's name (v126 constraint finding): the
+        item is waiting for REALITY to produce a record, which is outside the
+        system — the same owner class as `blocked`."""
+        self.assertEqual(self.graphs.owner_of(AWAIT), "external")
+        self.assertEqual(self.graphs.state_owners[AWAIT],
+                         self.graphs.state_owners["blocked"])
+
+    def test_queue_is_waiting_not_null(self):
+        """Non-null: a null queue means terminal/aggregate and would make the item
+        INVISIBLE in queues.md — which is the by-hand invisibility being removed."""
+        self.assertEqual(self.graphs.queue_for(AWAIT), "waiting")
+
+    def test_graph_version_bumped_with_a_rationale_note(self):
+        with open(wi.GRAPHS_PATH, encoding="utf-8") as f:
+            raw = json.load(f)
+        self.assertGreaterEqual(raw["version"], 9)
+        self.assertIn("_v9", raw)
+        self.assertIn(AWAIT, raw["_v9"])
+
+    def test_fold_reaches_and_leaves_the_state(self):
+        base = [{"ts": "1", "event": "registered", "agent": "flow-manager"},
+                {"ts": "2", "event": "made_ready", "agent": "flow-manager"},
+                {"ts": "3", "event": "pulled", "agent": "orchestrator"},
+                {"ts": "4", "event": "built_green", "agent": "engineer"},
+                {"ts": "5", "event": "deployed", "agent": "cicd"},
+                {"ts": "6", "event": "not_yet_observed", "agent": "tester"}]
+        self.assertEqual(wi.fold_state(self.graphs, "use-case", base), AWAIT)
+        self.assertEqual(wi.fold_state(self.graphs, "use-case", base + [
+            {"ts": "7", "event": "amended", "agent": "product"}]), AWAIT)
+        self.assertEqual(wi.fold_state(self.graphs, "use-case", base + [
+            {"ts": "7", "event": "validated", "agent": "tester"}]), "done")
+        self.assertEqual(wi.fold_state(self.graphs, "use-case", base + [
+            {"ts": "7", "event": "rejected", "agent": "tester"}]), "reworking")
+
+    def test_amend_in_state_is_time_preserving(self):
+        evs = [{"ts": _dt(10, 0), "event": "registered", "agent": "flow-manager"},
+               {"ts": _dt(10, 1), "event": "made_ready", "agent": "flow-manager"},
+               {"ts": _dt(10, 2), "event": "pulled", "agent": "orchestrator"},
+               {"ts": _dt(10, 3), "event": "built_green", "agent": "engineer"},
+               {"ts": _dt(10, 4), "event": "deployed", "agent": "cicd"},
+               {"ts": _dt(11, 0), "event": "not_yet_observed", "agent": "tester",
+                "observe": "make:probe-x"},
+               {"ts": _dt(12, 0), "event": "amended", "agent": "product"}]
+        self.write_item("active", "UC-A", "use-case", evs)
+        items, _ = wi.load_all_items(self.project)
+        segs = wi.walk_states(self.graphs, items["UC-A"], wi.parse_ts(_dt(13, 0)))
+        await_s = sum((x - e).total_seconds() for s, e, x in segs if s == AWAIT)
+        self.assertEqual(await_s, 2 * 86400)
+
+    def test_metrics_attribute_the_dwell_to_external(self):
+        evs = [{"ts": _dt(10, 0), "event": "registered", "agent": "flow-manager"},
+               {"ts": _dt(10, 1), "event": "made_ready", "agent": "flow-manager"},
+               {"ts": _dt(10, 2), "event": "pulled", "agent": "orchestrator"},
+               {"ts": _dt(10, 3), "event": "built_green", "agent": "engineer"},
+               {"ts": _dt(10, 4), "event": "deployed", "agent": "cicd"},
+               {"ts": _dt(10, 5), "event": "not_yet_observed", "agent": "tester",
+                "observe": "make:probe-x"}]
+        self.write_item("active", "UC-A", "use-case", evs)
+        items, _ = wi.load_all_items(self.project)
+        m = wi.per_item_metrics(self.graphs, items["UC-A"], wi.parse_ts(_dt(12, 5)))
+        self.assertAlmostEqual(m["time_in_state"][AWAIT], 2 * 86400, places=1)
+        self.assertAlmostEqual(m["time_by_owner"]["external"], 2 * 86400, places=1)
+        self.assertNotIn(AWAIT, m["time_by_owner"])
+
+
+class TestAwaitingObservationAppend(Base):
+    """PROOF-OF-FIRE through the REAL writer: the new edges observed working, the
+    illegal ones observed REFUSED."""
+
+    def _deployed_uc(self, iid="UC-ML1"):
+        self.write_item("active", iid, "use-case", [
+            {"ts": _dt(10, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(10, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(10, 2), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(10, 3), "event": "built_green", "agent": "engineer",
+             "ref": "7468849"},
+            {"ts": _dt(10, 4), "event": "deployed", "agent": "cicd", "ref": "7468849"},
+        ])
+        return iid
+
+    def _append(self, iid, event, agent, observe=None, note=None, ref=None,
+                ts=None):
+        ns = argparse.Namespace(project=self.project, id=iid, event=event,
+                                agent=agent, note=note, ref=ref,
+                                ts=ts or _dt(11, 0), tokens=None,
+                                duration_ms=None, observe=observe)
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            wi.cmd_append(ns)
+        return out.getvalue()
+
+    def _append_fails(self, iid, event, agent, **kw):
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            with self.assertRaises(SystemExit) as cm:
+                self._append(iid, event, agent, **kw)
+        self.assertNotEqual(cm.exception.code, 0)
+        return err.getvalue()
+
+    def _state(self, iid):
+        items, _ = wi.load_all_items(self.project)
+        return wi.compute_states(self.graphs, items)[iid], items[iid]
+
+    # ---- the edges WORK ------------------------------------------------------
+    def test_dev_validating_to_awaiting_observation(self):
+        iid = self._deployed_uc()
+        out = self._append(iid, "not_yet_observed", "tester",
+                           observe="make:probe-genesis-observed",
+                           note="inert behind GENESIS_PHASE_EVENTS_ENABLED=false")
+        self.assertIn(f"dev-validating --(not_yet_observed/tester)--> {AWAIT}", out)
+        state, item = self._state(iid)
+        self.assertEqual(state, AWAIT)
+        self.assertEqual(item.events[-1]["observe"], "make:probe-genesis-observed")
+        # and it is NOT terminal, so it stays in items/active/
+        self.assertTrue(os.path.exists(
+            os.path.join(self._items("active"), f"{iid}.md")))
+        self.assertFalse(os.path.exists(
+            os.path.join(self._items("done"), f"{iid}.md")))
+
+    def test_validate_only_route_can_park_too(self):
+        self.write_item("active", "UC-V", "use-case", [
+            {"ts": _dt(10, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(10, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(10, 2), "event": "pulled_for_validation",
+             "agent": "orchestrator"}])
+        self._append("UC-V", "not_yet_observed", "tester", observe="make:probe-x")
+        self.assertEqual(self._state("UC-V")[0], AWAIT)
+
+    def test_observation_lands_then_done(self):
+        iid = self._deployed_uc()
+        self._append(iid, "not_yet_observed", "tester", observe="make:probe-x")
+        self._append(iid, "validated", "tester", ts=_dt(20, 0),
+                     note="observed on stream OAG#BA123#2026-08-04 seq 7")
+        self.assertEqual(self._state(iid)[0], "done")
+        self.assertTrue(os.path.exists(
+            os.path.join(self._items("done"), f"{iid}.md")))
+
+    def test_observation_falsifies_then_reworking(self):
+        iid = self._deployed_uc()
+        self._append(iid, "not_yet_observed", "tester", observe="make:probe-x")
+        self._append(iid, "rejected", "tester", ts=_dt(20, 0),
+                     note="armed; the real record shows the event never fires")
+        self.assertEqual(self._state(iid)[0], "reworking")
+
+    def test_predicate_corrected_by_an_amendment(self):
+        iid = self._deployed_uc()
+        self._append(iid, "not_yet_observed", "tester", observe="make:probe-old")
+        self._append(iid, "amended", "solution-architect", ts=_dt(12, 0),
+                     observe="make:probe-new", note="probe was measuring the wrong thing")
+        state, item = self._state(iid)
+        self.assertEqual(state, AWAIT)
+        self.assertEqual(wi.observe_spec_in_effect(item), "make:probe-new")
+
+    def test_defect_can_park_and_resolve(self):
+        self.write_item("active", "DEF-1", "defect", [
+            {"ts": _dt(10, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(10, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(10, 2), "event": "confirmed", "agent": "engineer"},
+            {"ts": _dt(10, 3), "event": "fixed", "agent": "engineer", "ref": "abc"}])
+        self._append("DEF-1", "not_yet_observed", "tester", observe="make:probe-x")
+        self.assertEqual(self._state("DEF-1")[0], AWAIT)
+        self._append("DEF-1", "validated", "tester", ts=_dt(20, 0))
+        self.assertEqual(self._state("DEF-1")[0], "resolved")
+
+    # ---- the ILLEGAL ones are REFUSED ---------------------------------------
+    def test_cannot_park_from_building(self):
+        self.write_item("active", "UC-B", "use-case", [
+            {"ts": _dt(10, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(10, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(10, 2), "event": "pulled", "agent": "orchestrator"}])
+        err = self._append_fails("UC-B", "not_yet_observed", "tester",
+                                 observe="make:probe-x")
+        self.assertIn("not a legal transition from 'building'", err)
+
+    def test_only_the_tester_may_park(self):
+        iid = self._deployed_uc()
+        err = self._append_fails(iid, "not_yet_observed", "engineer",
+                                 observe="make:probe-x")
+        self.assertIn("not for agent 'engineer'", err)
+
+    def test_cannot_deploy_out_of_a_park(self):
+        iid = self._deployed_uc()
+        self._append(iid, "not_yet_observed", "tester", observe="make:probe-x")
+        err = self._append_fails(iid, "deployed", "cicd", ts=_dt(12, 0))
+        self.assertIn(f"not a legal transition from '{AWAIT}'", err)
+
+    def test_cannot_dev_validate_out_of_a_park(self):
+        """No back door to prod-deploying: the way out is the observation."""
+        iid = self._deployed_uc()
+        self._append(iid, "not_yet_observed", "tester", observe="make:probe-x")
+        err = self._append_fails(iid, "dev_validated", "tester", ts=_dt(12, 0))
+        self.assertIn(f"not a legal transition from '{AWAIT}'", err)
+
+    # ---- the predicate is REQUIRED, not optional (v124/EXP-121) --------------
+    def test_park_without_a_predicate_is_refused(self):
+        """The state cannot be ENTERED without a machine-checkable predicate — so
+        a prose park is unrepresentable, not merely discouraged."""
+        iid = self._deployed_uc()
+        err = self._append_fails(iid, "not_yet_observed", "tester",
+                                 note="waiting for a real cancellation")
+        self.assertIn("--observe", err)
+        self.assertEqual(self._state(iid)[0], "dev-validating")   # unmoved
+
+    def test_park_with_a_malformed_predicate_is_refused_at_the_write(self):
+        iid = self._deployed_uc()
+        err = self._append_fails(iid, "not_yet_observed", "tester",
+                                 observe="probe-x; rm -rf /")
+        self.assertIn("observe", err.lower())
+        self.assertEqual(self._state(iid)[0], "dev-validating")
+
+    def test_observe_is_refused_on_an_unrelated_event(self):
+        iid = self._deployed_uc()
+        err = self._append_fails(iid, "dev_validated", "tester",
+                                 observe="make:probe-x")
+        self.assertIn("observe", err.lower())
+
+    # ---- I6: validate catches a HAND-EDITED predicate-less park -------------
+    def test_validate_flags_a_hand_edited_predicate_less_park(self):
+        self.write_item("active", "UC-H", "use-case", [
+            {"ts": _dt(10, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(10, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(10, 2), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(10, 3), "event": "built_green", "agent": "engineer"},
+            {"ts": _dt(10, 4), "event": "deployed", "agent": "cicd"},
+            {"ts": _dt(11, 0), "event": "not_yet_observed", "agent": "tester"}])
+        v = wi.validate_items(self.graphs, self.project)
+        self.assertTrue(any("(I6)" in x and "UC-H" in x for x in v), v)
+
+    def test_validate_clean_with_a_predicate(self):
+        iid = self._deployed_uc()
+        self._append(iid, "not_yet_observed", "tester", observe="make:probe-x")
+        self.assertEqual(wi.validate_items(self.graphs, self.project), [])
+
+    def test_cli_exposes_observe(self):
+        iid = self._deployed_uc()
+        with contextlib.redirect_stdout(io.StringIO()):
+            wi.main(["append", "--project", self.project, "--id", iid,
+                     "--event", "not_yet_observed", "--agent", "tester",
+                     "--observe", "make:probe-x", "--ts", _dt(11, 0)])
+        self.assertEqual(self._state(iid)[0], AWAIT)
+
+
+class TestAwaitingObservationBubble(Base):
+    """THE load-bearing invariant: an `awaiting_observation` child must never let
+    its parent aggregate read `done`. The five v125 capabilities folded into `done`
+    slices while nothing worked; that is what made CFR and rework read clean."""
+
+    def _reg(self):
+        return [{"ts": _dt(10, 0), "event": "registered", "agent": "flow-manager"}]
+
+    def _done_uc(self):
+        return [{"ts": _dt(10, 0), "event": "registered", "agent": "flow-manager"},
+                {"ts": _dt(10, 1), "event": "made_ready", "agent": "flow-manager"},
+                {"ts": _dt(10, 2), "event": "pulled", "agent": "orchestrator"},
+                {"ts": _dt(10, 3), "event": "built_green", "agent": "engineer"},
+                {"ts": _dt(10, 4), "event": "deployed", "agent": "cicd"},
+                {"ts": _dt(10, 5), "event": "validated", "agent": "tester"}]
+
+    def _await_uc(self):
+        return self._done_uc()[:-1] + [
+            {"ts": _dt(10, 5), "event": "not_yet_observed", "agent": "tester",
+             "observe": "make:probe-x"}]
+
+    def _blocked_uc(self):
+        return [{"ts": _dt(10, 0), "event": "registered", "agent": "flow-manager"},
+                {"ts": _dt(10, 1), "event": "made_ready", "agent": "flow-manager"},
+                {"ts": _dt(10, 2), "event": "blocked", "agent": "flow-manager"}]
+
+    def _states(self):
+        return wi.compute_states(self.graphs, wi.load_all_items(self.project)[0])
+
+    def test_awaiting_child_prevents_the_slice_from_reading_done(self):
+        self.write_item("done", "UC-1", "use-case", self._done_uc(), parents=["SLC-1"])
+        self.write_item("active", "UC-2", "use-case", self._await_uc(), parents=["SLC-1"])
+        self.write_item("active", "SLC-1", "slice", self._reg())
+        st = self._states()
+        self.assertNotEqual(st["SLC-1"], "done")
+        self.assertEqual(st["SLC-1"], AWAIT)
+
+    def test_all_children_awaiting_bubbles_awaiting(self):
+        self.write_item("active", "UC-1", "use-case", self._await_uc(), parents=["SLC-1"])
+        self.write_item("active", "UC-2", "use-case", self._await_uc(), parents=["SLC-1"])
+        self.write_item("active", "SLC-1", "slice", self._reg())
+        self.assertEqual(self._states()["SLC-1"], AWAIT)
+
+    def test_bubble_is_multilevel(self):
+        self.write_item("active", "UC-1", "use-case", self._await_uc(), parents=["SLC-1"])
+        self.write_item("active", "SLC-1", "slice", self._reg(), parents=["CHK-1"])
+        self.write_item("active", "CHK-1", "chunk", self._reg())
+        st = self._states()
+        self.assertEqual(st["SLC-1"], AWAIT)
+        self.assertNotEqual(st["CHK-1"], "done")
+        self.assertEqual(st["CHK-1"], AWAIT)
+
+    def test_awaiting_takes_precedence_over_blocked(self):
+        """Both are external waits; the unproven-capability fact is the one a reader
+        most needs, and it is the one that can silently read `done` later."""
+        self.write_item("active", "UC-1", "use-case", self._await_uc(), parents=["SLC-1"])
+        self.write_item("active", "UC-2", "use-case", self._blocked_uc(), parents=["SLC-1"])
+        self.write_item("active", "SLC-1", "slice", self._reg())
+        self.assertEqual(self._states()["SLC-1"], AWAIT)
+
+    def test_all_blocked_still_bubbles_blocked(self):
+        """Regression: the pre-existing blocked rule is unchanged."""
+        self.write_item("active", "UC-1", "use-case", self._blocked_uc(), parents=["SLC-1"])
+        self.write_item("active", "UC-2", "use-case", self._blocked_uc(), parents=["SLC-1"])
+        self.write_item("active", "SLC-1", "slice", self._reg())
+        self.assertEqual(self._states()["SLC-1"], "blocked")
+
+    def test_a_child_still_building_wins_over_awaiting(self):
+        """Real work in flight => in_progress; the park is not allowed to mask it."""
+        self.write_item("active", "UC-1", "use-case", self._await_uc(), parents=["SLC-1"])
+        self.write_item("active", "UC-2", "use-case", [
+            {"ts": _dt(10, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(10, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(10, 2), "event": "pulled", "agent": "orchestrator"}],
+            parents=["SLC-1"])
+        self.write_item("active", "SLC-1", "slice", self._reg())
+        self.assertEqual(self._states()["SLC-1"], "in_progress")
+
+    def test_the_slice_reads_done_once_the_observation_lands(self):
+        """BOTH DIRECTIONS: the park is a hold, not a permanent veto."""
+        self.write_item("active", "UC-1", "use-case", self._await_uc(), parents=["SLC-1"])
+        self.write_item("active", "SLC-1", "slice", self._reg())
+        self.assertEqual(self._states()["SLC-1"], AWAIT)
+        with contextlib.redirect_stdout(io.StringIO()):
+            wi.cmd_append(argparse.Namespace(
+                project=self.project, id="UC-1", event="validated", agent="tester",
+                note="observed on a real record", ref=None, ts=_dt(20, 0),
+                tokens=None, duration_ms=None, observe=None))
+        self.assertEqual(self._states()["SLC-1"], "done")
+
+    def test_awaiting_aggregate_is_in_the_waiting_queue_not_none(self):
+        self.write_item("active", "UC-1", "use-case", self._await_uc(), parents=["SLC-1"])
+        self.write_item("active", "SLC-1", "slice", self._reg())
+        with contextlib.redirect_stdout(io.StringIO()):
+            wi.cmd_project(argparse.Namespace(project=self.project, now=_dt(21, 0),
+                                              item=None))
+        with open(os.path.join(self.tmp, "work", self.project, "views",
+                               "queues.json")) as f:
+            q = json.load(f)
+        self.assertIn("UC-1", q.get("waiting", []))
+        self.assertIn("SLC-1", q.get("waiting", []))
+
+    def test_validate_stays_clean_with_an_awaiting_aggregate(self):
+        """I2/I4: `awaiting_observation` is non-terminal, so the child stays in
+        items/active/ and the non-null queue is correct, not a violation. I6 exempts
+        the AGGREGATE: it bubbles into the state and has no own event stream to carry
+        a predicate — the predicate lives on the child, checked in its own right."""
+        self.write_item("active", "UC-1", "use-case", self._await_uc(), parents=["SLC-1"])
+        self.write_item("active", "SLC-1", "slice", self._reg())
+        self.assertEqual(wi.validate_items(self.graphs, self.project), [])
+
+    def test_loop_gate_does_not_report_the_bubbled_aggregate(self):
+        """Check 5 covers FLOW items only: otherwise every ancestor of one parked
+        use-case would raise a phantom 'no predicate' block."""
+        self.write_item("active", "UC-1", "use-case", self._await_uc(), parents=["SLC-1"])
+        self.write_item("active", "SLC-1", "slice", self._reg(), parents=["CHK-1"])
+        self.write_item("active", "CHK-1", "chunk", self._reg())
+        orig = wi._run_observation
+        wi._run_observation = lambda p, s, timeout=None: ("not-yet", "")
+        try:
+            findings = wi.compute_loop_gate(
+                self.graphs, self.project, now=wi.parse_ts(_dt(21, 0)))
+        finally:
+            wi._run_observation = orig
+        aw = [f for f in findings if f["check"] == "awaiting-observation"]
+        self.assertEqual([f["ids"] for f in aw], [["UC-1"]], findings)
 
 
 if __name__ == "__main__":

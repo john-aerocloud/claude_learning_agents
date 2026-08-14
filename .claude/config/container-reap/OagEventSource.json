@@ -1,0 +1,11 @@
+{
+  "_why": "DEFECT-OAG-091. Declares which local containers/networks belong to this project and the MAX DISPATCH LIFETIME the reaper derives liveness from. Ownership is provenance (the compose file the container was started from), never a container-name list.",
+  "composeConfigPathSuffix": "work/OagEventSource/src/app/local/docker-compose.yml",
+  "composeProjectPattern": "^oag-dynamodb-local(-[A-Za-z0-9._-]+)?$",
+
+  "_leaseTtlS": "DECLARED MAX DISPATCH LIFETIME between signs of life. The lease is written at ddb-local-up and RENEWED at every ddb-local-assert-ours (the entry of every gated test tier), so this is measured from the LAST observed sign of life, not from container creation. 3600s is ~12x the worst tier run ever measured here (301s, itself under the load this defect caused) and longer than most whole dispatches; the stall watchdog kills a silent agent at 600s. A run that legitimately needs longer declares it: OAG_DDB_LEASE_TTL_S=14400 make -C work/OagEventSource ddb-local-up.",
+  "leaseTtlS": 3600,
+
+  "_minAgeS": "Start/reap race floor: a container this young is immune even with no lease, because its lease may not have been written yet.",
+  "minAgeS": 300
+}

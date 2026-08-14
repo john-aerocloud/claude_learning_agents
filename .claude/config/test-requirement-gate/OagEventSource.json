@@ -1,0 +1,76 @@
+{
+  "project": "OagEventSource",
+  "_ruling": "A test was written to match the code. I do not care AT ALL about code coverage. The ONLY thing tests should be validating is the requirements. If we are making up tests for coverage that do not map onto requirements then either (a) we are wasting time, or (b) we have identified a new acceptance criteria and we need to retro as to why it wasn't discovered earlier. (human, 2026-08-02)",
+  "_mode_why": "RATCHET, not enforce. The honest first measurement is 1801 untagged cases of 2728 and 22 authored preconditions. Enforcing would turn trunk red on day one for work nobody has triaged, and a gate that is red for everything is a gate everyone learns to ignore — which is exactly how `make render-diagrams` sat red on trunk for 20 days. So the committed baseline is the floor and it may ONLY SHRINK: a NEW violation blocks, the existing debt is reported every run until the retro decides, per the ruling, whether each is waste or an undiscovered acceptance criterion.",
+  "mode": "ratchet",
+  "fileHeaderCoversCounts": false,
+  "_fileHeaderCoversCounts_why": "A file-level `@covers AC-x` is a coverage claim about the MODULE; the ruling asks what THIS CASE validates. Kept strict, and the number it costs is reported separately as `file-header-only` (606 of the 1801) so the retro can see the price of the strictness and change this flag if it disagrees.",
+  "roots": [
+    {
+      "path": "work/OagEventSource/src",
+      "limbs": [
+        "ac",
+        "authored"
+      ],
+      "why": "The product test corpus — app, fids-app, admin-app, adapters, integration and e2e. Both limbs apply."
+    },
+    {
+      "path": ".claude/tools",
+      "limbs": [
+        "ac",
+        "authored"
+      ],
+      "why": "Cross-project agent-ops tooling. Both limbs are scanned; the limb-1 exemption is taken as a VISIBLE allowlist entry rather than by silently omitting the limb here."
+    },
+    {
+      "path": ".claude/skills/work-items/scripts",
+      "limbs": [
+        "authored"
+      ],
+      "why": "The work-item machinery (python). Limb 1 does not apply: limb-1 parsing is JS/TS only, and these are machinery invariant tests with no product acceptance criterion. Limb 2's exec-boundary rule DOES apply, and this is where founding-evidence instance 2 lived."
+    }
+  ],
+  "corpus": {
+    "readerModules": [
+      "fixture-corpus-reader",
+      "capture-provenance"
+    ],
+    "fileReaders": [
+      "readFileSync",
+      "readFile",
+      "loadFixture"
+    ],
+    "fixturePathTokens": [
+      "fixtures/",
+      "FIXTURES_ROOT",
+      "FIXTURES_DIR",
+      "CORPUS_ROOT"
+    ],
+    "extraRootIdentifiers": []
+  },
+  "derived": {
+    "types": [
+      "FlightAggregate"
+    ],
+    "fields": [
+      "state",
+      "cancellationEmitted",
+      "withdrawn",
+      "milestones",
+      "phase"
+    ],
+    "_why": "Fields the FOLD derives from the event-TYPE progression. Hand-setting one builds a prior no real stream can hold - which is precisely how the born-cancelled suppression guard stayed green while nine real prod flights could never heal (UC-HF041, 4e76014). `withdrawn` joins the list with delta-061/DEFECT-OAG-063: it is set ONLY by the presence of a literal OagFlightWithdrawn event type and by NO delta leaf, so a test that hand-sets it has authored a stream reality cannot produce - and the fact it asserts, that a leg's lifecycle ENDED, is exactly the kind a consumer strikes a row on."
+  },
+  "allowlist": [
+    {
+      "path": ".claude/tools/*.test.js",
+      "limb": "ac",
+      "why": "Agent-system MACHINERY invariant tests. They assert a tool's own contract (impacted-tests' node->spec lookup; this gate's own rules) and there is no product acceptance criterion for them to name — the requirement they serve is a PROCESS obligation, not a customer one. Limb 2 still applies to them in full."
+    }
+  ],
+  "baseline": {
+    "ac": 1755,
+    "authored": 15
+  },
+  "_baseline_why": "Measured 2026-08-02 at the first run, honestly and without mass-tagging. `ac` = 1801 test cases with no AC reference in their own title, their suite, or their comments, out of 2728 scanned (66%); 606 of the 1801 carry a file-level @covers AC and nothing per-case. `authored` = 22 static hits across 9 files, read one by one at the first run with zero known false positives remaining (three were found and removed by tightening the rules: a runaway destructuring regex, an `expect(...)` argument, and a fixture embedded in a template literal). The ratchet refuses to write a HIGHER number (`--write-baseline` exits 2 unless --allow-baseline-growth), so these two integers can only fall. 1801 -> 1773 by earlier work; 1773 -> 1766 at DEFECT-OAG-068 (2026-08-07), NOT by mass-tagging (EXP-124 says that is a failed experiment and reproduces the coverage theatre the ruling rejects) but because seven existing cases were RETITLED to name the acceptance criterion they were already validating while their subject was being rewritten — e.g. the adapter suite's `if onEvent REJECTS, NO checkpoint` case, which had been green for the life of the service while asserting a precondition that could never hold. The 31 cases added by that defect all name an AC, so they cost nothing here. 1766 -> 1755 at OI-FIDS-INTEGRATION-TIMEOUT (2026-08-07), again not by mass-tagging: the FIDS live-integration tier had been UNRUNNABLE (its beforeAll walked 23,057 sequential feed pages and always timed out), and its eleven cases said `AC1.1`/`AC2.*` — a legacy form the gate's `AC-<ID>.<n>` vocabulary cannot see. Making the tier run in 7s meant reading every case, so each was retitled to the canonical form it already validated, and the two invariants they silently leaned on were registered as real criteria (AC-2.5 the `state` derivation, AC-2.6 the displayed-status parity). Worth noting for the retro: an unrunnable tier freezes its assertions at whatever they said when it last executed, so its criteria age out from under every subsequent defect fix — the limb-1 count cannot distinguish a tagged case that RUNS from a tagged case that cannot."
+}

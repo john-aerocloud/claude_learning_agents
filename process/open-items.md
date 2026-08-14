@@ -171,3 +171,309 @@ distinguish prod-exposed defect-resolves (immediate) from dev-only tooling/test 
 defect ever reached a prod-* state, or a `severity`/`prod_exposed` marker on the `reported`
 event). Low urgency: over-tripping only costs one cheap focused retro. Owner: work-items machinery
 (retro-debt classifier).
+
+## OI — no `amended` (annotation) edge for in-flight use-case/slice items (2026-07-30, OAG v117)
+The `use-case` state graph has NO self-edge / annotation event, so a **definition correction
+discovered by the per-slice architecture gate on an already-pulled item cannot be recorded as an
+event**. Live case: the SLC-047/SLC-048 gate corrected UC-OC1's scope (the read seam already
+served the whole config object) and outright **falsified** UC-XE1's premise (the "stale pilot"
+was delivering 51–61k events/day to a real consumer; the item's Definition pointed the engineer
+at a file whose edit would have torn down a LIVE consumer). Both corrections had to be carried as
+Definition-prose edits by the engineers, citing the deltas — so the *fact that the definition
+changed*, and why, is invisible to `fold(events)` and to every derived view and metric. The
+`requirement` type has `amended`; flow items do not. Fix: add an annotation transition
+(`amended`, from any non-terminal state to itself, agents `[solution-architect, product,
+flow-manager, orchestrator]`) to the flow-item graphs in `state-graphs.json`. Owner: work-items
+machinery. Worth doing: a gate that falsifies a premise is the highest-value event in the loop and
+is currently unrecordable.
+
+## OI — dispatched-agent mid-build death is an unmeasured time thief; resume protocol undocumented (2026-07-30, OAG v117)
+Both concurrently-dispatched engineers on the UC-OC1 / UC-XE1 pull died mid-build from harness
+causes, not code: one on `API Error: Connection closed mid-response`, one on `Agent stalled: no
+progress for 600s (stream watchdog did not recover)`. Each left **partial uncommitted work** in
+the shared working tree (one had 1 commit in, 4 of its own TDD-red specs still failing). Two gaps:
+(1) **No documented resume protocol** — the recovery that worked was *verify tree state first*
+(run the full suite to establish exactly what is green/red and who owns each failure), *then*
+resume the agent from its transcript with that state handed to it, rather than restarting the
+build from scratch and re-incurring the whole token cost. This should be written into the
+orchestrator/loop definition. (2) **The cost is invisible**: an agent death mid-`building` produces
+no event, so the wasted wall-clock and tokens are silently folded into the item's `building` time
+and attributed to `engineer` — the same misattribution class as the UC-OB1 `deploying`/cicd bug
+this cycle also fixed. Consider an `agent_failed` annotation event (depends on the `amended`
+self-edge OI above) so harness-induced rework is measurable and can be told apart from engineer
+rework in `by_owner`/quality stats. Owner: orchestrator definition + work-items machinery.
+
+## OI — `blocked`/`unblocked` agent-list asymmetry on flow items (2026-07-30, OAG v117)
+Both `use-case` and `defect` graphs grant `blocked` to `["flow-manager", "orchestrator"]` but
+`unblocked` to `["flow-manager"]` ONLY (`state-graphs.json`). In practice this is backwards: the
+orchestrator is typically the role that OBSERVES the external condition clear — on UC-XC4 the
+orchestrator verified from CloudWatch (fan-out rule `FailedInvocations` 100pct -> 0, DLQ arrivals
+stopped) that AdixOut had applied their prod bus policy, i.e. it held the evidence that the block
+had lifted, yet it could not itself append `unblocked` and had to hand the fact to flow-manager to
+transcribe. It CAN record the block starting but not the block ending, though both are the same
+class of external-condition observation. Two ways to close this, either is fine, but the asymmetry
+should be resolved deliberately rather than left as an accident of the v6 state-graph write-up:
+(a) widen `unblocked` to `agents: ["flow-manager", "orchestrator"]` to match `blocked`'s agent
+list exactly (symmetry-by-construction); or (b) keep `unblocked` flow-manager-only DELIBERATELY
+and say why in this file (e.g. "clearing a block is a flow decision — re-admitting an item to Ready
+is queue policy, not evidence-recording, so the flow-manager is the accountable last hand even when
+another agent supplies the evidence" — plausible, but currently unstated, so an agent hitting the
+rejected-append has no way to tell "not yet built" from "deliberately restricted"). Owner: work-items
+machinery (state-graphs.json is edited only via the retro/version-bump gate, §current file header).
+Do NOT change `state-graphs.json` outside that gate.
+
+## OI — verification-only UCs force agents to SPOOF build/deploy events (2026-07-30, OAG v117)
+The `use-case` flow graph has exactly ONE route to `done`: `ready → building → deploying →
+dev-validating → … → validated`. A UC whose entire scope is **validating something already built
+and deployed** therefore cannot reach `done` honestly. Live case: UC-XC4 ("prod live-delivery smoke
+— AdixOut receives a real event") needed no build and no deploy (the fan-out shipped under UC-XC3;
+the only missing precondition was AdixOut's own bus policy). To close it, the **tester appended
+`built_green` with `AGENT=engineer` and `deployed` with `AGENT=cicd`, both as declared no-ops** —
+precisely the spoofing that process-current.md forbids ("engineers/testers must NOT spoof
+`AGENT=cicd`"), and it cited UC-XC2/UC-XC3 as established precedent, so this is systemic, not a
+one-off lapse. Consequences: `by_owner` attribution gains phantom engineer/cicd effort that nobody
+spent, quality-by-stage gains fake `building`/`deploying` exits that can never fail, and the
+prohibition is dead letter because following it makes the item uncloseable. Fix options: (a) add a
+`validate_only` route (`ready → validating` via a `pulled_for_validation`-style event) for UCs that
+assert existing behaviour; or (b) let a UC declare `no_build: true` in frontmatter and have the fold
+skip the build/deploy segments. (a) is preferred — it keeps the fold total and makes the intent
+explicit at pull time. Owner: work-items machinery. This is the second graph-expressiveness gap
+found today (see the missing `amended` annotation edge) and both were discovered the same way: an
+agent needed to record something true and the graph had no legal way to say it.
+
+## OI — EventBridge invocation-attempt/latency metrics stop emitting on the prod fan-out rules (2026-07-30, OAG v117)
+Found by the tester during the UC-XC4 prod validation. On prod-shared 928618308042, for
+`oag-aerobus-fanout-adixout` the metrics `IngestionToInvocationSuccessLatency`,
+`InvocationAttempts`, `SuccessfulInvocationAttempts`, `IngestionToInvocationStartLatency` and
+`IngestionToInvocationCompleteLatency` **stopped publishing around 12:20 UTC** while
+`Invocations`/`MatchedEvents`/`TriggeredRules` continued healthy; for `oag-aerobus-fanout-fids`
+(passenger-facing, live in prod) they **never publish at all**. Delivery health was correct
+throughout — this is an observability-emission gap, not a delivery failure, and it did NOT block
+UC-XC4. But it means latency and attempt-level regressions on the two live prod consumer legs are
+currently unobservable, so a slow-but-succeeding fan-out would look identical to a healthy one.
+Relates to `OI-XE-CONSUMER-LIST-SOLE-SOURCE` (post-deploy live assertions on both hubs). Needs
+registration as a work item; assess whether it is an AWS-side emission condition (e.g. metrics only
+publish on certain target types) before treating it as our defect. Owner: cicd/solution-architect.
+
+## OI — `external`-blocked items are never re-checked; a self-cleared block is only discovered by accident (2026-07-30 OAG post-v117)
+UC-OA2 was blocked 2026-07-28T12:09 on "sso-admin owed" (DD-OAG-001: keystone OIDC app + dedicated
+`oagMaintainer` permission set). The permission set half was actually created 2026-07-28T16:44 UTC —
+roughly 4.5 hours after the block was recorded — but the item sat `blocked`/`external` for a further
+two full days and was only unblocked because the human happened to paste the role ARNs in chat.
+Nothing in the loop ever re-evaluates whether an `external` condition has cleared; once an item is
+blocked it is inert until a human volunteers the news. This is the SAME shape as the AdixOut prod
+bus-policy block on UC-XC4 (also discovered by accident — the orchestrator happened to re-run a
+CloudWatch query) and as UC-OB1 (still blocked today on the `oag/alerts-key` secret, unchecked since
+2026-07-30T12:13). Three independent occurrences on this project alone — systemic, not a one-off.
+
+**Consequence for the metric that is supposed to surface this:** `external` currently reads as only
+1.73% of measured GLT. That number is an artefact, not a health signal — it excludes exactly the
+"already-cleared but not yet noticed" span (UC-OA2's ~2 days of it), because we only start counting
+`external` from `blocked` to the human-reported `unblocked`, never from `blocked` to the TRUE clear
+time. The real external-wait figure is materially higher; the visible one rewards the failure to
+check.
+
+**Concrete mechanism (not just an observation):** a `blocked` event should be able to carry a
+machine-checkable **unblock predicate**, and the loop (`/loop-run` cycle, or a lightweight periodic
+sweep flow-manager triggers) evaluates every in-flight predicate each cycle instead of waiting on a
+human to report the news:
+- UC-OA2 (this cycle): `aws iam get-role --role-name AWSReservedSSO_oagMaintainer_<hash> --profile
+  <dev-datain|prod-datain>` exits 0 (role exists).
+- UC-XC4 (already resolved, cited as the second data point): `FailedInvocations == 0` sustained on
+  `oag-aerobus-fanout-adixout` for N consecutive periods (this is exactly the check the orchestrator
+  ran manually — mechanising it removes the "happened to re-run a query" dependency).
+- UC-OB1 (currently blocked, unresolved): `aws secretsmanager describe-secret --secret-id
+  oag/alerts-key --profile dev-datain` exits 0 (secret exists).
+Predicate shape: a small declarative `{check: <shell/aws-cli probe>, expect: <exit-0 | field==value>}`
+recorded on the `blocked` event itself (so it travels with the item, reviewable in the file, no new
+side-store); a cheap sweep (could ride on `make wi-project`, or a dedicated `make wi-sweep-blocked`)
+runs every recorded predicate and, on a pass, appends `unblocked` itself with `agent: flow-manager
+note: "auto-cleared by predicate <p>"` — turning a silent multi-day external wait into a
+next-cycle unblock. Where a predicate can't be cheaply expressed (a genuinely human-only fact, e.g.
+"AdixOut confirms receipt"), the item stays a pure human-reported block, unchanged from today — this
+targets the SUBSET of external blocks that are actually machine-observable, which on the evidence
+above (2 of 3 recent cases) is the majority. Target metric: honest `external` GLT share (expected to
+RISE, correctly, as the hidden already-cleared waiting becomes visible) and, going forward, the
+`blocked`→true-clear gap trending toward the loop-cycle interval instead of days. Owner: work-items
+machinery + flow-manager (predicate evaluation is a flow-manager-owned sweep, not a new agent).
+
+## OI — shared-file sweep collision, SECOND occurrence today (2026-07-30, OAG post-v117)
+The UC-XC5 engineer staged isolated `Makefile` / `package.json` / `class-deps.mmd` blobs (its own
+build-tooling changes), but the DEFECT-OAG-042 commit `42fbad1` landed in between and committed the
+working-tree versions of those same files — so one engineer's build-tooling changes are attributed to
+another engineer's commit. Nothing was lost and trunk is consistent (both engineers' actual source
+changes are present), but the commit attribution is wrong, and this is the SECOND sweep incident today
+(the first was caught pre-push; see the same-day open-items context above). Root cause: `Makefile`,
+`package.json` and `class-deps.mmd` are co-owned files that concurrent engineers both touch as a
+side-effect of unrelated work, so a commit-sweep by either one silently absorbs the other's staged-but-
+uncommitted edits to the same file. Two concrete mitigations, either or both:
+(a) **process fix** — serialise edits to shared files through the orchestrator (a shared-file edit is
+proposed, sequenced and committed under the orchestrator's control rather than committed opportunistically
+by whichever engineer's commit lands first);
+(b) **structural fix** — split the co-owned file so each UC/engineer owns a distinct file: e.g. per-slice
+`Makefile` targets live in included `.mk` files rather than one shared `Makefile`, and `class-deps.mmd`
+per-domain fragments rather than one shared diagram.
+**v123 disposition:** the immediate cause is non-adherence, not a missing rule — orchestrator.md has
+mandated a `git worktree` per concurrent code-committer since v80/EXP-097 and the orchestrator
+dispatched two concurrent committers into ONE tree anyway. v123 makes it a CHECKED dispatch
+precondition (orchestrator.md) and logs the non-adherence
+(`principle-failures/2026-07-30-orchestrator-asserted-authorised-and-pushed-without-establishing-the-governing-fact.md`).
+The structural file-split (b) stays deferred pending a third occurrence — but note the count is now
+2-in-one-day, so the third is likely and the refactor should not be re-deferred when it comes.
+
+This is exactly the §F7 shared-file-seam class the flow-manager tracks (two UCs claiming the same source
+file are seam-serialised, not co-schedulable) — recurring twice in one day on the SAME file class
+(build-tooling) makes it a concrete candidate for the structural refactor (b), not just tighter process
+discipline (a). Owner: cicd/engineer (file-split) + orchestrator (serialisation-of-shared-edits process
+rule). Track occurrences; a third recurrence on the same file class should force the refactor rather than
+another deferral.
+
+## OI — fold-back of instance/OagEventSource v123 is OWED (integration tree dirty) (2026-07-30)
+`make project-foldback PROJECT=OagEventSource` returned **exit 3 (DEFERRED)** at the v123 retro
+close: the integration tree (`…/Claufe_Code_agent_design`, on `main`) has ONE uncommitted tracked
+file — `.claude/settings.local.json`, a MACHINE-LOCAL config file. It was deliberately not touched
+(discarding it would destroy the human's local permission grants, and no agent may change
+permission settings). So v123 (commits `f4bb86d` + `f7cc4f9`, tag `process-v123`) sits on
+`instance/OagEventSource` un-reconciled, which is live gross-lead-time cost under §0a Rule 4.
+Two ways it clears, either is fine: (a) run `make project-foldback PROJECT=OagEventSource` once
+the integration tree is clean; or (b) land AdixOut's already-authored **untrack
+`.claude/settings.local.json`** fix (on `instance/AdixOut`, part of its v121 retro / EXP-113 fix) on
+`main` — that removes the recurring cause, since a machine-local file being TRACKED means every
+integration tree is permanently dirty and every fold-back is permanently deferred. (b) is the real
+fix; note it is the second instance to be blocked by this.
+
+## OI — the `defect` graph has no dev-first leg, so EXP-101 is inexpressible for a defect fix (2026-07-30, OAG v123)
+`use-case` carries the locked dev→prod path (`dev-validating --dev_validated--> prod-deploying
+--promoted--> prod-validating --validated--> done`), but `defect` goes `fixing --fixed--> validating
+--validated--> resolved` with a SINGLE validation state. So a defect fix on a cloud/hosted project
+cannot record "validated in dev, then promoted, then validated in prod" — the dev-first assurance
+EXP-101 exists to enforce simply has no representation, and both DEFECT-OAG-041/042 fixes this cycle
+were validated against prod data with no dev leg recordable. That is why EXP-101 scored "no
+opportunity" despite two cloud fixes shipping. Note this is NOT obviously a bug: a defect fix is often
+deliberately fixed-forward. But if dev-first is a real assurance it should apply to defect fixes on a
+hosted project too, and today the graph silently exempts them. Decide deliberately: either mirror the
+dev/prod split onto `defect`, or state here that defect fixes are exempt and why (so EXP-101's measure
+can stop counting hosted defect cycles as opportunities). Owner: work-items machinery (state-graph
+gate) + EXP-101's measure. Do NOT change `state-graphs.json` outside the retro/version-bump gate.
+
+## OI — EXP-120's provenance gate needs its hardening limbs BUILT on OAG (2026-07-30, OAG v123)
+EXP-120 was routed from two ledgers that already exist in the OAG project
+(`work/OagEventSource/src/app/tests/defect-oag-04{1,2}-wire-*-provenance.test.ts`), but the seed has
+three holes that the experiment's measure explicitly requires closing, and closing them is PROJECT
+work that must be registered as a work item on the next OAG cycle (not process work): (1)
+**completeness** — the declarations are hand-maintained inline `const` arrays linked to production
+code by a free-text `comparedIn` string, so a literal added to production code with NO ledger entry
+is undetected; the gate must fail on a MISSING declaration (needs derivation from source, or a lint
+on comparisons against inbound-payload values). (2) **corpus soundness** — the 041 sweep indexes ALL
+of `fixtures/` including derived/synthetic sets (`oag-version-coverage/`, `oag-doc-samples/`,
+`oag-schedule-dlq/synthetic/`), so a literal can be "confirmed" by a fixture we authored ourselves;
+the confirmable corpus must be provably-real and separated. (3) **refresh + gate wiring** — the
+corpus is grown by a self-described THROWAWAY script (`spike/capture.mjs`, hand-run, needs a
+gitignored secret) plus manual curation of a prod capture bucket, and there is no `make
+wire-provenance` in the push gate; both are cicd deliverables per cicd.md v123. Also carry the two
+known-unexploded holes to closure: `irregularOperationType='Recovery'` and `diversionType` (both in
+ZERO captures) must be corpus-confirmed or converted to declared+probed holes. Owner: OAG
+engineer + cicd, via a registered work item; EXP-120 scores it.
+
+## OI — untracking `.claude/settings.local.json` DELETES it in every other worktree on fold-forward (2026-07-30, v123)
+The v123 fix untracked `.claude/settings.local.json` so a machine-local file could stop deferring
+every instance's fold-back. It works — but untracking is a **deletion** in git terms, so the next
+`make project-update` in ANY other worktree removes that tree's copy from disk, silently losing its
+local `env` + `permissions` grants. Observed immediately: the OagEventSource worktree lost its copy
+on the very next fold-forward and had to be restored with
+`git show <pre-merge-sha>:.claude/settings.local.json > .claude/settings.local.json`.
+**AdixOut, ROC and OperationalFlowSimulator still hold theirs and WILL lose them on their next
+fold-forward.** Mitigations, in order of preference: (1) have `.claude/scripts/worktree update`
+back the file up before merging and restore it afterwards — it is the only place that knows a
+fold-forward is happening, and this makes the whole class safe, not just this file; (2) failing that,
+each instance restores from the pre-merge sha as above. Recovery is always possible because the file
+is in history up to the untrack commit — but it is silent, which is the actual defect: an agent that
+does not notice will run on with the project's default permissions and no `env`. Owner: worktree
+tooling (`.claude/scripts/worktree`).
+
+## OI — CRITICAL: agent-worktree auto-clean DESTROYED a completed engineer's work (2026-07-31)
+**Real loss, same day the worktree-isolation approach was validated.** The DEFECT-OAG-045 engineer
+finished, committed (`74dd4aa`, `1fea9a9`, `6bad51d`, `dc71a54`) and reported in full — then its
+worktree was auto-cleaned and **every commit went with it**. Confirmed unrecoverable: no branch, no
+directory, no object, nothing in the shared repo touching `hosted-build-guard`. Lost: the vite
+`.env.local`-leaks-into-production-builds fix, the hosted-build guard, the fail-closed artifact
+byte-scan, 17 tests, and a stale-doc correction — ~3h wall-clock and ~218k tokens.
+
+**Mechanism (exact).** The harness auto-cleans an isolation worktree that is *unchanged*, judged
+against the **PARENT** repo's tree. But the project repo lives at `work/<project>/`, which the parent
+**gitignores** — and in an agent worktree it is absent, so each engineer *clones it inside the
+worktree*. All real work therefore lands in a gitignored nested clone that is **invisible to the
+changed-check**. The DEFECT-OAG-044 engineer survived only by accident: it happened to also make a
+*parent-repo* commit (a principle-failure log), which marked its worktree changed. 045 made no parent
+commit, so it was judged pristine and deleted.
+
+**Root cause is the dispatch brief, i.e. mine.** I wrote "DO NOT PUSH" meaning *do not trigger the
+deploy pipeline* (push to `origin/main` on GitHub IS the apply). But a `git clone --local` of the
+shared project repo has **the local shared repo as its `origin`** — so pushing there is harmless,
+local, and is the ONLY way the work escapes the disposable worktree. The instruction conflated two
+different remotes and the engineer obeyed it literally and correctly.
+
+**Fixes, in order:**
+1. **Every worktree-isolated dispatch brief must say: push your project-repo commits to your clone's
+   `origin` (the local shared repo) before you finish.** Separately and explicitly: never push to
+   GitHub `origin/main`. Two remotes, two rules, never one sentence.
+2. The orchestrator must **fetch each finished agent's clone into the shared repo** before the
+   worktree can be reclaimed (`git fetch <worktree>/work/<project> 'refs/heads/*:refs/remotes/wt<id>/*'`) —
+   done for 044 as `wt044/main`, too late for 045.
+3. Better: **the worktree bootstrap should not clone the project repo at all** — bind-mount/symlink
+   the shared one, or have the agent work on a branch of the shared repo. A disposable container for
+   non-disposable work is the actual design error.
+4. Until (1)-(3) land, treat worktree isolation as **unsafe for committing agents**.
+
+**v124 retro disposition (2026-07-31).** Fixes (1) and (2) above are now COMMITTED RULES in
+`.claude/agents/orchestrator.md` ("Brief the ESCAPE ROUTE…"): the remote is named in every push
+instruction (bare "do not push" is banned), every brief carries a durable-ref requirement that the
+return must QUOTE, nothing is reclaimed without it, and v80 isolation is redefined as an explicit
+`git worktree add` on the PROJECT repo — never the Agent tool's auto-cleaned `isolation: "worktree"`
+for a project whose repo is a nested gitignored clone. Fix (3) — the bootstrap should not clone the
+project repo at all — is **still OWED and is the real fix** (a disposable container for
+non-disposable work); until it lands, (4) stands: worktree isolation via the Agent tool is unsafe
+for committing agents. Recorded alongside it: the isolation trial MEASURED WELL on its stated
+benefit (2 concurrent engineers, zero cross-contamination, both suites green at start, zero
+feature-code conflicts, ~9-15s setup via APFS copy-on-write, only append-only operational-file
+conflicts) against FOUR contamination incidents in the shared tree the same day — fix the
+substrate, do not abandon the isolation.
+
+**Metering non-adherence (v124, orchestrator-owned).** Token coverage is **2.6%** and duration
+coverage **0.2%** of 1,220 events, so §E plumbing-vs-delivery and §F agent-cycle-time are both
+uncomputable — including DEFECT-OAG-043's own `validated` event, appended `tokens: 0` with no
+`duration_ms` for a real ~40-minute tester dispatch. This is the orchestrator's own §E/§F rule
+unmet by the orchestrator. It is the SUBORDINATE step under this cycle's constraint (the
+push/deploy-cascade wait laundered as tester time) and cannot be fixed by machinery — only by
+passing `TOKENS=`/`DURATION_MS=` from the dispatch return on the same `wi-append`.
+
+
+## traceability: a job's acceptance criteria / fitness functions must be carried into the implementing use-case at `/slice-next` (2026-08-03, AdixOut REQ-006 — QUEUED)
+The traceability contract (`/requirement` §"traceability") forces every use-case created at
+`/slice-next` to tag `personas:` + `job:` — but NOT a job's ACCEPTANCE CRITERIA / fitness functions
+into the use-case's `## Acceptance conditions`. A POSITIVE feature AC becomes an acceptance condition
+naturally; a NEGATIVE/INVARIANT AC (a guard — "never emit X as a side effect") can silently drop
+between the signed-off dossier and the build. Tighten (`/requirement` traceability rule + `/slice-next`):
+a use-case implementing a job that carries an AC/fitness function MUST copy it into
+`## Acceptance conditions` as a red-first condition, and any standing INVARIANT AC MUST be a PINNED
+regression guard (synth-pin-class), not a one-shot test. Make it a checkable Ready property. Founding:
+REQ-006's demoted-from-fake-job guard (AC-3) — nothing in the machinery would have carried it into the
+slice; the dossier AC had to be hand-flagged build-binding. Sibling of the AC-vs-job discovery-method
+lesson. Owner: traceability contract (`process-current.md`) + `/slice-next`.
+
+## `/requirement` skill: "append EVENT=registered" step is stale for aggregate requirements (2026-08-03, AdixOut REQ-006 — QUEUED)
+`/requirement` step 3 says `make wi-append ... EVENT=registered AGENT=flow-manager` as a requirement's
+birth event, but the machinery treats a requirement as a pure AGGREGATE (state bubbles from children);
+`wi-append` rejects a flow event on it. A requirement is registered simply by writing its valid item
+file (state derives to `planned`). Fix: update `/requirement` (+ `requirement-new`) — registration =
+write item file + `make wi-project` (+ board mirror); drop the `EVENT=registered` append for aggregate
+types. Founding: REQ-006 registration hit the rejection. Owner: `.claude/commands/requirement.md`.
+
+## EXP-119 (fresh-account first-deploy bootstrap-parity) registry row DEFERRED at the v129 reconcile (2026-08-05, AdixOut — QUEUED)
+At the v122→v128 fold-forward reconcile, main's experiment registry was at the hard cap of 8 (all
+OagEventSource's), so AdixOut's novel EXP-119 (fresh-account first-deploy bootstrap-parity — cicd.md
+practice + IMP-026, founding principle-failure 2026-07-30-adixout-first-prod-deploy-fresh-account-bootstrap-gaps.md)
+could not take a slot without retiring another instance's scored row (not a merge-time call). The
+BEHAVIOUR is live as plain cicd.md practice; only the SCORED registry row is deferred. Next retro:
+score/adopt-or-retire across the merged set and give bootstrap-parity a row (target: CFR on first-account
+deploys) if a slot frees. Owner: next AdixOut retro (§25a registry prune).

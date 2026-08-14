@@ -79,7 +79,7 @@ against a real interaction model, not retrofitted.
    disconnection (a cue that is not colour-only) and re-fetch on reconnect —
    never present stale data as live (DEFECT-003: a map froze while its backend
    was down with no stale cue).
-3b. **Data-visualization FAITHFULNESS — TESTABLE (v114, DEF-004).** For any chart /
+3b. **Data-visualization FAITHFULNESS — TESTABLE.** For any chart /
    plot / graph, geometry + a11y green is NOT enough: every visual mark must
    quantitatively REPRESENT its underlying datum WITHOUT a silent clamp, truncation,
    or renormalization that changes what the viewer reads. Emit a checkable
@@ -265,6 +265,18 @@ Return tight, detail to the files:
 - POLISH: what presentational changes landed (sha), what stayed consistent with
   the design system, and any change you handed back to the engineer as a defect.
 - If you no-op'd (non-UI slice), say so in one line.
+
+## Committing on a shared working tree (DEFECT-OAG-058)
+Up to five agents share one working tree and therefore **one git index**. Commit with
+**`make commit-isolated REPO=<repo> MSG="type(scope): intent (ID)" PATHS="<your paths>"`**
+(`.claude/tools/isolated-commit.js`). Do NOT `git add` then commit — `git add` takes a
+pathspec but **`git commit` does not**, so it commits the whole shared index and publishes
+whatever another agent had staged (b477f08: nine files from two agents, applied to
+dev-shared because on this trunk the push is the apply). Do NOT pass a pathspec to
+`git commit` either — that commits from the **working tree** and sweeps a concurrent
+agent's mid-edit save. The tool uses a private `GIT_INDEX_FILE` + `commit-tree` + a
+compare-and-swap ref update, so neither can happen. If you were dispatched in your OWN
+worktree, a plain commit is safe.
 
 ## Command form — allowlist contract (process v15 §33, IMP-001)
 Every Bash command must match the committed allowlist in `.claude/settings.json`

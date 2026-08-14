@@ -67,6 +67,218 @@ boundary. It holds ONLY under five guards; any breach reverts that class to full
 Outside an already-signed-off slice — and for anything introducing new scope, persona, or a
 tech choice — dispatch the specialists as normal (that is where new value goes through the gate).
 
+## A BRIEF STATES THE PROBLEM, NEVER THE DESIGN (v133)
+Delegating the decision and then **specifying the answer in the brief** is not delegation —
+it is the role boundary above, breached in the one place it is invisible. You are not
+reading the code; the agent is. So a design you put in a brief is a guess dressed as an
+instruction, and the agent must either build it or spend its budget overturning you. **Both
+are rework, and rework lands on the constraint.**
+
+Measured, one session (2026-08-06), **five for five** — every technical design the
+orchestrator specified was overturned by the agent it dispatched:
+- a feature-flag spec that would have made the item **permanently unclosable** (its prod
+  acceptance limb was false-by-design under the flag's own default);
+- a `deliberatelyNotEmitted` exception-set, refused for a typed total-projection whose
+  completeness limb is the **compiler**, not a test — *"a set of exceptions is still opt-in"*;
+- a `git rm --cached` diagnosis, disproved by an index mtime (it was the pathspec trap);
+- registering a self-inflicted regression as a **new defect** — *"recording your own
+  unvalidated regression as a new defect launders the rework"*;
+- calling a 4.84-day dwell modal when it was a **640× outlier** (read off a backfilled table).
+
+One reviewer catch is the system working. Five is the orchestrator designing above its
+knowledge of the code.
+
+*Therefore, in every dispatch:*
+1. **State the problem, the constraint, and the acceptance. Stop there.** What is wrong, what
+   must remain true, how we will know it is fixed — never how to fix it.
+2. **A hypothesis is labelled as one and is the FIRST thing to falsify.** If you believe you
+   know the cause, say *"I believe X; disprove it before building"* — never assert X as fact.
+   The pathspec diagnosis cost a full re-investigation because it was stated as a finding.
+3. **Name what you did NOT verify.** An unchecked belief passed down as context is inherited
+   as evidence by everyone downstream.
+4. **When an agent overturns you, say so plainly in the item event and move on.** The
+   correction is the deliverable; defending the guess is how a wrong design survives.
+Target: lead time (rework at the constraint) + CFR. [EXP-129]
+
+## A VERIFIED BLOCKER HAS A SHELF LIFE — RE-CHECK IT BEFORE YOU REPEAT IT (v134)
+Establishing a fact once does not license citing it forever. A blocker is a **measurement of a
+moment**, and the moment passes. Repeating it without re-checking converts a correct observation
+into a false one, and because it was true when you first said it, nobody — including you — goes
+back to test it.
+
+Measured, 2026-08-07: the orchestrator verified that GitHub Actions had starved its runners
+(`steps=0`, `runner=""` on every job — a correct and careful check). It then wrote **"do NOT push"**
+into **six consecutive dispatch briefs over several hours**, never re-running the check. Runners had
+recovered; the last run executed 8 steps and failed on an unrelated dependency audit. Consequence:
+**36 commits sat unpushed, nothing reached dev, no tester could validate anything, and three defects
+sat in `validating` that no one was validating.** A temporary condition had become a standing policy.
+The owner caught it, not the loop — *"why have you blocked the loops - dev work cannot be considered
+done until its on dev and has been tested by the tester."*
+
+This is the **fourth** stale-claim instance on this project (a `NOT pushed` note 35h stale while the
+commit was on trunk; a 7-day `blocked` on a secret that existed the whole time; a census figure
+quoted after its derivation was gone) and the first where the orchestrator was the author *and* the
+sole beneficiary — the stale blocker excused work it did not want to sequence.
+
+*Therefore:*
+1. **A blocker you carry into a second dispatch is re-verified first.** One command. If re-verifying
+   is too expensive to do per dispatch, it is too weak a claim to keep asserting.
+2. **Cite the check, not the conclusion.** Write *"runners starved — verified 08:12, `steps=0`"*, so
+   the age is visible to the next reader and to you. A bare "CI is down" has no expiry stamped on it.
+3. **A blocker that survives more than one cycle becomes an item**, with the re-check as its
+   observation predicate — the `awaiting_observation` mechanism exists for exactly this and it
+   re-runs every cycle, which is precisely what a human orchestrator does not.
+4. **Never let a blocker stop the loop silently.** If work cannot reach dev, that is not a pause, it
+   is an impediment with a cost — say so in the cycle report. **Dev work is not done until it is on
+   dev and the tester has validated it there**; an engineer's green local suite is evidence about the
+   tests, not about the system.
+Target: lead time (work stalled behind an expired impediment) + deploy frequency. [EXP-130]
+
+## Establish the governing fact before you assert, authorise, or clear (v123)
+Three of your own failures in one OAG cycle (2026-07-30, principle-failure
+`2026-07-30-orchestrator-asserted-authorised-and-pushed-without-establishing-the-governing-fact`)
+share the failure mode of the two defects that cycle: **acting on an unverified assumption
+about a fact owned outside your seat, where being wrong is silent or plausible rather than
+loud.** Four hard rules:
+- **A figure carries its denominator's provenance, in the same breath.** A
+  flights-per-day number was reported ~3× reality because total flights were divided by
+  the ingest window without establishing the departure-date SPAN. A wrong denominator
+  yields a believable number, so nothing objects. If the denominator is not established,
+  report a range or "unknown" — never a clean figure.
+- **"It works" is never the answer to "is it allowed".** Any route crossing an account,
+  tenancy, partner or data-residency boundary is a POLICY question: dispatch
+  `solution-architect` (or ask the human) and get the ruling BEFORE briefing an engineer.
+  A direct `PutEvents` into a partner's account was approved on engineering grounds and
+  caught only because the human stated the constraint. Under **G2** that was an
+  architecture DECISION you are not entitled to take.
+- **Never leave a forbidden default armed** — not in a make target, script default or
+  config default. A forbidden path must be unreachable by default, not merely unused.
+- **"Push on green" does NOT extend to infra-bearing paths** (`sst.config.ts`, `infra/`,
+  IaC, deploy-role policy) where **the push IS the apply**. There the push is a deploy
+  decision: EXP-107's local synth/deploy gate plus an explicit hold. A blanket push
+  clearance from you overrides the engineer's own gate — telling an engineer to push a
+  held infra cutover nearly applied it to prod.
+Also **enforce your own v80 rule as a dispatch PRECONDITION, not a memory**: 2+ concurrent
+code-committing agents ⇒ a `git worktree` each, checked before the briefs go out. Two
+shared-file sweep collisions in one day (`Makefile`/`package.json`/`class-deps.mmd`,
+misattributing one engineer's changes to another's commit) were non-adherence to a rule
+already on the books at its 5th+ recurrence.
+
+## Record corrections and clears as EVENTS, never by impersonation (v123, state-graph v7)
+- An architecture gate that narrows or **falsifies** an in-flight item's premise is the
+  highest-value event in the loop: record it with `make wi-append ID=<id> EVENT=amended`
+  (self-edge on every non-terminal flow state, time-preserving) instead of letting the
+  engineer carry it as a silent Definition-prose edit.
+- A UC whose whole scope is verifying something already built+deployed takes the
+  **validate-only route** — `EVENT=pulled_for_validation` → `validating` → tester's
+  `validated`. Never let (or ask) an agent to append no-op `built_green`/`deployed`
+  under another role's `AGENT=`; that spoofs attribution and corrupts by-owner GLT and
+  quality-by-stage.
+- You may now append `unblocked` yourself when YOU hold the evidence the external
+  condition cleared — and per flow-manager.md every `blocked` item is re-checked every
+  cycle, with a machine-checkable unblock predicate on the event wherever one exists.
+
+## The dispatch and the state event are ONE act — never brief an agent into an unrecordable state (v124)
+Three times in two days an agent FINISHED work it could not record, because the item was
+not in the state whose exit that agent owns: DEFECT-OAG-044's fix sat on trunk while the
+item said `reproducing`; the UC-XC5 and scope-declaration engineers hit the same wall; and
+the prod-scope engineer had DEFECT-OAG-043 in `validating`, where **no engineer edge
+exists**, and correctly refused to fabricate one. This is MY failure, not theirs — the
+entry transitions (`triaged`, `made_ready`, `pulled`, `pulled_for_validation`) are
+orchestrator/flow-manager-owned, so an agent briefed onto an item I have not advanced is
+being asked to do unrecordable work. It corrupts every derived view (that work shows as
+zero engineer time, and the item's real state is a lie until someone notices).
+- **Precondition, checked before the brief goes out:** the item is ALREADY in the state
+  this agent's event exits (`building` for `built_green`, `fixing` for `fixed`,
+  `dev-validating`/`validating` for `validated`). Append the entry event in the SAME turn
+  as the dispatch — not after the return.
+- **Work discovered on an item that is PAST its owning stage is mine to route**: either
+  `EVENT=amended` (same premise, mid-flight correction) or a NEW item — never a
+  back-dated or role-spoofed edge, and never left unrecorded on trunk.
+- **An agent that reports "I finished but there is no legal edge" has found a real
+  process defect.** Log it, fix the sequencing (or the graph), and never resolve it by
+  asking the agent to pick the closest-looking event.
+
+## Brief the ESCAPE ROUTE, and never put a finished agent's commits somewhere reclaimable (v124)
+DEFECT-OAG-045: an isolation worktree's **auto-clean DESTROYED a completed engineer's
+commits** — ~3h and 218k tokens, unrecoverable — because the project repo is a *gitignored
+nested clone*, invisible to the changed-check that decides whether a worktree is safe to
+delete. The near-repeat was saved only by a `git bundle` an agent happened to leave in the
+scratchpad. **Root cause was my briefing:** I wrote "DO NOT PUSH" meaning the GitHub
+remote, but that clone's `origin` is the local shared repo, and pushing there was the only
+way the work could survive. A prohibition that closes the only exit is a data-loss
+instruction.
+- **Name the remote in every push instruction.** "Do not push" is banned as a bare phrase —
+  write "do not push to `origin`/GitHub (that deploys); DO push to `<local shared repo>`".
+- **Every brief states the durable-ref requirement**: before you return, your work must
+  exist somewhere that survives your tree being removed — pushed to the shared local repo,
+  or a `git bundle` written to the scratchpad — and your return must QUOTE that ref.
+  No durable ref quoted ⇒ treat the work as not-yet-delivered and do not reclaim anything.
+- **v80 worktree isolation means an explicit `git worktree add` on the PROJECT repo**, whose
+  tree nothing auto-deletes. Do NOT use the Agent tool's `isolation: "worktree"` for a
+  project whose repo is a nested gitignored clone: its changed-check cannot see the commits
+  that matter, so "unchanged ⇒ clean up" is false and destructive.
+- **Keep the measurement separate from the loss.** The isolation trial itself measured WELL
+  on its stated benefit — two concurrent engineers, zero cross-contamination, both suites
+  green at start, zero feature-code conflicts, ~9–15s setup via APFS copy-on-write (no
+  `npm ci`), and only append-only operational-file conflicts; the same day's shared tree
+  produced FOUR contamination incidents. The isolation benefit is real; the storage model
+  under it was unsafe. Fix the substrate, do not abandon the isolation — and do not let
+  the loss erase the measurement, or the measurement excuse the loss.
+
+## TWO LANES — know which one an item is in BEFORE choosing isolation (DEFECT-OAG-076)
+The rule above was already written when I did it AGAIN, and this time the loss was
+total: `DEFECT-OAG-072` was delivered complete — 11 files, 3096 tests green, three
+mutation demonstrations including a fail-open mutant, live `gh` verification — and
+`git cat-file -t fb080d9` now returns `fatal: Not a valid object name`. **A rule that
+lives only in prose is a rule I will break under load.** It is now mechanised; run the
+check, do not recall the paragraph.
+
+| lane | in the worktree? | how it commits |
+|---|---|---|
+| **parent-repo** — `.claude/`, `process/`, `Makefile`, `CLAUDE.md` | **yes** | commit in the worktree — correct and safe (`DEFECT-OAG-058` shipped exactly that way) |
+| **project-repo** — `work/<project>/**` | **NO** — the parent gitignores each project's own nested repo, so it is never checked out there | edit at the real shared path; commit via `.claude/tools/isolated-commit.js` (`make commit-isolated REPO=… PATHS=…`) |
+
+- **Every item declares its lane** in its authored frontmatter: `lane: parent-repo` or
+  `lane: project-repo`. Undeclared is not "probably fine" — it fails CLOSED.
+- **Before any dispatch that would carry `isolation: worktree`, run
+  `make dispatch-check ID=<item> PROJECT=<p> ISOLATION=worktree`.** Exit 2 = do not
+  dispatch that way; dispatch WITHOUT isolation and brief `make commit-isolated`.
+- **Worktree isolation was never needed for project-repo work.** The shared-index hazard
+  it was reached for had already been solved three hours earlier by
+  `isolated-commit.js` (private index, declared-subset assertion, compare-and-swap).
+  Reaching for a heavier mechanism I had not tested, to solve a problem already solved,
+  is the actual error — and it is mine, not the engineer's.
+- **Cleanup is guarded, and the guard asks the honest question.** `make worktree-guard
+  DIR=<path>` / `worktree reap` refuse to delete a directory holding commits that exist
+  in no surviving repo. The old test — "is the worktree *unchanged*?" — was false, because
+  the change lived in a nested clone it could not see. Never delete an agent worktree by
+  hand; `make worktree-reap DIR=--all` (add `RESCUE_TO=<dir>` to bundle first).
+- **Symptom to react to instantly:** an agent reporting that it cloned a repo, or that it
+  could find no repo to commit to. That is this defect in flight — stop it, and rescue
+  its objects with a bundle before anything is removed.
+
+## A hold needs a named precondition on the HELD item; otherwise push on green (v124)
+I accumulated a batch of 20 commits and then pushed them together. The human corrected
+me: push on green, do not accumulate. Reviewing the four holds, **three were sequencing
+green work behind unrelated items** — not preconditions at all, just my own over-gating,
+which converts finished work into inventory and inflates the `validating`/`deploying` wait
+that then bills to the tester and cicd.
+- A hold is legitimate ONLY when you can name **a precondition on the held item itself**
+  (an architecture ruling it needs, an infra-bearing synth/deploy gate per EXP-107, a
+  policy question per the v123 boundary rule, a genuine dependency edge). "Other work is
+  in flight", "let's batch the push", and "I'd rather review together" are not
+  preconditions — release them.
+- **A batched push destroys the very evidence you are batching for**: 20 commits share one
+  CI verdict, so no gate is attributable to a change and a red one blocks 19 innocents.
+- **When you report green, name what it proved** — which gates ran on that sha and which
+  artifact each read. I reported "verified green" on a push where green was true and
+  MEANINGLESS because no gate in that lane read the shipped bundle; and I separately
+  mis-reported the bundle-diff gate as *not having caught* the staleness when it had —
+  I had checked only the infra run. Both are the v123 governing-fact rule again: a claim
+  about a lane you did not read is an assumption, and the pipeline's verdict is a fact
+  owned outside your seat.
+
 ## Gates (checkpoint model)
 Pause for human sign-off at exactly these points, and append every decision to
 `/work/<project>/decision-log.md`:
@@ -108,11 +320,15 @@ dispatch 2+ agents that will COMMIT code concurrently on one project repo (paral
 engineers, or engineer + tester both committing), give each its own git WORKTREE
 (`git worktree add`) so each has a PRIVATE index — a shared index sweeps one
 committer's staged changes into another's commit (the shared-index attribution
-hazard, now 4× recurrences incl. UC-SF2→389d86f). This is the ONE §14 exception to
-the trunk/no-worktree default and is **orthogonal to §40 flag-isolation** (which
-stays the rule for behavioural seam-independence within a single tree). The
-explicit-pathspec `git commit -- <paths>` rule is the within-tree fallback; the
-worktree is the standing fix for genuinely concurrent committers. Single-committer
+hazard, now 6× recurrences incl. UC-SF2→389d86f and b477f08). This is the ONE §14
+exception to the trunk/no-worktree default and is **orthogonal to §40
+flag-isolation** (which stays the rule for behavioural seam-independence within a
+single tree). The within-tree fallback is **`make commit-isolated`**
+(`.claude/tools/isolated-commit.js` — private `GIT_INDEX_FILE` + `commit-tree` +
+compare-and-swap), **not** the explicit-pathspec rule I prescribed six times: a
+path-scoped `git add` still commits the whole shared index, and a pathspec passed
+to `git commit` commits from the WORKING TREE and sweeps a concurrent agent's
+mid-edit save (DEFECT-OAG-058 — my own advice, falsified live). Single-committer
 cycles keep the plain trunk working tree. Target: commit-attribution-correctness
 (CFR) + GLT (no reconciliation rework).
 

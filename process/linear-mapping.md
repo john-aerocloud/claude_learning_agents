@@ -54,6 +54,7 @@ their children per the graph's `bubble` rule.
 | `prod-validating` | In Review |
 | `reworking` | In Progress (rework) |
 | `blocked` | Blocked → else Todo → Backlog (NEVER In Progress) |
+| `awaiting_observation` | Blocked + `awaiting-observation` label (NEVER Done, NEVER Backlog) |
 | `done` | Done |
 
 (The dev-then-prod validation states `dev-validating`/`prod-deploying`/`prod-validating`
@@ -70,6 +71,7 @@ Backlog.)
 | `fixing` | In Progress |
 | `validating` | In Review |
 | `blocked` | Blocked → else Todo → Backlog (NEVER In Progress) |
+| `awaiting_observation` | Blocked + `awaiting-observation` label (NEVER Done, NEVER Backlog) |
 | `resolved` | Done |
 | `wontfix` | Cancelled |
 
@@ -92,6 +94,27 @@ only non-terminal children are all `blocked` itself derives `blocked` (see
 masquerading as active work.
 A UC with no acceptance criteria in its definition gets a `needs-acceptance`
 label (surfaced, never fabricated).
+
+**`awaiting_observation` — shipped and green but UNPROVEN (v125 §17c/§12d.3).** This state
+means the work is deployed and re-verified green, and is waiting on a real-world TRIGGER to
+prove it fires. It was added to the state graph and **left out of this table**, so it fell
+through to the default and rendered as **Backlog** — i.e. the board said "not started" about
+code running in production, which is the most misleading of the available lies. That is the
+SAME failure this section already records for the `dev-validating`/`prod-deploying`/
+`prod-validating` states before v100, so it is a recurrence, not a first occurrence.
+
+It maps to **Blocked** with an `awaiting-observation` label, because on the two properties a
+human reads off a board it genuinely is blocked-shaped: nobody is working it, and it is waiting
+on something outside the system (its `state_owners` entry is `external`, its queue is
+`waiting`). The label is what stops it being confused with a real impediment — an
+`awaiting_observation` item needs **no** unblocking action, only patience or a decision to force
+the trigger. Mirror the `not_yet_observed` event's `observe:` predicate into the banner so a human
+can see WHAT is being waited for and re-run it.
+
+**It must never map to `Done`** (it is not proven, and it must never fold into a done aggregate)
+**and never to `Backlog`** (it is shipped). Any future state added to `state-graphs.json` owes a
+row here in the same commit; an unmapped state does not fail loudly, it silently renders as
+Backlog, which is why this has now happened twice.
 
 ## 2a. Ticket DESCRIPTION — rich, plan-connected (v88+)
 

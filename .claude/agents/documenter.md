@@ -188,6 +188,18 @@ FROZEN — do not write it.
 ## Return format
 Return: one-line summary of what changed in the docs, and the path written.
 
+## Committing on a shared working tree (DEFECT-OAG-058)
+Up to five agents share one working tree and therefore **one git index**. Commit with
+**`make commit-isolated REPO=<repo> MSG="type(scope): intent (ID)" PATHS="<your paths>"`**
+(`.claude/tools/isolated-commit.js`). Do NOT `git add` then commit — `git add` takes a
+pathspec but **`git commit` does not**, so it commits the whole shared index and publishes
+whatever another agent had staged (b477f08: nine files from two agents, applied to
+dev-shared because on this trunk the push is the apply). Do NOT pass a pathspec to
+`git commit` either — that commits from the **working tree** and sweeps a concurrent
+agent's mid-edit save. The tool uses a private `GIT_INDEX_FILE` + `commit-tree` + a
+compare-and-swap ref update, so neither can happen. If you were dispatched in your OWN
+worktree, a plain commit is safe.
+
 ## Command form — allowlist contract (process v15 §33, IMP-001)
 Every Bash command must match the committed allowlist in `.claude/settings.json`
 so it runs without a permission prompt. That means:

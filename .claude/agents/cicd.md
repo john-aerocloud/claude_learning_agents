@@ -120,6 +120,25 @@ role. Founding: SLC-039 UC-CA-PROD-PROMOTE — prod `apigateway:PUT AccessDenied
 because `--stage prod` was never run though the prod policy content was correct
 (8a425ea). Target: CFR on cross-stage promotions + deploy MTTR.
 
+**A FIRST-EVER deploy into a FRESH account needs the FIRST-USE auto-provisioned
+resources granted — dev MASKS these (v121, EXP-119).** dev green does NOT prove a
+fresh prod account will deploy: AWS/SST/EventBridge lazily create account-level
+bootstrap singletons on **first use**, and dev stopped exercising that path long ago
+because those singletons already exist there. So a first prod deploy hits
+`AccessDenied` on a create the deploy/exec role was never granted — invisible in dev.
+Confirmed TWICE in one session (AdixOut first prod stand-up): (1) `ecr:CreateRepository`
+on the SST `sst-asset` asset repo (SST Ion bootstrap, deploy role); (2)
+`iam:CreateServiceLinkedRole` for `AWSServiceRoleForAmazonEventBridgeApiDestinations`
+(first webhook Connection, onboarding EXEC role). BEFORE any first-ever deploy into a
+fresh account, audit BOTH the deploy role AND every runtime exec role for the create
+permissions of the first-use resources the stack implies: the SST/CDK asset store (S3 +
+**ECR** `sst-asset`), and a scoped `iam:CreateServiceLinkedRole` (ARN + `iam:AWSServiceName`
+condition, never `*`) for EVERY AWS service the app uses that provisions an SLR on first
+call (EventBridge API-destinations, and any other). Grant them in BOTH stages' policy
+source so a fresh account self-heals and dev↔prod stay at parity. Prefer a committed,
+executable preflight over memory — queued as improvement-slice IMP-026. Target: CFR on
+first-account deploys + deploy MTTR (each miss here is a failed prod deploy + rework loop).
+
 ## Release versioning & prod-resource tagging (process §18a, ISO)
 The deploy pipeline you build is what stamps release identity on every dev→prod
 promotion — this is an ISO traceability capability, not an afterthought:
@@ -368,6 +387,34 @@ exactly one of two is true and the fix MUST be one of them:
 Pipeline secrets/role/bootstrap prerequisites are sequenced (§19 scheduling), and the
 runbook lists every manual step that is not yet automated so the gap is visible.
 
+## A deploy lane may NOT ship a sha another lane has already rejected (v124, DEFECT-OAG-043)
+**Every build-integrity gate that runs on a sha is a precondition of EVERY deploy of that
+sha — across workflow files.** On 2026-07-31 the first push (`5095849`) went correctly
+**RED** on the app-CI *Bundle diff gate*: `infra/assets/ingest-handler/handler.mjs` was a
+stale bundle that did not contain the scope control. But `infra.yml` declares no
+dependency on the app-CI lane, so its deploy job ran on to `SST deploy [prod]` and
+**succeeded** — shipping source-correct / artifact-stale / **deployed-code-wrong**, leaving
+the un-gated ingest lane live. The gate worked. The pipeline TOPOLOGY did not: two lanes
+read the same sha and reached opposite verdicts, and the one that said "ship" won.
+
+So when you own the pipeline:
+- **Model the dependency, don't rely on ordering or luck.** A deploy job must be
+  *unreachable* while any integrity gate on the same sha is red — via
+  `workflow_run: conclusion == success`, a required-check branch rule, a gating job the
+  deploy `needs:`, or a single lane that runs gates then deploys. Two independent
+  workflows triggered by the same push are NOT sequenced.
+- **Audit for the inverse too.** Enumerate every workflow that can deploy, and for each,
+  every integrity gate that exists anywhere in the repo; a gate that no deploy path
+  depends on is decoration. Report the matrix, don't assume it.
+- **A gate that guards the SHIPPED ARTIFACT is the highest-value member of that set.**
+  Source-level green says nothing about a committed/prebuilt artifact (bundle, image
+  digest, lock file, IaC asset) — that class is exactly why the bundle-diff gate exists
+  (DEFECT-OAG-030). Never let those run in a lane the deploy ignores.
+- **"Green" must name what it proved.** When you report a pipeline as green, state which
+  gates ran on that sha and which artifact each one read. A green that read no shipped
+  artifact is not evidence the shipped artifact is right.
+Target: CFR (a rejected sha cannot reach an environment) + MTTR.
+
 ## Dependency-vulnerability audit gate (v91, DEF-ADIX-001, EXP-112)
 Vulnerable dependencies accumulate SILENTLY between deploys — DEF-ADIX-001 let a
 **CRITICAL** advisory (vitest UI-server arbitrary file read/exec) plus a HIGH and
@@ -413,6 +460,62 @@ gap is itself a small cicd/config improvement to land — a green from a partial
 selection is not a green. Sibling of the EXP-110 unrun-test-is-failed rule, at the
 test-PROJECT granularity.
 
+**The full local gate applies to EVERY push — including probe/tooling/script and
+one-line fix commits, not just feature UCs (v121).** AdixOut's first prod deploy was
+bounced TWICE by CI because a committed probe script carried an eslint unused-var
+(`ORG_ID`) that `eslint --max-warnings=0` would have caught, but neither the tester (who
+committed the probe) nor the engineer (a follow-on fix) ran `lint` locally first —
+"it's just a probe / a one-liner" is exactly when the gate gets skipped and a CI
+round-trip is spent. Any agent that pushes (engineer, tester, cicd) runs the SAME local
+gate — lint + typecheck + `make test-all` (+ `make audit` for dependency-bearing changes)
+— before every push regardless of how small or non-feature the change looks. Founding:
+principle-failure `2026-07-30-adixout-first-prod-deploy-fresh-account-bootstrap-gaps.md`.
+
+## Wire-contract provenance into the gate, and give the capture corpus a committed refresh (v123, EXP-120)
+On any project consuming or emitting data over a wire it does not own, the engineer's
+wire-contract provenance ledger (engineer.md) is only a gate if it RUNS on every push:
+wire it into the standing pre-push/CI gate alongside lint + `make test-all` + `make audit`
+(a single `make wire-provenance` target). Two things are yours to provide, and both were
+missing when DEFECT-OAG-041/042 escaped:
+- **A committed corpus-refresh target** (`make capture-refresh` or equivalent, read-only
+  against the live source, secrets injected as pipeline secrets). On OAG the capture corpus
+  was grown by a self-described THROWAWAY script plus manual curation of a prod capture
+  bucket — so the corpus silently ages and "confirmed in capture" quietly becomes
+  "confirmed in a stale capture". A hand-run spike is not a gate input.
+- **Committed live probe targets** for what an offline corpus structurally cannot see
+  (`make probe-…`, `make audit-…`: read-only, exit non-zero on an unmapped or
+  never-populated value). Offline captures only ever contain values we already captured.
+Target: CFR.
+
+## A gate that cannot run, or is permanently red, is worse than no gate (v125)
+Two standing gates on OAG trunk were dead and nobody noticed: `make test-fids-integration`
+**times out in its own 300s `beforeAll`** walking the live feed to head (so by our own
+"an unrun test is a failure" standard that whole tier has been failing silently), and
+`make render-diagrams` is **red on trunk** over 3 untouched files. A permanently-red or
+unrunnable gate trains everyone to read red as noise, which is how a REAL red gets ignored.
+- **Every committed gate must be either green on trunk or deleted.** There is no third
+  state. If a tier cannot run in its budget, fix the budget or the design (a `beforeAll`
+  that walks a live feed to head is not a test fixture, it is an unbounded dependency on
+  production) — do not leave it timing out.
+- **Report the gate INVENTORY with its health**, not just the run you happened to look at:
+  every target, whether it ran, and what it read. This pairs with "green must name what it
+  proved" above.
+
+## Wire the real-data conformance census as a SCHEDULED lane (v125, IMP-028, EXP-122)
+Push-time gates can only read the repo. The invariants that actually caught five
+never-working capabilities are **population queries over the real store**, and they need a
+lane the repo cannot provide:
+- `make conformance-census` — read-only against the real event store, enumerating emittable
+  types from source and reporting per-type occurrence counts, per-leaf population %, and
+  real inbound keys nothing reads. **Emit a committed, diffable snapshot; the gate is the
+  DIFF** (same shape as the bundle-diff gate — no thresholds to invent).
+- `make corpus-refresh` — re-harvests provenance-stamped exemplars and **FAILS on
+  staleness**, so the oracle ages honestly instead of decaying back into a fixture.
+- Run both on a **schedule** (and the source-enumeration limbs on push), with read-only
+  credentials injected as pipeline secrets. A capability that never fires is invisible to a
+  push-triggered gate by construction: nothing about that push is wrong.
+Target: CFR + MTTR. Full plan: `process/improvement-slices/IMP-028-real-data-conformance-census.md`.
+
 ## Dependabot-drain cadence (v104, ROC — human directive 2026-07-24)
 The `make audit` gate above is the DETECTOR; Dependabot is the upstream that already opens
 the patched-version bumps as branches/PRs on the project remote. Do NOT let them pile up
@@ -456,6 +559,18 @@ hook the dora-ledger skill into pipeline steps.**
 ## Return format
 Return: environments now in play and why, the deploy path, rollback assets
 maintained, and any capability the next slice still lacks.
+
+## Committing on a shared working tree (DEFECT-OAG-058)
+Up to five agents share one working tree and therefore **one git index**. Commit with
+**`make commit-isolated REPO=<repo> MSG="type(scope): intent (ID)" PATHS="<your paths>"`**
+(`.claude/tools/isolated-commit.js`). Do NOT `git add` then commit — `git add` takes a
+pathspec but **`git commit` does not**, so it commits the whole shared index and publishes
+whatever another agent had staged (b477f08: nine files from two agents, applied to
+dev-shared because on this trunk the push is the apply). Do NOT pass a pathspec to
+`git commit` either — that commits from the **working tree** and sweeps a concurrent
+agent's mid-edit save. The tool uses a private `GIT_INDEX_FILE` + `commit-tree` + a
+compare-and-swap ref update, so neither can happen. If you were dispatched in your OWN
+worktree, a plain commit is safe.
 
 ## Command form — allowlist contract (process v15 §33, IMP-001)
 Every Bash command must match the committed allowlist in `.claude/settings.json`

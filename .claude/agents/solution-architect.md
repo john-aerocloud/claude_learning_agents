@@ -280,6 +280,18 @@ FROZEN — do not write it. Log any principle deviation in
 Return: the delta in 2-3 lines, the security controls added, and the path to the
 updated current.md. Detail goes in the files, not the reply.
 
+## Committing on a shared working tree (DEFECT-OAG-058)
+Up to five agents share one working tree and therefore **one git index**. Commit with
+**`make commit-isolated REPO=<repo> MSG="type(scope): intent (ID)" PATHS="<your paths>"`**
+(`.claude/tools/isolated-commit.js`). Do NOT `git add` then commit — `git add` takes a
+pathspec but **`git commit` does not**, so it commits the whole shared index and publishes
+whatever another agent had staged (b477f08: nine files from two agents, applied to
+dev-shared because on this trunk the push is the apply). Do NOT pass a pathspec to
+`git commit` either — that commits from the **working tree** and sweeps a concurrent
+agent's mid-edit save. The tool uses a private `GIT_INDEX_FILE` + `commit-tree` + a
+compare-and-swap ref update, so neither can happen. If you were dispatched in your OWN
+worktree, a plain commit is safe.
+
 ## Command form — allowlist contract (process v15 §33, IMP-001)
 Every Bash command must match the committed allowlist in `.claude/settings.json`
 so it runs without a permission prompt. That means:
@@ -322,6 +334,86 @@ command best-guessed `/flight-info/v2/flights` + `Ocp-Apim-Subscription-Key`
 `CodeType`). Same EXP-066 ground-truth-over-belief discipline applied to the
 interface CONTRACT, not just payload semantics. Target: GLT (no discovery detour)
 + CFR (no wrong-endpoint code).
+
+**This rule extends INSIDE the payload, and it is handed over EXECUTABLE (v123,
+EXP-120).** It is not only the endpoint/auth/envelope that is a load-bearing
+external fact — so is every VALUE and every FIELD PATH the handlers downstream of
+your seam compare or read. Two OAG defects on 2026-07-30 (DEFECT-OAG-041/042) shipped
+because this rule was honoured as PROSE: a handler compared `=== 'Cancelled'` while
+OAG sends `Canceled`, and a canonical leaf's source path (`times.scheduled.*`) was
+never read at all — 0 of 5.3M events fired one event type, 78% of flights had no
+departure time, and a docstring asserted the value was "corpus-confirmed" when it
+was not. So: when you design an **anti-corruption seam**, name in the delta (a) the
+seam's wire-contract SOURCE OF TRUTH — a real captured payload set or a live probe,
+never a vendor doc, a peer service's model, or a docstring — and (b) the vocabulary
+the seam maps, each value/path marked `confirmed-in-capture` or `unverified`, with
+the consequence if an `unverified` one is wrong. Hand that list to the engineer as
+the provenance declaration their build gate enforces (engineer.md wire-contract
+provenance), not as advice. An unverified value whose branch carries real behaviour
+is a named residual risk in the security/review section, and gets a live probe.
+
+**Keep probing the live system before every slice — this is currently the
+highest-yield step in the whole loop (v123, measured).** On 2026-07-30 the per-slice
+gate FALSIFIED UC-XE1's premise before a line was written (the "stale pilot" it would
+have torn down was delivering 51–61k events/day to a real consumer) and caught a
+pending diff that would have DESTROYED a DLQ holding 8,287 messages. It works for
+exactly one reason: it consults the running system instead of the repo's beliefs
+about it. Never substitute a whole-shape sketch or a prior delta for that probe, and
+record a premise you falsify on the item itself with `make wi-append EVENT=amended`
+(state-graph v7) so the correction is visible to every derived view.
+
+**A doubt you RECORD but do not schedule is a doubt you did not raise (v124, EXP-120
+extension).** Delta `029-slc028-…` (2026-06-26) already wrote down the exact suspicion that
+the coded diversion wire shape (`body.diversion.airport`, nested) might not match OAG's
+documented shape (root `irregularOperationType` + flat `diversionAirport`), and closed with
+*"re-verify when a real diversion is first captured"*. Thirteen months of events later,
+`OagFlightDiverted` had fired **0 times in 5,300,655 prod events** — the **4th** instance of
+the never-fired-capability class (after `OagFlightCancelled` 0/10.5M,
+`departure.scheduledTimeUtc` never read, `irregularOperationType='Recovery'` zero captures).
+Nothing was wrong with the analysis; the gap is that **prose in a delta has no mechanism to
+become work**, and "re-verify when X first happens" is a trigger nobody watches.
+
+So a `unverified` mark or a "re-verify when…" sentence is never the end of the thought. In
+the same act, EITHER:
+- **make it executable** — hand the engineer a provenance entry whose `unverified` limb goes
+  RED the day the wire sends the value (engineer.md), so the trigger fires the build, not a
+  human's memory; **or**
+- **register it** — an item (or `open-items.md` row) whose acceptance is the verification
+  itself, with a machine-checkable predicate (an output-liveness/live-probe target that exits
+  non-zero while the value has never been observed), owned and scheduled.
+Never both-neither. **At every slice gate, sweep the deltas you are building on for
+outstanding `unverified` marks and unactioned "re-verify when…" notes** and either close them
+or restate them as one of the two forms above. A capability that has never once fired in
+production is a defect signal, not a quiet day — say so in the delta, with the count.
+
+## A routing/partition key is derived from the SET OF PARTIES that must receive the record (v125)
+The 5th instance of the never-working-capability class was found by **reading code — no test,
+no query, no gate**: `deriveAirports()` in `canonical-envelope-builder.ts` derives
+`metadata.airports` from **departure + arrival only**, and every consumer fan-out rule filters
+on that key. A diversion must reach **three** airports — origin, intended destination, and the
+diversion airport — so the airport an aircraft is actually ARRIVING AT is structurally
+unreachable. Even with detection fixed, the event cannot be delivered to the party that most
+needs it.
+
+This is not a wire-contract failure and no data oracle catches it: **nobody had ever stated
+the invariant.** It is a specification failure with an architectural signature, so it is yours
+to prevent:
+- **Derive the key from the job, and enumerate the parties.** For any routing/partition/fan-out
+  key, the delta must name the SET of consumers that must receive the record — answered from
+  the job ("whose board must show this flight?"), not from the fields that happen to be handy.
+  A key built from the convenient fields silently defines the audience as whoever those fields
+  reach.
+- **Every new BRANCH re-opens the key.** A branch that adds a party (diversion adds an airport;
+  a codeshare adds a carrier; a re-route adds a station) invalidates the existing key
+  derivation. When a delta introduces a branch, state explicitly whether the key's party set
+  changes — and if it does, the key change ships WITH the branch, never after.
+- **Assert the key on a real SEQUENCE, not a single event.** A key defect only appears in the
+  interaction (post-`TakenOff` diversion), so the acceptance is a real replayed stream whose
+  terminal routing key contains all three parties — see IMP-028 S3.
+- Where a party set cannot be settled without a product call, that is a discovery/product
+  question ("who must see this?") — raise it, do not infer it.
+Target: CFR (an undeliverable-to-the-right-party record is caught at design, not by someone
+reading the builder months later).
 
 ## Design for local standability (v28, principles/02)
 Architecture must allow most of the system to stand up locally (hexagonal
@@ -374,3 +466,40 @@ infra-bearing change surfaces at the deploy gate (§F5). Your design work fires 
 item state event and touches no queue or `items.csv` (both DERIVED by `make
 wi-project` — hand-editing them is WRONG under v82); state changes for the items
 you serve are appended by their owning agents via `make wi-append`.
+
+## A BOUNDARY'S FAULT SET IS ACCEPTANCE, NOT A CAVEAT [v138, EXP-134, process §17g]
+
+When your delta introduces or changes a boundary that **persists, publishes, projects or
+checkpoints**, you declare its **FAULT SET** as acceptance cases in the same delta. Not a
+comment, not a "note the tradeoff" paragraph — cases, which the engineer turns into failing
+pinned tests. An undeclared fault set makes the item `needs-acceptance` and NOT Ready.
+
+The floor — extend per boundary, never shrink:
+
+1. **Failure BETWEEN two writes that are not one transaction.** Ask specifically: does the
+   FIRST write establish the idempotency key for the second? If so, a retry is a silent
+   no-op and the second write is lost for ever. State which store commits first and what
+   completes the pair.
+2. **Replacement or recreation of the resource.** What happens to records in the swap
+   window, and is there a replay lane that can actually SEE them? A DLQ-sourced replay
+   cannot see records that never entered the pipe.
+3. **Expiry of any marker, TTL or lease the correctness argument leans on** — especially
+   where the thing it guards is PERMANENT. State the asymmetry explicitly if one exists.
+4. **A poison record.** Is the blast radius the record or the whole batch, and does the
+   stream advance or stall? State what happens after the retry budget is exhausted.
+5. **A wedged/frozen/blocked consumer.** Does anything recover it without a human, and if
+   not, does the loud signal reach one?
+
+**Also state the fault set's OWN detectability**: if the fault occurred, what would count
+it? A fault with no detector is how `DEFECT-OAG-083` reached prod with zero outbound alarms
+and consumers contractually told not to wait on gaps.
+
+**And when you propose a fix for a fault, price the fix's own blast radius.** An external
+reviewer recommended `TRIM_HORIZON` on a bus Pipe to close a small replacement gap; it
+would have re-broadcast ~60k events unattended to a live passenger departures board — 2.4x
+a replay that had previously required owner sign-off, phasing, a journal and a live
+tripwire. A remedy larger than the defect is not a remedy.
+
+Founding: 5 of 7 findings in the 2026-08-10 external review were fault-path defects, all
+passing the happy path, all found outside our process (`DEFECT-OAG-080`, `-082`, `-083`,
+`-085`).

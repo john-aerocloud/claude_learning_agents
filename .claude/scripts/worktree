@@ -15,14 +15,45 @@
 # has uncommitted changes), and `ensure` moves a parked repo back into the
 # worktree. Stop/switch therefore round-trips without data loss.
 #
+# SECOND HAZARD, ADDED BY DEFECT-OAG-076 (it destroyed real work): parking is not
+# enough, because the doomed directory can hold a nested repo NOBODY PARKED. An
+# agent dispatched with `isolation: worktree` onto a PROJECT-REPO item finds no
+# project repo (the parent gitignores it, so it is never in the worktree) and no
+# legal way to commit, so it CLONES the project repo inside its worktree and
+# commits there — and the cleanup takes the clone's objects with it. That is how
+# DEFECT-OAG-072 died: `git cat-file -t fb080d9` => `fatal: Not a valid object
+# name`. "Unchanged worktree ⇒ safe to delete" is FALSE, because the change lived
+# in a nested repo the check does not model. So NO removal path here deletes a
+# directory without first asking the honest question — DOES EVERY COMMIT IN HERE
+# SURVIVE THE DELETION? — which is delegated to `.claude/tools/worktree-guard.js`
+# and never re-implemented as another idea of "unchanged".
+#
 # Usage (run from any tree in the repo; paths resolve to the `main` worktree):
 #   worktree ensure   <project>   # create worktree+branch if absent; move parked repo in; set ACTIVE; print path
 #   worktree path     <project>   # print the worktree path (does not create)
 #   worktree list                 # list all worktrees
 #   worktree foldback <project>   # merge instance/<project> into main IN the integration tree (works from any tree; unattended-safe; escalates on conflict)
 #   worktree update   <project>   # fold-FORWARD: merge main INTO instance/<project> so the worktree gets the latest process (safe — only the process layer moves; project repo untouched)
-#   worktree remove   <project>   # park the project repo back to integration tree, then remove the worktree
+#   worktree remove   <project>   # park the project repo back to integration tree, then remove the worktree (GUARDED)
+#   worktree guard    <path>      # ask only: would removing <path> destroy work that exists nowhere else? (exit 2 = yes)
+#   worktree reap     <path>|--all # GUARDED cleanup of a finished AGENT worktree (--all sweeps .claude/worktrees/*)
 set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+GUARD="$script_dir/../tools/worktree-guard.js"
+
+# exit 0 = nothing in <dir> dies with it; 2 = REFUSED (loud, on stderr).
+guard_ok() {
+  d=$1
+  if [ ! -f "$GUARD" ]; then
+    echo "REFUSING: worktree-guard.js not found at $GUARD — an unrunnable guard is not a clean one." >&2
+    return 2
+  fi
+  if node "$GUARD" scan "$d" ${WORKTREE_RESCUE_TO:+--rescue-to "$WORKTREE_RESCUE_TO"} >&2; then
+    return 0
+  fi
+  return 2
+}
 
 sub=${1:-}; [ -n "$sub" ] && shift || true
 
@@ -158,8 +189,47 @@ cmd_remove() {
     mv "$wt/work/$proj" "$mt/work/$proj" >&2
     echo "parked $proj repo at $mt/work/$proj" >&2
   fi
+  # DEFECT-OAG-076: parking covers the repo we KNOW about. Anything else nested in
+  # there — a clone an agent left behind — dies unannounced unless we ask.
+  guard_ok "$wt" || exit 2
   git worktree remove --force "$wt" >&2
   echo "removed worktree $wt (branch instance/$proj retained; project repo parked)"
+}
+
+cmd_guard() {
+  d=${1:?usage: worktree guard <path>}
+  guard_ok "$d" || exit 2
+}
+
+# cmd_reap — GUARDED cleanup of a finished AGENT worktree (the Agent tool's
+# `isolation: worktree` trees under <main>/.claude/worktrees/). This is the safe
+# replacement for an auto-clean that decides on "unchanged": it deletes only what
+# provably loses nothing, and REFUSES (leaving the tree intact, work recoverable)
+# otherwise. DEFECT-OAG-076.
+cmd_reap() {
+  target=${1:?usage: worktree reap <path>|--all}
+  mt=$(main_tree)
+  if [ "$target" = "--all" ]; then
+    agents="$mt/.claude/worktrees"
+    [ -d "$agents" ] || { echo "no agent worktrees at $agents"; return 0; }
+    rc=0
+    for d in "$agents"/*; do
+      [ -d "$d" ] || continue
+      cmd_reap "$d" || rc=2
+    done
+    return $rc
+  fi
+  [ -d "$target" ] || { echo "no such worktree: $target" >&2; return 0; }
+  if ! guard_ok "$target"; then
+    echo "REFUSED to reap $target — see the guard above. Make the work durable, then re-run." >&2
+    return 2
+  fi
+  if is_worktree "$target"; then
+    git -C "$mt" worktree remove --force "$target" >&2
+  else
+    rm -rf "$target"
+  fi
+  echo "reaped $target (nothing in it existed only there)"
 }
 
 case "$sub" in
@@ -169,5 +239,7 @@ case "$sub" in
   foldback) cmd_foldback "$@" ;;
   update)   cmd_update   "$@" ;;
   remove)   cmd_remove   "$@" ;;
-  *) echo "usage: worktree {ensure|path|list|foldback|update|remove} [project]" >&2; exit 2 ;;
+  guard)    cmd_guard    "$@" ;;
+  reap)     cmd_reap     "$@" ;;
+  *) echo "usage: worktree {ensure|path|list|foldback|update|remove|guard|reap} [project|path]" >&2; exit 2 ;;
 esac

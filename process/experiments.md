@@ -902,3 +902,23 @@ signed-off scope.
 **How this could be wrong.** Option 1 could make deferral so expensive that agents stop
 recording it in the dossier at all, which would be worse — the prose record is currently the
 only reason this was findable. Whatever is chosen must keep deferral cheap to *state*.
+
+### Third instance — 2026-08-14, a verification-only use-case
+
+`UC-ROC-089` is a live-verification use-case whose entire deliverable is a probe script plus its
+execution. A **tester** authored the script, committed it, and ran it green — then could not fire
+`pulled` (orchestrator/flow-manager only) and, later in the chain, would face `built_green`
+(engineer-only) for a script it wrote itself. It reported the block rather than spoofing a role,
+which is the right behaviour and the same disposition the documenter and cicd agents showed.
+
+So the mismatch has now appeared **three times in three different shapes**: a docs-only item built
+by a documenter (EXP-119), an infra-owned defect fixed by cicd (EXP-122), and now a
+verification-only item whose deliverable is authored by a tester. Each was patched by widening one
+transition's agent list. That is three patches to the same underlying assumption — that item TYPE
+predicts which ROLE does the work — and the assumption is simply false for any item whose value is
+not application code.
+
+**This strengthens the open question already recorded above** rather than adding a new one: the
+retro should decide whether per-transition agent allowlists are the right mechanism at all, or
+whether "who may fire this" should derive from the item's own declared owner. A fourth patch would
+be evidence the mechanism is wrong, not that the list needs extending again.

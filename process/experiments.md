@@ -1057,3 +1057,42 @@ even one was, the answer is a narrower fix, not a replacement.
 
 **Do not score this as "the four transitions now work."** Score it as: did an agent doing legitimate
 work get blocked or have to spoof a role again?
+
+### EXP-123 — instances five, six and seven, all on 2026-08-14: four different roles, one day
+
+Recording these together because the pattern is now beyond argument. On a single day, **four
+different roles** were blocked by or had to work around the per-transition agent allowlists:
+
+| Role | Transition | What happened |
+|---|---|---|
+| **engineer** | `pulled` (use-case) | Its own role brief tells it to fire `pulled`; the graph forbids it. Fired as `orchestrator` with a disclosing note. |
+| **tester** | `deployed` (use-case) | Item arrived in `deploying` with no cicd in the thread. Fired as `cicd`, transparently noted as a mechanical attestation. |
+| **solution-architect** | `confirmed`/`fixed` (defect) | `DEF-ROC-026` resolved as a pure **design decision** — delta 016, no code. The role that did 100% of the work has **no path at all** in the defect graph. flow-manager correctly REFUSED to force it, on the grounds that borrowing an agent name would misattribute DORA time-by-owner and quality-by-stage. |
+| **orchestrator** | `made_ready` (use-case) | **The flow owner cannot promote an item into Ready.** `made_ready` is `flow-manager`-only, while `pulled` is `["orchestrator","flow-manager"]` — so the orchestrator may PULL from Ready but not PUT into it. |
+
+### Why the last one settles it
+
+The orchestrator's own definition makes it the role that "owns sequencing, gates, DORA measurement
+and Theory-of-Constraints optimisation of the whole pipeline." A rule that lets that role *consume*
+from a queue but not *populate* it is not encoding a real safety property — nothing is protected by
+forcing a second agent to be spawned purely to append one event. It is an artefact of enumerating
+allowlists transition-by-transition without ever checking the set for coherence.
+
+Note the cost shape: every one of these four cost either **a spoofed role with a disclaimer nobody
+downstream will read**, or **an entire extra agent dispatch**. The first corrupts attribution; the
+second corrupts lead time. There is no third option available to an agent that just wants to record
+what it truthfully did.
+
+### Two consequences for the retro, beyond the mechanism change
+
+1. **The disclosing notes are load-bearing and invisible to the machinery.** `DEF-ROC-026`'s note
+   literally has to say *"read the attribution here, not the agent field."* Any metric computed from
+   the `agent` field is therefore already wrong wherever this has happened — and we know of at least
+   four cases in one day, all self-reported, so the true count is a floor.
+2. **A rule that cannot be followed gets worked around.** Three of the four agents did the honest
+   thing and disclosed; one (flow-manager) refused outright and escalated. That disposition is
+   admirable and should be praised — but relying on it is relying on every future agent choosing
+   integrity over convenience, when the mechanism itself makes the dishonest path cheaper.
+
+**Scoring, unchanged:** did an agent doing legitimate work get blocked or have to spoof a role again?
+Four instances in one day is the pre-change baseline.

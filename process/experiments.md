@@ -715,7 +715,34 @@ have not used real events to demonstrate that things work."* Recorded unsoftened
 - **EXP-102 (defect-vs-rework fork)** — POSITIVE data point (2nd opp → 2/3; main scored the 1st at v83), limb (b). The tester's UC-ADIX-006 concurrency failure was correctly classified as `rejected` (rework on the UC under validation, a deploy-failure, no `DEF-` raised) — not conflated into a defect against shipped work. CFR counted it as a deploy-failure per §3, MTTR tracked the validation-rejection recovery (2434 s median). 0 misclassifications this cycle. Remains `active`.
 - **EXP-101 (dev-then-prod validation)** — N/A this cycle (no scoring data): AdixOut is sandbox/local-only for the live-bus slice (the `dev-shared` bus is not yet live), so UC-ADIX-006 took the documented local-only collapse (`validated` fired straight from `dev-validating`, dev==prod). Not a violation — the collapse case is explicitly in-scope. No cloud/hosted dev→prod promotion occurred to score.
 
-## EXP-119 — a `documenter` can advance its own docs-only work item
+
+---
+
+## ID RE-ALLOCATION — 2026-08-14 (ROC), read before citing any ID below
+
+The sections that follow were originally numbered **EXP-119 … EXP-124** by the ROC instance while it
+was **22 process versions stale** (v118 against main's v140) and 15 days un-reconciled. Those six IDs
+were **already allocated on `main` to OagEventSource experiments**, since adopted/retired at OAG v125.
+They have been **renumbered to EXP-136 … EXP-141**, above main's high-water mark of EXP-135. Content is
+unchanged; only the identifiers moved. Any earlier ROC commit message citing EXP-119..124 refers to
+these sections under their old numbers.
+
+**Two structural problems this exposed, neither of which is fixed by renumbering:**
+
+1. **There is no cross-instance ID allocator.** Each instance mints the next ID from whatever registry
+   its own branch happens to hold, so any instance running on a stale base will collide. Renumbering is
+   a repair, not a fix — the next divergence reproduces it.
+2. **The hard cap of 8 `active` rows is a GLOBAL budget, but rows are allocated PER-INSTANCE.** Main
+   arrived at exactly 8. ROC's genuine experiments below would take it past the cap — and ROC cannot
+   honestly score OagEventSource's rows to make room, because it has neither the evidence nor the
+   standing to adopt-or-kill another project's work. **So the cap is breached, deliberately and
+   visibly, rather than resolved by killing rows I cannot fairly judge.** Recorded here instead of
+   silently exceeded. The cap needs either a per-instance allowance or a cross-instance scoring owner.
+
+Also note a **format divergence**: main's registry is a table (`| EXP-NNN | … |`); these ROC sections
+are `##` prose blocks. They merged without conflict precisely because they do not overlap textually —
+which means the merge cleanliness was luck, not compatibility.
+## EXP-136 — a `documenter` can advance its own docs-only work item
 **Registered:** 2026-07-31 (ROC) · **Status:** OPEN · **Applies-to:** any project with a
 docs-only or runbook-bearing use-case.
 
@@ -795,7 +822,7 @@ pre-emptively filter the derivation on the strength of the original reasoning �
 mechanism was misidentified, and the honest `agent` discriminator is already in place for
 whoever needs it.
 
-## EXP-120 — atomic pathspec commits in a shared working tree
+## EXP-137 — atomic pathspec commits in a shared working tree
 **Registered:** 2026-07-31 (ROC) · **Status:** OPEN · **Applies-to:** any project where
 more than one agent works concurrently in ONE working tree (i.e. the normal case today —
 agents share a worktree; only *projects* get separate worktrees).
@@ -904,11 +931,11 @@ landing its own hunk. Both are evidence the problem is real and that agents can 
 but both were individual diligence, which is what this experiment set out to replace with a
 documented default.
 
-**Revised scoring:** score EXP-120 positive for disjoint-file commits only. Co-owned-file
+**Revised scoring:** score EXP-137 positive for disjoint-file commits only. Co-owned-file
 mis-attribution is a SEPARATE open problem and should not be counted against or in favour of
 the atomic-pathspec rule.
 
-## EXP-121 — `prod-deploying` needs a `blocked` exit for single-environment projects
+## EXP-138 — `prod-deploying` needs a `blocked` exit for single-environment projects
 **Registered:** 2026-07-31 (ROC) · **Status:** OPEN · **Applies-to:** any project that has no
 production environment yet, or whose prod promotion is externally blocked.
 
@@ -947,7 +974,7 @@ the tester's terminal event from `dev-validating` is **`validated`**, not `dev_v
 `dev_validated` is only correct when a prod promotion will actually follow.
 
 **Target metric:** gross lead time — the blocked component. A stranded item accrues wip time
-invisibly and needs a human to notice, which is precisely the failure EXP-119 addressed in a
+invisibly and needs a human to notice, which is precisely the failure EXP-136 addressed in a
 different corner of the same graph.
 
 **Anticipated effect:** no item strands in `prod-deploying`; a genuinely unavailable prod
@@ -961,7 +988,7 @@ untrue.
 rather than being closed via `validated`, the guidance is not landing and the real fix is
 making the graph itself aware of whether a prod environment exists. Watch for that.
 
-## EXP-122 — a `cicd` agent can advance an infra-owned defect
+## EXP-139 — a `cicd` agent can advance an infra-owned defect
 **Registered:** 2026-08-04 (ROC) · **Status:** OPEN · **Applies-to:** any defect whose fix is
 infrastructure, pipeline or deploy-configuration rather than application code.
 
@@ -974,7 +1001,7 @@ service principal's apply erased the `BUILD_SHA` our pipeline stamps. It was dis
 ask, not application code. The machinery then refused every transition it needed, so it fired
 them as `AGENT=engineer` and said so in its report.
 
-That is the second instance of this exact shape (see **EXP-119**, where `documenter` appeared
+That is the second instance of this exact shape (see **EXP-136**, where `documenter` appeared
 zero times in the graph and a docs-only use-case could not be advanced by its actual builder).
 Both times the agent behaved correctly — attributed honestly in the note and escalated rather
 than hand-editing state — and both times the event log ended up naming the wrong role, which
@@ -1009,7 +1036,7 @@ transition it may not fire, or firing it under a role it does not hold.
 if each advanced without an orchestrator intervention and without any agent appending under a
 role it does not hold.
 
-## EXP-123 — an aggregate can read `done` while signed-off scope was never registered
+## EXP-140 — an aggregate can read `done` while signed-off scope was never registered
 **Registered:** 2026-08-05 (ROC) · **Status:** OPEN · **Applies-to:** every project using the
 event-sourced work-item model with aggregate types (requirement / chunk / slice).
 
@@ -1072,7 +1099,7 @@ execution. A **tester** authored the script, committed it, and ran it green — 
 which is the right behaviour and the same disposition the documenter and cicd agents showed.
 
 So the mismatch has now appeared **three times in three different shapes**: a docs-only item built
-by a documenter (EXP-119), an infra-owned defect fixed by cicd (EXP-122), and now a
+by a documenter (EXP-136), an infra-owned defect fixed by cicd (EXP-139), and now a
 verification-only item whose deliverable is authored by a tester. Each was patched by widening one
 transition's agent list. That is three patches to the same underlying assumption — that item TYPE
 predicts which ROLE does the work — and the assumption is simply false for any item whose value is
@@ -1085,7 +1112,7 @@ be evidence the mechanism is wrong, not that the list needs extending again.
 
 ---
 
-## EXP-124 — "dep satisfied" is undefined, so two flow-managers read it oppositely
+## EXP-141 — "dep satisfied" is undefined, so two flow-managers read it oppositely
 
 **Registered** 2026-08-14 (ROC). **Class:** flow rule with no written definition.
 
@@ -1153,9 +1180,9 @@ access to this session's context, reach the same promotion decision as the earli
 
 ---
 
-## EXP-123 — FOURTH INSTANCE (2026-08-14): the trigger fired; the mechanism is wrong
+## EXP-140 — FOURTH INSTANCE (2026-08-14): the trigger fired; the mechanism is wrong
 
-EXP-123 recorded, verbatim: *"A fourth patch would be evidence the mechanism is wrong, not that the
+EXP-140 recorded, verbatim: *"A fourth patch would be evidence the mechanism is wrong, not that the
 list needs extending again."* **That fourth instance has now occurred. Recording the verdict rather
 than patching a fourth transition.**
 
@@ -1172,9 +1199,9 @@ than silently spoof a role.
 
 | # | Item shape | Role that did the work | Transition it could not fire |
 |---|---|---|---|
-| EXP-119 | docs-only | documenter | `built_green` / `deployed` |
-| EXP-122 | infra-owned defect | cicd | `confirmed` / `fixed` |
-| EXP-123 | verification-only | tester | `pulled`, then `built_green` |
+| EXP-136 | docs-only | documenter | `built_green` / `deployed` |
+| EXP-139 | infra-owned defect | cicd | `confirmed` / `fixed` |
+| EXP-140 | verification-only | tester | `pulled`, then `built_green` |
 | **this** | ordinary use-case | **engineer** | **`pulled`** |
 
 The first three were explained away as "item TYPE does not predict the ROLE for unusual items." **This
@@ -1218,7 +1245,7 @@ even one was, the answer is a narrower fix, not a replacement.
 **Do not score this as "the four transitions now work."** Score it as: did an agent doing legitimate
 work get blocked or have to spoof a role again?
 
-### EXP-123 — instances five, six and seven, all on 2026-08-14: four different roles, one day
+### EXP-140 — instances five, six and seven, all on 2026-08-14: four different roles, one day
 
 Recording these together because the pattern is now beyond argument. On a single day, **four
 different roles** were blocked by or had to work around the per-transition agent allowlists:

@@ -990,3 +990,70 @@ the invisibility, which is the part that actually caused harm here.
 
 **Do not score this as "the rule was written."** Score it as: did a later flow-manager, with no
 access to this session's context, reach the same promotion decision as the earlier one?
+
+---
+
+## EXP-123 — FOURTH INSTANCE (2026-08-14): the trigger fired; the mechanism is wrong
+
+EXP-123 recorded, verbatim: *"A fourth patch would be evidence the mechanism is wrong, not that the
+list needs extending again."* **That fourth instance has now occurred. Recording the verdict rather
+than patching a fourth transition.**
+
+### The instance
+
+`UC-ROC-080`'s **engineer** performed its own pull and could not fire `pulled` — the state graph
+restricts that transition to `orchestrator`/`flow-manager`, while the engineer's own role brief
+tells it to fire `pulled` if it performs the pull. `built_green` is unreachable from `ready`, so the
+item was structurally stuck. The agent fired it as `AGENT=orchestrator` **with a note saying it had
+done so and why** — the honest workaround, and the fourth agent in a row to report the block rather
+than silently spoof a role.
+
+### The four instances, and what they share
+
+| # | Item shape | Role that did the work | Transition it could not fire |
+|---|---|---|---|
+| EXP-119 | docs-only | documenter | `built_green` / `deployed` |
+| EXP-122 | infra-owned defect | cicd | `confirmed` / `fixed` |
+| EXP-123 | verification-only | tester | `pulled`, then `built_green` |
+| **this** | ordinary use-case | **engineer** | **`pulled`** |
+
+The first three were explained away as "item TYPE does not predict the ROLE for unusual items." **This
+fourth one kills that explanation**: the item is an entirely ordinary use-case and the role is the
+canonical one for it. The mismatch is therefore **not** about unusual item types at all — it is that
+**per-transition agent allowlists encode an assumption that a transition has one rightful owner**,
+and that assumption is false wherever an agent legitimately does two jobs in sequence.
+
+Note also the *direct contradiction* this instance exposes: the engineer's role brief instructs it to
+fire `pulled`, and the graph forbids it. Two authored artefacts disagree — the same class as
+`DEF-ROC-026`, where four documents asserted a partition key the code never set. A rule that cannot
+be followed gets worked around, and every workaround costs a role-spoof or a note nobody reads.
+
+### The experiment — replace the mechanism, do not extend the list
+
+Derive "who may fire this" from the **item's own declared owner** rather than a per-transition
+allowlist: the item records who is doing the work, the machinery checks the firing agent against
+*that*, and the graph constrains only the **shape** of the transition (which states follow which).
+This keeps the property the allowlists were protecting — an agent cannot rubber-stamp its own work
+into a state it did not earn — while removing the false premise that a transition has exactly one
+rightful role forever.
+
+**Target metric:** count of role-spoofed or blocked transitions per 20 items (currently 4 known in
+~2 weeks, all self-reported — the true rate is a floor, not a measurement, since a silent spoof
+leaves no trace).
+
+**Anticipated effect:** the class disappears rather than shrinking. If instances continue after the
+change, the diagnosis here is wrong and the real problem is elsewhere.
+
+**Scoring horizon:** the next 20 items.
+
+**Applies-to predicate:** every project using the event-sourced work-item machinery.
+
+### How this could be wrong
+
+The allowlists may be catching real errors we never see, in which case removing them trades a visible
+annoyance for an invisible integrity loss. Before adopting, check whether any allowlist rejection in
+the history was a **genuine** mistake rather than a legitimate agent blocked by the mechanism. If
+even one was, the answer is a narrower fix, not a replacement.
+
+**Do not score this as "the four transitions now work."** Score it as: did an agent doing legitimate
+work get blocked or have to spoof a role again?

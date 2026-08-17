@@ -1283,3 +1283,17 @@ what it truthfully did.
 
 **Scoring, unchanged:** did an agent doing legitimate work get blocked or have to spoof a role again?
 Four instances in one day is the pre-change baseline.
+
+### EXP-140 — instance eight, and the sharpest: the role that OWNS the defect class cannot advance it
+
+2026-08-17, ROC. `DEF-ROC-037` is **doc/test-pin drift** — a documented command diverging from the code that pins it. That class is owned by the **documenter** by design; the orchestrator dispatched it there for exactly that reason, and the documenter fixed it well (repointed the pin, added reverse and discovery arms, mutation-checked all five, and recorded the coupling in `DOCS-LAYOUT.md`).
+
+**It then could not fire `confirmed` or `fixed`.** The defect flow reserves both to `orchestrator`/`engineer`/`cicd`. It appended them under `AGENT=engineer` with the substitution stated verbatim in each note, and flagged the gap rather than routing around it.
+
+**Why this instance settles what the previous seven only suggested.** The earlier cases could each be read as an unusual item meeting an unusual role. This one is the opposite: **the item type and the owning role are perfectly matched — and the graph still says no.** A defect about documentation, dispatched to the documentation role, on the orchestrator's deliberate judgement, and the mechanism forbids the only role that should have it.
+
+Tally so far, all self-reported (so a floor, not a measurement): documenter ×2 (`built_green`/`deployed`, now `confirmed`/`fixed`), tester (`deployed`), solution-architect (`confirmed`/`fixed` — no path at all), engineer (`pulled`), orchestrator (`made_ready`). **Five distinct roles, eight occasions.**
+
+Every one cost either a **borrowed agent name with a disclaimer nobody downstream reads** — corrupting `time_by_owner` and quality-by-stage — or **an extra agent dispatch**, corrupting lead time. The mechanism makes the dishonest path the cheap one, and has relied entirely on agents choosing to disclose. They have, every time, which is creditable and is not a control.
+
+**No ninth patch.** The replacement recorded above stands: derive firing rights from the item's declared owner; let the graph constrain transition SHAPE only.

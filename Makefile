@@ -582,6 +582,31 @@ roc-local-down:
 roc-e2e-battery:
 	npm --prefix $(ROC_APP) run local:e2e-battery $(if $(ROC_E2E_SPECS),-- $(ROC_E2E_SPECS),)
 
+# --- ROC living-demo scenario harness (UC-ROC-051/052/080) ---------------------
+ROC_DEMO := work/ROC
+# The committed harness SELF-TESTS for the demo scenario machinery. No stack, no
+# creds, no network — pure shell assertions on the harness + the scenario
+# convention + the seven status/media scenarios' honesty about assumed wire texts.
+#   make roc-demo-harness
+roc-demo-harness:
+	$(ROC_DEMO)/scenarios/tests/run.sh
+	$(ROC_DEMO)/scenarios/tests/mode.sh
+	$(ROC_DEMO)/scenarios/tests/uc080.sh
+# List the seven granular status/media injection scenarios: what each injects, the
+# Alert Status it must produce, and — the part that matters — WHICH wire texts are
+# ASSUMED rather than captured from the real feed.
+#   make roc-scenario-list
+roc-scenario-list:
+	npm --prefix $(ROC_APP) run --silent scenario:list
+# Run the whole living-demo scenario suite (raise -> recovery -> the seven
+# status/media scenarios) against a running local stack. Requires `make roc-local-up`.
+# NB the suite's own docstring precondition is a FRESH stack: a long-accumulated
+# Event Hubs emulator has been measured to fail ~2/10 on a mid-test alert-count
+# race, so bring it up fresh before treating a failure as a code fault.
+#   make roc-scenarios
+roc-scenarios:
+	$(ROC_DEMO)/scenarios/run-all.sh
+
 # --- UI accessibility scan (ui-designer; design-ops, root Makefile only) -------
 # Runs the axe/Playwright a11y + geometry specs (WCAG 2.2 AA contrast +
 # visual-structural GEO assertions, ui-design.md §4) over the observatory SPA.

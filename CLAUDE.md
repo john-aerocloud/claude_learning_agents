@@ -68,8 +68,51 @@ See `README.md` for the full system. In short:
   unrelated.)
 - **Two repositories — project output vs the agent system (v50).** Each
   `work/<project>/` is its **own independent git repo** (so a project can be
-  lifted out and live standalone). Commit **project output** inside it:
-  `git -C work/<project> add <paths> && git -C work/<project> commit -m "…"`.
+  lifted out and live standalone). Commit **project output** inside it — and when
+  more than one agent is live in the tree, **commit ATOMICALLY with a pathspec**:
+  `git -C work/<project> commit -m "…" -- <paths>`
+  **NOT** `add <paths> && commit`. The two-step form has a race window: the index
+  is shared, so a co-worker's `git add` landing between your `add` and your
+  `commit` silently sweeps THEIR staged work into YOUR commit. This has bitten
+  twice (2026-07-31, cicd recording deploys — once sweeping 25 files of another
+  agent's in-flight work). The pathspec form takes its content from the working
+  tree and never consults the shared index, so the window does not exist. If you
+  discover you have swept someone's work, the non-destructive repair is
+  `reset --soft HEAD~1` → `reset HEAD -- .` → re-add only your paths; never
+  rewrite a commit another agent has already built on.
+  **Three limits of the pathspec rule, all hit on 2026-08-14 — know them before
+  you rely on it:**
+  1. **It does not protect CO-OWNED files.** Two agents editing the same file
+     still collide; the pathspec only removes the *index* race. (EXP-120's
+     original claim was too broad and was corrected.)
+  2. **It cannot stage an UNTRACKED file** — `commit -- <new-path>` fails with
+     "did not match any file(s) known to git". When you must add a new file, run
+     `git add -- <your exact paths>` naming ONLY files you authored (never
+     `add -A`/`add .`), then commit immediately so the window stays minimal.
+     Check `git diff --cached --name-only` is empty first; if it is not,
+     someone else is mid-commit — wait rather than sweep them.
+  3. **It assumes HEAD is on trunk, and nothing checks that.** NEVER
+     `git checkout`/`switch` a branch inside a working tree another agent is
+     using: their commit silently lands on YOUR branch, and your next checkout
+     then reverts their files and deletes their new ones — with `git status`
+     looking clean to both of you. On 2026-08-14 this destroyed a green
+     `UC-ROC-092` commit (recovered only because the engineer noticed) while a
+     tester was mid-measurement in the same tree. **Use `git worktree` for every
+     non-trunk ref**, and **assert `git rev-parse --abbrev-ref HEAD` is trunk
+     before committing** — the v89 "is it tracked" check cannot see this class.
+  4. **`git stash -u` STEALS other agents' untracked files.** Reconciling a
+     divergence by stashing first is the natural move, and `-u` sweeps every
+     untracked file in the tree — including new source and test files another
+     agent is mid-build on, which are invisible to `git status --porcelain`
+     filters that only look at tracked paths. On 2026-08-14 a cicd reconcile
+     swept four of an engineer's new test files mid-build. **Recovery, which is
+     the part worth remembering:** do NOT `git stash pop` (it replays
+     everything, including work that has since been recommitted) — restore only
+     your own paths out of the stash's untracked commit:
+     `git restore --source=<stash>^3 -- <your paths>`. Better: before stashing
+     in a shared tree, list what you are about to take
+     (`git stash list`/`status -u`) and say so, or reconcile in a `git worktree`
+     instead so no other agent's files are in scope at all.
   Commit **agent-structure / process** changes (`.claude/`, `process/` incl.
   `process/machinery/`, `CLAUDE.md`, `README.md`) in THIS parent repo. The parent `.gitignore`s
   `/work/*/`, so it never tracks project contents; `work/README.md` and

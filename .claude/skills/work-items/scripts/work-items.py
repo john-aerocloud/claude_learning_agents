@@ -618,7 +618,20 @@ def load_all_items(project):
         for fn in sorted(os.listdir(subdir)):
             if not fn.endswith(".md"):
                 continue
-            it = load_item(os.path.join(subdir, fn))
+            try:
+                it = load_item(os.path.join(subdir, fn))
+            except FileNotFoundError:
+                # CONCURRENCY (2026-08-14): multiple agents share one working
+                # tree, so an item can be RELOCATED active/ -> done/ between our
+                # listdir() and this open(). The file has not been lost — it is
+                # already, or about to be, in the other subdir we also scan, so
+                # skipping it here is correct rather than merely tolerable.
+                # Observed live: `wi-append` died with FileNotFoundError on
+                # UC-ROC-079 mid-scan while a concurrent agent closed it; a
+                # retry succeeded, which is exactly the signature of a vanished
+                # name rather than a missing item. Crashing the whole projection
+                # for a rename is the wrong failure mode for a shared tree.
+                continue
             it.subdir = sub  # remember which folder it lives in
             if it.id in items:
                 dup_ids.append(it.id)

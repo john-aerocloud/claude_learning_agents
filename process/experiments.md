@@ -1297,3 +1297,19 @@ Tally so far, all self-reported (so a floor, not a measurement): documenter ×2 
 Every one cost either a **borrowed agent name with a disclaimer nobody downstream reads** — corrupting `time_by_owner` and quality-by-stage — or **an extra agent dispatch**, corrupting lead time. The mechanism makes the dishonest path the cheap one, and has relied entirely on agents choosing to disclose. They have, every time, which is creditable and is not a control.
 
 **No ninth patch.** The replacement recorded above stands: derive firing rights from the item's declared owner; let the graph constrain transition SHAPE only.
+
+### EXP-140 — instance nine, stated in one line
+
+2026-08-17, ROC, `DEF-ROC-026`. The rejection's fix was an **architecture-only** change (a scoped supersession pointer in `architecture/deltas/002`). The **solution-architect** made it and was then refused, verbatim:
+
+```
+append REJECTED: DEF-ROC-026 is in state 'fixing'.
+  event 'fixed' is legal here but not for agent 'solution-architect'.
+  legal events from here: fixed (agents: engineer/cicd), ...
+```
+
+**In one line: an architecture-only defect fix cannot be reported as fixed by the agent that owns architecture.**
+
+It substituted `amended` (a legal edge for its role), quoted the refusal in the note, and **left the item in `fixing`** rather than routing around it — so the item now needs an engineer or cicd to append a `fixed` event about work neither did. That is the second time in this defect's own life cycle that the same bookkeeping detour has been required.
+
+Nine occasions, five roles. No tenth patch: the recorded replacement stands — derive firing rights from the item's declared owner, let the graph constrain transition SHAPE only.

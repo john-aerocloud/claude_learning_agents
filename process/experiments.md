@@ -1314,6 +1314,20 @@ It substituted `amended` (a legal edge for its role), quoted the refusal in the 
 
 Nine occasions, five roles. No tenth patch: the recorded replacement stands — derive firing rights from the item's declared owner, let the graph constrain transition SHAPE only.
 
+### EXP-140 — instance TEN, on the very defect that closed EXP-142's gap
+
+2026-08-18, ROC, `DEF-ROC-057` (the bad Config screen a human reported). The whole item is a **UI-designer** item by construction: layout allocation, table density, design-token contrast, plus the EXP-142 whole-screen sweep. It was dispatched to the **ui-designer**, which reproduced it, root-caused it to a missing house split-view template, fixed it across three surfaces, and proved the new gate fails 16/16 on the pre-fix build. Then, verbatim:
+
+```
+append REJECTED: DEF-ROC-057 is in state 'reproducing'.
+  event 'confirmed' is legal here but not for agent 'ui-designer'.
+  legal events from here: confirmed (agents: orchestrator/engineer/cicd), ...
+```
+
+**In one line: the role that owns UI quality cannot even record that it reproduced a UI defect** — `ui-designer` appears on NO edge of the defect graph at all, so unlike instances eight and nine it has no legal substitute edge to detour through; it cannot move the item one step in any direction.
+
+Ten occasions, six roles, and this one arrives *inside the experiment built to stop UI defects escaping to humans* — the fix is verified and the item still cannot leave `reproducing` without an agent that did none of the work. The replacement already recorded (derive firing rights from the item's declared owner; let the graph constrain transition SHAPE only) would have made every one of the ten a non-event.
+
 ---
 
 ## EXP-142 — a screen is evaluated as a SCREEN, at a short viewport, or it is not evaluated

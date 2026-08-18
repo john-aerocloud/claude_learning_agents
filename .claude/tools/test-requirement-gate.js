@@ -910,6 +910,42 @@ function main(argv) {
     verbose: has('--verbose'),
     limit: has('--verbose') ? 0 : Number(arg('--limit', 40)),
   }))
+
+  // AUTO-TIGHTEN (v142). A ratchet that only moves when a human remembers to move it is not
+  // a ratchet — it is a high-water mark that drifts. Evidence: the floor was lowered to 1749
+  // by hand at the moment someone noticed a gain, and 106 minutes later two commits took the
+  // true count to 1811. Nobody saw it for THREE DAYS, because the only observer is the next
+  // gate run. So on every PASSING run, if the observed count is strictly BELOW the committed
+  // floor, tighten the floor now, mechanically, and say so.
+  // It can only ever LOWER: the raise path stays manual and reviewed (--write-baseline
+  // --allow-baseline-growth). A failing run tightens nothing.
+  if (r.exitCode === 0 && !has('--no-auto-tighten')) {
+    const p = path.join(repoRoot, '.claude/config/test-requirement-gate', `${project}.json`)
+    try {
+      const cfg = JSON.parse(fs.readFileSync(p, 'utf8'))
+      const old = cfg.baseline || {}
+      const next = { ...old }
+      const moved = []
+      for (const limb of ['ac', 'authored']) {
+        const seen = r.counts[limb]
+        if (typeof old[limb] === 'number' && seen < old[limb]) {
+          next[limb] = seen
+          moved.push(`${limb} ${old[limb]} -> ${seen}`)
+        }
+      }
+      if (moved.length) {
+        cfg.baseline = next
+        fs.writeFileSync(p, JSON.stringify(cfg, null, 2) + '\n', 'utf8')
+        console.log(
+          `\n  RATCHET TIGHTENED AUTOMATICALLY: ${moved.join(', ')}.\n` +
+          '  The gain is now locked in and cannot silently drift back. ' +
+          'COMMIT this config change with your work.')
+      }
+    } catch (e) {
+      console.log(`\n  (auto-tighten skipped: ${e.message})`)
+    }
+  }
+
   process.exitCode = r.exitCode
 }
 

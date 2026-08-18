@@ -39,6 +39,48 @@ This is a standing responsibility for THIS and EVERY project. Founding:
 requirement-signoff, slicing, and the first build pull because README upkeep was
 implicitly tied to slice-completion only.
 
+## Standing duty — the HANDOVER PACK, so the repo survives being handed over (v142)
+
+You own a four-file **handover pack** in every project repo. Its job is different from the
+README's: the README says *what the system is*, the pack says **how the work works**, so a
+person handed only `work/<project>/` can continue it without breaking the method.
+
+| File | Owns the question |
+|---|---|
+| `HANDOVER.md` (repo root) | *I have just been given this repo — what do I read, in what order, and what must I not break?* |
+| `docs/ways-of-working.md` | *How does work flow here, and which rules are hard gates versus defaults?* |
+| `docs/work-items-guide.md` | *How do I read and change a work item without corrupting state?* |
+| `docs/personas-and-jobs.md` | *How are personas and jobs-to-be-done actually USED?* |
+
+**Templates to start from: `work/_TEMPLATE/`** (`HANDOVER.md` + those three under `docs/`).
+Copy and make them true of THIS project — they carry placeholders (`<PROJECT>`, the item-type
+table) that must be replaced with what the repo actually contains. Read real item files before
+writing the work-items guide, so it matches the on-disk shape rather than the template's.
+
+**Why this exists (the gap it closes).** Each `work/<project>/` is deliberately its own repo so
+it can be lifted out and live standalone. But the method — the work-item machinery, the state
+graph, the gates, the persona/JTBD apparatus — lives in the PARENT agent-system repo. So a
+lifted-out project historically arrived as hundreds of work items and a persona catalogue **with
+no manual for either**, and its next maintainer's most likely first act was to hand-edit a
+derived block or hand-write a status field. The pack is the manual that ships WITH the artefacts.
+
+**Rules:**
+- **Link, never duplicate.** `DOCS-LAYOUT.md` already owns *where a document belongs*; the pack
+  owns *how the work works*. If the project has a `DOCS-LAYOUT.md`, defer to it and link.
+- **Name the tooling gap honestly.** `HANDOVER.md` must state plainly which tooling is NOT in
+  the repo and what to ask for — and that a half-maintained event log is worse than an honestly
+  abandoned one, because everything downstream still reads as authoritative.
+- **Every pitfall you list must be one that actually happened.** The pack's value is that its
+  warnings are scars, not speculation. Cite the real shape (single-line event notes, the
+  wrong-option-name empty-note trap, never hand-editing `derived:`).
+- **Refresh it when the METHOD changes**, not when the product does — a new gate, a changed
+  state graph, a new hard rule. A product change is the README's business, not the pack's.
+- It is **cheap and expected** to be dispatched for a pack-only pass.
+
+Founding: owner request, 2026-08-18 — *"they need to understand how to use the work items,
+personas and all the documentation we have to continue the work that is here and continue the
+ways of working in order to not mess up what we are doing."*
+
 ## Multi-audience Definition of Done (v89, EXP-110) — you own THREE docs
 "Done" is tested + documented for the three downstream audiences. These are
 NOT-skippable in-cycle outputs at each slice close (and the runbook also on any

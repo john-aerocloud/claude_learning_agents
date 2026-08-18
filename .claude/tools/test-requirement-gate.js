@@ -288,6 +288,32 @@ function matchBracket(code, open) {
   return -1
 }
 
+/**
+ * The nearest UNMATCHED opening bracket of ANY kind before `at`, or -1.
+ *
+ * The spread rule may only fire inside an OBJECT LITERAL, and asking for the nearest unmatched
+ * `{` alone cannot tell `{ ...a, k: v }` from `new Set([...a, ...b])` written inside a function
+ * body: the array's brackets are invisible to a `{`-only walk, so the enclosing BLOCK is found
+ * and any `const x: T =` annotation in it reads as an override key. Observed on
+ * `defect-oag-110-keyless-corpus-and-guard.test.ts:417`, where an array spread of two event
+ * lists was reported as `{ ...afterKeyless, lateKeyed: … }` (DEFECT-OAG-122). Precision over
+ * recall, mechanically — a noisy gate gets ignored.
+ */
+function enclosingOpenAny(code, at) {
+  const closeFor = { '(': ')', '{': '}', '[': ']' }
+  const depth = { ')': 0, '}': 0, ']': 0 }
+  for (let k = at; k >= 0; k--) {
+    const c = code[k]
+    if (c === ')' || c === '}' || c === ']') depth[c]++
+    else if (c === '(' || c === '{' || c === '[') {
+      const close = closeFor[c]
+      if (depth[close] === 0) return k
+      depth[close]--
+    }
+  }
+  return -1
+}
+
 /** Walk back from `at` to the nearest unmatched opening bracket of kind `open`. */
 function enclosingOpen(code, at, open) {
   const pairs = { '(': ')', '{': '}', '[': ']' }
@@ -557,8 +583,10 @@ function authoredViolations(src, scan, tainted, derived, lang) {
     RE_SPREAD.lastIndex = 0
     while ((m = RE_SPREAD.exec(code)) !== null) {
       if (!tainted.has(m[1])) continue
-      const open = enclosingOpen(code, m.index - 1, '{')
-      if (open === -1) continue
+      // The enclosing bracket must be an OBJECT literal's, not merely the nearest `{`: an
+      // ARRAY spread has no override to find, and a `{`-only walk lands on the enclosing block.
+      const open = enclosingOpenAny(code, m.index - 1)
+      if (open === -1 || code[open] !== '{') continue
       const close = matchBracket(code, open)
       if (close === -1 || close < m.index) continue
       // An override is a own-property at depth 1 of the SAME literal.

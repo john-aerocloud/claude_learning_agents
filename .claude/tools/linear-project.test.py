@@ -744,13 +744,28 @@ def test_extractor_populations_are_pinned_in_both_directions():
     for key in must_match:
         check(f"{key} has a NON-ZERO tree-wide population "
               f"({pop[key]['hits']}/{pop[key]['total']})", pop[key]["hits"] > 0)
-    # The two registered findings. Pinned AT ZERO with their reason, so the day either
-    # starts working this test demands the ledger say so.
-    for key in ("definition_oneliner", "why"):
-        check(f"{key} is STILL the registered zero-population finding "
-              f"({pop[key]['hits']}/{pop[key]['total']}) — if this went red, the "
-              f"extractor started matching and EXTRACTOR_LEDGER must be updated",
-              pop[key]["hits"] == 0 and pop[key]["total"] > 400)
+    # The two registered findings, pinned at their EXACT measured figure with a stated
+    # reason, so the ledger must be updated when either moves in EITHER direction.
+    #
+    # `why` is pinned at 1, not 0, and the reason is worth keeping: the single hit is
+    # THIS ITEM'S OWN LEDGER PROSE, which quotes the literal `**Why (persona/job):**`
+    # while recording that no item uses it — so the extractor matched the sentence
+    # documenting that it matches nothing. The pin caught that contamination the moment
+    # the item was written, which is the pin working: a measurement can be polluted by
+    # writing about the measurement, and that has to be visible rather than absorbed.
+    # It also SHARPENS the finding — one self-referential mention in 469 items is
+    # stronger evidence the format is unused than a bare zero would be.
+    expected = {
+        "definition_oneliner": (0, "no item writes a dash-suffixed `## Definition — …` "
+                                   "heading; masked by compose()'s title fallback"),
+        "why": (1, "the ONLY hit is this item's own ledger prose quoting the literal; "
+                   "no item USES it as an authoring convention"),
+    }
+    for key, (n, reason) in expected.items():
+        check(f"{key} population is EXACTLY {n} ({pop[key]['hits']}/{pop[key]['total']}) "
+              f"— {reason}. If this went red the population MOVED and "
+              f"EXTRACTOR_LEDGER must be updated in whichever direction",
+              pop[key]["hits"] == n and pop[key]["total"] > 400)
     check("every ledger row is measured (no row declared without a number)",
           all(k in pop for k, _m, _v in lp.EXTRACTOR_LEDGER))
     check("no ledger row calls its own population benign (§17h limb 2)",

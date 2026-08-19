@@ -1008,9 +1008,17 @@ def sweep_acceptance(project, root=None):
 #:                                     NO item writes a dash-suffixed heading. Masked
 #:                                     because compose() falls back to the title, so
 #:                                     the board renders the title twice and looks fine.
-#:   why                      0 / 468   FINDING — matches `**Why (persona/job):**`; no
-#:                                     item uses that literal. The "Contribution" line
+#:   why                      1 / 469   FINDING — matches `**Why (persona/job):**`; no
+#:                                     item USES that literal. The "Contribution" line
 #:                                     has therefore NEVER rendered on any board issue.
+#:                                     The single hit is the ledger PROSE of
+#:                                     OI-ACCEPTANCE-PARSER-SCORES-ZERO-SILENTLY, which
+#:                                     quotes the literal while recording that nothing
+#:                                     uses it — the extractor matched the sentence
+#:                                     documenting that it matches nothing, and the pin
+#:                                     caught that contamination immediately. One
+#:                                     self-referential mention in 469 items is STRONGER
+#:                                     evidence than a bare zero.
 #:   defect_fields           53 / 97 defects, 44 with ZERO fields — the `## Defect
 #:                                     (four fields)` shape is not what half the
 #:                                     corpus writes, so those issues carry no Defect
@@ -1034,7 +1042,8 @@ EXTRACTOR_LEDGER = (
     ("definition_oneliner", "an omitted 'What this delivers'; masked by the title fallback",
      "FINDING — 0/468, owner: linear-mapping §2a authoring decision"),
     ("why", "an omitted 'Contribution' line on every board issue",
-     "FINDING — 0/468, owner: linear-mapping §2a authoring decision"),
+     "FINDING — 1/469 and the one hit is this ledger's own prose, owner: "
+     "linear-mapping §2a authoring decision"),
     ("defect_fields", "a defect issue with no Defect section",
      "FINDING — 44 of 97 defects at zero, owner: linear-mapping §2a"),
     ("job_resolved", "a bare job code instead of the job name (VISIBLE degradation)",

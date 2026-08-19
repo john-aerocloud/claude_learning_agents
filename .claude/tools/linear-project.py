@@ -140,66 +140,250 @@ def parse_defect_fields(body):
 #: tagged conditions from one with none. Measured instances: DEFECT-OAG-054 (10 AC ids)
 #: and UC-XE1 (13 AC ids, pushed to Linear as DONE *and* needs-acceptance), then
 #: UC-DP2/DP3/DP4/DP5 on 2026-08-10. §17e — a gate that cries wolf is fixed, not tolerated.
-_ACCEPTANCE_HEADING = re.compile(r"^#{2,3}\s+Acceptance\b")
-#: Any level-2 or level-3 heading ends the section. This MUST allow `###` too: with the
-#: old `^##\s+` terminator a `### Acceptance` section would never be closed, so the
-#: parser would swallow every following `###` section as acceptance bullets. Fixing the
-#: start pattern alone would have traded a false negative for a false positive.
-_SECTION_HEADING = re.compile(r"^#{2,3}\s+")
+#: The capture group is the heading LEVEL, which the terminator below needs.
+_ACCEPTANCE_HEADING = re.compile(r"^(#{2,3})\s+Acceptance\b")
+#: Any level-2 or level-3 heading, with its level captured.
+_SECTION_HEADING = re.compile(r"^(#{2,3})\s+")
+
+#: An `AC-…` id. Deliberately cannot end in `.` — `[\w.]*` greedily ate the sentence
+#: period, minting phantom ids `AC-061.` / `AC-C11.2.` / `AC-RLNC.` that no criterion
+#: could ever match, which would make the residual self-check below cry wolf.
+_AC_ID = re.compile(r"\bAC-[A-Za-z0-9](?:[\w.]*[A-Za-z0-9])?")
+
+#: A markdown TABLE row whose FIRST cell is an AC id — `| **AC-OB1.1** | criterion … |`.
+#: UC-OB1 transcribes nine criteria that way and DEFECT-OAG-053 registers fifteen.
+#: Requiring an AC-shaped first cell skips the header/separator rows.
+_TABLE_ROW = re.compile(r"^\|\s*[*_`\s]*(AC-[A-Za-z0-9][\w.]*?)[*_`\s]*\|(.*)$")
+#: A list item — BOTH bullet styles the corpus actually uses, measured 2026-08-10:
+#: `- **AC-x**` (SLC-042/045/046, the UC-DP* family …) and NUMBERED `1. **AC-x**`
+#: (DEFECT-OAG-080/081/082/084/086, the SLC-CSP* family …). Matching only `[-*]`
+#: left every numbered item reading zero and LOOKED like a fix.
+_LIST_ITEM = re.compile(r"^(?:[-*]|\d+[.)])\s+(.*)$")
+#: A criterion declared in PROSE, with no list marker at all: `AC-053.4 — …` or
+#: `**\`AC-AP.1\`** — …`. This is the generalisation that stops the "add format five"
+#: treadmill: a criterion is anything that DECLARES an id at the start of a line.
+_AC_DECL = re.compile(r"^[*_`\s]{0,6}(AC-[A-Za-z0-9][\w.]*?)[*_`]*\s*[—:\-–]")
+#: A fenced code block toggles verbatim mode: prod measurements and shell snippets
+#: live inside acceptance sections and are not criteria.
+_FENCE = re.compile(r"^\s*```")
+
+#: Section text that means "nobody has written this yet" rather than "the parser
+#: failed". Kept narrow and literal on purpose: seven items head their section
+#: `## Acceptance (to be authored on pull)` and then AUTHOR it without changing the
+#: heading, so the HEADING is not evidence of anything — only the BODY is.
+_PLACEHOLDER = re.compile(
+    r"^(?:_?\s*(?:tbd|tba|to be authored|to be written|none(?: yet)?|n/?a)\b.*)$",
+    re.IGNORECASE,
+)
+
+
+def acceptance_sections(body):
+    """Every acceptance section in the body, as `(heading, level, lines)`.
+
+    TWO structural fixes, both measured against the real 468-item corpus:
+
+    * **Level-aware termination.** A `## Acceptance` section is closed only by a
+      heading of level <= 2. The old terminator matched ANY `##`/`###`, so a level-3
+      SUB-heading inside the section ended it — which is how `DEFECT-OAG-053`'s
+      FIFTEEN registered criteria (a table under `### Registered acceptance
+      criteria`) became invisible while the parser confidently reported 4.
+    * **Every section, not just the first.** `DEFECT-OAG-110` and `UC-XC5` each carry
+      a SECOND `## Acceptance` section, registered later; the old parser stopped at
+      the first and reported 8 of 22.
+    """
+    lines = body.split("\n")
+    out = []
+    i = 0
+    while i < len(lines):
+        m = _ACCEPTANCE_HEADING.match(lines[i])
+        if not m:
+            i += 1
+            continue
+        level = len(m.group(1))
+        j = i + 1
+        buf = []
+        while j < len(lines):
+            h = _SECTION_HEADING.match(lines[j])
+            if h and len(h.group(1)) <= level:
+                break
+            buf.append(lines[j])
+            j += 1
+        out.append((lines[i], level, buf))
+        i = j
+    return out
+
+
+def _criteria_from(lines):
+    """Split one acceptance section's lines into complete criteria + leftover prose.
+
+    A criterion STARTS at a list item, an AC-id table row, or a prose line that
+    DECLARES an AC id; continuation lines (indented, or blank-then-indented) join
+    onto it with wrap newlines collapsed to single spaces. Anything else is prose.
+    Crucially the scan does NOT stop at the first prose line — the old parser
+    `break`ed there, so an intervening paragraph hid every criterion after it.
+    """
+    criteria = []
+    prose = []
+    current = None
+    fenced = False
+
+    def flush():
+        nonlocal current
+        if current is not None:
+            criteria.append(_collapse(current))
+            current = None
+
+    for line in lines:
+        if _FENCE.match(line):
+            fenced = not fenced
+            flush()
+            prose.append(line)
+            continue
+        if fenced:
+            prose.append(line)
+            continue
+        trow = _TABLE_ROW.match(line)
+        if trow:
+            flush()
+            current = "%s %s" % (trow.group(1), trow.group(2).strip().rstrip("|").strip())
+            continue
+        item = _LIST_ITEM.match(line)
+        if item and not line[:1].isspace():
+            flush()
+            current = item.group(1)
+            continue
+        if line.strip() == "":
+            continue  # blank line inside/after a criterion — not a boundary
+        if line[:1] in (" ", "\t"):
+            if current is not None:
+                current += " " + line.strip()  # indented continuation
+            else:
+                prose.append(line)
+            continue
+        if _AC_DECL.match(line):  # a criterion declared in prose, no list marker
+            flush()
+            current = line.strip()
+            continue
+        flush()
+        prose.append(line)
+    flush()
+    return criteria, prose
+
+
+def _line_start_ids(line):
+    """The AC id a line DECLARES, if any — i.e. one standing at the start of the line
+    once a list marker, table pipe and emphasis/backtick markup are stripped.
+
+    This is what makes the residual self-check both HONEST and NON-VACUOUS. An id
+    merely REFERENCED mid-sentence is not a dropped criterion — the real corpus is
+    full of such references (`### Registered acceptance criteria (the AC-053.n
+    vocabulary …)`, "`AC-110.A6`–`A11` discharge `AC-110.8`'s fault set") and
+    counting them as residuals would make the check cry wolf on the very items it
+    exists to protect. An id standing where a DECLARATION goes and reaching no
+    criterion is a genuine drop: the parse read that line and produced nothing.
+    """
+    s = line.strip()
+    s = re.sub(r"^(?:[-*]|\d+[.)])\s+", "", s)
+    s = re.sub(r"^\|\s*", "", s)
+    s = s.lstrip("*_`> ")
+    m = re.match(r"(AC-[A-Za-z0-9](?:[\w.]*[A-Za-z0-9])?)", s)
+    return [m.group(1)] if m else []
+
+
+def acceptance_report(body):
+    """THE LOUD PARSE. Returns a verdict, never a bare count.
+
+    OI-ACCEPTANCE-PARSER-SCORES-ZERO-SILENTLY: `parse_acceptance()` returned a COUNT,
+    and `0` conflated two irreconcilable facts — *this item genuinely has no written
+    acceptance* (a real process state; §12a keeps such an item out of a build) and
+    *I could not read this item's acceptance*. Every consumer saw them as identical,
+    and the dangerous direction is false-green: the board stamped `needs-acceptance`
+    — a WORK INSTRUCTION to go and author acceptance — on `UC-GSA2` (OAG-216) and
+    `DEFECT-OAG-047` (OAG-208), both of which carry conditions their own testers
+    cited BY ID. Following that instruction means re-authoring over existing
+    acceptance, which §12a forbids an engineer to do at all.
+
+    `status` is one of:
+
+    * ``parsed``       — criteria extracted, and no id in the section was left behind.
+    * ``truncated``    — criteria extracted BUT an `AC-…` id present in the section
+                         reached none of them. **The parse checks itself**: it can no
+                         longer under-count silently. This is the class that hid
+                         `DEFECT-OAG-053` (4 of 20) and `DEFECT-OAG-110` (8 of 22).
+    * ``unreadable``   — a section with ids in it yielded ZERO criteria: a parser
+                         fault, stated as one.
+    * ``unenumerated`` — a section carrying real acceptance PROSE with no citable id
+                         and no list. Authored, but the §17d gate cannot trace to it.
+                         `UC-GSA2` is the founding case. Not a parser fault, and NOT
+                         "no acceptance".
+    * ``empty``        — a heading with nothing under it, or an explicit placeholder.
+    * ``none``         — no acceptance section, and no AC-led list anywhere.
+    * ``orphan``       — no recognised section, but a list/table of AC ids exists
+                         somewhere in the body: acceptance under a heading we do not
+                         know. Measured population on the real corpus: 0 items.
+
+    §17h: no class is described as benign. Each is a population with a measured size
+    that the sweep prints, and four of the seven can go red.
+    """
+    secs = acceptance_sections(body)
+    criteria = []
+    prose = []
+    for _h, _lvl, lines in secs:
+        c, p = _criteria_from(lines)
+        criteria.extend(c)
+        prose.extend(p)
+    text = "\n".join(l for _h, _lvl, lines in secs for l in lines).strip()
+    sec_ids = set(_AC_ID.findall(text))
+    got_ids = set()
+    for c in criteria:
+        got_ids |= set(_AC_ID.findall(c))
+    declared = set()
+    for _h, _lvl, lines in secs:
+        for line in lines:
+            declared |= set(_line_start_ids(line))
+    residual = sorted(declared - got_ids)
+
+    if not secs:
+        # No recognised heading. Acceptance authored under an UNKNOWN heading would
+        # still leave a STRUCTURAL trace: AC ids leading list items or table rows.
+        # A bare mention in prose is NOT that — 17 migrated stubs cite another item's
+        # `AC-…` in a `dora_ref`, and the old body-wide `AC-` heuristic labelled every
+        # one of them `acceptance-unparsed`, i.e. accused the parser on 17 items that
+        # simply have no acceptance. A label that fires that widely discriminates
+        # nothing, which is the disease this whole family is about.
+        orphan = set()
+        for line in body.split("\n"):
+            m = _TABLE_ROW.match(line) or _LIST_ITEM.match(line)
+            if not m:
+                continue
+            tail = m.group(1) if _TABLE_ROW.match(line) else m.group(1)
+            d = _AC_DECL.match(tail) or re.match(r"^[*_`\s]{0,6}(AC-[A-Za-z0-9][\w.]*)", tail)
+            if d:
+                orphan.add(d.group(1))
+        orphan = sorted(orphan)
+        status = "orphan" if len(orphan) >= 2 else "none"
+        return {"status": status, "criteria": [], "residual_ids": [], "sections": [],
+                "text": "", "orphan_ids": orphan}
+
+    if criteria and residual:
+        status = "truncated"
+    elif criteria:
+        status = "parsed"
+    elif not text or all(_PLACEHOLDER.match(l.strip()) for l in text.split("\n") if l.strip()):
+        status = "empty"
+    elif sec_ids:
+        status = "unreadable"
+    else:
+        status = "unenumerated"
+    return {"status": status, "criteria": criteria, "residual_ids": residual,
+            "sections": [h for h, _l, _b in secs], "text": text, "orphan_ids": []}
 
 
 def parse_acceptance(body):
-    """Parse the acceptance section into a list of COMPLETE criteria, joining
-    hard-wrapped continuation lines (subsequent indented lines belonging to the same
-    bullet) into one string with wrap newlines + indentation collapsed to single
-    spaces. Accepts `## Acceptance`, `### Acceptance`, `## Acceptance criteria`, and
-    any parenthetical suffix."""
-    lines = body.split("\n")
-    # locate the acceptance heading
-    start = None
-    for i, line in enumerate(lines):
-        if _ACCEPTANCE_HEADING.match(line):
-            start = i + 1
-            break
-    if start is None:
-        return []
-    criteria = []
-    current = None
-    for line in lines[start:]:
-        if _SECTION_HEADING.match(line):  # next level-2/3 section ends the list
-            break
-        # BOTH bullet styles the corpus actually uses. Measured 2026-08-10 across
-        # items/active: 25 items carry tagged AC, and they are split between `- **AC-x**`
-        # (SLC-042/045/046, OI-OAG-NULL-COHORT-GROWTH, the UC-DP* family …) and NUMBERED
-        # `1. **AC-x**` (DEFECT-OAG-080/081/082/084/086, REQ-OAG-CODESHARE-PARENT, the
-        # SLC-CSP* family …). Matching only `[-*]` would have left every numbered item
-        # still reading zero — i.e. fixing the heading alone would have left half the
-        # corpus mis-flagged and looked like a fix.
-        # THIRD format: a markdown TABLE row, `| **AC-OB1.1** | criterion … |`.
-        # UC-OB1 transcribes nine criteria that way. Skip the header/separator rows
-        # (`| AC | Criterion |` and `|---|---|`) by requiring an AC-shaped first cell.
-        trow = re.match(r"^\|\s*\**\s*(AC-[A-Za-z0-9][\w.]*)\s*\**\s*\|(.*)\|?\s*$", line)
-        if trow:
-            if current is not None:
-                criteria.append(_collapse(current))
-            current = "%s %s" % (trow.group(1), trow.group(2).strip().rstrip("|").strip())
-            continue
-        bullet = re.match(r"^(?:[-*]|\d+\.)\s+(.*)$", line)
-        if bullet:
-            if current is not None:
-                criteria.append(_collapse(current))
-            current = bullet.group(1)
-        elif current is not None:
-            if line.strip() == "":
-                continue  # blank line inside/after a bullet — not a boundary
-            if line[:1] in (" ", "\t"):  # indented continuation line
-                current += " " + line.strip()
-            else:
-                # a non-indented, non-bullet line ends the AC list
-                break
-    if current is not None:
-        criteria.append(_collapse(current))
-    return criteria
+    """Back-compat COUNT-ONLY view: the list of complete criteria, wrapped lines
+    joined. Callers that need to know whether a zero is real must read
+    `acceptance_report()` — a bare list cannot express "I could not read this"."""
+    return acceptance_report(body)["criteria"]
 
 
 def _collapse(s):
@@ -305,10 +489,36 @@ def render_description(item, jobs, personas, plan, block_reason=None):
         )
 
     if item.get("acceptance"):
-        parts.append(
-            "## Acceptance criteria\n"
-            + "\n".join(f"- {c}" for c in item["acceptance"])
-        )
+        block = "## Acceptance criteria\n" + "\n".join(f"- {c}" for c in item["acceptance"])
+        if item.get("acceptance_status") == "truncated":
+            # Never render a truncated list as if it were the whole set: a reader
+            # who trusts it concludes the missing conditions do not exist.
+            block += (
+                "\n\n> ⚠️ **Acceptance is TRUNCATED on the board.** These ids are written "
+                "in the item but reached no criterion the renderer could read: "
+                + ", ".join(f"`{i}`" for i in item.get("acceptance_residual", []))
+                + ". Read the item file, not this list."
+            )
+        parts.append(block)
+    elif item.get("acceptance_status") in ("unenumerated", "unreadable", "orphan"):
+        # AC-AP.1/AC-AP.2: a zero is never silent. The board previously showed NO
+        # acceptance section at all and stamped `needs-acceptance`, so a human was
+        # told to author acceptance over the top of text that already existed.
+        why = {
+            "unenumerated": "written as prose with no citable `AC-…` id, so it "
+                            "**could not be enumerated** into criteria",
+            "unreadable": "present but the renderer **could not read it** — this is a "
+                          "parser fault, not a missing-acceptance item",
+            "orphan": "written under a heading the renderer does not recognise, so it "
+                      "**could not be enumerated**",
+        }[item["acceptance_status"]]
+        note = ("## Acceptance criteria\n> ⚠️ **This item's acceptance is %s.** It is NOT "
+                "absent — do not author over it (§12a).\n" % why)
+        if item.get("acceptance_text"):
+            note += "\n" + "\n".join(
+                "> " + l if l.strip() else ">" for l in item["acceptance_text"].split("\n")
+            )
+        parts.append(note)
 
     if item.get("defect_fields"):
         df = item["defect_fields"]
@@ -341,7 +551,14 @@ def compose(project, item_id):
     itype = item.get("type", "")
 
     item["value_oneliner"] = parse_definition_oneliner(body) or item.get("title")
-    item["acceptance"] = parse_acceptance(body)
+    rep = acceptance_report(body)
+    item["acceptance"] = rep["criteria"]
+    # AC-AP.2 — the verdict travels WITH the count to every consumer. A bare list
+    # cannot say "I could not read this", which is the whole defect.
+    item["acceptance_status"] = rep["status"]
+    item["acceptance_residual"] = rep["residual_ids"]
+    item["acceptance_text"] = rep["text"]
+    item["acceptance_orphan"] = rep["orphan_ids"]
     item["contribution"] = parse_why(body)
     if itype == "defect":
         item["defect_fields"] = parse_defect_fields(body)
@@ -399,37 +616,52 @@ def compose_labels(item):
     # the board instead of collapsing into "blocked".
     if item.get("state") == "awaiting_observation":
         labels.append("awaiting-observation")
-    if itype == "use-case" and not item.get("acceptance"):
-        # THE PIN owed by OI-BOARD-ACCEPTANCE-PARSER-MATCHES-NOTHING. Before claiming an
-        # item lacks acceptance, prove the PARSER is not the thing at fault: if the raw
-        # body carries tagged `AC-…` ids while we extracted none, the parser is broken and
-        # this label would be actively wrong. Per §17c the acceptance of that fix is the
-        # parser OBSERVED extracting the ids — not a regex that merely looks permissive —
-        # so this raises rather than mislabelling. It is the difference between "this item
-        # has no acceptance" and "I could not read its acceptance", which is exactly the
-        # measurement-that-cannot-come-back-negative class the open item named.
-        body = item.get("_body") or ""  # NB: `_body`, not `body` — see compose()
-        tagged = sorted(set(re.findall(r"\bAC-[A-Za-z0-9][\w.]*", body)))
-        if tagged:
-            # DISTINGUISH "has no acceptance" from "I could not READ its acceptance".
-            # Conflating them is the original defect: a label that cannot come back
-            # negative. So this emits a DIFFERENT label and a loud warning — it does
-            # NOT raise. Deliberate severity choice per §F8a (a gate blocks only on
-            # harm that stopping relieves): taking the whole board sync down over a
-            # label would be worse than the mislabel, and a sweep hits every historical
-            # item at once. Measured 2026-08-10: 19 items across active+done still
-            # carry AC ids the parser cannot read, so a raise here would have made the
-            # sync unrunnable.
-            sys.stderr.write(
-                "WARN acceptance-parser: %s carries %d tagged AC id(s) (e.g. %s) but "
-                "parse_acceptance() extracted ZERO — labelling `acceptance-unparsed`, "
-                "NOT `needs-acceptance`. The item is not at fault; the parser is. "
-                "See OI-BOARD-ACCEPTANCE-PARSER-MATCHES-NOTHING.\n"
-                % (item.get("id", "<unknown>"), len(tagged), tagged[0])
+    # --- acceptance labelling: THREE facts, three labels (AC-AP.1/AC-AP.2) --------
+    # OI-ACCEPTANCE-PARSER-SCORES-ZERO-SILENTLY. Two things were wrong here.
+    #
+    # (1) `needs-acceptance` is a WORK INSTRUCTION - it tells a human to go and author
+    #     acceptance. It was stamped on OAG-216 (`UC-GSA2`) and OAG-208
+    #     (`DEFECT-OAG-047`), both of which carry conditions their own testers cited BY
+    #     ID. Acting on it means re-authoring over existing acceptance, which §12a
+    #     forbids an engineer to do at all - worse than the original omission.
+    # (2) The old branch was gated on `itype == "use-case"`, so a DEFECT whose
+    #     acceptance was unreadable produced NO label and NO warning at all.
+    #     `DEFECT-OAG-047`'s ten conditions were invisible in exactly that silence.
+    #
+    # The parser-fault signal is type-independent; the authoring instruction is not.
+    # The old "any `AC-` substring in the body" heuristic is gone with them: 17
+    # migrated stubs cite another item's `AC-...` inside a `dora_ref`, so it accused the
+    # parser on 17 items that simply have no acceptance - a label that fires that
+    # widely discriminates nothing, which is this family's whole disease.
+    status = item.get("acceptance_status")
+    if status in ("truncated", "unreadable", "orphan"):
+        sys.stderr.write(
+            "WARN acceptance-parser: %s status=%s - the item's acceptance is present but "
+            "NOT fully readable%s. Labelling `acceptance-unparsed`, NOT `needs-acceptance`: "
+            "the item is not at fault, the parser is. Run `make acceptance-audit`. "
+            "See OI-ACCEPTANCE-PARSER-SCORES-ZERO-SILENTLY.\n"
+            % (
+                item.get("id", "<unknown>"),
+                status,
+                (" (ids reaching no criterion: %s)" % ", ".join(item["acceptance_residual"]))
+                if item.get("acceptance_residual") else "",
             )
-            labels.append("acceptance-unparsed")
-        else:
-            labels.append("needs-acceptance")
+        )
+        labels.append("acceptance-unparsed")
+    elif status == "unenumerated":
+        # A distinct, honest third state: acceptance IS authored, as prose, and cannot
+        # be cited by the §17d gate. Neither the parser's fault nor a missing item.
+        sys.stderr.write(
+            "WARN acceptance-parser: %s status=unenumerated - acceptance prose is present "
+            "with no citable `AC-...` id, so §17d cannot trace a test to it. Labelling "
+            "`acceptance-unenumerated`. Enumerating it is PRODUCT/ARCHITECT work (§12a), "
+            "never the engineer's.\n" % item.get("id", "<unknown>")
+        )
+        labels.append("acceptance-unenumerated")
+    elif itype == "use-case" and not item.get("acceptance"):
+        # status is `none` or `empty`: genuinely nothing authored. THIS is the only
+        # state in which telling a human to author acceptance is correct.
+        labels.append("needs-acceptance")
     return labels
 
 
@@ -687,6 +919,155 @@ def run_audit(project=None):
 # --------------------------------------------------------------------------- #
 # Linear GraphQL client
 # --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+# Tree-wide acceptance sweep + audit gate (AC-AP.1 / AC-AP.3 / AC-AP.4)
+#
+# `f694ea3` established that the tree-wide answer can be catastrophically wrong
+# while looking fine: the parser matched NOTHING across every item and the only
+# symptom was a `needs-acceptance` label sitting on ~100% of the board. A parser
+# that is only exercised one item at a time, by a board sync nobody reads the
+# stderr of, has no observer. This is that observer, and it is a GATE.
+#
+# WHY A GATE AND NOT A LOOSER REGEX (AC-AP.4, decision recorded). Three formats
+# plus a terminator bug were fixed tree-wide in `f694ea3`; a FOURTH format broke it
+# the next day. Chasing formats is the "exempt it every time it is used" shape
+# (`OI-GITIGNORE-SWALLOWS-COMMITTED-TOOLS`). So the parse was made robust
+# STRUCTURALLY — level-aware sections, every section, a criterion is any line that
+# DECLARES an id — and, more importantly, it now CHECKS ITSELF: an id standing in a
+# declaration position that reached no criterion is a residual, and a residual makes
+# the verdict `truncated`. Format five cannot silently under-count, because the
+# parse is no longer the only witness to its own output. The sweep is what turns
+# that self-check from a per-item warning into a tree-wide, blocking fact.
+#
+# §17h: no class here is described as benign. Every class is printed with its
+# MEASURED SIZE, including `parsed` and `none`, and four of the seven can go red.
+# --------------------------------------------------------------------------- #
+#: Classes that are a FINDING: the item's acceptance is present and not fully
+#: readable. Hard zero — no count ratchet, because each one is an individually
+#: nameable item, not a population.
+FINDING_STATUSES = ("truncated", "unreadable", "orphan", "unenumerated")
+DECLARED_PATH = Path(__file__).resolve().parent / "acceptance-audit-declared.json"
+
+
+def sweep_acceptance(project, root=None):
+    """Every item under work/<project>/items/{active,done}/ with its acceptance
+    verdict. Pure: reads files, no network. Sorted by id for a stable report."""
+    base = Path(root) if root else ROOT
+    rows = []
+    for sub in ("active", "done"):
+        d = base / "work" / project / "items" / sub
+        if not d.is_dir():
+            continue
+        for f in sorted(d.glob("*.md")):
+            fm, body = split_item(f.read_text(encoding="utf-8"))
+            data = parse_frontmatter(fm)
+            rep = acceptance_report(body)
+            rows.append({
+                "id": data.get("id") or f.stem,
+                "type": data.get("type", ""),
+                "state": data.get("state", ""),
+                "queue": sub,
+                "path": str(f.relative_to(base)),
+                "status": rep["status"],
+                "criteria": rep["criteria"],
+                "residual_ids": rep["residual_ids"],
+                "orphan_ids": rep["orphan_ids"],
+                "sections": rep["sections"],
+            })
+    return sorted(rows, key=lambda r: r["id"])
+
+
+def load_declared(path=None):
+    """The declared-exception registry. §17h limb 1: an exclusion of an item from
+    the finding population is a decision and carries a machine-checkable AUTHORITY
+    ref. An entry with no authority is itself a finding."""
+    p = Path(path) if path else DECLARED_PATH
+    if not p.exists():
+        return {}
+    return json.loads(p.read_text(encoding="utf-8")).get("declared", {})
+
+
+def audit_acceptance(project, root=None, declared_path=None):
+    """Run the sweep and return (rows, counts, errors).
+
+    `errors` is empty only when EVERY finding is either absent or declared with an
+    authority, AND no declaration has gone stale. Stale declarations fail too: that
+    is what makes this shrink-only rather than a high-water mark that drifts
+    (§17d.5 — a ratchet only a human can tighten is not a ratchet)."""
+    rows = sweep_acceptance(project, root=root)
+    counts = {}
+    for r in rows:
+        counts[r["status"]] = counts.get(r["status"], 0) + 1
+    declared = load_declared(declared_path)
+    findings = {r["id"]: r for r in rows if r["status"] in FINDING_STATUSES}
+    errors = []
+    for iid, r in sorted(findings.items()):
+        d = declared.get(iid)
+        if not d:
+            detail = ""
+            if r["residual_ids"]:
+                detail = " ids reaching no criterion: %s." % ", ".join(r["residual_ids"])
+            if r["orphan_ids"]:
+                detail = " AC-led list outside any recognised section: %s." % ", ".join(
+                    r["orphan_ids"])
+            errors.append(
+                "%s (%s) status=%s — acceptance is PRESENT but not fully readable.%s "
+                "Fix the parser if it is a parser fault; if the acceptance is genuinely "
+                "not enumerable, that is PRODUCT/ARCHITECT work (§12a) and must be "
+                "declared in %s with an authority ref."
+                % (iid, r["path"], r["status"], detail, DECLARED_PATH.name)
+            )
+        elif not str(d.get("authority", "")).strip():
+            errors.append(
+                "%s is declared in %s with NO `authority` — §17h: an exclusion with no "
+                "authority is a FINDING, not a sample." % (iid, DECLARED_PATH.name)
+            )
+        elif d.get("status") and d["status"] != r["status"]:
+            errors.append(
+                "%s is declared as status=%s but now measures %s — re-decide it rather "
+                "than carrying a stale exemption." % (iid, d["status"], r["status"])
+            )
+    for iid in sorted(declared):
+        if iid not in findings:
+            errors.append(
+                "%s is declared as a known acceptance finding but is NO LONGER one — "
+                "delete the row from %s. A declaration that outlives its finding is how "
+                "a ratchet becomes a high-water mark." % (iid, DECLARED_PATH.name)
+            )
+    return rows, counts, errors
+
+
+def run_acceptance_audit(project, root=None, declared_path=None, verbose=True):
+    rows, counts, errors = audit_acceptance(project, root=root, declared_path=declared_path)
+    if verbose:
+        print("acceptance sweep — %s: %d items" % (project, len(rows)))
+        # Every class with its measured size. `parsed`/`none`/`empty` are printed too:
+        # a class that is never reported cannot be noticed when it moves.
+        for status in ("parsed", "truncated", "unreadable", "unenumerated", "empty",
+                       "none", "orphan"):
+            n = counts.get(status, 0)
+            crit = sum(len(r["criteria"]) for r in rows if r["status"] == status)
+            print("  %-13s %4d items%s" % (status, n, (", %d criteria" % crit) if crit else ""))
+        print("  %-13s %4d criteria across the corpus"
+              % ("TOTAL", sum(len(r["criteria"]) for r in rows)))
+        declared = load_declared(declared_path)
+        for r in rows:
+            if r["status"] in FINDING_STATUSES:
+                mark = "declared" if r["id"] in declared else "FINDING "
+                print("  [%s] %-46s %-13s %s"
+                      % (mark, r["id"], r["status"],
+                         ",".join(r["residual_ids"] + r["orphan_ids"])))
+    if errors:
+        print("\nacceptance audit FAILED — %d finding(s):" % len(errors))
+        for e in errors:
+            print("  - " + e)
+        return 1
+    if verbose:
+        print("\nacceptance audit PASS — every unreadable acceptance is declared with an "
+              "authority, and no declaration has gone stale.")
+    return 0
+
+
 def graphql(api_key, query, variables=None):
     payload = json.dumps({"query": query, "variables": variables or {}}).encode()
     req = urllib.request.Request(
@@ -896,7 +1277,24 @@ def main(argv=None):
              "state-graphs.json (both directions) and, with --project, every real "
              "item state. No network, no secret. Non-zero on any finding.",
     )
+    ap.add_argument(
+        "--acceptance-audit",
+        action="store_true",
+        help="offline: sweep EVERY item's acceptance and report the verdict class of "
+             "each (AC-AP.3). Non-zero when an item's acceptance is present but not "
+             "fully readable and is not declared with an authority ref. No network.",
+    )
+    ap.add_argument("--root", default=None,
+                    help="alternate repo root for the acceptance sweep (used by the "
+                         "non-vacuity demonstration, which must drive the REAL CLI).")
+    ap.add_argument("--declared", default=None,
+                    help="alternate declared-exception registry path.")
     args = ap.parse_args(argv)
+    if args.acceptance_audit:
+        if not args.project:
+            ap.error("--acceptance-audit requires --project")
+        return run_acceptance_audit(args.project, root=args.root,
+                                    declared_path=args.declared)
     if args.audit:
         try:
             return run_audit(args.project)

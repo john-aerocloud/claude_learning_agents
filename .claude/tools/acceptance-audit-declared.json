@@ -1,0 +1,36 @@
+{
+  "_why": "Declared exceptions for `make acceptance-audit` (OI-ACCEPTANCE-PARSER-SCORES-ZERO-SILENTLY, AC-AP.3/AC-AP.4). An item lands here ONLY when its acceptance is genuinely present-but-not-enumerable and enumerating it is product/architect work an engineer may not do (process 12a). Per process 17h limb 1 every row carries a machine-checkable `authority` - an exclusion with no authority is a FINDING, not a sample - and the audit FAILS on a row whose finding has gone away, so this file can only shrink.",
+  "_shrink_only": "Adding a row is a decision that needs an owner. Removing one is always allowed. A row that no longer matches a real finding FAILS the audit.",
+  "declared": {
+    "UC-GSA2": {
+      "status": "unenumerated",
+      "authority": "architecture/deltas/054-diversion.md section 15 (solution-architect ruling, quoted verbatim in the item's own acceptance heading)",
+      "owner": "product + solution-architect",
+      "note": "Acceptance is one prose paragraph carrying three conjunctive conditions and no AC id, transcribed verbatim from the delta so it may not be reworded by an engineer. Its tester quoted the walking-skeleton clause when correctly refusing to claim validated, so the text IS load-bearing. Enumerating it into AC-GSA2.1/.2/.3 is the owner's act."
+    },
+    "DEFECT-OAG-050": {
+      "status": "unenumerated",
+      "authority": "architecture/deltas/054-diversion.md section 15 (verbatim, per the item's own acceptance heading)",
+      "owner": "product + solution-architect",
+      "note": "Same shape as UC-GSA2: a verbatim delta clause expressed as a threshold sentence with no AC id."
+    },
+    "OI-OAG-NARROW-SCOPE-COHORT": {
+      "status": "unenumerated",
+      "authority": "architecture/deltas/054-diversion.md section 15 (verbatim, per the item's own acceptance heading)",
+      "owner": "product + solution-architect",
+      "note": "One-sentence acceptance ('the growth tripwire exits non-zero on a seeded +1'), verbatim from the delta, no AC id."
+    },
+    "OI-GH-WORKFLOW-CAPTURE-REFRESH-OWED": {
+      "status": "unenumerated",
+      "authority": "the item's own opening `open` event, which states the acceptance in prose and predates the AC-id convention for open-items",
+      "owner": "product",
+      "note": "Acceptance is prose with no AC id. Open-items are not required to carry ids, so this is not a defect in the item - it is the honest boundary of what the 17d gate can trace to, and it is reported rather than hidden."
+    },
+    "DEFECT-OAG-062": {
+      "status": "truncated",
+      "authority": "the item's own `fixed` event at ref 18a630e, which REGISTERED AC-062.6 and AC-062.7, and the blockquote at the end of its acceptance section which records that neither ever got an acceptance line",
+      "owner": "product",
+      "note": "A TRUE finding, and the most valuable row in this file: the residual self-check found two criteria the item registered in an event and a blockquote but never added to `## Acceptance`. The item itself names this as a discovery gap for the retro. Writing the two missing acceptance lines is product's act, not an engineer's (12a); the audit keeps it visible until then."
+    }
+  }
+}

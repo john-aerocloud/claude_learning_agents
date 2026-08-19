@@ -166,6 +166,33 @@ container-reap:
 container-orphans:
 	@node .claude/tools/container-reap.js scan --project $(PROJECT) $(if $(JSON),--json,)
 
+# --- Stack claim/release (DEF-ROC-062) ------------------------------------------
+# The LEASE WRITER container-reap.js has always expected but no project ever
+# supplied. With no claim, a container's ONLY protection from the reaper is age —
+# which cannot distinguish "in active use" from "abandoned". This is what let the
+# ROC reaper destroy FOUR RUNNING containers mid-validation (DEF-ROC-062): the
+# stack was simply older than leaseTtlS. `claim` writes a lease (the SAME file
+# container-reap.js already reads as an absolute veto) for every container the
+# project currently owns and has running; `release` removes them; a TTL means an
+# unrenewed claim from a dead agent simply EXPIRES rather than deadlocking the
+# tree. RENEW is just calling `claim` again — wired below into the ROC-specific
+# stack lifecycle + gated test targets so it happens on every sign of life, not
+# only at start (mirrors OagEventSource's ddb-local-assert-ours precedent).
+#   make stack-claim PROJECT=ROC [TTL=3600] [LABEL=my-label] [FORCE=1]
+#   make stack-release PROJECT=ROC [LABEL=my-label] [FORCE=1]
+#   make stack-status PROJECT=ROC              # who holds the claim + remaining TTL
+stack-claim:
+	@node .claude/tools/stack-claim.js claim --project $(PROJECT) \
+	  $(if $(TTL),--ttl $(TTL),) $(if $(LABEL),--label "$(LABEL)",) \
+	  $(if $(FORCE),--force,) $(if $(JSON),--json,)
+
+stack-release:
+	@node .claude/tools/stack-claim.js release --project $(PROJECT) \
+	  $(if $(LABEL),--label "$(LABEL)",) $(if $(FORCE),--force,) $(if $(JSON),--json,)
+
+stack-status:
+	@node .claude/tools/stack-claim.js status --project $(PROJECT) $(if $(JSON),--json,)
+
 # --- AWS SSO login -------------------------------------------------------------
 # Re-authenticate the project's SSO profile when the cached token has expired
 # (symptom: any aws CLI call fails with "Token has expired and refresh failed").
@@ -603,20 +630,32 @@ ROC_APP := work/ROC/src/app
 # LOCAL acceptance tier (real SB/EH/Azurite emulators). Requires the stack up
 # (`make roc-local-up`). Batch-runnable in ONE pass on a fresh stack; the older
 # specs now run-scope their Azure tables so re-runs never collide.
+# RENEWS the stack claim on entry (DEF-ROC-062, sign-of-life cadence — mirrors
+# OagEventSource's ddb-local-assert-ours) so a long acceptance run never lapses
+# into the reaper's unclaimed grace window mid-suite. Never fails the tier on a
+# claim hiccup (`|| true`) — a real docker problem shows up in the suite itself.
 #   make roc-acceptance
 roc-acceptance:
+	@node .claude/tools/stack-claim.js claim --project ROC || true
 	npm --prefix $(ROC_APP) run test:acceptance
 # Fresh emulator stack up/down (Azurite has no volume, so `up` is a clean slate).
+# `up` CLAIMS the stack it just started (first sign of life); `down` RELEASES the
+# claim before tearing down so no stale lease/marker outlives the containers
+# (DEF-ROC-062).
 roc-local-up:
 	npm --prefix $(ROC_APP) run local:up
+	@node .claude/tools/stack-claim.js claim --project ROC || true
 roc-local-down:
+	@node .claude/tools/stack-claim.js release --project ROC || true
 	npm --prefix $(ROC_APP) run local:down
 # The dashboard e2e BATTERY: runs the whole tests/e2e suite in ONE command by
 # resetting + seeding each spec's own precondition (see local/e2eBattery.ts).
 # Long-running (a fresh-stack reset per spec). Pass filter substrings to subset.
+# RENEWS the stack claim on entry (DEF-ROC-062) — see roc-acceptance above.
 #   make roc-e2e-battery
 #   make roc-e2e-battery ROC_E2E_SPECS="uc-roc-046 uc-roc-069"
 roc-e2e-battery:
+	@node .claude/tools/stack-claim.js claim --project ROC || true
 	npm --prefix $(ROC_APP) run local:e2e-battery $(if $(ROC_E2E_SPECS),-- $(ROC_E2E_SPECS),)
 
 # --- ROC living-demo scenario harness (UC-ROC-051/052/080) ---------------------
@@ -640,8 +679,10 @@ roc-scenario-list:
 # NB the suite's own docstring precondition is a FRESH stack: a long-accumulated
 # Event Hubs emulator has been measured to fail ~2/10 on a mid-test alert-count
 # race, so bring it up fresh before treating a failure as a code fault.
+# RENEWS the stack claim on entry (DEF-ROC-062) — see roc-acceptance above.
 #   make roc-scenarios
 roc-scenarios:
+	@node .claude/tools/stack-claim.js claim --project ROC || true
 	$(ROC_DEMO)/scenarios/run-all.sh
 
 # --- UI accessibility scan (ui-designer; design-ops, root Makefile only) -------
@@ -945,7 +986,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap make-refs-tracked container-reap container-orphans sso-login retro-debt retro-mark loop-gate test-wi wi-append wi-project wi-validate wi-migrate doc-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated test-requirement-gate test-requirement-gate-baseline board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery
+.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap make-refs-tracked container-reap container-orphans stack-claim stack-release stack-status sso-login retro-debt retro-mark loop-gate test-wi wi-append wi-project wi-validate wi-migrate doc-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated test-requirement-gate test-requirement-gate-baseline board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery
 
 # --- Viggo-fix UC-W7: Country/Nationality ID remediation (T-SQL) --------------
 # Data-driven, self-building T-SQL remediation script set + its local stand-up

@@ -1338,3 +1338,90 @@ append REJECTED: DEF-ROC-026 is in state 'fixing'.
 It substituted `amended` (a legal edge for its role), quoted the refusal in the note, and **left the item in `fixing`** rather than routing around it — so the item now needs an engineer or cicd to append a `fixed` event about work neither did. That is the second time in this defect's own life cycle that the same bookkeeping detour has been required.
 
 Nine occasions, five roles. No tenth patch: the recorded replacement stands — derive firing rights from the item's declared owner, let the graph constrain transition SHAPE only.
+
+### EXP-140 — instance TEN, on the very defect that closed EXP-142's gap
+
+2026-08-18, ROC, `DEF-ROC-057` (the bad Config screen a human reported). The whole item is a **UI-designer** item by construction: layout allocation, table density, design-token contrast, plus the EXP-142 whole-screen sweep. It was dispatched to the **ui-designer**, which reproduced it, root-caused it to a missing house split-view template, fixed it across three surfaces, and proved the new gate fails 16/16 on the pre-fix build. Then, verbatim:
+
+```
+append REJECTED: DEF-ROC-057 is in state 'reproducing'.
+  event 'confirmed' is legal here but not for agent 'ui-designer'.
+  legal events from here: confirmed (agents: orchestrator/engineer/cicd), ...
+```
+
+**In one line: the role that owns UI quality cannot even record that it reproduced a UI defect** — `ui-designer` appears on NO edge of the defect graph at all, so unlike instances eight and nine it has no legal substitute edge to detour through; it cannot move the item one step in any direction.
+
+Ten occasions, six roles, and this one arrives *inside the experiment built to stop UI defects escaping to humans* — the fix is verified and the item still cannot leave `reproducing` without an agent that did none of the work. The replacement already recorded (derive firing rights from the item's declared owner; let the graph constrain transition SHAPE only) would have made every one of the ten a non-event.
+
+---
+
+## EXP-142 — a screen is evaluated as a SCREEN, at a short viewport, or it is not evaluated
+
+**Registered** 2026-08-18, from ROC `DEF-ROC-057` / `DEF-ROC-058` (the `/defect` gap-closing retro).
+
+**The gap, stated so it cannot be misread as a threshold problem.** A human opened ROC's Config
+screen and reported bad contrast and a button they had to scroll an inner panel to reach. The
+screen genuinely is poor: half the viewport is empty while the rules table is starved into ~35% of
+the width, which balloons rows (a status list wraps ONE WORD PER LINE), clips the PRIORITY column
+off the right edge unreadably, and pushes `Edit`/`History` behind **363px** of inner overflow with
+no page-level scrollbar to hint at them. The project's own gate — `@axe-core/playwright` with
+`wcag2a`/`wcag2aa`/`wcag21aa` — returns **0 violations of any kind on that screen at four
+viewports.** The apparatus is not absent or lazy: the per-use-case e2e specs run live fully-themed
+axe, painted-pixel contrast, ≥24px targets and no-reflow. It is **mis-scoped**, in four ways that
+compound:
+
+1. every scan is bound to the ONE action its use-case delivered, so components pass individually
+   while their **composition** fails;
+2. one viewport (`devices["Desktop Chrome"]`) — and **every fault here vanishes at 1920×1080 and
+   appears at 1366×768**;
+3. axe's `color-contrast` rule judges **text only**, so non-text contrast (WCAG 1.4.11) is
+   unchecked — measured on this screen at **1.24:1** for buttons and **1.18:1** for a row divider
+   against a 3.0 requirement;
+4. **nothing, human or agent, ever looks at the render.** A screenshot settled in seconds what two
+   numeric probes had disagreed about.
+
+**Which step should have caught it, and why it didn't.** The **ui-designer**. Its methodology
+already carries a WCAG 2.2 AA acceptance checklist and navigation/IA + click-path budgets — the
+obligations exist. What happened is that the *automatable subset* (per-action axe) was built, and
+the un-automated remainder (does the assembled screen use its space, is every action reachable,
+does it look right) was never re-assigned to anything. So it silently became nobody's, and the
+green number made the absence invisible. This is the same shape as `DEF-ROC-042`/`045`/`046`/
+`053`/`054` — a documented, invoked mechanism that asserts nothing — sitting in the UI quality gate
+itself, which is why the human saw the screen before any gate did.
+
+**The experiment.** For any UI-bearing slice, the ui-designer's acceptance must include a
+**whole-screen sweep of each assembled page** (not each action), run at **at least one short
+viewport — 1366×768 — in addition to the default**, carrying two assertions that need no colour
+judgement and therefore cannot be argued with:
+
+- **reachability**: for every scroll container, no actionable element may sit outside its visible
+  box on first paint;
+- **no clipping**: no table header or column may be cut by its container's right edge;
+
+plus **a saved screenshot per page per viewport that the ui-designer must actually view** before
+signing off. Non-text contrast (1.4.11) is measured and reported, with exemptions recorded
+**visibly** as an allowlist (the `test-requirement-gate` precedent) rather than by silent omission —
+because the naive check over-flags intentional subtlety, and pretending otherwise would just build
+a gate everyone learns to ignore.
+
+**Target metric: change failure rate** (secondary: MTTR on UI defects). The prediction is specific:
+UI defects of the layout/reachability/contrast class should be found **by the sweep at build time
+rather than by a human after delivery**. `DEF-ROC-057` is the baseline instance — reported by the
+human, zero gates tripped.
+
+**Anticipated effect.** At least one such defect caught pre-delivery within the scoring horizon,
+and no repeat of a human-reported reachability or clipping defect on a screen the sweep covers. The
+honest failure mode to watch for: the sweep becomes a green number nobody reads, in which case this
+experiment has reproduced the very pattern it exists to close and must be scored a failure, not
+renewed.
+
+**Scoring horizon.** The next three UI-bearing slices, or 30 days, whichever comes first.
+
+**Applies-to predicate (§25a).** Any slice or defect whose surface includes a rendered screen —
+i.e. it touches `src/dashboard/**`. It does **not** apply to API-only or domain-only work, and it
+does not apply to the per-action a11y specs, which stay exactly as they are: this **adds** a
+screen-level tier, it does not replace the component-level one.
+
+**Deliberately not done here.** No process version bump: no cross-agent rule changed — this
+sharpens the ui-designer's own acceptance bar, which §25/§36 makes that role's to own. Bump only if
+the sweep turns out to need enforcement outside the ui-designer's remit.

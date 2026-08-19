@@ -92,8 +92,26 @@ keeping the In-Progress lane honest. An AGGREGATE (slice/chunk/requirement) whos
 only non-terminal children are all `blocked` itself derives `blocked` (see
 `_bubble`), so a parked-on-external tree drops out of In Progress instead of
 masquerading as active work.
-A UC with no acceptance criteria in its definition gets a `needs-acceptance`
-label (surfaced, never fabricated).
+**Acceptance is labelled with THREE distinct facts, never one
+(OI-ACCEPTANCE-PARSER-SCORES-ZERO-SILENTLY).** `needs-acceptance` is a **work
+instruction** — it tells a human to go and author acceptance — so it may only be
+applied when nothing is authored. The parser previously returned a bare COUNT, and a
+`0` meant either "genuinely no acceptance" (a real process state; §12a keeps such an
+item out of a build) **or** "I could not read it". The board therefore stamped
+`needs-acceptance` on OAG-216 (`UC-GSA2`) and OAG-208 (`DEFECT-OAG-047`), both of which
+carry conditions their own testers cited BY ID — and acting on that instruction means
+re-authoring over existing acceptance, which §12a forbids an engineer to do at all.
+
+| item state | label | who acts |
+|---|---|---|
+| nothing authored (`none`/`empty`) | `needs-acceptance` | product/architect authors it |
+| present but not fully readable (`truncated`/`unreadable`/`orphan`) | `acceptance-unparsed` | **the parser is at fault** — run `make acceptance-audit` |
+| authored as prose with no citable `AC-…` id (`unenumerated`) | `acceptance-unenumerated` | product/architect enumerates it; §17d cannot trace to it until then |
+
+The parser-fault labels are **type-independent** — the old branch was gated on
+use-cases, so a defect whose acceptance was unreadable produced no label and no warning
+at all. `needs-acceptance` stays use-case-only. All three are surfaced, never
+fabricated, and `make acceptance-audit` is the tree-wide observer (`loop-gate` check 10).
 
 **`awaiting_observation` — shipped and green but UNPROVEN (v125 §17c/§12d.3).** This state
 means the work is deployed and re-verified green, and is waiting on a real-world TRIGGER to
@@ -149,7 +167,9 @@ projection so the description tracks the item (idempotent).
 
 ## 3. Labels
 
-- **Type/flow:** `defect` · `open-item` · `blocked` · `needs-acceptance`
+- **Type/flow:** `defect` · `open-item` · `blocked` · `needs-acceptance` ·
+  `acceptance-unparsed` · `acceptance-unenumerated` (the last two are
+  parser/authoring facts, not work instructions — see §2)
 - **Job-to-be-done:** `job:<Jn>` from the item's `job` field, so a human can
   filter the board by JTBD. The job *code* is the only thing that crosses over;
   the JTBD prose stays in the item definition, not the board.

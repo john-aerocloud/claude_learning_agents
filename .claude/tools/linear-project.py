@@ -225,13 +225,15 @@ def _criteria_from(lines):
     criteria = []
     prose = []
     current = None
+    kind = None          # 'list' | 'table' | 'prose' — decides what CONTINUES it
     fenced = False
 
     def flush():
-        nonlocal current
+        nonlocal current, kind
         if current is not None:
             criteria.append(_collapse(current))
             current = None
+            kind = None
 
     for line in lines:
         if _FENCE.match(line):
@@ -246,14 +248,21 @@ def _criteria_from(lines):
         if trow:
             flush()
             current = "%s %s" % (trow.group(1), trow.group(2).strip().rstrip("|").strip())
+            kind = "table"
             continue
         item = _LIST_ITEM.match(line)
         if item and not line[:1].isspace():
             flush()
             current = item.group(1)
+            kind = "list"
             continue
         if line.strip() == "":
-            continue  # blank line inside/after a criterion — not a boundary
+            # A blank line ends a PARAGRAPH criterion (markdown paragraph semantics)
+            # but not a list/table one, where a blank line between an item and its
+            # indented continuation is normal.
+            if kind == "prose":
+                flush()
+            continue
         if line[:1] in (" ", "\t"):
             if current is not None:
                 current += " " + line.strip()  # indented continuation
@@ -263,6 +272,12 @@ def _criteria_from(lines):
         if _AC_DECL.match(line):  # a criterion declared in prose, no list marker
             flush()
             current = line.strip()
+            kind = "prose"
+            continue
+        if kind == "prose":
+            # An UNINDENTED wrap line: a paragraph criterion's continuation is not
+            # indented, so requiring indentation here would silently truncate it.
+            current += " " + line.strip()
             continue
         flush()
         prose.append(line)
@@ -977,6 +992,102 @@ def sweep_acceptance(project, root=None):
     return sorted(rows, key=lambda r: r["id"])
 
 
+#: §17g GENERALISATION SWEEP — "where ELSE does an extractor's failure look exactly
+#: like a legitimate empty answer?" Asked of every extractor in this file, and the
+#: answer was worse than the reported defect: TWO MORE match NOTHING tree-wide.
+#:
+#: Each row is (name, extractor-callable-key, "what a zero means"). The measured
+#: population is printed by `--acceptance-audit` on every run and PINNED by
+#: `linear-project.test.py`, in BOTH directions — a pinned-zero extractor that starts
+#: matching also goes red, forcing the ledger to be updated rather than drifting. The
+#: cure for this class is not vigilance, it is that a tree-wide zero cannot be quiet.
+#:
+#: MEASURED 2026-08-19 over the real 468-item OagEventSource corpus:
+#:   acceptance             219 sections / 1081 criteria   FIXED by this item
+#:   definition_oneliner      0 / 468   FINDING — matches `## Definition — <text>`;
+#:                                     NO item writes a dash-suffixed heading. Masked
+#:                                     because compose() falls back to the title, so
+#:                                     the board renders the title twice and looks fine.
+#:   why                      0 / 468   FINDING — matches `**Why (persona/job):**`; no
+#:                                     item uses that literal. The "Contribution" line
+#:                                     has therefore NEVER rendered on any board issue.
+#:   defect_fields           53 / 97 defects, 44 with ZERO fields — the `## Defect
+#:                                     (four fields)` shape is not what half the
+#:                                     corpus writes, so those issues carry no Defect
+#:                                     section at all.
+#:   job_resolved           352 / 468 items carrying a `job`; 116 unresolved over 8
+#:                                     distinct codes (J1–J5, J9 absent from
+#:                                     jtbd-map.md, plus compound values like `J0/J3`
+#:                                     the resolver cannot express). Degradation here
+#:                                     is VISIBLE (a bare code renders instead of the
+#:                                     job name), which is why it is lower severity
+#:                                     than the two silent zeros.
+#:   persona_resolved        all resolve — healthy.
+#:   block_note             the `blocked` banner; see the measured figure below.
+#: NOT fixed here and deliberately NOT fixed blind: what the authoring surface for
+#: `Definition`/`Why`/`Defect` SHOULD be is a linear-mapping §2a decision, not an
+#: engineer's regex guess — the same reasoning that keeps `unenumerated` items out of
+#: an engineer's hands (§12a). Registered in this ledger, reported every run.
+EXTRACTOR_LEDGER = (
+    ("acceptance", "a zero conflated 'no acceptance authored' with 'unreadable'",
+     "FIXED — acceptance_report() + make acceptance-audit"),
+    ("definition_oneliner", "an omitted 'What this delivers'; masked by the title fallback",
+     "FINDING — 0/468, owner: linear-mapping §2a authoring decision"),
+    ("why", "an omitted 'Contribution' line on every board issue",
+     "FINDING — 0/468, owner: linear-mapping §2a authoring decision"),
+    ("defect_fields", "a defect issue with no Defect section",
+     "FINDING — 44 of 97 defects at zero, owner: linear-mapping §2a"),
+    ("job_resolved", "a bare job code instead of the job name (VISIBLE degradation)",
+     "FINDING — 116 unresolved over 8 codes, owner: product/jtbd-map.md"),
+    ("persona_resolved", "a bare persona code instead of the persona name",
+     "healthy — all resolve"),
+    ("block_note", "a blocked item with no reason banner",
+     "reported; a blocked item with no note in its log is legitimate"),
+)
+
+
+def extractor_population(project, root=None):
+    """Measure EVERY extractor in this file against the real corpus.
+
+    An extractor that matches NOTHING tree-wide is the reported defect's whole shape,
+    and it is invisible per-item: each individual empty answer is indistinguishable
+    from an item that legitimately lacks the field. Only the POPULATION can tell.
+    """
+    base = Path(root) if root else ROOT
+    jt_p = base / "work" / project / "product" / "jtbd-map.md"
+    per_p = base / "work" / project / "product" / "personas.md"
+    jt = jt_p.read_text(encoding="utf-8") if jt_p.exists() else ""
+    per = per_p.read_text(encoding="utf-8") if per_p.exists() else ""
+    pop = {k: {"hits": 0, "total": 0} for k, _w, _s in EXTRACTOR_LEDGER}
+    for sub in ("active", "done"):
+        d = base / "work" / project / "items" / sub
+        if not d.is_dir():
+            continue
+        for f in sorted(d.glob("*.md")):
+            fm, body = split_item(f.read_text(encoding="utf-8"))
+            data = parse_frontmatter(fm)
+            rep = acceptance_report(body)
+            pop["acceptance"]["total"] += 1
+            pop["acceptance"]["hits"] += 1 if rep["criteria"] else 0
+            for key, fn in (("definition_oneliner", parse_definition_oneliner),
+                            ("why", parse_why)):
+                pop[key]["total"] += 1
+                pop[key]["hits"] += 1 if fn(body) else 0
+            if data.get("type") == "defect":
+                pop["defect_fields"]["total"] += 1
+                pop["defect_fields"]["hits"] += 1 if parse_defect_fields(body) else 0
+            if data.get("job"):
+                pop["job_resolved"]["total"] += 1
+                pop["job_resolved"]["hits"] += 1 if resolve_job(data["job"], jt) != data["job"] else 0
+            for pid in data.get("personas") or []:
+                pop["persona_resolved"]["total"] += 1
+                pop["persona_resolved"]["hits"] += 1 if resolve_persona(pid, per) != pid else 0
+            if data.get("state") == "blocked":
+                pop["block_note"]["total"] += 1
+                pop["block_note"]["hits"] += 1 if _latest_block_note(body) else 0
+    return pop
+
+
 def load_declared(path=None):
     """The declared-exception registry. §17h limb 1: an exclusion of an item from
     the finding population is a decision and carries a machine-checkable AUTHORITY
@@ -1050,6 +1161,15 @@ def run_acceptance_audit(project, root=None, declared_path=None, verbose=True):
             print("  %-13s %4d items%s" % (status, n, (", %d criteria" % crit) if crit else ""))
         print("  %-13s %4d criteria across the corpus"
               % ("TOTAL", sum(len(r["criteria"]) for r in rows)))
+        # §17g sweep: the SIBLING extractors' populations, every run. Two of them
+        # match NOTHING tree-wide — the reported defect's exact shape, one file over.
+        print("  --- extractor populations (§17g sweep; a tree-wide ZERO is a finding)")
+        pop = extractor_population(project, root=root)
+        for key, meaning, verdict in EXTRACTOR_LEDGER:
+            n, tot = pop[key]["hits"], pop[key]["total"]
+            flag = "  <== ZERO TREE-WIDE" if tot and not n else ""
+            print("      %-20s %4d / %-4d  %s%s" % (key, n, tot, verdict, flag))
+            print("      %-20s        %s" % ("", meaning))
         declared = load_declared(declared_path)
         for r in rows:
             if r["status"] in FINDING_STATUSES:

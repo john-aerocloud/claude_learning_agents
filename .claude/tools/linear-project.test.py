@@ -686,6 +686,79 @@ def test_audit_is_GREEN_on_the_real_corpus_with_the_committed_registry():
     check("the total criteria count is reported", "criteria across the corpus" in out)
 
 
+def test_fault_set_numbered_list_with_no_bold_ids():
+    # validates: AC-AP.6
+    # REAL shape, DEFECT-OAG-081: `1. AC-081.1 — …` with no emphasis at all. Matching
+    # only `- **AC-x**` left every numbered item reading zero and LOOKED like a fix.
+    body = """## Acceptance
+
+1. AC-081.1 - the DR runbook's resource table names the real prod table, account and KMS
+   alias, per environment, with no sandbox identifiers presented as prod.
+2. AC-081.2 - `OAG_EVENT_STORE_TABLE` has no environment-specific default that can be
+   silently wrong.
+"""
+    r = lp.acceptance_report(body)
+    check("plain numbered list parses", len(r["criteria"]) == 2)
+    check("status parsed with nothing residual",
+          r["status"] == "parsed" and not r["residual_ids"])
+    check("the wrapped continuation is joined", "presented as prod" in r["criteria"][0])
+
+
+def test_fault_set_ids_in_prose_with_no_list_marker():
+    # validates: AC-AP.6
+    # SYNTHETIC, and marked as such: the real corpus contains ZERO instances of a
+    # prose-declared criterion (measured over all 468 items), so reality has not
+    # produced this fault yet. It is in the §17g fault set because it is the shape a
+    # fifth format would arrive as, and the point of the fix is that it does not need
+    # a fifth rule — a criterion is any line that DECLARES an id.
+    body = """## Acceptance
+
+AC-Q.1 - the first condition, written as a paragraph with no bullet at all,
+wrapping onto a second line.
+
+AC-Q.2 - the second condition, likewise.
+"""
+    r = lp.acceptance_report(body)
+    check("prose-declared criteria parse without a fifth format rule",
+          len(r["criteria"]) == 2)
+    check("status parsed, no residual", r["status"] == "parsed" and not r["residual_ids"])
+    check("continuation joined onto the prose criterion",
+          "second line" in r["criteria"][0])
+
+
+
+def test_extractor_populations_are_pinned_in_both_directions():
+    # validates: AC-AP.6  (§17g generalisation sweep — the LEDGER is the deliverable)
+    """The sweep question this item owes: "where ELSE does an extractor's failure look
+    exactly like a legitimate empty answer?" Asked of every extractor in the file, the
+    answer was worse than the reported defect — TWO more match NOTHING tree-wide.
+
+    Both directions are pinned deliberately. A working extractor dropping to zero goes
+    red (the reported defect, recurring). A pinned-ZERO extractor that STARTS matching
+    ALSO goes red, so the ledger must be updated rather than quietly rotting — the
+    `f694ea3` failure was precisely a ledger everyone believed and nobody re-measured.
+    """
+    pop = lp.extractor_population("OagEventSource")
+    must_match = {"acceptance", "defect_fields", "job_resolved", "persona_resolved",
+                  "block_note"}
+    for key in must_match:
+        check(f"{key} has a NON-ZERO tree-wide population "
+              f"({pop[key]['hits']}/{pop[key]['total']})", pop[key]["hits"] > 0)
+    # The two registered findings. Pinned AT ZERO with their reason, so the day either
+    # starts working this test demands the ledger say so.
+    for key in ("definition_oneliner", "why"):
+        check(f"{key} is STILL the registered zero-population finding "
+              f"({pop[key]['hits']}/{pop[key]['total']}) — if this went red, the "
+              f"extractor started matching and EXTRACTOR_LEDGER must be updated",
+              pop[key]["hits"] == 0 and pop[key]["total"] > 400)
+    check("every ledger row is measured (no row declared without a number)",
+          all(k in pop for k, _m, _v in lp.EXTRACTOR_LEDGER))
+    check("no ledger row calls its own population benign (§17h limb 2)",
+          not any(w in v.lower() for _k, _m, v in lp.EXTRACTOR_LEDGER
+                  for w in ("benign", "degenerate", "expected", "out of scope")))
+
+
+
 def run():
     for fn in [
         test_parse_acceptance_joins_wrapped_lines,
@@ -704,6 +777,8 @@ def run():
         test_every_acceptance_section_is_read_not_only_the_first,
         test_prose_only_acceptance_is_unenumerated_not_zero,
         test_backticked_ids_in_a_numbered_list_parse,
+        test_fault_set_numbered_list_with_no_bold_ids,
+        test_fault_set_ids_in_prose_with_no_list_marker,
         test_genuinely_no_acceptance_is_representable_as_none,
         test_empty_acceptance_section_is_distinct_from_unreadable,
         test_a_dropped_id_is_reported_as_truncated_not_silently_lost,
@@ -716,6 +791,7 @@ def run():
         test_audit_goes_RED_on_a_declaration_with_no_authority,
         test_audit_goes_RED_on_a_stale_declaration_so_it_can_only_shrink,
         test_audit_is_GREEN_on_the_real_corpus_with_the_committed_registry,
+        test_extractor_populations_are_pinned_in_both_directions,
     ]:
         print(f"* {fn.__name__}")
         fn()

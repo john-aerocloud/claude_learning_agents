@@ -2849,7 +2849,102 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
     #        own CI cannot see it.
     findings.extend(compute_make_refs_tracked(project))
 
+    # --- 10. an item's acceptance must be READABLE, or loudly not — DELEGATED --
+    #         (OI-ACCEPTANCE-PARSER-SCORES-ZERO-SILENTLY). The loop is the reason
+    #         this hangs here: the parser's only other caller is a board sync run
+    #         one item at a time, whose stderr nobody reads, so a tree-wide wrong
+    #         answer had no observer at all (`f694ea3` matched NOTHING tree-wide
+    #         and the only symptom was a label sitting on ~100% of items).
+    findings.extend(compute_acceptance_audit(project))
+
     return findings
+
+
+# ---------------------------------------------------------------------------
+# loop-gate check 10 — an item's acceptance must be READABLE, or loudly not
+# (OI-ACCEPTANCE-PARSER-SCORES-ZERO-SILENTLY, AC-AP.1/AC-AP.3)
+#
+# `parse_acceptance()` returned a COUNT, and `0` conflated two irreconcilable facts:
+# the item genuinely has no written acceptance (a real process state — §12a keeps such
+# an item out of a build) and the parser could not READ its acceptance. The dangerous
+# direction is false-green: the board stamped `needs-acceptance` — a WORK INSTRUCTION
+# to go and author acceptance — on OAG-216 (`UC-GSA2`) and OAG-208
+# (`DEFECT-OAG-047`), both of which carry conditions their own testers cited BY ID.
+# Following that instruction means re-authoring over acceptance that already exists,
+# which §12a forbids an engineer to do at all.
+#
+# WHY IT HANGS HERE. `f694ea3` fixed three formats plus a terminator bug and a FOURTH
+# format broke it the next day; all four accidental discoveries on the open item were
+# found by someone who went looking. The parser's only other caller is `board-project`,
+# one item at a time, whose stderr nobody reads — so a tree-wide wrong answer had no
+# observer. The loop is the only continuously-running workflow, and the analyser lives
+# in the agent-system repo where a project's own CI cannot see it (same reason as
+# check 9). The whole point of the fix is that the answer is now checked BEFORE an
+# agent reads "0 acceptance conditions" and defers a buildable item.
+#
+# SEVERITY, per §F8a ("a gate blocks only on harm that stopping relieves"):
+#   findings   -> BLOCK. The next pull is exactly the moment the wrong answer is
+#         acted on — an engineer citing ids the gate cannot resolve, or an agent
+#         concluding an item is not buildable. One `make acceptance-audit` clears it.
+#   unrunnable -> UNKNOWN ("? " line). An unevaluated precondition is not a met one
+#         (§17c.2), and "clean" being indistinguishable from "did not run" is the
+#         exact shape of the defect this check exists for.
+# ---------------------------------------------------------------------------
+ACCEPTANCE_AUDIT_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                       "..", "..", "..", "tools", "linear-project.py")
+ACCEPTANCE_AUDIT_TIMEOUT = 120.0
+
+
+def compute_acceptance_audit(project, timeout=ACCEPTANCE_AUDIT_TIMEOUT):
+    """Delegate to the REAL acceptance audit CLI. 0 or 1 finding."""
+    common = {"check": "acceptance-audit", "ids": []}
+    try:
+        # --root/--declared are passed EXPLICITLY from this module's ROOT. The
+        # analyser otherwise resolves the corpus from its OWN file location, which
+        # would make it sweep the real repo while the caller is pointed at another
+        # tree — a check that answers about the wrong population is the same class
+        # of silent wrong answer this check exists to catch.
+        proc = subprocess.run(
+            [sys.executable, os.path.normpath(ACCEPTANCE_AUDIT_SCRIPT),
+             "--acceptance-audit", "--project", project, "--root", ROOT,
+             "--declared", os.path.join(ROOT, ".claude", "tools",
+                                        "acceptance-audit-declared.json")],
+            capture_output=True, text=True, timeout=timeout)
+    except Exception as exc:                                    # noqa: BLE001
+        return [dict(common, severity="unknown", message=(
+            f"[acceptance-audit] NOT ESTABLISHED — the check would not run "
+            f"({type(exc).__name__}: {str(exc)[:160]}). An unrunnable check is not a "
+            f"clean one, and this check exists precisely because a clean answer was "
+            f"indistinguishable from no answer. Remedy: "
+            f"`make acceptance-audit PROJECT={project}`."))]
+    out = (proc.stdout or "") + (proc.stderr or "")
+    if "acceptance sweep" not in out and "acceptance audit FAILED" not in out:
+        # The analyser did not produce its own headline, so it did not RUN (missing
+        # file, import error, wrong interpreter). A non-zero exit from a process that
+        # never reached the audit is NOT a finding, and a zero exit from one would be
+        # far worse — a clean answer indistinguishable from no answer is the exact
+        # false green this check exists for (§17c.2).
+        return [dict(common, severity="unknown", message=(
+            f"[acceptance-audit] NOT ESTABLISHED — the analyser produced no audit "
+            f"output (exit {proc.returncode}): {out.strip()[:200] or '<no output>'}. "
+            f"An unrunnable check is not a clean one. Remedy: "
+            f"`make acceptance-audit PROJECT={project}`."))]
+    if proc.returncode == 0:
+        return []
+    lines = [l.strip("- ").strip() for l in out.split("\n")
+             if l.strip().startswith("- ")]
+    ids = sorted({l.split(" ")[0] for l in lines if l})
+    head = next((l for l in out.split("\n") if "acceptance audit FAILED" in l), "")
+    return [dict(common, severity="block", ids=ids, message=(
+        f"[acceptance-audit] {head.strip() or 'acceptance audit FAILED'} — an item's "
+        f"acceptance is PRESENT but not fully readable, so a `0` (or an undercount) is "
+        f"indistinguishable from an item that genuinely has none: "
+        f"{', '.join(ids) or '—'}. The false-green direction is the dangerous one — the "
+        f"board's `needs-acceptance` label is a WORK INSTRUCTION, and acting on it means "
+        f"re-authoring over acceptance that already exists (§12a forbids it). Remedy: "
+        f"`make acceptance-audit PROJECT={project}` and fix the parser, OR — if the "
+        f"acceptance is genuinely not enumerable, which is product/architect work — "
+        f"declare it with an authority ref (§17h)."))]
 
 
 # ---------------------------------------------------------------------------

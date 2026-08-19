@@ -597,3 +597,84 @@ test('AC-DEFECT-OAG-076.2 assessRepo reports at-risk shas with their subjects so
   assert.match(a.atRisk[0].subject, /a subject worth quoting/);
   assert.equal(a.dirty.length, 0);
 });
+
+// --- AC-DEFECT-OAG-076.5 — the guard must be able to REPORT, at any size ------
+//
+// Found 2026-08-19 by `loop-gate` reading this guard as NOT ESTABLISHED:
+// `scan-all --json` produced exactly 65536 bytes and the JSON ended mid-string.
+// `process.exit()` immediately after `process.stdout.write` does not wait for a
+// PIPE to drain, so the payload was cut at the 64 KiB pipe buffer. The guard had
+// not regressed — the repo's history had simply grown past the buffer, which is
+// why this failure mode arrives silently and late. A guard that cannot report is
+// indistinguishable from a guard that was never run.
+
+/** A nested repo with enough at-risk commits to push `--json` past 64 KiB. */
+function makeOversizeScanTarget(commits = 80) {
+  const root = tmp('oag076-oversize-');
+  const repo = initRepo(path.join(root, 'nested-clone'));
+  const filler = 'x'.repeat(900);
+  for (let i = 0; i < commits; i += 1) {
+    git(repo, ['commit', '--allow-empty', '-q', '-m', `commit ${i} ${filler}`]);
+  }
+  return { root, repo, commits };
+}
+
+test('AC-DEFECT-OAG-076.5 `scan --json` output over 64 KiB still parses — the real CLI through a PIPE', () => {
+  const { root, commits } = makeOversizeScanTarget();
+  const r = spawnSync(process.execPath, [TOOL_PATH, 'scan', root, '--json'], { encoding: 'utf8' });
+
+  // The WITNESS. If the payload no longer crosses the pipe buffer this test proves
+  // nothing, so it FAILS rather than passing vacuously — the number is the point.
+  assert.ok(
+    r.stdout.length > 65536,
+    `witness lost: payload is ${r.stdout.length} bytes, which no longer exceeds the `
+    + '64 KiB pipe buffer, so this case can no longer observe the truncation it exists '
+    + 'to pin. Raise the commit count in makeOversizeScanTarget().',
+  );
+
+  const parsed = JSON.parse(r.stdout);              // threw before the fix
+  assert.equal(parsed.safe, false);                 // unreferenced commits => REFUSED
+  assert.equal(parsed.repos.length, 1);
+  assert.equal(parsed.repos[0].atRisk.length, commits);
+  assert.equal(r.status, 2);                        // exitCode survives the change
+});
+
+test('AC-DEFECT-OAG-076.5 CONTROL — the same payload through the old `process.exit()` tail IS truncated (the bug, observed failing)', () => {
+  const { root } = makeOversizeScanTarget();
+  const src = fs.readFileSync(TOOL_PATH, 'utf8');
+  assert.match(src, /process\.exitCode = main\(/, 'the tool no longer sets exitCode — update this control');
+
+  // The pre-fix tail, verbatim, over the identical fixture: the ONLY difference is
+  // synchronous exit vs. letting node flush.
+  const regressed = src.replace(
+    /if \(require\.main === module\) \{[\s\S]*?\n\}\n?$/,
+    'if (require.main === module) process.exit(main(process.argv.slice(2)));\n',
+  );
+  assert.notEqual(regressed, src, 'failed to build the regressed arm');
+  const bad = path.join(tmp('oag076-regressed-'), 'worktree-guard.js');
+  fs.writeFileSync(bad, regressed);
+
+  const r = spawnSync(process.execPath, [bad, 'scan', root, '--json'], { encoding: 'utf8' });
+  assert.equal(r.stdout.length, 65536, 'expected the pipe buffer to cut the payload at exactly 64 KiB');
+  assert.throws(() => JSON.parse(r.stdout), SyntaxError);
+});
+
+test('AC-DEFECT-OAG-076.5 §17g SWEEP — no tool in .claude/tools exits synchronously on the value of main(), in ANY tool', () => {
+  // The truncation lesson was already WRITTEN DOWN in test-requirement-gate.js
+  // ("NEVER process.exit() after writing to a pipe") and four sibling tools carried
+  // the bug anyway: container-reap, isolated-commit, make-refs-tracked,
+  // impacted-tests. A comment in one file is not a sweep. This case is the sweep,
+  // made mechanical so the fifth tool cannot reintroduce it — the failure is silent
+  // and arrives only once a tool's output happens to grow past 64 KiB.
+  const offenders = [];
+  for (const f of fs.readdirSync(__dirname)) {
+    if (!f.endsWith('.js') || f.endsWith('.test.js')) continue;
+    const src = fs.readFileSync(path.join(__dirname, f), 'utf8');
+    if (/process\.exit\(\s*main\s*\(/.test(src)) offenders.push(f);
+  }
+  assert.deepEqual(offenders, [], `these tools truncate their own output over 64 KiB: ${offenders.join(', ')}`);
+
+  // Non-vacuity: the detector must actually fire on the shape it forbids.
+  assert.match('if (require.main === module) process.exit(main(process.argv.slice(2)));',
+    /process\.exit\(\s*main\s*\(/);
+});

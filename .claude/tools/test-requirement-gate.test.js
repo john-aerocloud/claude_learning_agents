@@ -242,6 +242,29 @@ describe('AC-X.1 g', () => {
   assert.deepStrictEqual(rules(r, 'authored'), [])
 })
 
+test('limb2 spread-override: an ARRAY spread is not an object override, even in a block holding a typed declaration', () => {
+  // The false positive this rule shipped with (defect-oag-110-keyless-corpus-and-guard.test.ts:417):
+  // `[...a, ...b]` has no enclosing OBJECT literal, so a `{`-only walk back finds the enclosing
+  // BLOCK and reads the `const x: T =` annotation's colon as an override key.
+  const r = run({
+    'tests/a.test.ts': `
+import { readConfirmingRecords } from '../src/adapters/fixture-corpus-reader.js'
+const record = readConfirmingRecords()
+describe('AC-X.1 g', () => {
+  it('one', () => {
+    const before = record
+    const after = record
+    const lateKeyed: SomeType = 1
+    const ids = new Set([...before, ...after].map((e) => e.id))
+    void lateKeyed
+    void ids
+  })
+})
+`,
+  })
+  assert.deepStrictEqual(rules(r, 'authored'), [])
+})
+
 test('limb2 mutate-real: assigning into a corpus-loaded capture is flagged', () => {
   const r = run({
     'tests/a.test.ts': `

@@ -2359,6 +2359,57 @@ class TestLoopGate(Base):
             wi.compute_retro_debt = orig
         self.assertEqual(calls, [(self.project, 7)])
 
+    # ---- check 11: board-mapping drift (DEFECT-OAG-099, AC-099.5) -----------
+    def test_AC_099_5_board_mapping_drift_is_a_standing_gate_before_every_pull(self):
+        """A state in state-graphs.json with no board-status row renders as
+        unstarted Backlog — which has happened twice. AC-099.5 wants the check
+        AUTOMATIC, and §17e says a gate in no workflow is not a gate, so it hangs
+        on the loop's only continuously-running workflow."""
+        self._default_policy()
+        findings = wi.compute_board_mapping_drift()
+        self.assertEqual(findings, [], f"committed mapping should be clean: {findings}")
+        self.assertNotIn("board-mapping", self._checks(self._gate()))
+
+    def test_AC_099_5_a_drifted_board_mapping_blocks_the_pull(self):
+        drifted = wi.compute_board_mapping_drift(
+            graphs_path=self._write_drifted_graphs())
+        self.assertEqual([f["check"] for f in drifted], ["board-mapping"])
+        self.assertEqual(drifted[0]["severity"], "block")
+        self.assertIn("a_throwaway_state", drifted[0]["message"])
+        self.assertIn("linear-mapping.md", drifted[0]["message"])
+
+    def test_AC_099_5_an_unrunnable_board_mapping_check_is_UNKNOWN_not_clean(self):
+        """§17c.2: an unevaluated precondition is not a met one."""
+        findings = wi.compute_board_mapping_drift(
+            script="/nonexistent/board-sweep.py")
+        self.assertEqual([f["severity"] for f in findings], ["unknown"])
+        self.assertIn("NOT ESTABLISHED", findings[0]["message"])
+
+    def test_AC_099_5_loop_gate_delegates_rather_than_cloning_the_audit(self):
+        """DRY: the mapping audit has ONE executable home."""
+        self._default_policy()
+        calls = []
+        orig = wi.compute_board_mapping_drift
+        wi.compute_board_mapping_drift = lambda *a, **k: (calls.append(1) or [])
+        try:
+            self._gate()
+        finally:
+            wi.compute_board_mapping_drift = orig
+        self.assertEqual(len(calls), 1)
+
+    def _write_drifted_graphs(self):
+        import json as _json
+        src = os.path.join(wi.ROOT, "process", "machinery", "state-graphs.json")
+        with open(src, encoding="utf-8") as fh:
+            g = _json.load(fh)
+        g["types"]["use-case"]["transitions"].append(
+            {"from": "ready", "event": "throwaway", "to": "a_throwaway_state",
+             "agents": ["engineer"]})
+        p = os.path.join(self.tmp, "drifted-state-graphs.json")
+        with open(p, "w", encoding="utf-8") as fh:
+            _json.dump(g, fh)
+        return p
+
     # ---- reports EVERY violation, not just the first ------------------------
     # ---- check 4b: aged backlog item with NO DECISION (v135, EXP-131) --------
     # The constraint these guard: `open` was the top GLT contributor for two

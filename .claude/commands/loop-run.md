@@ -181,13 +181,22 @@ Each cycle:
    stable constraint on a clean run does not pay full-retro overhead; a shifted
    constraint is real learning that a retro must walk (exploit/subordinate/elevate).
 5b. **Full-sweep board reconcile — periodic BACKSTOP only (the primary path is the
-   step-4 per-item push).** After a slice/chunk close, dispatch the `linear`/`jira` projection
-   agent in full-sweep mode to reconcile structure (create/prune the Project/Milestone
-   hierarchy, catch anything the per-item pushes missed) from the item files (mapping in
-   `process/linear-mapping.md`). State-only mirror. Skip silently if the project has no board
-   binding. Never block the loop on the API; a failure is logged, not fatal. This does NOT
-   replace the per-item push — if you find the sweep is doing real work every time, the
-   per-item push (step 4) is being skipped, which is the board/doc-lag failure.
+   step-4 per-item push).** After a slice/chunk close, run
+   `make board-sweep PROJECT=<project>` (the `linear`/`jira` projection agent uses the same
+   target) to reconcile from the item files — mapping in `process/linear-mapping.md`.
+   State-only mirror. Skip silently if the project has no board binding. Never block the loop
+   on the API. This does NOT replace the per-item push — if you find the sweep is doing real
+   work every time, the per-item push (step 4) is being skipped, which is the board/doc-lag
+   failure.
+   **Do NOT reconcile by looping `board-project` over every id (DEFECT-OAG-099).** That
+   rewrote 269 already-correct items and then ran out of rate budget with 5 DONE items still
+   showing Blocked; the same shape later left two TERMINAL items lagging for seven days.
+   `board-sweep` skips items that already match, writes terminal/blocked lag FIRST, and on a
+   rate limit names every id that did not land. **A failure here is logged, not fatal — but it
+   is only "logged" if you QUOTE THE IDS.** Exit 3 means a shortfall: run
+   `make board-sweep-resume PROJECT=<project>` in the same cycle, or carry the named ids
+   forward explicitly. Exit 5 means the mapping drifted from `state-graphs.json` — run
+   `make board-audit`; that is a defect, not a skip.
 6. **Document — REQUIRED at each slice/UC close (docs must not drift).** Dispatch `documenter`
    to update the project README (and GitBook where bound) to match what just shipped — at
    every slice close, and for any UC that changes user-facing behaviour. Runs in the

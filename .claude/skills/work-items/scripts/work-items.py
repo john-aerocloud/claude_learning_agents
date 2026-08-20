@@ -2857,7 +2857,67 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
     #         and the only symptom was a label sitting on ~100% of items).
     findings.extend(compute_acceptance_audit(project))
 
+    # --- 11. every state in the graph has a board-status row — DELEGATED -------
+    #         (DEFECT-OAG-099 AC-099.5). An unmapped state does not fail, it
+    #         renders as unstarted BACKLOG — the board saying "not started" about
+    #         a terminal item, or about code running in production. That has now
+    #         happened TWICE (`cancelled` from state-graph v5; `awaiting_observation`
+    #         from v9), each time discovered by a human noticing, because the only
+    #         consumer was a per-item board sync whose stderr nobody reads. The
+    #         mapping is a hand-maintained table and the graph is not, so the two
+    #         drift on any commit that adds a state; hanging the check here makes
+    #         "add a state" and "add its row" one enforced commit.
+    findings.extend(compute_board_mapping_drift())
+
     return findings
+
+
+# ---------------------------------------------------------------------------
+# loop-gate check 11 — state-graph <-> board-status mapping drift
+# (DEFECT-OAG-099, AC-099.5). Offline: no project, no corpus, no network, no
+# secret. DELEGATED to the ONE executable home of the mapping audit
+# (.claude/tools/board-sweep.py --audit-mapping) — never re-implemented here.
+# ---------------------------------------------------------------------------
+BOARD_SWEEP_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "..", "..", "..", "tools", "board-sweep.py")
+BOARD_MAPPING_TIMEOUT = 60.0
+
+
+def compute_board_mapping_drift(script=None, graphs_path=None,
+                                timeout=BOARD_MAPPING_TIMEOUT):
+    """0 or 1 finding. UNKNOWN (never clean) if the analyser did not run: an
+    unevaluated precondition is not a met one (§17c.2)."""
+    common = {"check": "board-mapping", "ids": []}
+    argv = [sys.executable, os.path.normpath(script or BOARD_SWEEP_SCRIPT),
+            "--audit-mapping"]
+    if graphs_path:
+        argv += ["--graphs", graphs_path]
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True,
+                              timeout=timeout)
+    except Exception as exc:                                    # noqa: BLE001
+        return [dict(common, severity="unknown", message=(
+            f"[board-mapping] NOT ESTABLISHED — the mapping audit would not run "
+            f"({type(exc).__name__}: {str(exc)[:160]}). An unrunnable check is not "
+            f"a clean one. Remedy: `make board-audit`."))]
+    out = ((proc.stdout or "") + (proc.stderr or "")).strip()
+    if "board-mapping gate" not in out:
+        return [dict(common, severity="unknown", message=(
+            f"[board-mapping] NOT ESTABLISHED — the audit produced no verdict "
+            f"(exit {proc.returncode}): {out[:200] or '<no output>'}. An "
+            f"unrunnable check is not a clean one. Remedy: `make board-audit`."))]
+    if proc.returncode == 0:
+        return []
+    states = sorted({m for m in re.findall(r"\b(?:UNMAPPED|STALE-KEY)\s+\S+/(\S+?):",
+                                           out)})
+    return [dict(common, severity="block", ids=[], message=(
+        f"[board-mapping] {out.splitlines()[0]} "
+        f"{('states: ' + ', '.join(states) + '. ') if states else ''}"
+        f"An unmapped state renders as unstarted Backlog — the board lying about "
+        f"a terminal or in-production item, which has happened twice. Remedy: add "
+        f"the row to STATE_STATUS in .claude/tools/linear-project.py AND to "
+        f"process/linear-mapping.md §2, in the same commit as the state; then "
+        f"`make board-audit`."))]
 
 
 # ---------------------------------------------------------------------------

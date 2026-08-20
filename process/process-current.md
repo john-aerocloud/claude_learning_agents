@@ -219,7 +219,14 @@ optional or deferrable; only the external API *call* is best-effort (a failure i
 next push/sweep reconciles). **Invariant: an item's board status never lags its item-file state
 by more than the current cycle.** The full-sweep run is a periodic structure backstop, NOT the
 primary path — if the sweep does real state work every time, per-item pushes are being skipped
-(the board/doc-lag lapse). Likewise user-facing docs (README / GitBook, via `documenter`)
+(the board/doc-lag lapse). **The backstop is `make board-sweep`, never a loop over
+`board-project` (DEFECT-OAG-099):** the loop form writes every item whether or not it needs
+writing, so the rate limit lands on whatever is last — measured, 269 already-correct items
+rewritten and 5 DONE items left showing Blocked, and later two TERMINAL items lagging SEVEN
+DAYS against this very invariant. The sweep skips matches, spends the budget on terminal and
+blocked lag FIRST, and on exhaustion NAMES the ids that did not land (exit 3 + a resume file).
+An unnamed shortfall is how a "best effort, the next sweep reconciles" API failure becomes a
+week of a false board — **quote the ids or it did not get logged.** Likewise user-facing docs (README / GitBook, via `documenter`)
 are refreshed at each slice close and must not drift from shipped state. Boards and docs are
 projections — the item always wins, but a projection left stale is a process failure.
 

@@ -46,8 +46,18 @@ You do NOT read queues, the ledger, or other items. One item in, one issue out.
    - block reason (an item in `blocked` state, from its latest `blocked` event note) → a
      "Blocked: <reason>" note + flag; clear it when the item leaves `blocked`.
    - DORA timestamps from `events:` → worklog/comment or custom field if the board wants them.
-3. In **full-sweep mode** (no `--id`): project EVERY active + done item to reconcile drift the
-   per-item path may have missed (the backstop).
+3. In **full-sweep mode** (no `--id`): reconcile the drift the per-item path may have missed —
+   but NOT by writing every item in whatever order you enumerate them. **DEFECT-OAG-099 is a
+   Jira hazard too:** on Linear that loop rewrote 269 ALREADY-CORRECT items and then hit the
+   rate limit with 5 DONE items still showing Blocked, and later left two TERMINAL items
+   lagging seven days. Jira rate-limits too, so honour the same three rules whatever tool you
+   use: **(1) ORDER** — terminal lag first, then blocked/parked, then the rest;
+   **(2) SKIP** — read the board once and do not write an item whose status already matches its
+   derived state; **(3) SHORTFALL** — when the budget runs out, STOP and name every id that did
+   not land, in priority order, so the retry resumes exactly there. Never report a rate-limited
+   sweep as a count. (Linear's executable version is `make board-sweep` /
+   `.claude/tools/board-sweep.py`; Jira has no equivalent tool yet — if you find yourself
+   hand-looping, that missing wrapper is the gap to flag.)
 
 ## Invariants that make you safe at any scale
 - **Idempotent.** You read the item's *current* state and set the issue to match — never a diff.
@@ -64,4 +74,6 @@ You do NOT read queues, the ledger, or other items. One item in, one issue out.
 
 ## Return
 The item id, the Jira issue key, the status you set (and prior if known), and any error you
-swallowed. In full-sweep mode: counts (issues updated / created / errored).
+swallowed. In full-sweep mode: counts (written / skipped-because-already-correct / failed) and —
+mandatory, never summarised as a count — **the ID LIST of everything that did not land, in
+priority order**.

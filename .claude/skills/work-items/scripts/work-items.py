@@ -2593,6 +2593,64 @@ def _git(repo, *args, _stdin=None):
 # can be STALE (this worktree's parent origin/main is weeks behind, because the
 # owner owns the parent push), and staleness can only ever produce a false
 # NOT-ON-TRUNK — never a false ON-TRUNK, and never a false ABSENT.
+# §17g GENERALISATION SWEEP — every site that resolves a ref/sha against a repo.
+# The shape asked, per §17g: "where else is an object looked up in ONE repo when the
+# system has two?" Each entry is FIXED or NOT-APPLICABLE-BECAUSE. "I checked" is not
+# a ledger, so the reasons are recorded, including the one that surprised me.
+#
+#  1. work-items.py `_ref_on_trunk`                          FIXED — the reported bug.
+#  2. work-items.py loop-gate check 1 push-state rendering   FIXED — one string served
+#     both a wrong-repo lookup and a destroyed commit; now four distinct verdicts.
+#  3. work-items.py — NO registry-wide existence check existed at all   FIXED (check 12).
+#     Not a repo-blindness instance: an ABSENCE. Check 1 only sees items stalled in
+#     validation, so a destroyed commit on a DONE item had no observer anywhere —
+#     which is exactly how DEFECT-OAG-072 was lost.
+#  4. work-items.py `cmd_append` (the WRITE path)            FIXED — validated where
+#     the data enters; non-sha refused, absent-sha warned-but-recorded.
+#  5. work-items.py `_parse_scalar` / `_parse_inline_map`     FIXED — a ref is never
+#     number-coerced (IMP-029, prescribed 19 days earlier and unswept); plus the
+#     zero-padded repair for the refs already damaged on disk.
+#  6. .claude/commands/loop-run.md                            FIXED — it INSTRUCTED
+#     every reader to run the lookup in the project repo. A doc that teaches the
+#     defect is a defect.
+#  7. process/process-current.md §F8a                         FIXED — same, and this
+#     is the authoritative rule the doc above derives from.
+#  8. .claude/tools/impacted-tests.js `resolveDiffRoot`        NOT APPLICABLE — already
+#     repo-aware, and this is the sweep's real finding: EXP-104 fixed THIS EXACT SHAPE
+#     ("a SHA that only exists in the project's nested repo was `fatal: bad revision`
+#     in the parent, and vice versa"), noted it had "recurred 5x before this fix",
+#     converged on the same design (ask each candidate repo who owns the sha, raise
+#     an ACTIONABLE error when neither does) — and NOBODY SWEPT IT TO work-items.py.
+#     A fix in one tool is not a sweep (§17g). That is the whole reason this defect
+#     existed, and it is the second time in this file's history (see 5).
+#  9. .claude/tools/worktree-guard.js `assessRepo`            NOT APPLICABLE — it asks
+#     EVERY surviving witness repo whether a sha survives, and takes the shas from
+#     `rev-list` in the repo under assessment. Multi-repo by construction.
+# 10. .claude/tools/isolated-commit.js                        NOT APPLICABLE — the repo
+#     is a required parameter; every lookup is `git -C <that repo>`.
+# 11. .claude/scripts/worktree (`merge-base --is-ancestor "$br" main`)  NOT APPLICABLE —
+#     BRANCH names in the parent repo, not item refs. Parent-scoped by definition.
+# 12. .claude/tools/make-refs-tracked.js                      NOT APPLICABLE — resolves
+#     FILE paths (`ls-files`/`check-ignore`), never a commit object, and takes its
+#     repo as `--repo-root`.
+# 13. .claude/tools/linear-project.py + the board projections  NOT APPLICABLE — MEASURED,
+#     not assumed: they run no git at all and never consume `ref:`. The boards project
+#     item state, so a wrong push reading cannot reach them.
+# 14. work/<project>/Makefile `assert-build-identity`         NOT APPLICABLE, AND MUST
+#     STAY THAT WAY — `git cat-file -e $(BUILD_SHA)` deliberately resolves ONLY in the
+#     project repo. Same shape, OPPOSITE correct answer, because the QUESTION differs:
+#     check 12 asks "does this object exist ANYWHERE" (destroyed-work), while this asks
+#     "does this object belong to THIS repo" (provenance). DEFECT-OAG-036 was caused by
+#     a parent-repo sha being accepted as a project build identity, so widening this to
+#     search both repos would REGRESS it. Recorded because the next person running this
+#     sweep will see the shape and be tempted.
+#
+# UNMASKING CHECK (§17g's second half): does this fix open a latent path? Yes, one, and
+# it is a benign direction. check 12 can now BLOCK the loop, which nothing did before —
+# so a false positive here halts delivery. That is why absence is concluded ONLY from a
+# fully-readable, protocol-validated search, why a non-sha ref is an advisory, and why
+# the zero-padding repair exists: each is a false-positive source found by building the
+# alarm, and the first two were found by mutation rather than by reasoning.
 REF_ON_TRUNK = "on_trunk"
 REF_NOT_ON_TRUNK = "not_on_trunk"
 REF_ABSENT = "absent"

@@ -408,9 +408,25 @@ def _split_top_commas(s):
     return out
 
 
-# Event fields that are STRINGS by nature and must never be number-coerced by
+# Fields that are STRINGS by nature and must never be number-coerced by
 # _parse_scalar. A sha of all digits is still a sha (DEFECT-OAG-128).
+#
+# IMP-029 (opened 2026-08-01, and the fix it prescribed — "coerce `ref:` to str at
+# parse time, in the frontmatter loader" — sat unswept for 19 days while the exact
+# consequence it predicted happened: "a sha that fails to resolve looks identical to
+# a sha that resolves negative") also asked for an AUDIT of the other scalars that
+# can be all-digits. Done, through the real parser over all 478 items: the only
+# fields parsed as numbers are `value`, `cost`, `tokens`, `duration_ms`, every one
+# numeric BY INTENT. So `ref` was the sole live hazard.
+#
+# `id` and `job` are listed anyway, with a population of ZERO today. That is
+# deliberate: they are strings by INTENT (`DEFECT-OAG-128`, `J0`), and the reason
+# they are not currently coerced is that nobody has yet written an all-digit one —
+# which is luck, not a property. A field protected by the absence of a counterexample
+# is the shape §17h warns about; protect it by construction. (`title` is always
+# quoted and `defer_until` is date-shaped, so neither needs it.)
 EVENT_STRING_FIELDS = ("ref",)
+TOP_STRING_FIELDS = ("id", "job", "lane", "type")
 
 
 def _parse_inline_map(v):
@@ -483,7 +499,8 @@ def parse_frontmatter(fm_text):
                 fm[key] = None
                 i += 1
         else:
-            fm[key] = _parse_scalar(rest)
+            fm[key] = (rest.strip() if key in TOP_STRING_FIELDS
+                       else _parse_scalar(rest))
             i += 1
     return fm
 

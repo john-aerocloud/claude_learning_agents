@@ -4572,6 +4572,25 @@ class TestRefRepoScoping(Base):
         self.assertEqual(ev["ref"], "0605428")
         self.assertIsInstance(ev["ref"], str)
 
+    def test_AC_128_2_string_by_intent_frontmatter_is_never_number_coerced(self):
+        """IMP-029's unfinished audit, closed. The audit itself (via the real parser
+        over all 478 items) found only value/cost/tokens/duration_ms parsed as
+        numbers, every one numeric BY INTENT — so `ref` was the sole live hazard.
+        `id` and `job` are protected anyway at a population of ZERO: the reason they
+        are not coerced today is that nobody has written an all-digit one, which is
+        luck, not a property (§17h)."""
+        fm = wi.parse_frontmatter(
+            "id: 12345678\ntype: defect\njob: 17\nlane: parent-repo\n"
+            "value: 28\ncost: 2\n")
+        self.assertEqual(fm["id"], "12345678")
+        self.assertIsInstance(fm["id"], str)
+        self.assertEqual(fm["job"], "17")
+        self.assertIsInstance(fm["job"], str)
+        # and the genuinely numeric fields are STILL numbers — the guard must not
+        # turn the metric fields into strings and break every fold downstream.
+        self.assertEqual((fm["value"], fm["cost"]), (28, 2))
+        self.assertIsInstance(fm["value"], int)
+
     def test_AC_128_2_a_ref_round_trips_through_a_real_item_file(self):
         """End to end, not just the parser: write an item carrying `0605428`, read
         it back, and the leading zero is still there. This is the path that ate it —

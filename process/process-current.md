@@ -2315,13 +2315,54 @@ classifies it. A deep backlog remains a real signal the retro must act on — it
 a reason to stop delivering. Generalisation: when adding a gate check, ask what stopping
 achieves; if stopping makes the measured harm worse, the finding is an advisory, not a block.
 
-**Push/deploy state is DERIVED, never read from prose.** Use the structured `ref:` field and
-`git merge-base --is-ancestor <ref> origin/main` inside the project repo (`git -C work/P`,
-its own repo per v50). **Never** infer it from an event note. Event notes are append-only and
+**Push/deploy state is DERIVED, never read from prose.** Use the structured `ref:` field
+verified against git. **Never** infer it from an event note. Event notes are append-only and
 are not corrected when the world moves on: at v126 a note reading `"NOT pushed — push is the
 prod apply"` was ~35 hours stale while its commit had been on `origin/main` the whole time,
 and reasoning from it produced a confident, precisely-quantified, WRONG constraint diagnosis.
-An unresolvable ref is reported UNKNOWN, never assumed either way (§17c).
+
+**A `ref:` is REPO-SCOPED, so the derivation has FOUR outcomes, not two, and it must search
+BOTH repos [v144, DEFECT-OAG-128].** This instruction previously said `git merge-base
+--is-ancestor <ref> origin/main` inside the project repo (`git -C work/P`) — and that was
+wrong in the most damaging way available. A **parent-lane** ref (`.claude/`, `process/`,
+`Makefile`, `CLAUDE.md`) does not exist in the project repo *at all*, so the lookup did not
+answer merely wrong: **the ref failed to RESOLVE**, which is the `git cat-file -t fb080d9` →
+*fatal: Not a valid object name* signature by which `DEFECT-OAG-072`'s destruction was
+diagnosed — an item delivered complete and annihilated. **Seven refs in the OAG registry read
+that way**, and `loop-gate` rendered them with the same string as a sha that exists nowhere,
+so the one alarm meaning real data loss was **muted inside a routine UNKNOWN**. That is §17i
+in both directions at once. The derivation therefore:
+- **searches EVERY repo**, project first, then the agent system;
+- reports **ON-TRUNK** (ancestor of that repo's `origin` trunk — for the parent repo in a
+  per-project worktree that is `origin/instance/<project>`, *not* `origin/main`);
+  **NOT-ON-TRUNK** (the object EXISTS but is on no origin trunk — unpushed, **not lost**, and
+  the normal state of parent-lane work because the owner owns that push); **ABSENT** (every
+  repo was readable and none holds it — *the only reading that means work may have been
+  destroyed*; rescue first via `make worktree-guard DIR=--all`, never re-run to see if it
+  clears); or **CANNOT-DETERMINE** (a repo was unreadable, so absence was never established —
+  not a pass and not an alarm).
+- Staleness is asymmetric and that is what makes NOT-ON-TRUNK safe to report: a
+  remote-tracking ref can be weeks behind, which can only ever produce a false
+  NOT-ON-TRUNK — never a false ON-TRUNK and never a false ABSENT.
+
+**`lane:` is a CROSS-CHECKED ASSERTION, never the routing key for resolution.** Two
+measurements killed that design before it was built: `lane:` is **absent on 382 of 478 items
+(79.9%)**, and it is **single-valued while real items span both repos** — `DEFECT-OAG-091` was
+reported as an outright misdeclaration and is not one; its own log reads *"two lanes, two
+repos, never mixed"*, so declaring either lane is INCOMPLETE, not false. It remains
+load-bearing for `make dispatch-check` (fails closed, `DEFECT-OAG-076`), which is the point of
+use where its absence already bites. `loop-gate` check 12 reports a lane every one of its refs
+contradicts, as an **advisory** — a wrong `lane:` misroutes a dispatch, and halting delivery
+over a bookkeeping field would be the wrong trade.
+
+**And a `ref:` is a STRING, never a number.** `IMP-029` (opened 2026-08-01) prescribed exactly
+this and sat unswept for 19 days while the consequence it predicted happened verbatim: an
+all-digit sha is int-coerced on read, so `0605428` was re-rendered into `UC-XA5` **without its
+leading zero** and now resolves in neither repo — indistinguishable from destroyed work, while
+the real commit `06054289ae9d…` was on `origin/main` the whole time. Fixed at both ends
+(never coerced on read; an all-digit ref is retried zero-padded to recover the 11 already
+damaged on disk), and IMP-029's audit is closed: across all 478 items the only number-parsed
+fields are `value`/`cost`/`tokens`/`duration_ms`, all numeric by intent.
 
 **Always `git -C <path>` / `make -C <path>` — a bare git command resolves against the WRONG
 repository, silently [v127].** This is a two-repo tree (§v50: `work/<project>/` is its own

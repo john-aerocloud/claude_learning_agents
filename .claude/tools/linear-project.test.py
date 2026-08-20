@@ -675,6 +675,76 @@ def test_audit_goes_RED_on_a_stale_declaration_so_it_can_only_shrink():
         check("RED: it says to delete the row", "NO LONGER one" in out)
 
 
+def _synth_corpus(tmp, items, declared="{}"):
+    """A scratch repo root holding SYNTHESISED item files.
+
+    Deliberately NOT `_scratch_corpus`: that helper harvests real items out of
+    `work/OagEventSource/`, which does not exist in a per-project worktree (`work/*`
+    is gitignored, so a ROC worktree holds only ROC). A shared tool whose tests can
+    only run in one worktree cannot be fixed from the worktree its bug is blocking —
+    found while fixing DEF-ROC-077 from the ROC worktree. `items` is {id: body}.
+    """
+    d = tmp / "work" / "SCRATCH" / "items" / "active"
+    d.mkdir(parents=True, exist_ok=True)
+    for iid, body in items.items():
+        (d / f"{iid}.md").write_text(
+            "---\nid: %s\ntype: defect\ntitle: \"synthetic\"\n---\n\n%s" % (iid, body),
+            encoding="utf-8")
+    reg = tmp / "declared.json"
+    reg.write_text(declared)
+    return tmp, reg
+
+
+#: An acceptance section the parser reads CLEANLY — so the item is NOT a finding.
+_CLEAN_ACCEPTANCE = """## Acceptance
+
+- **AC-1.1** — the thing happens.
+- **AC-1.2** — the other thing happens.
+"""
+
+
+def test_audit_does_NOT_demand_deleting_ANOTHER_projects_declaration():
+    # validates: AC-AP.4 (scoping limb) — DEF-ROC-077.
+    # The registry is GLOBAL (`.claude/tools/acceptance-audit-declared.json`) but a
+    # sweep is PER-PROJECT. Reading "not a finding in THIS project" as "no longer a
+    # finding anywhere" made every OTHER project's row look stale, and the remedy it
+    # printed — "delete the row" — would DESTROY a legitimate declaration belonging to
+    # a project this run never looked at. Absence of evidence, not evidence of absence
+    # (the DEF-ROC-046 class). It blocked ROC's loop-gate on 5 OAG rows.
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        root, reg = _synth_corpus(
+            Path(td), {"DEF-SCRATCH-001": _CLEAN_ACCEPTANCE},
+            declared='{"declared": {"DEFECT-OTHERPROJ-001": {"status": "truncated",'
+                     ' "authority": "another project ruling"}}}')
+        code, out = _run_cli("--acceptance-audit", "--project", "SCRATCH",
+                             "--root", str(root), "--declared", str(reg))
+        check("GREEN: an out-of-scope declaration does NOT fail the audit", code == 0)
+        check("GREEN: it never tells you to delete another project's row",
+              "DEFECT-OTHERPROJ-001 is declared as a known acceptance finding"
+              not in out)
+        check("but it is NOT silent — the out-of-scope row is named and counted "
+              "(§17h: absence must be distinguishable from ignorance)",
+              "DEFECT-OTHERPROJ-001" in out and "not evaluated" in out)
+
+
+def test_audit_STILL_goes_RED_on_a_stale_declaration_for_an_IN_SCOPE_item():
+    # validates: AC-AP.4 — the scoping fix must not blunt the ratchet. An item that IS
+    # in this project's sweep and is no longer a finding must STILL fail, or the fix
+    # has turned a working ratchet into a high-water mark.
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        root, reg = _synth_corpus(
+            Path(td), {"DEF-SCRATCH-002": _CLEAN_ACCEPTANCE},
+            declared='{"declared": {"DEF-SCRATCH-002": {"status": "truncated",'
+                     ' "authority": "stale"}}}')
+        code, out = _run_cli("--acceptance-audit", "--project", "SCRATCH",
+                             "--root", str(root), "--declared", str(reg))
+        check("RED: an IN-SCOPE stale declaration still fails (ratchet intact)",
+              code != 0)
+        check("RED: it still says to delete the row", "NO LONGER one" in out)
+
+
 def test_audit_is_GREEN_on_the_real_corpus_with_the_committed_registry():
     # validates: AC-AP.3
     code, out = _run_cli("--acceptance-audit", "--project", "OagEventSource")

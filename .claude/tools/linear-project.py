@@ -1110,10 +1110,22 @@ def load_declared(path=None):
 def audit_acceptance(project, root=None, declared_path=None):
     """Run the sweep and return (rows, counts, errors).
 
+    Returns `(rows, counts, errors, out_of_scope)`.
+
     `errors` is empty only when EVERY finding is either absent or declared with an
-    authority, AND no declaration has gone stale. Stale declarations fail too: that
-    is what makes this shrink-only rather than a high-water mark that drifts
-    (§17d.5 — a ratchet only a human can tighten is not a ratchet)."""
+    authority, AND no IN-SCOPE declaration has gone stale. Stale declarations fail too:
+    that is what makes this shrink-only rather than a high-water mark that drifts
+    (§17d.5 — a ratchet only a human can tighten is not a ratchet).
+
+    SCOPING (DEF-ROC-077). The registry is GLOBAL — one file for the whole tree — but a
+    sweep is PER-PROJECT. So a declared id that is simply not among THIS project's items
+    tells this run NOTHING: it is absence of evidence, not evidence of absence (the
+    DEF-ROC-046 class). Treating it as stale printed "delete the row" for five
+    OagEventSource rows during a ROC run, and obeying that would have DESTROYED another
+    project's legitimate declarations while blocking ROC's loop-gate. Those ids are
+    returned in `out_of_scope` — named and counted, never silently skipped (§17h: a
+    zero must not be quiet) — and the ratchet still bites for every id this project
+    actually holds."""
     rows = sweep_acceptance(project, root=root)
     counts = {}
     for r in rows:
@@ -1147,18 +1159,26 @@ def audit_acceptance(project, root=None, declared_path=None):
                 "%s is declared as status=%s but now measures %s — re-decide it rather "
                 "than carrying a stale exemption." % (iid, d["status"], r["status"])
             )
+    swept_ids = {r["id"] for r in rows}
+    out_of_scope = []
     for iid in sorted(declared):
-        if iid not in findings:
-            errors.append(
-                "%s is declared as a known acceptance finding but is NO LONGER one — "
-                "delete the row from %s. A declaration that outlives its finding is how "
-                "a ratchet becomes a high-water mark." % (iid, DECLARED_PATH.name)
-            )
-    return rows, counts, errors
+        if iid in findings:
+            continue
+        if iid not in swept_ids:
+            # Not this project's item — this run has no evidence either way.
+            out_of_scope.append(iid)
+            continue
+        errors.append(
+            "%s is declared as a known acceptance finding but is NO LONGER one — "
+            "delete the row from %s. A declaration that outlives its finding is how "
+            "a ratchet becomes a high-water mark." % (iid, DECLARED_PATH.name)
+        )
+    return rows, counts, errors, out_of_scope
 
 
 def run_acceptance_audit(project, root=None, declared_path=None, verbose=True):
-    rows, counts, errors = audit_acceptance(project, root=root, declared_path=declared_path)
+    rows, counts, errors, out_of_scope = audit_acceptance(
+        project, root=root, declared_path=declared_path)
     if verbose:
         print("acceptance sweep — %s: %d items" % (project, len(rows)))
         # Every class with its measured size. `parsed`/`none`/`empty` are printed too:
@@ -1186,6 +1206,17 @@ def run_acceptance_audit(project, root=None, declared_path=None, verbose=True):
                 print("  [%s] %-46s %-13s %s"
                       % (mark, r["id"], r["status"],
                          ",".join(r["residual_ids"] + r["orphan_ids"])))
+        # DEF-ROC-077: the registry is GLOBAL, this sweep is PER-PROJECT. Rows for
+        # items this project does not hold are NOT stale — this run simply has no
+        # evidence about them. Printed with their measured size so that "not checked"
+        # can never read as "checked and clean" (§17h).
+        if out_of_scope:
+            print("  --- %d declared row(s) NOT EVALUATED: the item is not in this "
+                  "project's sweep, so this run has no evidence either way. They are "
+                  "another project's to score, and must NOT be deleted on this "
+                  "evidence." % len(out_of_scope))
+            for iid in out_of_scope:
+                print("      [not evaluated] %s" % iid)
     if errors:
         print("\nacceptance audit FAILED — %d finding(s):" % len(errors))
         for e in errors:

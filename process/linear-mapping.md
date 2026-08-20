@@ -56,11 +56,11 @@ their children per the graph's `bubble` rule.
 | `blocked` | Blocked → else Todo → Backlog (NEVER In Progress) |
 | `awaiting_observation` | Blocked + `awaiting-observation` label (NEVER Done, NEVER Backlog) |
 | `done` | Done |
+| `cancelled` | Cancelled → else Canceled (US spelling is what this workspace has) |
 
 (The dev-then-prod validation states `dev-validating`/`prod-deploying`/`prod-validating`
 come from the EXP-101/§11b state graph; before v100 they were unmapped and fell back to
-Backlog, mislabelling active validation work. Aggregates additionally map `planned` →
-Backlog.)
+Backlog, mislabelling active validation work.)
 
 **Defect items:**
 
@@ -74,6 +74,7 @@ Backlog.)
 | `awaiting_observation` | Blocked + `awaiting-observation` label (NEVER Done, NEVER Backlog) |
 | `resolved` | Done |
 | `wontfix` | Cancelled |
+| `cancelled` | Cancelled |
 
 **Open-items:**
 
@@ -83,6 +84,21 @@ Backlog.)
 | `scheduled` | Ready |
 | `done` | Done |
 | `wontfix` | Cancelled |
+| `cancelled` | Cancelled |
+
+**Aggregates (slice / chunk / requirement).** An aggregate holds no events of its
+own: its state BUBBLES from its children (`work-items.py` `_bubble`), so its range
+is exactly this — NOT the use-case table. Mapping it from a superset of the
+use-case states is what let stale keys hide and defeated the inverse sweep.
+
+| `derived.state` | Board status |
+|---|---|
+| `planned` | Backlog |
+| `in_progress` | In Progress |
+| `blocked` | Blocked → else Todo → Backlog (NEVER In Progress) |
+| `awaiting_observation` | Blocked + `awaiting-observation` label |
+| `done` | Done |
+| `cancelled` | Cancelled |
 
 A blocked item shows *why* on its board object: mirror the `blocked` event's note
 into a banner/comment while blocked, and post an unblocked note when it clears.
@@ -173,6 +189,41 @@ projection so the description tracks the item (idempotent).
 - **Job-to-be-done:** `job:<Jn>` from the item's `job` field, so a human can
   filter the board by JTBD. The job *code* is the only thing that crosses over;
   the JTBD prose stays in the item definition, not the board.
+
+## 3a. Reconciliation ORDER — a finite budget spent on the right items (DEFECT-OAG-099)
+
+A board sweep spends a rate-limited budget. The old "full sweep" was a loop over the
+single-item projection: every id, in filesystem order, written whether or not it
+needed writing. Measured on the real run, that spent the budget on **269 items that
+were already correct** and ran out with **5 DONE items still showing Blocked**. A week
+later the same shape left `UC-CSP1-1` and `UC-CSP1-2` — both TERMINAL — lagging for
+**seven days**, against the §F invariant that *a terminal or blocked board status must
+never lag its item file by more than the current cycle*.
+
+So a sweep is not a loop. It is `make board-sweep` (`.claude/tools/board-sweep.py`), a
+batch wrapper over the UNCHANGED single-item projection, and it obeys three rules:
+
+1. **SKIP what already matches.** Read the board once (~1 request per 100 issues) and do
+   not write an item whose board status already equals its derived state. This is the only
+   limb that reduces the spend rather than reordering who loses to it. Note the honest
+   limit: a status-only compare cannot see a stale title/description, so run
+   `COMPARE=full` periodically.
+2. **ORDER by fidelity need.** Terminal lag (`done`/`resolved`/`wontfix`/`cancelled`)
+   first, then parked lag (`blocked`/`awaiting_observation`) — the two classes the §F
+   invariant names — then everything else, most-recently-changed first. An explicit
+   `IDS=` list overrides and is honoured verbatim.
+3. **NAME the shortfall.** On rate-limit exhaustion, stop and report every id that did not
+   land, in priority order, loudly, plus a resume file. "Best effort, the next sweep
+   reconciles" is true of the API CALL and false of the OBLIGATION: an unnamed shortfall is
+   exactly how the seven-day lag happened.
+
+The wrapper also **refuses to run at all** while `STATE_STATUS` has drifted from
+`state-graphs.json` (see §2's twice-repeated Backlog failure). A drifted table is a
+precondition failure that costs nothing, not a per-item surprise mid-spend. It does NOT
+make the budget bigger: two of the three API requests each single-item projection spends
+are re-reads of immutable team metadata, so a first full reconcile costs ~3 requests/item
+however it is ordered. `--budget-probe` reports the API's own rate-limit headers, and says
+NOT ESTABLISHED rather than quoting a documented number it did not measure.
 
 ## 4. What deliberately does NOT go to the board
 

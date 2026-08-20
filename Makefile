@@ -360,6 +360,16 @@ parts-check:
 #                         not-yet (exit 3) is ADVISORY; a broken/absent predicate
 #                         BLOCKS, because an unrunnable liveness predicate is not a
 #                         predicate (v125 §17c.2).
+#  6-11 DELEGATED checks   each computed by its own committed analyser, never
+#                         re-implemented here: 6 test-requirement-gate (§17d) ·
+#                         7 worktree-guard (DEFECT-OAG-076) · 8 container-reap ·
+#                         9 make-refs-tracked · 10 acceptance-audit ·
+#                         11 board-mapping (DEFECT-OAG-099) — every state in
+#                         state-graphs.json must carry a board-status row, because
+#                         an unmapped state does not fail, it renders as unstarted
+#                         BACKLOG (twice now: `cancelled`, `awaiting_observation`).
+#                         Offline, project-free: `make board-audit`.
+#                         An analyser that would not RUN reports UNKNOWN, never clean.
 #
 # Exit 2 iff a BLOCKING check fired. An advisory-only run exits 0, says so, and
 # still prints the advisory (`!` line) so it cannot be read as satisfied.
@@ -488,6 +498,66 @@ test-board-project:
 
 board-audit:
 	$(BOARDPY) .claude/tools/linear-project.py --audit $(if $(PROJECT),--project $(PROJECT),)
+
+# --- board-sweep: the BATCH wrapper above the single-item projection ----------
+# DEFECT-OAG-099. The old "full sweep" was orchestration around `board-project`:
+# loop every id, in filesystem order, writing every item whether or not it needed
+# writing. On the observed run that spent the rate budget on 269 ALREADY-CORRECT
+# items and then ran out, leaving 5 DONE items showing Blocked. A week later the
+# same shape left UC-CSP1-1/UC-CSP1-2 — both TERMINAL — lagging for seven days,
+# violating the STAGE F invariant that a terminal or blocked board status must
+# never lag its item file by more than the current cycle.
+#
+# `linear-project.py` is deliberately UNCHANGED (small, testable, credential-safe).
+# The wrapper adds only what a BATCH knows and a single item cannot:
+#   ORDER    an explicit id list, or priority: terminal lag, then parked lag, then
+#            the rest, most-recently-changed first inside a class.
+#   SKIP     an item whose board status already equals its derived state is not
+#            written at all — the only limb that REDUCES the spend rather than
+#            reordering who loses to it.
+#   SHORTFALL on a rate limit: stop, name every id that did not land in priority
+#            order, LOUDLY, and write a resume file so the retry starts there.
+#
+# It REFUSES to run while STATE_STATUS has drifted from state-graphs.json — a
+# state the graph defines and the mapping lacks renders as unstarted Backlog, which
+# has now happened twice (cancelled, awaiting_observation). That is a precondition
+# of the sweep, not a per-item surprise.
+#
+# MEASURED, not assumed (board-sweep.test.py): a single-item projection costs 2
+# requests unlabelled, 3 labelled (4 the first time a label is created), of which
+# TWO are re-reads of IMMUTABLE team metadata. A first full reconcile of ~274 items
+# therefore costs ~800 requests HOWEVER it is ordered — the wrapper does not make
+# the budget larger and does not pretend to. `--budget-probe` (default on) reads
+# the API's own rate-limit headers before and after and reports the REAL numbers;
+# if they are absent it says NOT ESTABLISHED rather than quoting a documented one.
+#
+#   make board-sweep PROJECT=OagEventSource                     # all, priority order
+#   make board-sweep PROJECT=P IDS=UC-CSP1-1,UC-CSP1-2          # these, this order
+#   make board-sweep-resume PROJECT=P                           # finish what a rate limit cut off
+#   make board-sweep PROJECT=P COMPARE=full                     # also catch description drift
+#   make board-sweep-plan PROJECT=P                             # priority order, NO network/secret
+#   make board-sweep-dry PROJECT=P                              # read the board, write nothing
+#   make test-board-sweep                                       # offline suite (29 tests)
+# Exit codes: 0 clean · 2 something outstanding · 3 rate-limited (resume written)
+#             4 another sweep holds the lock · 5 refused before spending anything
+.PHONY: board-sweep board-sweep-resume board-sweep-plan board-sweep-dry test-board-sweep
+board-sweep:
+	$(BOARDPY) .claude/tools/board-sweep.py --project $(PROJECT) \
+	  $(if $(IDS),--ids $(IDS),--all) $(if $(COMPARE),--compare $(COMPARE),) \
+	  $(if $(MAX_WRITES),--max-writes $(MAX_WRITES),)
+
+board-sweep-resume:
+	$(BOARDPY) .claude/tools/board-sweep.py --project $(PROJECT) \
+	  --ids-file $(if $(RESUME),$(RESUME),.claude/state/board-sweep-$(PROJECT).resume)
+
+board-sweep-plan:
+	$(BOARDPY) .claude/tools/board-sweep.py --project $(PROJECT) --all --offline-plan
+
+board-sweep-dry:
+	$(BOARDPY) .claude/tools/board-sweep.py --project $(PROJECT) --all --dry-run
+
+test-board-sweep:
+	$(BOARDPY) .claude/tools/board-sweep.test.py
 
 # --- acceptance sweep + gate (OI-ACCEPTANCE-PARSER-SCORES-ZERO-SILENTLY) -------
 # `parse_acceptance()` returned a COUNT, and `0` conflated two irreconcilable facts:

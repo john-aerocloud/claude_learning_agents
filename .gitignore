@@ -48,3 +48,10 @@ node_modules
 # NOTE (v124/DEFECT-OAG-045): a project repo is a gitignored NESTED clone, invisible to
 # the auto-clean's changed-check — never let a committing agent's only copy live here.
 .claude/worktrees/
+
+# board-sweep resume + lock files (DEFECT-OAG-099) — MACHINE-LOCAL run state, not
+# process. The resume list names the ids a rate limit cut off; the lock stops two
+# concurrent sweeps double-spending one rate budget. Both are per-tree and
+# regenerated on every run, and committing them would dirty the integration tree
+# and defer every fold-back.
+.claude/state/

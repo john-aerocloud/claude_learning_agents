@@ -52,16 +52,38 @@ wrapped continuation lines into the complete criterion) and is proven by
    `python3 -c 'import json;print(json.load(open("work/<p>/secrets/linear.json"))["id_to_issue"])'`
    — which cannot surface `api_key`. Printing the secrets file (even incidentally, even to
    check something else) is a process failure.
-2. **Full-sweep mode** = loop the command over every active+done item id for the project.
+2. **Full-sweep mode = `make board-sweep`, NEVER a loop over `board-project` (DEFECT-OAG-099).**
+   Looping the single-item command over every id is what this used to say, and it is the
+   defect: it writes every item whether or not it needs writing, in filesystem order, so the
+   rate limit lands on whatever happens to be last. Measured on the real run: **269
+   already-correct items rewritten, then the budget ran out with 5 DONE items still showing
+   Blocked.** A week later the same shape left `UC-CSP1-1`/`UC-CSP1-2` — both TERMINAL —
+   lagging for **seven days**, against the STAGE F invariant that a terminal or blocked board
+   status must never lag its item file by more than the current cycle.
+
+   ```
+   make board-sweep PROJECT=<project>                        # all, priority order, skips matches
+   make board-sweep PROJECT=<project> IDS=UC-A,UC-B          # exactly these, in this order
+   make board-sweep-resume PROJECT=<project>                 # finish what a rate limit cut off
+   make board-sweep-plan PROJECT=<project>                   # order only; no network, no secret
+   ```
+   The wrapper reads the board ONCE (~1 request per 100 issues), **skips every item whose
+   status already matches**, writes the rest in priority order (terminal lag -> parked lag ->
+   the rest, newest first), and on a rate limit STOPS and names every id that did not land.
+   Exit codes: `0` clean · `2` something outstanding · `3` rate-limited (a resume file is
+   written — run `board-sweep-resume`) · `4` another sweep holds the lock · `5` refused before
+   spending anything (usually mapping drift: run `make board-audit`).
+   Run `COMPARE=full` periodically: the default status-only compare cannot see a stale
+   title/description.
 3. Report what the command did (created/updated + Linear identifier + status); on a non-zero
-   exit, relay its (key-free) error — the API call is best-effort, the next sweep reconciles.
+   exit, relay its (key-free) error. **A rate-limited sweep is NOT "best effort, the next
+   sweep reconciles" — that assumption is what let two terminal items lag a week.** Quote the
+   ids it names and either resume immediately or hand the shortfall on explicitly.
 
 Do NOT re-implement any of the mapping in prose here; `linear-mapping.md` is the spec and
 `linear-project.py` is its sole executable renderer. If the mapping must change, change the
 script (with its test) — not a hand-composed description.
    - DORA timestamps from `events:` → keep as a comment/custom field if the board wants them.
-3. In **full-sweep mode** (no `--id`): project EVERY active + done item to reconcile drift the
-   per-item path may have missed (the backstop). This is `--live` with no `--item`.
 
 ## Invariants that make you safe at any scale
 - **Idempotent.** You read the item's *current* state and set the issue to match — you never
@@ -73,9 +95,18 @@ script (with its test) — not a hand-composed description.
   Linear API failure is logged and left for the next sweep — you NEVER block or fail the loop,
   and you NEVER modify the item file. Retry transient failures a couple of times, then give up
   quietly.
+- **…but "the next sweep reconciles" is NOT a licence to lose a TERMINAL item (DEFECT-OAG-099).**
+  A failure you swallow QUIETLY is how `UC-CSP1-1`/`UC-CSP1-2` sat wrong on the board for seven
+  days. Never fail the loop — but always NAME the ids that did not land, in your return, every
+  time. `make board-sweep` does this for you and writes a resume file; quote it.
+- **One sweep at a time.** Per-item projections on DIFFERENT items are still fully parallel, but
+  two FULL SWEEPS are not: they double-spend one rate budget and race the id→issue map.
+  `board-sweep` takes a lock and the second run refuses (exit 4) rather than competing.
 - **Projection only.** You emit no ledger/DORA rows and make no flow decisions. If the item and
   the board disagree, the item wins — always.
 
 ## Return
 The item id, the Linear issue id, the status you set (and prior if known), and any error you
-swallowed. In full-sweep mode: counts (issues updated / created / errored).
+swallowed. In full-sweep mode: the sweep's exit code, counts (written / skipped-because-already-
+correct / failed) and — mandatory, never summarised as a count — **the ID LIST of everything that
+did not land, in priority order**, plus the resume-file path if one was written.

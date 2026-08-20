@@ -934,6 +934,50 @@ def cmd_append(a):
     ts = a.ts or now_iso()
     new_event = {"ts": ts, "event": a.event, "agent": a.agent}
     if a.ref:
+        # THE EARLIEST CATCHABLE POINT for a bad `ref:` — this is where the data
+        # ENTERS (DEFECT-OAG-128). Two outcomes, deliberately asymmetric:
+        #
+        # REFUSED — a ref that is not sha-SHAPED. The contract declares `ref: <sha>`
+        #   (process/machinery/CONTRACT.md), so there is no legitimate use and no
+        #   judgement to make; `UC-ML1` put an architecture-delta DOCUMENT id
+        #   (`delta-052`) in the field and it sat there unnoticed. Refusing costs the
+        #   caller one corrected command; accepting costs a permanently unverifiable
+        #   ref, and it is the shape a genuinely mistyped sha would hide behind.
+        # WARNED, NOT REFUSED — a sha-shaped ref that resolves in NEITHER repo. It is
+        #   NOT refused, because the fail-safe direction here is the opposite one: the
+        #   event log is the source of truth, and losing a real state transition
+        #   because git could not vouch for its sha would be a far worse outcome than
+        #   recording a suspect sha. `loop-gate` check 12 is the BLOCKING control and
+        #   it sweeps the whole registry every cycle, so nothing escapes — this just
+        #   puts the complaint in front of the agent that made the mistake, while it
+        #   still remembers what it committed.
+        ref = str(a.ref).strip()
+        if not _is_sha_shaped(ref):
+            print(f"append: REFUSED — `ref: {ref}` is not a commit sha, and the "
+                  f"contract declares `ref: <sha>` "
+                  f"(process/machinery/CONTRACT.md). A ref that cannot be resolved "
+                  f"against a repo can never be verified, and it is exactly the "
+                  f"shape a mistyped sha hides behind (DEFECT-OAG-128). If you meant "
+                  f"to cite a document (an architecture delta, an ADR), put it in "
+                  f"--note; if you meant a commit, pass its sha.", file=sys.stderr)
+            sys.exit(1)
+        res = resolve_ref(a.project, ref)
+        if res["verdict"] == REF_ABSENT:
+            print(f"append: WARNING — `ref: {ref}` resolves in NEITHER the "
+                  f"project repo (work/{a.project}) NOR the agent-system repo, "
+                  f"though both were readable. The event is being RECORDED (the log "
+                  f"is the source of truth and losing a real transition is worse "
+                  f"than recording a suspect sha), but this is the DEFECT-OAG-072 "
+                  f"signature: either the sha is mistyped, or work has been "
+                  f"DESTROYED. Check NOW, while you still remember what you "
+                  f"committed — `make worktree-guard DIR=--all` — and correct the "
+                  f"ref if it is a typo. `make loop-gate` will BLOCK the loop on "
+                  f"this until it is resolved.", file=sys.stderr)
+        elif res["padded"]:
+            print(f"append: note — `ref: {ref}` resolved only after rebuilding a "
+                  f"leading zero (`{res['resolved']}`). Record the sha with its "
+                  f"leading zero, or a reader will see a commit that does not exist.",
+                  file=sys.stderr)
         new_event["ref"] = a.ref
     if observe:
         new_event["observe"] = observe

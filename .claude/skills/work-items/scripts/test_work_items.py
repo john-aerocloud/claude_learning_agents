@@ -4839,6 +4839,85 @@ class TestRefRepoScoping(Base):
         self.assertIn("COULD NOT LOOK", f[0]["message"])
         self.assertNotIn("EXIST IN NEITHER REPO", f[0]["message"])
 
+    # -- the EARLIEST catchable point: the append path, where the data enters ----
+    def _append(self, iid, event, agent, ref):
+        args = argparse.Namespace(project=self.project, id=iid, event=event,
+                                  agent=agent, ref=ref, note=None, ts=None,
+                                  observe=None, tokens=None, duration_ms=None,
+                                  note_path=None, amend=None)
+        err, out = io.StringIO(), io.StringIO()
+        code = 0
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
+            try:
+                wi.cmd_append(args)
+            except SystemExit as ex:
+                code = ex.code or 0
+        return code, err.getvalue() + out.getvalue()
+
+    def _open_defect(self, iid):
+        self.write_item("active", iid, "defect", [
+            {"ts": _dt(1, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(1, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(1, 2), "event": "confirmed", "agent": "engineer"},
+        ])
+
+    def test_AC_128_2_append_REFUSES_a_ref_that_is_not_a_commit_sha(self):
+        """`UC-ML1` put an architecture-delta DOCUMENT id (`delta-052`) in a field the
+        contract reserves for a sha, and it sat there unnoticed until a control was
+        built. There is no legitimate use, so this is refused rather than warned:
+        refusing costs one corrected command, accepting costs a permanently
+        unverifiable ref — and it is the shape a mistyped sha hides behind."""
+        self._topology()
+        self._open_defect("DEF-DOC")
+        code, out = self._append("DEF-DOC", "fixed", "engineer", "delta-052")
+        self.assertEqual(code, 1, out)
+        self.assertIn("REFUSED", out)
+        self.assertIn("CONTRACT.md", out)
+        self.assertIn("--note", out)                    # names the remedy
+        items, _d = wi.load_all_items(self.project)
+        self.assertEqual([e for e in items["DEF-DOC"].events
+                          if e.get("event") == "fixed"], [], "nothing was written")
+
+    def test_AC_128_2_append_WARNS_but_still_RECORDS_a_sha_absent_everywhere(self):
+        """Deliberately asymmetric to the refusal above. The event log IS the source
+        of truth, so losing a real state transition because git could not vouch for
+        its sha is worse than recording a suspect one. check 12 is the blocking
+        control; this puts the complaint in front of the agent that made the mistake
+        while it still remembers what it committed."""
+        self._topology()
+        self._open_defect("DEF-GONE")
+        code, out = self._append("DEF-GONE", "fixed", "engineer", "deadbee")
+        self.assertEqual(code, 0, out)
+        self.assertIn("WARNING", out)
+        self.assertIn("DEFECT-OAG-072", out)
+        self.assertIn("worktree-guard", out)
+        self.assertIn("BLOCK the loop", out)
+        items, _d = wi.load_all_items(self.project)
+        self.assertEqual([str(e["ref"]) for e in items["DEF-GONE"].events
+                          if e.get("event") == "fixed"], ["deadbee"],
+                         "the transition must NOT be lost")
+
+    def test_AC_128_1_append_accepts_a_PARENT_lane_sha_in_silence(self):
+        """The regression that matters most here: before the fix a parent-lane sha
+        would have been the thing that looked destroyed. It must pass without a
+        murmur, or every parent-lane append trains the agent to ignore the warning."""
+        parent, _proj = self._topology()
+        sha = self._commit(parent, "process/ap.md", "ap\n", "parent-lane work")
+        self._open_defect("DEF-PAR")
+        code, out = self._append("DEF-PAR", "fixed", "engineer", sha)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("WARNING", out)
+        self.assertNotIn("REFUSED", out)
+
+    def test_AC_128_1_append_accepts_a_PROJECT_lane_sha_in_silence(self):
+        _parent, proj = self._topology()
+        sha = self._commit(proj, "src/ap.ts", "ap\n", "project-lane work")
+        self._open_defect("DEF-PRJ")
+        code, out = self._append("DEF-PRJ", "fixed", "engineer", sha)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("WARNING", out)
+        self.assertNotIn("REFUSED", out)
+
     def test_AC_128_4_check12_a_contradicted_lane_is_reported_but_never_BLOCKS(self):
         """AC-128.4. Advisory on purpose: resolution no longer trusts `lane:`, so a
         wrong one costs a misrouted DISPATCH (DEFECT-OAG-076), not a wrong push

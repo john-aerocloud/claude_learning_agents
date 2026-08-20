@@ -477,3 +477,39 @@ could not take a slot without retiring another instance's scored row (not a merg
 BEHAVIOUR is live as plain cicd.md practice; only the SCORED registry row is deferred. Next retro:
 score/adopt-or-retire across the merged set and give bootstrap-parity a row (target: CFR on first-account
 deploys) if a slot frees. Owner: next AdixOut retro (§25a registry prune).
+
+## `prod-deploying` has no `blocked` exit for a single-environment project (2026-08-20, ROC v145 — DEFERRED, review 2026-09-17)
+Retired from `process/experiments.md` at v145 as one of six `##` sections that never had a registry
+row (full text + disposition in `experiments-archive.md`). The gap is real: an item that reaches
+`prod-deploying` in a project with no prod environment has no legal exit and strands, accruing wip
+time that reads as delivery. It is DEFERRED rather than built because it is off the current
+constraint (`blocked`/`external`, 41–42% of GLT) and ROC has no prod environment to strand an item
+in — measured `prod-deploying` dwell is 191 s across ONE item, i.e. the harm is latent, not live.
+Bring it forward the moment any project gains a second environment, or an item strands. Fix shape:
+a `blocked` exit from `prod-deploying` in `state-graphs.json` with the §17c.6 probe requirement, so
+the park is re-checkable like any other. Owner: cicd + the work-item machinery.
+
+## "dep satisfied" is undefined, so two flow-managers read it oppositely (2026-08-20, ROC v145 — DEFERRED, review 2026-09-17)
+Retired from `process/experiments.md` at v145 (same six row-less sections; full text in
+`experiments-archive.md`). Two readings are both defensible — a `deps:` edge is satisfied when the
+dependency is `done`, or when the dependency's blocking OUTPUT exists — and the section recorded two
+flow-managers acting on different ones, which changes what `ready` means and therefore what the pull
+loop admits. DEFERRED because settling it needs evidence this retro does not hold: the rework rate on
+items promoted under the looser reading, against Ready-floor breach frequency under the stricter one.
+Both numbers are derivable from the item event stream and neither has been computed. Do NOT settle it
+by preference. Owner: `flow-manager` + `process/machinery/CONTRACT.md`.
+
+## `make test-tools` is RED in every project worktree — 8 tests keyed to an absent corpus (2026-08-20, ROC v145 — QUEUED)
+`make-refs-tracked.test.js` binds 8 cases to the REAL `work/OagEventSource` tree (deliberately — a
+verbatim corpus is what makes them strong). In any per-project worktree that path does not exist, so
+they FAIL rather than report unavailable, and `make test-tools` exits non-zero everywhere except an
+OAG tree. A gate that is red for reasons unrelated to your change is a gate nobody runs, which is
+§17e decay by attrition — and it nearly cost this retro a real finding: the `.claude/tools` sweep
+(AC-DEFECT-OAG-076.5) caught the v145 tool truncating its own stdout, plus a pre-existing offender in
+`stack-claim.js`, only because the suite was run despite the noise. **This is the §17g
+generalisation-sweep obligation from commit `1eafaa3` landing unswept**: that fast-follow fixed
+exactly this class one commit earlier in `linear-project.test.py` (a `CorpusUnavailable` sentinel,
+tests report SKIP with the reason, exit stays NON-ZERO so a partial run can never read as green) and
+did not sweep the sibling suite. Mirror that decision here rather than inventing a second one; the
+design question to settle is how node's runner reports "not exercised" without a partial run reading
+green. Owner: engineer.

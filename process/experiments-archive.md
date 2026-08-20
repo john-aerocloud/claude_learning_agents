@@ -294,3 +294,642 @@ because nobody re-runs a pass. Recommended bringing its 2026-09-05 defer forward
 **Original row:**
 
 | EXP-133 | v137 (2026-08-07, OagEventSource) | `work/<p>/Makefile` (`OAG_DDB_NAME` + `OAG_DDB_PROJECT` + `ddb-local-mine` + a tightened `ddb-local-assert-ours`) + `src/app/local/docker-compose.yml` (parameterised `container_name`) | **Problem:** owner-raised 2026-08-07 - *we should consider using dynamodb container per engineer*. Investigated and the exposure was NOT where it looked. Test DATA was already safe: the adapter suite namespaces its tables per run (`OagFeed-EventStore-PortContract-<runid>-N`; measured 27 tables across 3 run ids on the live container) so two concurrent engineers could not corrupt each other's rows. THE CONTAINER ITSELF was the exposure and in two distinct ways. (1) `container_name` was HARDCODED in docker-compose.yml so `OAG_DDB_PORT` moved the port while the name stayed fixed - a container per engineer was therefore IMPOSSIBLE and a second `docker compose up -d` RECREATES the one container on the new port yanking the endpoint out from under an in-flight suite whose tests then fail with a connection error INDISTINGUISHABLE FROM A CODE FAILURE. (2) `ddb-local-assert-ours` could only ask is this container OAG's - never is it MINE - so it green-lit engineer B onto engineer A's database. Context: two engineers were building concurrently at the time and BOTH had independently discovered they must hand-override `OAG_DDB_PORT=8010` because port 8000 is held by a sibling project. **Solution:** container identity is DERIVED not hardcoded. `OAG_DDB_NAME` (default = the LEGACY name so every existing invocation is byte-identical) plus a per-name compose project so two stacks are separate objects to compose rather than one being reconfigured under the other; `ddb-local-assert-ours` compares the publisher against `$(OAG_DDB_NAME)`; and `make ddb-local-mine DISPATCH=<id>` derives BOTH port and name from one dispatch id (port 8100-8999 clear of 8000 and 8010) so different dispatches cannot collide and a re-dispatch idempotently reuses its own container. Derived rather than hand-picked for the same reason a threshold is: a hand-picked port looks fine and collides silently. | CFR (a phantom connection failure that reads as a code failure is a false defect signal) - secondarily lead time via removed re-dispatches | over the next 3 sessions: **POSITIVE** if zero agent deaths or suite failures are attributable to DynamoDB Local contention AND no engineer hand-picks a port. **NEGATIVE - kill the row - if any of:** a container-contention failure still occurs with `ddb-local-mine` available (then the container was not the mechanism and EXP-127's load-average reading was right after all); OR the derived-port scheme itself collides; OR engineers keep hand-overriding `OAG_DDB_PORT` because `ddb-local-mine` is more friction than the workaround it replaces - that last one is the realistic failure mode and is why the legacy default was preserved rather than forced. Baseline: 1 watchdog stall this session at load 7.57 and 2 of 2 engineers hand-overriding the port. | 3 sessions | active (0/3) | applies-to: any project whose agents run a tier against a shared local container (DynamoDB Local / Azurite / an emulator) - ROC and AdixOut both do. VERIFIED AT LANDING not asserted: `ddb-local-mine DISPATCH=retro-probe` brought up `oag-dynamodb-local-retro-probe` on derived port 8603 ALONGSIDE the live shared container on 8010 and a sibling project's on 8000 - three coexisting - without disturbing the two engineers mid-suite. NON-VACUITY PROVEN in both directions: the guard PASSES on a correct port/name pairing and FAILS loudly on my-name-vs-another-engineer's-port, which is the case the OLD guard would have PASSED (port 8010 IS `oag-dynamodb-local`) - that is the exact hole. Backward compatibility verified: the legacy invocation the two live engineers were using still passes. Opened cap-neutral: EXP-125 ADOPTED and archived this retro; registry stays at **8 active AT cap**. |
+
+---
+
+## RETIRED at v145 (2026-08-20, ROC) — the six row-less ROC `##` sections + the 2026-08-14 id re-allocation note
+
+**Why they are here.** These were never rows in the registry table, so the hard WIP cap never
+governed them, no retro ever scored them, and `process/experiments.md` was carrying two different
+genres in one id space: capped falsifiable hypotheses, and long-form findings awaiting a decision.
+That is what let two experiments both be minted `EXP-142` (main's test-requirement-gate ratchet and
+ROC's screen-viewport hypothesis) — the same defect class as `DEF-ROC-077` the same day: a GLOBAL
+registry read against PER-PROJECT reality, with no uniqueness check anywhere.
+
+**Dispositions** (the full text of each section follows, verbatim):
+
+- `EXP-136` + `EXP-139` + `EXP-140` and its ten-instance continuation → **PROMOTED** to a real row,
+  **`EXP-ROC-002`**, carrying the mechanism the sections had already converged on: derive firing
+  rights from the item's DECLARED OWNER; let the state graph constrain transition SHAPE only.
+- `EXP-137` (atomic pathspec commits) → **ADOPTED**, live in `CLAUDE.md` with its four known limits.
+- `EXP-138` (`prod-deploying` needs a `blocked` exit) → **DEFERRED**, `open-items.md`.
+- `EXP-141` ("dep satisfied" is undefined) → **DEFERRED**, `open-items.md`.
+- `EXP-142` (a screen is evaluated as a SCREEN) → **KEPT and RENAMED `EXP-ROC-001`**, with a row.
+  `main` holds the authoritative `EXP-142`; the ROC section was the colliding half, and v144 was
+  right that it had no standing to relabel `main`'s. Per-project namespacing removes the choice.
+
+Ids are per-project namespaced from v145 (`EXP-<PROJ>-<nnn>`) and the bare-numeric space is FROZEN,
+enforced by `make process-lint`. Citations of `EXP-136`..`EXP-141` in v141/v144 records still resolve
+here; nothing has been silently relabelled.
+## ID RE-ALLOCATION — 2026-08-14 (ROC), read before citing any ID below
+
+The sections that follow were originally numbered **EXP-119 … EXP-124** by the ROC instance while it
+was **22 process versions stale** (v118 against main's v140) and 15 days un-reconciled. Those six IDs
+were **already allocated on `main` to OagEventSource experiments**, since adopted/retired at OAG v125.
+They have been **renumbered to EXP-136 … EXP-141**, above main's high-water mark of EXP-135. Content is
+unchanged; only the identifiers moved. Any earlier ROC commit message citing EXP-119..124 refers to
+these sections under their old numbers.
+
+**Two structural problems this exposed, neither of which is fixed by renumbering:**
+
+1. **There is no cross-instance ID allocator.** Each instance mints the next ID from whatever registry
+   its own branch happens to hold, so any instance running on a stale base will collide. Renumbering is
+   a repair, not a fix — the next divergence reproduces it.
+2. **The hard cap of 8 `active` rows is a GLOBAL budget, but rows are allocated PER-INSTANCE.** Main
+   arrived at exactly 8. ROC's genuine experiments below would take it past the cap — and ROC cannot
+   honestly score OagEventSource's rows to make room, because it has neither the evidence nor the
+   standing to adopt-or-kill another project's work. **So the cap is breached, deliberately and
+   visibly, rather than resolved by killing rows I cannot fairly judge.** Recorded here instead of
+   silently exceeded. The cap needs either a per-instance allowance or a cross-instance scoring owner.
+
+Also note a **format divergence**: main's registry is a table (`| EXP-NNN | … |`); these ROC sections
+are `##` prose blocks. They merged without conflict precisely because they do not overlap textually —
+which means the merge cleanliness was luck, not compatibility.
+## EXP-136 — a `documenter` can advance its own docs-only work item
+**Registered:** 2026-07-31 (ROC) · **Status:** OPEN · **Applies-to:** any project with a
+docs-only or runbook-bearing use-case.
+
+**The gap.** `documenter` appeared **zero times** in
+`process/machinery/state-graphs.json`. `built_green` was restricted to `engineer`, so a
+docs-only use-case could not be advanced by the agent that actually built it. On ROC's
+`UC-ROC-082` (the SSO-outage runbook, a tracked acceptance condition of a signed-off
+requirement) the documenter had to append under the `engineer` slot and record the
+attribution truth in the note — an honest workaround, but the event log now misattributes
+who did the work, which is exactly the property the event-sourced model exists to get right.
+It then stranded the item in `deploying`, whose only forward event is `deployed (cicd)` —
+a dead end for an item with no runtime artifact to deploy.
+
+**Amendment made.** `documenter` added to the `agents` list of the `use-case` transitions
+`built_green` (building → deploying) and `deployed` (deploying → dev-validating). Minimal
+and additive: no new state, no new event, no change to any existing agent's rights.
+
+**Why not a separate docs-only path?** A new state or a `deploying`-skipping edge is the
+tempting design, but docs DO ship — via commit and push to trunk — so `deployed` is
+semantically honest for them rather than a fiction, and it keeps one graph instead of two.
+Revisit only if a docs item genuinely needs a different validation shape from a code item.
+
+**Target metric:** gross lead time — specifically the queue/blocked component. The failure
+mode this removes is an item sitting in a dead-end state until a human notices and
+hand-resolves it, which is pure blocked time attributable to the machinery rather than the
+work.
+
+**Anticipated effect:** docs-bearing use-cases flow to `dev-validating` without
+orchestrator intervention, and the event log attributes doc work to `documenter` instead of
+to `engineer`. Also expected: honest `time_by_owner` for documenters, which today reads as
+zero because they cannot own a transition.
+
+**Scoring horizon:** the next three docs-bearing use-cases across any project. Score as
+positive if each advanced without an orchestrator unblock and without an agent appending
+under a role it does not hold.
+
+**How it could be wrong.** If `deployed` for a docs item turns out to mislead a reader into
+thinking a runtime deployment occurred, the fix is a distinct docs path, not reverting this.
+Watch for that in the retro rather than assuming the semantic holds.
+
+### Follow-up 2026-07-31 — the documenter's own assessment, and a correction to it
+
+The documenter that hit this gap was asked to judge whether `deployed` would mislead a
+future reader. Its answer was better than the question: the risk is **not in prose** — a
+human reading the item cannot be misled, because the note's first clause states there is no
+runtime artifact — but in **derived metrics and incident correlation**. It also argued,
+correctly, that `deploying` was the genuinely dishonest state (a no-op) while `deployed` is
+substantively true for a runbook, since the artifact reaches its reader the instant it is on
+trunk. It recommended keeping the graph as amended and guarding the derivation instead,
+noting that the amendment made this possible by keeping the `agent` field an honest
+discriminator (`documenter` vs `cicd`) rather than filing doc work under `cicd`.
+
+**Correction — its proposed guard rested on a premise that does not hold.** It proposed
+excluding `deployed` events whose agent is `documenter` from the deployment-frequency and
+change-failure-rate derivations. I checked `_compute_dora` in
+`.claude/skills/work-items/scripts/work-items.py` before implementing that, and
+**deployment frequency does not count `deployed` events at all**: it counts each item's
+TERMINAL event (`validated` / `closed` / `deploy`, falling back to
+`not_reproduced` / `declined`) per active day (`work-items.py:1180-1188`). So filtering on
+the `deployed` agent would have changed nothing, and implementing it would have added dead
+code plus a false sense that a risk had been closed.
+
+**What survives the correction:**
+- **Concern 1 (frequency inflation) partially stands, by a different route.** A docs-only
+  item still reaches `validated`/`done` and so still increments the terminal count. Whether
+  that is *wrong* is genuinely arguable — a delivered runbook IS delivered work — so this is
+  a question for the retro, not a bug to patch. What is NOT true is that it inflates via a
+  `deployed`-event count.
+- **Concern 2 (incident correlation) stands unchanged and needs no code.** Someone asking
+  "what deployed just before this incident?" can find a docs `deployed` event in the window
+  and waste time on a markdown commit. The mitigation is exactly the honest `agent` field
+  this amendment preserved — a one-predicate filter for whoever writes that query.
+
+**Watch in the retro:** whether docs-only items materially move the terminal-event count,
+and whether anyone doing incident correlation is actually misled in practice. Do NOT
+pre-emptively filter the derivation on the strength of the original reasoning — the
+mechanism was misidentified, and the honest `agent` discriminator is already in place for
+whoever needs it.
+
+## EXP-137 — atomic pathspec commits in a shared working tree
+**Registered:** 2026-07-31 (ROC) · **Status:** OPEN · **Applies-to:** any project where
+more than one agent works concurrently in ONE working tree (i.e. the normal case today —
+agents share a worktree; only *projects* get separate worktrees).
+
+**The gap.** Every agent was instructed to commit as
+`git -C work/<p> add <paths> && git -C work/<p> commit -m "…"`. The git **index is shared**
+across concurrent agents in one working tree, so a co-worker's `git add` landing between
+your `add` and your `commit` sweeps their staged work into your commit. Observed **twice on
+2026-07-31**: the cicd agent recording deploy events accidentally committed 25 files of
+another engineer's in-flight UC-ROC-084 work (`91f0404`), and on the retry the same
+engineer's own commit (`c67e588`) picked up cicd's three item files. Nothing was lost either
+time — both agents noticed and repaired non-destructively — but attribution is now wrong in
+the history, and it cost two agents real time to detect and unwind.
+
+**Change made.** `CLAUDE.md` now instructs `git -C work/<p> commit -m "…" -- <paths>`
+(atomic, pathspec form) and explains why: the pathspec form takes content from the WORKING
+TREE and never consults the shared index, so the race window does not exist. It also records
+the non-destructive repair (`reset --soft HEAD~1` → `reset HEAD -- .` → re-add own paths)
+and the rule not to rewrite a commit another agent has built on.
+
+**Why not a lock.** A mutex around git writes was the other candidate. Rejected as the
+first move: it adds a coordination mechanism (and a deadlock/staleness failure mode) to
+solve a problem that a different command form eliminates outright. Revisit only if the
+pathspec form proves insufficient — e.g. if agents need multi-step staging that genuinely
+cannot be expressed as one pathspec commit.
+
+**Note this was ALREADY the emergent practice.** Several engineers independently arrived at
+"explicit pathspec, never `git add` sweep" and said so in their reports; one even recommended
+this exact form in a commit message. The gap was that the instruction told them otherwise, so
+the safe behaviour depended on individual diligence rather than the documented default.
+
+**Target metric:** change failure rate, and gross lead time's rework component —
+mis-attributed commits produce false blame during later diagnosis and cost detection time.
+
+**Anticipated effect:** zero further cross-agent index sweeps. Watch for the opposite
+failure too: an agent that needed staged-but-uncommitted state and finds the pathspec form
+awkward.
+
+**Scoring horizon:** the next multi-agent cycle with 4+ concurrent agents in one tree. Score
+positive if no sweep occurs and no agent reports the form as blocking.
+
+### Third occurrence, found after registering this — and it BROKE CI
+
+A third sweep surfaced the same day, and unlike the first two it was not merely an
+attribution problem: commit **`f624dff`** — a `UC-ROC-082` *item/docs* commit — swept an
+unrelated **in-flight file move** (`src/app/local/evaluateApi.ts` →
+`src/app/src/api/evaluateApi.ts`) onto trunk **ahead of its importer updates**. The runner
+then failed with `ENOENT` on the old path, turning CI red over `9928840`. It self-cleared on
+the next run (`25123f9`, success) once the importers landed.
+
+**This is the cost case the first two occurrences did not demonstrate.** A swept *content*
+change is bad attribution; a swept *refactor mid-flight* is a broken build on trunk. And it
+landed via a **docs-only commit**, from an agent that touched no source at all — so no
+amount of care about one's own files prevents it. That is what makes the two-step form
+unsafe rather than merely untidy: the hazard is not proportional to what you are committing.
+
+Note also how it was diagnosed: the engineer who hit the red CI stood up a **clean detached
+worktree at HEAD without their change** and reproduced the failure there, rather than
+assuming it was or was not theirs. Worth reinforcing — that technique separated three
+distinct pre-existing failures from their own work in one pass.
+
+**Deliberately NOT registered as a defect.** The root cause is this experiment's subject and
+is already fixed in `CLAUDE.md`; the symptom self-resolved on the following run; and the
+broken state no longer exists on trunk. A defect record would inflate the count without
+adding a fix or a fact. Recorded here as evidence instead — if a fourth sweep occurs AFTER
+the atomic-pathspec instruction is in place, that is a different finding and does warrant its
+own defect, because it would mean the instruction is not being followed or is insufficient.
+
+### FOURTH occurrence — and it proves this amendment is INSUFFICIENT, not unfollowed
+
+A fourth sweep happened on 2026-08-03, **with both agents correctly using the atomic
+pathspec form**. `DEF-ROC-016`'s commit `883ebd8` swept ~112 lines of `DEF-ROC-019`'s
+then-uncommitted edits to `architecture/dependencies/class-deps.mmd`. Nothing was lost — all
+the DEF-ROC-019 model nodes/edges are on trunk — but they are attributed to the wrong commit,
+and only one line rode in the correct one.
+
+**So my framing above was wrong, and this correction matters more than the original
+experiment.** I wrote that the pathspec form "takes its content from the working tree and
+never consults the shared index, so the window does not exist." The first half is true and
+the second half does **not** follow. Taking content from the working tree is *precisely* the
+problem for a **CO-OWNED file**: if another agent has uncommitted hunks in a path you name in
+your pathspec, you commit THEIR hunks along with yours, deterministically and with no race
+window at all. The atomic form eliminates the *index* race for disjoint files; it gives no
+protection whatsoever where two agents legitimately edit the same file.
+
+`class-deps.mmd` is exactly that file — the change-impact model every engineer is required to
+update in the same commit as their code. So the process actively directs concurrent agents
+into a shared path and then offers them a rule that does not cover it.
+
+**Candidate fixes, none yet chosen** (deliberately not decided unilaterally — this needs a
+judgement about how much machinery is warranted):
+1. **Split the diagram** so each item's claims live in a separate file that is later composed.
+   Removes co-ownership at the cost of a build/compose step.
+2. **Per-hunk staging** (`git hash-object -w` + `git update-index --cacheinfo`, which one
+   engineer already used successfully). Precise, but needs allowlist additions and is easy to
+   get wrong under time pressure.
+3. **Serialise model updates** — the model edit becomes a follow-up commit, accepting that it
+   is briefly out of step with the code it describes. Cheapest, and weakens the
+   same-commit guarantee the model relies on.
+4. **Accept mis-attribution on co-owned files** and note it in commit messages. Honest, zero
+   machinery, loses per-item traceability of model changes.
+
+Note one engineer already worked around this correctly and unprompted (building a mine-only
+blob and `update-index`-ing it), and another **waited** for the co-owner to commit before
+landing its own hunk. Both are evidence the problem is real and that agents can handle it —
+but both were individual diligence, which is what this experiment set out to replace with a
+documented default.
+
+**Revised scoring:** score EXP-137 positive for disjoint-file commits only. Co-owned-file
+mis-attribution is a SEPARATE open problem and should not be counted against or in favour of
+the atomic-pathspec rule.
+
+## EXP-138 — `prod-deploying` needs a `blocked` exit for single-environment projects
+**Registered:** 2026-07-31 (ROC) · **Status:** OPEN · **Applies-to:** any project that has no
+production environment yet, or whose prod promotion is externally blocked.
+
+**The gap.** `prod-deploying` was the ONLY wip state in the `use-case` graph with **no
+`blocked` exit** — `ready`, `building`, `deploying`, `dev-validating` and `prod-validating`
+all had one. Its only exits were `promoted` (cicd → prod-validating) and `deploy_failed`
+(cicd → reworking). That reads as an oversight rather than a design choice.
+
+**How it bit.** ROC has **no production environment**: its Terraform has never been applied,
+`deploy-ROC.yml` deploys only to `aas-test`, and no prod Function App exists. A tester
+validating `UC-ROC-084` fired `dev_validated` (dev-validating → prod-deploying) — a
+perfectly legal event — and the item stranded. Both remaining exits would have required
+asserting something false: `promoted` claims a prod deploy that cannot have happened, and
+`deploy_failed` claims a failure when nothing failed. The honest state ("waiting on a prod
+environment that does not exist") was inexpressible.
+
+Note the trap is not the tester's error. `dev-validating` offers BOTH `validated` (→ done,
+the correct path for a single-environment project) and `dev_validated` (→ prod-deploying).
+Nothing in the graph signals which applies, and the more specific-sounding name is the wrong
+one here. Every earlier ROC use-case happened to take `validated`.
+
+**Amendment made.** Added `{"from": "prod-deploying", "to": "blocked", "event": "blocked",
+"agents": ["flow-manager", "orchestrator"]}` — consistent with the five states that already
+have it. Minimal and additive: no new state, no new event name, no existing agent's rights
+changed, and it makes the honest state expressible.
+
+**Why not remove `dev_validated`, or auto-route single-env projects to `done`?** Both were
+tempting and both are wrong for now. Removing it breaks projects that genuinely promote to
+prod. Auto-routing would need the machinery to know whether a project has a prod
+environment, which it currently has no way to know and which would be a much larger change
+than the problem justifies. A `blocked` exit costs one line and keeps the fact visible in the
+queue rather than hiding it.
+
+**Guidance that goes with it (the recurrence fix):** in a project with no prod environment,
+the tester's terminal event from `dev-validating` is **`validated`**, not `dev_validated`.
+`dev_validated` is only correct when a prod promotion will actually follow.
+
+**Target metric:** gross lead time — the blocked component. A stranded item accrues wip time
+invisibly and needs a human to notice, which is precisely the failure EXP-136 addressed in a
+different corner of the same graph.
+
+**Anticipated effect:** no item strands in `prod-deploying`; a genuinely unavailable prod
+environment shows up in the `waiting` queue where the flow view can see it.
+
+**Scoring horizon:** the next three use-cases reaching `dev-validating` on a project without
+prod. Score positive if none strand and none are advanced by an event that asserts something
+untrue.
+
+**How it could be wrong.** If items start routinely sitting `blocked` in `prod-deploying`
+rather than being closed via `validated`, the guidance is not landing and the real fix is
+making the graph itself aware of whether a prod environment exists. Watch for that.
+
+## EXP-139 — a `cicd` agent can advance an infra-owned defect
+**Registered:** 2026-08-04 (ROC) · **Status:** OPEN · **Applies-to:** any defect whose fix is
+infrastructure, pipeline or deploy-configuration rather than application code.
+
+**The gap.** The `defect` graph restricted `confirmed` (reproducing → fixing) to
+`orchestrator`/`engineer` and `fixed` (fixing → validating) to `engineer` alone. But defects
+are not all code: `DEF-ROC-020` was a **shared-ownership infrastructure** defect — two
+uncoordinated writers to the same Azure Function App's `app_settings`, where a platform-infra
+service principal's apply erased the `BUILD_SHA` our pipeline stamps. It was dispatched to
+`cicd` deliberately, because the remedy is Terraform / workflow / a drift check / a cross-team
+ask, not application code. The machinery then refused every transition it needed, so it fired
+them as `AGENT=engineer` and said so in its report.
+
+That is the second instance of this exact shape (see **EXP-136**, where `documenter` appeared
+zero times in the graph and a docs-only use-case could not be advanced by its actual builder).
+Both times the agent behaved correctly — attributed honestly in the note and escalated rather
+than hand-editing state — and both times the event log ended up naming the wrong role, which
+is precisely the property an event-sourced model exists to get right. It also skews
+`time_by_owner`: infra work is billed to `engineer` and `cicd` reads as idle.
+
+**Amendment made.** `cicd` added to the `agents` list of the `defect` transitions `confirmed`
+and `fixed`. Minimal and additive — no new state, no new event, no existing agent's rights
+changed.
+
+**Why only those two.** `validated` stays tester-only: cicd fixing its own defect and then
+validating it would collapse the gate that caught `DEF-ROC-013`'s misdiagnosis. And
+`not_reproduced` stays orchestrator-only, since declining a defect is a judgement call about
+scope rather than a technical step.
+
+**The pattern worth noticing, and the reason this is registered rather than just fixed:** the
+graph was written assuming defects are code and use-cases are built by engineers. Two agent
+roles have now hit that assumption from different directions within a week. The next one is
+probably `solution-architect` (an architecture-delta defect) or `product` (a
+requirement-framing defect). Rather than wait for a third instance, the retro should ask
+whether the per-transition agent allowlists are the right mechanism at all, or whether
+"who may fire this" should derive from the item's own declared owner.
+
+**Target metric:** gross lead time's blocked component, plus the integrity of
+`time_by_owner`. The concrete failure removed is an agent stalling on a legal-looking
+transition it may not fire, or firing it under a role it does not hold.
+
+**Anticipated effect:** infra-owned defects flow without an orchestrator unblock, and
+`time_by_owner` starts attributing infra work to `cicd`.
+
+**Scoring horizon:** the next three defects dispatched to a non-engineer role. Score positive
+if each advanced without an orchestrator intervention and without any agent appending under a
+role it does not hold.
+
+## EXP-140 — an aggregate can read `done` while signed-off scope was never registered
+**Registered:** 2026-08-05 (ROC) · **Status:** OPEN · **Applies-to:** every project using the
+event-sourced work-item model with aggregate types (requirement / chunk / slice).
+
+**The gap, found by accident.** `REQ-ROC-002` and `CHK-ROC-004` had bubbled to **`done`** — and
+were wrong. `SLC-ROC-006` was the only child ever turned into a work item, so when it finished,
+the aggregates folded to `done` by construction. But the signed-off dossier for that requirement
+contained further scope (the J20 pace-control / named-scenario replay work) that was
+**explicitly deferred, not descoped** — and because deferred-but-agreed scope was never
+registered as children, the model had no way to know it existed. The requirement therefore
+reported complete while part of what a human had signed off was untracked.
+
+Product found this only while looking for decomposable work behind a *different* closing chunk.
+Nothing surfaced it: `wi-validate` passes (I1–I4 all hold — the fold is internally consistent),
+the derived views are correct, and the tree looks healthy. **The invariant that is missing is
+not about consistency of the fold; it is about coverage of the dossier.**
+
+**Why this matters more than one requirement.** `done` on an aggregate is read by humans and by
+the metrics as "this value was delivered". If registration is the only thing that makes scope
+visible, then any scope agreed at sign-off but deferred to later is invisible the moment its
+registered siblings complete — and the gap grows silently with every deferral. This project has
+deferred scope at sign-off repeatedly and deliberately (connectivity statuses in REQ-ROC-006,
+multi-role RBAC in REQ-ROC-005, template creation in CHK-ROC-009), all of them legitimate
+decisions. Each is a candidate instance of the same trap.
+
+**Not yet fixed — the right mechanism needs a judgement I should not make alone.** Candidates:
+1. **A dossier-coverage check**: require every signed-off dossier to enumerate its scope items,
+   and refuse to let an aggregate fold to `done` while any enumerated item lacks a registered
+   child or an explicit descope record. Strongest, and the most machinery.
+2. **Register deferred scope immediately as `blocked`/`open-item` children** rather than leaving
+   it in prose. Cheap, keeps the tree honest, but inflates `waiting` with things nobody intends
+   to pull soon — and this project already has 14 items in `waiting`.
+3. **A `deferred_scope:` frontmatter field on aggregates**, checked at fold time, so `done`
+   requires it to be empty or explicitly waived.
+4. Accept it and rely on the retro to re-read dossiers before closing a requirement — no
+   machinery, relies on diligence, which is what failed here.
+
+**Target metric:** none of the four DORA metrics directly — this is a **truthfulness** defect in
+the delivery record, which corrupts every metric derived from it. The observable proxy: the
+number of aggregates that transition out of `done` after being found incomplete (this instance
+is one; `CHK-ROC-004`/`REQ-ROC-002` were flipped back to `in_progress` when the missing scope was
+registered as `SLC-ROC-025`).
+
+**Anticipated effect:** an aggregate reading `done` means the signed-off scope was delivered or
+explicitly descoped — not merely that its registered children finished.
+
+**Scoring horizon:** the next three requirements to close. Score positive if each was checked
+against its dossier before closing, and negative if any is later found to have had untracked
+signed-off scope.
+
+**How this could be wrong.** Option 1 could make deferral so expensive that agents stop
+recording it in the dossier at all, which would be worse — the prose record is currently the
+only reason this was findable. Whatever is chosen must keep deferral cheap to *state*.
+
+### Third instance — 2026-08-14, a verification-only use-case
+
+`UC-ROC-089` is a live-verification use-case whose entire deliverable is a probe script plus its
+execution. A **tester** authored the script, committed it, and ran it green — then could not fire
+`pulled` (orchestrator/flow-manager only) and, later in the chain, would face `built_green`
+(engineer-only) for a script it wrote itself. It reported the block rather than spoofing a role,
+which is the right behaviour and the same disposition the documenter and cicd agents showed.
+
+So the mismatch has now appeared **three times in three different shapes**: a docs-only item built
+by a documenter (EXP-136), an infra-owned defect fixed by cicd (EXP-139), and now a
+verification-only item whose deliverable is authored by a tester. Each was patched by widening one
+transition's agent list. That is three patches to the same underlying assumption — that item TYPE
+predicts which ROLE does the work — and the assumption is simply false for any item whose value is
+not application code.
+
+**This strengthens the open question already recorded above** rather than adding a new one: the
+retro should decide whether per-transition agent allowlists are the right mechanism at all, or
+whether "who may fire this" should derive from the item's own declared owner. A fourth patch would
+be evidence the mechanism is wrong, not that the list needs extending again.
+
+---
+
+## EXP-141 — "dep satisfied" is undefined, so two flow-managers read it oppositely
+
+**Registered** 2026-08-14 (ROC). **Class:** flow rule with no written definition.
+
+### What happened
+
+Two `flow-manager` instances, **in the same session**, reached opposite conclusions about the same
+promotion rule — and both were acting in good faith.
+
+- The **earlier** instance established and applied a convention *three times*: a dependency counts
+  as satisfied once it is `built_green` **on trunk**, without waiting for its own
+  deploy/validate cycle. `UC-ROC-078`'s `made_ready` note states it explicitly — *"dep satisfied =
+  green on trunk not full deploy+validate"* — and cites `UC-ROC-076`/`079`, which in turn cite the
+  same basis against `UC-ROC-075`.
+- The **later** instance searched for that convention, **found no precedent**, and declined to
+  promote `UC-ROC-092` because its deps sat in `dev-validating` rather than `done`.
+
+Both were right about what they could see. The convention exists **only in event-log notes**, never
+in a rule; the later instance searched item *states*, where it is invisible by construction.
+
+### Why it was invisible — the actual gap
+
+Three places could have carried the definition and none does:
+
+| Where | What it says about dep-satisfaction for promotion |
+|---|---|
+| `process/process-current.md` §F2/F3/F6/F7 | describes DAG / independent-set mechanics — never defines what makes a dep *satisfied* |
+| `process/machinery/CONTRACT.md` | same: edges and folding, no promotion predicate |
+| the machinery (`wi-append` edge-check, `wi-validate` I1–I4) | **no invariant on dep state at `made_ready`** |
+
+So promotion is pure flow-manager judgement, unconstrained by machinery and undocumented in
+process. That is why it diverged silently rather than failing loudly.
+
+### The experiment
+
+Pick ONE and write it down where a flow-manager will find it (§F6 + `CONTRACT.md`):
+
+1. **Codify the convention** — `built_green` on trunk satisfies a peer dep for promotion purposes.
+   Faster flow; accepts the risk that a dep is later rejected and its dependents rework.
+2. **Reject it** — require `done`. Zero rework risk; Ready starves more often, which is exactly the
+   floor breach observed this cycle (`ready=1` against `min_items=2`, with no legitimate promotion
+   available because `UC-ROC-092`'s deps were merely `dev-validating`).
+
+**Target metric:** rework count on promoted-early items, against Ready-floor breach frequency.
+Those are the two costs the choice trades between, so measuring only one would bias the answer.
+
+**Anticipated effect.** Option 1 raises throughput and should show near-zero rework *while the
+suite is trustworthy* — but the trust precondition is doing real work in that sentence, and
+`DEF-ROC-022` (an unexplained intermittent failure in the C1 walking-skeleton test) is live evidence
+the precondition is not currently met. Option 2 costs flow but cannot produce this class of rework.
+
+**Scoring horizon:** the next 10 promotions.
+
+**Applies-to predicate:** any project whose items carry `deps` edges — i.e. all of them.
+
+### How this could be wrong
+
+The divergence may be *desirable* discretion rather than a defect: a flow-manager weighing a
+specific dep's risk is doing judgement work a blanket rule would flatten. If so, the fix is not a
+rule but a **required note** — force the promoting agent to state which basis it used and why, so
+the next instance can find it in state rather than prose. That would keep the judgement and remove
+the invisibility, which is the part that actually caused harm here.
+
+**Do not score this as "the rule was written."** Score it as: did a later flow-manager, with no
+access to this session's context, reach the same promotion decision as the earlier one?
+
+---
+
+## EXP-140 — FOURTH INSTANCE (2026-08-14): the trigger fired; the mechanism is wrong
+
+EXP-140 recorded, verbatim: *"A fourth patch would be evidence the mechanism is wrong, not that the
+list needs extending again."* **That fourth instance has now occurred. Recording the verdict rather
+than patching a fourth transition.**
+
+### The instance
+
+`UC-ROC-080`'s **engineer** performed its own pull and could not fire `pulled` — the state graph
+restricts that transition to `orchestrator`/`flow-manager`, while the engineer's own role brief
+tells it to fire `pulled` if it performs the pull. `built_green` is unreachable from `ready`, so the
+item was structurally stuck. The agent fired it as `AGENT=orchestrator` **with a note saying it had
+done so and why** — the honest workaround, and the fourth agent in a row to report the block rather
+than silently spoof a role.
+
+### The four instances, and what they share
+
+| # | Item shape | Role that did the work | Transition it could not fire |
+|---|---|---|---|
+| EXP-136 | docs-only | documenter | `built_green` / `deployed` |
+| EXP-139 | infra-owned defect | cicd | `confirmed` / `fixed` |
+| EXP-140 | verification-only | tester | `pulled`, then `built_green` |
+| **this** | ordinary use-case | **engineer** | **`pulled`** |
+
+The first three were explained away as "item TYPE does not predict the ROLE for unusual items." **This
+fourth one kills that explanation**: the item is an entirely ordinary use-case and the role is the
+canonical one for it. The mismatch is therefore **not** about unusual item types at all — it is that
+**per-transition agent allowlists encode an assumption that a transition has one rightful owner**,
+and that assumption is false wherever an agent legitimately does two jobs in sequence.
+
+Note also the *direct contradiction* this instance exposes: the engineer's role brief instructs it to
+fire `pulled`, and the graph forbids it. Two authored artefacts disagree — the same class as
+`DEF-ROC-026`, where four documents asserted a partition key the code never set. A rule that cannot
+be followed gets worked around, and every workaround costs a role-spoof or a note nobody reads.
+
+### The experiment — replace the mechanism, do not extend the list
+
+Derive "who may fire this" from the **item's own declared owner** rather than a per-transition
+allowlist: the item records who is doing the work, the machinery checks the firing agent against
+*that*, and the graph constrains only the **shape** of the transition (which states follow which).
+This keeps the property the allowlists were protecting — an agent cannot rubber-stamp its own work
+into a state it did not earn — while removing the false premise that a transition has exactly one
+rightful role forever.
+
+**Target metric:** count of role-spoofed or blocked transitions per 20 items (currently 4 known in
+~2 weeks, all self-reported — the true rate is a floor, not a measurement, since a silent spoof
+leaves no trace).
+
+**Anticipated effect:** the class disappears rather than shrinking. If instances continue after the
+change, the diagnosis here is wrong and the real problem is elsewhere.
+
+**Scoring horizon:** the next 20 items.
+
+**Applies-to predicate:** every project using the event-sourced work-item machinery.
+
+### How this could be wrong
+
+The allowlists may be catching real errors we never see, in which case removing them trades a visible
+annoyance for an invisible integrity loss. Before adopting, check whether any allowlist rejection in
+the history was a **genuine** mistake rather than a legitimate agent blocked by the mechanism. If
+even one was, the answer is a narrower fix, not a replacement.
+
+**Do not score this as "the four transitions now work."** Score it as: did an agent doing legitimate
+work get blocked or have to spoof a role again?
+
+### EXP-140 — instances five, six and seven, all on 2026-08-14: four different roles, one day
+
+Recording these together because the pattern is now beyond argument. On a single day, **four
+different roles** were blocked by or had to work around the per-transition agent allowlists:
+
+| Role | Transition | What happened |
+|---|---|---|
+| **engineer** | `pulled` (use-case) | Its own role brief tells it to fire `pulled`; the graph forbids it. Fired as `orchestrator` with a disclosing note. |
+| **tester** | `deployed` (use-case) | Item arrived in `deploying` with no cicd in the thread. Fired as `cicd`, transparently noted as a mechanical attestation. |
+| **solution-architect** | `confirmed`/`fixed` (defect) | `DEF-ROC-026` resolved as a pure **design decision** — delta 016, no code. The role that did 100% of the work has **no path at all** in the defect graph. flow-manager correctly REFUSED to force it, on the grounds that borrowing an agent name would misattribute DORA time-by-owner and quality-by-stage. |
+| **orchestrator** | `made_ready` (use-case) | **The flow owner cannot promote an item into Ready.** `made_ready` is `flow-manager`-only, while `pulled` is `["orchestrator","flow-manager"]` — so the orchestrator may PULL from Ready but not PUT into it. |
+
+### Why the last one settles it
+
+The orchestrator's own definition makes it the role that "owns sequencing, gates, DORA measurement
+and Theory-of-Constraints optimisation of the whole pipeline." A rule that lets that role *consume*
+from a queue but not *populate* it is not encoding a real safety property — nothing is protected by
+forcing a second agent to be spawned purely to append one event. It is an artefact of enumerating
+allowlists transition-by-transition without ever checking the set for coherence.
+
+Note the cost shape: every one of these four cost either **a spoofed role with a disclaimer nobody
+downstream will read**, or **an entire extra agent dispatch**. The first corrupts attribution; the
+second corrupts lead time. There is no third option available to an agent that just wants to record
+what it truthfully did.
+
+### Two consequences for the retro, beyond the mechanism change
+
+1. **The disclosing notes are load-bearing and invisible to the machinery.** `DEF-ROC-026`'s note
+   literally has to say *"read the attribution here, not the agent field."* Any metric computed from
+   the `agent` field is therefore already wrong wherever this has happened — and we know of at least
+   four cases in one day, all self-reported, so the true count is a floor.
+2. **A rule that cannot be followed gets worked around.** Three of the four agents did the honest
+   thing and disclosed; one (flow-manager) refused outright and escalated. That disposition is
+   admirable and should be praised — but relying on it is relying on every future agent choosing
+   integrity over convenience, when the mechanism itself makes the dishonest path cheaper.
+
+**Scoring, unchanged:** did an agent doing legitimate work get blocked or have to spoof a role again?
+Four instances in one day is the pre-change baseline.
+
+### EXP-140 — instance eight, and the sharpest: the role that OWNS the defect class cannot advance it
+
+2026-08-17, ROC. `DEF-ROC-037` is **doc/test-pin drift** — a documented command diverging from the code that pins it. That class is owned by the **documenter** by design; the orchestrator dispatched it there for exactly that reason, and the documenter fixed it well (repointed the pin, added reverse and discovery arms, mutation-checked all five, and recorded the coupling in `DOCS-LAYOUT.md`).
+
+**It then could not fire `confirmed` or `fixed`.** The defect flow reserves both to `orchestrator`/`engineer`/`cicd`. It appended them under `AGENT=engineer` with the substitution stated verbatim in each note, and flagged the gap rather than routing around it.
+
+**Why this instance settles what the previous seven only suggested.** The earlier cases could each be read as an unusual item meeting an unusual role. This one is the opposite: **the item type and the owning role are perfectly matched — and the graph still says no.** A defect about documentation, dispatched to the documentation role, on the orchestrator's deliberate judgement, and the mechanism forbids the only role that should have it.
+
+Tally so far, all self-reported (so a floor, not a measurement): documenter ×2 (`built_green`/`deployed`, now `confirmed`/`fixed`), tester (`deployed`), solution-architect (`confirmed`/`fixed` — no path at all), engineer (`pulled`), orchestrator (`made_ready`). **Five distinct roles, eight occasions.**
+
+Every one cost either a **borrowed agent name with a disclaimer nobody downstream reads** — corrupting `time_by_owner` and quality-by-stage — or **an extra agent dispatch**, corrupting lead time. The mechanism makes the dishonest path the cheap one, and has relied entirely on agents choosing to disclose. They have, every time, which is creditable and is not a control.
+
+**No ninth patch.** The replacement recorded above stands: derive firing rights from the item's declared owner; let the graph constrain transition SHAPE only.
+
+### EXP-140 — instance nine, stated in one line
+
+2026-08-17, ROC, `DEF-ROC-026`. The rejection's fix was an **architecture-only** change (a scoped supersession pointer in `architecture/deltas/002`). The **solution-architect** made it and was then refused, verbatim:
+
+```
+append REJECTED: DEF-ROC-026 is in state 'fixing'.
+  event 'fixed' is legal here but not for agent 'solution-architect'.
+  legal events from here: fixed (agents: engineer/cicd), ...
+```
+
+**In one line: an architecture-only defect fix cannot be reported as fixed by the agent that owns architecture.**
+
+It substituted `amended` (a legal edge for its role), quoted the refusal in the note, and **left the item in `fixing`** rather than routing around it — so the item now needs an engineer or cicd to append a `fixed` event about work neither did. That is the second time in this defect's own life cycle that the same bookkeeping detour has been required.
+
+Nine occasions, five roles. No tenth patch: the recorded replacement stands — derive firing rights from the item's declared owner, let the graph constrain transition SHAPE only.
+
+### EXP-140 — instance TEN, on the very defect that closed EXP-142's gap
+
+2026-08-18, ROC, `DEF-ROC-057` (the bad Config screen a human reported). The whole item is a **UI-designer** item by construction: layout allocation, table density, design-token contrast, plus the EXP-142 whole-screen sweep. It was dispatched to the **ui-designer**, which reproduced it, root-caused it to a missing house split-view template, fixed it across three surfaces, and proved the new gate fails 16/16 on the pre-fix build. Then, verbatim:
+
+```
+append REJECTED: DEF-ROC-057 is in state 'reproducing'.
+  event 'confirmed' is legal here but not for agent 'ui-designer'.
+  legal events from here: confirmed (agents: orchestrator/engineer/cicd), ...
+```
+
+**In one line: the role that owns UI quality cannot even record that it reproduced a UI defect** — `ui-designer` appears on NO edge of the defect graph at all, so unlike instances eight and nine it has no legal substitute edge to detour through; it cannot move the item one step in any direction.
+
+Ten occasions, six roles, and this one arrives *inside the experiment built to stop UI defects escaping to humans* — the fix is verified and the item still cannot leave `reproducing` without an agent that did none of the work. The replacement already recorded (derive firing rights from the item's declared owner; let the graph constrain transition SHAPE only) would have made every one of the ten a non-event.
+
+---
+

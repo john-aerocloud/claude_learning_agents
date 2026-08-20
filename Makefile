@@ -509,8 +509,23 @@ acceptance-audit:
 # same python the dora launcher resolves (the PY pattern). A line may carry an
 # inline <!-- doc-lint:allow --> escape for a legit archive/historical mention.
 #   make doc-lint
-doc-lint:
+doc-lint: process-lint
 	$(PY) .claude/skills/work-items/scripts/doc-lint.py
+
+# --- Process-doc STRUCTURAL gate (process §25a / §27.5) -----------------------
+# doc-lint is a DENYLIST scanner and cannot see a file that is internally
+# inconsistent. process-lint checks the process files against THEMSELVES:
+#   C1 the `# Current Process — vNN` heading matches the highest retro record
+#      (it was 19 versions stale at v138 and stale again at v145)
+#   C2 every `## EXP-` section has a registry row, and no id is defined twice
+#   C3 the bare-numeric EXP id space is FROZEN — new ids are `EXP-<PROJ>-<nnn>`
+#      (a global counter with per-instance writers minted `EXP-142` TWICE)
+#   C4 per-project active rows are at or under the hard cap of 8, and no row is
+#      unattributed (v143 routed this to "a committed tool"; this is that tool)
+# Runs as a prerequisite of `doc-lint`, so the retro's step-7 gate covers both.
+#   make process-lint
+process-lint:
+	node .claude/tools/process-lint.js
 
 # --- Validation & smoke --------------------------------------------------------
 # The validation event now rides on the work-item via `make wi-append` (tester's
@@ -986,7 +1001,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap make-refs-tracked container-reap container-orphans stack-claim stack-release stack-status sso-login retro-debt retro-mark loop-gate test-wi wi-append wi-project wi-validate wi-migrate doc-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated test-requirement-gate test-requirement-gate-baseline board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery
+.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap make-refs-tracked container-reap container-orphans stack-claim stack-release stack-status sso-login retro-debt retro-mark loop-gate test-wi wi-append wi-project wi-validate wi-migrate doc-lint process-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated test-requirement-gate test-requirement-gate-baseline board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery
 
 # --- Viggo-fix UC-W7: Country/Nationality ID remediation (T-SQL) --------------
 # Data-driven, self-building T-SQL remediation script set + its local stand-up

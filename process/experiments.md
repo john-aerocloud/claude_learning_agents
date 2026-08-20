@@ -1,9 +1,31 @@
-# Experiment registry (process v88 §25a — LEAN, HARD WIP cap = 8 active PER PROJECT, scoped at v143)
+# Experiment registry (process v88 §25a — LEAN, HARD WIP cap = 8 active PER PROJECT, scoped at v143;
+ids PER-PROJECT namespaced and the bare-numeric space FROZEN at v145)
 
 Every genuinely-uncertain routed change is an experiment. One row per change. The
 orchestrator scores rows at every retro (§26 / retro step 5a). Statuses: `active` |
 `validated` | `validated-by-null-hypothesis` | `under-question` | `retirement-trial` |
 `failed`.
+
+**TWO STRUCTURAL RULES, added at v145 and ENFORCED by `make process-lint` — not prose (§25a):**
+
+1. **Ids are PER-PROJECT namespaced: `EXP-<PROJ>-<nnn>`.** The bare-numeric space
+   (`EXP-127`…`EXP-143`) is FROZEN — nothing may be added to it. The old global counter was
+   read per-instance from whatever a worktree happened to hold, which is a read-modify-write
+   race across worktrees with a stale read: on 2026-08-18 two different experiments were both
+   minted **`EXP-142`** (main's test-requirement-gate ratchet at v142, ROC's screen-viewport
+   hypothesis the same day), and v144 correctly refused to silently relabel either. The cap
+   was scoped per-project at v143 and **the ID SPACE was left global** — the fix was applied
+   to the budget and not to the namespace. Work items have been project-namespaced all along
+   (`DEF-ROC-077`, `DEFECT-OAG-091`); experiments now match, so a collision is impossible by
+   construction rather than found afterwards by a human reading two files.
+2. **A finding awaiting a decision is an ITEM or an `open-items.md` entry — never an `## EXP-`
+   section.** This file holds ONLY rows of the capped table plus their scoring notes. Six
+   ROC-authored `##` sections lived here for three weeks with NO row, so the WIP cap never
+   governed them and no retro ever scored them — which is what made "8 active, AT cap" untrue
+   for two consecutive retros. One of those sections had reached **ten measured instances
+   across six roles** with a stated mechanism and still no row: an unregistered finding
+   accretes evidence and never becomes work, which is the same prose-remedy failure §17c.5
+   exists to stop. `process-lint` fails on any section without a row.
 
 **THE VALIDITY BAR + the lean-registry rules now live in process-current.md §25a**
 (a row is a falsifiable HYPOTHESIS with Problem + Solution + a NAMED target DORA metric
@@ -13,6 +35,12 @@ mandatory). The status-lifecycle mechanics live in the `process-framework` skill
 file holds ONLY the live experiments under test; everything retired is in
 `experiments-archive.md` WITH its outcome (the index of what we've learned + folded in).
 
+> **✅ RESOLVED — kept for the record, no longer live.** The cap was scoped PER-PROJECT at
+> v143 (the escalation below was the right call and it was answered), and at v145 the second
+> half of the same defect — the GLOBAL id space the per-project cap was still drawing from —
+> was closed by namespacing ids and freezing the bare-numeric space. Per-project counts are
+> now printed and capped by `make process-lint`. The original escalation follows verbatim.
+>
 > **⚠️ CAP BREACHED FOR THE SECOND CONSECUTIVE RETRO — this is now a PATTERN, not an
 > incident, and it is escalated rather than re-excused (v142, OagEventSource 2026-08-18).**
 > v141 (ROC) breached the cap-of-8 deliberately and recorded why: the cap is a GLOBAL budget
@@ -51,8 +79,10 @@ file holds ONLY the live experiments under test; everything retired is in
 
 | id | routed | artifact(s) | change | target metric | anticipated effect | horizon | status | scoring notes |
 |----|--------|-------------|--------|---------------|--------------------|---------|--------|---------------|
-| EXP-143 | v144 (2026-08-20, ROC, gap-closing retro on DEF-ROC-073/074/075/076) | process-current.md §17c limb 6 + `.claude/skills/work-items/scripts/work-items.py` (`PROBE=` on `EVENT=blocked`, sentinels `BLOCKER: standing` / `BLOCKER: cleared`, reusing the `parse_observe_spec`/`_run_observation` machinery already proven for `OBSERVE=`) + `loop-gate` check + per-project `work/<p>/Makefile` probe targets | **Problem:** the machinery enumerates TWO park states (`_PARKED_STATES = {"blocked", "awaiting_observation"}`) and requires a machine-checkable predicate for only ONE. `blocked` takes a prose `note:` and nothing else, so a blocker is never re-tested and the park never ends on its own. `DEF-ROC-004` sat `blocked` **28.8 days after both blockers had gone** (its subscription was created the day it was raised); the blockage was falsified in ~5 minutes by trying. `external` is **46.3% of ROC GLT at median 19.3 d/item** — the largest single cost — with no detector but a human re-asking. §17c limb 3 already required a re-check and was PROSE, so Layer 2's own sentence came true against it. **Solution:** make `blocked` carry the same burden of proof as `awaiting_observation` — `append` REFUSES `EVENT=blocked` without `PROBE=make:<target>`; `loop-gate` BLOCKS on `BLOCKER: cleared` (unblock is actionable) and on a BROKEN probe, advisory on `BLOCKER: standing`. | **gross lead time** (`external` owner share + median time-in-`blocked`) | `external` share of GLT falls from **46.3%** and median time-in-`blocked` falls from **~19.3 d**, because a cleared blocker is found by a cadenced probe instead of by a human happening to re-ask. Secondary: fewer items parked on a premise that has already rotted. | 3 retros or 6 weeks, whichever is later (external waits are long; a shorter horizon cannot distinguish the effect from noise) | active (0/3) | **FALSIFICATION, stated up front:** if probes come back `BLOCKER: standing` honestly and the `external` share does NOT fall, then blockers genuinely stay closed, the probe ceremony is pure cost, and this row is **KILLED not re-tuned**. **Second, non-obvious failure mode to check FIRST at every scoring:** a probe that is cheap to write badly will be written badly — a target that always prints `standing` is a mechanism that cannot fail, i.e. this experiment reproducing the exact class it was opened against. So scoring MUST sample real probe targets for non-vacuity, not merely count that they exist (the EXP-124 coverage-theatre trap). **Applies-to predicate (§25a):** any item of any type entering `blocked` — i.e. every `EVENT=blocked` append. Does NOT apply to `awaiting_observation` (already covered by `OBSERVE=`) nor to items blocked on another tracked item (a `deps:` edge is already machine-checkable and needs no probe). |
-| EXP-142 | process §17d.5 + tool | `.claude/tools/test-requirement-gate.js`, `.claude/tools/test-requirement-gate.test.js` | **Problem:** the shrink-only ratchet only ever shrank when a human remembered to shrink it, so the committed floor is a HIGH-WATER MARK THAT DRIFTS. Measured: the limb-1 floor was hand-lowered 1755 -> 1749 at 10:30:34 on 2026-08-14; two commits at 11:50 and 12:16 the same morning took the true count to 1811, and it went unseen for THREE DAYS because the drift's only observer is the next gate run (a system outage removed the session that would have run it). Over the softening's whole two-week life the count ended HIGHER than it started (1795 -> 1811) while the floor recorded a win. **Solution:** every PASSING gate run whose observed count is strictly below the committed floor rewrites the floor DOWN automatically and says so; raising stays manual and reviewed (`--write-baseline --allow-baseline-growth`); a FAILING run tightens nothing; `--no-auto-tighten` for scratch/set-diff runs. | **change failure rate** — a test that cannot validate a requirement is caught at the commit that lands it rather than N days later, so the escape window shrinks. Secondary: **lead time** (the gate blocks pulls, so a stale-floor regression stalls the whole loop, as it did for 3 days here). | the committed floor falls without human action and never rises; the interval between a violation landing and the gate going red collapses to the next run rather than the next time somebody remembers to re-baseline. | 3 retros | active (0/3) | **Measurement, and it CAN come back negative:** at each retro record (a) how many times the floor moved DOWN automatically since the last retro and by how much, and (b) the max observed latency between a limb-1/limb-2 violation landing on trunk and a gate run reporting it. **NEGATIVE** if the floor never moves automatically (the auto-tighten is inert because runs are never green — meaning the ratchet is simply always red, which is a different failure needing a different fix), or if latency does NOT fall, or if agents start passing `--no-auto-tighten` habitually to avoid committing a config change (watch for it — that would be §17e.2 softening by the back door and KILLS this row). **NON-VACUITY PROVEN AT LANDING, not asserted:** 5 committed self-tests drive the REAL CLI through `child_process` (stubbing the writer would be the exec-boundary fault this very gate exists to catch); they assert it fires below-floor, does NOT fire at-floor, tightens NOTHING on a red run and never raises, is suppressed by `--no-auto-tighten`, and that `--json` stays a pure read. `make test-tools` 170/170 green. |
+| EXP-143 | v144 (2026-08-20, ROC, gap-closing retro on DEF-ROC-073/074/075/076) | process-current.md §17c limb 6 + `.claude/skills/work-items/scripts/work-items.py` (`PROBE=` on `EVENT=blocked`, sentinels `BLOCKER: standing` / `BLOCKER: cleared`, reusing the `parse_observe_spec`/`_run_observation` machinery already proven for `OBSERVE=`) + `loop-gate` check + per-project `work/<p>/Makefile` probe targets | **Problem:** the machinery enumerates TWO park states (`_PARKED_STATES = {"blocked", "awaiting_observation"}`) and requires a machine-checkable predicate for only ONE. `blocked` takes a prose `note:` and nothing else, so a blocker is never re-tested and the park never ends on its own. `DEF-ROC-004` sat `blocked` **28.8 days after both blockers had gone** (its subscription was created the day it was raised); the blockage was falsified in ~5 minutes by trying. `external` is **46.3% of ROC GLT at median 19.3 d/item** — the largest single cost — with no detector but a human re-asking. §17c limb 3 already required a re-check and was PROSE, so Layer 2's own sentence came true against it. **Solution:** make `blocked` carry the same burden of proof as `awaiting_observation` — `append` REFUSES `EVENT=blocked` without `PROBE=make:<target>`; `loop-gate` BLOCKS on `BLOCKER: cleared` (unblock is actionable) and on a BROKEN probe, advisory on `BLOCKER: standing`. | **gross lead time** (`external` owner share + median time-in-`blocked`) | `external` share of GLT falls from **46.3%** and median time-in-`blocked` falls from **~19.3 d**, because a cleared blocker is found by a cadenced probe instead of by a human happening to re-ask. Secondary: fewer items parked on a premise that has already rotted. | 3 retros or 6 weeks, whichever is later (external waits are long; a shorter horizon cannot distinguish the effect from noise) | active (0/3) | **FALSIFICATION, stated up front:** if probes come back `BLOCKER: standing` honestly and the `external` share does NOT fall, then blockers genuinely stay closed, the probe ceremony is pure cost, and this row is **KILLED not re-tuned**. **Second, non-obvious failure mode to check FIRST at every scoring:** a probe that is cheap to write badly will be written badly — a target that always prints `standing` is a mechanism that cannot fail, i.e. this experiment reproducing the exact class it was opened against. So scoring MUST sample real probe targets for non-vacuity, not merely count that they exist (the EXP-124 coverage-theatre trap). **Applies-to predicate (§25a):** any item of any type entering `blocked` — i.e. every `EVENT=blocked` append. Does NOT apply to `awaiting_observation` (already covered by `OBSERVE=`) nor to items blocked on another tracked item (a `deps:` edge is already machine-checkable and needs no probe). **SCORED v145 (2026-08-20, ROC) — STRIKE 1, UNSCOREABLE BY CONSTRUCTION: the mechanism is NOT YET ENFORCED.** Limb 6 shipped saying `EVENT=blocked` "requires `PROBE=`" while nothing refuses; caught ~4h later by ROC itself, labelled NOT YET ENFORCED, and registered as `OI-ROC-005` (commit `912c5dc`) — §17c.5 working, but it means the row cannot move a metric yet. `blocked` is meanwhile STILL the top time thief (41.10% of GLT, median **21.7 days** across 10 items, 0.00% backfill) and its count-independent median has RISEN from 19.3d (v144) — so the target metric is going the WRONG way while the mechanism is unbuilt, which is the honest reading, not a strike against the hypothesis. `OI-ROC-005` is this cycle's exploit move and the resumed loop's FIRST pull; AC-005.6 (migrate the 12 currently-`blocked` items, not just future parks) is the limb that decides whether the 41% moves at all. Strike 2 is due at the next ROC retro whether or not the item has landed. |
+| EXP-ROC-001 | v145 (2026-08-20, ROC) — RENAMED from the colliding `## EXP-142` section registered 2026-08-18 from `DEF-ROC-057`/`DEF-ROC-058`; the section is archived, the hypothesis is unchanged | `.claude/agents/ui-designer.md` + the `ui-design-system` skill — screen-level acceptance at a SHORT viewport | **Problem:** a human opened ROC's Config screen and reported bad contrast plus a button reachable only by scrolling an inner panel — while the project's own gate (`@axe-core/playwright`, `wcag2a`/`wcag2aa`/`wcag21aa`) returned **0 violations at four viewports**. The apparatus is real and ran; it evaluates ELEMENTS against thresholds and never asks whether the SCREEN works, so 363px of inner overflow with no page-level scrollbar and a clipped PRIORITY column are invisible to it. **Solution:** a screen is accepted as a SCREEN — at a short viewport, with the whole layout in scope (space allocation, inner-overflow reachability, column clipping), not only as a set of conformant elements. | **change failure rate** (secondary: MTTR on UI defects) | at least one layout-class defect caught pre-delivery inside the horizon; human-reported UI defects of the "it passed the gate and is still bad" class fall to zero | next 3 UI-bearing use-cases | active (0/3) | **Why it is an experiment and not a fix:** it could easily come back negative — the new acceptance may just add viewport permutations and catch nothing a human would have reported (the coverage-theatre trap). Score it on defects CAUGHT, never on checks ADDED. Non-vacuity: the founding screen (`DEF-ROC-057`) must fail the new acceptance when re-run against its pre-fix state. |
+| EXP-ROC-002 | v145 (2026-08-20, ROC) — PROMOTED from the archived `## EXP-136`/`139`/`140` sections (ten instances accreted over three weeks with no row) | `process/machinery/state-graphs.json` + `.claude/skills/work-items/scripts/work-items.py` — firing rights derived from the item's DECLARED OWNER. **REGISTERED, not shipped in this retro** (§17f.7): item `OI-ROC-006`. | **Problem:** per-transition agent allowlists encode an assumption that a transition has ONE rightful owner. Measured **ten occasions across six roles** (documenter on docs-only work; cicd on an infra-owned defect; tester on verification-only; engineer on an ORDINARY use-case; solution-architect on an architecture-only fix; ui-designer, which appears on NO edge of the defect graph at all, unable to record that it reproduced a UI defect). Each was patched by widening a list, and the tenth arrived *inside* the experiment built to stop UI defects escaping to humans. Agents either STALL or append under a role they are not — and a spoofed `AGENT=` corrupts the `by_owner` attribution the retro uses to NAME the constraint. **Solution:** stop extending allowlists; derive "who may fire this" from the item's own declared owner and let the state graph constrain transition SHAPE only. | **gross lead time** — the blocked/wip component — with the count of role-spoofed or blocked transitions per 20 items as the leading indicator (10 known across the last ~60 items) | the class DISAPPEARS rather than shrinking; if instances continue after the change, the mechanism is wrong and this row dies rather than getting an eleventh patch | next 20 items | active (0/3) | **How this could be wrong (carried over from the archived section):** if any one of the ten was really a role doing work that was NOT its own, the answer is a narrower fix, not a replacement — check that first. **Do NOT score it as "those transitions now work."** Score it as: did an agent doing legitimate work get blocked, or have to spoof a role, again? |
+| EXP-142 | v142 (2026-08-18, OagEventSource) — process §17d.5 + tool | `.claude/tools/test-requirement-gate.js`, `.claude/tools/test-requirement-gate.test.js` | **Problem:** the shrink-only ratchet only ever shrank when a human remembered to shrink it, so the committed floor is a HIGH-WATER MARK THAT DRIFTS. Measured: the limb-1 floor was hand-lowered 1755 -> 1749 at 10:30:34 on 2026-08-14; two commits at 11:50 and 12:16 the same morning took the true count to 1811, and it went unseen for THREE DAYS because the drift's only observer is the next gate run (a system outage removed the session that would have run it). Over the softening's whole two-week life the count ended HIGHER than it started (1795 -> 1811) while the floor recorded a win. **Solution:** every PASSING gate run whose observed count is strictly below the committed floor rewrites the floor DOWN automatically and says so; raising stays manual and reviewed (`--write-baseline --allow-baseline-growth`); a FAILING run tightens nothing; `--no-auto-tighten` for scratch/set-diff runs. | **change failure rate** — a test that cannot validate a requirement is caught at the commit that lands it rather than N days later, so the escape window shrinks. Secondary: **lead time** (the gate blocks pulls, so a stale-floor regression stalls the whole loop, as it did for 3 days here). | the committed floor falls without human action and never rises; the interval between a violation landing and the gate going red collapses to the next run rather than the next time somebody remembers to re-baseline. | 3 retros | active (0/3) | **Measurement, and it CAN come back negative:** at each retro record (a) how many times the floor moved DOWN automatically since the last retro and by how much, and (b) the max observed latency between a limb-1/limb-2 violation landing on trunk and a gate run reporting it. **NEGATIVE** if the floor never moves automatically (the auto-tighten is inert because runs are never green — meaning the ratchet is simply always red, which is a different failure needing a different fix), or if latency does NOT fall, or if agents start passing `--no-auto-tighten` habitually to avoid committing a config change (watch for it — that would be §17e.2 softening by the back door and KILLS this row). **NON-VACUITY PROVEN AT LANDING, not asserted:** 5 committed self-tests drive the REAL CLI through `child_process` (stubbing the writer would be the exec-boundary fault this very gate exists to catch); they assert it fires below-floor, does NOT fire at-floor, tightens NOTHING on a red run and never raises, is suppressed by `--no-auto-tighten`, and that `--json` stays a pure read. `make test-tools` 170/170 green. |
 | EXP-135 | v140 (2026-08-13, OagEventSource, gap-closing retro on DEFECT-OAG-107/110) | process-current.md §17h + item `OI-EXCLUSION-WITHOUT-AUTHORITY-READS-AS-HEALTHY` (owner solution-architect + engineer) — the GATE is registered, not shipped in this retro, per §17f.7 | **Problem:** unscheduled and GA flights have NEVER reached consumers — **29.8%/31.2% of SRQ's real traffic**, 7.2%/7.9% at TPA, 5.1%/5.8% at RSW, across **57 ICAO-only carriers plus 21 IATA-holding ones** (AA, DL, UA, WN, BA, FX, 5X). Nobody decided this: when finally asked the owner ruled in one sentence that they must come through. MECHANISM: a record with no `scheduleInstanceKey` cannot form a stream (that key IS our stream identity), which is defensible — **the defect is what we CALLED it.** Four source sites name the excluded population a *"benign GA/Unscheduled degenerate sample"* and `normalise-rest.ts:11` sources the exclusion to *"probe §E — out of scope"*. Two moves and both are the failure: (1) a PROBE's scope note ("I am not looking at these right now") was frozen into production as a PRODUCT decision about what customers receive; (2) **"benign" is a HEALTH VERDICT on a population nobody had authority to exclude**, so the skip counter counts up forever and NOTHING CAN EVER GO RED — the instrument that would have found this was built, wired, and pre-declared as reporting good news. WHY NO GATE CAUGHT IT: *which population of the source we admit* is a CONTRACT decision, the identical class as `AC-110.3` (stream identity for a keyless record) which this same defect correctly routes to the solution-architect and FORBIDS an engineer to author — **we had the rule for the KEY and not for the POPULATION**, though both decide what a consumer receives. The tester could not have caught it: validation exercises what ARRIVES, and nothing compares what we admitted against what the source HOLDS. **THE SHARPEST EVIDENCE — we already stood on this exact spot.** `DEFECT-OAG-055` went to THIS counter in THIS file and wrote *"a diversion recovery hiding inside a counter that reads '8 GA records skipped' is the silent-suppression family this project has been bitten by repeatedly"* — it NAMED the family, then split irregular-ops out of the benign count and STOPPED, leaving the *"benign"* verdict standing over the rest of the bucket. The label survived the one review that recognised it as dangerous. That is exactly §17g's generalisation-sweep miss, and **§17g was introduced at v138, AFTER 055** — so this is a PRE-§17g instance surfacing after the remedy existed, which is why the remedy here is a GATE and not another rule telling agents to generalise. **Solution:** §17h, two limbs. (i) **An exclusion of a population from the domain is a CONTRACT decision owned by the solution-architect.** A counted skip, an early return or a `continue` on a population predicate must carry a machine-checkable reference to the item or ruling that AUTHORISED it; an exclusion with no authority is a **FINDING**, not a sample. (ii) **A counter may not pre-judge its own population healthy.** `benign`/`degenerate`/`expected`/`out of scope` as the STANDING description of a counted population is banned — the counter states the population and its measured SIZE, and something must be able to go red. Mechanised in the shape `test-requirement-gate` already proves works on this repo (tag-or-justify, ratchet that may only shrink). | **change failure rate** — a silent exclusion is a change that delivered less than it claimed with nothing able to detect it. Secondarily MTTR, since an authority reference turns "why is this dropped?" from an investigation into a lookup. | at each of the next 3 retros. **Baseline measured 2026-08-13:** 7 `benign`/`degenerate sample` sites in real source (`src/app/src`, `src/fids-app/src`, excluding `dist/`, `node_modules/` and tests); **0 counted exclusions carry an authority reference**; 1 excluded population of measured size (5–31% by airport) shipped undetected for months. **POSITIVE** if every counted exclusion carries an authority ref, the unauthorised count reaches 0 and CFR falls or holds. **NEGATIVE — KILL the row, do not re-tune — if any of:** the gate is satisfied by mass-annotating existing skips with a back-dated authority (that is EXP-124's coverage-theatre and it is the realistic failure mode here, so the audit is *did any exclusion get REMOVED or RULED, or were they all merely labelled*); OR CFR does not move after 3 retros, meaning authorship was never the mechanism; OR — **and this one is the honest risk** — the gate converts exclusions into `open` findings faster than they are ruled, pushing the standing constraint (`open` **51.25%** of GLT, median **6.9d/item**, n=81, 0% backfill) further the WRONG way. That last is a real tension with EXP-131 and must be checked FIRST at every scoring, because this row manufactures exactly the inventory that row exists to cap. | 3 retros | active (0/3) | applies-to: any project whose ingest, adapter or projection layer DROPS records on a predicate — i.e. every event-sourced feed. ROC's PPSM ingest and AdixOut's AIDX flightleg filter both qualify and neither has been checked. **NOT shipped in this retro, deliberately and per §17f.7:** an engineer holds `src/app` exclusively fixing a red trunk (`DEFECT-OAG-114`) and a second writer would collide on the shared working tree (`OI-SRC-APP-WORK-IS-SERIALISED-TO-ONE`), so the change is REGISTERED as an item with a named owner and an acceptance condition rather than written as prose in this changelog — which is the eighth-prose-only-remedy failure §17f.7 was written against. Opened cap-neutral: **EXP-123 ADOPTED and archived this retro** (its `loop-gate` mechanism is live and load-bearing — it BLOCKED this very pull with 4 violations and named the remedy for each, which is the adoption case exactly); registry stays at **8 active, AT cap**. |
 | EXP-132 | v136 (2026-08-07, OagEventSource) | `.claude/skills/work-items/scripts/work-items.py` (`parts-check` + constraint marker on `retro-mark`) + `Makefile` (`make parts-check`) + process-current.md §F8b | **Problem:** two standing rules CONTRADICTED and the contradiction consumed the session's delivery budget. §F8 never batches an INCIDENT so a defect resolve trips a FULL retro immediately; `/loop-run` step 5a says a STABLE constraint must not pay full-retro overhead. MEASURED: the v135 retro closed at **13:17:51Z** and DEFECT-OAG-060's resolve re-armed the gate at **13:23:43Z** - six minutes later on an UNCHANGED constraint (`queue` 59.71% / `open` 42.2%). With ~15 defects the owner had just asked to clear that pair spends the session on retros re-deriving one answer. The orchestrator escalated to the owner rather than resolving it silently because the alternative was softening a gate on its own authority - the §17e / EXP-125 failure already on this project's record. **Solution:** owner ruling 2026-08-07 - parts-check per resolve escalate on SHIFT - implemented as MACHINERY not permission. `make parts-check` reads the constraint from the derived `views/stats.json` compares it to the constraint recorded at the last close and drains the INCIDENT arm ONLY when provably unchanged. Escalates exit 2 on: SHIFTED (names the move and leaves the marker untouched so an escalation can never drain debt) / UNREADABLE (an instrument that cannot be read is not evidence of stability) / NO PRIOR RECORD / ROUTINE debt at threshold. `retro-mark` now records the constraint too so the paths cannot drift. Inherits §17f.6 - an owner or state whose backfill share exceeds 50% is never named the constraint or parts-check could confirm a phantom. THE MACHINERY DECIDES NOT THE ORCHESTRATOR which is what separates this from a softening. | lead time for changes (median) - defect throughput stops being consumed by retro overhead | over the next 3 sessions: **POSITIVE** if defects resolved per session RISES with CFR flat-or-better and every constraint SHIFT is still caught by a full retro. **NEGATIVE - and this row must be KILLED not re-tuned - if any of:** a constraint shift is MISSED (audit: compare the constraint at each parts-check against the next full retro's finding - a shift that parts-check passed through is a straight failure); CFR or MTTR worsen because real learning went uncaptured; or parts-check is ever observed draining debt on a shifted / unreadable constraint. Baseline: trailing-30d median lead time **12430s**; defect arrivals 36 in 30d against 38 all-time. | 3 sessions | active (0/3) | applies-to: every project whose §F8 incident arm fires faster than a retro can pay for itself - i.e. any project working a defect backlog. Verified live at landing: escalated correctly with NO prior record (fail-closed), then drained DEFECT-OAG-060 only once the marker carried v135's own measured constraint. 221 unit tests green (+6 new, **5 of which assert REFUSAL rather than success** - the property under test is that the cheap path is unavailable unless stability is proven); NON-VACUITY PROVEN per EXP-122 limb (ii) by disabling the stability control - the shifted-constraint test fails with a witness. Honest risk: parts-check makes the constraint marker load-bearing, so a `wi-project` that silently fails leaves a stale constraint - which is why UNREADABLE escalates rather than passing. Opened cap-neutral: EXP-121 ADOPTED and archived this retro; registry stays at **8 active, AT cap**. |
 | EXP-131 | v135 (2026-08-07, OagEventSource) | `.claude/skills/work-items/scripts/work-items.py` (`loop-gate` check 4 `aged-backlog-undecided` + `--max-backlog-age-days` + `defer_until:`) + process-current.md §12d.1 | **Problem:** the constraint has not moved for THREE consecutive retros because the system MANUFACTURES findings and RETIRES none. Measured 2026-08-07: state `open` = **42.18% of measured GLT**, median **326331s (3.8d)/item**, n=54, **backfill 0.00%** (so not an instrument artifact) — against 42.09% at v134 and 39.73% at v132. By owner `queue` = **59.69%** (median 240945s = 2.8d, n=115). Intake holds **65 items, median age 2.2d, oldest 8.0d**; defect arrivals are **36 trailing-30d of 38 all-time**, i.e. discovery outruns retirement structurally. WHY-CHAIN: every gate/census/probe/agent-read opens an OI row -> the loop pulls only from `ready` and nothing promotes or retires an OI -> the one signal that MEASURES this (loop-gate's intake check) is deliberately ADVISORY (v126, correct: blocking on DEPTH inverts the constraint) and has NO CONSUMER, printing depth and age every cycle with nothing obliged to answer -> retiring a finding needs an explicit decision and there was no cheap mechanised path for one, so every OI is implicitly "someone will do this". THIRD recurrence of EXP-123's pattern: documented obligations are skipped, mechanised ones are honoured. **Solution:** `loop-gate` BLOCKS when a BACKLOG-kind queue holds an item older than `--max-backlog-age-days` (default 7) carrying no in-date `defer_until:`. Blocks on AGE-WITHOUT-A-DECISION, never on depth — check 3 stays advisory, so v126's Little's-Law ruling is intact. This REFINES §F8a's "a gate blocks only on harm that stopping relieves": the harm relieved is undated inventory aging invisibly, and the gate is cleared by a DECISION (one line, seconds) rather than by delivery, so the loop is never held hostage to throughput. Three load-bearing properties: the cheapest path to green is a dated defer NEVER a close (a gate whose easiest remedy were "close it" would manufacture pressure to close real findings, which §F8a bans — the remedy text says so explicitly); a defer EXPIRES and re-blocks (EXP-130's shelf-life lesson applied to inventory); an unparseable date FAILS CLOSED so a typo cannot silence the gate. | lead time for changes (median) — secondarily the `open` share of GLT | at each of the next 3 retros: trailing-30d median lead time is **12430s** at open and `open` is **42.18%** of measured GLT with median **3.8d/item**. **POSITIVE** if `open`'s median/item FALLS and median lead time falls or holds. **NEGATIVE — and the row must be KILLED not re-tuned — if any of:** CFR rises; findings are CLOSED rather than deferred to clear the gate (audit: count `cancelled`/`closed` open-items whose closing event cites no verified resolution); defers are extended reflexively rather than re-decided (audit: any item whose `defer_until` has been pushed forward twice with no intervening work); or `open`'s median/item is flat-or-worse after 3 retros, which would mean a decision gate was never the mechanism. | 3 retros | active (0/3) | applies-to: every project whose findings are generated faster than they are retired — i.e. any project with committed gates, a census, or probes. The 7d default is a GUESS, exactly as `--stale-hours` was, and is the first knob to tune from the measured age distribution (median 2.2d / oldest 8.0d here). Verified on the real project at landing: names **4 items of 65** (`OI-CHUNKS-STALE-REF` 8.0d, `OI-CFG-ENDPOINT-DERIVE` 7.9d, `OI-FIDS-INTEGRATION-TIMEOUT` 7.8d, `OI-E2E-TYPECHECK-GAP` 7.1d) — the aged tail, not the backlog, which is the proportionality the design intends. 215 unit tests green (+6 new); **NON-VACUITY PROVEN** per EXP-122 limb (ii) by disabling the control — 3 of the 6 new tests fail with one witness each. ToC placement: this is the EXPLOIT move. SUBORDINATE is NAMED BUT NOT BUILT (an OI should carry schedule-or-defer AT CREATION, capping the generator rather than filtering downstream) and is the next move if this holds; ELEVATE (raise `N`) is explicitly NOT taken while exploit and subordinate are untried. Opened cap-neutral: EXP-122 ADOPTED and archived this retro (mechanism live, observed firing 3x in one gate run); registry stays at **8 active, AT cap**. |
@@ -744,619 +774,23 @@ have not used real events to demonstrate that things work."* Recorded unsoftened
 
 ---
 
-## ID RE-ALLOCATION — 2026-08-14 (ROC), read before citing any ID below
-
-The sections that follow were originally numbered **EXP-119 … EXP-124** by the ROC instance while it
-was **22 process versions stale** (v118 against main's v140) and 15 days un-reconciled. Those six IDs
-were **already allocated on `main` to OagEventSource experiments**, since adopted/retired at OAG v125.
-They have been **renumbered to EXP-136 … EXP-141**, above main's high-water mark of EXP-135. Content is
-unchanged; only the identifiers moved. Any earlier ROC commit message citing EXP-119..124 refers to
-these sections under their old numbers.
-
-**Two structural problems this exposed, neither of which is fixed by renumbering:**
-
-1. **There is no cross-instance ID allocator.** Each instance mints the next ID from whatever registry
-   its own branch happens to hold, so any instance running on a stale base will collide. Renumbering is
-   a repair, not a fix — the next divergence reproduces it.
-2. **The hard cap of 8 `active` rows is a GLOBAL budget, but rows are allocated PER-INSTANCE.** Main
-   arrived at exactly 8. ROC's genuine experiments below would take it past the cap — and ROC cannot
-   honestly score OagEventSource's rows to make room, because it has neither the evidence nor the
-   standing to adopt-or-kill another project's work. **So the cap is breached, deliberately and
-   visibly, rather than resolved by killing rows I cannot fairly judge.** Recorded here instead of
-   silently exceeded. The cap needs either a per-instance allowance or a cross-instance scoring owner.
-
-Also note a **format divergence**: main's registry is a table (`| EXP-NNN | … |`); these ROC sections
-are `##` prose blocks. They merged without conflict precisely because they do not overlap textually —
-which means the merge cleanliness was luck, not compatibility.
-## EXP-136 — a `documenter` can advance its own docs-only work item
-**Registered:** 2026-07-31 (ROC) · **Status:** OPEN · **Applies-to:** any project with a
-docs-only or runbook-bearing use-case.
-
-**The gap.** `documenter` appeared **zero times** in
-`process/machinery/state-graphs.json`. `built_green` was restricted to `engineer`, so a
-docs-only use-case could not be advanced by the agent that actually built it. On ROC's
-`UC-ROC-082` (the SSO-outage runbook, a tracked acceptance condition of a signed-off
-requirement) the documenter had to append under the `engineer` slot and record the
-attribution truth in the note — an honest workaround, but the event log now misattributes
-who did the work, which is exactly the property the event-sourced model exists to get right.
-It then stranded the item in `deploying`, whose only forward event is `deployed (cicd)` —
-a dead end for an item with no runtime artifact to deploy.
-
-**Amendment made.** `documenter` added to the `agents` list of the `use-case` transitions
-`built_green` (building → deploying) and `deployed` (deploying → dev-validating). Minimal
-and additive: no new state, no new event, no change to any existing agent's rights.
-
-**Why not a separate docs-only path?** A new state or a `deploying`-skipping edge is the
-tempting design, but docs DO ship — via commit and push to trunk — so `deployed` is
-semantically honest for them rather than a fiction, and it keeps one graph instead of two.
-Revisit only if a docs item genuinely needs a different validation shape from a code item.
-
-**Target metric:** gross lead time — specifically the queue/blocked component. The failure
-mode this removes is an item sitting in a dead-end state until a human notices and
-hand-resolves it, which is pure blocked time attributable to the machinery rather than the
-work.
-
-**Anticipated effect:** docs-bearing use-cases flow to `dev-validating` without
-orchestrator intervention, and the event log attributes doc work to `documenter` instead of
-to `engineer`. Also expected: honest `time_by_owner` for documenters, which today reads as
-zero because they cannot own a transition.
-
-**Scoring horizon:** the next three docs-bearing use-cases across any project. Score as
-positive if each advanced without an orchestrator unblock and without an agent appending
-under a role it does not hold.
-
-**How it could be wrong.** If `deployed` for a docs item turns out to mislead a reader into
-thinking a runtime deployment occurred, the fix is a distinct docs path, not reverting this.
-Watch for that in the retro rather than assuming the semantic holds.
-
-### Follow-up 2026-07-31 — the documenter's own assessment, and a correction to it
-
-The documenter that hit this gap was asked to judge whether `deployed` would mislead a
-future reader. Its answer was better than the question: the risk is **not in prose** — a
-human reading the item cannot be misled, because the note's first clause states there is no
-runtime artifact — but in **derived metrics and incident correlation**. It also argued,
-correctly, that `deploying` was the genuinely dishonest state (a no-op) while `deployed` is
-substantively true for a runbook, since the artifact reaches its reader the instant it is on
-trunk. It recommended keeping the graph as amended and guarding the derivation instead,
-noting that the amendment made this possible by keeping the `agent` field an honest
-discriminator (`documenter` vs `cicd`) rather than filing doc work under `cicd`.
-
-**Correction — its proposed guard rested on a premise that does not hold.** It proposed
-excluding `deployed` events whose agent is `documenter` from the deployment-frequency and
-change-failure-rate derivations. I checked `_compute_dora` in
-`.claude/skills/work-items/scripts/work-items.py` before implementing that, and
-**deployment frequency does not count `deployed` events at all**: it counts each item's
-TERMINAL event (`validated` / `closed` / `deploy`, falling back to
-`not_reproduced` / `declined`) per active day (`work-items.py:1180-1188`). So filtering on
-the `deployed` agent would have changed nothing, and implementing it would have added dead
-code plus a false sense that a risk had been closed.
-
-**What survives the correction:**
-- **Concern 1 (frequency inflation) partially stands, by a different route.** A docs-only
-  item still reaches `validated`/`done` and so still increments the terminal count. Whether
-  that is *wrong* is genuinely arguable — a delivered runbook IS delivered work — so this is
-  a question for the retro, not a bug to patch. What is NOT true is that it inflates via a
-  `deployed`-event count.
-- **Concern 2 (incident correlation) stands unchanged and needs no code.** Someone asking
-  "what deployed just before this incident?" can find a docs `deployed` event in the window
-  and waste time on a markdown commit. The mitigation is exactly the honest `agent` field
-  this amendment preserved — a one-predicate filter for whoever writes that query.
-
-**Watch in the retro:** whether docs-only items materially move the terminal-event count,
-and whether anyone doing incident correlation is actually misled in practice. Do NOT
-pre-emptively filter the derivation on the strength of the original reasoning — the
-mechanism was misidentified, and the honest `agent` discriminator is already in place for
-whoever needs it.
-
-## EXP-137 — atomic pathspec commits in a shared working tree
-**Registered:** 2026-07-31 (ROC) · **Status:** OPEN · **Applies-to:** any project where
-more than one agent works concurrently in ONE working tree (i.e. the normal case today —
-agents share a worktree; only *projects* get separate worktrees).
-
-**The gap.** Every agent was instructed to commit as
-`git -C work/<p> add <paths> && git -C work/<p> commit -m "…"`. The git **index is shared**
-across concurrent agents in one working tree, so a co-worker's `git add` landing between
-your `add` and your `commit` sweeps their staged work into your commit. Observed **twice on
-2026-07-31**: the cicd agent recording deploy events accidentally committed 25 files of
-another engineer's in-flight UC-ROC-084 work (`91f0404`), and on the retry the same
-engineer's own commit (`c67e588`) picked up cicd's three item files. Nothing was lost either
-time — both agents noticed and repaired non-destructively — but attribution is now wrong in
-the history, and it cost two agents real time to detect and unwind.
-
-**Change made.** `CLAUDE.md` now instructs `git -C work/<p> commit -m "…" -- <paths>`
-(atomic, pathspec form) and explains why: the pathspec form takes content from the WORKING
-TREE and never consults the shared index, so the race window does not exist. It also records
-the non-destructive repair (`reset --soft HEAD~1` → `reset HEAD -- .` → re-add own paths)
-and the rule not to rewrite a commit another agent has built on.
-
-**Why not a lock.** A mutex around git writes was the other candidate. Rejected as the
-first move: it adds a coordination mechanism (and a deadlock/staleness failure mode) to
-solve a problem that a different command form eliminates outright. Revisit only if the
-pathspec form proves insufficient — e.g. if agents need multi-step staging that genuinely
-cannot be expressed as one pathspec commit.
-
-**Note this was ALREADY the emergent practice.** Several engineers independently arrived at
-"explicit pathspec, never `git add` sweep" and said so in their reports; one even recommended
-this exact form in a commit message. The gap was that the instruction told them otherwise, so
-the safe behaviour depended on individual diligence rather than the documented default.
-
-**Target metric:** change failure rate, and gross lead time's rework component —
-mis-attributed commits produce false blame during later diagnosis and cost detection time.
-
-**Anticipated effect:** zero further cross-agent index sweeps. Watch for the opposite
-failure too: an agent that needed staged-but-uncommitted state and finds the pathspec form
-awkward.
-
-**Scoring horizon:** the next multi-agent cycle with 4+ concurrent agents in one tree. Score
-positive if no sweep occurs and no agent reports the form as blocking.
-
-### Third occurrence, found after registering this — and it BROKE CI
-
-A third sweep surfaced the same day, and unlike the first two it was not merely an
-attribution problem: commit **`f624dff`** — a `UC-ROC-082` *item/docs* commit — swept an
-unrelated **in-flight file move** (`src/app/local/evaluateApi.ts` →
-`src/app/src/api/evaluateApi.ts`) onto trunk **ahead of its importer updates**. The runner
-then failed with `ENOENT` on the old path, turning CI red over `9928840`. It self-cleared on
-the next run (`25123f9`, success) once the importers landed.
-
-**This is the cost case the first two occurrences did not demonstrate.** A swept *content*
-change is bad attribution; a swept *refactor mid-flight* is a broken build on trunk. And it
-landed via a **docs-only commit**, from an agent that touched no source at all — so no
-amount of care about one's own files prevents it. That is what makes the two-step form
-unsafe rather than merely untidy: the hazard is not proportional to what you are committing.
-
-Note also how it was diagnosed: the engineer who hit the red CI stood up a **clean detached
-worktree at HEAD without their change** and reproduced the failure there, rather than
-assuming it was or was not theirs. Worth reinforcing — that technique separated three
-distinct pre-existing failures from their own work in one pass.
-
-**Deliberately NOT registered as a defect.** The root cause is this experiment's subject and
-is already fixed in `CLAUDE.md`; the symptom self-resolved on the following run; and the
-broken state no longer exists on trunk. A defect record would inflate the count without
-adding a fix or a fact. Recorded here as evidence instead — if a fourth sweep occurs AFTER
-the atomic-pathspec instruction is in place, that is a different finding and does warrant its
-own defect, because it would mean the instruction is not being followed or is insufficient.
-
-### FOURTH occurrence — and it proves this amendment is INSUFFICIENT, not unfollowed
-
-A fourth sweep happened on 2026-08-03, **with both agents correctly using the atomic
-pathspec form**. `DEF-ROC-016`'s commit `883ebd8` swept ~112 lines of `DEF-ROC-019`'s
-then-uncommitted edits to `architecture/dependencies/class-deps.mmd`. Nothing was lost — all
-the DEF-ROC-019 model nodes/edges are on trunk — but they are attributed to the wrong commit,
-and only one line rode in the correct one.
-
-**So my framing above was wrong, and this correction matters more than the original
-experiment.** I wrote that the pathspec form "takes its content from the working tree and
-never consults the shared index, so the window does not exist." The first half is true and
-the second half does **not** follow. Taking content from the working tree is *precisely* the
-problem for a **CO-OWNED file**: if another agent has uncommitted hunks in a path you name in
-your pathspec, you commit THEIR hunks along with yours, deterministically and with no race
-window at all. The atomic form eliminates the *index* race for disjoint files; it gives no
-protection whatsoever where two agents legitimately edit the same file.
-
-`class-deps.mmd` is exactly that file — the change-impact model every engineer is required to
-update in the same commit as their code. So the process actively directs concurrent agents
-into a shared path and then offers them a rule that does not cover it.
-
-**Candidate fixes, none yet chosen** (deliberately not decided unilaterally — this needs a
-judgement about how much machinery is warranted):
-1. **Split the diagram** so each item's claims live in a separate file that is later composed.
-   Removes co-ownership at the cost of a build/compose step.
-2. **Per-hunk staging** (`git hash-object -w` + `git update-index --cacheinfo`, which one
-   engineer already used successfully). Precise, but needs allowlist additions and is easy to
-   get wrong under time pressure.
-3. **Serialise model updates** — the model edit becomes a follow-up commit, accepting that it
-   is briefly out of step with the code it describes. Cheapest, and weakens the
-   same-commit guarantee the model relies on.
-4. **Accept mis-attribution on co-owned files** and note it in commit messages. Honest, zero
-   machinery, loses per-item traceability of model changes.
-
-Note one engineer already worked around this correctly and unprompted (building a mine-only
-blob and `update-index`-ing it), and another **waited** for the co-owner to commit before
-landing its own hunk. Both are evidence the problem is real and that agents can handle it —
-but both were individual diligence, which is what this experiment set out to replace with a
-documented default.
-
-**Revised scoring:** score EXP-137 positive for disjoint-file commits only. Co-owned-file
-mis-attribution is a SEPARATE open problem and should not be counted against or in favour of
-the atomic-pathspec rule.
-
-## EXP-138 — `prod-deploying` needs a `blocked` exit for single-environment projects
-**Registered:** 2026-07-31 (ROC) · **Status:** OPEN · **Applies-to:** any project that has no
-production environment yet, or whose prod promotion is externally blocked.
-
-**The gap.** `prod-deploying` was the ONLY wip state in the `use-case` graph with **no
-`blocked` exit** — `ready`, `building`, `deploying`, `dev-validating` and `prod-validating`
-all had one. Its only exits were `promoted` (cicd → prod-validating) and `deploy_failed`
-(cicd → reworking). That reads as an oversight rather than a design choice.
-
-**How it bit.** ROC has **no production environment**: its Terraform has never been applied,
-`deploy-ROC.yml` deploys only to `aas-test`, and no prod Function App exists. A tester
-validating `UC-ROC-084` fired `dev_validated` (dev-validating → prod-deploying) — a
-perfectly legal event — and the item stranded. Both remaining exits would have required
-asserting something false: `promoted` claims a prod deploy that cannot have happened, and
-`deploy_failed` claims a failure when nothing failed. The honest state ("waiting on a prod
-environment that does not exist") was inexpressible.
-
-Note the trap is not the tester's error. `dev-validating` offers BOTH `validated` (→ done,
-the correct path for a single-environment project) and `dev_validated` (→ prod-deploying).
-Nothing in the graph signals which applies, and the more specific-sounding name is the wrong
-one here. Every earlier ROC use-case happened to take `validated`.
-
-**Amendment made.** Added `{"from": "prod-deploying", "to": "blocked", "event": "blocked",
-"agents": ["flow-manager", "orchestrator"]}` — consistent with the five states that already
-have it. Minimal and additive: no new state, no new event name, no existing agent's rights
-changed, and it makes the honest state expressible.
-
-**Why not remove `dev_validated`, or auto-route single-env projects to `done`?** Both were
-tempting and both are wrong for now. Removing it breaks projects that genuinely promote to
-prod. Auto-routing would need the machinery to know whether a project has a prod
-environment, which it currently has no way to know and which would be a much larger change
-than the problem justifies. A `blocked` exit costs one line and keeps the fact visible in the
-queue rather than hiding it.
-
-**Guidance that goes with it (the recurrence fix):** in a project with no prod environment,
-the tester's terminal event from `dev-validating` is **`validated`**, not `dev_validated`.
-`dev_validated` is only correct when a prod promotion will actually follow.
-
-**Target metric:** gross lead time — the blocked component. A stranded item accrues wip time
-invisibly and needs a human to notice, which is precisely the failure EXP-136 addressed in a
-different corner of the same graph.
-
-**Anticipated effect:** no item strands in `prod-deploying`; a genuinely unavailable prod
-environment shows up in the `waiting` queue where the flow view can see it.
-
-**Scoring horizon:** the next three use-cases reaching `dev-validating` on a project without
-prod. Score positive if none strand and none are advanced by an event that asserts something
-untrue.
-
-**How it could be wrong.** If items start routinely sitting `blocked` in `prod-deploying`
-rather than being closed via `validated`, the guidance is not landing and the real fix is
-making the graph itself aware of whether a prod environment exists. Watch for that.
-
-## EXP-139 — a `cicd` agent can advance an infra-owned defect
-**Registered:** 2026-08-04 (ROC) · **Status:** OPEN · **Applies-to:** any defect whose fix is
-infrastructure, pipeline or deploy-configuration rather than application code.
-
-**The gap.** The `defect` graph restricted `confirmed` (reproducing → fixing) to
-`orchestrator`/`engineer` and `fixed` (fixing → validating) to `engineer` alone. But defects
-are not all code: `DEF-ROC-020` was a **shared-ownership infrastructure** defect — two
-uncoordinated writers to the same Azure Function App's `app_settings`, where a platform-infra
-service principal's apply erased the `BUILD_SHA` our pipeline stamps. It was dispatched to
-`cicd` deliberately, because the remedy is Terraform / workflow / a drift check / a cross-team
-ask, not application code. The machinery then refused every transition it needed, so it fired
-them as `AGENT=engineer` and said so in its report.
-
-That is the second instance of this exact shape (see **EXP-136**, where `documenter` appeared
-zero times in the graph and a docs-only use-case could not be advanced by its actual builder).
-Both times the agent behaved correctly — attributed honestly in the note and escalated rather
-than hand-editing state — and both times the event log ended up naming the wrong role, which
-is precisely the property an event-sourced model exists to get right. It also skews
-`time_by_owner`: infra work is billed to `engineer` and `cicd` reads as idle.
-
-**Amendment made.** `cicd` added to the `agents` list of the `defect` transitions `confirmed`
-and `fixed`. Minimal and additive — no new state, no new event, no existing agent's rights
-changed.
-
-**Why only those two.** `validated` stays tester-only: cicd fixing its own defect and then
-validating it would collapse the gate that caught `DEF-ROC-013`'s misdiagnosis. And
-`not_reproduced` stays orchestrator-only, since declining a defect is a judgement call about
-scope rather than a technical step.
-
-**The pattern worth noticing, and the reason this is registered rather than just fixed:** the
-graph was written assuming defects are code and use-cases are built by engineers. Two agent
-roles have now hit that assumption from different directions within a week. The next one is
-probably `solution-architect` (an architecture-delta defect) or `product` (a
-requirement-framing defect). Rather than wait for a third instance, the retro should ask
-whether the per-transition agent allowlists are the right mechanism at all, or whether
-"who may fire this" should derive from the item's own declared owner.
-
-**Target metric:** gross lead time's blocked component, plus the integrity of
-`time_by_owner`. The concrete failure removed is an agent stalling on a legal-looking
-transition it may not fire, or firing it under a role it does not hold.
-
-**Anticipated effect:** infra-owned defects flow without an orchestrator unblock, and
-`time_by_owner` starts attributing infra work to `cicd`.
-
-**Scoring horizon:** the next three defects dispatched to a non-engineer role. Score positive
-if each advanced without an orchestrator intervention and without any agent appending under a
-role it does not hold.
-
-## EXP-140 — an aggregate can read `done` while signed-off scope was never registered
-**Registered:** 2026-08-05 (ROC) · **Status:** OPEN · **Applies-to:** every project using the
-event-sourced work-item model with aggregate types (requirement / chunk / slice).
-
-**The gap, found by accident.** `REQ-ROC-002` and `CHK-ROC-004` had bubbled to **`done`** — and
-were wrong. `SLC-ROC-006` was the only child ever turned into a work item, so when it finished,
-the aggregates folded to `done` by construction. But the signed-off dossier for that requirement
-contained further scope (the J20 pace-control / named-scenario replay work) that was
-**explicitly deferred, not descoped** — and because deferred-but-agreed scope was never
-registered as children, the model had no way to know it existed. The requirement therefore
-reported complete while part of what a human had signed off was untracked.
-
-Product found this only while looking for decomposable work behind a *different* closing chunk.
-Nothing surfaced it: `wi-validate` passes (I1–I4 all hold — the fold is internally consistent),
-the derived views are correct, and the tree looks healthy. **The invariant that is missing is
-not about consistency of the fold; it is about coverage of the dossier.**
-
-**Why this matters more than one requirement.** `done` on an aggregate is read by humans and by
-the metrics as "this value was delivered". If registration is the only thing that makes scope
-visible, then any scope agreed at sign-off but deferred to later is invisible the moment its
-registered siblings complete — and the gap grows silently with every deferral. This project has
-deferred scope at sign-off repeatedly and deliberately (connectivity statuses in REQ-ROC-006,
-multi-role RBAC in REQ-ROC-005, template creation in CHK-ROC-009), all of them legitimate
-decisions. Each is a candidate instance of the same trap.
-
-**Not yet fixed — the right mechanism needs a judgement I should not make alone.** Candidates:
-1. **A dossier-coverage check**: require every signed-off dossier to enumerate its scope items,
-   and refuse to let an aggregate fold to `done` while any enumerated item lacks a registered
-   child or an explicit descope record. Strongest, and the most machinery.
-2. **Register deferred scope immediately as `blocked`/`open-item` children** rather than leaving
-   it in prose. Cheap, keeps the tree honest, but inflates `waiting` with things nobody intends
-   to pull soon — and this project already has 14 items in `waiting`.
-3. **A `deferred_scope:` frontmatter field on aggregates**, checked at fold time, so `done`
-   requires it to be empty or explicitly waived.
-4. Accept it and rely on the retro to re-read dossiers before closing a requirement — no
-   machinery, relies on diligence, which is what failed here.
-
-**Target metric:** none of the four DORA metrics directly — this is a **truthfulness** defect in
-the delivery record, which corrupts every metric derived from it. The observable proxy: the
-number of aggregates that transition out of `done` after being found incomplete (this instance
-is one; `CHK-ROC-004`/`REQ-ROC-002` were flipped back to `in_progress` when the missing scope was
-registered as `SLC-ROC-025`).
-
-**Anticipated effect:** an aggregate reading `done` means the signed-off scope was delivered or
-explicitly descoped — not merely that its registered children finished.
-
-**Scoring horizon:** the next three requirements to close. Score positive if each was checked
-against its dossier before closing, and negative if any is later found to have had untracked
-signed-off scope.
-
-**How this could be wrong.** Option 1 could make deferral so expensive that agents stop
-recording it in the dossier at all, which would be worse — the prose record is currently the
-only reason this was findable. Whatever is chosen must keep deferral cheap to *state*.
-
-### Third instance — 2026-08-14, a verification-only use-case
-
-`UC-ROC-089` is a live-verification use-case whose entire deliverable is a probe script plus its
-execution. A **tester** authored the script, committed it, and ran it green — then could not fire
-`pulled` (orchestrator/flow-manager only) and, later in the chain, would face `built_green`
-(engineer-only) for a script it wrote itself. It reported the block rather than spoofing a role,
-which is the right behaviour and the same disposition the documenter and cicd agents showed.
-
-So the mismatch has now appeared **three times in three different shapes**: a docs-only item built
-by a documenter (EXP-136), an infra-owned defect fixed by cicd (EXP-139), and now a
-verification-only item whose deliverable is authored by a tester. Each was patched by widening one
-transition's agent list. That is three patches to the same underlying assumption — that item TYPE
-predicts which ROLE does the work — and the assumption is simply false for any item whose value is
-not application code.
-
-**This strengthens the open question already recorded above** rather than adding a new one: the
-retro should decide whether per-transition agent allowlists are the right mechanism at all, or
-whether "who may fire this" should derive from the item's own declared owner. A fourth patch would
-be evidence the mechanism is wrong, not that the list needs extending again.
-
----
-
-## EXP-141 — "dep satisfied" is undefined, so two flow-managers read it oppositely
-
-**Registered** 2026-08-14 (ROC). **Class:** flow rule with no written definition.
-
-### What happened
-
-Two `flow-manager` instances, **in the same session**, reached opposite conclusions about the same
-promotion rule — and both were acting in good faith.
-
-- The **earlier** instance established and applied a convention *three times*: a dependency counts
-  as satisfied once it is `built_green` **on trunk**, without waiting for its own
-  deploy/validate cycle. `UC-ROC-078`'s `made_ready` note states it explicitly — *"dep satisfied =
-  green on trunk not full deploy+validate"* — and cites `UC-ROC-076`/`079`, which in turn cite the
-  same basis against `UC-ROC-075`.
-- The **later** instance searched for that convention, **found no precedent**, and declined to
-  promote `UC-ROC-092` because its deps sat in `dev-validating` rather than `done`.
-
-Both were right about what they could see. The convention exists **only in event-log notes**, never
-in a rule; the later instance searched item *states*, where it is invisible by construction.
-
-### Why it was invisible — the actual gap
-
-Three places could have carried the definition and none does:
-
-| Where | What it says about dep-satisfaction for promotion |
+## ROC id re-allocation + the six row-less `##` sections — RETIRED at v145
+
+The `## ID RE-ALLOCATION` note and the six ROC-authored `##` finding sections that followed it
+(`EXP-136`/`137`/`138`/`139`/`140`/`141`, plus the ten-instance `EXP-140` continuation) are in
+`experiments-archive.md` **with their dispositions**. They were never registry rows, so the WIP cap
+never governed them and nothing ever scored them — the invisibility v144 recorded and v145 fixed
+structurally. Their live content did not vanish:
+
+| archived section | disposition at v145 |
 |---|---|
-| `process/process-current.md` §F2/F3/F6/F7 | describes DAG / independent-set mechanics — never defines what makes a dep *satisfied* |
-| `process/machinery/CONTRACT.md` | same: edges and folding, no promotion predicate |
-| the machinery (`wi-append` edge-check, `wi-validate` I1–I4) | **no invariant on dep state at `made_ready`** |
+| `EXP-136` + `EXP-139` + `EXP-140` (+ its ten-instance continuation) | **PROMOTED to a real row — `EXP-ROC-002`.** Ten measured instances across six roles, with a stated mechanism, and no row: exactly the accretion this registry exists to prevent. |
+| `EXP-137` (atomic pathspec commits) | **ADOPTED** — live in `CLAUDE.md` as plain practice, including the four limits found on 2026-08-14. A fix, not a hypothesis; it should never have held an id. |
+| `EXP-138` (`prod-deploying` needs a `blocked` exit) | **DEFERRED** to `open-items.md` (`OI-PROD-DEPLOYING-NO-BLOCKED-EXIT`, dated). A missing state-graph edge, off the current constraint, and ROC has no prod environment to strand an item in. |
+| `EXP-141` ("dep satisfied" is undefined) | **DEFERRED** to `open-items.md` (`OI-DEP-SATISFIED-UNDEFINED`, dated) — a contract definition owed to `flow-manager`, needing evidence this retro does not have. |
+| `EXP-142` (a screen is evaluated as a SCREEN) | **KEPT, renamed `EXP-ROC-001`** and given a real row. `EXP-142` is `main`'s authoritative allocation (the test-requirement-gate ratchet); ROC's section was the colliding half. |
 
-So promotion is pure flow-manager judgement, unconstrained by machinery and undocumented in
-process. That is why it diverged silently rather than failing loudly.
-
-### The experiment
-
-Pick ONE and write it down where a flow-manager will find it (§F6 + `CONTRACT.md`):
-
-1. **Codify the convention** — `built_green` on trunk satisfies a peer dep for promotion purposes.
-   Faster flow; accepts the risk that a dep is later rejected and its dependents rework.
-2. **Reject it** — require `done`. Zero rework risk; Ready starves more often, which is exactly the
-   floor breach observed this cycle (`ready=1` against `min_items=2`, with no legitimate promotion
-   available because `UC-ROC-092`'s deps were merely `dev-validating`).
-
-**Target metric:** rework count on promoted-early items, against Ready-floor breach frequency.
-Those are the two costs the choice trades between, so measuring only one would bias the answer.
-
-**Anticipated effect.** Option 1 raises throughput and should show near-zero rework *while the
-suite is trustworthy* — but the trust precondition is doing real work in that sentence, and
-`DEF-ROC-022` (an unexplained intermittent failure in the C1 walking-skeleton test) is live evidence
-the precondition is not currently met. Option 2 costs flow but cannot produce this class of rework.
-
-**Scoring horizon:** the next 10 promotions.
-
-**Applies-to predicate:** any project whose items carry `deps` edges — i.e. all of them.
-
-### How this could be wrong
-
-The divergence may be *desirable* discretion rather than a defect: a flow-manager weighing a
-specific dep's risk is doing judgement work a blanket rule would flatten. If so, the fix is not a
-rule but a **required note** — force the promoting agent to state which basis it used and why, so
-the next instance can find it in state rather than prose. That would keep the judgement and remove
-the invisibility, which is the part that actually caused harm here.
-
-**Do not score this as "the rule was written."** Score it as: did a later flow-manager, with no
-access to this session's context, reach the same promotion decision as the earlier one?
-
----
-
-## EXP-140 — FOURTH INSTANCE (2026-08-14): the trigger fired; the mechanism is wrong
-
-EXP-140 recorded, verbatim: *"A fourth patch would be evidence the mechanism is wrong, not that the
-list needs extending again."* **That fourth instance has now occurred. Recording the verdict rather
-than patching a fourth transition.**
-
-### The instance
-
-`UC-ROC-080`'s **engineer** performed its own pull and could not fire `pulled` — the state graph
-restricts that transition to `orchestrator`/`flow-manager`, while the engineer's own role brief
-tells it to fire `pulled` if it performs the pull. `built_green` is unreachable from `ready`, so the
-item was structurally stuck. The agent fired it as `AGENT=orchestrator` **with a note saying it had
-done so and why** — the honest workaround, and the fourth agent in a row to report the block rather
-than silently spoof a role.
-
-### The four instances, and what they share
-
-| # | Item shape | Role that did the work | Transition it could not fire |
-|---|---|---|---|
-| EXP-136 | docs-only | documenter | `built_green` / `deployed` |
-| EXP-139 | infra-owned defect | cicd | `confirmed` / `fixed` |
-| EXP-140 | verification-only | tester | `pulled`, then `built_green` |
-| **this** | ordinary use-case | **engineer** | **`pulled`** |
-
-The first three were explained away as "item TYPE does not predict the ROLE for unusual items." **This
-fourth one kills that explanation**: the item is an entirely ordinary use-case and the role is the
-canonical one for it. The mismatch is therefore **not** about unusual item types at all — it is that
-**per-transition agent allowlists encode an assumption that a transition has one rightful owner**,
-and that assumption is false wherever an agent legitimately does two jobs in sequence.
-
-Note also the *direct contradiction* this instance exposes: the engineer's role brief instructs it to
-fire `pulled`, and the graph forbids it. Two authored artefacts disagree — the same class as
-`DEF-ROC-026`, where four documents asserted a partition key the code never set. A rule that cannot
-be followed gets worked around, and every workaround costs a role-spoof or a note nobody reads.
-
-### The experiment — replace the mechanism, do not extend the list
-
-Derive "who may fire this" from the **item's own declared owner** rather than a per-transition
-allowlist: the item records who is doing the work, the machinery checks the firing agent against
-*that*, and the graph constrains only the **shape** of the transition (which states follow which).
-This keeps the property the allowlists were protecting — an agent cannot rubber-stamp its own work
-into a state it did not earn — while removing the false premise that a transition has exactly one
-rightful role forever.
-
-**Target metric:** count of role-spoofed or blocked transitions per 20 items (currently 4 known in
-~2 weeks, all self-reported — the true rate is a floor, not a measurement, since a silent spoof
-leaves no trace).
-
-**Anticipated effect:** the class disappears rather than shrinking. If instances continue after the
-change, the diagnosis here is wrong and the real problem is elsewhere.
-
-**Scoring horizon:** the next 20 items.
-
-**Applies-to predicate:** every project using the event-sourced work-item machinery.
-
-### How this could be wrong
-
-The allowlists may be catching real errors we never see, in which case removing them trades a visible
-annoyance for an invisible integrity loss. Before adopting, check whether any allowlist rejection in
-the history was a **genuine** mistake rather than a legitimate agent blocked by the mechanism. If
-even one was, the answer is a narrower fix, not a replacement.
-
-**Do not score this as "the four transitions now work."** Score it as: did an agent doing legitimate
-work get blocked or have to spoof a role again?
-
-### EXP-140 — instances five, six and seven, all on 2026-08-14: four different roles, one day
-
-Recording these together because the pattern is now beyond argument. On a single day, **four
-different roles** were blocked by or had to work around the per-transition agent allowlists:
-
-| Role | Transition | What happened |
-|---|---|---|
-| **engineer** | `pulled` (use-case) | Its own role brief tells it to fire `pulled`; the graph forbids it. Fired as `orchestrator` with a disclosing note. |
-| **tester** | `deployed` (use-case) | Item arrived in `deploying` with no cicd in the thread. Fired as `cicd`, transparently noted as a mechanical attestation. |
-| **solution-architect** | `confirmed`/`fixed` (defect) | `DEF-ROC-026` resolved as a pure **design decision** — delta 016, no code. The role that did 100% of the work has **no path at all** in the defect graph. flow-manager correctly REFUSED to force it, on the grounds that borrowing an agent name would misattribute DORA time-by-owner and quality-by-stage. |
-| **orchestrator** | `made_ready` (use-case) | **The flow owner cannot promote an item into Ready.** `made_ready` is `flow-manager`-only, while `pulled` is `["orchestrator","flow-manager"]` — so the orchestrator may PULL from Ready but not PUT into it. |
-
-### Why the last one settles it
-
-The orchestrator's own definition makes it the role that "owns sequencing, gates, DORA measurement
-and Theory-of-Constraints optimisation of the whole pipeline." A rule that lets that role *consume*
-from a queue but not *populate* it is not encoding a real safety property — nothing is protected by
-forcing a second agent to be spawned purely to append one event. It is an artefact of enumerating
-allowlists transition-by-transition without ever checking the set for coherence.
-
-Note the cost shape: every one of these four cost either **a spoofed role with a disclaimer nobody
-downstream will read**, or **an entire extra agent dispatch**. The first corrupts attribution; the
-second corrupts lead time. There is no third option available to an agent that just wants to record
-what it truthfully did.
-
-### Two consequences for the retro, beyond the mechanism change
-
-1. **The disclosing notes are load-bearing and invisible to the machinery.** `DEF-ROC-026`'s note
-   literally has to say *"read the attribution here, not the agent field."* Any metric computed from
-   the `agent` field is therefore already wrong wherever this has happened — and we know of at least
-   four cases in one day, all self-reported, so the true count is a floor.
-2. **A rule that cannot be followed gets worked around.** Three of the four agents did the honest
-   thing and disclosed; one (flow-manager) refused outright and escalated. That disposition is
-   admirable and should be praised — but relying on it is relying on every future agent choosing
-   integrity over convenience, when the mechanism itself makes the dishonest path cheaper.
-
-**Scoring, unchanged:** did an agent doing legitimate work get blocked or have to spoof a role again?
-Four instances in one day is the pre-change baseline.
-
-### EXP-140 — instance eight, and the sharpest: the role that OWNS the defect class cannot advance it
-
-2026-08-17, ROC. `DEF-ROC-037` is **doc/test-pin drift** — a documented command diverging from the code that pins it. That class is owned by the **documenter** by design; the orchestrator dispatched it there for exactly that reason, and the documenter fixed it well (repointed the pin, added reverse and discovery arms, mutation-checked all five, and recorded the coupling in `DOCS-LAYOUT.md`).
-
-**It then could not fire `confirmed` or `fixed`.** The defect flow reserves both to `orchestrator`/`engineer`/`cicd`. It appended them under `AGENT=engineer` with the substitution stated verbatim in each note, and flagged the gap rather than routing around it.
-
-**Why this instance settles what the previous seven only suggested.** The earlier cases could each be read as an unusual item meeting an unusual role. This one is the opposite: **the item type and the owning role are perfectly matched — and the graph still says no.** A defect about documentation, dispatched to the documentation role, on the orchestrator's deliberate judgement, and the mechanism forbids the only role that should have it.
-
-Tally so far, all self-reported (so a floor, not a measurement): documenter ×2 (`built_green`/`deployed`, now `confirmed`/`fixed`), tester (`deployed`), solution-architect (`confirmed`/`fixed` — no path at all), engineer (`pulled`), orchestrator (`made_ready`). **Five distinct roles, eight occasions.**
-
-Every one cost either a **borrowed agent name with a disclaimer nobody downstream reads** — corrupting `time_by_owner` and quality-by-stage — or **an extra agent dispatch**, corrupting lead time. The mechanism makes the dishonest path the cheap one, and has relied entirely on agents choosing to disclose. They have, every time, which is creditable and is not a control.
-
-**No ninth patch.** The replacement recorded above stands: derive firing rights from the item's declared owner; let the graph constrain transition SHAPE only.
-
-### EXP-140 — instance nine, stated in one line
-
-2026-08-17, ROC, `DEF-ROC-026`. The rejection's fix was an **architecture-only** change (a scoped supersession pointer in `architecture/deltas/002`). The **solution-architect** made it and was then refused, verbatim:
-
-```
-append REJECTED: DEF-ROC-026 is in state 'fixing'.
-  event 'fixed' is legal here but not for agent 'solution-architect'.
-  legal events from here: fixed (agents: engineer/cicd), ...
-```
-
-**In one line: an architecture-only defect fix cannot be reported as fixed by the agent that owns architecture.**
-
-It substituted `amended` (a legal edge for its role), quoted the refusal in the note, and **left the item in `fixing`** rather than routing around it — so the item now needs an engineer or cicd to append a `fixed` event about work neither did. That is the second time in this defect's own life cycle that the same bookkeeping detour has been required.
-
-Nine occasions, five roles. No tenth patch: the recorded replacement stands — derive firing rights from the item's declared owner, let the graph constrain transition SHAPE only.
-
-### EXP-140 — instance TEN, on the very defect that closed EXP-142's gap
-
-2026-08-18, ROC, `DEF-ROC-057` (the bad Config screen a human reported). The whole item is a **UI-designer** item by construction: layout allocation, table density, design-token contrast, plus the EXP-142 whole-screen sweep. It was dispatched to the **ui-designer**, which reproduced it, root-caused it to a missing house split-view template, fixed it across three surfaces, and proved the new gate fails 16/16 on the pre-fix build. Then, verbatim:
-
-```
-append REJECTED: DEF-ROC-057 is in state 'reproducing'.
-  event 'confirmed' is legal here but not for agent 'ui-designer'.
-  legal events from here: confirmed (agents: orchestrator/engineer/cicd), ...
-```
-
-**In one line: the role that owns UI quality cannot even record that it reproduced a UI defect** — `ui-designer` appears on NO edge of the defect graph at all, so unlike instances eight and nine it has no legal substitute edge to detour through; it cannot move the item one step in any direction.
-
-Ten occasions, six roles, and this one arrives *inside the experiment built to stop UI defects escaping to humans* — the fix is verified and the item still cannot leave `reproducing` without an agent that did none of the work. The replacement already recorded (derive firing rights from the item's declared owner; let the graph constrain transition SHAPE only) would have made every one of the ten a non-event.
-
----
-
-## EXP-142 — a screen is evaluated as a SCREEN, at a short viewport, or it is not evaluated
+## EXP-ROC-001 — a screen is evaluated as a SCREEN, at a short viewport, or it is not evaluated
 
 **Registered** 2026-08-18, from ROC `DEF-ROC-057` / `DEF-ROC-058` (the `/defect` gap-closing retro).
 

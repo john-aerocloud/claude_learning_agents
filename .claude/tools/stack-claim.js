@@ -279,4 +279,6 @@ module.exports = {
   ownedContainers, claim, release, status, main,
 };
 
-if (require.main === module) process.exit(main());
+// Set `exitCode`, never a synchronous exit on main's return value (truncates stdout
+// past the 64 KiB pipe buffer). Named by the .claude/tools sweep, AC-DEFECT-OAG-076.5.
+if (require.main === module) process.exitCode = main();

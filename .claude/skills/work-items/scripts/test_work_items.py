@@ -4177,11 +4177,15 @@ class TestStalledWork(Base):
                           "agent": "engineer"}])
         findings = [f for f in self._gate() if f["check"] == "stalled-work"]
         self.assertEqual(len(findings), 1, findings)
-        self.assertEqual(findings[0]["severity"], "unknown")
-        self.assertIn("COULD NOT", findings[0]["message"].upper())
+        # and it BLOCKS: the subject is an OCCUPIED WIP slot, so "we could not tell"
+        # must stop the pull exactly as "it is idle" does (§17i).
+        self.assertEqual(findings[0]["severity"], "block")
+        self.assertIsNone(findings[0]["idle_s"])
+        self.assertIn("COULD NOT LOOK", findings[0]["message"].upper())
         self.assertIn("DEF-BADTS", findings[0]["message"])
         code, out = self._run()
-        self.assertIn("NOT ESTABLISHED", out)
+        self.assertEqual(code, 2)
+        self.assertIn("COULD NOT LOOK", out)
 
     def test_17i_check_is_unconditional_no_flag_can_switch_it_off(self):
         """--no-observe exists and skips check 5's predicates. Nothing may skip THIS
@@ -4211,6 +4215,44 @@ class TestStalledWork(Base):
                           if f["check"] == "stalled-validation"], ["unknown"])
         self.assertEqual([i for f in self._blocks(findings) for i in f["ids"]],
                          ["DEF-NOREF"])
+
+    # ---- AC-127.5 (§17g sweep) — the same shape found in check 4 -------------
+    def test_AC_127_5_backlog_item_with_no_computable_age_is_NOT_ESTABLISHED(self):
+        """Swept out of this defect: check 4 did `if ent is None: continue`, so an
+        item whose AGE cannot be computed was exempt from the aging gate for ever
+        and `validate` reported clean for it too. Real population when this was
+        measured: THREE — DEFECT-OAG-129 and DEFECT-OAG-130 (value 26 each) and
+        OI-DEF124-SWEEP-LEDGER, all with an EMPTY `events:` list."""
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "DEF-NOEVENTS", "defect", [])
+        findings = self._gate(max_backlog_age_days=1.0)
+        un = [f for f in findings if f["check"] == "aged-backlog-unreadable"]
+        self.assertEqual(len(un), 1, findings)
+        self.assertEqual(un[0]["severity"], "unknown")
+        self.assertIn("DEF-NOEVENTS", un[0]["ids"])
+        self.assertIn("NOT ESTABLISHED", un[0]["message"])
+        # it is NOT counted as an aged-undecided item either way — the point is that
+        # the gate says so out loud instead of skipping it
+        aged = [f for f in findings if f["check"] == "aged-backlog-undecided"]
+        self.assertTrue(all("DEF-NOEVENTS" not in f["ids"] for f in aged), aged)
+        code, out = self._run(max_backlog_age_days=1.0)
+        self.assertIn("NOT ESTABLISHED", out)
+        self.assertIn("DEF-NOEVENTS", out)
+
+    def test_AC_127_5_a_readable_backlog_item_is_still_measured_normally(self):
+        """Non-vacuity for the limb above: the unreadable path must not swallow the
+        ordinary one."""
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "DEF-OLD", "defect",
+                        [{"ts": _dt(1, 0), "event": "reported", "agent": "orchestrator"}])
+        findings = self._gate(max_backlog_age_days=1.0)
+        aged = [f for f in findings if f["check"] == "aged-backlog-undecided"]
+        self.assertEqual(len(aged), 1, findings)
+        self.assertIn("DEF-OLD", aged[0]["ids"])
+        self.assertEqual([f for f in findings
+                          if f["check"] == "aged-backlog-unreadable"], [])
 
     def test_no_double_report_when_check1_already_blocks_the_item(self):
         """One item, one remedy. Check 1's finding is the more specific one (the work

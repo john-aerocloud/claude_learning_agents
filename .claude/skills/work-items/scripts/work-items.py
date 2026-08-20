@@ -2320,8 +2320,13 @@ def cmd_parts_check(a):
 #      the QUEUE KIND block below for why.
 #   4. retro-debt          DELEGATED to compute_retro_debt (never re-implemented).
 #   5. awaiting-observation [v9] every item in `awaiting_observation` is reported
-#      AND its liveness predicate RE-EVALUATED, exactly as `blocked` is re-checked
-#      each cycle. observed -> BLOCK (a tester dispatch is now actionable);
+#      AND its liveness predicate RE-EVALUATED. (This comment used to say "exactly
+#      as `blocked` is re-checked each cycle" — THAT MECHANISM DOES NOT EXIST: no
+#      limb of this gate looks at `blocked` at all, and 7 flow items were sitting
+#      there on 2026-08-20, the oldest for 16.46 days. Registered as
+#      OI-LOOP-GATE-NEVER-RECHECKS-A-BLOCK rather than left as a claim about a
+#      control nobody built — §17i's mirror image.) observed -> BLOCK (a tester
+#      dispatch is now actionable);
 #      not-yet -> ADVISORY (legitimate, outstanding, never "satisfied"); broken or
 #      absent predicate -> BLOCK (an unverifiable park is the prose-remedy class).
 #
@@ -2850,15 +2855,25 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
                   "queue": queue, "owner": owner, "kind": kind,
                   "threshold_h": thr_h}
         if entered is None:
+            # BLOCKS, and deliberately: §17i — where the control is a gate, an
+            # answer it could not establish is not a pass. The subject here is an
+            # OCCUPIED WIP slot, i.e. exactly the thing whose idleness caused 35
+            # items to be deferred; "we could not tell" about it must stop the pull
+            # in the same way "it is idle" does. (Check 4's could-not-look is
+            # UNKNOWN instead, because its whole queue class is advisory by design —
+            # see the QUEUE KIND block.)
             findings.append(dict(
-                common, severity="unknown", idle_s=None,
+                common, severity="block", idle_s=None,
                 message=(
                     f"[stalled-work] COULD NOT LOOK: {iid} is in '{state}' (queue "
                     f"{queue}) and holds that slot, but its idle time cannot be "
                     f"computed — {why}. This run establishes NOTHING about whether "
-                    f"it is being worked; it is not a pass (§17i). Remedy: fix the "
-                    f"item's event timestamps (`make wi-validate PROJECT={project}` "
-                    f"names the malformed row), then re-run.")))
+                    f"it is being worked, and silence is not a pass (§17i), so it "
+                    f"BLOCKS. Remedy: repair the item's event stream (every event "
+                    f"needs a parseable `ts:`; an item with NO events has no history "
+                    f"at all — append its genesis event with `make wi-append "
+                    f"PROJECT={project} ID={iid} EVENT=<genesis> AGENT=<agent>`), "
+                    f"then re-run.")))
             continue
         idle_s = (now - entered).total_seconds()
         if idle_s <= thr_h * 3600.0:
@@ -3015,9 +3030,20 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
         if queue_kind(policy, q) != QUEUE_KIND_BACKLOG:
             continue
         undecided = []
+        unreadable = []
         for mid in members[q]:
-            _st, ent = _current_segment(graphs, items[mid], now)
+            st_m = states.get(mid)
+            ent, why = _open_segment_entered(graphs, items[mid], st_m, now)
             if ent is None:
+                # §17g sweep off DEFECT-OAG-127: this used to be a bare `continue`,
+                # so an item whose AGE cannot be established was exempt from the
+                # aging gate FOR EVER, silently, and `validate` reports clean for it
+                # too. Measured population on OagEventSource 2026-08-20: THREE items
+                # with an EMPTY `events:` list (DEFECT-OAG-129 and DEFECT-OAG-130 at
+                # value 26, and OI-DEF124-SWEEP-LEDGER) — registered by hand, folding
+                # to their initial state with no genesis event, hence no segment and
+                # no age. They could have sat there indefinitely.
+                unreadable.append((mid, why))
                 continue
             age_d = (now - ent).total_seconds() / 86400.0
             if age_d <= max_backlog_age_days:
@@ -3026,6 +3052,27 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
             if deferred_to is not None and deferred_to > now:
                 continue            # an in-date decision exists — respect it
             undecided.append((age_d, mid, deferred_to))
+        if unreadable:
+            # UNKNOWN, not block — and the asymmetry with check 11 is deliberate,
+            # not an oversight: this queue class is ADVISORY BY DESIGN (blocking on
+            # backlog inverts the constraint, see the QUEUE KIND block), so the
+            # honest report here is NOT ESTABLISHED, which reaches the headline and
+            # can never read as satisfied.
+            findings.append({
+                "check": "aged-backlog-unreadable", "severity": "unknown",
+                "queue": q, "ids": [m for m, _w in unreadable],
+                "message": (
+                    f"[aged-backlog-unreadable] NOT ESTABLISHED: the age of "
+                    f"{len(unreadable)} item(s) in {q} CANNOT BE COMPUTED, so the "
+                    f"aging gate above did not consider them at all: "
+                    + "; ".join(f"{m} ({w})" for m, w in unreadable[:6])
+                    + f". An item with no computable age is exempt from every "
+                      f"age-based limb for ever — that is not the same as clean "
+                      f"(§17i). Remedy: give it a genesis event, `make wi-append "
+                      f"PROJECT={project} ID=<id> EVENT=<genesis> AGENT=<agent>` "
+                      f"(state = fold(events); an item with an empty `events:` list "
+                      f"has no history for anything to measure)."),
+            })
         if not undecided:
             continue
         undecided.sort(reverse=True)

@@ -269,9 +269,15 @@ function readLeases(dir = leaseDirDefault()) {
   return leases;
 }
 
-function writeLease(container, ttlS, dir = leaseDirDefault()) {
+/**
+ * `now` is test-only injection (DEF-ROC-062 stack-claim.js self-tests), mirroring
+ * the same convention `sweep()` already uses — real callers never pass it and get
+ * the wall clock, exactly as before.
+ */
+function writeLease(container, ttlS, dir = leaseDirDefault(),
+  now = Math.floor(Date.now() / 1000)) {
   fs.mkdirSync(dir, { recursive: true });
-  const expiry = Math.floor(Date.now() / 1000) + Number(ttlS);
+  const expiry = Number(now) + Number(ttlS);
   fs.writeFileSync(path.join(dir, `${container}.lease`), `${expiry}\n`);
   return expiry;
 }

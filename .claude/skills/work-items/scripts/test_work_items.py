@@ -2084,32 +2084,112 @@ class TestLoopGate(Base):
 
         def fake(project, ref):
             calls.append((project, ref))
-            return True                      # git says: on trunk
+            return {"ref": ref, "verdict": wi.REF_ON_TRUNK, "lane": wi.LANE_PROJECT,
+                    "trunk": "origin/main", "resolved": ref, "padded": False,
+                    "searched": [wi.LANE_PROJECT, wi.LANE_PARENT], "unreadable": [],
+                    "reason": "ancestor"}
 
-        orig = wi._ref_on_trunk
-        wi._ref_on_trunk = fake
+        orig = wi.resolve_ref
+        wi.resolve_ref = fake
         try:
             f = [x for x in self._gate() if x["check"] == "stalled-validation"][0]
         finally:
-            wi._ref_on_trunk = orig
+            wi.resolve_ref = orig
         self.assertEqual(calls, [(self.project, "5095849")])
         self.assertIs(f["on_trunk"], True)    # git, not the stale note
-        self.assertIn("on origin trunk", f["message"])
+        self.assertIn("PUSHED", f["message"])
 
-    def test_unresolvable_ref_reports_unknown_push_state(self):
+    def _stub_resolve(self, verdict, **kw):
+        base = {"verdict": verdict, "lane": None, "trunk": None, "resolved": None,
+                "padded": False, "searched": [], "unreadable": [], "reason": "stub"}
+        base.update(kw)
+        return lambda p, r: dict(base, ref=r)
+
+    def test_a_ref_absent_from_EVERY_repo_screams_destroyed_work(self):
+        """DEFECT-OAG-128 / AC-128.2. Before the fix this rendered as the SAME
+        string as a parent-lane ref that merely lived in the other repo — so the
+        one alarm that means real data loss was muted inside a routine UNKNOWN."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self.write_item("active", "DEF-STALE", "defect",
+                        self._validating_defect(20, 12, ref="deadbee"))
+        orig = wi.resolve_ref
+        wi.resolve_ref = self._stub_resolve(
+            wi.REF_ABSENT, searched=[wi.LANE_PROJECT, wi.LANE_PARENT],
+            reason="resolves in NONE of the 2 readable repo(s)")
+        try:
+            f = [x for x in self._gate() if x["check"] == "stalled-validation"][0]
+        finally:
+            wi.resolve_ref = orig
+        self.assertEqual(f["ref_verdict"], wi.REF_ABSENT)
+        self.assertIsNone(f["on_trunk"])
+        self.assertIn("ABSENT FROM EVERY REPO", f["message"])
+        self.assertIn("DEFECT-OAG-072", f["message"])
+        self.assertIn("worktree-guard", f["message"])       # the rescue, not a re-run
+
+    def test_a_ref_we_COULD_NOT_LOOK_UP_is_neither_a_pass_nor_the_alarm(self):
+        """§17i, and the distinction the defect existed for: 'I could not look' must
+        be visibly different from BOTH 'pushed' and 'destroyed'."""
         self._default_policy()
         for i in range(3):
             self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
         self.write_item("active", "DEF-STALE", "defect",
                         self._validating_defect(20, 12, ref="notasha"))
-        orig = wi._ref_on_trunk
-        wi._ref_on_trunk = lambda p, r: None       # cannot resolve
+        orig = wi.resolve_ref
+        wi.resolve_ref = self._stub_resolve(
+            wi.REF_CANNOT_DETERMINE, unreadable=[wi.LANE_PARENT],
+            reason="could not read the parent-repo repo(s)")
         try:
             f = [x for x in self._gate() if x["check"] == "stalled-validation"][0]
         finally:
-            wi._ref_on_trunk = orig
+            wi.resolve_ref = orig
+        self.assertEqual(f["ref_verdict"], wi.REF_CANNOT_DETERMINE)
         self.assertIsNone(f["on_trunk"])
-        self.assertIn("UNKNOWN", f["message"])
+        self.assertIn("COULD NOT BE ESTABLISHED", f["message"])
+        self.assertNotIn("ABSENT FROM EVERY REPO", f["message"])   # not the alarm
+        self.assertNotIn("PUSHED —", f["message"])                 # not a pass
+
+    def test_an_existing_but_unpushed_ref_says_NOT_LOST_in_so_many_words(self):
+        """The commonest parent-lane state (the owner owns the parent push). It must
+        not read like the destroyed-work case, which is what a reader of the old
+        single UNKNOWN string had to guess at."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self.write_item("active", "DEF-STALE", "defect",
+                        self._validating_defect(20, 12, ref="8dae2cc"))
+        orig = wi.resolve_ref
+        wi.resolve_ref = self._stub_resolve(
+            wi.REF_NOT_ON_TRUNK, lane=wi.LANE_PARENT, resolved="8dae2cc",
+            searched=[wi.LANE_PROJECT, wi.LANE_PARENT])
+        try:
+            f = [x for x in self._gate() if x["check"] == "stalled-validation"][0]
+        finally:
+            wi.resolve_ref = orig
+        self.assertIs(f["on_trunk"], False)
+        self.assertEqual(f["ref_lane"], wi.LANE_PARENT)
+        self.assertIn("NOT lost", f["message"])
+        self.assertIn("parent-repo", f["message"])
+
+    def test_a_zero_stripped_ref_says_so_instead_of_looking_destroyed(self):
+        """UC-XA5's `605428`. The message must name the repair, or the next reader
+        re-derives the leading-zero bug from scratch."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self.write_item("active", "DEF-STALE", "defect",
+                        self._validating_defect(20, 12, ref="605428"))
+        orig = wi.resolve_ref
+        wi.resolve_ref = self._stub_resolve(
+            wi.REF_ON_TRUNK, lane=wi.LANE_PROJECT, trunk="origin/main",
+            resolved="0605428", padded=True)
+        try:
+            f = [x for x in self._gate() if x["check"] == "stalled-validation"][0]
+        finally:
+            wi.resolve_ref = orig
+        self.assertEqual(f["ref_resolved"], "0605428")
+        self.assertIn("leading zero was eaten", f["message"])
 
     def test_ref_on_trunk_returns_none_without_repo(self):
         # ROOT is a temp dir: work/<P> is not a git repo -> UNKNOWN, never a guess
@@ -4320,12 +4400,20 @@ class TestRefRepoScoping(Base):
 
     def _topology(self, parent_branch="main"):
         """The real shape: a parent repo that gitignores each project's own nested
-        repo. Both are real; neither can see the other's objects."""
-        parent = self._init_repo(os.path.join(self.tmp, "parent"), parent_branch)
+        repo, so the project repo is a SEPARATE repo living inside the parent's
+        working tree. Both are real; neither can see the other's objects.
+
+        Built AT `wi.ROOT` rather than in a side directory, so the items the gate
+        reads and the repos it queries share one root — the same relationship they
+        have in production. Patching ROOT to a repo elsewhere silently pointed
+        `load_all_items` at an empty tree and every finding came back empty, which
+        is the sort of vacuous green this whole item is about."""
+        parent = self._init_repo(self.tmp, parent_branch)
         self._write(parent, ".gitignore", "/work/*/\n")
         self._commit(parent, "CLAUDE.md", "agent system\n", "parent base")
         proj = self._init_repo(os.path.join(parent, "work", self.project))
         self._commit(proj, "src/a.ts", "a\n", "project base")
+        self.assertEqual(os.path.abspath(parent), os.path.abspath(wi.ROOT))
         return parent, proj
 
     # -- AC-128.1: resolution finds the ref in whichever repo actually holds it --
@@ -4335,11 +4423,7 @@ class TestRefRepoScoping(Base):
         parent, _proj = self._topology()
         sha = self._commit(parent, "process/x.md", "x\n", "a parent-lane fix")
         self._push(parent)
-        orig, wi.ROOT = wi.ROOT, parent
-        try:
-            r = wi.resolve_ref(self.project, sha)
-        finally:
-            wi.ROOT = orig
+        r = wi.resolve_ref(self.project, sha)
         self.assertEqual(r["verdict"], wi.REF_ON_TRUNK, r)
         self.assertEqual(r["lane"], wi.LANE_PARENT, r)
 
@@ -4349,11 +4433,7 @@ class TestRefRepoScoping(Base):
         parent, proj = self._topology()
         sha = self._commit(proj, "src/b.ts", "b\n", "a project-lane fix")
         self._push(proj)
-        orig, wi.ROOT = wi.ROOT, parent
-        try:
-            r = wi.resolve_ref(self.project, sha)
-        finally:
-            wi.ROOT = orig
+        r = wi.resolve_ref(self.project, sha)
         self.assertEqual(r["verdict"], wi.REF_ON_TRUNK, r)
         self.assertEqual(r["lane"], wi.LANE_PROJECT, r)
 
@@ -4376,11 +4456,7 @@ class TestRefRepoScoping(Base):
         sha = self._commit(parent, "process/z.md", "z\n", "unpushed parent work")
         self._push(parent)
         sha2 = self._commit(parent, "process/z2.md", "z2\n", "later, unpushed")
-        orig, wi.ROOT = wi.ROOT, parent
-        try:
-            r = wi.resolve_ref(self.project, sha2)
-        finally:
-            wi.ROOT = orig
+        r = wi.resolve_ref(self.project, sha2)
         self.assertEqual(r["verdict"], wi.REF_NOT_ON_TRUNK, r)
         self.assertEqual(r["lane"], wi.LANE_PARENT, r)
         self.assertNotEqual(r["verdict"], wi.REF_ABSENT)
@@ -4393,11 +4469,7 @@ class TestRefRepoScoping(Base):
         parent, _proj = self._topology(parent_branch="instance/" + self.project)
         sha = self._commit(parent, "process/w.md", "w\n", "on the instance branch")
         self._push(parent)
-        orig, wi.ROOT = wi.ROOT, parent
-        try:
-            r = wi.resolve_ref(self.project, sha)
-        finally:
-            wi.ROOT = orig
+        r = wi.resolve_ref(self.project, sha)
         self.assertEqual(r["verdict"], wi.REF_ON_TRUNK, r)
         self.assertEqual(r["trunk"], "origin/instance/" + self.project, r)
 
@@ -4407,11 +4479,7 @@ class TestRefRepoScoping(Base):
         returned the same None as a wrong-repo lookup, i.e. it did not exist."""
         parent, _proj = self._topology()
         self._push(parent)
-        orig, wi.ROOT = wi.ROOT, parent
-        try:
-            r = wi.resolve_ref(self.project, "deadbee")
-        finally:
-            wi.ROOT = orig
+        r = wi.resolve_ref(self.project, "deadbee")
         self.assertEqual(r["verdict"], wi.REF_ABSENT, r)
         self.assertEqual(sorted(r["searched"]),
                          sorted([wi.LANE_PARENT, wi.LANE_PROJECT]), r)
@@ -4423,12 +4491,8 @@ class TestRefRepoScoping(Base):
         parent, _proj = self._topology()
         real = self._commit(parent, "process/r.md", "r\n", "real parent work")
         self._push(parent)
-        orig, wi.ROOT = wi.ROOT, parent
-        try:
-            found = wi.resolve_ref(self.project, real)
-            absent = wi.resolve_ref(self.project, "deadbee")
-        finally:
-            wi.ROOT = orig
+        found = wi.resolve_ref(self.project, real)
+        absent = wi.resolve_ref(self.project, "deadbee")
         self.assertNotEqual(found["verdict"], absent["verdict"])
         self.assertEqual(found["verdict"], wi.REF_ON_TRUNK)
         self.assertEqual(absent["verdict"], wi.REF_ABSENT)
@@ -4440,23 +4504,15 @@ class TestRefRepoScoping(Base):
         parent, proj = self._topology()
         self._push(parent)
         shutil.rmtree(os.path.join(proj, ".git"))
-        orig, wi.ROOT = wi.ROOT, parent
-        try:
-            r = wi.resolve_ref(self.project, "deadbee")
-        finally:
-            wi.ROOT = orig
+        r = wi.resolve_ref(self.project, "deadbee")
         self.assertEqual(r["verdict"], wi.REF_CANNOT_DETERMINE, r)
         self.assertIn(wi.LANE_PROJECT, r["unreadable"], r)
 
     def test_AC_128_2_no_ref_at_all_is_CANNOT_DETERMINE_never_ABSENT(self):
         parent, _proj = self._topology()
-        orig, wi.ROOT = wi.ROOT, parent
-        try:
-            for empty in (None, "", "   "):
-                r = wi.resolve_ref(self.project, empty)
-                self.assertEqual(r["verdict"], wi.REF_CANNOT_DETERMINE, (empty, r))
-        finally:
-            wi.ROOT = orig
+        for empty in (None, "", "   "):
+            r = wi.resolve_ref(self.project, empty)
+            self.assertEqual(r["verdict"], wi.REF_CANNOT_DETERMINE, (empty, r))
 
     # -- the third fault, found by BUILDING the alarm (UC-XA5 / `605428`) ------
     def test_AC_128_2_an_all_digit_ref_stripped_of_its_leading_zero_is_repaired(self):
@@ -4480,25 +4536,18 @@ class TestRefRepoScoping(Base):
         for i in range(4000):
             sha = self._git(proj, "commit-tree", tree, "-p", head,
                             "-m", "hunt %d" % i).stdout.strip()
-            if not sha.startswith("0"):
-                continue
-            for k in range(4, 9):
-                if sha[:k].isdigit():
-                    target = sha[:k]
-                    break
-            if target:
+            # width 7 deliberately: that is the abbreviation this registry records,
+            # so `mangled` comes out at 6 chars — UC-XA5's exact shape.
+            if sha.startswith("0") and sha[:7].isdigit():
+                target = sha[:7]
                 break
         self.assertIsNotNone(
             target, "no leading-zero all-digit abbreviation minted in 4000 tries; "
                     "the fixture stopped exercising the int-coercion repair")
         mangled = str(int(target))
         self.assertNotEqual(mangled, target)          # the coercion really bites
-        orig, wi.ROOT = wi.ROOT, _parent
-        try:
-            r = wi.resolve_ref(self.project, mangled)
-            baseline = wi.resolve_ref(self.project, mangled + "f" * 8)
-        finally:
-            wi.ROOT = orig
+        r = wi.resolve_ref(self.project, mangled)
+        baseline = wi.resolve_ref(self.project, mangled + "f" * 8)
         self.assertNotEqual(r["verdict"], wi.REF_ABSENT, r)
         self.assertTrue(r["padded"], r)
         self.assertEqual(r["resolved"], target, r)
@@ -4543,12 +4592,8 @@ class TestRefRepoScoping(Base):
         parent, proj = self._topology()
         sha = self._commit(proj, "src/c.ts", "c\n", "a project-lane fix")
         self._push(proj)
-        orig, wi.ROOT = wi.ROOT, parent
-        try:
-            bad = wi.check_declared_lane(self.project, wi.LANE_PARENT, [sha])
-            good = wi.check_declared_lane(self.project, wi.LANE_PROJECT, [sha])
-        finally:
-            wi.ROOT = orig
+        bad = wi.check_declared_lane(self.project, wi.LANE_PARENT, [sha])
+        good = wi.check_declared_lane(self.project, wi.LANE_PROJECT, [sha])
         self.assertEqual(bad["verdict"], "contradicted", bad)
         self.assertEqual(bad["resolved_lanes"], [wi.LANE_PROJECT], bad)
         self.assertEqual(good["verdict"], "consistent", good)
@@ -4564,11 +4609,7 @@ class TestRefRepoScoping(Base):
         self._push(proj)
         q_sha = self._commit(parent, "process/d.md", "d\n", "parent half")
         self._push(parent)
-        orig, wi.ROOT = wi.ROOT, parent
-        try:
-            r = wi.check_declared_lane(self.project, wi.LANE_PROJECT, [p_sha, q_sha])
-        finally:
-            wi.ROOT = orig
+        r = wi.check_declared_lane(self.project, wi.LANE_PROJECT, [p_sha, q_sha])
         self.assertEqual(r["verdict"], "spans-both", r)
         self.assertEqual(sorted(r["resolved_lanes"]),
                          sorted([wi.LANE_PARENT, wi.LANE_PROJECT]), r)
@@ -4581,21 +4622,13 @@ class TestRefRepoScoping(Base):
         parent, proj = self._topology()
         sha = self._commit(proj, "src/e.ts", "e\n", "a project-lane fix")
         self._push(proj)
-        orig, wi.ROOT = wi.ROOT, parent
-        try:
-            r = wi.check_declared_lane(self.project, None, [sha])
-        finally:
-            wi.ROOT = orig
+        r = wi.check_declared_lane(self.project, None, [sha])
         self.assertEqual(r["verdict"], "undeclared", r)
         self.assertEqual(r["resolved_lanes"], [wi.LANE_PROJECT], r)
 
     def test_AC_128_4_a_lane_check_with_no_resolvable_ref_CANNOT_DETERMINE(self):
         parent, _proj = self._topology()
-        orig, wi.ROOT = wi.ROOT, parent
-        try:
-            r = wi.check_declared_lane(self.project, wi.LANE_PARENT, ["deadbee"])
-        finally:
-            wi.ROOT = orig
+        r = wi.check_declared_lane(self.project, wi.LANE_PARENT, ["deadbee"])
         self.assertEqual(r["verdict"], "cannot-determine", r)
         self.assertEqual(r["resolved_lanes"], [], r)
 
@@ -4604,16 +4637,223 @@ class TestRefRepoScoping(Base):
         parent, proj = self._topology()
         sha = self._commit(proj, "src/f.ts", "f\n", "pushed")
         self._push(proj)
-        orig, wi.ROOT = wi.ROOT, parent
-        try:
-            self.assertIs(wi._ref_on_trunk(self.project, sha), True)
-            unpushed = self._commit(proj, "src/g.ts", "g\n", "unpushed")
-            self.assertIs(wi._ref_on_trunk(self.project, unpushed), False)
-            # ABSENT maps to None, NOT to False: "the object is gone" must never
-            # render as the ordinary, unalarming "not pushed yet".
-            self.assertIsNone(wi._ref_on_trunk(self.project, "deadbee"))
-        finally:
-            wi.ROOT = orig
+        self.assertIs(wi._ref_on_trunk(self.project, sha), True)
+        unpushed = self._commit(proj, "src/g.ts", "g\n", "unpushed")
+        self.assertIs(wi._ref_on_trunk(self.project, unpushed), False)
+        # ABSENT maps to None, NOT to False: "the object is gone" must never
+        # render as the ordinary, unalarming "not pushed yet".
+        self.assertIsNone(wi._ref_on_trunk(self.project, "deadbee"))
+
+    # ===================================================================
+    # check 12 — every recorded `ref:` must still EXIST somewhere
+    # (DEFECT-OAG-128 / AC-128.2). Check 1 only ever looks at items STALLED IN
+    # VALIDATION; a destroyed commit on a DONE item is what nobody re-reads, and
+    # that is precisely what happened to DEFECT-OAG-072.
+    # ===================================================================
+    def _done_item(self, iid, ref, lane=None, event="fixed"):
+        evs = [
+            {"ts": _dt(1, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(1, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(1, 2), "event": "confirmed", "agent": "engineer"},
+            {"ts": _dt(1, 3), "event": event, "agent": "engineer", "ref": ref},
+            {"ts": _dt(1, 4), "event": "validated", "agent": "tester"},
+        ]
+        self.write_item("done", iid, "defect", evs,
+                        extra_fm=({"lane": lane} if lane else None))
+
+    def _default_policy(self):
+        os.makedirs(os.path.join(self.tmp, "work", self.project, "queues"),
+                    exist_ok=True)
+        with open(os.path.join(self.tmp, "work", self.project, "queues",
+                               "policy.csv"), "w", encoding="utf-8") as f:
+            f.write("queue,param,value,owner,rationale\n"
+                    "ready,min_items,3,retro,seed\n"
+                    "ready,wip_limit,4,retro,seed\n"
+                    "intake,min_items,2,retro,seed\n"
+                    "intake,wip_limit,10,retro,seed\n"
+                    "intake,kind,backlog,retro,seed\n")
+
+    def _ready_uc(self, day):
+        return [
+            {"ts": _dt(day, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(day, 1), "event": "made_ready", "agent": "flow-manager"},
+        ]
+
+    def _run_cli(self):
+        buf = io.StringIO()
+        args = argparse.Namespace(project=self.project, stale_hours=4.0, threshold=3,
+                                  now="2026-06-25T00:00:00Z", observe=False,
+                                  observe_timeout=5, max_backlog_age_days=7.0)
+        code = 0
+        with contextlib.redirect_stdout(buf):
+            try:
+                code = wi.cmd_loop_gate(args) or 0
+            except SystemExit as ex:      # the gate exits 2; that IS the block
+                code = ex.code or 0
+        return code, buf.getvalue()
+
+    def _prov(self, _parent=None, **kw):
+        """`_parent` is accepted and ignored: the topology IS wi.ROOT, so there is
+        nothing to redirect. Kept in the signature because each caller passing its
+        parent makes the topology dependency visible at the call site."""
+        return wi.compute_ref_provenance(self.project, **kw)
+
+    def test_AC_128_2_check12_a_DONE_items_destroyed_commit_BLOCKS_the_loop(self):
+        """The DEFECT-OAG-072 case exactly: an item DELIVERED COMPLETE and CLOSED
+        whose objects are gone. Nothing else in the gate looks at a done item."""
+        parent, _proj = self._topology()
+        self._done_item("DEF-LOST", "deadbee")
+        f = self._prov(parent)
+        self.assertEqual([x["severity"] for x in f], ["block"], f)
+        self.assertEqual(f[0]["ids"], ["DEF-LOST"])
+        self.assertIn("EXIST IN NEITHER REPO", f[0]["message"])
+        self.assertIn("DEFECT-OAG-072", f[0]["message"])
+        self.assertIn("worktree-guard", f[0]["message"])   # rescue, not a re-run
+        self.assertNotIn("re-run to see if it clears", f[0]["message"].split("do NOT")[0])
+
+    def test_AC_128_2_check12_a_PARENT_lane_ref_is_NOT_reported_destroyed(self):
+        """The defect itself, at registry scale: six real items read as destroyed
+        because the lookup only ever entered the project repo."""
+        parent, _proj = self._topology()
+        sha = self._commit(parent, "process/p.md", "p\n", "a parent-lane fix")
+        self._done_item("DEF-PARENT", sha)
+        self.assertEqual(self._prov(parent), [])
+
+    def test_AC_128_2_check12_a_PROJECT_lane_ref_is_NOT_reported_destroyed(self):
+        parent, proj = self._topology()
+        sha = self._commit(proj, "src/p.ts", "p\n", "a project-lane fix")
+        self._done_item("DEF-PROJ", sha)
+        self.assertEqual(self._prov(parent), [])
+
+    def test_AC_128_2_check12_an_unpushed_commit_is_not_an_alarm(self):
+        """Existence, never ancestry. Unpushed-ness is check 1's business and is a
+        completely ordinary state of the parent repo."""
+        parent, _proj = self._topology()
+        sha = self._commit(parent, "process/u.md", "u\n", "never pushed anywhere")
+        self._done_item("DEF-UNPUSHED", sha)
+        self.assertEqual(self._prov(parent), [])
+
+    def test_AC_128_2_check12_an_unreadable_repo_is_COULD_NOT_LOOK_not_the_alarm(self):
+        """§17i. A partial search cannot establish absence, and crying destroyed-work
+        off one is how the alarm gets trained out of people — which is how
+        DEFECT-OAG-072 was lost."""
+        parent, proj = self._topology()
+        self._done_item("DEF-LOST", "deadbee")
+        shutil.rmtree(os.path.join(proj, ".git"))
+        f = self._prov(parent)
+        self.assertEqual([x["severity"] for x in f], ["unknown"], f)
+        self.assertIn("COULD NOT LOOK", f[0]["message"])
+        self.assertIn("not a pass", f[0]["message"])
+        self.assertNotIn("EXIST IN NEITHER REPO", f[0]["message"])
+
+    def test_AC_128_2_check12_a_non_sha_ref_is_advisory_never_destroyed_work(self):
+        """`UC-ML1` records `ref: delta-052` — an architecture-delta DOCUMENT id on a
+        solution-architect `amended` event. The contract declares `ref: <sha>`, which
+        is the AUTHORITY for excluding it (§17h); it is REPORTED, because a silent
+        exclusion is where a mistyped sha would hide. Found on the check's first real
+        run, and without it the alarm's first ever firing would have been false."""
+        parent, _proj = self._topology()
+        self._done_item("DEF-DOCREF", "delta-052", event="amended")
+        f = self._prov(parent)
+        self.assertEqual([x["severity"] for x in f], ["advisory"], f)
+        self.assertIn("NOT sha-shaped", f[0]["message"])
+        self.assertIn("delta-052", f[0]["message"])
+        self.assertIn("CONTRACT.md", f[0]["message"])
+        self.assertNotIn("EXIST IN NEITHER REPO", f[0]["message"])
+
+    def test_AC_128_2_check12_a_MISTYPED_sha_still_reaches_the_alarm(self):
+        """The exclusion above must not become a hiding place. A ref that is still
+        sha-SHAPED but wrong is destroyed-work-shaped and must block."""
+        parent, _proj = self._topology()
+        real = self._commit(parent, "process/m.md", "m\n", "the real commit")
+        self._done_item("DEF-TYPO", ("f" if real[0] != "f" else "e") + real[1:] + "ab")
+        f = self._prov(parent)
+        self.assertEqual([x["severity"] for x in f], ["block"], f)
+
+    def test_AC_128_2_check12_the_zero_stripped_ref_does_not_false_fire(self):
+        """UC-XA5's `605428`, at registry scale: the batched probe must submit the
+        zero-padded repair candidates too, or this check false-fires on the 11
+        all-digit refs already damaged on disk."""
+        _parent, proj = self._topology()
+        tree = self._git(proj, "rev-parse", "HEAD^{tree}").stdout.strip()
+        head = self._git(proj, "rev-parse", "HEAD").stdout.strip()
+        target = None
+        for i in range(4000):
+            sha = self._git(proj, "commit-tree", tree, "-p", head,
+                            "-m", "hunt %d" % i).stdout.strip()
+            # width 7 deliberately: that is the abbreviation this registry records,
+            # so `mangled` comes out at 6 chars — UC-XA5's exact shape.
+            if sha.startswith("0") and sha[:7].isdigit():
+                target = sha[:7]
+                break
+        self.assertIsNotNone(target, "fixture stopped minting a leading-zero sha")
+        mangled = str(int(target))
+        self.assertNotEqual(mangled, target)
+        self._done_item("DEF-ZERO", mangled)
+        self.assertEqual(self._prov(_parent), [])
+
+    def test_AC_128_4_check12_a_contradicted_lane_is_reported_but_never_BLOCKS(self):
+        """AC-128.4. Advisory on purpose: resolution no longer trusts `lane:`, so a
+        wrong one costs a misrouted DISPATCH (DEFECT-OAG-076), not a wrong push
+        reading — and blocking the loop on a stale field would stop delivery over a
+        bookkeeping error."""
+        parent, proj = self._topology()
+        sha = self._commit(proj, "src/l.ts", "l\n", "project-lane work")
+        self._done_item("DEF-BADLANE", sha, lane=wi.LANE_PARENT)
+        f = self._prov(parent)
+        self.assertEqual([x["severity"] for x in f], ["advisory"], f)
+        self.assertEqual(f[0]["ids"], ["DEF-BADLANE"])
+        self.assertIn("declares lane:parent-repo", f[0]["message"])
+        self.assertIn("dispatch-check", f[0]["message"])
+
+    def test_AC_128_4_check12_a_TWO_LANE_item_is_not_reported_at_all(self):
+        """DEFECT-OAG-091's real shape — one project ref and one parent ref, declaring
+        either. A single-valued field cannot express that, so the declaration is
+        INCOMPLETE not FALSE, and flagging it would manufacture a violation."""
+        parent, proj = self._topology()
+        p_sha = self._commit(proj, "src/t.ts", "t\n", "project half")
+        q_sha = self._commit(parent, "process/t.md", "t\n", "parent half")
+        self.write_item("done", "DEF-TWOLANE", "defect", [
+            {"ts": _dt(1, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(1, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(1, 2), "event": "confirmed", "agent": "engineer"},
+            {"ts": _dt(1, 3), "event": "fixed", "agent": "engineer", "ref": p_sha},
+            {"ts": _dt(1, 4), "event": "validated", "agent": "tester", "ref": q_sha},
+        ], extra_fm={"lane": wi.LANE_PROJECT})
+        self.assertEqual(self._prov(parent), [])
+
+    def test_AC_128_4_check12_an_UNDECLARED_lane_is_not_reported(self):
+        """382 of 478 items (79.9%) have no `lane:`. Treating that as a violation
+        would fail four fifths of the registry on its first run."""
+        parent, proj = self._topology()
+        sha = self._commit(proj, "src/n.ts", "n\n", "no lane declared")
+        self._done_item("DEF-NOLANE", sha, lane=None)
+        self.assertEqual(self._prov(parent), [])
+
+    def test_AC_128_2_check12_is_UNCONDITIONAL_and_reaches_the_exit_code(self):
+        """A gate with an off switch is a gate that cannot fail (§17i). No flag
+        reaches this check, and its block must actually stop the pull — asserted
+        through the real CLI, not the pure function."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        parent, _proj = self._topology()
+        self._done_item("DEF-LOST", "deadbee")
+        code, out = self._run_cli()
+        self.assertEqual(code, 2, out)
+        self.assertIn("ref-provenance", out)
+        self.assertIn("EXIST IN NEITHER REPO", out)
+
+    def test_AC_128_2_check12_registry_wide_findings_are_deduped_by_ref(self):
+        """Two items citing one destroyed sha is ONE loss, named twice — a per-item
+        finding would make a single incident look like a spreading one."""
+        parent, _proj = self._topology()
+        self._done_item("DEF-A", "deadbee")
+        self._done_item("DEF-B", "deadbee")
+        f = self._prov(parent)
+        self.assertEqual(len(f), 1, f)
+        self.assertEqual(f[0]["ids"], ["DEF-A", "DEF-B"])
+        self.assertEqual(f[0]["absent"], ["deadbee"])
 
 
 if __name__ == "__main__":

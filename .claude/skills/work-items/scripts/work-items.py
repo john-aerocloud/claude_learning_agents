@@ -2463,12 +2463,17 @@ def _project_repo(project):
     return os.path.join(ROOT, "work", project)
 
 
-def _git(repo, *args):
-    """Run git in `repo`; return (rc, stdout). rc None when git/repo unusable."""
+def _git(repo, *args, _stdin=None):
+    """Run git in `repo`; return (rc, stdout). rc None when git/repo unusable.
+
+    `_stdin` feeds a batched command (`cat-file --batch-check`). Its output is NOT
+    stripped when stdin is used: the batch protocol is positional, one answer line
+    per input line, so stripping would silently shift the mapping."""
     try:
         r = subprocess.run(["git", "-C", repo, *args], capture_output=True,
-                           text=True, check=False)
-        return r.returncode, (r.stdout or "").strip()
+                           text=True, check=False, input=_stdin)
+        out = r.stdout or ""
+        return r.returncode, (out.rstrip("\n") if _stdin is not None else out.strip())
     except Exception:
         return None, ""
 
@@ -2732,6 +2737,194 @@ def check_declared_lane(project, declared, refs):
         out["verdict"] = "consistent"
     else:
         out["verdict"] = "contradicted"
+    return out
+
+
+# ---------------------------------------------------------------------------
+# loop-gate check 12 — EVERY recorded `ref:` must resolve in SOME repo we can read
+# (DEFECT-OAG-128, AC-128.2 — the general close-time push gate AC-116.2 asked for)
+#
+# Check 1 only ever looks at items that are STALLED IN VALIDATION, which is a tiny
+# and transient slice. A destroyed commit on a DONE item is exactly the thing
+# nobody re-reads: DEFECT-OAG-072 was delivered complete, closed, and annihilated,
+# and the loss was found by a human happening to run `git cat-file`. So the sweep
+# has to be over the WHOLE registry, every cycle, or the alarm has no observer.
+#
+# Only EXISTENCE is asked here, never ancestry — "is this object still anywhere on
+# disk" is the destroyed-work question, and unpushed-ness is check 1's business.
+# That is also what makes it affordable at 202 refs: existence is BATCHED into ONE
+# `cat-file --batch-check` per repo (measured 66 ms for the real registry, 2 git
+# calls total), where per-ref rev-parse would be ~400 subprocess spawns before
+# every pull.
+#
+# THE FAIL-SAFE DIRECTION, which is the whole reason this check is careful rather
+# than loud: if a lane repo cannot be read, absence was NEVER ESTABLISHED, so the
+# result is COULD-NOT-LOOK and not the alarm. Screaming "destroyed work" off a
+# partial search is precisely how a real alarm gets trained out of people, and
+# being ignored is how DEFECT-OAG-072 was lost in the first place.
+def _batch_ref_existence(project, refs):
+    """({ref: lane-or-None}, [unreadable lanes]) for many refs in ~2 git calls.
+
+    `cat-file --batch-check` answers one line per input line, in order, so the
+    mapping back is positional. A padded repair candidate (see _ref_candidates) is
+    submitted alongside its original and credited to it."""
+    pairs = []                                   # [(ref, candidate)]
+    for ref in refs:
+        for cand in _ref_candidates(ref):
+            pairs.append((str(ref), cand))
+    found = {str(r): None for r in refs}
+    unreadable = []
+    if not pairs:
+        return found, unreadable
+    for lane, repo in _lane_repos(project):
+        if not _repo_readable(repo):
+            unreadable.append(lane)
+            continue
+        rc, out = _git(repo, "cat-file", "--batch-check",
+                       _stdin="".join(c + "\n" for _r, c in pairs))
+        if rc is None:
+            unreadable.append(lane)
+            continue
+        lines = out.split("\n")
+        if len(lines) != len(pairs):             # never guess off a short answer
+            unreadable.append(lane)
+            continue
+        for (ref, _cand), line in zip(pairs, lines):
+            parts = line.split()
+            if len(parts) == 3 and parts[1] == "commit" and found.get(ref) is None:
+                found[ref] = lane
+    return found, unreadable
+
+
+# A `ref:` the CONTRACT says is a sha (process/machinery/CONTRACT.md: `ref: <sha>`).
+# That declaration is the AUTHORITY for treating a non-hex ref as a MALFORMED REF
+# rather than as a destroyed commit (§17h — an exclusion needs an authority, and a
+# counter may not call its own population benign). Found on the check's first real
+# run: `UC-ML1` records `ref: delta-052` on a solution-architect `amended` event —
+# an architecture-delta DOCUMENT id in a field the contract reserves for a sha. It
+# is a real contract violation and it is reported as one; it is NOT destroyed work,
+# and letting it fire the destroyed-work alarm would have made the alarm's first
+# ever firing a false one.
+# Git's own minimum abbreviation length. An all-digit ref SHORTER than this cannot
+# be a usable sha at all, so it is malformed rather than repairable.
+GIT_MIN_ABBREV = 4
+
+
+def _is_sha_shaped(ref):
+    """Could `ref` be a commit sha, i.e. is it worth asking git about?
+
+    Two admitted shapes, and the second is not redundant. An ALL-DIGIT ref of any
+    length >= 4 is admitted even below the 6-char hex floor, because int-coercion
+    SHORTENS a sha by however many leading zeros it ate — `0605428` became `605428`,
+    and a sha with two leading zeros would fall further. Applying the hex floor to
+    it would classify a repairable sha as malformed and silently exclude it from
+    the existence check, which is the hiding place §17h warns about. Below git's own
+    4-char abbreviation floor there is nothing to ask, so that IS malformed."""
+    r = str(ref).strip()
+    if re.fullmatch(r"[0-9a-fA-F]{6,40}", r):
+        return True
+    return r.isdigit() and GIT_MIN_ABBREV <= len(r) <= 40
+
+
+def compute_ref_provenance(project, items=None):
+    """Findings for refs that resolve in NO readable repo, and for a declared
+    `lane:` every one of its refs contradicts."""
+    common = {"check": "ref-provenance"}
+    try:
+        if items is None:
+            items, _dup = load_all_items(project)
+    except Exception as exc:                                     # noqa: BLE001
+        return [dict(common, severity="unknown", ids=[], message=(
+            f"[ref-provenance] COULD NOT LOOK — the item registry would not load "
+            f"({type(exc).__name__}: {str(exc)[:160]}). NOTHING was checked about "
+            f"whether any recorded commit still exists, which is not the same as "
+            f"every commit being fine (§17i)."))]
+    by_ref = {}                                  # sha-shaped ref -> [item ids]
+    malformed = {}                               # non-sha ref -> [(item, event)]
+    declared = {}                                # item id -> (lane, [refs])
+    for iid in sorted(items):
+        it = items[iid]
+        refs = []
+        for ev in it.events:
+            if not ev.get("ref"):
+                continue
+            r = str(ev["ref"]).strip()
+            if _is_sha_shaped(r):
+                refs.append(r)
+                by_ref.setdefault(r, []).append(iid)
+            else:
+                malformed.setdefault(r, []).append((iid, ev.get("event")))
+        lane = (it.fm.get("lane") if hasattr(it, "fm") else None)
+        if refs:
+            declared[iid] = (lane, refs)
+    if not by_ref and not malformed:
+        return []
+    found, unreadable = _batch_ref_existence(project, sorted(by_ref))
+    out = []
+    if malformed:
+        out.append(dict(
+            common, severity="advisory",
+            ids=sorted({i for w in malformed.values() for i, _e in w}),
+            malformed=sorted(malformed),
+            message=("ADVISORY (does NOT block the pull) [ref-provenance] "
+                     + "; ".join(
+                         "`ref: %s` on %s (%s)" % (
+                             r, "/".join(sorted({i for i, _e in w})),
+                             "/".join(sorted({str(e) for _i, e in w})))
+                         for r, w in sorted(malformed.items())[:8])
+                     + " — %d recorded ref(s) are NOT sha-shaped, so their existence "
+                       "was NEVER CHECKED. The contract declares `ref: <sha>` "
+                       "(process/machinery/CONTRACT.md), so this is a contract "
+                       "violation rather than a naming preference — and it is "
+                       "REPORTED rather than skipped, because a silent exclusion is "
+                       "exactly where a genuinely mistyped sha would hide (§17h). It "
+                       "is deliberately NOT the destroyed-work alarm: a document id "
+                       "was never a commit, and letting it fire that alarm would have "
+                       "made the alarm's first ever firing a false one. Remedy: move "
+                       "the document reference into `note:` and either record the "
+                       "real sha or omit `ref:`." % len(malformed))))
+    if unreadable:
+        return [dict(common, severity="unknown", ids=[], unreadable=unreadable,
+                     message=(
+            f"[ref-provenance] COULD NOT LOOK — the {', '.join(unreadable)} repo(s) "
+            f"were unreadable, so the {len(by_ref)} recorded ref(s) were NOT checked "
+            f"for existence. This run establishes nothing about destroyed work; it "
+            f"is not a pass (§17i). Remedy: run from the project root so both "
+            f"work/{project}/.git and the agent-system repo are visible."))]
+    absent = sorted(r for r, lane in found.items() if lane is None)
+    if absent:
+        ids = sorted({i for r in absent for i in by_ref[r]})
+        detail = "; ".join(f"{r} ({', '.join(by_ref[r])})" for r in absent[:8])
+        out.append(dict(common, severity="block", ids=ids, absent=absent, message=(
+            f"[ref-provenance] *** {len(absent)} RECORDED COMMIT(S) EXIST IN NEITHER "
+            f"REPO *** — {detail}. This is the DEFECT-OAG-072 signature (`git "
+            f"cat-file -t fb080d9` => Not a valid object name) for an item that was "
+            f"DELIVERED COMPLETE and whose objects were then destroyed with an agent "
+            f"worktree. Both repos were READABLE and neither holds these objects. "
+            f"RESCUE BEFORE ANYTHING ELSE — `make worktree-guard DIR=--all`, and "
+            f"check every nested clone for objects before any worktree is removed; "
+            f"do NOT remove anything and do NOT re-run to see if it clears. If a ref "
+            f"is merely MISTYPED, correct the item rather than muting the check.")))
+    contradicted = []
+    for iid, (lane, refs) in sorted(declared.items()):
+        if not lane:
+            continue                             # 79.9% of the registry; not a fault
+        lanes = sorted({found[r] for r in refs if found.get(r)})
+        if lanes and str(lane) not in lanes:
+            contradicted.append((iid, str(lane), lanes))
+    if contradicted:
+        out.append(dict(common, severity="advisory",
+                        ids=[i for i, _d, _a in contradicted],
+                        contradicted=contradicted, message=(
+            "ADVISORY (does NOT block the pull) [ref-provenance] "
+            + "; ".join(f"{i} declares lane:{d} but every ref resolves in "
+                        f"{'/'.join(a)}" for i, d, a in contradicted[:8])
+            + ". `lane:` is what `make dispatch-check` routes a dispatch on "
+              "(DEFECT-OAG-076), so a wrong one sends an agent to a worktree that "
+              "cannot hold its work. NOT blocking, because ref resolution no longer "
+              "trusts this field and an item whose refs span BOTH repos is "
+              "incomplete rather than wrong (DEFECT-OAG-091's real shape). Remedy: "
+              "correct `lane:` on the named items.")))
     return out
 
 
@@ -3059,17 +3252,42 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
         # str(): an all-digit short sha (e.g. DEFECT-OAG-045's 5095849) is parsed
         # back from the item file as an int by the frontmatter scalar reader.
         ref = str(ev.get("ref"))
-        on_trunk = _ref_on_trunk(project, ref)
-        push = ("on origin trunk" if on_trunk is True else
-                "NOT on origin trunk" if on_trunk is False else
-                "push state UNKNOWN (ref unresolvable in work/%s)" % project)
+        # FOUR outcomes, rendered DISTINCTLY (DEFECT-OAG-128). This line used to
+        # read "push state UNKNOWN (ref unresolvable in work/<project>)" for BOTH a
+        # parent-lane ref (which merely lived in the other repo) and a sha that
+        # existed nowhere at all — one string for a non-event and for destroyed
+        # work. Collapsing "I looked in the wrong place" into either a pass or the
+        # data-loss alarm was the whole defect.
+        res = resolve_ref(project, ref)
+        on_trunk = (True if res["verdict"] == REF_ON_TRUNK else
+                    False if res["verdict"] == REF_NOT_ON_TRUNK else None)
+        repaired = (" [ref recorded as `%s`; resolved as `%s` — a leading zero was "
+                    "eaten by int-coercion, see DEFECT-OAG-128]"
+                    % (ref, res["resolved"])) if res["padded"] else ""
+        if res["verdict"] == REF_ON_TRUNK:
+            push = "PUSHED — on %s in the %s repo" % (res["trunk"], res["lane"])
+        elif res["verdict"] == REF_NOT_ON_TRUNK:
+            push = ("NOT PUSHED — the commit EXISTS in the %s repo but is on no "
+                    "origin trunk there. It is unpushed, NOT lost" % res["lane"])
+        elif res["verdict"] == REF_ABSENT:
+            push = ("*** COMMIT OBJECT ABSENT FROM EVERY REPO *** — this is the "
+                    "DEFECT-OAG-072 signature (`git cat-file -t fb080d9` => Not a "
+                    "valid object name) for an item whose work was DELIVERED AND "
+                    "DESTROYED. %s. RESCUE FIRST, do not re-run: `make "
+                    "worktree-guard DIR=--all`, and check any nested clone for "
+                    "objects before anything is removed" % res["reason"])
+        else:
+            push = ("push state COULD NOT BE ESTABLISHED — %s. This is not a pass "
+                    "and not an alarm (§17i)" % res["reason"])
         findings.append({
             "check": "stalled-validation", "severity": "block",
             "ids": [iid], "state": state, "dwell_s": dwell, "ref": ref,
-            "on_trunk": on_trunk, "event": ev.get("event"),
+            "on_trunk": on_trunk, "ref_verdict": res["verdict"],
+            "ref_lane": res["lane"], "ref_resolved": res["resolved"],
+            "event": ev.get("event"),
             "message": (f"[stalled-validation] {iid} has been in '{state}' for "
                         f"{_hms(dwell)} (>{stale_hours}h); the work is DONE "
-                        f"({ev.get('event')} ref {ref}, {push}) — only a dispatch "
+                        f"({ev.get('event')} ref {ref}, {push}){repaired} — only a dispatch "
                         f"is missing. Remedy: dispatch the tester now, then "
                         f"`make wi-append PROJECT={project} ID={iid} "
                         f"EVENT=validated|rejected AGENT=tester`."),
@@ -3461,6 +3679,14 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
     #         answer had no observer at all (`f694ea3` matched NOTHING tree-wide
     #         and the only symptom was a label sitting on ~100% of items).
     findings.extend(compute_acceptance_audit(project))
+
+    # --- 12. every recorded `ref:` must still EXIST somewhere — DELEGATED ------
+    #         (DEFECT-OAG-128). Deliberately registry-wide including DONE items:
+    #         a destroyed commit on a closed item is the case nobody re-reads, and
+    #         it is exactly what happened to DEFECT-OAG-072. `items` is threaded in
+    #         rather than re-loaded: 478 files is ~340ms, and a gate that runs before
+    #         every pull pays that on every cycle for nothing.
+    findings.extend(compute_ref_provenance(project, items=items))
 
     return findings
 

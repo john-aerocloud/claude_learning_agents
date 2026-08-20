@@ -279,4 +279,11 @@ module.exports = {
   ownedContainers, claim, release, status, main,
 };
 
-if (require.main === module) process.exit(main());
+if (require.main === module) {
+  // §17g sweep off AC-DEFECT-OAG-076.5: `process.exit()` does not wait for a PIPE to
+  // drain, so any payload over the 64 KiB buffer reaches the consumer TRUNCATED and
+  // the tool falls silent without saying so. This tool arrived from another instance
+  // AFTER that sweep landed and reintroduced the shape — which is why the sweep is a
+  // committed test rather than a comment. Set exitCode; let the runtime flush.
+  process.exitCode = main();
+}

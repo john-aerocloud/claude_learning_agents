@@ -294,6 +294,12 @@ class TestGeneralisationSweep(unittest.TestCase):
     #: Interpolations that are NOT prose. Declared, so a new one has to be classified.
     NOT_PROSE = {
         "REF", "TOKENS", "DURATION_MS", "OBSERVE", "PROJECT", "ID", "EVENT", "AGENT",
+        # PROBE [v145]: a `make:<target> [VAR=VALUE]` spec, not prose. It goes
+        # through `parse_observe_spec`, which rejects anything that is not a plain
+        # make target plus plain VAR=VALUE overrides — no paths, no quotes, no shell
+        # metacharacter of any kind — and the spec is invoked as an argv LIST, never
+        # a shell string. Same disposition, and the same reason, as OBSERVE.
+        "PROBE",
         "PATHS", "REPO", "NOW", "TS",
         # the file routes themselves: a PATH, which is the whole point — it has no
         # metacharacters, so nothing downstream can eat it.

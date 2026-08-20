@@ -1284,13 +1284,25 @@ challenged a reported number, and the fifth by reading code.**
    for"* — came true against the rule that wrote it. The generalising claim: **an
    externally-blocked item is not blocked, it is UNVERIFIED-blocked, until something that can
    fail says so.** A blocker is a claim about the world, and the world changes without telling us.
-   **STATUS — READ THIS BEFORE RELYING ON THIS LIMB: it is NOT YET ENFORCED.** The mechanism is
-   registered as `OI-ROC-005` (owner cicd + orchestrator, acceptance = the refusal firing, with a
-   NON-VACUITY criterion requiring one real probe observed moving `standing` → `cleared`), deferred
-   only because `work-items.py` is the single script every concurrent dispatch calls and three were
-   live (§F2b). Recorded here per §17c.5 rather than left to read as a live control — **a limb that
-   says "must" while nothing refuses is precisely the prose-remedy failure this limb exists to name**,
-   and it stays labelled until `OI-ROC-005` lands.
+   **STATUS — ENFORCED since v145 (`OI-ROC-005` landed 2026-08-20).** `wi-append` REFUSES
+   `EVENT=blocked` without `PROBE=`, refuses a malformed spec before writing, `loop-gate` re-runs
+   every blocked item's probe on every invocation (`blocked-park`: `cleared` blocks, `standing` is
+   advisory, anything else blocks as BROKEN), and `wi-validate` **I7** catches a hand-edited park —
+   the same four-way treatment §17c.2 already gave observation, sharing one runner so the two park
+   states cannot drift apart again. It was PROSE for four hours and labelled as such; the label is
+   what made it get built. **NON-VACUITY, measured not asserted:** the seven parked ROC items were
+   migrated in the same change and TWO were falsified on the probes' first cycle — `DEF-ROC-008`
+   (the deployed host reports `jiraEgress.configured=keyvault`; real tickets `ROC-14`/`ROC-15` had
+   already been raised through it) and `UC-ROC-023` (blocked 27.3 days on two preconditions that
+   were both already satisfied) — while five reported `standing` against real queries. Same probe
+   family, both answers, so the mechanism is not a constant. **Two traps found while building it,
+   both worth carrying:** (1) the first `DEF-ROC-008` probe counted `az keyvault list` and read 0,
+   which measures whether OUR identity may LIST vaults, not whether the vault exists — an
+   unanswerable query read as a true negative, i.e. DEF-ROC-046's mistake inside the probe written
+   to prevent it. **Ask the deployed app about itself, not our own RBAC.** (2) Attaching a probe to
+   an old park is an `amended` self-loop, which opened a new dwell segment and made a 34-day park
+   report **0.0h** — the migration that exposes the cost would have ERASED it. Adjacent same-state
+   segments are now merged for every park-age reading.
 Target: CFR (a never-fired capability, an unread real field, or a dead gate is caught by a
 lane instead of surviving millions of events into `done`) + MTTR, and for limb 6 specifically
 **gross lead time** — the `external` owner share and median time-in-`blocked`.

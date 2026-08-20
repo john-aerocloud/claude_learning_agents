@@ -246,10 +246,74 @@ def _run_observation(project, spec, timeout=DEFAULT_OBSERVE_TIMEOUT):
     """Evaluate an observation predicate NOW. Returns (verdict, detail) where
     verdict is 'observed' | 'not-yet' | 'broken'. Module-level so the loop-gate
     tests can substitute it (same seam as `_ref_on_trunk`)."""
+    return _run_probe(project, spec, OBS_SENTINEL, _OBS_SENTINEL_RE,
+                      (OBS_OBSERVED, OBS_NOT_YET), timeout, "observation")
+
+
+# ---------------------------------------------------------------------------
+# THE REVERSAL PROBE — §17c limb 6 (v144/EXP-143), MECHANISED at v145 (OI-ROC-005)
+#
+# `blocked` was the one park state nothing re-checked. The machinery already
+# enumerated BOTH park states (`_PARKED_STATES`) and already refused
+# `not_yet_observed` without a predicate, on the stated grounds that "a park whose
+# reason is only a `note:` can never come back negative and therefore never ends".
+# That reasoning was never specific to observation; `blocked` was simply left
+# exempt. The measured cost: `DEF-ROC-004` sat `blocked` for 28.8 DAYS after both
+# of its blockers had already gone, and `blocked` holds 41% of this project's gross
+# lead time at a median of 21.7 days per item.
+#
+# The contract is §17c.2's, copied deliberately rather than reinvented — same
+# `make:<target>` scheme, same parser, same timeout, same fail-CLOSED treatment:
+#   `BLOCKER: standing`  -> the probe ran and the blocker is genuinely still there
+#                           (ADVISORY; legitimate, outstanding, never "satisfied").
+#   `BLOCKER: cleared`   -> the blocker is GONE; an `unblocked` dispatch is now
+#                           actionable (loop-gate BLOCKS for it).
+#   anything else        -> BROKEN. No sentinel, both sentinels, non-zero exit, a
+#                           missing target, a crash, a timeout. Fail CLOSED, so a
+#                           probe that does not exist can never masquerade as
+#                           "still blocked" — the exact mistake DEF-ROC-046 made in
+#                           the other direction.
+#
+# NOTE the asymmetry with observation, which is deliberate: `observed` and
+# `cleared` both BLOCK (there is an actionable dispatch), while `not-yet` and
+# `standing` are advisory. The park is only honest while something can decide it
+# has ended.
+# ---------------------------------------------------------------------------
+BLK_SENTINEL = "BLOCKER:"
+BLK_STANDING = "standing"
+BLK_CLEARED = "cleared"
+_BLK_SENTINEL_RE = re.compile(r"^\s*" + BLK_SENTINEL + r"\s*(\S+)\s*$",
+                              re.IGNORECASE | re.MULTILINE)
+
+
+def probe_spec_in_effect(item):
+    """The reversal probe CURRENTLY in effect for `item`: the `probe:` of the LAST
+    event that carries one, so a wrong probe is corrected by appending `amended`
+    with a new one and never by editing a historical event. None if there is none.
+    Mirror of `observe_spec_in_effect` — same rule, the other park state."""
+    spec = None
+    for ev in item.events:
+        if ev.get("probe"):
+            spec = str(ev.get("probe"))
+    return spec
+
+
+def _run_probe(project, spec, sentinel, sentinel_re, names, timeout, what):
+    """Evaluate a `make:<target>` predicate NOW and read its sentinel verdict.
+
+    Shared by the observation predicate (§17c.2) and the reversal probe (§17c.6):
+    the scheme, the parser, the argv-list invocation, the timeout and the
+    fail-CLOSED verdict reading are identical, and only the sentinel word and the
+    two verdict names differ. `names` is (positive, negative); the positive
+    verdict is the one with an ACTIONABLE dispatch behind it.
+
+    Returns (verdict, detail) where verdict is one of `names` or 'broken'.
+    """
     try:
         argv = parse_observe_spec(spec)
     except ValueError as e:
-        return "broken", f"malformed observe spec: {e}"
+        return "broken", f"malformed {what} spec: {e}"
+    positive, negative = names
     repo = _project_repo(project)
     try:
         r = subprocess.run(["make", "-C", repo] + argv, capture_output=True,
@@ -262,21 +326,29 @@ def _run_observation(project, spec, timeout=DEFAULT_OBSERVE_TIMEOUT):
     out = r.stdout or ""
     tail = (out + (r.stderr or "")).strip()[-400:]
     if r.returncode != 0:
-        return "broken", (f"the probe exited {r.returncode} — an observation probe "
-                          f"must exit 0 and report its verdict on stdout as "
-                          f"`{OBS_SENTINEL} {OBS_OBSERVED}|{OBS_NOT_YET}`: {tail}")
-    verdicts = {m.group(1).strip().lower() for m in _OBS_SENTINEL_RE.finditer(out)}
-    verdicts &= {OBS_OBSERVED, OBS_NOT_YET}
-    if verdicts == {OBS_OBSERVED}:
-        return "observed", out.strip()[-400:]
-    if verdicts == {OBS_NOT_YET}:
-        return "not-yet", out.strip()[-400:]
+        return "broken", (f"the probe exited {r.returncode} — a {what} probe must "
+                          f"exit 0 and report its verdict on stdout as "
+                          f"`{sentinel} {positive}|{negative}`: {tail}")
+    verdicts = {m.group(1).strip().lower() for m in sentinel_re.finditer(out)}
+    verdicts &= {positive, negative}
+    if verdicts == {positive}:
+        return positive, out.strip()[-400:]
+    if verdicts == {negative}:
+        return negative, out.strip()[-400:]
     if len(verdicts) > 1:
         return "broken", (f"the probe reported BOTH verdicts — ambiguous, so it "
                           f"establishes nothing: {tail}")
-    return "broken", (f"the probe printed no `{OBS_SENTINEL} {OBS_OBSERVED}` or "
-                      f"`{OBS_SENTINEL} {OBS_NOT_YET}` line, so its verdict is "
+    return "broken", (f"the probe printed no `{sentinel} {positive}` or "
+                      f"`{sentinel} {negative}` line, so its verdict is "
                       f"unreadable: {tail}")
+
+
+def _run_blocker_probe(project, spec, timeout=DEFAULT_OBSERVE_TIMEOUT):
+    """Evaluate a reversal probe NOW. Returns (verdict, detail) with verdict
+    'cleared' | 'standing' | 'broken'. Module-level so the loop-gate tests can
+    substitute it (same seam as `_run_observation` / `_ref_on_trunk`)."""
+    return _run_probe(project, spec, BLK_SENTINEL, _BLK_SENTINEL_RE,
+                      (BLK_CLEARED, BLK_STANDING), timeout, "reversal")
 
 
 def check_transition(graphs, itype, state, event, agent):
@@ -510,6 +582,12 @@ def _render_event(ev):
     # on the `amended` self-edge (where it REPLACES the predicate in effect).
     if ev.get("observe") not in (None, ""):
         parts.append(f"observe: {_q(ev.get('observe'))}")
+    # probe: the MACHINE-CHECKABLE REVERSAL probe of a `blocked` park [v145,
+    # §17c limb 6] — same `make:<target> [VAR=V]` scheme, different sentinel.
+    # Required on `blocked`, optional on the `amended` self-edge (where it
+    # REPLACES the probe in effect — the correction and migration path).
+    if ev.get("probe") not in (None, ""):
+        parts.append(f"probe: {_q(ev.get('probe'))}")
     # tokens: OPTIONAL subagent token cost of producing this transition. Rendered
     # only when present (absent ⇒ unknown, treated as 0 by the cost-split fold).
     if ev.get("tokens") not in (None, ""):
@@ -916,12 +994,58 @@ def cmd_append(a):
               f"'{to}').", file=sys.stderr)
         sys.exit(1)
 
+    # --- the REVERSAL probe is REQUIRED on `blocked`, not optional [v145] -----
+    # §17c limb 6 / EXP-143, mechanised by OI-ROC-005. The machinery already
+    # enumerated BOTH park states and already refused `not_yet_observed` without a
+    # predicate, on the stated grounds that a park whose reason is only a `note:`
+    # can never come back negative and therefore never ends. `blocked` was simply
+    # left exempt, and it is the more expensive of the two: 41% of gross lead time
+    # at a median 21.7 days per item, with DEF-ROC-004 sitting blocked for 28.8
+    # DAYS after both of its blockers had already gone. Refuse it at the WRITE,
+    # which is the earliest possible catch.
+    probe = getattr(a, "probe", None)
+    if to == "blocked":
+        if probe:
+            try:
+                parse_observe_spec(probe)
+            except ValueError as e:
+                print(f"append REJECTED: {a.id}: {e}", file=sys.stderr)
+                print(f"  the probe must be '{OBSERVE_SCHEME}<target> "
+                      f"[VAR=VALUE ...]' naming a COMMITTED, RE-RUNNABLE target in "
+                      f"work/{a.project}/Makefile that exits 0 and prints "
+                      f"`{BLK_SENTINEL} {BLK_CLEARED}` once the blocker is gone, or "
+                      f"`{BLK_SENTINEL} {BLK_STANDING}` while it is still there.",
+                      file=sys.stderr)
+                sys.exit(1)
+        elif a.event == "blocked":
+            print(f"append REJECTED: {a.id}: entering 'blocked' requires --probe "
+                  f"(a machine-checkable reversal probe).", file=sys.stderr)
+            print(f"  A park whose reason is only a --note cannot come back "
+                  f"negative, so nothing ever ends it: `blocked` is the top time "
+                  f"thief in this project and DEF-ROC-004 sat here for 28.8 DAYS "
+                  f"after both of its blockers had already gone (§17c limb 6).",
+                  file=sys.stderr)
+            print(f"  e.g. --probe '{OBSERVE_SCHEME}probe-blocker-<id>' — it must "
+                  f"exit 0 and print `{BLK_SENTINEL} {BLK_CLEARED}` or "
+                  f"`{BLK_SENTINEL} {BLK_STANDING}`; anything else is BROKEN and "
+                  f"blocks the loop. A probe that ALWAYS prints "
+                  f"`{BLK_SENTINEL} {BLK_STANDING}` is a mechanism that cannot "
+                  f"fail — write one that can.", file=sys.stderr)
+            sys.exit(1)
+    elif probe:
+        print(f"append REJECTED: {a.id}: --probe is only meaningful on a "
+              f"transition into 'blocked' (got '{a.event}' -> '{to}').",
+              file=sys.stderr)
+        sys.exit(1)
+
     ts = a.ts or now_iso()
     new_event = {"ts": ts, "event": a.event, "agent": a.agent}
     if a.ref:
         new_event["ref"] = a.ref
     if observe:
         new_event["observe"] = observe
+    if probe:
+        new_event["probe"] = probe
     # tokens: the subagent_tokens the dispatched specialist spent producing this
     # transition. Optional — rides the state event so cost-split is a pure fold.
     if getattr(a, "tokens", None) is not None:
@@ -2491,11 +2615,25 @@ def _last_ref_event(item, event_names):
 
 
 def _current_segment(graphs, item, now):
-    """(state, entered_ts) for the item's still-open segment, or (None, None)."""
+    """(state, entered_ts) for the item's still-open segment, or (None, None).
+
+    ADJACENT SEGMENTS IN THE SAME STATE ARE MERGED [v145]. A self-loop (`amended`)
+    opens a new segment in `walk_states`, which is right for the event log and
+    WRONG for the question every caller here is asking: "how long has this item
+    been sitting in this state?" Attaching a reversal probe to a 34-day park is an
+    `amended`, and without this merge the gate would report that park as 0.0h old —
+    i.e. migrating the parks to make their age visible would have HIDDEN it, on the
+    single largest contributor to gross lead time. The same applies to the
+    stalled-validation dwell: amending a stalled item must not reset its clock.
+    Per-state totals in `stats.md` sum every segment and are unaffected."""
     segs = walk_states(graphs, item, now)
     if not segs:
         return None, None
     state, entered, _exited = segs[-1]
+    i = len(segs) - 2
+    while i >= 0 and segs[i][0] == state:
+        entered = segs[i][1]
+        i -= 1
     return state, entered
 
 
@@ -2814,6 +2952,86 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
                 f"printing `{OBS_SENTINEL} {OBS_OBSERVED}`/`{OBS_SENTINEL} "
                 f"{OBS_NOT_YET}`) or record a corrected one "
                 f"with `make wi-append … EVENT=amended … OBSERVE=…`.")))
+
+    # --- 5b. blocked: RE-RUN the reversal probe, every cycle [v145, §17c.6] ---
+    # The sibling of check 5, and the more expensive park of the two: `blocked`
+    # holds the largest single share of gross lead time in this project at a median
+    # of ~3 weeks per item. Its only detector used to be a human deciding to
+    # re-ask, and DEF-ROC-004 sat here for 28.8 DAYS after both of its blockers had
+    # already gone. Severities mirror check 5 exactly — the verdict with an
+    # ACTIONABLE dispatch behind it BLOCKS:
+    #   cleared  -> BLOCK. The blocker is gone; an `unblocked` append is available.
+    #   standing -> ADVISORY. Honest, outstanding, never "satisfied".
+    #   broken   -> BLOCK. An unrunnable probe is not a probe (§17c.2), and a probe
+    #               that does not exist must never masquerade as "still blocked".
+    for iid in sorted(items):
+        if states.get(iid) != "blocked":
+            continue
+        it = items[iid]
+        # FLOW items only — an aggregate BUBBLES into `blocked` from a child and has
+        # no own event stream to carry a probe. The probe lives on the child, and
+        # reporting the ancestors would be a phantom block for each of them.
+        if graphs.kind(it.type) != "flow":
+            continue
+        _st, entered = _current_segment(graphs, it, now)
+        dwell = (now - entered).total_seconds() if entered else None
+        spec = probe_spec_in_effect(it)
+        common = {"check": "blocked-park", "ids": [iid], "state": "blocked",
+                  "dwell_s": dwell, "spec": spec}
+        if not spec:
+            findings.append(dict(common, severity="block", verdict="no-predicate",
+                                 message=(
+                f"[blocked-park] {iid} has been parked in 'blocked' for "
+                f"{_hms(dwell)} but carries NO reversal probe — nothing can decide "
+                f"when the blocker ends, so it would sit here for ever. This is the "
+                f"DEF-ROC-004 shape (28.8 days blocked after both blockers had "
+                f"already gone). Remedy: `make wi-append PROJECT={project} ID={iid} "
+                f"EVENT=amended AGENT=flow-manager "
+                f"PROBE={OBSERVE_SCHEME}<target>` naming a committed re-runnable "
+                f"probe (exit 0, printing `{BLK_SENTINEL} {BLK_CLEARED}` or "
+                f"`{BLK_SENTINEL} {BLK_STANDING}`) — or, if it should not be "
+                f"blocked at all, `EVENT=unblocked` and say why.")))
+            continue
+        if not observe:
+            findings.append(dict(common, severity="unknown", verdict="not-evaluated",
+                                 message=(
+                f"[blocked-park] {iid}: reversal probe '{spec}' was NOT evaluated "
+                f"(--no-observe). Parked {_hms(dwell)}. This run establishes nothing "
+                f"about whether the blocker is still there — re-run without "
+                f"--no-observe before concluding anything.")))
+            continue
+        verdict, detail = _run_blocker_probe(project, spec, observe_timeout)
+        if verdict == BLK_CLEARED:
+            findings.append(dict(common, severity="block", verdict=verdict,
+                                 detail=detail, message=(
+                f"[blocked-park] {iid}: THE BLOCKER IS GONE (probe '{spec}' reported "
+                f"{BLK_SENTINEL} {BLK_CLEARED}{'; ' + detail if detail else ''}) "
+                f"after {_hms(dwell)} parked. An `unblocked` dispatch is ACTIONABLE "
+                f"and this is the single largest recoverable cost in the system. "
+                f"Remedy: `make wi-append PROJECT={project} ID={iid} "
+                f"EVENT=unblocked AGENT=flow-manager` with the probe output in NOTE, "
+                f"then pull it.")))
+        elif verdict == BLK_STANDING:
+            findings.append(dict(common, severity="advisory", verdict=verdict,
+                                 detail=detail, message=(
+                f"ADVISORY (does NOT block the pull) [blocked-park] {iid} parked "
+                f"{_hms(dwell)}: '{spec}' reports the blocker is STILL BLOCKED. "
+                f"Legitimate and re-checked every cycle — but it is OUTSTANDING, "
+                f"never satisfied, and `blocked` is the top contributor to gross "
+                f"lead time. If the wait is unbounded, escalate it, buy round it, or "
+                f"decide the item should not be blocked — never let the probe become "
+                f"the reason nobody looks.")))
+        else:
+            findings.append(dict(common, severity="block", verdict="broken",
+                                 detail=detail, message=(
+                f"[blocked-park] {iid}: its reversal probe CANNOT BE EVALUATED "
+                f"('{spec}': {detail}). An unrunnable probe is not a probe "
+                f"(§17c.2), and a probe that does not exist must NEVER masquerade "
+                f"as 'still blocked' — that is DEF-ROC-046's mistake in the other "
+                f"direction. Remedy: fix the probe (exit 0, printing "
+                f"`{BLK_SENTINEL} {BLK_CLEARED}`/`{BLK_SENTINEL} {BLK_STANDING}`) "
+                f"or record a corrected one with "
+                f"`make wi-append … EVENT=amended … PROBE=…`.")))
 
     # --- 4. retro debt (DELEGATED — do not duplicate that logic) -------------
     routine, incidents, due, _detail, marker = compute_retro_debt(
@@ -3392,7 +3610,7 @@ def cmd_validate(a):
         for v in violations:
             print(f"  - {v}", file=sys.stderr)
         sys.exit(1)
-    print(f"validate: {a.project} clean — I1–I4 + I6 all hold.")
+    print(f"validate: {a.project} clean — I1–I4 + I6 + I7 all hold.")
 
 
 def validate_items(graphs, project):
@@ -3463,6 +3681,26 @@ def validate_items(graphs, project):
                 except ValueError as e:
                     violations.append(
                         f"(I6) {iid}: observation predicate is not evaluable: {e}")
+
+        # I7: a `blocked` FLOW item carries a VALID reversal probe [v145, §17c.6].
+        # Exactly the role I6 plays for the sibling park state: `append` refuses the
+        # transition without one, so a violation here means a hand-edit or a park
+        # made before the rule existed. Aggregates are exempt for the same reason —
+        # a slice/chunk BUBBLES into `blocked` from a child and has no own stream.
+        if state == "blocked" and graphs.kind(it.type) == "flow":
+            spec = probe_spec_in_effect(it)
+            if not spec:
+                violations.append(
+                    f"(I7) {iid}: in 'blocked' with NO reversal probe — nothing can "
+                    f"decide when the blocker ends. Record one via `wi-append … "
+                    f"EVENT=amended … PROBE={OBSERVE_SCHEME}<target>`; do not "
+                    f"hand-edit item state.")
+            else:
+                try:
+                    parse_observe_spec(spec)
+                except ValueError as e:
+                    violations.append(
+                        f"(I7) {iid}: reversal probe is not evaluable: {e}")
 
         # I4b: a done FLOW item must live in done/ (aggregates always stay in
         # active/ — their state is DERIVED from children, not their own stream,
@@ -3899,6 +4137,21 @@ def main(argv=None):
                          f"{OBS_NOT_YET}` while it has not). Also accepted on the "
                          "`amended` self-edge, where it REPLACES the predicate in "
                          "effect. Rejected on any other event.")
+    ap.add_argument("--probe",
+                    help="REQUIRED when entering `blocked` (§17c limb 6): the "
+                         "machine-checkable REVERSAL probe, "
+                         f"'{OBSERVE_SCHEME}<target> [VAR=VALUE ...]' — a committed "
+                         "re-runnable make target in work/<project>/ that exits 0 and "
+                         f"prints `{BLK_SENTINEL} {BLK_CLEARED}` once the blocker is "
+                         f"gone (or `{BLK_SENTINEL} {BLK_STANDING}` while it is still "
+                         "there). Anything else is BROKEN and blocks the loop. Also "
+                         "accepted on the `amended` self-edge, where it REPLACES the "
+                         "probe in effect — that is how a wrong probe is corrected, "
+                         "and how a pre-v145 park is migrated. Rejected on any other "
+                         "event. WHY: `blocked` holds the largest share of gross lead "
+                         "time of any state, and its only detector used to be a human "
+                         "deciding to re-ask — DEF-ROC-004 sat blocked for 28.8 DAYS "
+                         "after both of its blockers had already gone.")
     ap.add_argument("--tokens", type=int,
                     help="subagent_tokens the dispatched specialist spent producing "
                          "this transition (optional; feeds the plumbing-vs-delivery "

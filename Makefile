@@ -413,7 +413,7 @@ wi-append:
 	  exit 1; \
 	fi
 	$(WORKITEMS) append --project $(PROJECT) --id $(ID) --event $(EVENT) --agent $(AGENT) \
-	  $(if $(REF),--ref "$(REF)",) $(if $(NOTE),--note "$(NOTE)",) $(if $(NOTE_FILE),--note-file "$(NOTE_FILE)",) $(if $(TOKENS),--tokens "$(TOKENS)",) $(if $(DURATION_MS),--duration-ms "$(DURATION_MS)",) $(if $(OBSERVE),--observe "$(OBSERVE)",)
+	  $(if $(REF),--ref "$(REF)",) $(if $(NOTE),--note "$(NOTE)",) $(if $(NOTE_FILE),--note-file "$(NOTE_FILE)",) $(if $(TOKENS),--tokens "$(TOKENS)",) $(if $(DURATION_MS),--duration-ms "$(DURATION_MS)",) $(if $(OBSERVE),--observe "$(OBSERVE)",) $(if $(PROBE),--probe "$(PROBE)",)
 # Recompute ALL views (queues + stats + tree + re-render each item's derived block). Run after each loop.
 # make wi-project PROJECT=OagEventSource
 wi-project:
@@ -422,6 +422,9 @@ wi-project:
 # I6 [v9] = an `awaiting_observation` flow item carries a VALID observation predicate
 #   (append refuses the transition without one, so a violation here means a hand-edit).
 #   I5 stays RESERVED for IMP-011's still-owed CORE-job aggregate invariant.
+# I7 [v145] = a `blocked` flow item carries a VALID reversal probe (§17c limb 6) —
+#   same rule, the other park state. `blocked` is the biggest time thief in the
+#   system and used to have no detector but a human remembering to re-ask.
 # make wi-validate PROJECT=OagEventSource
 wi-validate:
 	$(WORKITEMS) validate --project $(PROJECT)

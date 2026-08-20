@@ -3853,5 +3853,388 @@ class TestAwaitingObservationBubble(Base):
         self.assertEqual([f["ids"] for f in aw], [["UC-1"]], findings)
 
 
+# --------------------------------------------------------------------------- #
+# THE REVERSAL PROBE — §17c limb 6 / EXP-143, mechanised by OI-ROC-005
+#
+# `blocked` was the one park state nothing re-checked, while holding 41% of ROC's
+# gross lead time at a median 21.7 DAYS per item. The founding measurement:
+# DEF-ROC-004 sat `blocked` for 28.8 days after both of its blockers had already
+# gone, and the only detector was a human deciding to re-ask.
+#
+# These tests are the acceptance of OI-ROC-005, AC-005.1 .. AC-005.5. They are
+# written against the SAME contract as the observation predicate deliberately, so
+# the two park states cannot drift apart again.
+# --------------------------------------------------------------------------- #
+class TestReversalProbeAppend(Base):
+    """AC-005.1 / AC-005.2 — the write refuses a park with no machine-checkable
+    reversal probe, and refuses a malformed one BEFORE the event is written."""
+
+    def _ns(self, iid, event, agent, probe=None):
+        return argparse.Namespace(project=self.project, id=iid, event=event,
+                                  agent=agent, ref=None, note=None,
+                                  ts="2026-06-18T00:00:00Z", probe=probe)
+
+    def _blockable_uc(self, iid="UC-B"):
+        self.write_item("active", iid, "use-case",
+                        [{"ts": "1", "event": "registered", "agent": "flow-manager"},
+                         {"ts": "2", "event": "made_ready", "agent": "flow-manager"}])
+        return os.path.join(self._items("active"), f"{iid}.md")
+
+    def test_AC_005_1_blocked_without_a_probe_is_REFUSED(self):
+        """PROOF-OF-FIRE. The whole finding is that a park whose reason is only a
+        note can never come back negative, so it never ends."""
+        path = self._blockable_uc()
+        with self.assertRaises(SystemExit) as cm:
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                wi.cmd_append(self._ns("UC-B", "blocked", "flow-manager"))
+        self.assertNotEqual(cm.exception.code, 0)
+        msg = err.getvalue()
+        self.assertIn("requires --probe", msg)
+        self.assertIn("BLOCKER:", msg)
+        # and NOTHING was written — the refusal is at the write, not after it
+        self.assertEqual(len(wi.load_item(path).events), 2)
+
+    def test_AC_005_2_a_malformed_probe_fails_before_the_event_is_written(self):
+        path = self._blockable_uc()
+        for bad in ("probe-x",                      # no make: scheme
+                    "make:",                        # no target
+                    "make:x; rm -rf /",             # shell metacharacters
+                    "make:../escape"):              # not a plain target
+            with self.subTest(bad=bad):
+                with self.assertRaises(SystemExit) as cm:
+                    with contextlib.redirect_stderr(io.StringIO()) as err:
+                        wi.cmd_append(self._ns("UC-B", "blocked", "flow-manager",
+                                               probe=bad))
+                self.assertNotEqual(cm.exception.code, 0)
+                self.assertIn("REJECTED", err.getvalue())
+                self.assertEqual(len(wi.load_item(path).events), 2)
+
+    def test_a_valid_probe_is_written_onto_the_event_and_is_readable(self):
+        path = self._blockable_uc()
+        with contextlib.redirect_stdout(io.StringIO()):
+            wi.cmd_append(self._ns("UC-B", "blocked", "flow-manager",
+                                   probe="make:probe-blocker-uc-b"))
+        it = wi.load_item(path)
+        self.assertEqual(it.events[-1].get("probe"), "make:probe-blocker-uc-b")
+        self.assertEqual(wi.probe_spec_in_effect(it), "make:probe-blocker-uc-b")
+
+    def test_a_wrong_probe_is_corrected_by_amending_never_by_editing_history(self):
+        """The LAST event carrying a probe wins — same rule as `observe:`, so a
+        bad probe is fixed forward and the history stays append-only."""
+        path = self._blockable_uc()
+        with contextlib.redirect_stdout(io.StringIO()):
+            wi.cmd_append(self._ns("UC-B", "blocked", "flow-manager",
+                                   probe="make:probe-wrong"))
+            wi.cmd_append(self._ns("UC-B", "amended", "flow-manager",
+                                   probe="make:probe-right"))
+        it = wi.load_item(path)
+        self.assertEqual(wi.probe_spec_in_effect(it), "make:probe-right")
+        self.assertEqual(it.events[-2].get("probe"), "make:probe-wrong")
+
+    def test_probe_on_a_transition_that_is_not_a_park_is_REFUSED(self):
+        """A probe means "this park is re-checkable". On any other transition it
+        would be dead metadata that nothing evaluates — refuse it rather than
+        store something misleading."""
+        self.write_item("active", "UC-P", "use-case",
+                        [{"ts": "1", "event": "registered", "agent": "flow-manager"}])
+        with self.assertRaises(SystemExit) as cm:
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                wi.cmd_append(self._ns("UC-P", "made_ready", "flow-manager",
+                                       probe="make:probe-x"))
+        self.assertNotEqual(cm.exception.code, 0)
+        self.assertIn("only meaningful", err.getvalue())
+
+
+class TestReversalProbeRunner(Base):
+    """AC-005.4 — all five BROKEN cases, against a REAL `make`.
+
+    Stubbing subprocess here would prove only that the mapping agrees with itself:
+    that is exactly how the observation predicate's first cut passed its tests and
+    then read BROKEN for every probe in the field, because **make does not
+    propagate a recipe's exit status**. So this drives real make."""
+
+    def _probe_makefile(self, body):
+        d = os.path.join(self.tmp, "work", self.project)
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "Makefile"), "w", encoding="utf-8") as f:
+            f.write(body)
+
+    def test_AC_005_4_the_five_broken_cases_and_the_two_real_verdicts(self):
+        self._probe_makefile(
+            "cleared:\n\t@echo 'the roc-test subscription exists'\n\t@echo 'BLOCKER: cleared'\n"
+            "standing:\n\t@echo 'still 403 from the deploy SP'\n\t@echo 'BLOCKER: standing'\n"
+            "silent:\n\t@echo 'I looked at some things'\n"
+            "crashes:\n\t@echo boom >&2; exit 1\n"
+            "codeonly:\n\t@exit 3\n"
+            "both:\n\t@echo 'BLOCKER: standing'; echo 'BLOCKER: cleared'\n")
+        run = lambda t: wi._run_blocker_probe(self.project, f"make:{t}")
+        # the two real verdicts
+        self.assertEqual(run("cleared")[0], "cleared")
+        self.assertEqual(run("standing")[0], "standing")
+        # 1. no sentinel at all — helpful output, no verdict, establishes nothing
+        self.assertEqual(run("silent")[0], "broken")
+        # 2. a crash
+        self.assertEqual(run("crashes")[0], "broken")
+        # 3. an exit-code-only contract, which `make` cannot express
+        self.assertEqual(run("codeonly")[0], "broken")
+        # 4. both sentinels — ambiguous, so it establishes nothing
+        self.assertEqual(run("both")[0], "broken")
+        # 5. a target that DOES NOT EXIST must never masquerade as "still blocked"
+        verdict, detail = run("no-such-target")
+        self.assertEqual(verdict, "broken")
+        self.assertIn("No rule to make target", detail)
+        # the operator gets the probe's own words, both ways round
+        self.assertIn("roc-test subscription", run("cleared")[1])
+        self.assertIn("403", run("standing")[1])
+
+    def test_a_timeout_is_broken_not_standing(self):
+        self._probe_makefile("slow:\n\t@sleep 5\n\t@echo 'BLOCKER: standing'\n")
+        verdict, detail = wi._run_blocker_probe(self.project, "make:slow", timeout=0.4)
+        self.assertEqual(verdict, "broken")
+        self.assertIn("timeout", detail)
+
+    def test_a_malformed_spec_is_never_executed(self):
+        called = []
+        orig = wi.subprocess.run
+        wi.subprocess.run = lambda *a, **k: called.append(a)
+        try:
+            verdict, detail = wi._run_blocker_probe(self.project, "make:x; rm -rf /")
+        finally:
+            wi.subprocess.run = orig
+        self.assertEqual(verdict, "broken")
+        self.assertEqual(called, [])
+        self.assertIn("malformed", detail)
+
+    def test_the_probe_runs_the_project_makefile_without_a_shell(self):
+        seen = {}
+
+        class R:
+            returncode, stdout, stderr = 0, "BLOCKER: cleared", ""
+
+        def fake_run(argv, **kw):
+            seen["argv"], seen["kw"] = argv, kw
+            return R()
+
+        orig = wi.subprocess.run
+        wi.subprocess.run = fake_run
+        try:
+            self.assertEqual(
+                wi._run_blocker_probe(self.project,
+                                      "make:probe-blocker-x SUB=aas-test")[0],
+                "cleared")
+        finally:
+            wi.subprocess.run = orig
+        self.assertEqual(seen["argv"],
+                         ["make", "-C", os.path.join(self.tmp, "work", self.project),
+                          "probe-blocker-x", "SUB=aas-test"])
+        self.assertNotIn("shell", seen["kw"])
+
+
+class TestReversalProbeLoopGate(TestLoopGate):
+    """AC-005.3 / AC-005.5 — the gate re-runs every blocked item's probe EVERY
+    cycle. `cleared` BLOCKS (an `unblocked` dispatch is actionable); `standing` is
+    advisory; anything else BLOCKS as BROKEN.
+
+    Inherits TestLoopGate's helpers so the severities are asserted through the
+    SAME gate driver as every other check."""
+
+    def _blocked_defect(self, iid="DEF-1", day=1, spec="make:probe-blocker-def-1"):
+        evs = [{"ts": _dt(day, 0), "event": "reported", "agent": "orchestrator"},
+               {"ts": _dt(day, 1), "event": "triaged", "agent": "orchestrator"},
+               {"ts": _dt(day, 2), "event": "confirmed", "agent": "engineer"},
+               {"ts": _dt(day, 3), "event": "blocked", "agent": "flow-manager",
+                "note": "waiting on the deploy service principal"}]
+        if spec:
+            evs[-1]["probe"] = spec
+        return evs
+
+    def _fake_probe(self, verdict, detail="", record=None):
+        def fake(project, spec, timeout=None):
+            if record is not None:
+                record.append((project, spec, timeout))
+            return verdict, detail
+        return fake
+
+    def _with_probe(self, verdict, detail="", run=False, **kw):
+        orig = wi._run_blocker_probe
+        wi._run_blocker_probe = self._fake_probe(verdict, detail)
+        try:
+            return self._run(**kw) if run else self._gate(**kw)
+        finally:
+            wi._run_blocker_probe = orig
+
+    def _quiet_ready(self):
+        """Three ready UCs + the shipped policy, so the OTHER checks are silent
+        and the blocked finding is the only thing under test."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+
+    def test_AC_005_3_standing_is_ADVISORY_and_does_not_block(self):
+        self._quiet_ready()
+        self.write_item("active", "DEF-1", "defect", self._blocked_defect())
+        findings = self._with_probe("standing", "403 from the deploy SP")
+        self.assertNotIn("blocked-park", self._checks(findings))
+        adv = [f for f in findings
+               if f["check"] == "blocked-park" and f["severity"] == "advisory"]
+        self.assertEqual([f["ids"] for f in adv], [["DEF-1"]], findings)
+        self.assertEqual(adv[0]["verdict"], "standing")
+        code, out = self._with_probe("standing", "403 from the deploy SP", run=True)
+        self.assertEqual(code, 0)
+        self.assertIn("ADVISORY", out)
+        self.assertIn("DEF-1", out)
+        self.assertIn("STILL BLOCKED", out.upper())
+
+    def test_AC_005_3_cleared_BLOCKS_and_names_the_unblocked_append(self):
+        """The founding failure: DEF-ROC-004 blocked for 28.8 days after its
+        blockers had gone. `cleared` is actionable, so it must stop the pull."""
+        self._quiet_ready()
+        self.write_item("active", "DEF-1", "defect", self._blocked_defect())
+        findings = self._with_probe("cleared", "the roc-test subscription exists")
+        self.assertIn("blocked-park", self._checks(findings))
+        f = [x for x in findings if x["check"] == "blocked-park"][0]
+        self.assertEqual((f["severity"], f["verdict"], f["ids"]),
+                         ("block", "cleared", ["DEF-1"]))
+        code, out = self._with_probe("cleared", "subscription exists", run=True)
+        self.assertEqual(code, 2)
+        self.assertIn("EVENT=unblocked", out)
+        self.assertIn("DEF-1", out)
+
+    def test_AC_005_4_a_broken_probe_BLOCKS(self):
+        self._quiet_ready()
+        self.write_item("active", "DEF-1", "defect", self._blocked_defect())
+        findings = self._with_probe("broken", "No rule to make target 'probe-x'")
+        self.assertIn("blocked-park", self._checks(findings))
+        f = [x for x in findings if x["check"] == "blocked-park"][0]
+        self.assertEqual(f["verdict"], "broken")
+        code, out = self._with_probe("broken", "No rule to make target", run=True)
+        self.assertEqual(code, 2)
+        self.assertIn("CANNOT BE EVALUATED", out)
+
+    def test_a_blocked_item_with_NO_probe_BLOCKS(self):
+        """Only reachable by a hand-edit or a pre-v145 park. Fail CLOSED: an
+        unverifiable park is exactly the prose park this limb exists to end."""
+        self._quiet_ready()
+        self.write_item("active", "DEF-1", "defect", self._blocked_defect(spec=None))
+        findings = self._with_probe("cleared")      # never consulted
+        f = [x for x in findings if x["check"] == "blocked-park"][0]
+        self.assertEqual((f["severity"], f["verdict"]), ("block", "no-predicate"))
+        self.assertIsNone(f["spec"])
+        code, out = self._with_probe("cleared", run=True)
+        self.assertEqual(code, 2)
+        self.assertIn("NO reversal probe", out)
+
+    def test_no_observe_flag_reports_unknown_never_silently_clean(self):
+        self._quiet_ready()
+        self.write_item("active", "DEF-1", "defect", self._blocked_defect())
+        calls = []
+        orig = wi._run_blocker_probe
+        wi._run_blocker_probe = self._fake_probe("cleared", record=calls)
+        try:
+            findings = self._gate(observe=False)
+            code, out = self._run(observe=False)
+        finally:
+            wi._run_blocker_probe = orig
+        self.assertEqual(calls, [])
+        f = [x for x in findings if x["check"] == "blocked-park"][0]
+        self.assertEqual((f["severity"], f["verdict"]), ("unknown", "not-evaluated"))
+        self.assertEqual(code, 0)
+        self.assertIn("NOT ESTABLISHED", out)
+
+    def test_the_probe_is_re_evaluated_on_EVERY_run(self):
+        """The whole finding was that nothing re-checked. A cached or once-only
+        evaluation would reproduce it exactly."""
+        self._quiet_ready()
+        self.write_item("active", "DEF-1", "defect", self._blocked_defect())
+        calls = []
+        orig = wi._run_blocker_probe
+        wi._run_blocker_probe = self._fake_probe("standing", record=calls)
+        try:
+            self._gate()
+            self._gate()
+            self._gate()
+        finally:
+            wi._run_blocker_probe = orig
+        self.assertEqual(len(calls), 3)
+        self.assertEqual({c[1] for c in calls}, {"make:probe-blocker-def-1"})
+
+    def test_attaching_a_probe_must_not_RESET_the_park_age(self):
+        """THE MIGRATION MUST NOT HIDE THE COST IT EXISTS TO EXPOSE. Attaching a
+        probe to an old park is an `amended` self-loop, which opens a new segment in
+        `walk_states`. Without merging adjacent same-state segments the gate reports
+        a 34-day park as 0.0h — so migrating the parks to make their age visible
+        would have ERASED it, on the largest single contributor to gross lead time.
+        Observed for real on the first migration run."""
+        self._quiet_ready()
+        evs = self._blocked_defect(day=1)                       # blocked on day 1
+        evs.append({"ts": _dt(20, 0), "event": "amended", "agent": "flow-manager",
+                    "probe": "make:probe-blocker-def-1"})       # amended 19 days later
+        self.write_item("active", "DEF-1", "defect", evs)
+        findings = self._with_probe("standing")
+        f = [x for x in findings if x["check"] == "blocked-park"][0]
+        # NOW is day 30, so the park is ~29 days old, NOT the 10 days since the
+        # amend and certainly not zero.
+        self.assertGreater(f["dwell_s"], 25 * 86400, f)
+
+    def test_an_AGGREGATE_that_bubbled_to_blocked_is_exempt(self):
+        """A slice BUBBLES into blocked from a child and has no own event stream,
+        so it carries no probe. Reporting it would be a phantom block for every
+        ancestor of one parked item — the probe lives on the child."""
+        self._quiet_ready()
+        self.write_item("active", "DEF-1", "defect",
+                        self._blocked_defect(), parents=["SLC-1"])
+        self.write_item("active", "SLC-1", "slice", [])
+        findings = self._with_probe("standing")
+        ids = [i for f in findings if f["check"] == "blocked-park" for i in f["ids"]]
+        self.assertEqual(ids, ["DEF-1"])
+
+
+class TestReversalProbeInvariant(Base):
+    """I7 — a `blocked` FLOW item carries a valid reversal probe. `append` refuses
+    the transition without one, so a violation here means a hand-edit; this is the
+    same role I6 plays for `awaiting_observation`."""
+
+    def _validate(self):
+        """Violations go to STDERR (a gate's findings must not be swallowed by a
+        stdout pipe); the clean line goes to stdout. Capture both."""
+        ns = argparse.Namespace(project=self.project)
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                try:
+                    wi.cmd_validate(ns)
+                    code = 0
+                except SystemExit as e:
+                    code = e.code
+        return code, out.getvalue() + err.getvalue()
+
+    def _blocked(self, probe):
+        evs = [{"ts": _dt(1, 0), "event": "reported", "agent": "orchestrator"},
+               {"ts": _dt(1, 1), "event": "triaged", "agent": "orchestrator"},
+               {"ts": _dt(1, 2), "event": "confirmed", "agent": "engineer"},
+               {"ts": _dt(1, 3), "event": "blocked", "agent": "flow-manager"}]
+        if probe:
+            evs[-1]["probe"] = probe
+        return evs
+
+    def test_I7_flags_a_hand_edited_park_with_no_probe(self):
+        self.write_item("active", "DEF-9", "defect", self._blocked(None))
+        code, out = self._validate()
+        self.assertNotEqual(code, 0)
+        self.assertIn("(I7)", out)
+        self.assertIn("DEF-9", out)
+
+    def test_I7_flags_an_unevaluable_probe(self):
+        self.write_item("active", "DEF-9", "defect", self._blocked("probe-x"))
+        code, out = self._validate()
+        self.assertNotEqual(code, 0)
+        self.assertIn("(I7)", out)
+
+    def test_I7_is_satisfied_by_a_valid_probe(self):
+        self.write_item("active", "DEF-9", "defect",
+                        self._blocked("make:probe-blocker-def-9"))
+        code, out = self._validate()
+        self.assertEqual(code, 0, out)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -2533,6 +2533,221 @@ def _defer_until(item):
     return dt
 
 
+# ---------------------------------------------------------------------------
+# loop-gate check 11 — STALLED WORK: an item CLAIMED (or SCHEDULED) with NO
+# RECORDED ACTIVITY (DEFECT-OAG-127)
+#
+# WHY THIS EXISTS. Check 1 above covers VALIDATION states only, and only BLOCKS
+# when the work is provably finished (a structured `ref:`). So every state where
+# work is actually DONE — `fixing`, `building`, `reproducing`, `deploying`,
+# `reworking` — was a blind spot, and so was an item SCHEDULED into `ready` that
+# nobody ever pulled. Measured 2026-08-19 by replaying the REAL item files at
+# project-repo commit 9ff713ee through this very gate: SIX wip items idle
+# 4.92-7.31d (DEFECT-OAG-046 @7.31d fixing, UC-C11/UC-C11b @5.94d building,
+# DEFECT-OAG-116 @5.13d, DEFECT-OAG-120 @4.92d fixing) and THREE `scheduled`
+# items idle 5.12-8.11d — and of those nine the entire gate named NONE. The only
+# id it named was the one ref-bearing `validating` item.
+#
+# THE COST WAS A WRONG DECISION, NOT A MISSING ALARM. `wip: 7` reads identically
+# whether seven agents are working or seven items are abandoned, so the flow
+# decision taken on it was inverted in BOTH directions inside one session: 35
+# items were deferred to September for "no capacity" while no work was happening
+# at all, and three scheduled items sat 127-199h while `wip` showed four free
+# slots. That is the §17h shape at the flow layer — a counter whose unhealthy
+# state is indistinguishable from its healthy one — so check 3's WIP line now
+# states that it counts OCCUPANCY and prints the activity split beside it, and the
+# gate's header carries that split on EVERY run (the wrong decision was taken
+# while wip was UNDER its cap, so an over-cap-only signal would not have helped).
+#
+# WHAT THIS CHECK HONESTLY KNOWS, AND WHAT IT DOES NOT. It knows one fact: NO
+# EVENT HAS BEEN RECORDED FOR THIS ITEM SINCE <t>. It CANNOT distinguish an agent
+# working a hard item for six hours from an item nobody is holding, because
+# nothing in this system records a dispatch — there is no start-of-dispatch event,
+# no lease and no heartbeat on the item. The signal that would separate them is
+# exactly that: a dispatch record (id + start ts, released on return) written by
+# the dispatcher and read here, which is the open finding
+# OI-LOOP-GATE-CANNOT-SEE-A-DISPATCH-IN-FLIGHT (the converse blind spot: the gate
+# also cannot tell a live dispatch from none). Until that exists this check must
+# NOT claim abandonment, and it does not: it reports the idle fact, and the remedy
+# asks the reader to decide between the three possibilities. A proxy was available
+# — the per-dispatch DynamoDB-Local containers carry a DISPATCH id — and was
+# deliberately NOT used: not every dispatch starts one, so it would answer "no
+# container therefore abandoned" wrongly, which is a guess wearing a measurement's
+# clothes.
+#
+# THRESHOLDS ARE DERIVED, AND DELIBERATELY NOT FROM THE TAIL. views/stats.md §B
+# (measured dwell, backfill held apart per §17f) gives per-state MEDIAN dwell:
+# reproducing 733s, fixing 670s, building 1536s, deploying 685s, dev-validating
+# 1790s, validating 10001s, reworking 4626s, prod-deploying 65s, prod-validating
+# 26s. 24h is 58x-3300x every one of them. The p95 of the same distribution is
+# 12-92h — but that tail IS the pathology (its top entries are the very abandoned
+# segments above), so deriving the threshold from it would define the disease as
+# normal, which is the §17h trap in the measurement itself. Hence: median-anchored.
+#
+# The states differ by two orders of magnitude among themselves and ALL of them by
+# two more from the threshold, so splitting 24h into per-state numbers would be
+# false precision — with ONE exception the data does justify: `scheduled` has a
+# median of 55091s (15.3h, n=20, ZERO backfill), an order of magnitude above every
+# work state, because it is a DIFFERENT QUANTITY (queue latency, not effort). So
+# the ready-stage states get their own, larger number. The map is nevertheless
+# keyed PER STATE, so a state that later proves different can be tuned alone, and
+# `queues/policy.csv` carries a per-queue `stall_hours` override so the number is
+# owned by the retro like every other buffer knob (§F2) rather than by this file.
+#
+# Measured against history at these numbers: 52 firings across ~600 closed
+# segments (3-12% per state), every one of them a real stall (DEFECT-OAG-045 @36h
+# is the founding stalled-validation case; UC-C11 @146h; DEFECT-OAG-046 @176h). At
+# any instant only OPEN segments are reported, so the steady-state report is
+# empty when work is moving — which is what keeps it from becoming background
+# noise, the failure mode that let `make render-diagrams` sit red for 20 days.
+STALLED_WORK_HOURS = {
+    # agent-owned WIP-stage states: nobody has recorded anything in a day
+    "building": 24.0, "fixing": 24.0, "reproducing": 24.0, "reworking": 24.0,
+    "deploying": 24.0, "prod-deploying": 24.0,
+    "validating": 24.0, "dev-validating": 24.0, "prod-validating": 24.0,
+    # ready-stage: scheduled and not pulled. Queue latency, not effort.
+    "ready": 48.0, "scheduled": 48.0,
+}
+# FAIL-CLOSED default for a state added to the graph later: it is covered (and so
+# FIRES) rather than silently exempt. The completeness test pins the population,
+# so a new WIP-stage state forces a deliberate decision rather than a blind spot.
+DEFAULT_STALLED_WORK_HOURS = 24.0
+# policy.csv param that overrides the above per QUEUE (the retro's knob, §F2).
+STALLED_WORK_POLICY_PARAM = "stall_hours"
+
+
+def stalled_work_hours_for(state, policy=None, graphs=None):
+    """Idle-hours threshold for `state`: the queues/policy.csv `stall_hours` row
+    for its queue if declared (retro-owned), else the derived per-state default,
+    else DEFAULT_STALLED_WORK_HOURS (fail-closed)."""
+    if policy is not None and graphs is not None:
+        q = graphs.queue_for(state)
+        if q:
+            raw = policy.get(q, {}).get(STALLED_WORK_POLICY_PARAM)
+            if raw not in (None, ""):
+                try:
+                    return float(raw)
+                except (TypeError, ValueError):
+                    pass            # unparseable -> fall through to the default
+    return float(STALLED_WORK_HOURS.get(state, DEFAULT_STALLED_WORK_HOURS))
+
+
+def stalled_work_states(graphs, policy):
+    """{state: threshold_hours} for every state this check MUST cover — DERIVED
+    from state-graphs.json, never a hand list, so a state added later cannot
+    become a blind spot the way `fixing`/`building` did:
+
+      * non-terminal (a terminal state cannot stall), AND
+      * in a queue at all (an aggregate/planned state has no own stream), AND
+      * that queue is NOT a BACKLOG queue — a backlog item is aging inventory,
+        which check 4 owns by AGE-WITHOUT-A-DECISION; reporting it here too would
+        give one item two different remedies, AND
+      * not owner-class `external` — `blocked`/`awaiting_observation` items carry a
+        RECORDED reason for the wait and are re-checked by check 5. An UNRECORDED
+        wait is what this check is for.
+
+    An unclassified queue defaults to `wip` (queue_kind fails closed), so a new
+    in-flight stage is INSIDE this population until somebody says otherwise."""
+    out = {}
+    for state in graphs.queue_map:
+        if state.startswith("_") or state in TERMINAL_STATES:
+            continue
+        q = graphs.queue_for(state)
+        if not q:
+            continue
+        if queue_kind(policy, q) == QUEUE_KIND_BACKLOG:
+            continue
+        if graphs.owner_of(state) == "external":
+            continue
+        out[state] = stalled_work_hours_for(state, policy, graphs)
+    return out
+
+
+# The ready-stage queue: its members are SCHEDULED, not claimed, so they get the
+# other remedy (pull it / de-schedule it) — AC-127.3.
+STALLED_WORK_SCHEDULED_QUEUE = "ready"
+
+
+def _open_segment_entered(graphs, item, state, now):
+    """(entered_ts, None) for the item's still-open segment in `state`, or
+    (None, reason) when the idle time CANNOT BE COMPUTED.
+
+    §17i: a control that cannot look must SAY SO. The tempting shape here is
+    `if entered is None: continue` — which is what checks 3 and 4 do — and it
+    collapses could-not-look into a silent pass. It is reachable: an event whose
+    `ts` will not parse leaves walk_states with no timed segment for the state the
+    fold actually reports, so the item's idle time is unknowable while the item
+    still occupies a WIP slot."""
+    if graphs.kind(item.type) != "flow":
+        return None, ("it is an aggregate — it has no own event stream, so its "
+                      "idle time is a property of its children, not of itself")
+    seg_state, entered = _current_segment(graphs, item, now)
+    if entered is None:
+        return None, ("no timed segment could be replayed from its event log "
+                      "(no parseable event timestamps)")
+    if seg_state != state:
+        return None, (f"its last replayable segment is '{seg_state}' but the fold "
+                      f"reports '{state}' — an event timestamp is missing or will "
+                      f"not parse, so the clock for '{state}' never started")
+    return entered, None
+
+
+def compute_wip_activity(graphs, project, now=None, policy=None):
+    """OCCUPANCY vs ACTIVITY per WIP-stage queue — the distinction AC-127.4 exists
+    to force. Returns {queue: {occupied, active, idle, unreadable, idle_ids}}.
+
+    `occupied` is what every depth/cap number in this system has always meant.
+    `active` = a recorded event inside the state's stall threshold. `idle` = past
+    it. `unreadable` = could-not-look, counted SEPARATELY so it is never quietly
+    added to `active` (§17i)."""
+    items, _dup = load_all_items(project)
+    states = compute_states(graphs, items)
+    if policy is None:
+        policy = read_queue_policy(project)
+    if now is None:
+        now = parse_ts(now_iso())
+    return _wip_activity(graphs, items, states, policy, now)
+
+
+def _wip_activity(graphs, items, states, policy, now):
+    """The pure half of compute_wip_activity, so the gate computes the split from
+    the SAME item load it already did rather than re-reading the tree."""
+    pop = stalled_work_states(graphs, policy)
+    out = {}
+    for iid in sorted(items):
+        state = states.get(iid)
+        if state not in pop:
+            continue
+        q = graphs.queue_for(state)
+        row = out.setdefault(q, {"occupied": 0, "active": 0, "idle": 0,
+                                 "unreadable": 0, "idle_ids": []})
+        row["occupied"] += 1
+        entered, _why = _open_segment_entered(graphs, items[iid], state, now)
+        if entered is None:
+            row["unreadable"] += 1
+            continue
+        if (now - entered).total_seconds() > pop[state] * 3600.0:
+            row["idle"] += 1
+            row["idle_ids"].append(iid)
+        else:
+            row["active"] += 1
+    return out
+
+
+def _activity_phrase(row):
+    """The occupancy/activity split as one readable clause. Used in the gate header
+    and in check 3's WIP line so `depth` can never again be read as activity."""
+    if not row:
+        return None
+    txt = (f"{row['occupied']} occupied = {row['active']} with recorded activity / "
+           f"{row['idle']} idle past threshold")
+    if row.get("unreadable"):
+        txt += f" / {row['unreadable']} NOT ESTABLISHED"
+    if row.get("idle_ids"):
+        txt += f" (idle: {', '.join(row['idle_ids'][:6])})"
+    return txt
+
+
 def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
                       threshold=3, now=None, observe=True,
                       observe_timeout=DEFAULT_OBSERVE_TIMEOUT,
@@ -2605,6 +2820,79 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
                         f"EVENT=validated|rejected AGENT=tester`."),
         })
 
+    # --- 11. STALLED WORK — claimed or scheduled, with NO RECORDED ACTIVITY ---
+    #     (DEFECT-OAG-127; see the block above compute_wip_activity for the whole
+    #     argument, the measured derivation, and what this check does NOT claim.)
+    #     UNCONDITIONAL: no flag reaches it, because a gate with an off switch is a
+    #     gate that cannot fail (§17i).
+    already_blocked = {i for f in findings
+                       if f["check"] == "stalled-validation" and f["severity"] == "block"
+                       for i in f.get("ids", [])}
+    stall_pop = stalled_work_states(graphs, policy)
+    for iid in sorted(items):
+        state = states.get(iid)
+        if state not in stall_pop:
+            continue
+        # Check 1 already named it with the MORE SPECIFIC remedy (the work is done,
+        # dispatch the tester), so yield to it. Its UNKNOWN case is deliberately NOT
+        # excluded: "we cannot tell whether the work is finished" is a different
+        # question from "nothing has happened for a week", and the second one blocks.
+        if iid in already_blocked:
+            continue
+        it = items[iid]
+        thr_h = stall_pop[state]
+        entered, why = _open_segment_entered(graphs, it, state, now)
+        queue = graphs.queue_for(state)
+        owner = graphs.owner_of(state)
+        scheduled = (queue == STALLED_WORK_SCHEDULED_QUEUE)
+        kind = "scheduled-not-pulled" if scheduled else "claimed-no-activity"
+        common = {"check": "stalled-work", "ids": [iid], "state": state,
+                  "queue": queue, "owner": owner, "kind": kind,
+                  "threshold_h": thr_h}
+        if entered is None:
+            findings.append(dict(
+                common, severity="unknown", idle_s=None,
+                message=(
+                    f"[stalled-work] COULD NOT LOOK: {iid} is in '{state}' (queue "
+                    f"{queue}) and holds that slot, but its idle time cannot be "
+                    f"computed — {why}. This run establishes NOTHING about whether "
+                    f"it is being worked; it is not a pass (§17i). Remedy: fix the "
+                    f"item's event timestamps (`make wi-validate PROJECT={project}` "
+                    f"names the malformed row), then re-run.")))
+            continue
+        idle_s = (now - entered).total_seconds()
+        if idle_s <= thr_h * 3600.0:
+            continue
+        if scheduled:
+            msg = (
+                f"[stalled-work] {iid} has been SCHEDULED in '{state}' for "
+                f"{_hms(idle_s)} with NO RECORDED EVENT since (threshold "
+                f"{thr_h:.0f}h). A scheduled item nobody pulls is invisible aging "
+                f"inventory: it holds a '{queue}' slot, and '{queue}' depth then "
+                f"reads as if the schedule were being honoured. Remedy — PULL it "
+                f"now (it was already chosen, so this is the cheapest work "
+                f"available), OR de-schedule it and record an explicit dated "
+                f"decision (`defer_until: YYYY-MM-DD` in its frontmatter), OR "
+                f"cancel it. Do NOT leave it scheduled: aging inventory is the "
+                f"largest measured contributor to gross lead time.")
+        else:
+            msg = (
+                f"[stalled-work] {iid} has been in '{state}' ({owner}) for "
+                f"{_hms(idle_s)} with NO RECORDED EVENT since (threshold "
+                f"{thr_h:.0f}h) — the '{queue}' slot is OCCUPIED and nothing is "
+                f"known to be happening in it. THIS IS AN IDLE FACT, NOT A VERDICT: "
+                f"the event log cannot tell an in-flight dispatch from work nobody "
+                f"is holding, because no dispatch is recorded anywhere "
+                f"(OI-LOOP-GATE-CANNOT-SEE-A-DISPATCH-IN-FLIGHT). Decide it, three "
+                f"ways: (a) RE-DISPATCH — the work is fine and nobody is holding it; "
+                f"(b) RELEASE — it is genuinely waiting on something, so say so and "
+                f"free the slot: `make wi-append PROJECT={project} ID={iid} "
+                f"EVENT=blocked AGENT=flow-manager NOTE=<what it waits on>`; (c) if "
+                f"it IS being worked, append the event already earned so the clock "
+                f"restarts. Until then this slot must NOT be read as capacity in "
+                f"use — do not raise the WIP cap to work around it.")
+        findings.append(dict(common, severity="block", idle_s=idle_s, message=msg))
+
     # --- derived queue depths (pure function of state via queue_map) ----------
     depths = defaultdict(int)
     members = defaultdict(list)
@@ -2613,6 +2901,11 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
         if q:
             depths[q] += 1
             members[q].append(iid)
+
+    # OCCUPANCY vs ACTIVITY (AC-127.4). Every depth number above counts OCCUPANCY;
+    # this is the same population split by whether anything has been RECORDED
+    # against it lately. Computed from the items already loaded.
+    activity = _wip_activity(graphs, items, states, policy, now)
 
     # --- 2. ready below floor ------------------------------------------------
     floor = policy.get("ready", {}).get("min_items",
@@ -2680,12 +2973,27 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
                 f"number, and never to stop pulling, which only makes it worse."
                 + age_txt)))
         else:
-            findings.append(dict(common, severity="block", message=(
+            # THIS DEPTH COUNTS OCCUPANCY, NOT ACTIVITY, and saying so is AC-127.4.
+            # Reading it as activity is what cost 35 wrongly-deferred items: the
+            # cap was "full" of work nothing was happening to. The split rides on
+            # the same line so the two numbers can never be confused again.
+            row = activity.get(q) or {}
+            split = _activity_phrase(row)
+            findings.append(dict(common, severity="block",
+                                 active=row.get("active"), idle=row.get("idle"),
+                                 unreadable=row.get("unreadable"),
+                                 idle_ids=row.get("idle_ids", []),
+                                 message=(
                 f"[queue-over-cap] {q} depth {depths[q]} > wip_limit {cap} — over "
-                f"by {over}. {q} is a WIP STAGE: concurrent work in flight past "
-                f"the cap is real harm (aging, context-switching). Remedy: drain "
-                f"{over} to done before admitting more; the cap targets gross lead "
-                f"time (§F2), work cannot be allowed to age.")))
+                f"by {over}. THIS DEPTH IS OCCUPANCY, NOT ACTIVITY"
+                + (f" — {split}. " if split else ". ") +
+                f"{q} is a WIP STAGE: concurrent work in flight past the cap is "
+                f"real harm (aging, context-switching). Remedy: drain {over} to "
+                f"done before admitting more — and if the idle count above is "
+                f"non-zero, those slots are NOT capacity in use, so re-dispatch or "
+                f"release them (see the [stalled-work] lines) BEFORE concluding "
+                f"there is no capacity. The cap targets gross lead time (§F2), "
+                f"work cannot be allowed to age.")))
 
     # --- 4. aged backlog item carrying NO DECISION (v135, EXP-131) -----------
     # Depth is advisory (check 3) and must stay that way — Little's Law governs
@@ -3370,8 +3678,29 @@ def cmd_loop_gate(a):
                ("OK — no BLOCKING precondition violated, the loop may pull"
                 if (advisory or unknown) else
                 "OK — all preconditions hold, the loop may pull"))
-    print(f"loop-gate[{a.project}] @ {stamp} (stale-hours {stale_hours}) "
-          f"=> {verdict}{adv_tail}")
+    # OCCUPANCY vs ACTIVITY on EVERY run, not only when a queue is over its cap
+    # (AC-127.4): the 35-item wrong deferral was decided while wip was UNDER cap.
+    # A could-not-look is counted apart and never folded into `active` (§17i).
+    try:
+        act = compute_wip_activity(graphs, a.project, now=now)
+    except Exception as exc:                          # never silently: say so
+        act, act_err = None, exc
+    else:
+        act_err = None
+    if act_err is not None:
+        act_txt = f"; wip/ready activity NOT ESTABLISHED ({act_err})"
+    else:
+        parts = []
+        for q in sorted(act):
+            row = act[q]
+            seg = (f"{q} {row['occupied']} occupied = {row['active']} active / "
+                   f"{row['idle']} idle")
+            if row.get("unreadable"):
+                seg += f" / {row['unreadable']} NOT ESTABLISHED"
+            parts.append(seg)
+        act_txt = ("; " + "; ".join(parts)) if parts else "; wip/ready empty"
+    print(f"loop-gate[{a.project}] @ {stamp} (stale-hours {stale_hours}"
+          f"{act_txt}) => {verdict}{adv_tail}")
     for f in blocking:
         print(f"  - {f['message']}")
     for f in advisory:

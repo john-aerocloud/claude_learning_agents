@@ -1869,12 +1869,18 @@ class TestLoopGate(Base):
             for q, p, v in rows:
                 f.write(f"{q},{p},{v},count,flow-manager,throughput,2026-06-01,EXP-022\n")
 
-    def _building_uc(self, iid, day=10):
+    # DEFAULT DAY = 29, i.e. ~1 day before NOW (DEFECT-OAG-127). It used to be 10 —
+    # TWENTY DAYS stale — and every "healthy fixture" test below therefore asserted
+    # that a queue full of month-old inventory was a satisfied precondition. That is
+    # precisely the condition check 11 exists to catch, so the fixtures were changed
+    # rather than the check weakened: a test whose baseline is the pathology can only
+    # ever ratify it. A test that WANTS a stale item passes the day explicitly.
+    def _building_uc(self, iid, day=29):
         return [{"ts": _dt(day, 0), "event": "registered", "agent": "flow-manager"},
                 {"ts": _dt(day, 1), "event": "made_ready", "agent": "flow-manager"},
                 {"ts": _dt(day, 2), "event": "pulled", "agent": "orchestrator"}]
 
-    def _reworking_uc(self, iid, day=10):
+    def _reworking_uc(self, iid, day=29):
         return self._building_uc(iid, day) + [
             {"ts": _dt(day, 3), "event": "build_failed", "agent": "engineer"}]
 
@@ -1885,7 +1891,7 @@ class TestLoopGate(Base):
                       ("deploy", "min_items", 0), ("deploy", "wip_limit", 1),
                       ("rework", "min_items", 0), ("rework", "wip_limit", 2)])
 
-    def _ready_uc(self, iid, day=10):
+    def _ready_uc(self, iid, day=29):
         return [{"ts": _dt(day, 0), "event": "registered", "agent": "flow-manager"},
                 {"ts": _dt(day, 1), "event": "made_ready", "agent": "flow-manager"}]
 
@@ -1988,8 +1994,9 @@ class TestLoopGate(Base):
         self.assertIn("stalled-validation", self._checks(self._gate(stale_hours=1)))
 
     def test_stalled_validation_without_ref_is_unknown_not_block(self):
-        """No structured ref => we CANNOT establish the work is done. Report
-        UNKNOWN (advisory), never assume either way."""
+        """No structured ref => we CANNOT establish the work is done. CHECK 1 reports
+        UNKNOWN (never assumes either way) — and since DEFECT-OAG-127 the idle fact
+        itself is carried by check 11, so the loop no longer walks past it."""
         self._default_policy()
         for i in range(3):
             self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
@@ -2000,9 +2007,15 @@ class TestLoopGate(Base):
         unknown = [f for f in findings if f["severity"] == "unknown"]
         self.assertTrue(any("DEF-NOREF" in f["ids"] for f in unknown), findings)
         code, out = self._run()
-        self.assertEqual(code, 0)             # UNKNOWN does not block
-        # ...but it reaches the HEADLINE: a run that failed to establish something
-        # may never report "all preconditions hold"
+        # CHECK 1's verdict is still UNKNOWN and still does not block — that is what
+        # this test is about. The RUN, however, now exits 2, because check 11
+        # (DEFECT-OAG-127) sees the ten-day IDLENESS, which is a fact independent of
+        # whether the work is finished. Before that check existed, an item could sit
+        # in `validating` for a week with no ref and the loop pulled straight past it.
+        self.assertEqual(code, 2)
+        self.assertIn("stalled-work", out)
+        # ...and the unknown still reaches the HEADLINE: a run that failed to
+        # establish something may never report "all preconditions hold"
         self.assertIn("NOT ESTABLISHED", out)
         self.assertNotIn("all preconditions hold", out)
 
@@ -3851,6 +3864,364 @@ class TestAwaitingObservationBubble(Base):
             wi._run_observation = orig
         aw = [f for f in findings if f["check"] == "awaiting-observation"]
         self.assertEqual([f["ids"] for f in aw], [["UC-1"]], findings)
+
+
+# --------------------------------------------------------------------------- #
+# loop-gate check 11 — STALLED WORK (DEFECT-OAG-127)
+#
+# The defect: check 1 (`stalled-validation`) covers VALIDATION states only, and only
+# blocks when the work is provably DONE (a `ref:`). Work abandoned in `fixing`,
+# `building`, `reproducing`, `deploying`, `reworking` — and an item SCHEDULED into
+# `ready` that is never pulled — was invisible to every limb of the gate. Measured
+# 2026-08-19 by replaying the REAL item files at commit 9ff713ee against the real
+# gate: six WIP items idle 4.92-7.31d and three `scheduled` items idle 5.12-8.11d,
+# and the only id the whole gate named was the one ref-bearing `validating` item.
+#
+# Fixtures below are hand-built (a state machine is ours, not a wire we do not own),
+# but the DURATIONS and the states are taken from that real reconstruction.
+# --------------------------------------------------------------------------- #
+class TestStalledWork(Base):
+    """AC-127.1 .. AC-127.5. REUSES TestLoopGate's fixture builders by explicit
+    binding rather than inheritance: subclassing would re-run all of that class's
+    tests under this name, which reads as coverage and is only duplication."""
+
+    _policy = TestLoopGate._policy
+    _default_policy = TestLoopGate._default_policy
+    _ready_uc = TestLoopGate._ready_uc
+    _building_uc = TestLoopGate._building_uc
+    _reworking_uc = TestLoopGate._reworking_uc
+    _validating_defect = TestLoopGate._validating_defect
+    _gate = TestLoopGate._gate
+    _run = TestLoopGate._run
+    NEVER_AGES = TestLoopGate.NEVER_AGES
+
+    # ---- fixture builders, each parked in one state with NO further event ------
+    def _fixing_defect(self, day, hour=0):
+        """A defect in `fixing` since day/hour and nothing since — no `fixed`, so
+        check 1 cannot see it and never could."""
+        return [{"ts": _dt(day, 0), "event": "reported", "agent": "orchestrator"},
+                {"ts": _dt(day, hour), "event": "triaged", "agent": "orchestrator"},
+                {"ts": _dt(day, hour), "event": "confirmed", "agent": "engineer"}]
+
+    def _reproducing_defect(self, day, hour=0):
+        return [{"ts": _dt(day, 0), "event": "reported", "agent": "orchestrator"},
+                {"ts": _dt(day, hour), "event": "triaged", "agent": "orchestrator"}]
+
+    def _deploying_uc(self, day, hour=0):
+        return self._building_at(day) + [
+            {"ts": _dt(day, hour), "event": "built_green", "agent": "engineer"}]
+
+    def _building_at(self, day, hour=0):
+        """`building` since day/hour, nothing since. TestLoopGate._building_uc
+        hardcodes hours 0-2; a threshold test needs the hour."""
+        return [{"ts": _dt(day, 0), "event": "registered", "agent": "flow-manager"},
+                {"ts": _dt(day, hour), "event": "made_ready", "agent": "flow-manager"},
+                {"ts": _dt(day, hour), "event": "pulled", "agent": "orchestrator"}]
+
+    def _scheduled_oi(self, day, hour=0):
+        return [{"ts": _dt(day, 0), "event": "open", "agent": "flow-manager"},
+                {"ts": _dt(day, hour), "event": "scheduled", "agent": "flow-manager"}]
+
+    def _blocks(self, findings, check="stalled-work"):
+        return [f for f in findings
+                if f["check"] == check and f["severity"] == "block"]
+
+    def _fresh_ready(self):
+        """Three ready items that are ACTUALLY fresh (day 29 -> ~1d before NOW),
+        so the ready floor is satisfied without smuggling in stale inventory. The
+        old fixtures used day 10 == 20 days stale, which is exactly the condition
+        this check exists to catch."""
+        for i in range(3):
+            # NB _ready_uc's first arg is the id, the SECOND is the day
+            self.write_item("active", f"UC-R{i}", "use-case",
+                            self._ready_uc(f"UC-R{i}", 29))
+
+    # ---- AC-127.1 — the build states are no longer blind spots ---------------
+    def test_AC_127_1_work_abandoned_in_a_build_state_blocks(self):
+        """The reconstructed 2026-08-19 population: `fixing`/`building`/`reproducing`/
+        `deploying` idle for days, which the gate could not see at all."""
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "DEF-FIXING", "defect", self._fixing_defect(23))
+        self.write_item("active", "UC-BUILDING", "use-case", self._building_at(24))
+        self.write_item("active", "DEF-REPRO", "defect", self._reproducing_defect(25))
+        self.write_item("active", "UC-DEPLOYING", "use-case", self._deploying_uc(24, 2))
+        findings = self._gate()
+        got = sorted(i for f in self._blocks(findings) for i in f["ids"])
+        self.assertEqual(got, ["DEF-FIXING", "DEF-REPRO", "UC-BUILDING", "UC-DEPLOYING"],
+                         findings)
+        by_id = {f["ids"][0]: f for f in self._blocks(findings)}
+        self.assertEqual(by_id["DEF-FIXING"]["state"], "fixing")
+        self.assertEqual(by_id["DEF-REPRO"]["state"], "reproducing")
+        self.assertEqual(by_id["UC-BUILDING"]["state"], "building")
+        self.assertEqual(by_id["UC-DEPLOYING"]["state"], "deploying")
+        self.assertEqual(by_id["DEF-FIXING"]["owner"], "engineer")
+        self.assertEqual(by_id["UC-DEPLOYING"]["owner"], "cicd")
+        # the idle time is REPORTED, not merely detected
+        self.assertGreater(by_id["DEF-FIXING"]["idle_s"], 6 * 86400)
+        code, out = self._run()
+        self.assertEqual(code, 2)
+        for iid in ("DEF-FIXING", "UC-BUILDING", "DEF-REPRO", "UC-DEPLOYING"):
+            self.assertIn(iid, out)
+        self.assertIn("stalled-work", out)
+
+    def test_AC_127_1_reworking_is_covered_too(self):
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "UC-RW", "use-case", self._reworking_uc("x", 23))
+        got = sorted(i for f in self._blocks(self._gate()) for i in f["ids"])
+        self.assertEqual(got, ["UC-RW"])
+
+    def test_AC_127_1_scheduled_but_never_pulled_blocks(self):
+        """The other arm of the SAME blind spot: three items sat in `ready`, already
+        SCHEDULED, for 127-199h while the gate reported nothing and `wip` showed four
+        free slots. An item nobody pulled raises nothing today."""
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "OI-SCHED", "open-item", self._scheduled_oi(21))
+        self.write_item("active", "UC-SCHED", "use-case",
+                        self._ready_uc("UC-SCHED", 21))
+        blocks = self._blocks(self._gate())
+        got = sorted(i for f in blocks for i in f["ids"])
+        self.assertEqual(got, ["OI-SCHED", "UC-SCHED"], blocks)
+        by_id = {f["ids"][0]: f for f in blocks}
+        self.assertEqual(by_id["OI-SCHED"]["state"], "scheduled")
+        self.assertEqual(by_id["UC-SCHED"]["state"], "ready")
+        # a scheduled item is a DIFFERENT quantity from a claimed one, and the
+        # finding says which it is (AC-127.3 needs the two remedies separable)
+        self.assertEqual(by_id["OI-SCHED"]["kind"], "scheduled-not-pulled")
+        self.assertEqual(by_id["UC-SCHED"]["kind"], "scheduled-not-pulled")
+
+    def test_AC_127_1_work_within_its_threshold_does_not_block(self):
+        """NOT NOISY, and this is the limb that proves it: an item worked for hours
+        is not abandoned. Everything here is inside its threshold and NOTHING fires
+        — so a green run of this class means something."""
+        self._default_policy()
+        self._fresh_ready()
+        # `building` since day 29 18:00 -> 6h before NOW
+        self.write_item("active", "UC-BUSY", "use-case", self._building_at(29, 18))
+        self.write_item("active", "DEF-BUSY", "defect", self._fixing_defect(29, 20))
+        self.write_item("active", "OI-JUST-SCHED", "open-item", self._scheduled_oi(28, 6))
+        findings = self._gate()
+        self.assertEqual(self._blocks(findings), [], findings)
+
+    def test_AC_127_1_a_parked_item_is_not_reported_as_stalled_work(self):
+        """`blocked` and `awaiting_observation` are owner=external: a recorded reason
+        exists and check 5 / the block re-check own them. Reporting them here would
+        double-count the one thing that IS already visible."""
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "UC-BLOCKED", "use-case",
+                        self._ready_uc("UC-BLOCKED", 10)
+                        + [{"ts": _dt(11, 0), "event": "blocked",
+                                               "agent": "flow-manager"}])
+        self.assertEqual(self._blocks(self._gate()), [])
+
+    def test_AC_127_1_intake_is_not_reported_as_stalled_work(self):
+        """An item in a BACKLOG queue is aging inventory, not abandoned work: check 4
+        owns it by AGE-WITHOUT-A-DECISION, and blocking on it here would report the
+        same item twice under two remedies."""
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "DEF-INTAKE", "defect",
+                        [{"ts": _dt(1, 0), "event": "reported", "agent": "orchestrator"}])
+        self.write_item("active", "OI-OPEN", "open-item",
+                        [{"ts": _dt(1, 0), "event": "open", "agent": "flow-manager"}])
+        self.assertEqual(self._blocks(self._gate()), [])
+
+    # ---- AC-127.1 (completeness) — the population may not be a hand list ------
+    def test_AC_127_1_every_wip_stage_state_has_a_threshold(self):
+        """THE GUARD AGAINST THE DEFECT RECURRING. The population is DERIVED from
+        state-graphs.json (non-terminal + non-backlog queue + not owner=external),
+        so a state added to the graph later is covered by construction. If a future
+        state has no threshold, this fails rather than silently exempting it."""
+        pop = wi.stalled_work_states(self.graphs, wi.read_queue_policy(self.project))
+        self.assertEqual(
+            sorted(pop),
+            sorted(["building", "deploying", "dev-validating", "prod-deploying",
+                    "prod-validating", "reworking", "reproducing", "fixing",
+                    "validating", "ready", "scheduled"]),
+            "a state entered/left the WIP-STAGE population — give it a threshold "
+            "and update this pin deliberately")
+        for state, hours in pop.items():
+            self.assertIsInstance(hours, float)
+            self.assertGreater(hours, 0.0)
+
+    def test_AC_127_1_an_unlisted_wip_state_fails_closed(self):
+        """A state in the population with no entry in the derived map takes the
+        WORK default and therefore still FIRES. Fail-closed: a new state is never
+        silently exempt."""
+        self.assertEqual(wi.stalled_work_hours_for("some-future-state"),
+                         wi.DEFAULT_STALLED_WORK_HOURS)
+
+    # ---- AC-127.2 — the thresholds come from the measured distribution --------
+    def test_AC_127_2_thresholds_are_the_measured_ones(self):
+        """Derived from views/stats.md §B measured-dwell medians (backfill held
+        apart per §17f): fixing 670s, reproducing 733s, building 1536s, deploying
+        685s, dev-validating 1790s, validating 10001s, reworking 4626s. 24h is
+        58-3400x every one of them. `scheduled`'s median is 55091s (15.3h, ZERO
+        backfill) — an order of magnitude higher and a DIFFERENT quantity (queue
+        latency, not effort), so it gets its own, larger number."""
+        for s in ("building", "fixing", "reproducing", "reworking", "deploying",
+                  "prod-deploying", "validating", "dev-validating", "prod-validating"):
+            self.assertEqual(wi.stalled_work_hours_for(s), 24.0, s)
+        for s in ("ready", "scheduled"):
+            self.assertEqual(wi.stalled_work_hours_for(s), 48.0, s)
+        self.assertGreater(wi.stalled_work_hours_for("scheduled"),
+                           wi.stalled_work_hours_for("building"))
+
+    def test_AC_127_2_the_retro_can_tune_it_in_policy_csv(self):
+        """Same ownership as every other buffer knob (§F2): the number lives in
+        queues/policy.csv, per QUEUE, and the code default is only the fallback."""
+        self._policy([("intake", "min_items", 2), ("intake", "wip_limit", 10),
+                      ("ready", "min_items", 3), ("ready", "wip_limit", 4),
+                      ("wip", "stall_hours", 240)])
+        self._fresh_ready()
+        self.write_item("active", "DEF-FIXING", "defect", self._fixing_defect(23))
+        # 7 days idle < the tuned 240h -> no finding
+        self.assertEqual(self._blocks(self._gate()), [])
+        pol = wi.read_queue_policy(self.project)
+        self.assertEqual(wi.stalled_work_hours_for("fixing", pol, self.graphs), 240.0)
+
+    # ---- AC-127.3 — the remedy distinguishes re-dispatch from release ---------
+    def test_AC_127_3_remedy_offers_redispatch_AND_release(self):
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "DEF-FIXING", "defect", self._fixing_defect(23))
+        msg = self._blocks(self._gate())[0]["message"]
+        self.assertIn("RE-DISPATCH", msg)
+        self.assertIn("RELEASE", msg)
+        self.assertIn("EVENT=blocked", msg)          # the release is executable
+        self.assertIn("DEF-FIXING", msg)
+        self.assertIn("fixing", msg)
+
+    def test_AC_127_3_message_claims_no_activity_never_abandonment(self):
+        """POINT OF HONESTY. The event log CANNOT distinguish an agent working a hard
+        item for six hours from an item nobody holds: nothing records a dispatch. So
+        the finding reports the fact it has (no event since T) and must not assert
+        the inference it cannot make."""
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "DEF-FIXING", "defect", self._fixing_defect(23))
+        msg = self._blocks(self._gate())[0]["message"]
+        self.assertIn("NO RECORDED", msg.upper())
+        self.assertNotIn("abandoned", msg.lower())
+        self.assertIn("cannot tell", msg.lower())
+
+    def test_AC_127_3_scheduled_remedy_differs_from_the_claimed_one(self):
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "OI-SCHED", "open-item", self._scheduled_oi(21))
+        msg = self._blocks(self._gate())[0]["message"]
+        self.assertIn("PULL", msg)
+        self.assertIn("defer_until", msg)
+
+    # ---- AC-127.4 — depth is occupancy, and it must say so -------------------
+    def test_AC_127_4_wip_over_cap_says_it_counts_occupancy(self):
+        """`wip: 7` looks identical whether seven agents are working or seven items
+        are abandoned. That reading cost 35 deferred items."""
+        self._policy([("intake", "min_items", 2), ("intake", "wip_limit", 10),
+                      ("ready", "min_items", 3), ("ready", "wip_limit", 4),
+                      ("wip", "wip_limit", 2)])
+        self._fresh_ready()
+        for i in range(3):
+            self.write_item("active", f"DEF-S{i}", "defect", self._fixing_defect(23, i))
+        over = [f for f in self._gate()
+                if f["check"] == "queue-over-cap" and f.get("queue") == "wip"]
+        self.assertEqual(len(over), 1, over)
+        msg = over[0]["message"]
+        self.assertIn("OCCUPANCY", msg.upper())
+        self.assertIn("0 with recorded activity", msg)
+        self.assertIn("3 idle", msg)
+        self.assertEqual(over[0]["active"], 0)
+        self.assertEqual(over[0]["idle"], 3)
+
+    def test_AC_127_4_header_reports_occupied_versus_active_every_run(self):
+        """It must be on EVERY run, not only when over cap: the wrong decision was
+        taken while wip was UNDER its cap."""
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "DEF-BUSY", "defect", self._fixing_defect(29, 20))
+        self.write_item("active", "DEF-IDLE", "defect", self._fixing_defect(23))
+        code, out = self._run()
+        head = out.splitlines()[0]
+        self.assertIn("wip 2 occupied", head)
+        self.assertIn("1 active", head)
+        self.assertIn("1 idle", head)
+
+    def test_AC_127_4_activity_split_is_computable_on_its_own(self):
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "DEF-BUSY", "defect", self._fixing_defect(29, 20))
+        self.write_item("active", "DEF-IDLE", "defect", self._fixing_defect(23))
+        act = wi.compute_wip_activity(self.graphs, self.project, now=wi.parse_ts(NOW))
+        self.assertEqual(act["wip"]["occupied"], 2)
+        self.assertEqual(act["wip"]["active"], 1)
+        self.assertEqual(act["wip"]["idle"], 1)
+        self.assertEqual(act["wip"]["idle_ids"], ["DEF-IDLE"])
+        self.assertEqual(act["ready"]["occupied"], 3)
+        self.assertEqual(act["ready"]["idle"], 0)
+
+    # ---- §17i — a check that cannot look must SAY SO, never pass -------------
+    def test_17i_unreadable_dwell_reports_could_not_look(self):
+        """An item whose latest event carries an unparseable ts has NO open segment
+        for its current state, so its idle time cannot be computed. The old shape
+        (`if ent is None: continue`) collapses that into a pass — the exact class
+        §17i was written against."""
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "DEF-BADTS", "defect",
+                        [{"ts": _dt(20, 0), "event": "reported", "agent": "orchestrator"},
+                         {"ts": _dt(20, 1), "event": "triaged", "agent": "orchestrator"},
+                         {"ts": "not-a-timestamp", "event": "confirmed",
+                          "agent": "engineer"}])
+        findings = [f for f in self._gate() if f["check"] == "stalled-work"]
+        self.assertEqual(len(findings), 1, findings)
+        self.assertEqual(findings[0]["severity"], "unknown")
+        self.assertIn("COULD NOT", findings[0]["message"].upper())
+        self.assertIn("DEF-BADTS", findings[0]["message"])
+        code, out = self._run()
+        self.assertIn("NOT ESTABLISHED", out)
+
+    def test_17i_check_is_unconditional_no_flag_can_switch_it_off(self):
+        """--no-observe exists and skips check 5's predicates. Nothing may skip THIS
+        limb: a gate with an off switch is a gate that cannot fail."""
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "DEF-FIXING", "defect", self._fixing_defect(23))
+        for kwargs in ({"observe": False}, {"observe": True},
+                       {"max_backlog_age_days": self.NEVER_AGES},
+                       {"stale_hours": 100000.0}):
+            with self.subTest(**kwargs):
+                self.assertEqual(
+                    [i for f in self._blocks(self._gate(**kwargs)) for i in f["ids"]],
+                    ["DEF-FIXING"], kwargs)
+
+    # ---- the second hole check 1 left: a stall with NO ref never blocked ------
+    def test_a_stalled_validation_without_a_ref_now_BLOCKS(self):
+        """Check 1 reports UNKNOWN (non-blocking) when a validating item carries no
+        `ref:` — so an item idle for a week in `validating` never stopped the loop.
+        Idleness is a fact independent of whether the work is finished."""
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "DEF-NOREF", "defect",
+                        self._validating_defect(22, 3, fixed_ref=False))
+        findings = self._gate()
+        self.assertEqual([f["severity"] for f in findings
+                          if f["check"] == "stalled-validation"], ["unknown"])
+        self.assertEqual([i for f in self._blocks(findings) for i in f["ids"]],
+                         ["DEF-NOREF"])
+
+    def test_no_double_report_when_check1_already_blocks_the_item(self):
+        """One item, one remedy. Check 1's finding is the more specific one (the work
+        is DONE, dispatch the tester), so this limb yields to it."""
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "DEF-DONE", "defect",
+                        self._validating_defect(22, 3, ref="abc1234"))
+        findings = self._gate()
+        self.assertEqual([f["check"] for f in findings
+                          if "DEF-DONE" in f.get("ids", [])], ["stalled-validation"])
 
 
 if __name__ == "__main__":

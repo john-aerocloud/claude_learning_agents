@@ -3815,7 +3815,14 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
     #         and the only symptom was a label sitting on ~100% of items).
     findings.extend(compute_acceptance_audit(project))
 
-    # --- 11. every state in the graph has a board-status row — DELEGATED -------
+    # --- 13. every state in the graph has a board-status row — DELEGATED -------
+    #     NUMBER COLLISION, resolved here rather than silently: DEFECT-OAG-099's
+    #     own docs call this "check 11", and so does the DEFECT-OAG-127
+    #     stalled-work check above — they were authored in parallel by agents
+    #     that could not see each other. Renumbered to 13 (12 is ref-provenance)
+    #     so the comments are unambiguous. Nothing functional changed: the
+    #     runtime `check` keys were already distinct ("stalled-work" vs
+    #     "board-mapping"), which is why nothing was shadowed.
     #         (DEFECT-OAG-099 AC-099.5). An unmapped state does not fail, it
     #         renders as unstarted BACKLOG — the board saying "not started" about
     #         a terminal item, or about code running in production. That has now

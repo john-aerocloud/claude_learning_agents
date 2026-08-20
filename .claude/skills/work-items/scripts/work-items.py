@@ -408,6 +408,11 @@ def _split_top_commas(s):
     return out
 
 
+# Event fields that are STRINGS by nature and must never be number-coerced by
+# _parse_scalar. A sha of all digits is still a sha (DEFECT-OAG-128).
+EVENT_STRING_FIELDS = ("ref",)
+
+
 def _parse_inline_map(v):
     """`{ts: ..., event: ..., agent: ..., note: "..."}` -> dict."""
     v = v.strip()
@@ -419,7 +424,17 @@ def _parse_inline_map(v):
         if ":" not in part:
             continue
         k, _, val = part.partition(":")
-        d[k.strip()] = _parse_scalar(val)
+        k = k.strip()
+        # A `ref:` is a SHA — a string by nature, even when every character
+        # happens to be a digit. Int-coercing it DESTROYS DATA and the loss is
+        # silent: the sha `0605428` was read as the int 605428 and then
+        # re-rendered into the item file without its leading zero, so `UC-XA5`
+        # permanently records a ref that resolves in NEITHER repo — which is the
+        # `git cat-file` signature of destroyed work (DEFECT-OAG-128, and the real
+        # commit 06054289ae9d... is on origin/main the whole time). 11 of 202 refs
+        # in the registry are all-digit, so this is a standing hazard, not a
+        # one-off. resolve_ref repairs the refs already damaged; this stops new ones.
+        d[k] = str(val).strip() if k in EVENT_STRING_FIELDS else _parse_scalar(val)
     return d
 
 
@@ -2458,31 +2473,266 @@ def _git(repo, *args):
         return None, ""
 
 
-def _ref_on_trunk(project, ref):
-    """True/False iff `ref` IS/IS-NOT an ancestor of the project repo's origin
-    trunk; None = UNKNOWN (no repo, git unavailable, ref or trunk unresolvable).
+# ---------------------------------------------------------------------------
+# A `ref:` IS REPO-SCOPED, AND NOTHING RECORDED WHICH REPO (DEFECT-OAG-128)
+#
+# This system has TWO repos by design (§v50): the agent system (this parent repo:
+# .claude/, process/, Makefile, CLAUDE.md) and each project's own nested repo at
+# work/<project>/, which the parent gitignores. A `ref:` on an item is a sha in
+# ONE of them, and the item does not reliably say which.
+#
+# The bug this replaces: `_ref_on_trunk` ran `merge-base --is-ancestor` ALWAYS in
+# `git -C work/<project>`. A parent-lane ref does not exist there at all, so the
+# check did not merely answer WRONG — the ref failed to RESOLVE, which is the
+# `git cat-file -t fb080d9 => fatal: Not a valid object name` signature by which
+# DEFECT-OAG-072's destruction was diagnosed. Measured on the real registry
+# (2026-08-20, 478 items / 202 distinct refs): SEVEN refs resolve only in the
+# parent repo, and every one read as unresolvable. Reproduced before the fix:
+#   _ref_on_trunk('OagEventSource', '8dae2cc')  -> None   (real, on parent main)
+#   _ref_on_trunk('OagEventSource', 'deadbee')  -> None   (fabricated, nowhere)
+# LITERALLY EQUAL. So the failure was §17i in BOTH directions at once: a
+# wrong-place lookup rendered as a routine UNKNOWN, and the one alarm that means
+# real data loss rendered as that same routine UNKNOWN — i.e. MUTED. Narrowing the
+# false positives without muting the true one is the whole job here.
+#
+# WHY `lane:` IS NOT THE ROUTING KEY, though the defect report proposed it.
+# Two measurements killed that design:
+#   1. `lane:` is ABSENT on 382 of 478 items (79.9%) — not on 4 of 6 as reported.
+#      Routing on a field four fifths of the registry lacks just moves the wrong
+#      answer around.
+#   2. `lane:` is SINGLE-VALUED and real items span BOTH repos. DEFECT-OAG-091 was
+#      cited as "an outright misdeclaration" (declared project-repo, ref on the
+#      parent). It is not. Its own event log reads "Two lanes, two repos, never
+#      mixed": 898880d4 is a project commit AND 2c6a7d58 is a parent commit. The
+#      field cannot express that, so the declaration is INCOMPLETE, not false.
+# So resolution SEARCHES BOTH REPOS, always, and `lane:` is demoted from a routing
+# key to a CROSS-CHECKED ASSERTION. That direction cannot invent a false "missing":
+# a ref present in either repo is found. `lane:` is still load-bearing for
+# `make dispatch-check` (DEFECT-OAG-076) — this changes only ref resolution.
+#
+# THE FOUR VERDICTS, and why three is not enough (§17i). PASS/FAIL/COULD-NOT-LOOK
+# maps onto ancestry, but "the object is not in ANY repo" is a fourth thing that
+# must not hide inside COULD-NOT-LOOK — it is the only verdict that means work may
+# have been destroyed, and it has to stay loud to be worth anything.
+#   REF_ON_TRUNK         the object exists and is an ancestor of that repo's origin
+#                        trunk => pushed.
+#   REF_NOT_ON_TRUNK     the object EXISTS in a repo we read, but is not on its
+#                        origin trunk => committed and unpushed. NOT lost.
+#   REF_ABSENT           every lane repo was READABLE and none has the object.
+#                        THE DEFECT-OAG-072 ALARM. Loud, blocking.
+#   REF_CANNOT_DETERMINE we could not look: a lane repo was unreadable, or the
+#                        object exists but no origin trunk resolves. NEVER a pass,
+#                        and never the destroyed-work alarm either.
+# The asymmetry that makes REF_NOT_ON_TRUNK safe to report: a remote-tracking ref
+# can be STALE (this worktree's parent origin/main is weeks behind, because the
+# owner owns the parent push), and staleness can only ever produce a false
+# NOT-ON-TRUNK — never a false ON-TRUNK, and never a false ABSENT.
+REF_ON_TRUNK = "on_trunk"
+REF_NOT_ON_TRUNK = "not_on_trunk"
+REF_ABSENT = "absent"
+REF_CANNOT_DETERMINE = "cannot_determine"
 
-    The whole point: push state is a fact in GIT, never a claim in an event note."""
+LANE_PROJECT = "project-repo"
+LANE_PARENT = "parent-repo"
+# Longest abbreviation a zero-padding repair will try. Git refuses an ambiguous
+# abbreviation rather than guessing, so the only cost of a wide range is a few
+# cheap rev-parse calls, and only ever for an all-digit ref (11 of 202 measured).
+SHA_PAD_MAX_WIDTH = 12
+
+
+def _lane_repos(project):
+    """[(lane, repo_path)] — EVERY repo a `ref:` could name, project repo first.
+
+    Ordering is deliberate: the overwhelming majority of refs are project-lane
+    (194 of 202 measured), so the first probe usually hits."""
+    return [(LANE_PROJECT, _project_repo(project)), (LANE_PARENT, ROOT)]
+
+
+def _repo_readable(repo):
+    """True iff `repo` is a git repo we can query. `.git` is a FILE in a worktree
+    and a DIRECTORY in a normal clone, so exists() is the right test for both."""
+    return bool(repo) and os.path.exists(os.path.join(repo, ".git"))
+
+
+def _ref_candidates(ref):
+    """[ref, *zero-padded retries] — the recorded ref plus the shas it would be if
+    a LEADING ZERO had been eaten by int-coercion.
+
+    Found while building this check, and it matters because without it the new
+    ABSENT alarm FALSE-FIRES on its first real run. `_parse_scalar` int-coerces any
+    all-digit frontmatter value, so the sha `0605428` was read as the int 605428 and
+    then RE-RENDERED into the item file without its leading zero. `UC-XA5` therefore
+    records `ref: 605428`, which resolves in NEITHER repo — the exact ABSENT
+    signature — while the real commit `06054289ae9d50bf194b98643d920939b5d7531b`
+    ("test(aerobus): pin out-of-org/unlisted principal DENIED...") sits on
+    origin/main. The data loss is already on disk in items written before the
+    _parse_scalar fix below, so recovery has to happen at READ time too.
+    Only all-digit refs can have suffered it; a ref with any hex letter was never
+    coerced. Ambiguity is not a hazard: git REFUSES an ambiguous abbreviation
+    rather than guessing, so a padded candidate either resolves uniquely or not."""
+    ref = str(ref or "").strip()
     if not ref:
-        return None
-    ref = str(ref)
-    repo = _project_repo(project)
-    if not os.path.exists(os.path.join(repo, ".git")):
-        return None
-    rc, _ = _git(repo, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
-    if rc != 0:
-        return None                     # ref not resolvable here -> UNKNOWN
-    for trunk in TRUNK_CANDIDATES:
-        rc, _ = _git(repo, "rev-parse", "--verify", "--quiet", f"{trunk}^{{commit}}")
-        if rc != 0:
+        return []
+    out = [ref]
+    if ref.isdigit():
+        for w in range(len(ref) + 1, SHA_PAD_MAX_WIDTH + 1):
+            out.append(ref.rjust(w, "0"))
+    return out
+
+
+def _trunk_candidates(repo):
+    """Origin trunk refs to test ancestry against, in order.
+
+    ONLY `origin/*` refs: the question is "is it PUSHED", and a local branch
+    answers a different one. The parent repo adds `origin/<its current branch>`
+    because a parent-lane commit's push destination in a per-project worktree is
+    `origin/instance/<project>`, not `origin/main` — without it every parent-lane
+    ref would read NOT-ON-TRUNK for the wrong reason."""
+    cands = list(TRUNK_CANDIDATES)
+    rc, branch = _git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+    if rc == 0 and branch and branch != "HEAD":
+        cand = "origin/" + branch
+        if cand not in cands:
+            cands.append(cand)
+    return cands
+
+
+def resolve_ref(project, ref):
+    """Where a `ref:` lives and whether it is pushed. THE seam the gate calls.
+
+    Returns a dict, never a bare tri-state, because the caller must be able to tell
+    the four outcomes apart:
+      verdict    REF_ON_TRUNK | REF_NOT_ON_TRUNK | REF_ABSENT | REF_CANNOT_DETERMINE
+      lane       the lane whose repo the object was found in, or None
+      trunk      the origin trunk it is an ancestor of, or None
+      resolved   the sha actually used (may be a zero-padded repair of `ref`)
+      padded     True iff a leading zero had to be rebuilt to resolve it
+      searched   [lane, ...] repos we could read
+      unreadable [lane, ...] repos we could NOT read (why ABSENT must not be
+                 concluded from a partial search)
+    """
+    out = {"ref": None if ref is None else str(ref), "verdict": REF_CANNOT_DETERMINE,
+           "lane": None, "trunk": None, "resolved": None, "padded": False,
+           "searched": [], "unreadable": [], "reason": None}
+    cands = _ref_candidates(ref)
+    if not cands:
+        out["reason"] = "no ref recorded"
+        return out
+    hits = []                                  # [(lane, repo, sha, padded)]
+    for lane, repo in _lane_repos(project):
+        if not _repo_readable(repo):
+            out["unreadable"].append(lane)
             continue
-        rc, _ = _git(repo, "merge-base", "--is-ancestor", ref, trunk)
-        if rc == 0:
-            return True
-        if rc == 1:
-            return False
-        return None                     # git error -> UNKNOWN, never a guess
-    return None                         # no origin trunk -> UNKNOWN
+        out["searched"].append(lane)
+        for cand in cands:
+            rc, _ = _git(repo, "rev-parse", "--verify", "--quiet",
+                         "%s^{commit}" % cand)
+            if rc is None:                     # git itself unusable => not a search
+                out["unreadable"].append(lane)
+                if lane in out["searched"]:
+                    out["searched"].remove(lane)
+                break
+            if rc == 0:
+                hits.append((lane, repo, cand, cand != cands[0]))
+                break
+    if not hits:
+        if out["unreadable"] or not out["searched"]:
+            out["reason"] = ("could not read the %s repo(s), so the object's absence "
+                             "was never established"
+                             % ", ".join(out["unreadable"] or ["(none searched)"]))
+            return out                          # COULD-NOT-LOOK, never the alarm
+        out["verdict"] = REF_ABSENT
+        out["reason"] = ("resolves in NONE of the %d readable repo(s): %s"
+                         % (len(out["searched"]), ", ".join(out["searched"])))
+        return out
+    # Found. Ancestry is asked in EVERY repo that has it before concluding
+    # not-on-trunk, so a repo with no origin trunk cannot mask a repo that has one.
+    best = None
+    for lane, repo, sha, padded in hits:
+        for trunk in _trunk_candidates(repo):
+            rc, _ = _git(repo, "rev-parse", "--verify", "--quiet",
+                         "%s^{commit}" % trunk)
+            if rc != 0:
+                continue
+            rc, _ = _git(repo, "merge-base", "--is-ancestor", sha, trunk)
+            if rc == 0:
+                out.update(verdict=REF_ON_TRUNK, lane=lane, trunk=trunk,
+                           resolved=sha, padded=padded,
+                           reason="ancestor of %s in the %s repo" % (trunk, lane))
+                return out
+            if rc == 1 and best is None:
+                best = (REF_NOT_ON_TRUNK, lane, sha, padded,
+                        "the object EXISTS in the %s repo but is not an ancestor of "
+                        "any origin trunk there — committed, not pushed (and NOT "
+                        "lost)" % lane)
+    if best is not None:
+        v, lane, sha, padded, why = best
+        out.update(verdict=v, lane=lane, resolved=sha, padded=padded, reason=why)
+        return out
+    lane, _repo, sha, padded = hits[0]
+    out.update(lane=lane, resolved=sha, padded=padded,
+               reason=("the object exists in the %s repo but no origin trunk "
+                       "resolves there, so push state could not be established"
+                       % lane))
+    return out                                  # COULD-NOT-LOOK
+
+
+def _ref_on_trunk(project, ref):
+    """BACK-COMPAT tri-state over resolve_ref: True on trunk / False not on trunk /
+    None could-not-establish. Kept because callers and tests hold this shape.
+
+    REF_ABSENT maps to **None, never False**. False means "committed but not pushed
+    yet", which is ordinary and unalarming; a destroyed object must never be able to
+    hide inside it. Anything that needs to SEE the absent case must call resolve_ref
+    — which is why the gate does."""
+    v = resolve_ref(project, ref)["verdict"]
+    return True if v == REF_ON_TRUNK else False if v == REF_NOT_ON_TRUNK else None
+
+
+def check_declared_lane(project, declared, refs):
+    """Cross-check an item's `lane:` against where its refs ACTUALLY resolve.
+
+    `lane:` is CHECKED here, never trusted for routing (see the block above). The
+    verdicts, and why each is its own thing rather than pass/fail:
+      consistent      the declared lane is among the lanes the refs resolve in.
+      spans-both      the refs resolve in BOTH repos. NOT a violation: a
+                      single-valued field cannot express a two-lane item, so the
+                      declaration is INCOMPLETE, not false. DEFECT-OAG-091's real
+                      shape — it was reported as "an outright misdeclaration" and
+                      is not one; flagging it would manufacture a violation out of
+                      a correct item.
+      contradicted    every ref resolves, and NONE of them in the declared lane.
+                      The genuine misdeclaration class.
+      undeclared      no `lane:`. 382 of 478 items (79.9%, measured) — so this is
+                      the registry's normal state and cannot be a violation. It
+                      carries the lane the refs imply, which is what makes a
+                      backfill mechanical rather than a judgement call.
+      cannot-determine  no ref resolved anywhere readable, so the declaration was
+                      never tested against anything (§17i).
+    """
+    declared = (str(declared).strip() if declared not in (None, "") else None)
+    lanes, absent, undet = [], [], []
+    for ref in (refs or []):
+        r = resolve_ref(project, ref)
+        if r["lane"] and r["lane"] not in lanes:
+            lanes.append(r["lane"])
+        elif r["verdict"] == REF_ABSENT:
+            absent.append(r["ref"])
+        elif not r["lane"]:
+            undet.append(r["ref"])
+    out = {"declared": declared, "resolved_lanes": lanes,
+           "absent_refs": absent, "undetermined_refs": undet}
+    if not lanes:
+        out["verdict"] = "cannot-determine"
+    elif declared is None:
+        out["verdict"] = "undeclared"
+    elif len(lanes) > 1:
+        out["verdict"] = "spans-both"
+    elif declared in lanes:
+        out["verdict"] = "consistent"
+    else:
+        out["verdict"] = "contradicted"
+    return out
 
 
 def _last_ref_event(item, event_names):

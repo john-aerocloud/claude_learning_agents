@@ -42,6 +42,23 @@
  *      ~half its 79 nodes as stale prior-slice marks). A stale mark committed N
  *      slices ago appears in NEITHER diff, so a diff-sourced set drops it; only
  *      marks/edges/decls that moved IN the window survive.
+ *
+ *      THE DIFF SELECTS; IT DOES NOT IDENTIFY (OI-IMPACTED-TESTS-JUNK-NODE-IDS).
+ *      A diff hands us isolated LINES, and a line lifted out of a multi-line
+ *      label — or a label containing an ASCII `--` used as an English dash, or an
+ *      edge label carrying a literal `|` — is indistinguishable from a statement
+ *      when read alone. That is how `THE`, `an`, `code`, `resolve`, `delta-072`,
+ *      `BUY`, `which`, `reason`, `group`, `field`, `skip`, `stage`, `deploy` were
+ *      emitted as graph nodes: 46 of 398 "changed nodes" on a 26-day window were
+ *      label prose, and they inflated the UNCOVERED list (164 -> 118 once gated),
+ *      so every agent running this had to hand-discount the number before
+ *      believing it. Node IDENTITY therefore comes from parseMermaidStructure()
+ *      over WHOLE files (working tree + HEAD + the SINCE revision), which skips
+ *      comments, bracket-balanced quote-aware labels and `|...|` edge labels; the
+ *      diff-sourced candidates are FILTERED through that declared inventory and
+ *      everything else is REPORTED as `rejected` rather than dropped silently.
+ *      This is not a stop-word list: no English word appears anywhere in this
+ *      file, and a node genuinely declared `code` passes straight through.
  *   2. Greps committed specs (tests/validation, tests/smoke, tests/skeleton, and
  *      unit suites anywhere under src/**) for `@covers <node-id>[, <node-id>...]`
  *      tags and builds node-id -> {spec files} map.
@@ -59,6 +76,10 @@
  *
  * SELF-TESTING: .claude/tools/impacted-tests.test.js (node --test) proves the
  * behaviours with fixtures + throwaway git repo(s). No credentials.
+ * .claude/tools/impacted-tests-junk-node-ids.test.js pins the structural parse
+ * against fixtures/impacted-tests/junk-node-ids-capture.mmd — six statements
+ * lifted VERBATIM from the real corpus at a recorded sha, each annotated with the
+ * junk pair the old parse emitted from it.
  *
  * NESTED-REPO GIT-ROOT RESOLUTION (EXP-104, fixed here — recurred 5x before this)
  *   Under the v50 topology, work/<project>/ is very often its OWN independent git
@@ -302,6 +323,19 @@ function gitDiff(diffRoot, revs, files) {
   }
 }
 
+// The content of one file AT a revision, or null when it does not exist there
+// (a newly-added diagram at `since`, a since-deleted one at HEAD). Used to build
+// the DECLARED-NODE inventory across the whole window, so the structural gate
+// cannot swallow a node whose declaration was removed in-window.
+function gitShow(diffRoot, rev, relPath) {
+  try {
+    return execFileSync('git', ['-C', diffRoot, 'show', `${rev}:${relPath}`],
+      { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch {
+    return null;
+  }
+}
+
 // Does `repoRoot`'s OWN git history contain `sha`? Used to pick which repo a
 // project SHA actually belongs to (EXP-104).
 function shaExistsIn(repoRoot, sha) {
@@ -335,20 +369,250 @@ function resolveDiffRoot(root, project, since) {
   throw new Error(`SHA "${since}" not found in repo (${root}).`);
 }
 
+// ---- structural mermaid parse (OI-IMPACTED-TESTS-JUNK-NODE-IDS) -------------
+//
+// WHY A PARSE AND NOT A LINE REGEX. Node IDENTITY used to come from the same
+// per-line regexes used on diff lines (NODE_DECL_RE / EDGE_RE) swept over the
+// whole file. Those regexes cannot tell STRUCTURE from LABEL PROSE, and this
+// project's labels are long English paragraphs, so ordinary words became "node
+// ids": measured on the real corpus, the 791-entry "inventory" contained `THE`,
+// `an`, `code`, `resolve`, `delta-072`, `BUY`, `which`, `reason`, `group`. Three
+// mechanisms produced them:
+//   (1) an ASCII `--` used as an English dash inside a label matched EDGE_RE, so
+//       both surrounding words became edge endpoints
+//       (`...IATA code -- BUY = Burlington NC...` -> nodes `code` and `BUY`);
+//   (2) an edge label carrying a literal pipe (`-.->|"... | reason no-genesis ..."|`)
+//       ended EDGE_RE's `\|[^|]*\|` early, so the next prose word read as the
+//       edge TARGET (`SCOPEGATE -> reason`);
+//   (3) a label spanning two physical lines (three exist in class-deps.mmd) left
+//       its continuation line looking like a statement.
+// Those ids flowed into the UNCOVERED list and inflated it, and every agent
+// running the tool had to hand-discount the number before believing it.
+//
+// delta-074 R12: "no control is verified by text-slicing an artifact whose layout
+// it does not own." So identity is read from DECLARED STRUCTURE. This is a small
+// mermaid flowchart tokeniser: it walks the whole text (crossing newlines, since
+// labels do), and SKIPS every region that is not structure — `%%` comments,
+// bracket-balanced quote-aware node labels (`[...]`, `(...)`, `{...}`, `>...]`,
+// including `[(`/`((`/`{{` compounds), and `|...|` edge labels. Only what is
+// left is tokenised into ids, arrows and `:::class` marks.
+//
+// NOT A STOP-WORD LIST (AC-JUNK.4). No English word is named anywhere in this
+// tool. A node genuinely DECLARED `code` is a node; the same characters inside a
+// label are not. The rule is positional, so the next label word cannot
+// reintroduce the fault.
+
+// A mermaid id: alphanumerics/underscore, single hyphens allowed INSIDE (so
+// `ordered-write-sweep` is one id) but never a `--`, which is an arrow.
+// STICKY (`y`), matched at a set lastIndex — never `.exec(text.slice(i))`, which
+// would be quadratic on a half-megabyte diagram.
+const MMD_ID_RE = /[A-Za-z0-9_]+(?:-[A-Za-z0-9_]+)*/y;
+
+// Edge operators, sticky and longest-first: a terminated arrow must win over its
+// own prefix (`-->` must not tokenise as `--` + `>`). The FIRST alternatives are
+// mermaid's INLINE-TEXT arrow forms `-.text.->` / `-- text -->` / `== text ==>`,
+// which this corpus uses 80+ times (`-.implemented by.->`, `-.constructs (reads
+// oag/rest-key).->`). Consuming the text AS PART OF THE ARROW is what stops
+// `implemented` / `by` / `constructs` / `resolver` / `client` / `source` being
+// read as nodes — the mirror-image of the label-prose fault, found by diffing the
+// structural inventory against the old one rather than assumed away.
+// `terminated` distinguishes `-->`/`--x`/`--o`/`==>` from the OPEN `--`/`---`/
+// `-.-`/`==` forms, which is how the `A -- text --> B` sandwich is recognised.
+// `x`/`o` heads need a boundary or they would eat the first char of `xyz`; `>`
+// does not (`A-->B` is legal and has no separator).
+const MMD_ARROW_HEAD = '(?:>|[xo](?![A-Za-z0-9_-]))';
+const MMD_ARROW_RE = new RegExp(
+  '<?(?:'
+  // the inline text is bounded by the END OF LINE (`\n` excluded), not by an
+  // arbitrary character budget: the longest real one in this corpus is 134 chars
+  // (`-.constructs (default scope + gate; CONNECTION_CONFIG_TABLE_NAME absent =>
+  // ... NEVER unfiltered).->`), and a guessed budget is exactly the "text-slicing
+  // a layout you do not own" fault delta-074 R12 rules out.
+  + `-\\.[^.\\n|"]*\\.-+${MMD_ARROW_HEAD}?`                  // -.text.->  /  -.text.-
+  + `|-{2,}[^-\\n|">]+-{2,}${MMD_ARROW_HEAD}`                // -- text -->
+  + `|={2,}[^=\\n|">]+={2,}>`                                // == text ==>
+  + `|-\\.+-+${MMD_ARROW_HEAD}?`                             // -.->  -.-
+  + `|-{2,}${MMD_ARROW_HEAD}`                                // -->  --x  --o
+  + '|={2,}>'                                                // ==>
+  + '|-{2,}'                                                 // ---  (open link)
+  + '|={2,}'                                                 // ===  (open thick link)
+  + ')', 'y');
+
+// statement-leading keywords that declare no node id of interest. `class` is
+// handled separately (it NAMES nodes); the rest are layout/type directives.
+const MMD_STMT_KEYWORDS = new Set([
+  'flowchart', 'graph', 'subgraph', 'end', 'direction', 'classdef', 'linkstyle',
+  'style', 'click', 'acctitle', 'accdescr', 'linkstyle',
+]);
+
+// Index just past the closing `"` of the quoted run starting at i. Crosses
+// newlines: mermaid labels legitimately span lines (three do in class-deps.mmd,
+// which is precisely what defeated the per-line parse).
+function skipQuoted(text, i) {
+  let j = i + 1;
+  while (j < text.length && text[j] !== '"') j++;
+  return j + 1;
+}
+
+// Index just past the close of the node-label region opening at i. Balanced on
+// the OPENER'S OWN family so `[(label)]`, `((label))`, `{{label}}` all close
+// correctly, and quote-aware so a bracket inside label prose cannot unbalance it.
+// `>` (the asymmetric shape) closes on `]` and is not itself counted.
+function skipNodeLabel(text, i) {
+  const open = text[i];
+  const close = open === '(' ? ')' : open === '{' ? '}' : ']';
+  const countOpener = open !== '>';
+  let depth = 1;
+  let j = i + 1;
+  while (j < text.length) {
+    const c = text[j];
+    if (c === '"') { j = skipQuoted(text, j); continue; }
+    if (countOpener && c === open) { depth++; j++; continue; }
+    if (c === close) { depth--; j++; if (depth === 0) return j; continue; }
+    j++;
+  }
+  return text.length; // unbalanced: consume to EOF rather than resync into prose
+}
+
+// Index just past the closing `|` of the edge label opening at i. Quote-aware,
+// which is the fix for mechanism (2): a literal pipe INSIDE the quoted label no
+// longer terminates it.
+function skipEdgeLabel(text, i) {
+  let j = i + 1;
+  while (j < text.length) {
+    const c = text[j];
+    if (c === '"') { j = skipQuoted(text, j); continue; }
+    if (c === '|') return j + 1;
+    j++;
+  }
+  return text.length;
+}
+
+/**
+ * Tokenise a .mmd into STATEMENTS of structure-level tokens. Label bodies,
+ * comments and edge labels are consumed and discarded — they never reach a
+ * token, so nothing inside them can become an id.
+ *
+ * Token shapes: {t:'id', v, shaped} · {t:'arrow', terminated} · {t:'elabel'} ·
+ * {t:'cls', v} · {t:'amp'} · {t:'other'}
+ */
+function tokeniseMermaid(text) {
+  const statements = [];
+  let cur = [];
+  const flush = () => { if (cur.length) statements.push(cur); cur = []; };
+  let i = 0;
+  const n = text.length;
+  while (i < n) {
+    const c = text[i];
+    if (c === '\n' || c === ';') { flush(); i++; continue; }
+    if (c === '%' && text[i + 1] === '%') { while (i < n && text[i] !== '\n') i++; continue; }
+    if (c === ' ' || c === '\t' || c === '\r') { i++; continue; }
+    if (c === '|') { cur.push({ t: 'elabel' }); i = skipEdgeLabel(text, i); continue; }
+    if (c === '"') { i = skipQuoted(text, i); continue; }
+    if (c === '&') { cur.push({ t: 'amp' }); i++; continue; }
+    if (text.startsWith(':::', i)) {
+      MMD_ID_RE.lastIndex = i + 3;
+      const m = MMD_ID_RE.exec(text);
+      if (m && m.index === i + 3) { cur.push({ t: 'cls', v: m[0] }); i = i + 3 + m[0].length; continue; }
+      i += 3; continue;
+    }
+    MMD_ARROW_RE.lastIndex = i;
+    const am = MMD_ARROW_RE.exec(text);
+    if (am) {
+      cur.push({ t: 'arrow', terminated: /[>xo]$/.test(am[0]) });
+      i += am[0].length;
+      continue;
+    }
+    MMD_ID_RE.lastIndex = i;
+    const im = MMD_ID_RE.exec(text);
+    if (im) {
+      const id = im[0];
+      let k = i + id.length;
+      while (k < n && (text[k] === ' ' || text[k] === '\t')) k++;
+      const opener = text[k];
+      const shaped = opener === '[' || opener === '(' || opener === '{' || opener === '>';
+      cur.push({ t: 'id', v: id, shaped });
+      i = shaped ? skipNodeLabel(text, k) : i + id.length;
+      continue;
+    }
+    cur.push({ t: 'other' });
+    i++;
+  }
+  flush();
+  return statements;
+}
+
+/**
+ * The DECLARED-NODE inventory of a .mmd, read from structure.
+ *
+ * A node id is declared when it is (a) given a shape/label (`id[...]`), (b) an
+ * endpoint of an edge, or (c) named in a `class A,B <cls>;` statement — mermaid's
+ * three ways of bringing a node into existence. `changed` marks are collected in
+ * the same pass.
+ *
+ * @returns {{declared:Set<string>, shaped:Set<string>, marked:Set<string>}}
+ */
+function parseMermaidStructure(text) {
+  const declared = new Set();
+  const shaped = new Set();
+  const marked = new Set();
+  for (const stmt of tokeniseMermaid(text)) {
+    const first = stmt[0];
+    if (first && first.t === 'id' && !first.shaped) {
+      const kw = first.v.toLowerCase();
+      if (kw === 'class') {
+        // `class A,B,C someClass` — every id but the LAST names a node.
+        const ids = stmt.slice(1).filter((t) => t.t === 'id').map((t) => t.v);
+        const cls = ids.pop();
+        for (const id of ids) declared.add(id);
+        if (cls && isChangedClass(cls)) for (const id of ids) marked.add(id);
+        continue;
+      }
+      if (MMD_STMT_KEYWORDS.has(kw)) continue; // layout/type directive
+    }
+    for (let k = 0; k < stmt.length; k++) {
+      const tok = stmt[k];
+      if (tok.t === 'cls' && isChangedClass(tok.v)) {
+        // the mark attaches to the nearest preceding id
+        for (let b = k - 1; b >= 0; b--) {
+          if (stmt[b].t === 'id') { marked.add(stmt[b].v); break; }
+        }
+        continue;
+      }
+      if (tok.t !== 'id') continue;
+      if (tok.shaped) { declared.add(tok.v); shaped.add(tok.v); continue; }
+      // an unshaped id is a node only if it is an EDGE ENDPOINT: adjacent to an
+      // arrow (an intervening `|edge label|` does not break adjacency), or joined
+      // by `&`.
+      const neighbour = (dir) => {
+        let j = k + dir;
+        while (j >= 0 && j < stmt.length && stmt[j].t === 'elabel') j += dir;
+        return stmt[j];
+      };
+      const prev = neighbour(-1);
+      const next = neighbour(1);
+      const linked = (t) => t && (t.t === 'arrow' || t.t === 'amp');
+      if (!linked(prev) && !linked(next)) continue;
+      // mermaid's legacy inline edge-label form `A -- text --> B`: an unshaped id
+      // sandwiched between an OPEN arrow and a TERMINATED one is the LABEL, not a
+      // node. A chain (`A --> B --> C`) has a TERMINATED arrow before B, so B
+      // survives. (Limit: `A -- text --- B` is textually ambiguous with the chain
+      // `A --- B --- C`; the chain reading wins.)
+      if (prev && next && prev.t === 'arrow' && next.t === 'arrow'
+          && !prev.terminated && next.terminated) continue;
+      declared.add(tok.v);
+    }
+  }
+  return { declared, shaped, marked };
+}
+
 // Node ids appearing ANYWHERE in this .mmd text (declaration or edge endpoint),
 // regardless of "changed" state — the FULL inventory of this diagram's node-id
-// vocabulary. Used ONLY for the @covers/node-id convention sanity check below;
-// the changed-set stays diff-sourced only (OI-42).
+// vocabulary. Used for the @covers/node-id convention sanity check AND as the
+// gate the diff-sourced changed-set is filtered through; the changed-set is
+// still SELECTED by the diff only (OI-42), never IDENTIFIED by it.
 function extractAllNodeIds(text) {
-  const out = new Set();
-  for (const rawLine of text.split('\n')) {
-    const dm = rawLine.match(NODE_DECL_RE);
-    if (dm) out.add(dm[1]);
-    EDGE_RE.lastIndex = 0;
-    const em = rawLine.match(EDGE_RE);
-    if (em) { out.add(em[1]); out.add(em[2]); }
-  }
-  return out;
+  return parseMermaidStructure(text).declared;
 }
 
 // Structural sanity check, independent of the SINCE window: do ANY @covers tags
@@ -431,6 +695,7 @@ function run({ root, project, since }) {
   //    long-delivered prior-slice marks (recoloured-but-still-named-"changed")
   //    that are in neither diff, which is exactly the s009 over-report.
   const changed = new Set();
+  let resolvedDiffRoot = null;
   if (files.length) {
     // EXP-104: resolve the git root that actually owns `since` BEFORE diffing —
     // a project SHA usually lives in work/<project>/'s own nested repo, not the
@@ -441,8 +706,42 @@ function run({ root, project, since }) {
     for (const id of extractNodesFromDiffLines(committedDiff)) changed.add(id);
     const workingDiff = gitDiff(diffRoot, [], files);
     for (const id of extractNodesFromDiffLines(workingDiff)) changed.add(id);
+    resolvedDiffRoot = diffRoot;
   }
-  const changedNodes = [...changed].sort();
+  const candidates = [...changed].sort();
+
+  // 1b. GATE THE CANDIDATES ON DECLARED STRUCTURE
+  //     (OI-IMPACTED-TESTS-JUNK-NODE-IDS).
+  //     A diff hands us isolated LINES. A line lifted out of the middle of a
+  //     multi-line label, or a label containing an ASCII `--` used as an English
+  //     dash, is indistinguishable from a statement when read on its own — which
+  //     is how `THE`, `an`, `code`, `resolve`, `delta-072`, `BUY`, `which`,
+  //     `reason` and `group` were emitted as graph nodes and inflated the
+  //     UNCOVERED list to 70 on the real corpus.
+  //     So the diff SELECTS; it never IDENTIFIES. Identity comes from
+  //     parseMermaidStructure() over WHOLE files, where labels can be skipped
+  //     properly. The inventory spans three revisions of each diagram — the
+  //     working tree, HEAD, and the SINCE revision — so a node whose declaration
+  //     was REMOVED in-window is still recognised and still reported.
+  //     This is NOT a stop-word list (AC-JUNK.4): no word is named anywhere here,
+  //     and a node genuinely declared `code` passes straight through.
+  const declaredNodes = new Set();
+  for (const f of files) {
+    let text;
+    try { text = fs.readFileSync(f, 'utf8'); } catch { continue; }
+    for (const id of parseMermaidStructure(text).declared) declaredNodes.add(id);
+  }
+  if (resolvedDiffRoot && files.length) {
+    for (const rev of ['HEAD', since]) {
+      for (const f of files) {
+        const text = gitShow(resolvedDiffRoot, rev, path.relative(resolvedDiffRoot, f));
+        if (text === null) continue; // file absent at that revision — nothing to add
+        for (const id of parseMermaidStructure(text).declared) declaredNodes.add(id);
+      }
+    }
+  }
+  const changedNodes = candidates.filter((n) => declaredNodes.has(n));
+  const rejected = candidates.filter((n) => !declaredNodes.has(n));
 
   // 2. covers index over committed specs
   const coversIndex = buildCoversIndex(findSpecFiles(root, project));
@@ -477,7 +776,12 @@ function run({ root, project, since }) {
   }
 
   const exitCode = uncovered.length ? 2 : 0;
-  return { changedNodes, impacted, uncovered, exitCode, tagConvention };
+  return {
+    changedNodes, impacted, uncovered, exitCode, tagConvention,
+    // the structural gate, reported not silent: a dropped candidate a reader
+    // cannot see is indistinguishable from an input that never contained it.
+    rejected, declaredNodes, candidateCount: candidates.length,
+  };
 }
 
 // ---- plain-text report ------------------------------------------------------
@@ -503,11 +807,25 @@ function formatReport(res, { project, since, root }) {
   }
   if (res.changedNodes.length === 0) {
     lines.push('No changed/added/removed nodes in architecture/dependencies/*.mmd.');
+    if (res.rejected && res.rejected.length) {
+      lines.push(`(${res.rejected.length} of ${res.candidateCount} candidate token(s) rejected as `
+        + `not-declared label prose: ${res.rejected.join(', ')})`);
+    }
     lines.push('');
     lines.push('EXIT 0 (clean — nothing to tick off).');
     return lines.join('\n');
   }
   lines.push(`Changed nodes (${res.changedNodes.length}): ${res.changedNodes.join(', ')}`);
+  if (res.rejected && res.rejected.length) {
+    // OI-IMPACTED-TESTS-JUNK-NODE-IDS: state the gate's work out loud. These are
+    // tokens the diff lines OFFERED that are not declared nodes in ANY revision
+    // of the diagrams in this window — label prose, almost always. Shown so the
+    // reader can see the parse discarding rather than have to infer it, and so a
+    // genuinely-declared node wrongly landing here is visible as a tool bug.
+    lines.push(`Rejected (${res.rejected.length} of ${res.candidateCount} candidate token(s) `
+      + 'are not declared nodes in any in-window revision — label prose, not graph nodes): '
+      + res.rejected.join(', '));
+  }
   lines.push('');
   lines.push('## IMPACTED SPECS (changed node -> covering spec) — test-plan tick-off');
   if (res.impacted.length === 0) {
@@ -581,12 +899,15 @@ module.exports = {
   extractMarkedNodes,
   extractNodesFromDiffLines,
   extractAllNodeIds,
+  tokeniseMermaid,
+  parseMermaidStructure,
   checkTagConvention,
   parseCoversTags,
   parseAliasComments,
   effectiveSpecsFor,
   resolveDiffRoot,
   shaExistsIn,
+  gitShow,
   run,
   formatReport,
 };

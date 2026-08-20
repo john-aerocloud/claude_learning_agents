@@ -46,3 +46,45 @@ and a `.mmd` that is clean while the code changed is precisely that.
   e2e wiring can still land cleanly). Candidate EXP for cicd; this is the second registered instance
   of the class (DEFECT-OAG-044 was the first, OFS v115 the inverse), so the prose has now failed twice.
 - **Immediate:** the graph and ledger are correct at `7c3dcbb`; nothing needs re-work in the code.
+
+---
+
+## SECOND SIGHTING, SAME DAY, DIFFERENT PROJECT AND DIFFERENT ENGINEER (DEFECT-OAG-121)
+
+**Logged:** 2026-08-20 (engineer, DEFECT-OAG-121, OagEventSource)
+
+Same principle, same shape, independently. Three code commits landed before the
+`:::def121rchanged` marks:
+
+- `c9826af6` — the ODbL carrier asset held as a declared, attributed exception: a **behaviour
+  change** to `static-carrier-reference` (imports the asset again, gains
+  `CARRIER_DATA_ATTRIBUTION` on the loaded table) and to `bundled-data-asset-gate` (policy moved
+  from prohibition to a bounded allow-listed exception).
+- `a62dcefc` — the built-bytes assertion.
+- `e2b4146c` — `no-comparison-possible` / exit 4 restored: a **behaviour change** to
+  `carrier-name-truth` and `census-carrier-name-truth`, both modelled nodes.
+
+The marks and the `edge-ledger.md` section landed only at `b48d74ba`. So `make impacted-tests`
+against any of those three shas reports **no changed nodes** while five modelled nodes had already
+changed behaviour — including a node on the **published-field path** whose change was visible to
+live external consumers.
+
+**Why this one is worth the second entry rather than a dedup.** Two independent engineers hit the
+identical rule on the same day, both while following v95 ("commit at each green sub-step") in good
+faith. That is not two careless engineers; it is a **rule that loses to another rule at the moment
+of the commit**. v95 fires a strong, well-drilled instinct ("green → commit NOW, a stall costs you
+the increment") and the graph mark is a quiet two-line chore with no test that fails when it is
+missing. In a contest between an instinct backed by a loss story and a chore backed by a comment,
+the chore loses — twice today.
+
+**The asymmetry that makes it recur:** committing code without the mark has NO immediate signal —
+the suite is green, the gate passes, the commit succeeds. The cost lands later, on a different
+agent, reading `impacted-tests` and being told nothing changed. A rule whose violation is
+*invisible at the moment of violation* cannot be maintained by intention.
+
+**Candidate remedy (for the retro, not asserted here):** make the absence mechanical rather than
+remembered — a pre-commit/loop-gate check that, when a commit touches a source file mapped to a
+node in `class-deps.mmd`, requires that same commit to touch the `.mmd`. That converts the chore
+from a thing to remember into a thing that blocks, which is the only shape that has held for the
+other gates in this repo (the registry gate, the roster gate, the requirement gate). Both sightings
+were caught by the engineer noticing afterwards — i.e. by luck and conscientiousness, twice.

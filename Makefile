@@ -326,6 +326,32 @@ parts-check:
 #                         and pressures agents to close real findings. Declared
 #                         per queue as a `kind` row in queues/policy.csv.
 #   4 retro-debt          delegated to the retro-debt computation
+#  11 stalled-work        AN ITEM CLAIMED OR SCHEDULED WITH NO RECORDED ACTIVITY
+#                         (DEFECT-OAG-127). Check 1 sees VALIDATION states only and
+#                         only blocks when the work is provably finished, so work
+#                         abandoned in `fixing`/`building`/`reproducing`/`deploying`/
+#                         `reworking` — and an item SCHEDULED into `ready` that
+#                         nobody pulled — was invisible to EVERY limb. Measured on
+#                         the real 2026-08-19 tree: 11 of 12 occupied slots
+#                         invisible, six idle 4.92-7.31d and three scheduled
+#                         5.12-8.11d, while `wip 9` read exactly as nine agents
+#                         working. Population DERIVED from state-graphs.json
+#                         (non-terminal + non-backlog queue + not owner=external),
+#                         so a state added later is covered by construction.
+#                         Thresholds anchored on MEASURED MEDIAN dwell (24h for the
+#                         agent-owned states = 58-3300x their medians; 48h for
+#                         ready/scheduled, a different quantity), tunable per queue
+#                         with a `stall_hours` row in queues/policy.csv. It reports
+#                         the IDLE FACT only — nothing records a dispatch, so it
+#                         cannot tell an in-flight agent from work nobody holds, and
+#                         it does not pretend to: the remedy asks for re-dispatch,
+#                         release-as-blocked, or the event already earned. A slot
+#                         whose idle time cannot be established BLOCKS (§17i).
+#                         AND: the header line now carries the OCCUPANCY vs ACTIVITY
+#                         split for every WIP-stage queue on EVERY run, because
+#                         `wip: 7` reads the same whether seven agents are working or
+#                         seven items are abandoned — that reading deferred 35 items
+#                         for capacity that existed.
 #   5 awaiting-observation [state-graph v9] every item parked in
 #                         `awaiting_observation` (shipped, green, UNPROVEN) is
 #                         reported AND its liveness predicate RE-EVALUATED, exactly

@@ -3286,6 +3286,94 @@ class TestLoopGate(Base):
         self.assertIn("NOT ESTABLISHED", f[0]["message"])
         self.assertNotIn("make-refs-tracked", self._checks(findings))
 
+    # ---- check 10: acceptance-audit (OI-ACCEPTANCE-PARSER-SCORES-ZERO-SILENTLY)
+    # Every fixture below is a REAL item file copied VERBATIM out of the live corpus.
+    # Authoring one would be authoring the precondition (§17d.2): the whole claim is
+    # about what real item text does to the parser.
+    def _accept(self, findings):
+        return [f for f in findings if f["check"] == "acceptance-audit"]
+
+    def _copy_real_item(self, iid):
+        for sub in ("active", "done"):
+            src = os.path.join(self._orig_root, "work", "OagEventSource", "items", sub,
+                               iid + ".md")
+            if os.path.exists(src):
+                shutil.copy2(src, os.path.join(self._items("active"), iid + ".md"))
+                return
+        self.skipTest("real item %s not present; fixture must be harvested" % iid)
+
+    def _declared(self, payload):
+        d = os.path.join(self.tmp, ".claude", "tools")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "acceptance-audit-declared.json"), "w") as fh:
+            fh.write(payload)
+
+    def test_acceptance_audit_blocks_on_a_real_unreadable_item(self):
+        """AC-AP.1 — a zero must be LOUD, and it must block BEFORE the next pull: the
+        pull is the moment an agent acts on 'this item has no acceptance'."""
+        self._copy_real_item("UC-GSA2")
+        self._declared('{"declared": {}}')
+        f = self._accept(self._gate())
+        self.assertEqual(len(f), 1, f)
+        self.assertEqual(f[0]["severity"], "block")
+        self.assertIn("UC-GSA2", f[0]["ids"])
+        self.assertIn("PRESENT but not fully readable", f[0]["message"])
+
+    def test_acceptance_audit_blocks_on_a_real_truncated_item_naming_the_lost_id(self):
+        """The residual self-check: DEFECT-OAG-062 registered AC-062.6/AC-062.7 in an
+        event and never added them to its acceptance list. A count could not say so."""
+        self._copy_real_item("DEFECT-OAG-062")
+        self._declared('{"declared": {}}')
+        f = self._accept(self._gate())
+        self.assertEqual(len(f), 1, f)
+        self.assertIn("DEFECT-OAG-062", f[0]["ids"])
+
+    def test_acceptance_audit_is_clean_when_a_real_item_parses(self):
+        """Non-vacuity in the other direction — it is not a check that always fires.
+        DEFECT-OAG-053's fifteen registered criteria live in a table under a level-3
+        sub-heading, which is precisely what used to terminate the section."""
+        self._copy_real_item("DEFECT-OAG-053")
+        self._declared('{"declared": {}}')
+        self.assertEqual(self._accept(self._gate()), [])
+
+    def test_acceptance_audit_declared_row_needs_an_authority(self):
+        """§17h limb 1 — an exclusion with no authority is a FINDING, not a sample."""
+        self._copy_real_item("UC-GSA2")
+        self._declared('{"declared": {"UC-GSA2": {"status": "unenumerated"}}}')
+        f = self._accept(self._gate())
+        self.assertEqual(len(f), 1, f)
+        self.assertEqual(f[0]["severity"], "block")
+
+    def test_acceptance_audit_declared_with_authority_clears_the_block(self):
+        self._copy_real_item("UC-GSA2")
+        self._declared('{"declared": {"UC-GSA2": {"status": "unenumerated",'
+                       ' "authority": "delta-054 section 15"}}}')
+        self.assertEqual(self._accept(self._gate()), [])
+
+    def test_acceptance_audit_unrunnable_is_unknown_never_a_silent_pass(self):
+        """An unevaluated precondition is not a met one (§17c.2) — and for THIS check
+        the asymmetry is the defect itself: a clean answer indistinguishable from no
+        answer is exactly how a tree-wide zero survived."""
+        self._copy_real_item("UC-GSA2")
+        self._declared('{"declared": {}}')
+        orig = wi.ACCEPTANCE_AUDIT_SCRIPT
+        wi.ACCEPTANCE_AUDIT_SCRIPT = os.path.join(self.tmp, "not-a-script.py")
+        try:
+            f = self._accept(self._gate())
+        finally:
+            wi.ACCEPTANCE_AUDIT_SCRIPT = orig
+        self.assertEqual(len(f), 1, f)
+        self.assertEqual(f[0]["severity"], "unknown")
+        self.assertIn("NOT ESTABLISHED", f[0]["message"])
+
+    def test_acceptance_audit_asks_about_the_CALLER_root_not_its_own(self):
+        """The analyser resolves the corpus from its own file location by default. If
+        the check did not pass --root, it would sweep the REAL repo while the caller
+        points elsewhere — a check answering about the wrong population, which is the
+        same silent-wrong-answer class it exists to catch."""
+        self._declared('{"declared": {}}')          # empty temp corpus, no items
+        self.assertEqual(self._accept(self._gate()), [])
+
     # ---- policy.csv handling ------------------------------------------------
     def test_missing_policy_csv_uses_documented_defaults(self):
         # no policy.csv at all -> the §F2 seed defaults (ready 3/4, intake 2/10)

@@ -323,6 +323,457 @@ def test_every_real_item_state_is_projectable():
     check(f"every real (type,state) projects (bad: {unresolvable})", not unresolvable)
 
 
+
+# --------------------------------------------------------------------------- #
+# OI-ACCEPTANCE-PARSER-SCORES-ZERO-SILENTLY — a ZERO MUST BE LOUD.
+#
+# `parse_acceptance()` returned a COUNT, and `0` meant two irreconcilable things:
+# "this item genuinely has no acceptance" (a real process state — §12a keeps such
+# an item out of a build) and "I could not read this item's acceptance". Every
+# downstream consumer — the board's `needs-acceptance` label (a WORK INSTRUCTION
+# telling a human to author acceptance), the §17d traceability gate, an agent
+# asking "is this buildable?" — saw the two as identical. Measured on the real
+# corpus, 468 items, before the fix: FOUR items carried an `## Acceptance`
+# heading and parsed to ZERO, and TWELVE more parsed a strict SUBSET of the AC
+# ids written in their own acceptance section, worst case `DEFECT-OAG-053`
+# (4 of 20 — its fifteen REGISTERED criteria sit in a table under a level-3
+# sub-heading, and a level-3 heading TERMINATED the section) and `DEFECT-OAG-110`
+# (8 of 22 — a SECOND `## Acceptance` section the parser never reached).
+#
+# The fixtures below are REAL TEXT taken verbatim from those items, per AC-AP.5.
+# The fix is structural, not a fifth format: sections are level-aware, ALL
+# acceptance sections are read, a criterion is any AC-id declaration (list,
+# table row, or prose line), and the parse CHECKS ITSELF against the ids present
+# in the text it read — so it can no longer drop one silently.
+# --------------------------------------------------------------------------- #
+
+# Verbatim shape of DEFECT-OAG-053: four narrative bullets, then the fifteen
+# REGISTERED criteria in a markdown table under a LEVEL-3 sub-heading.
+FIX_L3_TERMINATOR = """\
+## Acceptance
+
+1. Two concurrent writers at the same `expectedSeq` with **different envelope ids** => exactly one
+   succeeds, the other raises `OptimisticConcurrencyError`, **observed against real DynamoDB**.
+2. The characterisation pins UC-ML4 landed **go RED** when the guard is fixed.
+
+### Registered acceptance criteria (the `AC-053.n` vocabulary the tests name, §17d)
+
+Every criterion below traces to a delta-057 clause.
+
+| AC | What it requires | delta-057 | Pinned by |
+|---|---|---|---|
+| AC-053.1 | N concurrent `append` at one `expectedSeq` => exactly 1 fulfilled | §6 M2 | `a.test.ts` |
+| AC-053.2 | the same race through `ingest()` on ONE REAL captured OAG body | §6 M2 | same |
+| AC-053.3 | positions UNIQUE and DENSE from 0..head on EVERY stream | §6 M2 | same |
+
+## MEASURED IN PROD — the race is ACTIVE, not latent
+
+Not acceptance. This section must not be swallowed.
+"""
+
+# Verbatim shape of DEFECT-OAG-110: TWO `## Acceptance` sections, the second
+# registered a fortnight after the first.
+FIX_TWO_SECTIONS = """\
+## Acceptance
+
+1. **`AC-110.1`** — the first condition.
+2. **`AC-110.2`** — the second condition.
+
+## Acceptance — the registered criteria, in full (registered 2026-08-18 by DEFECT-OAG-122)
+
+The eight conditions above are the product-level ones.
+
+- **`AC-110.A1`** — delta-071 §12, verbatim.
+- **`AC-110.F1`** — delta-071 §6, the fitness limbs and their red lines.
+
+## Related
+"""
+
+# Verbatim acceptance section of UC-GSA2 — PROSE, no ids, no list. Registered
+# since 2026-08-04; the board stamped it `needs-acceptance` on OAG-216 while its
+# own tester quoted this very clause when refusing to claim validated.
+FIX_PROSE_ONLY = """\
+## Acceptance (verbatim, delta-054 section 15)
+
+A real captured diverted **push** body committed as a fixture emits `OagFlightDiverted`,
+AND a real `Recovery` body emits the recovery signal, AND the first real emission is
+observed end-to-end to a consumer rule invocation (walking-skeleton assertion).
+
+## Sequencing / release gate
+
+- **Trigger:** `oag.diversion.detected` (metric #6).
+"""
+
+# The first draft that started this item: ids in BACKTICKS inside a numbered list.
+FIX_BACKTICKED_IDS = """\
+## Acceptance
+
+1. **`AC-AP.1`** — a **zero result is never silent**. An item whose body contains something that
+   looks like acceptance but parses to 0 conditions raises loudly.
+2. **`AC-AP.2`** — the two states are **separately representable** end to end.
+"""
+
+FIX_NO_ACCEPTANCE = """\
+## Definition
+
+_CHK-10-INTAKE_ (migrated from items.csv). dora_ref: `CHK-10-INTAKE;DONE-181c8bd(AC-C10.1-5-pass)`.
+Definition text not auto-located; fill in from the slice docs.
+"""
+
+FIX_EMPTY_SECTION = """\
+## Acceptance (to be authored on pull)
+
+## Related
+
+- nothing yet.
+"""
+
+
+def test_level3_subheading_does_not_terminate_acceptance():
+    # validates: AC-AP.5, AC-AP.6
+    """DEFECT-OAG-053, real: 15 registered criteria under a `###` sub-heading."""
+    r = lp.acceptance_report(FIX_L3_TERMINATOR)
+    ids = set()
+    for c in r["criteria"]:
+        ids |= set(lp._AC_ID.findall(c))
+    check("a level-3 sub-heading does NOT terminate a level-2 acceptance section",
+          {"AC-053.1", "AC-053.2", "AC-053.3"} <= ids)
+    check("narrative bullets are still criteria (2 + 3 table rows = 5)", len(r["criteria"]) == 5)
+    check("no residual id was dropped", r["residual_ids"] == [])
+    check("status is parsed", r["status"] == "parsed")
+    check("a LEVEL-2 heading still terminates the section",
+          not any("must not be swallowed" in c for c in r["criteria"]))
+
+
+def test_every_acceptance_section_is_read_not_only_the_first():
+    # validates: AC-AP.6
+    """DEFECT-OAG-110, real: a second `## Acceptance` section registered later."""
+    r = lp.acceptance_report(FIX_TWO_SECTIONS)
+    ids = set()
+    for c in r["criteria"]:
+        ids |= set(lp._AC_ID.findall(c))
+    check("both acceptance sections reported", len(r["sections"]) == 2)
+    check("first section's ids present", {"AC-110.1", "AC-110.2"} <= ids)
+    check("SECOND section's ids present too", {"AC-110.A1", "AC-110.F1"} <= ids)
+    check("four criteria across both sections", len(r["criteria"]) == 4)
+    check("status parsed, nothing residual", r["status"] == "parsed" and not r["residual_ids"])
+
+
+def test_prose_only_acceptance_is_unenumerated_not_zero():
+    # validates: AC-AP.1, AC-AP.2, AC-AP.6
+    """UC-GSA2, real: acceptance IS written; it is simply not enumerable."""
+    r = lp.acceptance_report(FIX_PROSE_ONLY)
+    check("status distinguishes prose acceptance from absent acceptance",
+          r["status"] == "unenumerated")
+    check("it is NOT reported as 'none'", r["status"] != "none")
+    check("the prose is carried so a consumer can show it", "OagFlightDiverted" in r["text"])
+    check("a section WAS found", len(r["sections"]) == 1)
+    check("the next level-2 section is not swallowed", "Trigger" not in r["text"])
+
+
+def test_backticked_ids_in_a_numbered_list_parse():
+    # validates: AC-AP.5, AC-AP.6
+    r = lp.acceptance_report(FIX_BACKTICKED_IDS)
+    check("backticked ids in a numbered list parse", len(r["criteria"]) == 2)
+    check("status parsed", r["status"] == "parsed")
+    check("backticked id is recognised as an id", "AC-AP.1" in " ".join(r["criteria"]))
+
+
+def test_genuinely_no_acceptance_is_representable_as_none():
+    # validates: AC-AP.2, AC-AP.6
+    """UC-C10, real: a migrated stub. It mentions `AC-C10.1-5` in a dora_ref, which
+    the old body-wide `AC-` heuristic mislabelled `acceptance-unparsed` — a claim
+    that the PARSER is broken, on an item that simply has no acceptance."""
+    r = lp.acceptance_report(FIX_NO_ACCEPTANCE)
+    check("no acceptance section and no AC-led list => status none", r["status"] == "none")
+    check("a dora_ref mention is NOT an orphan finding", r["orphan_ids"] == [])
+    check("no criteria", r["criteria"] == [])
+
+
+def test_empty_acceptance_section_is_distinct_from_unreadable():
+    # validates: AC-AP.2
+    r = lp.acceptance_report(FIX_EMPTY_SECTION)
+    check("a heading with nothing under it => status empty", r["status"] == "empty")
+    check("empty is not unreadable", r["status"] != "unreadable")
+
+
+def test_a_dropped_id_is_reported_as_truncated_not_silently_lost():
+    # validates: AC-AP.1
+    """The self-check: the parse compares its own output against the ids present in
+    the text it read. An id in the section that reached no criterion is a RESIDUAL,
+    and the verdict is `truncated` — never a quiet undercount."""
+    body = (
+        "## Acceptance\n\n"
+        "- **AC-Z.1** — the one criterion the parser can see.\n\n"
+        "```\nAC-Z.2 lives inside a fenced block the parser deliberately ignores\n```\n"
+    )
+    r = lp.acceptance_report(body)
+    check("one criterion parsed", len(r["criteria"]) == 1)
+    check("the unreached id is reported", r["residual_ids"] == ["AC-Z.2"])
+    check("status is truncated, not parsed", r["status"] == "truncated")
+
+
+def test_ids_never_capture_a_trailing_sentence_period():
+    # validates: AC-AP.1
+    check("AC id excludes a trailing period",
+          lp._AC_ID.findall("cited AC-061. Next sentence.") == ["AC-061"])
+    check("AC id keeps internal dots", lp._AC_ID.findall("AC-110.A17 ok") == ["AC-110.A17"])
+
+
+def test_label_distinguishes_unreadable_from_needs_acceptance():
+    # validates: AC-AP.2
+    """AC-AP.2 end to end: the BOARD must not tell a human to author acceptance for
+    an item that has it. `needs-acceptance` is a work instruction."""
+    unread = lp.compose_labels(
+        {"type": "use-case", "acceptance": [], "acceptance_status": "truncated",
+         "acceptance_residual": ["AC-053.5"], "_body": ""})
+    check("truncated => acceptance-unparsed", "acceptance-unparsed" in unread)
+    check("truncated => NOT needs-acceptance", "needs-acceptance" not in unread)
+    prose = lp.compose_labels(
+        {"type": "use-case", "acceptance": [], "acceptance_status": "unenumerated", "_body": ""})
+    check("unenumerated => acceptance-unenumerated", "acceptance-unenumerated" in prose)
+    check("unenumerated => NOT needs-acceptance", "needs-acceptance" not in prose)
+    real = lp.compose_labels(
+        {"type": "use-case", "acceptance": [], "acceptance_status": "none", "_body": ""})
+    check("genuinely none => needs-acceptance", "needs-acceptance" in real)
+    # A DEFECT with unreadable acceptance was invisible before: the old branch was
+    # gated on `itype == "use-case"`, so DEFECT-OAG-047's ten conditions parsed to
+    # zero and NOTHING was said. The parser-fault signal is type-independent.
+    d = lp.compose_labels(
+        {"type": "defect", "acceptance": [], "acceptance_status": "truncated",
+         "acceptance_residual": ["AC-047.7"], "_body": ""})
+    check("a DEFECT also raises acceptance-unparsed", "acceptance-unparsed" in d)
+    check("a defect is NOT told to author acceptance", "needs-acceptance" not in d)
+
+
+def test_render_shows_the_unreadable_banner_to_a_human():
+    # validates: AC-AP.2
+    md = lp.render_description(
+        {"id": "X", "type": "use-case", "acceptance": [], "acceptance_status": "unenumerated",
+         "acceptance_text": "prose acceptance here", "acceptance_residual": []},
+        "", "", "")
+    check("the board description says the acceptance could not be enumerated",
+          "could not be enumerated" in md.lower() or "unenumerated" in md.lower())
+    check("the prose acceptance text still reaches the human", "prose acceptance here" in md)
+
+
+def test_tree_sweep_classifies_every_real_item_and_is_non_vacuous():
+    # validates: AC-AP.3, AC-AP.5
+    """AC-AP.3 — the sweep is the deliverable. Runs over the REAL corpus."""
+    rows = lp.sweep_acceptance("OagEventSource")
+    check("the sweep sees the whole corpus (>400 items)", len(rows) > 400)
+    counts = {}
+    for r in rows:
+        counts[r["status"]] = counts.get(r["status"], 0) + 1
+    check(f"every class carries a measured size (not a verdict): {counts}",
+          set(counts) <= {"parsed", "truncated", "unreadable", "unenumerated", "empty",
+                          "none", "orphan"})
+    check("the sweep is non-vacuous: it finds parsed items", counts.get("parsed", 0) > 100)
+    # NON-VACUITY of the loud path, on real items: UC-GSA2 is prose-only and
+    # DEFECT-OAG-053's registered table was invisible before the fix.
+    by_id = {r["id"]: r for r in rows}
+    if "UC-GSA2" in by_id:
+        check("UC-GSA2 classifies as unenumerated (not none)",
+              by_id["UC-GSA2"]["status"] == "unenumerated")
+    if "DEFECT-OAG-053" in by_id:
+        check("DEFECT-OAG-053's 15 registered criteria are now visible",
+              len(by_id["DEFECT-OAG-053"]["criteria"]) >= 19)
+    if "DEFECT-OAG-110" in by_id:
+        check("DEFECT-OAG-110's second section is now visible",
+              len(by_id["DEFECT-OAG-110"]["criteria"]) >= 10)
+
+
+
+# --------------------------------------------------------------------------- #
+# §17e NON-VACUITY, driven through the REAL CLI (AC-AP.5).
+#
+# These do NOT call the audit function in-process. `make acceptance-audit` shells
+# out to the script, so the claim under test is "the COMMAND exits non-zero", and
+# stubbing that boundary would prove only that the mapping agrees with itself —
+# the exact fault the 2026-08-02 ruling names. The corpus for each demonstration is
+# a REAL item file COPIED VERBATIM out of work/OagEventSource/items/, never a
+# hand-authored fixture: the precondition is HARVESTED, not written (§17d.2).
+# --------------------------------------------------------------------------- #
+def _run_cli(*argv):
+    import subprocess
+    r = subprocess.run([sys.executable, str(HERE / "linear-project.py")] + list(argv),
+                       capture_output=True, text=True)
+    return r.returncode, r.stdout + r.stderr
+
+
+def _scratch_corpus(tmp, ids, declared="{}"):
+    """A scratch repo root holding REAL item files, copied byte-for-byte."""
+    import shutil
+    d = tmp / "work" / "SCRATCH" / "items" / "active"
+    d.mkdir(parents=True, exist_ok=True)
+    for iid in ids:
+        for sub in ("active", "done"):
+            src = HERE.parents[1] / "work" / "OagEventSource" / "items" / sub / f"{iid}.md"
+            if src.exists():
+                shutil.copy2(src, d / f"{iid}.md")
+                break
+        else:
+            raise AssertionError(f"real item {iid} not found — fixture must be harvested")
+    reg = tmp / "declared.json"
+    reg.write_text(declared)
+    return tmp, reg
+
+
+def test_audit_goes_RED_on_a_real_item_with_unenumerable_acceptance():
+    # validates: AC-AP.5
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        root, reg = _scratch_corpus(Path(td), ["UC-GSA2"], declared='{"declared": {}}')
+        code, out = _run_cli("--acceptance-audit", "--project", "SCRATCH",
+                             "--root", str(root), "--declared", str(reg))
+        check("RED: undeclared unenumerated acceptance exits non-zero", code != 0)
+        check("RED: the failure NAMES the item", "UC-GSA2" in out)
+        check("RED: it says the acceptance is PRESENT, not missing",
+              "PRESENT but not fully readable" in out)
+        check("RED: it says enumerating is product/architect work (§12a)",
+              "12a" in out or "§12a" in out)
+
+
+def test_audit_goes_RED_on_a_real_truncated_item_and_names_the_dropped_id():
+    # validates: AC-AP.1, AC-AP.5
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        root, reg = _scratch_corpus(Path(td), ["DEFECT-OAG-062"], declared='{"declared": {}}')
+        code, out = _run_cli("--acceptance-audit", "--project", "SCRATCH",
+                             "--root", str(root), "--declared", str(reg))
+        check("RED: a truncated real item exits non-zero", code != 0)
+        check("RED: the dropped id is named, not just counted", "AC-062.6" in out)
+        check("RED: status is reported as truncated", "truncated" in out)
+
+
+def test_audit_goes_RED_on_a_declaration_with_no_authority():
+    # validates: AC-AP.4  (§17h limb 1)
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        root, reg = _scratch_corpus(
+            Path(td), ["UC-GSA2"],
+            declared='{"declared": {"UC-GSA2": {"status": "unenumerated", "note": "x"}}}')
+        code, out = _run_cli("--acceptance-audit", "--project", "SCRATCH",
+                             "--root", str(root), "--declared", str(reg))
+        check("RED: an exclusion with no authority fails", code != 0)
+        check("RED: the message cites §17h's rule",
+              "authority is a FINDING" in out or "NO `authority`" in out)
+
+
+def test_audit_goes_RED_on_a_stale_declaration_so_it_can_only_shrink():
+    # validates: AC-AP.4
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        # A real item whose acceptance parses cleanly, declared as a known finding.
+        root, reg = _scratch_corpus(
+            Path(td), ["DEFECT-OAG-053"],
+            declared='{"declared": {"DEFECT-OAG-053": {"status": "truncated",'
+                     ' "authority": "stale"}}}')
+        code, out = _run_cli("--acceptance-audit", "--project", "SCRATCH",
+                             "--root", str(root), "--declared", str(reg))
+        check("RED: a declaration that outlived its finding fails", code != 0)
+        check("RED: it says to delete the row", "NO LONGER one" in out)
+
+
+def test_audit_is_GREEN_on_the_real_corpus_with_the_committed_registry():
+    # validates: AC-AP.3
+    code, out = _run_cli("--acceptance-audit", "--project", "OagEventSource")
+    check("the committed registry makes the real corpus PASS", code == 0)
+    check("the sweep prints a measured size for EVERY class, incl. the healthy ones "
+          "(§17h: no class is pre-judged benign)",
+          all(s in out for s in ("parsed", "truncated", "unreadable", "unenumerated",
+                                 "empty", "none", "orphan")))
+    check("the total criteria count is reported", "criteria across the corpus" in out)
+
+
+def test_fault_set_numbered_list_with_no_bold_ids():
+    # validates: AC-AP.6
+    # REAL shape, DEFECT-OAG-081: `1. AC-081.1 — …` with no emphasis at all. Matching
+    # only `- **AC-x**` left every numbered item reading zero and LOOKED like a fix.
+    body = """## Acceptance
+
+1. AC-081.1 - the DR runbook's resource table names the real prod table, account and KMS
+   alias, per environment, with no sandbox identifiers presented as prod.
+2. AC-081.2 - `OAG_EVENT_STORE_TABLE` has no environment-specific default that can be
+   silently wrong.
+"""
+    r = lp.acceptance_report(body)
+    check("plain numbered list parses", len(r["criteria"]) == 2)
+    check("status parsed with nothing residual",
+          r["status"] == "parsed" and not r["residual_ids"])
+    check("the wrapped continuation is joined", "presented as prod" in r["criteria"][0])
+
+
+def test_fault_set_ids_in_prose_with_no_list_marker():
+    # validates: AC-AP.6
+    # SYNTHETIC, and marked as such: the real corpus contains ZERO instances of a
+    # prose-declared criterion (measured over all 468 items), so reality has not
+    # produced this fault yet. It is in the §17g fault set because it is the shape a
+    # fifth format would arrive as, and the point of the fix is that it does not need
+    # a fifth rule — a criterion is any line that DECLARES an id.
+    body = """## Acceptance
+
+AC-Q.1 - the first condition, written as a paragraph with no bullet at all,
+wrapping onto a second line.
+
+AC-Q.2 - the second condition, likewise.
+"""
+    r = lp.acceptance_report(body)
+    check("prose-declared criteria parse without a fifth format rule",
+          len(r["criteria"]) == 2)
+    check("status parsed, no residual", r["status"] == "parsed" and not r["residual_ids"])
+    check("continuation joined onto the prose criterion",
+          "second line" in r["criteria"][0])
+
+
+
+def test_extractor_populations_are_pinned_in_both_directions():
+    # validates: AC-AP.6  (§17g generalisation sweep — the LEDGER is the deliverable)
+    """The sweep question this item owes: "where ELSE does an extractor's failure look
+    exactly like a legitimate empty answer?" Asked of every extractor in the file, the
+    answer was worse than the reported defect — TWO more match NOTHING tree-wide.
+
+    Both directions are pinned deliberately. A working extractor dropping to zero goes
+    red (the reported defect, recurring). A pinned-ZERO extractor that STARTS matching
+    ALSO goes red, so the ledger must be updated rather than quietly rotting — the
+    `f694ea3` failure was precisely a ledger everyone believed and nobody re-measured.
+    """
+    pop = lp.extractor_population("OagEventSource")
+    must_match = {"acceptance", "defect_fields", "job_resolved", "persona_resolved",
+                  "block_note"}
+    for key in must_match:
+        check(f"{key} has a NON-ZERO tree-wide population "
+              f"({pop[key]['hits']}/{pop[key]['total']})", pop[key]["hits"] > 0)
+    # The two registered findings, pinned at their EXACT measured figure with a stated
+    # reason, so the ledger must be updated when either moves in EITHER direction.
+    #
+    # `why` is pinned at 1, not 0, and the reason is worth keeping: the single hit is
+    # THIS ITEM'S OWN LEDGER PROSE, which quotes the literal `**Why (persona/job):**`
+    # while recording that no item uses it — so the extractor matched the sentence
+    # documenting that it matches nothing. The pin caught that contamination the moment
+    # the item was written, which is the pin working: a measurement can be polluted by
+    # writing about the measurement, and that has to be visible rather than absorbed.
+    # It also SHARPENS the finding — one self-referential mention in 469 items is
+    # stronger evidence the format is unused than a bare zero would be.
+    expected = {
+        "definition_oneliner": (0, "no item writes a dash-suffixed `## Definition — …` "
+                                   "heading; masked by compose()'s title fallback"),
+        "why": (1, "the ONLY hit is this item's own ledger prose quoting the literal; "
+                   "no item USES it as an authoring convention"),
+    }
+    for key, (n, reason) in expected.items():
+        check(f"{key} population is EXACTLY {n} ({pop[key]['hits']}/{pop[key]['total']}) "
+              f"— {reason}. If this went red the population MOVED and "
+              f"EXTRACTOR_LEDGER must be updated in whichever direction",
+              pop[key]["hits"] == n and pop[key]["total"] > 400)
+    check("every ledger row is measured (no row declared without a number)",
+          all(k in pop for k, _m, _v in lp.EXTRACTOR_LEDGER))
+    check("no ledger row calls its own population benign (§17h limb 2)",
+          not any(w in v.lower() for _k, _m, v in lp.EXTRACTOR_LEDGER
+                  for w in ("benign", "degenerate", "expected", "out of scope")))
+
+
+
 def run():
     for fn in [
         test_parse_acceptance_joins_wrapped_lines,
@@ -337,6 +788,25 @@ def run():
         test_awaiting_observation_resolves_to_a_parked_status,
         test_unmapped_state_is_loud_not_silently_backlog,
         test_every_real_item_state_is_projectable,
+        test_level3_subheading_does_not_terminate_acceptance,
+        test_every_acceptance_section_is_read_not_only_the_first,
+        test_prose_only_acceptance_is_unenumerated_not_zero,
+        test_backticked_ids_in_a_numbered_list_parse,
+        test_fault_set_numbered_list_with_no_bold_ids,
+        test_fault_set_ids_in_prose_with_no_list_marker,
+        test_genuinely_no_acceptance_is_representable_as_none,
+        test_empty_acceptance_section_is_distinct_from_unreadable,
+        test_a_dropped_id_is_reported_as_truncated_not_silently_lost,
+        test_ids_never_capture_a_trailing_sentence_period,
+        test_label_distinguishes_unreadable_from_needs_acceptance,
+        test_render_shows_the_unreadable_banner_to_a_human,
+        test_tree_sweep_classifies_every_real_item_and_is_non_vacuous,
+        test_audit_goes_RED_on_a_real_item_with_unenumerable_acceptance,
+        test_audit_goes_RED_on_a_real_truncated_item_and_names_the_dropped_id,
+        test_audit_goes_RED_on_a_declaration_with_no_authority,
+        test_audit_goes_RED_on_a_stale_declaration_so_it_can_only_shrink,
+        test_audit_is_GREEN_on_the_real_corpus_with_the_committed_registry,
+        test_extractor_populations_are_pinned_in_both_directions,
     ]:
         print(f"* {fn.__name__}")
         fn()

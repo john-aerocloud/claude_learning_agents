@@ -453,7 +453,7 @@ wi-migrate:
 # network, no secret. Non-zero on any finding. The same audit runs inside
 # test-board-project, so the drift cannot reach the board unnoticed.
 BOARDPY ?= $(shell sh .claude/skills/work-items/scripts/work-items --python)
-.PHONY: board-project test-board-project board-audit
+.PHONY: board-project test-board-project board-audit acceptance-audit
 board-project:
 	$(BOARDPY) .claude/tools/linear-project.py --project $(PROJECT) --id $(ID)
 
@@ -462,6 +462,43 @@ test-board-project:
 
 board-audit:
 	$(BOARDPY) .claude/tools/linear-project.py --audit $(if $(PROJECT),--project $(PROJECT),)
+
+# --- acceptance sweep + gate (OI-ACCEPTANCE-PARSER-SCORES-ZERO-SILENTLY) -------
+# `parse_acceptance()` returned a COUNT, and `0` conflated two irreconcilable facts:
+# "this item genuinely has no written acceptance" (a real process state - 12a keeps
+# such an item out of a build) and "I could not read this item's acceptance". Nothing
+# distinguished them, and the dangerous direction is FALSE-GREEN: the board stamped
+# `needs-acceptance` - a WORK INSTRUCTION to go and author acceptance - on OAG-216
+# (UC-GSA2) and OAG-208 (DEFECT-OAG-047), both of which carry conditions their own
+# testers cited BY ID. Acting on that label means re-authoring over acceptance that
+# already exists, which 12a forbids an engineer to do at all.
+#
+# Measured on the real 468-item corpus BEFORE the fix: 4 items carried an
+# `## Acceptance` heading and parsed to ZERO, and 12 more parsed a strict SUBSET of
+# the ids written in their own acceptance section - worst DEFECT-OAG-053 at 4 of 20
+# (fifteen REGISTERED criteria in a table under a level-3 sub-heading, and a level-3
+# heading TERMINATED the section) and DEFECT-OAG-110 at 8 of 22 (a SECOND
+# `## Acceptance` section the parser never reached). All four accidental discoveries
+# recorded on the item were found by someone going looking; nobody ever found one by
+# being told.
+#
+# The parse is now robust STRUCTURALLY rather than by a fifth format (level-aware
+# sections, every section, a criterion is any line that DECLARES an id) and - the
+# load-bearing part - it CHECKS ITSELF: an id standing in a declaration position that
+# reached no criterion makes the verdict `truncated`, so it can no longer under-count
+# silently. This target is the tree-wide observer of that self-check, because a parser
+# exercised one item at a time by a board sync nobody reads the stderr of has none.
+#
+# 17h: every class is printed with its MEASURED SIZE (including the healthy ones) and
+# no class is described as benign; four of the seven can go red. An item whose
+# acceptance is genuinely not enumerable is DECLARED in
+# .claude/tools/acceptance-audit-declared.json with an `authority` ref - an exclusion
+# with no authority FAILS, and so does a declaration whose finding has gone away, so
+# the file can only shrink. Offline: no network, no secret. Wired as `loop-gate`
+# check 10 and asserted by `make test-board-project`.
+#   make acceptance-audit PROJECT=OagEventSource
+acceptance-audit:
+	$(BOARDPY) .claude/tools/linear-project.py --acceptance-audit --project $(PROJECT)
 
 # --- Process-doc conformance gate (process §27.5) -----------------------------
 # Scans the LIVE process/agent/skill/root docs for a DENYLIST of RETIRED

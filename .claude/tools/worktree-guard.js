@@ -509,4 +509,16 @@ module.exports = {
   scan, scanAll, registeredWorktrees, accountedFor, LANE_TABLE,
 };
 
-if (require.main === module) process.exit(main(process.argv.slice(2)));
+if (require.main === module) {
+  // AC-DEFECT-OAG-076.5 — do NOT `process.exit()` here. A large `--json` payload
+  // written to a PIPE is TRUNCATED at the 64 KiB pipe buffer, because
+  // `process.stdout.write` is asynchronous on a pipe and `process.exit()` does not
+  // wait for it to drain. This is not hypothetical: on 2026-08-19 `scan-all --json`
+  // crossed 64 KiB (it lists every at-risk commit, so it grows with history), its
+  // JSON stopped parsing mid-string at byte 65536, and `loop-gate` reported the
+  // guard as NOT ESTABLISHED. An unrunnable guard is not a clean guard (process
+  // 17e), and this is the check that stands between a finished agent's commits and
+  // DEFECT-OAG-072's fate. Setting `exitCode` preserves the status while letting
+  // node flush stdout and exit on its own.
+  process.exitCode = main(process.argv.slice(2));
+}

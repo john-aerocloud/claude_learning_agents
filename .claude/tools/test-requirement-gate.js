@@ -288,6 +288,32 @@ function matchBracket(code, open) {
   return -1
 }
 
+/**
+ * The nearest UNMATCHED opening bracket of ANY kind before `at`, or -1.
+ *
+ * The spread rule may only fire inside an OBJECT LITERAL, and asking for the nearest unmatched
+ * `{` alone cannot tell `{ ...a, k: v }` from `new Set([...a, ...b])` written inside a function
+ * body: the array's brackets are invisible to a `{`-only walk, so the enclosing BLOCK is found
+ * and any `const x: T =` annotation in it reads as an override key. Observed on
+ * `defect-oag-110-keyless-corpus-and-guard.test.ts:417`, where an array spread of two event
+ * lists was reported as `{ ...afterKeyless, lateKeyed: … }` (DEFECT-OAG-122). Precision over
+ * recall, mechanically — a noisy gate gets ignored.
+ */
+function enclosingOpenAny(code, at) {
+  const closeFor = { '(': ')', '{': '}', '[': ']' }
+  const depth = { ')': 0, '}': 0, ']': 0 }
+  for (let k = at; k >= 0; k--) {
+    const c = code[k]
+    if (c === ')' || c === '}' || c === ']') depth[c]++
+    else if (c === '(' || c === '{' || c === '[') {
+      const close = closeFor[c]
+      if (depth[close] === 0) return k
+      depth[close]--
+    }
+  }
+  return -1
+}
+
 /** Walk back from `at` to the nearest unmatched opening bracket of kind `open`. */
 function enclosingOpen(code, at, open) {
   const pairs = { '(': ')', '{': '}', '[': ']' }
@@ -557,8 +583,10 @@ function authoredViolations(src, scan, tainted, derived, lang) {
     RE_SPREAD.lastIndex = 0
     while ((m = RE_SPREAD.exec(code)) !== null) {
       if (!tainted.has(m[1])) continue
-      const open = enclosingOpen(code, m.index - 1, '{')
-      if (open === -1) continue
+      // The enclosing bracket must be an OBJECT literal's, not merely the nearest `{`: an
+      // ARRAY spread has no override to find, and a `{`-only walk lands on the enclosing block.
+      const open = enclosingOpenAny(code, m.index - 1)
+      if (open === -1 || code[open] !== '{') continue
       const close = matchBracket(code, open)
       if (close === -1 || close < m.index) continue
       // An override is a own-property at depth 1 of the SAME literal.
@@ -910,6 +938,42 @@ function main(argv) {
     verbose: has('--verbose'),
     limit: has('--verbose') ? 0 : Number(arg('--limit', 40)),
   }))
+
+  // AUTO-TIGHTEN (v142). A ratchet that only moves when a human remembers to move it is not
+  // a ratchet — it is a high-water mark that drifts. Evidence: the floor was lowered to 1749
+  // by hand at the moment someone noticed a gain, and 106 minutes later two commits took the
+  // true count to 1811. Nobody saw it for THREE DAYS, because the only observer is the next
+  // gate run. So on every PASSING run, if the observed count is strictly BELOW the committed
+  // floor, tighten the floor now, mechanically, and say so.
+  // It can only ever LOWER: the raise path stays manual and reviewed (--write-baseline
+  // --allow-baseline-growth). A failing run tightens nothing.
+  if (r.exitCode === 0 && !has('--no-auto-tighten')) {
+    const p = path.join(repoRoot, '.claude/config/test-requirement-gate', `${project}.json`)
+    try {
+      const cfg = JSON.parse(fs.readFileSync(p, 'utf8'))
+      const old = cfg.baseline || {}
+      const next = { ...old }
+      const moved = []
+      for (const limb of ['ac', 'authored']) {
+        const seen = r.counts[limb]
+        if (typeof old[limb] === 'number' && seen < old[limb]) {
+          next[limb] = seen
+          moved.push(`${limb} ${old[limb]} -> ${seen}`)
+        }
+      }
+      if (moved.length) {
+        cfg.baseline = next
+        fs.writeFileSync(p, JSON.stringify(cfg, null, 2) + '\n', 'utf8')
+        console.log(
+          `\n  RATCHET TIGHTENED AUTOMATICALLY: ${moved.join(', ')}.\n` +
+          '  The gain is now locked in and cannot silently drift back. ' +
+          'COMMIT this config change with your work.')
+      }
+    } catch (e) {
+      console.log(`\n  (auto-tighten skipped: ${e.message})`)
+    }
+  }
+
   process.exitCode = r.exitCode
 }
 

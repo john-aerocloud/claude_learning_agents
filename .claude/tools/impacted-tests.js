@@ -568,7 +568,11 @@ function main() {
     process.exit(1);
   }
   process.stdout.write(formatReport(res, { project, since: opts.since, root }) + '\n');
-  process.exit(res.exitCode);
+  // §17g sweep off AC-DEFECT-OAG-076.5: `process.exit()` does not wait for a PIPE
+  // to drain, so any payload over the 64 KiB pipe buffer reaches the consumer
+  // TRUNCATED. `worktree-guard scan-all --json` hit exactly that on 2026-08-19 and
+  // loop-gate read the guard as unrunnable. Set exitCode; let the runtime flush.
+  process.exitCode = res.exitCode;
 }
 
 if (require.main === module) main();

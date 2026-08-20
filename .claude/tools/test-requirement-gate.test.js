@@ -242,6 +242,29 @@ describe('AC-X.1 g', () => {
   assert.deepStrictEqual(rules(r, 'authored'), [])
 })
 
+test('limb2 spread-override: an ARRAY spread is not an object override, even in a block holding a typed declaration', () => {
+  // The false positive this rule shipped with (defect-oag-110-keyless-corpus-and-guard.test.ts:417):
+  // `[...a, ...b]` has no enclosing OBJECT literal, so a `{`-only walk back finds the enclosing
+  // BLOCK and reads the `const x: T =` annotation's colon as an override key.
+  const r = run({
+    'tests/a.test.ts': `
+import { readConfirmingRecords } from '../src/adapters/fixture-corpus-reader.js'
+const record = readConfirmingRecords()
+describe('AC-X.1 g', () => {
+  it('one', () => {
+    const before = record
+    const after = record
+    const lateKeyed: SomeType = 1
+    const ids = new Set([...before, ...after].map((e) => e.id))
+    void lateKeyed
+    void ids
+  })
+})
+`,
+  })
+  assert.deepStrictEqual(rules(r, 'authored'), [])
+})
+
 test('limb2 mutate-real: assigning into a corpus-loaded capture is flagged', () => {
   const r = run({
     'tests/a.test.ts': `
@@ -519,4 +542,84 @@ test('proof-of-fire: the CORRECTED shapes are clean — the gate distinguishes t
     { derived: { types: ['FlightAggregate'], fields: ['state', 'cancellationEmitted'] } },
   )
   assert.deepStrictEqual(rules(r, 'authored'), [])
+})
+
+// ==========================================================================
+// AUTO-TIGHTEN (v142) — the ratchet must move itself.
+//
+// These drive the REAL CLI through child_process, not runGate(), because the
+// behaviour under test lives in main() and writes a file. Asserting it against a
+// stubbed writer would be exactly the exec-boundary fault this gate exists to
+// catch: the stub would be written by whoever was wrong about the CLI.
+//
+// Founding evidence: the limb-1 floor was lowered to 1749 by hand at the moment
+// someone noticed a gain; 106 minutes later two commits took the true count to
+// 1811, and nobody saw it for THREE DAYS because the only observer of the drift
+// is the next gate run.
+// ==========================================================================
+
+const { execFileSync } = require('node:child_process')
+const CLI = path.join(__dirname, 'test-requirement-gate.js')
+
+function runCli(root, extraArgs) {
+  const args = [CLI, '--project', 'Scratch', '--repo-root', root].concat(extraArgs || [])
+  let stdout = ''
+  let status = 0
+  try {
+    stdout = execFileSync(process.execPath, args, { encoding: 'utf8' })
+  } catch (e) {
+    stdout = (e.stdout || '') + (e.stderr || '')
+    status = e.status
+  }
+  return { stdout, status }
+}
+
+const floorOf = (root) =>
+  JSON.parse(
+    fs.readFileSync(path.join(root, '.claude/config/test-requirement-gate/Scratch.json'), 'utf8'),
+  ).baseline
+
+// One clean case (names its AC) => real counts are ac:0, authored:0.
+const CLEAN = { 'tests/a.test.ts': "it('AC-X.1 does a thing', () => { expect(1).toBe(1) })\n" }
+// One dirty case (no AC reference) => real count is ac:1.
+const DIRTY = { 'tests/a.test.ts': "it('does a thing', () => { expect(1).toBe(1) })\n" }
+
+test('auto-tighten: a PASSING run whose count is BELOW the floor lowers the floor', () => {
+  const root = scratch(CLEAN, { mode: 'ratchet', baseline: { ac: 5, authored: 3 } })
+  const { stdout, status } = runCli(root)
+  assert.strictEqual(status, 0, stdout)
+  assert.match(stdout, /RATCHET TIGHTENED AUTOMATICALLY/, stdout)
+  assert.deepStrictEqual(floorOf(root), { ac: 0, authored: 0 })
+})
+
+test('auto-tighten: NON-VACUITY — it must NOT fire when the count already equals the floor', () => {
+  const root = scratch(CLEAN, { mode: 'ratchet', baseline: { ac: 0, authored: 0 } })
+  const { stdout, status } = runCli(root)
+  assert.strictEqual(status, 0, stdout)
+  assert.doesNotMatch(stdout, /RATCHET TIGHTENED/, stdout)
+  assert.deepStrictEqual(floorOf(root), { ac: 0, authored: 0 })
+})
+
+test('auto-tighten: a FAILING run tightens NOTHING and never RAISES the floor', () => {
+  const root = scratch(DIRTY, { mode: 'ratchet', baseline: { ac: 0, authored: 0 } })
+  const { stdout, status } = runCli(root)
+  assert.strictEqual(status, 2, stdout)
+  assert.doesNotMatch(stdout, /RATCHET TIGHTENED/, stdout)
+  // The floor is the thing that must survive a red run untouched.
+  assert.deepStrictEqual(floorOf(root), { ac: 0, authored: 0 })
+})
+
+test('auto-tighten: --no-auto-tighten suppresses the write (for scratch/diff runs)', () => {
+  const root = scratch(CLEAN, { mode: 'ratchet', baseline: { ac: 5, authored: 3 } })
+  const { stdout, status } = runCli(root, ['--no-auto-tighten'])
+  assert.strictEqual(status, 0, stdout)
+  assert.doesNotMatch(stdout, /RATCHET TIGHTENED/, stdout)
+  assert.deepStrictEqual(floorOf(root), { ac: 5, authored: 3 })
+})
+
+test('auto-tighten: --json is a pure read and must never move the floor', () => {
+  const root = scratch(CLEAN, { mode: 'ratchet', baseline: { ac: 5, authored: 3 } })
+  const { stdout } = runCli(root, ['--json'])
+  JSON.parse(stdout) // must still be valid, untruncated JSON
+  assert.deepStrictEqual(floorOf(root), { ac: 5, authored: 3 })
 })

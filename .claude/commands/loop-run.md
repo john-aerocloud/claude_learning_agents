@@ -62,10 +62,34 @@ state and flow decisions.
 > The classification is declared in `queues/policy.csv` as a `kind` row, not hardcoded.
 >
 > **Never conclude "it's pushed / it's deployed" from an event NOTE.** The gate derives it
-> from the structured `ref:` plus `git merge-base --is-ancestor <ref> origin/main` in the
-> project repo (`git -C work/$1`); you must too. A note reading "NOT pushed" was ~35h stale
-> while its commit had been on `origin/main` the whole time, and reasoning from it produced a
-> confident, precisely-quantified, WRONG diagnosis (§17c Layer 2, against our own metrics).
+> from the structured `ref:` verified against git; you must too. A note reading "NOT pushed"
+> was ~35h stale while its commit had been on `origin/main` the whole time, and reasoning
+> from it produced a confident, precisely-quantified, WRONG diagnosis (§17c Layer 2, against
+> our own metrics).
+>
+> **A `ref:` is REPO-SCOPED — resolve it in BOTH repos, and read FOUR outcomes, not two**
+> (DEFECT-OAG-128). This instruction used to say `git merge-base --is-ancestor <ref>
+> origin/main` in `git -C work/$1`, and that was wrong in the most damaging way available:
+> a **parent-lane** ref (`.claude/`, `process/`, `Makefile`) does not exist in the project
+> repo at all, so the lookup did not answer *wrong* — it reported a **missing commit
+> object**, which is the exact signature by which `DEFECT-OAG-072`'s destruction was
+> diagnosed (`git cat-file -t fb080d9` → *fatal: Not a valid object name*). Seven refs in
+> this registry read that way. So:
+>   * **ON-TRUNK** — an ancestor of that repo's `origin` trunk. Pushed. (For the parent repo
+>     in a per-project worktree the trunk is `origin/instance/<project>`, not `origin/main`.)
+>   * **NOT-ON-TRUNK** — the object EXISTS but is on no origin trunk. Unpushed, **not lost**;
+>     the normal state of parent-lane work, because the owner owns that push.
+>   * **ABSENT** — every repo was readable and none holds it. **This is the only reading that
+>     means work may have been destroyed.** Rescue first (`make worktree-guard DIR=--all`),
+>     never re-run to see if it clears.
+>   * **CANNOT-DETERMINE** — a repo was unreadable, so absence was never established. Not a
+>     pass and not an alarm (§17i).
+> `lane:` is **not** the routing key and must not be used as one: it is absent on 382 of 478
+> items (79.9%) and it is single-valued while real items span both repos (`DEFECT-OAG-091`
+> has a project ref *and* a parent ref). It is a **cross-checked assertion** — `loop-gate`
+> check 12 reports a lane every one of its refs contradicts, and that is advisory, because a
+> wrong `lane:` costs a misrouted *dispatch* (`make dispatch-check`, `DEFECT-OAG-076`), not a
+> wrong push reading. Do not hand-roll any of this: read the gate's verdict.
 >
 > **The push and the tester dispatch are ONE act.** A turn that pushes green work without
 > dispatching its validation has not finished — dispatch it, or record the deferral and the
@@ -181,13 +205,22 @@ Each cycle:
    stable constraint on a clean run does not pay full-retro overhead; a shifted
    constraint is real learning that a retro must walk (exploit/subordinate/elevate).
 5b. **Full-sweep board reconcile — periodic BACKSTOP only (the primary path is the
-   step-4 per-item push).** After a slice/chunk close, dispatch the `linear`/`jira` projection
-   agent in full-sweep mode to reconcile structure (create/prune the Project/Milestone
-   hierarchy, catch anything the per-item pushes missed) from the item files (mapping in
-   `process/linear-mapping.md`). State-only mirror. Skip silently if the project has no board
-   binding. Never block the loop on the API; a failure is logged, not fatal. This does NOT
-   replace the per-item push — if you find the sweep is doing real work every time, the
-   per-item push (step 4) is being skipped, which is the board/doc-lag failure.
+   step-4 per-item push).** After a slice/chunk close, run
+   `make board-sweep PROJECT=<project>` (the `linear`/`jira` projection agent uses the same
+   target) to reconcile from the item files — mapping in `process/linear-mapping.md`.
+   State-only mirror. Skip silently if the project has no board binding. Never block the loop
+   on the API. This does NOT replace the per-item push — if you find the sweep is doing real
+   work every time, the per-item push (step 4) is being skipped, which is the board/doc-lag
+   failure.
+   **Do NOT reconcile by looping `board-project` over every id (DEFECT-OAG-099).** That
+   rewrote 269 already-correct items and then ran out of rate budget with 5 DONE items still
+   showing Blocked; the same shape later left two TERMINAL items lagging for seven days.
+   `board-sweep` skips items that already match, writes terminal/blocked lag FIRST, and on a
+   rate limit names every id that did not land. **A failure here is logged, not fatal — but it
+   is only "logged" if you QUOTE THE IDS.** Exit 3 means a shortfall: run
+   `make board-sweep-resume PROJECT=<project>` in the same cycle, or carry the named ids
+   forward explicitly. Exit 5 means the mapping drifted from `state-graphs.json` — run
+   `make board-audit`; that is a defect, not a skip.
 6. **Document — REQUIRED at each slice/UC close (docs must not drift).** Dispatch `documenter`
    to update the project README (and GitBook where bound) to match what just shipped — at
    every slice close, and for any UC that changes user-facing behaviour. Runs in the

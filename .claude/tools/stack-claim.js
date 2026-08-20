@@ -279,6 +279,11 @@ module.exports = {
   ownedContainers, claim, release, status, main,
 };
 
-// Set `exitCode`, never a synchronous exit on main's return value (truncates stdout
-// past the 64 KiB pipe buffer). Named by the .claude/tools sweep, AC-DEFECT-OAG-076.5.
-if (require.main === module) process.exitCode = main();
+if (require.main === module) {
+  // §17g sweep off AC-DEFECT-OAG-076.5: `process.exit()` does not wait for a PIPE to
+  // drain, so any payload over the 64 KiB buffer reaches the consumer TRUNCATED and
+  // the tool falls silent without saying so. This tool arrived from another instance
+  // AFTER that sweep landed and reintroduced the shape — which is why the sweep is a
+  // committed test rather than a comment. Set exitCode; let the runtime flush.
+  process.exitCode = main();
+}

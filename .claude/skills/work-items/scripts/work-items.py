@@ -480,6 +480,27 @@ def _split_top_commas(s):
     return out
 
 
+# Fields that are STRINGS by nature and must never be number-coerced by
+# _parse_scalar. A sha of all digits is still a sha (DEFECT-OAG-128).
+#
+# IMP-029 (opened 2026-08-01, and the fix it prescribed — "coerce `ref:` to str at
+# parse time, in the frontmatter loader" — sat unswept for 19 days while the exact
+# consequence it predicted happened: "a sha that fails to resolve looks identical to
+# a sha that resolves negative") also asked for an AUDIT of the other scalars that
+# can be all-digits. Done, through the real parser over all 478 items: the only
+# fields parsed as numbers are `value`, `cost`, `tokens`, `duration_ms`, every one
+# numeric BY INTENT. So `ref` was the sole live hazard.
+#
+# `id` and `job` are listed anyway, with a population of ZERO today. That is
+# deliberate: they are strings by INTENT (`DEFECT-OAG-128`, `J0`), and the reason
+# they are not currently coerced is that nobody has yet written an all-digit one —
+# which is luck, not a property. A field protected by the absence of a counterexample
+# is the shape §17h warns about; protect it by construction. (`title` is always
+# quoted and `defer_until` is date-shaped, so neither needs it.)
+EVENT_STRING_FIELDS = ("ref",)
+TOP_STRING_FIELDS = ("id", "job", "lane", "type")
+
+
 def _parse_inline_map(v):
     """`{ts: ..., event: ..., agent: ..., note: "..."}` -> dict."""
     v = v.strip()
@@ -491,7 +512,17 @@ def _parse_inline_map(v):
         if ":" not in part:
             continue
         k, _, val = part.partition(":")
-        d[k.strip()] = _parse_scalar(val)
+        k = k.strip()
+        # A `ref:` is a SHA — a string by nature, even when every character
+        # happens to be a digit. Int-coercing it DESTROYS DATA and the loss is
+        # silent: the sha `0605428` was read as the int 605428 and then
+        # re-rendered into the item file without its leading zero, so `UC-XA5`
+        # permanently records a ref that resolves in NEITHER repo — which is the
+        # `git cat-file` signature of destroyed work (DEFECT-OAG-128, and the real
+        # commit 06054289ae9d... is on origin/main the whole time). 11 of 202 refs
+        # in the registry are all-digit, so this is a standing hazard, not a
+        # one-off. resolve_ref repairs the refs already damaged; this stops new ones.
+        d[k] = str(val).strip() if k in EVENT_STRING_FIELDS else _parse_scalar(val)
     return d
 
 
@@ -540,7 +571,8 @@ def parse_frontmatter(fm_text):
                 fm[key] = None
                 i += 1
         else:
-            fm[key] = _parse_scalar(rest)
+            fm[key] = (rest.strip() if key in TOP_STRING_FIELDS
+                       else _parse_scalar(rest))
             i += 1
     return fm
 
@@ -1041,6 +1073,50 @@ def cmd_append(a):
     ts = a.ts or now_iso()
     new_event = {"ts": ts, "event": a.event, "agent": a.agent}
     if a.ref:
+        # THE EARLIEST CATCHABLE POINT for a bad `ref:` — this is where the data
+        # ENTERS (DEFECT-OAG-128). Two outcomes, deliberately asymmetric:
+        #
+        # REFUSED — a ref that is not sha-SHAPED. The contract declares `ref: <sha>`
+        #   (process/machinery/CONTRACT.md), so there is no legitimate use and no
+        #   judgement to make; `UC-ML1` put an architecture-delta DOCUMENT id
+        #   (`delta-052`) in the field and it sat there unnoticed. Refusing costs the
+        #   caller one corrected command; accepting costs a permanently unverifiable
+        #   ref, and it is the shape a genuinely mistyped sha would hide behind.
+        # WARNED, NOT REFUSED — a sha-shaped ref that resolves in NEITHER repo. It is
+        #   NOT refused, because the fail-safe direction here is the opposite one: the
+        #   event log is the source of truth, and losing a real state transition
+        #   because git could not vouch for its sha would be a far worse outcome than
+        #   recording a suspect sha. `loop-gate` check 12 is the BLOCKING control and
+        #   it sweeps the whole registry every cycle, so nothing escapes — this just
+        #   puts the complaint in front of the agent that made the mistake, while it
+        #   still remembers what it committed.
+        ref = str(a.ref).strip()
+        if not _is_sha_shaped(ref):
+            print(f"append: REFUSED — `ref: {ref}` is not a commit sha, and the "
+                  f"contract declares `ref: <sha>` "
+                  f"(process/machinery/CONTRACT.md). A ref that cannot be resolved "
+                  f"against a repo can never be verified, and it is exactly the "
+                  f"shape a mistyped sha hides behind (DEFECT-OAG-128). If you meant "
+                  f"to cite a document (an architecture delta, an ADR), put it in "
+                  f"--note; if you meant a commit, pass its sha.", file=sys.stderr)
+            sys.exit(1)
+        res = resolve_ref(a.project, ref)
+        if res["verdict"] == REF_ABSENT:
+            print(f"append: WARNING — `ref: {ref}` resolves in NEITHER the "
+                  f"project repo (work/{a.project}) NOR the agent-system repo, "
+                  f"though both were readable. The event is being RECORDED (the log "
+                  f"is the source of truth and losing a real transition is worse "
+                  f"than recording a suspect sha), but this is the DEFECT-OAG-072 "
+                  f"signature: either the sha is mistyped, or work has been "
+                  f"DESTROYED. Check NOW, while you still remember what you "
+                  f"committed — `make worktree-guard DIR=--all` — and correct the "
+                  f"ref if it is a typo. `make loop-gate` will BLOCK the loop on "
+                  f"this until it is resolved.", file=sys.stderr)
+        elif res["padded"]:
+            print(f"append: note — `ref: {ref}` resolved only after rebuilding a "
+                  f"leading zero (`{res['resolved']}`). Record the sha with its "
+                  f"leading zero, or a reader will see a commit that does not exist.",
+                  file=sys.stderr)
         new_event["ref"] = a.ref
     if observe:
         new_event["observe"] = observe
@@ -2444,8 +2520,13 @@ def cmd_parts_check(a):
 #      the QUEUE KIND block below for why.
 #   4. retro-debt          DELEGATED to compute_retro_debt (never re-implemented).
 #   5. awaiting-observation [v9] every item in `awaiting_observation` is reported
-#      AND its liveness predicate RE-EVALUATED, exactly as `blocked` is re-checked
-#      each cycle. observed -> BLOCK (a tester dispatch is now actionable);
+#      AND its liveness predicate RE-EVALUATED. (This comment used to say "exactly
+#      as `blocked` is re-checked each cycle" — THAT MECHANISM DOES NOT EXIST: no
+#      limb of this gate looks at `blocked` at all, and 7 flow items were sitting
+#      there on 2026-08-20, the oldest for 16.46 days. Registered as
+#      OI-LOOP-GATE-NEVER-RECHECKS-A-BLOCK rather than left as a claim about a
+#      control nobody built — §17i's mirror image.) observed -> BLOCK (a tester
+#      dispatch is now actionable);
 #      not-yet -> ADVISORY (legitimate, outstanding, never "satisfied"); broken or
 #      absent predicate -> BLOCK (an unverifiable park is the prose-remedy class).
 #
@@ -2567,41 +2648,543 @@ def _project_repo(project):
     return os.path.join(ROOT, "work", project)
 
 
-def _git(repo, *args):
-    """Run git in `repo`; return (rc, stdout). rc None when git/repo unusable."""
+def _git(repo, *args, _stdin=None):
+    """Run git in `repo`; return (rc, stdout). rc None when git/repo unusable.
+
+    `_stdin` feeds a batched command (`cat-file --batch-check`). Its output is NOT
+    stripped when stdin is used: the batch protocol is positional, one answer line
+    per input line, so stripping would silently shift the mapping."""
     try:
         r = subprocess.run(["git", "-C", repo, *args], capture_output=True,
-                           text=True, check=False)
-        return r.returncode, (r.stdout or "").strip()
+                           text=True, check=False, input=_stdin)
+        out = r.stdout or ""
+        return r.returncode, (out.rstrip("\n") if _stdin is not None else out.strip())
     except Exception:
         return None, ""
 
 
-def _ref_on_trunk(project, ref):
-    """True/False iff `ref` IS/IS-NOT an ancestor of the project repo's origin
-    trunk; None = UNKNOWN (no repo, git unavailable, ref or trunk unresolvable).
+# ---------------------------------------------------------------------------
+# A `ref:` IS REPO-SCOPED, AND NOTHING RECORDED WHICH REPO (DEFECT-OAG-128)
+#
+# This system has TWO repos by design (§v50): the agent system (this parent repo:
+# .claude/, process/, Makefile, CLAUDE.md) and each project's own nested repo at
+# work/<project>/, which the parent gitignores. A `ref:` on an item is a sha in
+# ONE of them, and the item does not reliably say which.
+#
+# The bug this replaces: `_ref_on_trunk` ran `merge-base --is-ancestor` ALWAYS in
+# `git -C work/<project>`. A parent-lane ref does not exist there at all, so the
+# check did not merely answer WRONG — the ref failed to RESOLVE, which is the
+# `git cat-file -t fb080d9 => fatal: Not a valid object name` signature by which
+# DEFECT-OAG-072's destruction was diagnosed. Measured on the real registry
+# (2026-08-20, 478 items / 202 distinct refs): SEVEN refs resolve only in the
+# parent repo, and every one read as unresolvable. Reproduced before the fix:
+#   _ref_on_trunk('OagEventSource', '8dae2cc')  -> None   (real, on parent main)
+#   _ref_on_trunk('OagEventSource', 'deadbee')  -> None   (fabricated, nowhere)
+# LITERALLY EQUAL. So the failure was §17i in BOTH directions at once: a
+# wrong-place lookup rendered as a routine UNKNOWN, and the one alarm that means
+# real data loss rendered as that same routine UNKNOWN — i.e. MUTED. Narrowing the
+# false positives without muting the true one is the whole job here.
+#
+# WHY `lane:` IS NOT THE ROUTING KEY, though the defect report proposed it.
+# Two measurements killed that design:
+#   1. `lane:` is ABSENT on 382 of 478 items (79.9%) — not on 4 of 6 as reported.
+#      Routing on a field four fifths of the registry lacks just moves the wrong
+#      answer around.
+#   2. `lane:` is SINGLE-VALUED and real items span BOTH repos. DEFECT-OAG-091 was
+#      cited as "an outright misdeclaration" (declared project-repo, ref on the
+#      parent). It is not. Its own event log reads "Two lanes, two repos, never
+#      mixed": 898880d4 is a project commit AND 2c6a7d58 is a parent commit. The
+#      field cannot express that, so the declaration is INCOMPLETE, not false.
+# So resolution SEARCHES BOTH REPOS, always, and `lane:` is demoted from a routing
+# key to a CROSS-CHECKED ASSERTION. That direction cannot invent a false "missing":
+# a ref present in either repo is found. `lane:` is still load-bearing for
+# `make dispatch-check` (DEFECT-OAG-076) — this changes only ref resolution.
+#
+# THE FOUR VERDICTS, and why three is not enough (§17i). PASS/FAIL/COULD-NOT-LOOK
+# maps onto ancestry, but "the object is not in ANY repo" is a fourth thing that
+# must not hide inside COULD-NOT-LOOK — it is the only verdict that means work may
+# have been destroyed, and it has to stay loud to be worth anything.
+#   REF_ON_TRUNK         the object exists and is an ancestor of that repo's origin
+#                        trunk => pushed.
+#   REF_NOT_ON_TRUNK     the object EXISTS in a repo we read, but is not on its
+#                        origin trunk => committed and unpushed. NOT lost.
+#   REF_ABSENT           every lane repo was READABLE and none has the object.
+#                        THE DEFECT-OAG-072 ALARM. Loud, blocking.
+#   REF_CANNOT_DETERMINE we could not look: a lane repo was unreadable, or the
+#                        object exists but no origin trunk resolves. NEVER a pass,
+#                        and never the destroyed-work alarm either.
+# The asymmetry that makes REF_NOT_ON_TRUNK safe to report: a remote-tracking ref
+# can be STALE (this worktree's parent origin/main is weeks behind, because the
+# owner owns the parent push), and staleness can only ever produce a false
+# NOT-ON-TRUNK — never a false ON-TRUNK, and never a false ABSENT.
+# §17g GENERALISATION SWEEP — every site that resolves a ref/sha against a repo.
+# The shape asked, per §17g: "where else is an object looked up in ONE repo when the
+# system has two?" Each entry is FIXED or NOT-APPLICABLE-BECAUSE. "I checked" is not
+# a ledger, so the reasons are recorded, including the one that surprised me.
+#
+#  1. work-items.py `_ref_on_trunk`                          FIXED — the reported bug.
+#  2. work-items.py loop-gate check 1 push-state rendering   FIXED — one string served
+#     both a wrong-repo lookup and a destroyed commit; now four distinct verdicts.
+#  3. work-items.py — NO registry-wide existence check existed at all   FIXED (check 12).
+#     Not a repo-blindness instance: an ABSENCE. Check 1 only sees items stalled in
+#     validation, so a destroyed commit on a DONE item had no observer anywhere —
+#     which is exactly how DEFECT-OAG-072 was lost.
+#  4. work-items.py `cmd_append` (the WRITE path)            FIXED — validated where
+#     the data enters; non-sha refused, absent-sha warned-but-recorded.
+#  5. work-items.py `_parse_scalar` / `_parse_inline_map`     FIXED — a ref is never
+#     number-coerced (IMP-029, prescribed 19 days earlier and unswept); plus the
+#     zero-padded repair for the refs already damaged on disk.
+#  6. .claude/commands/loop-run.md                            FIXED — it INSTRUCTED
+#     every reader to run the lookup in the project repo. A doc that teaches the
+#     defect is a defect.
+#  7. process/process-current.md §F8a                         FIXED — same, and this
+#     is the authoritative rule the doc above derives from.
+#  8. .claude/tools/impacted-tests.js `resolveDiffRoot`        NOT APPLICABLE — already
+#     repo-aware, and this is the sweep's real finding: EXP-104 fixed THIS EXACT SHAPE
+#     ("a SHA that only exists in the project's nested repo was `fatal: bad revision`
+#     in the parent, and vice versa"), noted it had "recurred 5x before this fix",
+#     converged on the same design (ask each candidate repo who owns the sha, raise
+#     an ACTIONABLE error when neither does) — and NOBODY SWEPT IT TO work-items.py.
+#     A fix in one tool is not a sweep (§17g). That is the whole reason this defect
+#     existed, and it is the second time in this file's history (see 5).
+#  9. .claude/tools/worktree-guard.js `assessRepo`            NOT APPLICABLE — it asks
+#     EVERY surviving witness repo whether a sha survives, and takes the shas from
+#     `rev-list` in the repo under assessment. Multi-repo by construction.
+# 10. .claude/tools/isolated-commit.js                        NOT APPLICABLE — the repo
+#     is a required parameter; every lookup is `git -C <that repo>`.
+# 11. .claude/scripts/worktree (`merge-base --is-ancestor "$br" main`)  NOT APPLICABLE —
+#     BRANCH names in the parent repo, not item refs. Parent-scoped by definition.
+# 12. .claude/tools/make-refs-tracked.js                      NOT APPLICABLE — resolves
+#     FILE paths (`ls-files`/`check-ignore`), never a commit object, and takes its
+#     repo as `--repo-root`.
+# 13. .claude/tools/linear-project.py + the board projections  NOT APPLICABLE — MEASURED,
+#     not assumed: they run no git at all and never consume `ref:`. The boards project
+#     item state, so a wrong push reading cannot reach them.
+# 14. work/<project>/Makefile `assert-build-identity`         NOT APPLICABLE, AND MUST
+#     STAY THAT WAY — `git cat-file -e $(BUILD_SHA)` deliberately resolves ONLY in the
+#     project repo. Same shape, OPPOSITE correct answer, because the QUESTION differs:
+#     check 12 asks "does this object exist ANYWHERE" (destroyed-work), while this asks
+#     "does this object belong to THIS repo" (provenance). DEFECT-OAG-036 was caused by
+#     a parent-repo sha being accepted as a project build identity, so widening this to
+#     search both repos would REGRESS it. Recorded because the next person running this
+#     sweep will see the shape and be tempted.
+#
+# UNMASKING CHECK (§17g's second half): does this fix open a latent path? Yes, one, and
+# it is a benign direction. check 12 can now BLOCK the loop, which nothing did before —
+# so a false positive here halts delivery. That is why absence is concluded ONLY from a
+# fully-readable, protocol-validated search, why a non-sha ref is an advisory, and why
+# the zero-padding repair exists: each is a false-positive source found by building the
+# alarm, and the first two were found by mutation rather than by reasoning.
+REF_ON_TRUNK = "on_trunk"
+REF_NOT_ON_TRUNK = "not_on_trunk"
+REF_ABSENT = "absent"
+REF_CANNOT_DETERMINE = "cannot_determine"
 
-    The whole point: push state is a fact in GIT, never a claim in an event note."""
+LANE_PROJECT = "project-repo"
+LANE_PARENT = "parent-repo"
+# Longest abbreviation a zero-padding repair will try. Git refuses an ambiguous
+# abbreviation rather than guessing, so the only cost of a wide range is a few
+# cheap rev-parse calls, and only ever for an all-digit ref (11 of 202 measured).
+SHA_PAD_MAX_WIDTH = 12
+
+
+def _lane_repos(project):
+    """[(lane, repo_path)] — EVERY repo a `ref:` could name, project repo first.
+
+    Ordering is deliberate: the overwhelming majority of refs are project-lane
+    (194 of 202 measured), so the first probe usually hits."""
+    return [(LANE_PROJECT, _project_repo(project)), (LANE_PARENT, ROOT)]
+
+
+def _repo_readable(repo):
+    """True iff `repo` is a git repo we can query. `.git` is a FILE in a worktree
+    and a DIRECTORY in a normal clone, so exists() is the right test for both."""
+    return bool(repo) and os.path.exists(os.path.join(repo, ".git"))
+
+
+def _ref_candidates(ref):
+    """[ref, *zero-padded retries] — the recorded ref plus the shas it would be if
+    a LEADING ZERO had been eaten by int-coercion.
+
+    Found while building this check, and it matters because without it the new
+    ABSENT alarm FALSE-FIRES on its first real run. `_parse_scalar` int-coerces any
+    all-digit frontmatter value, so the sha `0605428` was read as the int 605428 and
+    then RE-RENDERED into the item file without its leading zero. `UC-XA5` therefore
+    records `ref: 605428`, which resolves in NEITHER repo — the exact ABSENT
+    signature — while the real commit `06054289ae9d50bf194b98643d920939b5d7531b`
+    ("test(aerobus): pin out-of-org/unlisted principal DENIED...") sits on
+    origin/main. The data loss is already on disk in items written before the
+    _parse_scalar fix below, so recovery has to happen at READ time too.
+    Only all-digit refs can have suffered it; a ref with any hex letter was never
+    coerced. Ambiguity is not a hazard: git REFUSES an ambiguous abbreviation
+    rather than guessing, so a padded candidate either resolves uniquely or not."""
+    ref = str(ref or "").strip()
     if not ref:
-        return None
-    ref = str(ref)
-    repo = _project_repo(project)
-    if not os.path.exists(os.path.join(repo, ".git")):
-        return None
-    rc, _ = _git(repo, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
-    if rc != 0:
-        return None                     # ref not resolvable here -> UNKNOWN
-    for trunk in TRUNK_CANDIDATES:
-        rc, _ = _git(repo, "rev-parse", "--verify", "--quiet", f"{trunk}^{{commit}}")
-        if rc != 0:
+        return []
+    out = [ref]
+    if ref.isdigit():
+        for w in range(len(ref) + 1, SHA_PAD_MAX_WIDTH + 1):
+            out.append(ref.rjust(w, "0"))
+    return out
+
+
+def _trunk_candidates(repo):
+    """Origin trunk refs to test ancestry against, in order.
+
+    ONLY `origin/*` refs: the question is "is it PUSHED", and a local branch
+    answers a different one. The parent repo adds `origin/<its current branch>`
+    because a parent-lane commit's push destination in a per-project worktree is
+    `origin/instance/<project>`, not `origin/main` — without it every parent-lane
+    ref would read NOT-ON-TRUNK for the wrong reason."""
+    cands = list(TRUNK_CANDIDATES)
+    rc, branch = _git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+    if rc == 0 and branch and branch != "HEAD":
+        cand = "origin/" + branch
+        if cand not in cands:
+            cands.append(cand)
+    return cands
+
+
+def resolve_ref(project, ref):
+    """Where a `ref:` lives and whether it is pushed. THE seam the gate calls.
+
+    Returns a dict, never a bare tri-state, because the caller must be able to tell
+    the four outcomes apart:
+      verdict    REF_ON_TRUNK | REF_NOT_ON_TRUNK | REF_ABSENT | REF_CANNOT_DETERMINE
+      lane       the lane whose repo the object was found in, or None
+      trunk      the origin trunk it is an ancestor of, or None
+      resolved   the sha actually used (may be a zero-padded repair of `ref`)
+      padded     True iff a leading zero had to be rebuilt to resolve it
+      searched   [lane, ...] repos we could read
+      unreadable [lane, ...] repos we could NOT read (why ABSENT must not be
+                 concluded from a partial search)
+    """
+    out = {"ref": None if ref is None else str(ref), "verdict": REF_CANNOT_DETERMINE,
+           "lane": None, "trunk": None, "resolved": None, "padded": False,
+           "searched": [], "unreadable": [], "reason": None}
+    cands = _ref_candidates(ref)
+    if not cands:
+        out["reason"] = "no ref recorded"
+        return out
+    hits = []                                  # [(lane, repo, sha, padded)]
+    for lane, repo in _lane_repos(project):
+        if not _repo_readable(repo):
+            out["unreadable"].append(lane)
             continue
-        rc, _ = _git(repo, "merge-base", "--is-ancestor", ref, trunk)
-        if rc == 0:
-            return True
-        if rc == 1:
-            return False
-        return None                     # git error -> UNKNOWN, never a guess
-    return None                         # no origin trunk -> UNKNOWN
+        out["searched"].append(lane)
+        for cand in cands:
+            rc, _ = _git(repo, "rev-parse", "--verify", "--quiet",
+                         "%s^{commit}" % cand)
+            if rc is None:                     # git itself unusable => not a search
+                out["unreadable"].append(lane)
+                if lane in out["searched"]:
+                    out["searched"].remove(lane)
+                break
+            if rc == 0:
+                hits.append((lane, repo, cand, cand != cands[0]))
+                break
+    if not hits:
+        if out["unreadable"] or not out["searched"]:
+            out["reason"] = ("could not read the %s repo(s), so the object's absence "
+                             "was never established"
+                             % ", ".join(out["unreadable"] or ["(none searched)"]))
+            return out                          # COULD-NOT-LOOK, never the alarm
+        out["verdict"] = REF_ABSENT
+        out["reason"] = ("resolves in NONE of the %d readable repo(s): %s"
+                         % (len(out["searched"]), ", ".join(out["searched"])))
+        return out
+    # Found. Ancestry is asked in EVERY repo that has it before concluding
+    # not-on-trunk, so a repo with no origin trunk cannot mask a repo that has one.
+    best = None
+    for lane, repo, sha, padded in hits:
+        for trunk in _trunk_candidates(repo):
+            rc, _ = _git(repo, "rev-parse", "--verify", "--quiet",
+                         "%s^{commit}" % trunk)
+            if rc != 0:
+                continue
+            rc, _ = _git(repo, "merge-base", "--is-ancestor", sha, trunk)
+            if rc == 0:
+                out.update(verdict=REF_ON_TRUNK, lane=lane, trunk=trunk,
+                           resolved=sha, padded=padded,
+                           reason="ancestor of %s in the %s repo" % (trunk, lane))
+                return out
+            if rc == 1 and best is None:
+                best = (REF_NOT_ON_TRUNK, lane, sha, padded,
+                        "the object EXISTS in the %s repo but is not an ancestor of "
+                        "any origin trunk there — committed, not pushed (and NOT "
+                        "lost)" % lane)
+    if best is not None:
+        v, lane, sha, padded, why = best
+        out.update(verdict=v, lane=lane, resolved=sha, padded=padded, reason=why)
+        return out
+    lane, _repo, sha, padded = hits[0]
+    out.update(lane=lane, resolved=sha, padded=padded,
+               reason=("the object exists in the %s repo but no origin trunk "
+                       "resolves there, so push state could not be established"
+                       % lane))
+    return out                                  # COULD-NOT-LOOK
+
+
+def _ref_on_trunk(project, ref):
+    """BACK-COMPAT tri-state over resolve_ref: True on trunk / False not on trunk /
+    None could-not-establish. Kept because callers and tests hold this shape.
+
+    REF_ABSENT maps to **None, never False**. False means "committed but not pushed
+    yet", which is ordinary and unalarming; a destroyed object must never be able to
+    hide inside it. Anything that needs to SEE the absent case must call resolve_ref
+    — which is why the gate does."""
+    v = resolve_ref(project, ref)["verdict"]
+    return True if v == REF_ON_TRUNK else False if v == REF_NOT_ON_TRUNK else None
+
+
+def check_declared_lane(project, declared, refs):
+    """Cross-check an item's `lane:` against where its refs ACTUALLY resolve.
+
+    `lane:` is CHECKED here, never trusted for routing (see the block above). The
+    verdicts, and why each is its own thing rather than pass/fail:
+      consistent      the declared lane is among the lanes the refs resolve in.
+      spans-both      the refs resolve in BOTH repos. NOT a violation: a
+                      single-valued field cannot express a two-lane item, so the
+                      declaration is INCOMPLETE, not false. DEFECT-OAG-091's real
+                      shape — it was reported as "an outright misdeclaration" and
+                      is not one; flagging it would manufacture a violation out of
+                      a correct item.
+      contradicted    every ref resolves, and NONE of them in the declared lane.
+                      The genuine misdeclaration class.
+      undeclared      no `lane:`. 382 of 478 items (79.9%, measured) — so this is
+                      the registry's normal state and cannot be a violation. It
+                      carries the lane the refs imply, which is what makes a
+                      backfill mechanical rather than a judgement call.
+      cannot-determine  no ref resolved anywhere readable, so the declaration was
+                      never tested against anything (§17i).
+    """
+    declared = (str(declared).strip() if declared not in (None, "") else None)
+    lanes, absent, undet = [], [], []
+    for ref in (refs or []):
+        r = resolve_ref(project, ref)
+        if r["lane"] and r["lane"] not in lanes:
+            lanes.append(r["lane"])
+        elif r["verdict"] == REF_ABSENT:
+            absent.append(r["ref"])
+        elif not r["lane"]:
+            undet.append(r["ref"])
+    out = {"declared": declared, "resolved_lanes": lanes,
+           "absent_refs": absent, "undetermined_refs": undet}
+    if not lanes:
+        out["verdict"] = "cannot-determine"
+    elif declared is None:
+        out["verdict"] = "undeclared"
+    elif len(lanes) > 1:
+        out["verdict"] = "spans-both"
+    elif declared in lanes:
+        out["verdict"] = "consistent"
+    else:
+        out["verdict"] = "contradicted"
+    return out
+
+
+# ---------------------------------------------------------------------------
+# loop-gate check 12 — EVERY recorded `ref:` must resolve in SOME repo we can read
+# (DEFECT-OAG-128, AC-128.2 — the general close-time push gate AC-116.2 asked for)
+#
+# Check 1 only ever looks at items that are STALLED IN VALIDATION, which is a tiny
+# and transient slice. A destroyed commit on a DONE item is exactly the thing
+# nobody re-reads: DEFECT-OAG-072 was delivered complete, closed, and annihilated,
+# and the loss was found by a human happening to run `git cat-file`. So the sweep
+# has to be over the WHOLE registry, every cycle, or the alarm has no observer.
+#
+# Only EXISTENCE is asked here, never ancestry — "is this object still anywhere on
+# disk" is the destroyed-work question, and unpushed-ness is check 1's business.
+# That is also what makes it affordable at 202 refs: existence is BATCHED into ONE
+# `cat-file --batch-check` per repo (measured 66 ms for the real registry, 2 git
+# calls total), where per-ref rev-parse would be ~400 subprocess spawns before
+# every pull.
+#
+# THE FAIL-SAFE DIRECTION, which is the whole reason this check is careful rather
+# than loud: if a lane repo cannot be read, absence was NEVER ESTABLISHED, so the
+# result is COULD-NOT-LOOK and not the alarm. Screaming "destroyed work" off a
+# partial search is precisely how a real alarm gets trained out of people, and
+# being ignored is how DEFECT-OAG-072 was lost in the first place.
+def _batch_ref_existence(project, refs):
+    """({ref: lane-or-None}, [unreadable lanes]) for many refs in ~2 git calls.
+
+    `cat-file --batch-check` answers one line per input line, in order, so the
+    mapping back is positional. A padded repair candidate (see _ref_candidates) is
+    submitted alongside its original and credited to it."""
+    pairs = []                                   # [(ref, candidate)]
+    for ref in refs:
+        for cand in _ref_candidates(ref):
+            pairs.append((str(ref), cand))
+    found = {str(r): None for r in refs}
+    unreadable = []
+    if not pairs:
+        return found, unreadable
+    for lane, repo in _lane_repos(project):
+        if not _repo_readable(repo):
+            unreadable.append(lane)
+            continue
+        rc, out = _git(repo, "cat-file", "--batch-check",
+                       _stdin="".join(c + "\n" for _r, c in pairs))
+        if rc is None:
+            unreadable.append(lane)
+            continue
+        lines = out.split("\n")
+        # THE ANSWER IS VALIDATED, NOT COUNTED. `--batch-check` is POSITIONAL, one
+        # answer per input line, and every answer is either `<oid> <type> <size>` or
+        # `<input> missing`. A TRUNCATED or otherwise malformed reply therefore
+        # shifts the mapping and refs begin reading ABSENT because a neighbour's
+        # line was consumed — a FALSE destroyed-work alarm off a plumbing fault.
+        # A length check alone does NOT catch it: with one input, losing the only
+        # line leaves [""], whose length still matches, and the blank parses as
+        # not-a-commit. This is the v143 truncation class (worktree-guard read NOT
+        # ESTABLISHED once the repo's history grew past a 64 KiB pipe buffer —
+        # nothing regressed, the world got bigger), so the protocol is checked
+        # shape-wise and any violation is COULD-NOT-LOOK.
+        def _ok(line):
+            parts = line.split()
+            return (len(parts) == 3 and parts[1] in ("commit", "tree", "blob", "tag")
+                    ) or (len(parts) == 2 and parts[1] == "missing")
+
+        if len(lines) != len(pairs) or not all(_ok(l) for l in lines):
+            unreadable.append(lane)
+            continue
+        for (ref, _cand), line in zip(pairs, lines):
+            parts = line.split()
+            if len(parts) == 3 and parts[1] == "commit" and found.get(ref) is None:
+                found[ref] = lane
+    return found, unreadable
+
+
+# A `ref:` the CONTRACT says is a sha (process/machinery/CONTRACT.md: `ref: <sha>`).
+# That declaration is the AUTHORITY for treating a non-hex ref as a MALFORMED REF
+# rather than as a destroyed commit (§17h — an exclusion needs an authority, and a
+# counter may not call its own population benign). Found on the check's first real
+# run: `UC-ML1` records `ref: delta-052` on a solution-architect `amended` event —
+# an architecture-delta DOCUMENT id in a field the contract reserves for a sha. It
+# is a real contract violation and it is reported as one; it is NOT destroyed work,
+# and letting it fire the destroyed-work alarm would have made the alarm's first
+# ever firing a false one.
+# Git's own minimum abbreviation length. An all-digit ref SHORTER than this cannot
+# be a usable sha at all, so it is malformed rather than repairable.
+GIT_MIN_ABBREV = 4
+
+
+def _is_sha_shaped(ref):
+    """Could `ref` be a commit sha, i.e. is it worth asking git about?
+
+    Two admitted shapes, and the second is not redundant. An ALL-DIGIT ref of any
+    length >= 4 is admitted even below the 6-char hex floor, because int-coercion
+    SHORTENS a sha by however many leading zeros it ate — `0605428` became `605428`,
+    and a sha with two leading zeros would fall further. Applying the hex floor to
+    it would classify a repairable sha as malformed and silently exclude it from
+    the existence check, which is the hiding place §17h warns about. Below git's own
+    4-char abbreviation floor there is nothing to ask, so that IS malformed."""
+    r = str(ref).strip()
+    if re.fullmatch(r"[0-9a-fA-F]{6,40}", r):
+        return True
+    return r.isdigit() and GIT_MIN_ABBREV <= len(r) <= 40
+
+
+def compute_ref_provenance(project, items=None):
+    """Findings for refs that resolve in NO readable repo, and for a declared
+    `lane:` every one of its refs contradicts."""
+    common = {"check": "ref-provenance"}
+    try:
+        if items is None:
+            items, _dup = load_all_items(project)
+    except Exception as exc:                                     # noqa: BLE001
+        return [dict(common, severity="unknown", ids=[], message=(
+            f"[ref-provenance] COULD NOT LOOK — the item registry would not load "
+            f"({type(exc).__name__}: {str(exc)[:160]}). NOTHING was checked about "
+            f"whether any recorded commit still exists, which is not the same as "
+            f"every commit being fine (§17i)."))]
+    by_ref = {}                                  # sha-shaped ref -> [item ids]
+    malformed = {}                               # non-sha ref -> [(item, event)]
+    declared = {}                                # item id -> (lane, [refs])
+    for iid in sorted(items):
+        it = items[iid]
+        refs = []
+        for ev in it.events:
+            if not ev.get("ref"):
+                continue
+            r = str(ev["ref"]).strip()
+            if _is_sha_shaped(r):
+                refs.append(r)
+                by_ref.setdefault(r, []).append(iid)
+            else:
+                malformed.setdefault(r, []).append((iid, ev.get("event")))
+        lane = (it.fm.get("lane") if hasattr(it, "fm") else None)
+        if refs:
+            declared[iid] = (lane, refs)
+    if not by_ref and not malformed:
+        return []
+    found, unreadable = _batch_ref_existence(project, sorted(by_ref))
+    out = []
+    if malformed:
+        out.append(dict(
+            common, severity="advisory",
+            ids=sorted({i for w in malformed.values() for i, _e in w}),
+            malformed=sorted(malformed),
+            message=("ADVISORY (does NOT block the pull) [ref-provenance] "
+                     + "; ".join(
+                         "`ref: %s` on %s (%s)" % (
+                             r, "/".join(sorted({i for i, _e in w})),
+                             "/".join(sorted({str(e) for _i, e in w})))
+                         for r, w in sorted(malformed.items())[:8])
+                     + " — %d recorded ref(s) are NOT sha-shaped, so their existence "
+                       "was NEVER CHECKED. The contract declares `ref: <sha>` "
+                       "(process/machinery/CONTRACT.md), so this is a contract "
+                       "violation rather than a naming preference — and it is "
+                       "REPORTED rather than skipped, because a silent exclusion is "
+                       "exactly where a genuinely mistyped sha would hide (§17h). It "
+                       "is deliberately NOT the destroyed-work alarm: a document id "
+                       "was never a commit, and letting it fire that alarm would have "
+                       "made the alarm's first ever firing a false one. Remedy: move "
+                       "the document reference into `note:` and either record the "
+                       "real sha or omit `ref:`." % len(malformed))))
+    if unreadable:
+        return [dict(common, severity="unknown", ids=[], unreadable=unreadable,
+                     message=(
+            f"[ref-provenance] COULD NOT LOOK — the {', '.join(unreadable)} repo(s) "
+            f"were unreadable, so the {len(by_ref)} recorded ref(s) were NOT checked "
+            f"for existence. This run establishes nothing about destroyed work; it "
+            f"is not a pass (§17i). Remedy: run from the project root so both "
+            f"work/{project}/.git and the agent-system repo are visible."))]
+    absent = sorted(r for r, lane in found.items() if lane is None)
+    if absent:
+        ids = sorted({i for r in absent for i in by_ref[r]})
+        detail = "; ".join(f"{r} ({', '.join(by_ref[r])})" for r in absent[:8])
+        out.append(dict(common, severity="block", ids=ids, absent=absent, message=(
+            f"[ref-provenance] *** {len(absent)} RECORDED COMMIT(S) EXIST IN NEITHER "
+            f"REPO *** — {detail}. This is the DEFECT-OAG-072 signature (`git "
+            f"cat-file -t fb080d9` => Not a valid object name) for an item that was "
+            f"DELIVERED COMPLETE and whose objects were then destroyed with an agent "
+            f"worktree. Both repos were READABLE and neither holds these objects. "
+            f"RESCUE BEFORE ANYTHING ELSE — `make worktree-guard DIR=--all`, and "
+            f"check every nested clone for objects before any worktree is removed; "
+            f"do NOT remove anything and do NOT re-run to see if it clears. If a ref "
+            f"is merely MISTYPED, correct the item rather than muting the check.")))
+    contradicted = []
+    for iid, (lane, refs) in sorted(declared.items()):
+        if not lane:
+            continue                             # 79.9% of the registry; not a fault
+        lanes = sorted({found[r] for r in refs if found.get(r)})
+        if lanes and str(lane) not in lanes:
+            contradicted.append((iid, str(lane), lanes))
+    if contradicted:
+        out.append(dict(common, severity="advisory",
+                        ids=[i for i, _d, _a in contradicted],
+                        contradicted=contradicted, message=(
+            "ADVISORY (does NOT block the pull) [ref-provenance] "
+            + "; ".join(f"{i} declares lane:{d} but every ref resolves in "
+                        f"{'/'.join(a)}" for i, d, a in contradicted[:8])
+            + ". `lane:` is what `make dispatch-check` routes a dispatch on "
+              "(DEFECT-OAG-076), so a wrong one sends an agent to a worktree that "
+              "cannot hold its work. NOT blocking, because ref resolution no longer "
+              "trusts this field and an item whose refs span BOTH repos is "
+              "incomplete rather than wrong (DEFECT-OAG-091's real shape). Remedy: "
+              "correct `lane:` on the named items.")))
+    return out
 
 
 def _last_ref_event(item, event_names):
@@ -2671,6 +3254,221 @@ def _defer_until(item):
     return dt
 
 
+# ---------------------------------------------------------------------------
+# loop-gate check 11 — STALLED WORK: an item CLAIMED (or SCHEDULED) with NO
+# RECORDED ACTIVITY (DEFECT-OAG-127)
+#
+# WHY THIS EXISTS. Check 1 above covers VALIDATION states only, and only BLOCKS
+# when the work is provably finished (a structured `ref:`). So every state where
+# work is actually DONE — `fixing`, `building`, `reproducing`, `deploying`,
+# `reworking` — was a blind spot, and so was an item SCHEDULED into `ready` that
+# nobody ever pulled. Measured 2026-08-19 by replaying the REAL item files at
+# project-repo commit 9ff713ee through this very gate: SIX wip items idle
+# 4.92-7.31d (DEFECT-OAG-046 @7.31d fixing, UC-C11/UC-C11b @5.94d building,
+# DEFECT-OAG-116 @5.13d, DEFECT-OAG-120 @4.92d fixing) and THREE `scheduled`
+# items idle 5.12-8.11d — and of those nine the entire gate named NONE. The only
+# id it named was the one ref-bearing `validating` item.
+#
+# THE COST WAS A WRONG DECISION, NOT A MISSING ALARM. `wip: 7` reads identically
+# whether seven agents are working or seven items are abandoned, so the flow
+# decision taken on it was inverted in BOTH directions inside one session: 35
+# items were deferred to September for "no capacity" while no work was happening
+# at all, and three scheduled items sat 127-199h while `wip` showed four free
+# slots. That is the §17h shape at the flow layer — a counter whose unhealthy
+# state is indistinguishable from its healthy one — so check 3's WIP line now
+# states that it counts OCCUPANCY and prints the activity split beside it, and the
+# gate's header carries that split on EVERY run (the wrong decision was taken
+# while wip was UNDER its cap, so an over-cap-only signal would not have helped).
+#
+# WHAT THIS CHECK HONESTLY KNOWS, AND WHAT IT DOES NOT. It knows one fact: NO
+# EVENT HAS BEEN RECORDED FOR THIS ITEM SINCE <t>. It CANNOT distinguish an agent
+# working a hard item for six hours from an item nobody is holding, because
+# nothing in this system records a dispatch — there is no start-of-dispatch event,
+# no lease and no heartbeat on the item. The signal that would separate them is
+# exactly that: a dispatch record (id + start ts, released on return) written by
+# the dispatcher and read here, which is the open finding
+# OI-LOOP-GATE-CANNOT-SEE-A-DISPATCH-IN-FLIGHT (the converse blind spot: the gate
+# also cannot tell a live dispatch from none). Until that exists this check must
+# NOT claim abandonment, and it does not: it reports the idle fact, and the remedy
+# asks the reader to decide between the three possibilities. A proxy was available
+# — the per-dispatch DynamoDB-Local containers carry a DISPATCH id — and was
+# deliberately NOT used: not every dispatch starts one, so it would answer "no
+# container therefore abandoned" wrongly, which is a guess wearing a measurement's
+# clothes.
+#
+# THRESHOLDS ARE DERIVED, AND DELIBERATELY NOT FROM THE TAIL. views/stats.md §B
+# (measured dwell, backfill held apart per §17f) gives per-state MEDIAN dwell:
+# reproducing 733s, fixing 670s, building 1536s, deploying 685s, dev-validating
+# 1790s, validating 10001s, reworking 4626s, prod-deploying 65s, prod-validating
+# 26s. 24h is 58x-3300x every one of them. The p95 of the same distribution is
+# 12-92h — but that tail IS the pathology (its top entries are the very abandoned
+# segments above), so deriving the threshold from it would define the disease as
+# normal, which is the §17h trap in the measurement itself. Hence: median-anchored.
+#
+# The states differ by two orders of magnitude among themselves and ALL of them by
+# two more from the threshold, so splitting 24h into per-state numbers would be
+# false precision — with ONE exception the data does justify: `scheduled` has a
+# median of 55091s (15.3h, n=20, ZERO backfill), an order of magnitude above every
+# work state, because it is a DIFFERENT QUANTITY (queue latency, not effort). So
+# the ready-stage states get their own, larger number. The map is nevertheless
+# keyed PER STATE, so a state that later proves different can be tuned alone, and
+# `queues/policy.csv` carries a per-queue `stall_hours` override so the number is
+# owned by the retro like every other buffer knob (§F2) rather than by this file.
+#
+# Measured against history at these numbers: 52 firings across ~600 closed
+# segments (3-12% per state), every one of them a real stall (DEFECT-OAG-045 @36h
+# is the founding stalled-validation case; UC-C11 @146h; DEFECT-OAG-046 @176h). At
+# any instant only OPEN segments are reported, so the steady-state report is
+# empty when work is moving — which is what keeps it from becoming background
+# noise, the failure mode that let `make render-diagrams` sit red for 20 days.
+STALLED_WORK_HOURS = {
+    # agent-owned WIP-stage states: nobody has recorded anything in a day
+    "building": 24.0, "fixing": 24.0, "reproducing": 24.0, "reworking": 24.0,
+    "deploying": 24.0, "prod-deploying": 24.0,
+    "validating": 24.0, "dev-validating": 24.0, "prod-validating": 24.0,
+    # ready-stage: scheduled and not pulled. Queue latency, not effort.
+    "ready": 48.0, "scheduled": 48.0,
+}
+# FAIL-CLOSED default for a state added to the graph later: it is covered (and so
+# FIRES) rather than silently exempt. The completeness test pins the population,
+# so a new WIP-stage state forces a deliberate decision rather than a blind spot.
+DEFAULT_STALLED_WORK_HOURS = 24.0
+# policy.csv param that overrides the above per QUEUE (the retro's knob, §F2).
+STALLED_WORK_POLICY_PARAM = "stall_hours"
+
+
+def stalled_work_hours_for(state, policy=None, graphs=None):
+    """Idle-hours threshold for `state`: the queues/policy.csv `stall_hours` row
+    for its queue if declared (retro-owned), else the derived per-state default,
+    else DEFAULT_STALLED_WORK_HOURS (fail-closed)."""
+    if policy is not None and graphs is not None:
+        q = graphs.queue_for(state)
+        if q:
+            raw = policy.get(q, {}).get(STALLED_WORK_POLICY_PARAM)
+            if raw not in (None, ""):
+                try:
+                    return float(raw)
+                except (TypeError, ValueError):
+                    pass            # unparseable -> fall through to the default
+    return float(STALLED_WORK_HOURS.get(state, DEFAULT_STALLED_WORK_HOURS))
+
+
+def stalled_work_states(graphs, policy):
+    """{state: threshold_hours} for every state this check MUST cover — DERIVED
+    from state-graphs.json, never a hand list, so a state added later cannot
+    become a blind spot the way `fixing`/`building` did:
+
+      * non-terminal (a terminal state cannot stall), AND
+      * in a queue at all (an aggregate/planned state has no own stream), AND
+      * that queue is NOT a BACKLOG queue — a backlog item is aging inventory,
+        which check 4 owns by AGE-WITHOUT-A-DECISION; reporting it here too would
+        give one item two different remedies, AND
+      * not owner-class `external` — `blocked`/`awaiting_observation` items carry a
+        RECORDED reason for the wait and are re-checked by check 5. An UNRECORDED
+        wait is what this check is for.
+
+    An unclassified queue defaults to `wip` (queue_kind fails closed), so a new
+    in-flight stage is INSIDE this population until somebody says otherwise."""
+    out = {}
+    for state in graphs.queue_map:
+        if state.startswith("_") or state in TERMINAL_STATES:
+            continue
+        q = graphs.queue_for(state)
+        if not q:
+            continue
+        if queue_kind(policy, q) == QUEUE_KIND_BACKLOG:
+            continue
+        if graphs.owner_of(state) == "external":
+            continue
+        out[state] = stalled_work_hours_for(state, policy, graphs)
+    return out
+
+
+# The ready-stage queue: its members are SCHEDULED, not claimed, so they get the
+# other remedy (pull it / de-schedule it) — AC-127.3.
+STALLED_WORK_SCHEDULED_QUEUE = "ready"
+
+
+def _open_segment_entered(graphs, item, state, now):
+    """(entered_ts, None) for the item's still-open segment in `state`, or
+    (None, reason) when the idle time CANNOT BE COMPUTED.
+
+    §17i: a control that cannot look must SAY SO. The tempting shape here is
+    `if entered is None: continue` — which is what checks 3 and 4 do — and it
+    collapses could-not-look into a silent pass. It is reachable: an event whose
+    `ts` will not parse leaves walk_states with no timed segment for the state the
+    fold actually reports, so the item's idle time is unknowable while the item
+    still occupies a WIP slot."""
+    if graphs.kind(item.type) != "flow":
+        return None, ("it is an aggregate — it has no own event stream, so its "
+                      "idle time is a property of its children, not of itself")
+    seg_state, entered = _current_segment(graphs, item, now)
+    if entered is None:
+        return None, ("no timed segment could be replayed from its event log "
+                      "(no parseable event timestamps)")
+    if seg_state != state:
+        return None, (f"its last replayable segment is '{seg_state}' but the fold "
+                      f"reports '{state}' — an event timestamp is missing or will "
+                      f"not parse, so the clock for '{state}' never started")
+    return entered, None
+
+
+def compute_wip_activity(graphs, project, now=None, policy=None):
+    """OCCUPANCY vs ACTIVITY per WIP-stage queue — the distinction AC-127.4 exists
+    to force. Returns {queue: {occupied, active, idle, unreadable, idle_ids}}.
+
+    `occupied` is what every depth/cap number in this system has always meant.
+    `active` = a recorded event inside the state's stall threshold. `idle` = past
+    it. `unreadable` = could-not-look, counted SEPARATELY so it is never quietly
+    added to `active` (§17i)."""
+    items, _dup = load_all_items(project)
+    states = compute_states(graphs, items)
+    if policy is None:
+        policy = read_queue_policy(project)
+    if now is None:
+        now = parse_ts(now_iso())
+    return _wip_activity(graphs, items, states, policy, now)
+
+
+def _wip_activity(graphs, items, states, policy, now):
+    """The pure half of compute_wip_activity, so the gate computes the split from
+    the SAME item load it already did rather than re-reading the tree."""
+    pop = stalled_work_states(graphs, policy)
+    out = {}
+    for iid in sorted(items):
+        state = states.get(iid)
+        if state not in pop:
+            continue
+        q = graphs.queue_for(state)
+        row = out.setdefault(q, {"occupied": 0, "active": 0, "idle": 0,
+                                 "unreadable": 0, "idle_ids": []})
+        row["occupied"] += 1
+        entered, _why = _open_segment_entered(graphs, items[iid], state, now)
+        if entered is None:
+            row["unreadable"] += 1
+            continue
+        if (now - entered).total_seconds() > pop[state] * 3600.0:
+            row["idle"] += 1
+            row["idle_ids"].append(iid)
+        else:
+            row["active"] += 1
+    return out
+
+
+def _activity_phrase(row):
+    """The occupancy/activity split as one readable clause. Used in the gate header
+    and in check 3's WIP line so `depth` can never again be read as activity."""
+    if not row:
+        return None
+    txt = (f"{row['occupied']} occupied = {row['active']} with recorded activity / "
+           f"{row['idle']} idle past threshold")
+    if row.get("unreadable"):
+        txt += f" / {row['unreadable']} NOT ESTABLISHED"
+    if row.get("idle_ids"):
+        txt += f" (idle: {', '.join(row['idle_ids'][:6])})"
+    return txt
+
+
 def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
                       threshold=3, now=None, observe=True,
                       observe_timeout=DEFAULT_OBSERVE_TIMEOUT,
@@ -2727,21 +3525,129 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
         # str(): an all-digit short sha (e.g. DEFECT-OAG-045's 5095849) is parsed
         # back from the item file as an int by the frontmatter scalar reader.
         ref = str(ev.get("ref"))
-        on_trunk = _ref_on_trunk(project, ref)
-        push = ("on origin trunk" if on_trunk is True else
-                "NOT on origin trunk" if on_trunk is False else
-                "push state UNKNOWN (ref unresolvable in work/%s)" % project)
+        # FOUR outcomes, rendered DISTINCTLY (DEFECT-OAG-128). This line used to
+        # read "push state UNKNOWN (ref unresolvable in work/<project>)" for BOTH a
+        # parent-lane ref (which merely lived in the other repo) and a sha that
+        # existed nowhere at all — one string for a non-event and for destroyed
+        # work. Collapsing "I looked in the wrong place" into either a pass or the
+        # data-loss alarm was the whole defect.
+        res = resolve_ref(project, ref)
+        on_trunk = (True if res["verdict"] == REF_ON_TRUNK else
+                    False if res["verdict"] == REF_NOT_ON_TRUNK else None)
+        repaired = (" [ref recorded as `%s`; resolved as `%s` — a leading zero was "
+                    "eaten by int-coercion, see DEFECT-OAG-128]"
+                    % (ref, res["resolved"])) if res["padded"] else ""
+        if res["verdict"] == REF_ON_TRUNK:
+            push = "PUSHED — on %s in the %s repo" % (res["trunk"], res["lane"])
+        elif res["verdict"] == REF_NOT_ON_TRUNK:
+            push = ("NOT PUSHED — the commit EXISTS in the %s repo but is on no "
+                    "origin trunk there. It is unpushed, NOT lost" % res["lane"])
+        elif res["verdict"] == REF_ABSENT:
+            push = ("*** COMMIT OBJECT ABSENT FROM EVERY REPO *** — this is the "
+                    "DEFECT-OAG-072 signature (`git cat-file -t fb080d9` => Not a "
+                    "valid object name) for an item whose work was DELIVERED AND "
+                    "DESTROYED. %s. RESCUE FIRST, do not re-run: `make "
+                    "worktree-guard DIR=--all`, and check any nested clone for "
+                    "objects before anything is removed" % res["reason"])
+        else:
+            push = ("push state COULD NOT BE ESTABLISHED — %s. This is not a pass "
+                    "and not an alarm (§17i)" % res["reason"])
         findings.append({
             "check": "stalled-validation", "severity": "block",
             "ids": [iid], "state": state, "dwell_s": dwell, "ref": ref,
-            "on_trunk": on_trunk, "event": ev.get("event"),
+            "on_trunk": on_trunk, "ref_verdict": res["verdict"],
+            "ref_lane": res["lane"], "ref_resolved": res["resolved"],
+            "event": ev.get("event"),
             "message": (f"[stalled-validation] {iid} has been in '{state}' for "
                         f"{_hms(dwell)} (>{stale_hours}h); the work is DONE "
-                        f"({ev.get('event')} ref {ref}, {push}) — only a dispatch "
+                        f"({ev.get('event')} ref {ref}, {push}){repaired} — only a dispatch "
                         f"is missing. Remedy: dispatch the tester now, then "
                         f"`make wi-append PROJECT={project} ID={iid} "
                         f"EVENT=validated|rejected AGENT=tester`."),
         })
+
+    # --- 11. STALLED WORK — claimed or scheduled, with NO RECORDED ACTIVITY ---
+    #     (DEFECT-OAG-127; see the block above compute_wip_activity for the whole
+    #     argument, the measured derivation, and what this check does NOT claim.)
+    #     UNCONDITIONAL: no flag reaches it, because a gate with an off switch is a
+    #     gate that cannot fail (§17i).
+    already_blocked = {i for f in findings
+                       if f["check"] == "stalled-validation" and f["severity"] == "block"
+                       for i in f.get("ids", [])}
+    stall_pop = stalled_work_states(graphs, policy)
+    for iid in sorted(items):
+        state = states.get(iid)
+        if state not in stall_pop:
+            continue
+        # Check 1 already named it with the MORE SPECIFIC remedy (the work is done,
+        # dispatch the tester), so yield to it. Its UNKNOWN case is deliberately NOT
+        # excluded: "we cannot tell whether the work is finished" is a different
+        # question from "nothing has happened for a week", and the second one blocks.
+        if iid in already_blocked:
+            continue
+        it = items[iid]
+        thr_h = stall_pop[state]
+        entered, why = _open_segment_entered(graphs, it, state, now)
+        queue = graphs.queue_for(state)
+        owner = graphs.owner_of(state)
+        scheduled = (queue == STALLED_WORK_SCHEDULED_QUEUE)
+        kind = "scheduled-not-pulled" if scheduled else "claimed-no-activity"
+        common = {"check": "stalled-work", "ids": [iid], "state": state,
+                  "queue": queue, "owner": owner, "kind": kind,
+                  "threshold_h": thr_h}
+        if entered is None:
+            # BLOCKS, and deliberately: §17i — where the control is a gate, an
+            # answer it could not establish is not a pass. The subject here is an
+            # OCCUPIED WIP slot, i.e. exactly the thing whose idleness caused 35
+            # items to be deferred; "we could not tell" about it must stop the pull
+            # in the same way "it is idle" does. (Check 4's could-not-look is
+            # UNKNOWN instead, because its whole queue class is advisory by design —
+            # see the QUEUE KIND block.)
+            findings.append(dict(
+                common, severity="block", idle_s=None,
+                message=(
+                    f"[stalled-work] COULD NOT LOOK: {iid} is in '{state}' (queue "
+                    f"{queue}) and holds that slot, but its idle time cannot be "
+                    f"computed — {why}. This run establishes NOTHING about whether "
+                    f"it is being worked, and silence is not a pass (§17i), so it "
+                    f"BLOCKS. Remedy: repair the item's event stream (every event "
+                    f"needs a parseable `ts:`; an item with NO events has no history "
+                    f"at all — append its genesis event with `make wi-append "
+                    f"PROJECT={project} ID={iid} EVENT=<genesis> AGENT=<agent>`), "
+                    f"then re-run.")))
+            continue
+        idle_s = (now - entered).total_seconds()
+        if idle_s <= thr_h * 3600.0:
+            continue
+        if scheduled:
+            msg = (
+                f"[stalled-work] {iid} has been SCHEDULED in '{state}' for "
+                f"{_hms(idle_s)} with NO RECORDED EVENT since (threshold "
+                f"{thr_h:.0f}h). A scheduled item nobody pulls is invisible aging "
+                f"inventory: it holds a '{queue}' slot, and '{queue}' depth then "
+                f"reads as if the schedule were being honoured. Remedy — PULL it "
+                f"now (it was already chosen, so this is the cheapest work "
+                f"available), OR de-schedule it and record an explicit dated "
+                f"decision (`defer_until: YYYY-MM-DD` in its frontmatter), OR "
+                f"cancel it. Do NOT leave it scheduled: aging inventory is the "
+                f"largest measured contributor to gross lead time.")
+        else:
+            msg = (
+                f"[stalled-work] {iid} has been in '{state}' ({owner}) for "
+                f"{_hms(idle_s)} with NO RECORDED EVENT since (threshold "
+                f"{thr_h:.0f}h) — the '{queue}' slot is OCCUPIED and nothing is "
+                f"known to be happening in it. THIS IS AN IDLE FACT, NOT A VERDICT: "
+                f"the event log cannot tell an in-flight dispatch from work nobody "
+                f"is holding, because no dispatch is recorded anywhere "
+                f"(OI-LOOP-GATE-CANNOT-SEE-A-DISPATCH-IN-FLIGHT). Decide it, three "
+                f"ways: (a) RE-DISPATCH — the work is fine and nobody is holding it; "
+                f"(b) RELEASE — it is genuinely waiting on something, so say so and "
+                f"free the slot: `make wi-append PROJECT={project} ID={iid} "
+                f"EVENT=blocked AGENT=flow-manager NOTE=<what it waits on>`; (c) if "
+                f"it IS being worked, append the event already earned so the clock "
+                f"restarts. Until then this slot must NOT be read as capacity in "
+                f"use — do not raise the WIP cap to work around it.")
+        findings.append(dict(common, severity="block", idle_s=idle_s, message=msg))
 
     # --- derived queue depths (pure function of state via queue_map) ----------
     depths = defaultdict(int)
@@ -2751,6 +3657,11 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
         if q:
             depths[q] += 1
             members[q].append(iid)
+
+    # OCCUPANCY vs ACTIVITY (AC-127.4). Every depth number above counts OCCUPANCY;
+    # this is the same population split by whether anything has been RECORDED
+    # against it lately. Computed from the items already loaded.
+    activity = _wip_activity(graphs, items, states, policy, now)
 
     # --- 2. ready below floor ------------------------------------------------
     floor = policy.get("ready", {}).get("min_items",
@@ -2818,12 +3729,27 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
                 f"number, and never to stop pulling, which only makes it worse."
                 + age_txt)))
         else:
-            findings.append(dict(common, severity="block", message=(
+            # THIS DEPTH COUNTS OCCUPANCY, NOT ACTIVITY, and saying so is AC-127.4.
+            # Reading it as activity is what cost 35 wrongly-deferred items: the
+            # cap was "full" of work nothing was happening to. The split rides on
+            # the same line so the two numbers can never be confused again.
+            row = activity.get(q) or {}
+            split = _activity_phrase(row)
+            findings.append(dict(common, severity="block",
+                                 active=row.get("active"), idle=row.get("idle"),
+                                 unreadable=row.get("unreadable"),
+                                 idle_ids=row.get("idle_ids", []),
+                                 message=(
                 f"[queue-over-cap] {q} depth {depths[q]} > wip_limit {cap} — over "
-                f"by {over}. {q} is a WIP STAGE: concurrent work in flight past "
-                f"the cap is real harm (aging, context-switching). Remedy: drain "
-                f"{over} to done before admitting more; the cap targets gross lead "
-                f"time (§F2), work cannot be allowed to age.")))
+                f"by {over}. THIS DEPTH IS OCCUPANCY, NOT ACTIVITY"
+                + (f" — {split}. " if split else ". ") +
+                f"{q} is a WIP STAGE: concurrent work in flight past the cap is "
+                f"real harm (aging, context-switching). Remedy: drain {over} to "
+                f"done before admitting more — and if the idle count above is "
+                f"non-zero, those slots are NOT capacity in use, so re-dispatch or "
+                f"release them (see the [stalled-work] lines) BEFORE concluding "
+                f"there is no capacity. The cap targets gross lead time (§F2), "
+                f"work cannot be allowed to age.")))
 
     # --- 4. aged backlog item carrying NO DECISION (v135, EXP-131) -----------
     # Depth is advisory (check 3) and must stay that way — Little's Law governs
@@ -2845,9 +3771,20 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
         if queue_kind(policy, q) != QUEUE_KIND_BACKLOG:
             continue
         undecided = []
+        unreadable = []
         for mid in members[q]:
-            _st, ent = _current_segment(graphs, items[mid], now)
+            st_m = states.get(mid)
+            ent, why = _open_segment_entered(graphs, items[mid], st_m, now)
             if ent is None:
+                # §17g sweep off DEFECT-OAG-127: this used to be a bare `continue`,
+                # so an item whose AGE cannot be established was exempt from the
+                # aging gate FOR EVER, silently, and `validate` reports clean for it
+                # too. Measured population on OagEventSource 2026-08-20: THREE items
+                # with an EMPTY `events:` list (DEFECT-OAG-129 and DEFECT-OAG-130 at
+                # value 26, and OI-DEF124-SWEEP-LEDGER) — registered by hand, folding
+                # to their initial state with no genesis event, hence no segment and
+                # no age. They could have sat there indefinitely.
+                unreadable.append((mid, why))
                 continue
             age_d = (now - ent).total_seconds() / 86400.0
             if age_d <= max_backlog_age_days:
@@ -2856,6 +3793,27 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
             if deferred_to is not None and deferred_to > now:
                 continue            # an in-date decision exists — respect it
             undecided.append((age_d, mid, deferred_to))
+        if unreadable:
+            # UNKNOWN, not block — and the asymmetry with check 11 is deliberate,
+            # not an oversight: this queue class is ADVISORY BY DESIGN (blocking on
+            # backlog inverts the constraint, see the QUEUE KIND block), so the
+            # honest report here is NOT ESTABLISHED, which reaches the headline and
+            # can never read as satisfied.
+            findings.append({
+                "check": "aged-backlog-unreadable", "severity": "unknown",
+                "queue": q, "ids": [m for m, _w in unreadable],
+                "message": (
+                    f"[aged-backlog-unreadable] NOT ESTABLISHED: the age of "
+                    f"{len(unreadable)} item(s) in {q} CANNOT BE COMPUTED, so the "
+                    f"aging gate above did not consider them at all: "
+                    + "; ".join(f"{m} ({w})" for m, w in unreadable[:6])
+                    + f". An item with no computable age is exempt from every "
+                      f"age-based limb for ever — that is not the same as clean "
+                      f"(§17i). Remedy: give it a genesis event, `make wi-append "
+                      f"PROJECT={project} ID=<id> EVENT=<genesis> AGENT=<agent>` "
+                      f"(state = fold(events); an item with an empty `events:` list "
+                      f"has no history for anything to measure)."),
+            })
         if not undecided:
             continue
         undecided.sort(reverse=True)
@@ -3075,7 +4033,81 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
     #         and the only symptom was a label sitting on ~100% of items).
     findings.extend(compute_acceptance_audit(project))
 
+    # --- 13. every state in the graph has a board-status row — DELEGATED -------
+    #     NUMBER COLLISION, resolved here rather than silently: DEFECT-OAG-099's
+    #     own docs call this "check 11", and so does the DEFECT-OAG-127
+    #     stalled-work check above — they were authored in parallel by agents
+    #     that could not see each other. Renumbered to 13 (12 is ref-provenance)
+    #     so the comments are unambiguous. Nothing functional changed: the
+    #     runtime `check` keys were already distinct ("stalled-work" vs
+    #     "board-mapping"), which is why nothing was shadowed.
+    #         (DEFECT-OAG-099 AC-099.5). An unmapped state does not fail, it
+    #         renders as unstarted BACKLOG — the board saying "not started" about
+    #         a terminal item, or about code running in production. That has now
+    #         happened TWICE (`cancelled` from state-graph v5; `awaiting_observation`
+    #         from v9), each time discovered by a human noticing, because the only
+    #         consumer was a per-item board sync whose stderr nobody reads. The
+    #         mapping is a hand-maintained table and the graph is not, so the two
+    #         drift on any commit that adds a state; hanging the check here makes
+    #         "add a state" and "add its row" one enforced commit.
+    findings.extend(compute_board_mapping_drift())
+    # --- 12. every recorded `ref:` must still EXIST somewhere — DELEGATED ------
+    #         (DEFECT-OAG-128). Deliberately registry-wide including DONE items:
+    #         a destroyed commit on a closed item is the case nobody re-reads, and
+    #         it is exactly what happened to DEFECT-OAG-072. `items` is threaded in
+    #         rather than re-loaded: 478 files is ~340ms, and a gate that runs before
+    #         every pull pays that on every cycle for nothing.
+    findings.extend(compute_ref_provenance(project, items=items))
+
     return findings
+
+
+# ---------------------------------------------------------------------------
+# loop-gate check 11 — state-graph <-> board-status mapping drift
+# (DEFECT-OAG-099, AC-099.5). Offline: no project, no corpus, no network, no
+# secret. DELEGATED to the ONE executable home of the mapping audit
+# (.claude/tools/board-sweep.py --audit-mapping) — never re-implemented here.
+# ---------------------------------------------------------------------------
+BOARD_SWEEP_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "..", "..", "..", "tools", "board-sweep.py")
+BOARD_MAPPING_TIMEOUT = 60.0
+
+
+def compute_board_mapping_drift(script=None, graphs_path=None,
+                                timeout=BOARD_MAPPING_TIMEOUT):
+    """0 or 1 finding. UNKNOWN (never clean) if the analyser did not run: an
+    unevaluated precondition is not a met one (§17c.2)."""
+    common = {"check": "board-mapping", "ids": []}
+    argv = [sys.executable, os.path.normpath(script or BOARD_SWEEP_SCRIPT),
+            "--audit-mapping"]
+    if graphs_path:
+        argv += ["--graphs", graphs_path]
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True,
+                              timeout=timeout)
+    except Exception as exc:                                    # noqa: BLE001
+        return [dict(common, severity="unknown", message=(
+            f"[board-mapping] NOT ESTABLISHED — the mapping audit would not run "
+            f"({type(exc).__name__}: {str(exc)[:160]}). An unrunnable check is not "
+            f"a clean one. Remedy: `make board-audit`."))]
+    out = ((proc.stdout or "") + (proc.stderr or "")).strip()
+    if "board-mapping gate" not in out:
+        return [dict(common, severity="unknown", message=(
+            f"[board-mapping] NOT ESTABLISHED — the audit produced no verdict "
+            f"(exit {proc.returncode}): {out[:200] or '<no output>'}. An "
+            f"unrunnable check is not a clean one. Remedy: `make board-audit`."))]
+    if proc.returncode == 0:
+        return []
+    states = sorted({m for m in re.findall(r"\b(?:UNMAPPED|STALE-KEY)\s+\S+/(\S+?):",
+                                           out)})
+    return [dict(common, severity="block", ids=[], message=(
+        f"[board-mapping] {out.splitlines()[0]} "
+        f"{('states: ' + ', '.join(states) + '. ') if states else ''}"
+        f"An unmapped state renders as unstarted Backlog — the board lying about "
+        f"a terminal or in-production item, which has happened twice. Remedy: add "
+        f"the row to STATE_STATUS in .claude/tools/linear-project.py AND to "
+        f"process/linear-mapping.md §2, in the same commit as the state; then "
+        f"`make board-audit`."))]
 
 
 # ---------------------------------------------------------------------------
@@ -3588,8 +4620,29 @@ def cmd_loop_gate(a):
                ("OK — no BLOCKING precondition violated, the loop may pull"
                 if (advisory or unknown) else
                 "OK — all preconditions hold, the loop may pull"))
-    print(f"loop-gate[{a.project}] @ {stamp} (stale-hours {stale_hours}) "
-          f"=> {verdict}{adv_tail}")
+    # OCCUPANCY vs ACTIVITY on EVERY run, not only when a queue is over its cap
+    # (AC-127.4): the 35-item wrong deferral was decided while wip was UNDER cap.
+    # A could-not-look is counted apart and never folded into `active` (§17i).
+    try:
+        act = compute_wip_activity(graphs, a.project, now=now)
+    except Exception as exc:                          # never silently: say so
+        act, act_err = None, exc
+    else:
+        act_err = None
+    if act_err is not None:
+        act_txt = f"; wip/ready activity NOT ESTABLISHED ({act_err})"
+    else:
+        parts = []
+        for q in sorted(act):
+            row = act[q]
+            seg = (f"{q} {row['occupied']} occupied = {row['active']} active / "
+                   f"{row['idle']} idle")
+            if row.get("unreadable"):
+                seg += f" / {row['unreadable']} NOT ESTABLISHED"
+            parts.append(seg)
+        act_txt = ("; " + "; ".join(parts)) if parts else "; wip/ready empty"
+    print(f"loop-gate[{a.project}] @ {stamp} (stale-hours {stale_hours}"
+          f"{act_txt}) => {verdict}{adv_tail}")
     for f in blocking:
         print(f"  - {f['message']}")
     for f in advisory:

@@ -1869,12 +1869,18 @@ class TestLoopGate(Base):
             for q, p, v in rows:
                 f.write(f"{q},{p},{v},count,flow-manager,throughput,2026-06-01,EXP-022\n")
 
-    def _building_uc(self, iid, day=10):
+    # DEFAULT DAY = 29, i.e. ~1 day before NOW (DEFECT-OAG-127). It used to be 10 —
+    # TWENTY DAYS stale — and every "healthy fixture" test below therefore asserted
+    # that a queue full of month-old inventory was a satisfied precondition. That is
+    # precisely the condition check 11 exists to catch, so the fixtures were changed
+    # rather than the check weakened: a test whose baseline is the pathology can only
+    # ever ratify it. A test that WANTS a stale item passes the day explicitly.
+    def _building_uc(self, iid, day=29):
         return [{"ts": _dt(day, 0), "event": "registered", "agent": "flow-manager"},
                 {"ts": _dt(day, 1), "event": "made_ready", "agent": "flow-manager"},
                 {"ts": _dt(day, 2), "event": "pulled", "agent": "orchestrator"}]
 
-    def _reworking_uc(self, iid, day=10):
+    def _reworking_uc(self, iid, day=29):
         return self._building_uc(iid, day) + [
             {"ts": _dt(day, 3), "event": "build_failed", "agent": "engineer"}]
 
@@ -1885,7 +1891,7 @@ class TestLoopGate(Base):
                       ("deploy", "min_items", 0), ("deploy", "wip_limit", 1),
                       ("rework", "min_items", 0), ("rework", "wip_limit", 2)])
 
-    def _ready_uc(self, iid, day=10):
+    def _ready_uc(self, iid, day=29):
         return [{"ts": _dt(day, 0), "event": "registered", "agent": "flow-manager"},
                 {"ts": _dt(day, 1), "event": "made_ready", "agent": "flow-manager"}]
 
@@ -1988,8 +1994,9 @@ class TestLoopGate(Base):
         self.assertIn("stalled-validation", self._checks(self._gate(stale_hours=1)))
 
     def test_stalled_validation_without_ref_is_unknown_not_block(self):
-        """No structured ref => we CANNOT establish the work is done. Report
-        UNKNOWN (advisory), never assume either way."""
+        """No structured ref => we CANNOT establish the work is done. CHECK 1 reports
+        UNKNOWN (never assumes either way) — and since DEFECT-OAG-127 the idle fact
+        itself is carried by check 11, so the loop no longer walks past it."""
         self._default_policy()
         for i in range(3):
             self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
@@ -2000,9 +2007,15 @@ class TestLoopGate(Base):
         unknown = [f for f in findings if f["severity"] == "unknown"]
         self.assertTrue(any("DEF-NOREF" in f["ids"] for f in unknown), findings)
         code, out = self._run()
-        self.assertEqual(code, 0)             # UNKNOWN does not block
-        # ...but it reaches the HEADLINE: a run that failed to establish something
-        # may never report "all preconditions hold"
+        # CHECK 1's verdict is still UNKNOWN and still does not block — that is what
+        # this test is about. The RUN, however, now exits 2, because check 11
+        # (DEFECT-OAG-127) sees the ten-day IDLENESS, which is a fact independent of
+        # whether the work is finished. Before that check existed, an item could sit
+        # in `validating` for a week with no ref and the loop pulled straight past it.
+        self.assertEqual(code, 2)
+        self.assertIn("stalled-work", out)
+        # ...and the unknown still reaches the HEADLINE: a run that failed to
+        # establish something may never report "all preconditions hold"
         self.assertIn("NOT ESTABLISHED", out)
         self.assertNotIn("all preconditions hold", out)
 
@@ -2071,32 +2084,112 @@ class TestLoopGate(Base):
 
         def fake(project, ref):
             calls.append((project, ref))
-            return True                      # git says: on trunk
+            return {"ref": ref, "verdict": wi.REF_ON_TRUNK, "lane": wi.LANE_PROJECT,
+                    "trunk": "origin/main", "resolved": ref, "padded": False,
+                    "searched": [wi.LANE_PROJECT, wi.LANE_PARENT], "unreadable": [],
+                    "reason": "ancestor"}
 
-        orig = wi._ref_on_trunk
-        wi._ref_on_trunk = fake
+        orig = wi.resolve_ref
+        wi.resolve_ref = fake
         try:
             f = [x for x in self._gate() if x["check"] == "stalled-validation"][0]
         finally:
-            wi._ref_on_trunk = orig
+            wi.resolve_ref = orig
         self.assertEqual(calls, [(self.project, "5095849")])
         self.assertIs(f["on_trunk"], True)    # git, not the stale note
-        self.assertIn("on origin trunk", f["message"])
+        self.assertIn("PUSHED", f["message"])
 
-    def test_unresolvable_ref_reports_unknown_push_state(self):
+    def _stub_resolve(self, verdict, **kw):
+        base = {"verdict": verdict, "lane": None, "trunk": None, "resolved": None,
+                "padded": False, "searched": [], "unreadable": [], "reason": "stub"}
+        base.update(kw)
+        return lambda p, r: dict(base, ref=r)
+
+    def test_a_ref_absent_from_EVERY_repo_screams_destroyed_work(self):
+        """DEFECT-OAG-128 / AC-128.2. Before the fix this rendered as the SAME
+        string as a parent-lane ref that merely lived in the other repo — so the
+        one alarm that means real data loss was muted inside a routine UNKNOWN."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self.write_item("active", "DEF-STALE", "defect",
+                        self._validating_defect(20, 12, ref="deadbee"))
+        orig = wi.resolve_ref
+        wi.resolve_ref = self._stub_resolve(
+            wi.REF_ABSENT, searched=[wi.LANE_PROJECT, wi.LANE_PARENT],
+            reason="resolves in NONE of the 2 readable repo(s)")
+        try:
+            f = [x for x in self._gate() if x["check"] == "stalled-validation"][0]
+        finally:
+            wi.resolve_ref = orig
+        self.assertEqual(f["ref_verdict"], wi.REF_ABSENT)
+        self.assertIsNone(f["on_trunk"])
+        self.assertIn("ABSENT FROM EVERY REPO", f["message"])
+        self.assertIn("DEFECT-OAG-072", f["message"])
+        self.assertIn("worktree-guard", f["message"])       # the rescue, not a re-run
+
+    def test_a_ref_we_COULD_NOT_LOOK_UP_is_neither_a_pass_nor_the_alarm(self):
+        """§17i, and the distinction the defect existed for: 'I could not look' must
+        be visibly different from BOTH 'pushed' and 'destroyed'."""
         self._default_policy()
         for i in range(3):
             self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
         self.write_item("active", "DEF-STALE", "defect",
                         self._validating_defect(20, 12, ref="notasha"))
-        orig = wi._ref_on_trunk
-        wi._ref_on_trunk = lambda p, r: None       # cannot resolve
+        orig = wi.resolve_ref
+        wi.resolve_ref = self._stub_resolve(
+            wi.REF_CANNOT_DETERMINE, unreadable=[wi.LANE_PARENT],
+            reason="could not read the parent-repo repo(s)")
         try:
             f = [x for x in self._gate() if x["check"] == "stalled-validation"][0]
         finally:
-            wi._ref_on_trunk = orig
+            wi.resolve_ref = orig
+        self.assertEqual(f["ref_verdict"], wi.REF_CANNOT_DETERMINE)
         self.assertIsNone(f["on_trunk"])
-        self.assertIn("UNKNOWN", f["message"])
+        self.assertIn("COULD NOT BE ESTABLISHED", f["message"])
+        self.assertNotIn("ABSENT FROM EVERY REPO", f["message"])   # not the alarm
+        self.assertNotIn("PUSHED —", f["message"])                 # not a pass
+
+    def test_an_existing_but_unpushed_ref_says_NOT_LOST_in_so_many_words(self):
+        """The commonest parent-lane state (the owner owns the parent push). It must
+        not read like the destroyed-work case, which is what a reader of the old
+        single UNKNOWN string had to guess at."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self.write_item("active", "DEF-STALE", "defect",
+                        self._validating_defect(20, 12, ref="8dae2cc"))
+        orig = wi.resolve_ref
+        wi.resolve_ref = self._stub_resolve(
+            wi.REF_NOT_ON_TRUNK, lane=wi.LANE_PARENT, resolved="8dae2cc",
+            searched=[wi.LANE_PROJECT, wi.LANE_PARENT])
+        try:
+            f = [x for x in self._gate() if x["check"] == "stalled-validation"][0]
+        finally:
+            wi.resolve_ref = orig
+        self.assertIs(f["on_trunk"], False)
+        self.assertEqual(f["ref_lane"], wi.LANE_PARENT)
+        self.assertIn("NOT lost", f["message"])
+        self.assertIn("parent-repo", f["message"])
+
+    def test_a_zero_stripped_ref_says_so_instead_of_looking_destroyed(self):
+        """UC-XA5's `605428`. The message must name the repair, or the next reader
+        re-derives the leading-zero bug from scratch."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self.write_item("active", "DEF-STALE", "defect",
+                        self._validating_defect(20, 12, ref="605428"))
+        orig = wi.resolve_ref
+        wi.resolve_ref = self._stub_resolve(
+            wi.REF_ON_TRUNK, lane=wi.LANE_PROJECT, trunk="origin/main",
+            resolved="0605428", padded=True)
+        try:
+            f = [x for x in self._gate() if x["check"] == "stalled-validation"][0]
+        finally:
+            wi.resolve_ref = orig
+        self.assertEqual(f["ref_resolved"], "0605428")
+        self.assertIn("leading zero was eaten", f["message"])
 
     def test_ref_on_trunk_returns_none_without_repo(self):
         # ROOT is a temp dir: work/<P> is not a git repo -> UNKNOWN, never a guess
@@ -2358,6 +2451,57 @@ class TestLoopGate(Base):
         finally:
             wi.compute_retro_debt = orig
         self.assertEqual(calls, [(self.project, 7)])
+
+    # ---- check 11: board-mapping drift (DEFECT-OAG-099, AC-099.5) -----------
+    def test_AC_099_5_board_mapping_drift_is_a_standing_gate_before_every_pull(self):
+        """A state in state-graphs.json with no board-status row renders as
+        unstarted Backlog — which has happened twice. AC-099.5 wants the check
+        AUTOMATIC, and §17e says a gate in no workflow is not a gate, so it hangs
+        on the loop's only continuously-running workflow."""
+        self._default_policy()
+        findings = wi.compute_board_mapping_drift()
+        self.assertEqual(findings, [], f"committed mapping should be clean: {findings}")
+        self.assertNotIn("board-mapping", self._checks(self._gate()))
+
+    def test_AC_099_5_a_drifted_board_mapping_blocks_the_pull(self):
+        drifted = wi.compute_board_mapping_drift(
+            graphs_path=self._write_drifted_graphs())
+        self.assertEqual([f["check"] for f in drifted], ["board-mapping"])
+        self.assertEqual(drifted[0]["severity"], "block")
+        self.assertIn("a_throwaway_state", drifted[0]["message"])
+        self.assertIn("linear-mapping.md", drifted[0]["message"])
+
+    def test_AC_099_5_an_unrunnable_board_mapping_check_is_UNKNOWN_not_clean(self):
+        """§17c.2: an unevaluated precondition is not a met one."""
+        findings = wi.compute_board_mapping_drift(
+            script="/nonexistent/board-sweep.py")
+        self.assertEqual([f["severity"] for f in findings], ["unknown"])
+        self.assertIn("NOT ESTABLISHED", findings[0]["message"])
+
+    def test_AC_099_5_loop_gate_delegates_rather_than_cloning_the_audit(self):
+        """DRY: the mapping audit has ONE executable home."""
+        self._default_policy()
+        calls = []
+        orig = wi.compute_board_mapping_drift
+        wi.compute_board_mapping_drift = lambda *a, **k: (calls.append(1) or [])
+        try:
+            self._gate()
+        finally:
+            wi.compute_board_mapping_drift = orig
+        self.assertEqual(len(calls), 1)
+
+    def _write_drifted_graphs(self):
+        import json as _json
+        src = os.path.join(wi.ROOT, "process", "machinery", "state-graphs.json")
+        with open(src, encoding="utf-8") as fh:
+            g = _json.load(fh)
+        g["types"]["use-case"]["transitions"].append(
+            {"from": "ready", "event": "throwaway", "to": "a_throwaway_state",
+             "agents": ["engineer"]})
+        p = os.path.join(self.tmp, "drifted-state-graphs.json")
+        with open(p, "w", encoding="utf-8") as fh:
+            _json.dump(g, fh)
+        return p
 
     # ---- reports EVERY violation, not just the first ------------------------
     # ---- check 4b: aged backlog item with NO DECISION (v135, EXP-131) --------
@@ -4234,6 +4378,1059 @@ class TestReversalProbeInvariant(Base):
                         self._blocked("make:probe-blocker-def-9"))
         code, out = self._validate()
         self.assertEqual(code, 0, out)
+
+# loop-gate check 11 — STALLED WORK (DEFECT-OAG-127)
+#
+# The defect: check 1 (`stalled-validation`) covers VALIDATION states only, and only
+# blocks when the work is provably DONE (a `ref:`). Work abandoned in `fixing`,
+# `building`, `reproducing`, `deploying`, `reworking` — and an item SCHEDULED into
+# `ready` that is never pulled — was invisible to every limb of the gate. Measured
+# 2026-08-19 by replaying the REAL item files at commit 9ff713ee against the real
+# gate: six WIP items idle 4.92-7.31d and three `scheduled` items idle 5.12-8.11d,
+# and the only id the whole gate named was the one ref-bearing `validating` item.
+#
+# Fixtures below are hand-built (a state machine is ours, not a wire we do not own),
+# but the DURATIONS and the states are taken from that real reconstruction.
+# --------------------------------------------------------------------------- #
+class TestStalledWork(Base):
+    """AC-127.1 .. AC-127.5. REUSES TestLoopGate's fixture builders by explicit
+    binding rather than inheritance: subclassing would re-run all of that class's
+    tests under this name, which reads as coverage and is only duplication."""
+
+    _policy = TestLoopGate._policy
+    _default_policy = TestLoopGate._default_policy
+    _ready_uc = TestLoopGate._ready_uc
+    _building_uc = TestLoopGate._building_uc
+    _reworking_uc = TestLoopGate._reworking_uc
+    _validating_defect = TestLoopGate._validating_defect
+    _gate = TestLoopGate._gate
+    _run = TestLoopGate._run
+    NEVER_AGES = TestLoopGate.NEVER_AGES
+
+    # ---- fixture builders, each parked in one state with NO further event ------
+    def _fixing_defect(self, day, hour=0):
+        """A defect in `fixing` since day/hour and nothing since — no `fixed`, so
+        check 1 cannot see it and never could."""
+        return [{"ts": _dt(day, 0), "event": "reported", "agent": "orchestrator"},
+                {"ts": _dt(day, hour), "event": "triaged", "agent": "orchestrator"},
+                {"ts": _dt(day, hour), "event": "confirmed", "agent": "engineer"}]
+
+    def _reproducing_defect(self, day, hour=0):
+        return [{"ts": _dt(day, 0), "event": "reported", "agent": "orchestrator"},
+                {"ts": _dt(day, hour), "event": "triaged", "agent": "orchestrator"}]
+
+    def _deploying_uc(self, day, hour=0):
+        return self._building_at(day) + [
+            {"ts": _dt(day, hour), "event": "built_green", "agent": "engineer"}]
+
+    def _building_at(self, day, hour=0):
+        """`building` since day/hour, nothing since. TestLoopGate._building_uc
+        hardcodes hours 0-2; a threshold test needs the hour."""
+        return [{"ts": _dt(day, 0), "event": "registered", "agent": "flow-manager"},
+                {"ts": _dt(day, hour), "event": "made_ready", "agent": "flow-manager"},
+                {"ts": _dt(day, hour), "event": "pulled", "agent": "orchestrator"}]
+
+    def _scheduled_oi(self, day, hour=0):
+        return [{"ts": _dt(day, 0), "event": "open", "agent": "flow-manager"},
+                {"ts": _dt(day, hour), "event": "scheduled", "agent": "flow-manager"}]
+
+    def _blocks(self, findings, check="stalled-work"):
+        return [f for f in findings
+                if f["check"] == check and f["severity"] == "block"]
+
+    def _fresh_ready(self):
+        """Three ready items that are ACTUALLY fresh (day 29 -> ~1d before NOW),
+        so the ready floor is satisfied without smuggling in stale inventory. The
+        old fixtures used day 10 == 20 days stale, which is exactly the condition
+        this check exists to catch."""
+        for i in range(3):
+            # NB _ready_uc's first arg is the id, the SECOND is the day
+            self.write_item("active", f"UC-R{i}", "use-case",
+                            self._ready_uc(f"UC-R{i}", 29))
+
+    # ---- AC-127.1 — the build states are no longer blind spots ---------------
+    def test_AC_127_1_work_abandoned_in_a_build_state_blocks(self):
+        """The reconstructed 2026-08-19 population: `fixing`/`building`/`reproducing`/
+        `deploying` idle for days, which the gate could not see at all."""
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "DEF-FIXING", "defect", self._fixing_defect(23))
+        self.write_item("active", "UC-BUILDING", "use-case", self._building_at(24))
+        self.write_item("active", "DEF-REPRO", "defect", self._reproducing_defect(25))
+        self.write_item("active", "UC-DEPLOYING", "use-case", self._deploying_uc(24, 2))
+        findings = self._gate()
+        got = sorted(i for f in self._blocks(findings) for i in f["ids"])
+        self.assertEqual(got, ["DEF-FIXING", "DEF-REPRO", "UC-BUILDING", "UC-DEPLOYING"],
+                         findings)
+        by_id = {f["ids"][0]: f for f in self._blocks(findings)}
+        self.assertEqual(by_id["DEF-FIXING"]["state"], "fixing")
+        self.assertEqual(by_id["DEF-REPRO"]["state"], "reproducing")
+        self.assertEqual(by_id["UC-BUILDING"]["state"], "building")
+        self.assertEqual(by_id["UC-DEPLOYING"]["state"], "deploying")
+        self.assertEqual(by_id["DEF-FIXING"]["owner"], "engineer")
+        self.assertEqual(by_id["UC-DEPLOYING"]["owner"], "cicd")
+        # the idle time is REPORTED, not merely detected
+        self.assertGreater(by_id["DEF-FIXING"]["idle_s"], 6 * 86400)
+        code, out = self._run()
+        self.assertEqual(code, 2)
+        for iid in ("DEF-FIXING", "UC-BUILDING", "DEF-REPRO", "UC-DEPLOYING"):
+            self.assertIn(iid, out)
+        self.assertIn("stalled-work", out)
+
+    def test_AC_127_1_reworking_is_covered_too(self):
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "UC-RW", "use-case", self._reworking_uc("x", 23))
+        got = sorted(i for f in self._blocks(self._gate()) for i in f["ids"])
+        self.assertEqual(got, ["UC-RW"])
+
+    def test_AC_127_1_scheduled_but_never_pulled_blocks(self):
+        """The other arm of the SAME blind spot: three items sat in `ready`, already
+        SCHEDULED, for 127-199h while the gate reported nothing and `wip` showed four
+        free slots. An item nobody pulled raises nothing today."""
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "OI-SCHED", "open-item", self._scheduled_oi(21))
+        self.write_item("active", "UC-SCHED", "use-case",
+                        self._ready_uc("UC-SCHED", 21))
+        blocks = self._blocks(self._gate())
+        got = sorted(i for f in blocks for i in f["ids"])
+        self.assertEqual(got, ["OI-SCHED", "UC-SCHED"], blocks)
+        by_id = {f["ids"][0]: f for f in blocks}
+        self.assertEqual(by_id["OI-SCHED"]["state"], "scheduled")
+        self.assertEqual(by_id["UC-SCHED"]["state"], "ready")
+        # a scheduled item is a DIFFERENT quantity from a claimed one, and the
+        # finding says which it is (AC-127.3 needs the two remedies separable)
+        self.assertEqual(by_id["OI-SCHED"]["kind"], "scheduled-not-pulled")
+        self.assertEqual(by_id["UC-SCHED"]["kind"], "scheduled-not-pulled")
+
+    def test_AC_127_1_work_within_its_threshold_does_not_block(self):
+        """NOT NOISY, and this is the limb that proves it: an item worked for hours
+        is not abandoned. Everything here is inside its threshold and NOTHING fires
+        — so a green run of this class means something."""
+        self._default_policy()
+        self._fresh_ready()
+        # `building` since day 29 18:00 -> 6h before NOW
+        self.write_item("active", "UC-BUSY", "use-case", self._building_at(29, 18))
+        self.write_item("active", "DEF-BUSY", "defect", self._fixing_defect(29, 20))
+        self.write_item("active", "OI-JUST-SCHED", "open-item", self._scheduled_oi(28, 6))
+        findings = self._gate()
+        self.assertEqual(self._blocks(findings), [], findings)
+
+    def test_AC_127_1_a_parked_item_is_not_reported_as_stalled_work(self):
+        """`blocked` and `awaiting_observation` are owner=external: a recorded reason
+        exists and check 5 / the block re-check own them. Reporting them here would
+        double-count the one thing that IS already visible."""
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "UC-BLOCKED", "use-case",
+                        self._ready_uc("UC-BLOCKED", 10)
+                        + [{"ts": _dt(11, 0), "event": "blocked",
+                                               "agent": "flow-manager"}])
+        self.assertEqual(self._blocks(self._gate()), [])
+
+    def test_AC_127_1_intake_is_not_reported_as_stalled_work(self):
+        """An item in a BACKLOG queue is aging inventory, not abandoned work: check 4
+        owns it by AGE-WITHOUT-A-DECISION, and blocking on it here would report the
+        same item twice under two remedies."""
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "DEF-INTAKE", "defect",
+                        [{"ts": _dt(1, 0), "event": "reported", "agent": "orchestrator"}])
+        self.write_item("active", "OI-OPEN", "open-item",
+                        [{"ts": _dt(1, 0), "event": "open", "agent": "flow-manager"}])
+        self.assertEqual(self._blocks(self._gate()), [])
+
+    # ---- AC-127.1 (completeness) — the population may not be a hand list ------
+    def test_AC_127_1_every_wip_stage_state_has_a_threshold(self):
+        """THE GUARD AGAINST THE DEFECT RECURRING. The population is DERIVED from
+        state-graphs.json (non-terminal + non-backlog queue + not owner=external),
+        so a state added to the graph later is covered by construction. If a future
+        state has no threshold, this fails rather than silently exempting it."""
+        pop = wi.stalled_work_states(self.graphs, wi.read_queue_policy(self.project))
+        self.assertEqual(
+            sorted(pop),
+            sorted(["building", "deploying", "dev-validating", "prod-deploying",
+                    "prod-validating", "reworking", "reproducing", "fixing",
+                    "validating", "ready", "scheduled"]),
+            "a state entered/left the WIP-STAGE population — give it a threshold "
+            "and update this pin deliberately")
+        for state, hours in pop.items():
+            self.assertIsInstance(hours, float)
+            self.assertGreater(hours, 0.0)
+
+    def test_AC_127_1_an_unlisted_wip_state_fails_closed(self):
+        """A state in the population with no entry in the derived map takes the
+        WORK default and therefore still FIRES. Fail-closed: a new state is never
+        silently exempt."""
+        self.assertEqual(wi.stalled_work_hours_for("some-future-state"),
+                         wi.DEFAULT_STALLED_WORK_HOURS)
+
+    # ---- AC-127.2 — the thresholds come from the measured distribution --------
+    def test_AC_127_2_thresholds_are_the_measured_ones(self):
+        """Derived from views/stats.md §B measured-dwell medians (backfill held
+        apart per §17f): fixing 670s, reproducing 733s, building 1536s, deploying
+        685s, dev-validating 1790s, validating 10001s, reworking 4626s. 24h is
+        58-3400x every one of them. `scheduled`'s median is 55091s (15.3h, ZERO
+        backfill) — an order of magnitude higher and a DIFFERENT quantity (queue
+        latency, not effort), so it gets its own, larger number."""
+        for s in ("building", "fixing", "reproducing", "reworking", "deploying",
+                  "prod-deploying", "validating", "dev-validating", "prod-validating"):
+            self.assertEqual(wi.stalled_work_hours_for(s), 24.0, s)
+        for s in ("ready", "scheduled"):
+            self.assertEqual(wi.stalled_work_hours_for(s), 48.0, s)
+        self.assertGreater(wi.stalled_work_hours_for("scheduled"),
+                           wi.stalled_work_hours_for("building"))
+
+    def test_AC_127_2_the_retro_can_tune_it_in_policy_csv(self):
+        """Same ownership as every other buffer knob (§F2): the number lives in
+        queues/policy.csv, per QUEUE, and the code default is only the fallback."""
+        self._policy([("intake", "min_items", 2), ("intake", "wip_limit", 10),
+                      ("ready", "min_items", 3), ("ready", "wip_limit", 4),
+                      ("wip", "stall_hours", 240)])
+        self._fresh_ready()
+        self.write_item("active", "DEF-FIXING", "defect", self._fixing_defect(23))
+        # 7 days idle < the tuned 240h -> no finding
+        self.assertEqual(self._blocks(self._gate()), [])
+        pol = wi.read_queue_policy(self.project)
+        self.assertEqual(wi.stalled_work_hours_for("fixing", pol, self.graphs), 240.0)
+
+    # ---- AC-127.3 — the remedy distinguishes re-dispatch from release ---------
+    def test_AC_127_3_remedy_offers_redispatch_AND_release(self):
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "DEF-FIXING", "defect", self._fixing_defect(23))
+        msg = self._blocks(self._gate())[0]["message"]
+        self.assertIn("RE-DISPATCH", msg)
+        self.assertIn("RELEASE", msg)
+        self.assertIn("EVENT=blocked", msg)          # the release is executable
+        self.assertIn("DEF-FIXING", msg)
+        self.assertIn("fixing", msg)
+
+    def test_AC_127_3_message_claims_no_activity_never_abandonment(self):
+        """POINT OF HONESTY. The event log CANNOT distinguish an agent working a hard
+        item for six hours from an item nobody holds: nothing records a dispatch. So
+        the finding reports the fact it has (no event since T) and must not assert
+        the inference it cannot make."""
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "DEF-FIXING", "defect", self._fixing_defect(23))
+        msg = self._blocks(self._gate())[0]["message"]
+        self.assertIn("NO RECORDED", msg.upper())
+        self.assertNotIn("abandoned", msg.lower())
+        self.assertIn("cannot tell", msg.lower())
+
+    def test_AC_127_3_scheduled_remedy_differs_from_the_claimed_one(self):
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "OI-SCHED", "open-item", self._scheduled_oi(21))
+        msg = self._blocks(self._gate())[0]["message"]
+        self.assertIn("PULL", msg)
+        self.assertIn("defer_until", msg)
+
+    # ---- AC-127.4 — depth is occupancy, and it must say so -------------------
+    def test_AC_127_4_wip_over_cap_says_it_counts_occupancy(self):
+        """`wip: 7` looks identical whether seven agents are working or seven items
+        are abandoned. That reading cost 35 deferred items."""
+        self._policy([("intake", "min_items", 2), ("intake", "wip_limit", 10),
+                      ("ready", "min_items", 3), ("ready", "wip_limit", 4),
+                      ("wip", "wip_limit", 2)])
+        self._fresh_ready()
+        for i in range(3):
+            self.write_item("active", f"DEF-S{i}", "defect", self._fixing_defect(23, i))
+        over = [f for f in self._gate()
+                if f["check"] == "queue-over-cap" and f.get("queue") == "wip"]
+        self.assertEqual(len(over), 1, over)
+        msg = over[0]["message"]
+        self.assertIn("OCCUPANCY", msg.upper())
+        self.assertIn("0 with recorded activity", msg)
+        self.assertIn("3 idle", msg)
+        self.assertEqual(over[0]["active"], 0)
+        self.assertEqual(over[0]["idle"], 3)
+
+    def test_AC_127_4_header_reports_occupied_versus_active_every_run(self):
+        """It must be on EVERY run, not only when over cap: the wrong decision was
+        taken while wip was UNDER its cap."""
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "DEF-BUSY", "defect", self._fixing_defect(29, 20))
+        self.write_item("active", "DEF-IDLE", "defect", self._fixing_defect(23))
+        code, out = self._run()
+        head = out.splitlines()[0]
+        self.assertIn("wip 2 occupied", head)
+        self.assertIn("1 active", head)
+        self.assertIn("1 idle", head)
+
+    def test_AC_127_4_activity_split_is_computable_on_its_own(self):
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "DEF-BUSY", "defect", self._fixing_defect(29, 20))
+        self.write_item("active", "DEF-IDLE", "defect", self._fixing_defect(23))
+        act = wi.compute_wip_activity(self.graphs, self.project, now=wi.parse_ts(NOW))
+        self.assertEqual(act["wip"]["occupied"], 2)
+        self.assertEqual(act["wip"]["active"], 1)
+        self.assertEqual(act["wip"]["idle"], 1)
+        self.assertEqual(act["wip"]["idle_ids"], ["DEF-IDLE"])
+        self.assertEqual(act["ready"]["occupied"], 3)
+        self.assertEqual(act["ready"]["idle"], 0)
+
+    # ---- §17i — a check that cannot look must SAY SO, never pass -------------
+    def test_17i_unreadable_dwell_reports_could_not_look(self):
+        """An item whose latest event carries an unparseable ts has NO open segment
+        for its current state, so its idle time cannot be computed. The old shape
+        (`if ent is None: continue`) collapses that into a pass — the exact class
+        §17i was written against."""
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "DEF-BADTS", "defect",
+                        [{"ts": _dt(20, 0), "event": "reported", "agent": "orchestrator"},
+                         {"ts": _dt(20, 1), "event": "triaged", "agent": "orchestrator"},
+                         {"ts": "not-a-timestamp", "event": "confirmed",
+                          "agent": "engineer"}])
+        findings = [f for f in self._gate() if f["check"] == "stalled-work"]
+        self.assertEqual(len(findings), 1, findings)
+        # and it BLOCKS: the subject is an OCCUPIED WIP slot, so "we could not tell"
+        # must stop the pull exactly as "it is idle" does (§17i).
+        self.assertEqual(findings[0]["severity"], "block")
+        self.assertIsNone(findings[0]["idle_s"])
+        self.assertIn("COULD NOT LOOK", findings[0]["message"].upper())
+        self.assertIn("DEF-BADTS", findings[0]["message"])
+        code, out = self._run()
+        self.assertEqual(code, 2)
+        self.assertIn("COULD NOT LOOK", out)
+
+    def test_17i_check_is_unconditional_no_flag_can_switch_it_off(self):
+        """--no-observe exists and skips check 5's predicates. Nothing may skip THIS
+        limb: a gate with an off switch is a gate that cannot fail."""
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "DEF-FIXING", "defect", self._fixing_defect(23))
+        for kwargs in ({"observe": False}, {"observe": True},
+                       {"max_backlog_age_days": self.NEVER_AGES},
+                       {"stale_hours": 100000.0}):
+            with self.subTest(**kwargs):
+                self.assertEqual(
+                    [i for f in self._blocks(self._gate(**kwargs)) for i in f["ids"]],
+                    ["DEF-FIXING"], kwargs)
+
+    # ---- the second hole check 1 left: a stall with NO ref never blocked ------
+    def test_a_stalled_validation_without_a_ref_now_BLOCKS(self):
+        """Check 1 reports UNKNOWN (non-blocking) when a validating item carries no
+        `ref:` — so an item idle for a week in `validating` never stopped the loop.
+        Idleness is a fact independent of whether the work is finished."""
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "DEF-NOREF", "defect",
+                        self._validating_defect(22, 3, fixed_ref=False))
+        findings = self._gate()
+        self.assertEqual([f["severity"] for f in findings
+                          if f["check"] == "stalled-validation"], ["unknown"])
+        self.assertEqual([i for f in self._blocks(findings) for i in f["ids"]],
+                         ["DEF-NOREF"])
+
+    # ---- AC-127.5 (§17g sweep) — the same shape found in check 4 -------------
+    def test_AC_127_5_backlog_item_with_no_computable_age_is_NOT_ESTABLISHED(self):
+        """Swept out of this defect: check 4 did `if ent is None: continue`, so an
+        item whose AGE cannot be computed was exempt from the aging gate for ever
+        and `validate` reported clean for it too. Real population when this was
+        measured: THREE — DEFECT-OAG-129 and DEFECT-OAG-130 (value 26 each) and
+        OI-DEF124-SWEEP-LEDGER, all with an EMPTY `events:` list."""
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "DEF-NOEVENTS", "defect", [])
+        findings = self._gate(max_backlog_age_days=1.0)
+        un = [f for f in findings if f["check"] == "aged-backlog-unreadable"]
+        self.assertEqual(len(un), 1, findings)
+        self.assertEqual(un[0]["severity"], "unknown")
+        self.assertIn("DEF-NOEVENTS", un[0]["ids"])
+        self.assertIn("NOT ESTABLISHED", un[0]["message"])
+        # it is NOT counted as an aged-undecided item either way — the point is that
+        # the gate says so out loud instead of skipping it
+        aged = [f for f in findings if f["check"] == "aged-backlog-undecided"]
+        self.assertTrue(all("DEF-NOEVENTS" not in f["ids"] for f in aged), aged)
+        code, out = self._run(max_backlog_age_days=1.0)
+        self.assertIn("NOT ESTABLISHED", out)
+        self.assertIn("DEF-NOEVENTS", out)
+
+    def test_AC_127_5_a_readable_backlog_item_is_still_measured_normally(self):
+        """Non-vacuity for the limb above: the unreadable path must not swallow the
+        ordinary one."""
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "DEF-OLD", "defect",
+                        [{"ts": _dt(1, 0), "event": "reported", "agent": "orchestrator"}])
+        findings = self._gate(max_backlog_age_days=1.0)
+        aged = [f for f in findings if f["check"] == "aged-backlog-undecided"]
+        self.assertEqual(len(aged), 1, findings)
+        self.assertIn("DEF-OLD", aged[0]["ids"])
+        self.assertEqual([f for f in findings
+                          if f["check"] == "aged-backlog-unreadable"], [])
+
+    def test_no_double_report_when_check1_already_blocks_the_item(self):
+        """One item, one remedy. Check 1's finding is the more specific one (the work
+        is DONE, dispatch the tester), so this limb yields to it."""
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "DEF-DONE", "defect",
+                        self._validating_defect(22, 3, ref="abc1234"))
+        findings = self._gate()
+        self.assertEqual([f["check"] for f in findings
+                          if "DEF-DONE" in f.get("ids", [])], ["stalled-validation"])
+
+
+# ===========================================================================
+# DEFECT-OAG-128 — a `ref:` is REPO-SCOPED, and the derivation looked in one repo
+#
+# Reproduced BEFORE the fix, against the real repos (recorded on the item):
+#   _ref_on_trunk('OagEventSource', '8dae2cc') -> None   real, on the parent's main
+#   _ref_on_trunk('OagEventSource', 'deadbee') -> None   fabricated, nowhere at all
+# equal — so a wrong-place lookup and a destroyed commit were the same reading, and
+# loop-gate printed the same string for both. These cases keep them apart.
+#
+# The topology is built with REAL git repos, not a patched seam. The whole defect is
+# about WHICH REPO A LOOKUP LANDS IN, so a fake that answers by lane would assert
+# the belief instead of the behaviour.
+# ===========================================================================
+class TestRefRepoScoping(Base):
+    def _git(self, repo, *args):
+        return subprocess.run(["git", "-C", repo, *args], capture_output=True,
+                              text=True, check=False)
+
+    def _init_repo(self, d, branch="main"):
+        os.makedirs(d, exist_ok=True)
+        self._git(d, "init", "-q", "-b", branch)
+        self._git(d, "config", "user.email", "a@b.test")
+        self._git(d, "config", "user.name", "A")
+        self._git(d, "config", "commit.gpgsign", "false")
+        return d
+
+    def _write(self, root, rel, text):
+        p = os.path.join(root, rel)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(text)
+
+    def _commit(self, repo, rel, text, msg):
+        """A commit, and its short sha."""
+        self._write(repo, rel, text)
+        self._git(repo, "add", "-A")
+        self._git(repo, "commit", "-q", "-m", msg)
+        return self._git(repo, "rev-parse", "--short=7", "HEAD").stdout.strip()
+
+    def _push(self, repo):
+        """Publish the current branch to this repo's own `origin`, so origin/<b>
+        exists. `--bare` because a non-bare push target refuses a checked-out
+        branch — and the check tests ORIGIN refs only, deliberately: the question
+        is 'is it PUSHED', which a local branch cannot answer."""
+        remote = repo + "-origin.git"
+        if not os.path.exists(remote):
+            subprocess.run(["git", "init", "-q", "--bare", remote], check=True)
+            self._git(repo, "remote", "add", "origin", remote)
+        br = self._git(repo, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+        self._git(repo, "push", "-q", "origin", br)
+        self._git(repo, "fetch", "-q", "origin")
+
+    def _topology(self, parent_branch="main"):
+        """The real shape: a parent repo that gitignores each project's own nested
+        repo, so the project repo is a SEPARATE repo living inside the parent's
+        working tree. Both are real; neither can see the other's objects.
+
+        Built AT `wi.ROOT` rather than in a side directory, so the items the gate
+        reads and the repos it queries share one root — the same relationship they
+        have in production. Patching ROOT to a repo elsewhere silently pointed
+        `load_all_items` at an empty tree and every finding came back empty, which
+        is the sort of vacuous green this whole item is about."""
+        parent = self._init_repo(self.tmp, parent_branch)
+        self._write(parent, ".gitignore", "/work/*/\n")
+        self._commit(parent, "CLAUDE.md", "agent system\n", "parent base")
+        proj = self._init_repo(os.path.join(parent, "work", self.project))
+        self._commit(proj, "src/a.ts", "a\n", "project base")
+        self.assertEqual(os.path.abspath(parent), os.path.abspath(wi.ROOT))
+        return parent, proj
+
+    # -- AC-128.1: resolution finds the ref in whichever repo actually holds it --
+    def test_AC_128_1_a_parent_lane_ref_resolves_and_reads_PUSHED(self):
+        """The six real cases. A parent-repo commit on the parent's origin trunk
+        must read ON-TRUNK — not missing, which is what the defect produced."""
+        parent, _proj = self._topology()
+        sha = self._commit(parent, "process/x.md", "x\n", "a parent-lane fix")
+        self._push(parent)
+        r = wi.resolve_ref(self.project, sha)
+        self.assertEqual(r["verdict"], wi.REF_ON_TRUNK, r)
+        self.assertEqual(r["lane"], wi.LANE_PARENT, r)
+
+    def test_AC_128_1_a_project_lane_ref_still_resolves_the_control_arm(self):
+        """The arm that already worked and must keep working — the fix must not
+        buy the parent lane at the project lane's expense."""
+        parent, proj = self._topology()
+        sha = self._commit(proj, "src/b.ts", "b\n", "a project-lane fix")
+        self._push(proj)
+        r = wi.resolve_ref(self.project, sha)
+        self.assertEqual(r["verdict"], wi.REF_ON_TRUNK, r)
+        self.assertEqual(r["lane"], wi.LANE_PROJECT, r)
+
+    def test_AC_128_1_a_parent_ref_is_NOT_read_out_of_the_project_repo(self):
+        """The mechanism, asserted directly: the two repos have disjoint histories,
+        so a parent sha must be absent from the project repo. If this ever fails the
+        fixture has stopped reproducing the defect's precondition and every other
+        case in this class is vacuous."""
+        parent, proj = self._topology()
+        sha = self._commit(parent, "process/y.md", "y\n", "parent only")
+        self.assertEqual(
+            self._git(proj, "rev-parse", "--verify", "--quiet",
+                      sha + "^{commit}").returncode, 1)
+
+    def test_AC_128_1_committed_but_unpushed_is_NOT_ON_TRUNK_not_absent(self):
+        """A parent-lane commit that exists but was never pushed (the normal state
+        of this repo — the owner owns the parent push). It is UNPUSHED, which is a
+        different fact from LOST, and conflating them is the defect."""
+        parent, _proj = self._topology()
+        sha = self._commit(parent, "process/z.md", "z\n", "unpushed parent work")
+        self._push(parent)
+        sha2 = self._commit(parent, "process/z2.md", "z2\n", "later, unpushed")
+        r = wi.resolve_ref(self.project, sha2)
+        self.assertEqual(r["verdict"], wi.REF_NOT_ON_TRUNK, r)
+        self.assertEqual(r["lane"], wi.LANE_PARENT, r)
+        self.assertNotEqual(r["verdict"], wi.REF_ABSENT)
+        self.assertTrue(sha)          # the pushed sibling really was pushed
+
+    def test_AC_128_1_parent_trunk_is_the_worktree_branchs_origin_not_only_main(self):
+        """A per-project worktree sits on `instance/<project>`, so a parent-lane
+        commit's push destination is origin/instance/<project>. Without that
+        candidate every parent ref reads NOT-ON-TRUNK for the wrong reason."""
+        parent, _proj = self._topology(parent_branch="instance/" + self.project)
+        sha = self._commit(parent, "process/w.md", "w\n", "on the instance branch")
+        self._push(parent)
+        r = wi.resolve_ref(self.project, sha)
+        self.assertEqual(r["verdict"], wi.REF_ON_TRUNK, r)
+        self.assertEqual(r["trunk"], "origin/instance/" + self.project, r)
+
+    # -- AC-128.2: the DEFECT-OAG-072 alarm survives, and is DISTINCT ----------
+    def test_AC_128_2_a_sha_that_exists_NOWHERE_is_ABSENT_and_LOUD(self):
+        """The alarm that means work may have been destroyed. Before the fix this
+        returned the same None as a wrong-repo lookup, i.e. it did not exist."""
+        parent, _proj = self._topology()
+        self._push(parent)
+        r = wi.resolve_ref(self.project, "deadbee")
+        self.assertEqual(r["verdict"], wi.REF_ABSENT, r)
+        self.assertEqual(sorted(r["searched"]),
+                         sorted([wi.LANE_PARENT, wi.LANE_PROJECT]), r)
+        self.assertEqual(r["unreadable"], [], r)
+
+    def test_AC_128_2_ABSENT_is_a_DIFFERENT_verdict_from_a_wrong_repo_lookup(self):
+        """THE regression this defect is. Both arms in one assertion, so the fix
+        cannot be satisfied by making them agree again in the other direction."""
+        parent, _proj = self._topology()
+        real = self._commit(parent, "process/r.md", "r\n", "real parent work")
+        self._push(parent)
+        found = wi.resolve_ref(self.project, real)
+        absent = wi.resolve_ref(self.project, "deadbee")
+        self.assertNotEqual(found["verdict"], absent["verdict"])
+        self.assertEqual(found["verdict"], wi.REF_ON_TRUNK)
+        self.assertEqual(absent["verdict"], wi.REF_ABSENT)
+
+    def test_AC_128_2_an_UNREADABLE_repo_is_CANNOT_DETERMINE_never_ABSENT(self):
+        """§17i. If a lane repo could not be read, the object's absence was never
+        established — and claiming destroyed work on a partial search is how a real
+        alarm gets trained out of people."""
+        parent, proj = self._topology()
+        self._push(parent)
+        shutil.rmtree(os.path.join(proj, ".git"))
+        r = wi.resolve_ref(self.project, "deadbee")
+        self.assertEqual(r["verdict"], wi.REF_CANNOT_DETERMINE, r)
+        self.assertIn(wi.LANE_PROJECT, r["unreadable"], r)
+
+    def test_AC_128_2_no_ref_at_all_is_CANNOT_DETERMINE_never_ABSENT(self):
+        parent, _proj = self._topology()
+        for empty in (None, "", "   "):
+            r = wi.resolve_ref(self.project, empty)
+            self.assertEqual(r["verdict"], wi.REF_CANNOT_DETERMINE, (empty, r))
+
+    # -- the third fault, found by BUILDING the alarm (UC-XA5 / `605428`) ------
+    def test_AC_128_2_an_all_digit_ref_stripped_of_its_leading_zero_is_repaired(self):
+        """Without this the new ABSENT alarm FALSE-FIRES on its first real run.
+        `_parse_scalar` int-coerces an all-digit frontmatter value, so the sha
+        `0605428` was read as 605428 and re-rendered WITHOUT the zero; `UC-XA5`
+        therefore records a ref that resolves in neither repo — the exact ABSENT
+        signature — while its real commit 06054289ae9d50bf194b98643d920939b5d7531b
+        sits on origin/main. Repaired at READ time because the loss is already on
+        disk in every item written before the parser fix.
+
+        Driven by a REAL git object, not a stubbed lookup: `commit-tree` is searched
+        until it mints a sha with a leading zero followed by digits, so the
+        int-coercion is applied to a sha git will actually resolve. The object is
+        deliberately left unreachable — the claim is that the repair stops the
+        FALSE ABSENT, and reachability would test ancestry instead."""
+        _parent, proj = self._topology()
+        tree = self._git(proj, "rev-parse", "HEAD^{tree}").stdout.strip()
+        head = self._git(proj, "rev-parse", "HEAD").stdout.strip()
+        target = None
+        for i in range(4000):
+            sha = self._git(proj, "commit-tree", tree, "-p", head,
+                            "-m", "hunt %d" % i).stdout.strip()
+            # width 7 deliberately: that is the abbreviation this registry records,
+            # so `mangled` comes out at 6 chars — UC-XA5's exact shape.
+            if sha.startswith("0") and sha[:7].isdigit():
+                target = sha[:7]
+                break
+        self.assertIsNotNone(
+            target, "no leading-zero all-digit abbreviation minted in 4000 tries; "
+                    "the fixture stopped exercising the int-coercion repair")
+        mangled = str(int(target))
+        self.assertNotEqual(mangled, target)          # the coercion really bites
+        r = wi.resolve_ref(self.project, mangled)
+        baseline = wi.resolve_ref(self.project, mangled + "f" * 8)
+        self.assertNotEqual(r["verdict"], wi.REF_ABSENT, r)
+        self.assertTrue(r["padded"], r)
+        self.assertEqual(r["resolved"], target, r)
+        # and the repair is NOT a blanket "never say absent": a genuinely absent
+        # sha of the same shape still reads ABSENT.
+        self.assertEqual(baseline["verdict"], wi.REF_ABSENT, baseline)
+
+    def test_AC_128_2_the_padding_repair_is_bounded_to_all_digit_refs(self):
+        """A ref with any hex letter was never int-coerced, so padding it would be
+        inventing candidates. Pure limb, no git."""
+        self.assertEqual(wi._ref_candidates("8dae2cc"), ["8dae2cc"])
+        cands = wi._ref_candidates("605428")
+        self.assertEqual(cands[0], "605428")
+        self.assertIn("0605428", cands)
+        self.assertTrue(all(c.lstrip("0") == "605428" for c in cands[1:]), cands)
+
+    def test_AC_128_2_the_root_cause_a_ref_is_never_int_coerced_on_read(self):
+        """The repair above recovers old damage; this stops NEW damage. A sha is a
+        string by nature and must round-trip through the item file unchanged."""
+        ev = wi._parse_inline_map(
+            '{ts: "2026-01-01T00:00:00Z", event: fixed, agent: engineer, ref: 0605428}')
+        self.assertEqual(ev["ref"], "0605428")
+        self.assertIsInstance(ev["ref"], str)
+
+    def test_AC_128_2_string_by_intent_frontmatter_is_never_number_coerced(self):
+        """IMP-029's unfinished audit, closed. The audit itself (via the real parser
+        over all 478 items) found only value/cost/tokens/duration_ms parsed as
+        numbers, every one numeric BY INTENT — so `ref` was the sole live hazard.
+        `id` and `job` are protected anyway at a population of ZERO: the reason they
+        are not coerced today is that nobody has written an all-digit one, which is
+        luck, not a property (§17h)."""
+        fm = wi.parse_frontmatter(
+            "id: 12345678\ntype: defect\njob: 17\nlane: parent-repo\n"
+            "value: 28\ncost: 2\n")
+        self.assertEqual(fm["id"], "12345678")
+        self.assertIsInstance(fm["id"], str)
+        self.assertEqual(fm["job"], "17")
+        self.assertIsInstance(fm["job"], str)
+        # and the genuinely numeric fields are STILL numbers — the guard must not
+        # turn the metric fields into strings and break every fold downstream.
+        self.assertEqual((fm["value"], fm["cost"]), (28, 2))
+        self.assertIsInstance(fm["value"], int)
+
+    def test_AC_128_2_a_ref_round_trips_through_a_real_item_file(self):
+        """End to end, not just the parser: write an item carrying `0605428`, read
+        it back, and the leading zero is still there. This is the path that ate it —
+        wi-project re-renders the file it just read."""
+        self.write_item("active", "UC-ZERO", "use-case", [
+            {"ts": _dt(1, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(1, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(1, 2), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(1, 3), "event": "built_green", "agent": "engineer",
+             "ref": "0605428"},
+        ])
+        items, _dup = wi.load_all_items(self.project)
+        ev = [e for e in items["UC-ZERO"].events if e.get("event") == "built_green"][0]
+        self.assertEqual(str(ev["ref"]), "0605428")
+
+    # -- AC-128.4: a declared lane is CROSS-CHECKED, not trusted ---------------
+    def test_AC_128_4_a_lane_contradicted_by_every_ref_is_reported(self):
+        parent, proj = self._topology()
+        sha = self._commit(proj, "src/c.ts", "c\n", "a project-lane fix")
+        self._push(proj)
+        bad = wi.check_declared_lane(self.project, wi.LANE_PARENT, [sha])
+        good = wi.check_declared_lane(self.project, wi.LANE_PROJECT, [sha])
+        self.assertEqual(bad["verdict"], "contradicted", bad)
+        self.assertEqual(bad["resolved_lanes"], [wi.LANE_PROJECT], bad)
+        self.assertEqual(good["verdict"], "consistent", good)
+
+    def test_AC_128_4_a_genuinely_TWO_LANE_item_is_NOT_a_misdeclaration(self):
+        """DEFECT-OAG-091's real shape, and the reason `lane:` cannot be the routing
+        key. Its log says "Two lanes, two repos, never mixed": 898880d4 project +
+        2c6a7d58 parent. A single-valued field cannot express that, so declaring
+        either one is INCOMPLETE, not FALSE. Calling it a misdeclaration would
+        manufacture a violation out of a correct item."""
+        parent, proj = self._topology()
+        p_sha = self._commit(proj, "src/d.ts", "d\n", "project half")
+        self._push(proj)
+        q_sha = self._commit(parent, "process/d.md", "d\n", "parent half")
+        self._push(parent)
+        r = wi.check_declared_lane(self.project, wi.LANE_PROJECT, [p_sha, q_sha])
+        self.assertEqual(r["verdict"], "spans-both", r)
+        self.assertEqual(sorted(r["resolved_lanes"]),
+                         sorted([wi.LANE_PARENT, wi.LANE_PROJECT]), r)
+
+    def test_AC_128_4_an_absent_lane_is_UNDECLARED_not_a_violation(self):
+        """`lane:` is absent on 382 of 478 items (79.9% — measured, not assumed), so
+        treating absence as a violation would fail four fifths of the registry.
+        It reports as UNDECLARED with the lane its refs imply, which is what makes a
+        backfill mechanical."""
+        parent, proj = self._topology()
+        sha = self._commit(proj, "src/e.ts", "e\n", "a project-lane fix")
+        self._push(proj)
+        r = wi.check_declared_lane(self.project, None, [sha])
+        self.assertEqual(r["verdict"], "undeclared", r)
+        self.assertEqual(r["resolved_lanes"], [wi.LANE_PROJECT], r)
+
+    def test_AC_128_4_a_lane_check_with_no_resolvable_ref_CANNOT_DETERMINE(self):
+        parent, _proj = self._topology()
+        r = wi.check_declared_lane(self.project, wi.LANE_PARENT, ["deadbee"])
+        self.assertEqual(r["verdict"], "cannot-determine", r)
+        self.assertEqual(r["resolved_lanes"], [], r)
+
+    # -- back-compat: the tri-state wrapper still means what it meant ----------
+    def test_the_tri_state_wrapper_delegates_and_never_calls_ABSENT_true(self):
+        parent, proj = self._topology()
+        sha = self._commit(proj, "src/f.ts", "f\n", "pushed")
+        self._push(proj)
+        self.assertIs(wi._ref_on_trunk(self.project, sha), True)
+        unpushed = self._commit(proj, "src/g.ts", "g\n", "unpushed")
+        self.assertIs(wi._ref_on_trunk(self.project, unpushed), False)
+        # ABSENT maps to None, NOT to False: "the object is gone" must never
+        # render as the ordinary, unalarming "not pushed yet".
+        self.assertIsNone(wi._ref_on_trunk(self.project, "deadbee"))
+
+    # ===================================================================
+    # check 12 — every recorded `ref:` must still EXIST somewhere
+    # (DEFECT-OAG-128 / AC-128.2). Check 1 only ever looks at items STALLED IN
+    # VALIDATION; a destroyed commit on a DONE item is what nobody re-reads, and
+    # that is precisely what happened to DEFECT-OAG-072.
+    # ===================================================================
+    def _done_item(self, iid, ref, lane=None, event="fixed"):
+        evs = [
+            {"ts": _dt(1, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(1, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(1, 2), "event": "confirmed", "agent": "engineer"},
+            {"ts": _dt(1, 3), "event": event, "agent": "engineer", "ref": ref},
+            {"ts": _dt(1, 4), "event": "validated", "agent": "tester"},
+        ]
+        self.write_item("done", iid, "defect", evs,
+                        extra_fm=({"lane": lane} if lane else None))
+
+    def _default_policy(self):
+        os.makedirs(os.path.join(self.tmp, "work", self.project, "queues"),
+                    exist_ok=True)
+        with open(os.path.join(self.tmp, "work", self.project, "queues",
+                               "policy.csv"), "w", encoding="utf-8") as f:
+            f.write("queue,param,value,owner,rationale\n"
+                    "ready,min_items,3,retro,seed\n"
+                    "ready,wip_limit,4,retro,seed\n"
+                    "intake,min_items,2,retro,seed\n"
+                    "intake,wip_limit,10,retro,seed\n"
+                    "intake,kind,backlog,retro,seed\n")
+
+    def _ready_uc(self, day):
+        return [
+            {"ts": _dt(day, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(day, 1), "event": "made_ready", "agent": "flow-manager"},
+        ]
+
+    def _run_cli(self):
+        buf = io.StringIO()
+        args = argparse.Namespace(project=self.project, stale_hours=4.0, threshold=3,
+                                  now="2026-06-25T00:00:00Z", observe=False,
+                                  observe_timeout=5, max_backlog_age_days=7.0)
+        code = 0
+        with contextlib.redirect_stdout(buf):
+            try:
+                code = wi.cmd_loop_gate(args) or 0
+            except SystemExit as ex:      # the gate exits 2; that IS the block
+                code = ex.code or 0
+        return code, buf.getvalue()
+
+    def _prov(self, _parent=None, **kw):
+        """`_parent` is accepted and ignored: the topology IS wi.ROOT, so there is
+        nothing to redirect. Kept in the signature because each caller passing its
+        parent makes the topology dependency visible at the call site."""
+        return wi.compute_ref_provenance(self.project, **kw)
+
+    def test_AC_128_2_check12_a_DONE_items_destroyed_commit_BLOCKS_the_loop(self):
+        """The DEFECT-OAG-072 case exactly: an item DELIVERED COMPLETE and CLOSED
+        whose objects are gone. Nothing else in the gate looks at a done item."""
+        parent, _proj = self._topology()
+        self._done_item("DEF-LOST", "deadbee")
+        f = self._prov(parent)
+        self.assertEqual([x["severity"] for x in f], ["block"], f)
+        self.assertEqual(f[0]["ids"], ["DEF-LOST"])
+        self.assertIn("EXIST IN NEITHER REPO", f[0]["message"])
+        self.assertIn("DEFECT-OAG-072", f[0]["message"])
+        self.assertIn("worktree-guard", f[0]["message"])   # rescue, not a re-run
+        self.assertNotIn("re-run to see if it clears", f[0]["message"].split("do NOT")[0])
+
+    def test_AC_128_2_check12_a_PARENT_lane_ref_is_NOT_reported_destroyed(self):
+        """The defect itself, at registry scale: six real items read as destroyed
+        because the lookup only ever entered the project repo."""
+        parent, _proj = self._topology()
+        sha = self._commit(parent, "process/p.md", "p\n", "a parent-lane fix")
+        self._done_item("DEF-PARENT", sha)
+        self.assertEqual(self._prov(parent), [])
+
+    def test_AC_128_2_check12_a_PROJECT_lane_ref_is_NOT_reported_destroyed(self):
+        parent, proj = self._topology()
+        sha = self._commit(proj, "src/p.ts", "p\n", "a project-lane fix")
+        self._done_item("DEF-PROJ", sha)
+        self.assertEqual(self._prov(parent), [])
+
+    def test_AC_128_2_check12_an_unpushed_commit_is_not_an_alarm(self):
+        """Existence, never ancestry. Unpushed-ness is check 1's business and is a
+        completely ordinary state of the parent repo."""
+        parent, _proj = self._topology()
+        sha = self._commit(parent, "process/u.md", "u\n", "never pushed anywhere")
+        self._done_item("DEF-UNPUSHED", sha)
+        self.assertEqual(self._prov(parent), [])
+
+    def test_AC_128_2_check12_an_unreadable_repo_is_COULD_NOT_LOOK_not_the_alarm(self):
+        """§17i. A partial search cannot establish absence, and crying destroyed-work
+        off one is how the alarm gets trained out of people — which is how
+        DEFECT-OAG-072 was lost."""
+        parent, proj = self._topology()
+        self._done_item("DEF-LOST", "deadbee")
+        shutil.rmtree(os.path.join(proj, ".git"))
+        f = self._prov(parent)
+        self.assertEqual([x["severity"] for x in f], ["unknown"], f)
+        self.assertIn("COULD NOT LOOK", f[0]["message"])
+        self.assertIn("not a pass", f[0]["message"])
+        self.assertNotIn("EXIST IN NEITHER REPO", f[0]["message"])
+
+    def test_AC_128_2_check12_a_non_sha_ref_is_advisory_never_destroyed_work(self):
+        """`UC-ML1` records `ref: delta-052` — an architecture-delta DOCUMENT id on a
+        solution-architect `amended` event. The contract declares `ref: <sha>`, which
+        is the AUTHORITY for excluding it (§17h); it is REPORTED, because a silent
+        exclusion is where a mistyped sha would hide. Found on the check's first real
+        run, and without it the alarm's first ever firing would have been false."""
+        parent, _proj = self._topology()
+        self._done_item("DEF-DOCREF", "delta-052", event="amended")
+        f = self._prov(parent)
+        self.assertEqual([x["severity"] for x in f], ["advisory"], f)
+        self.assertIn("NOT sha-shaped", f[0]["message"])
+        self.assertIn("delta-052", f[0]["message"])
+        self.assertIn("CONTRACT.md", f[0]["message"])
+        self.assertNotIn("EXIST IN NEITHER REPO", f[0]["message"])
+
+    def test_AC_128_2_check12_a_MISTYPED_sha_still_reaches_the_alarm(self):
+        """The exclusion above must not become a hiding place. A ref that is still
+        sha-SHAPED but wrong is destroyed-work-shaped and must block."""
+        parent, _proj = self._topology()
+        real = self._commit(parent, "process/m.md", "m\n", "the real commit")
+        self._done_item("DEF-TYPO", ("f" if real[0] != "f" else "e") + real[1:] + "ab")
+        f = self._prov(parent)
+        self.assertEqual([x["severity"] for x in f], ["block"], f)
+
+    def test_AC_128_2_check12_the_zero_stripped_ref_does_not_false_fire(self):
+        """UC-XA5's `605428`, at registry scale: the batched probe must submit the
+        zero-padded repair candidates too, or this check false-fires on the 11
+        all-digit refs already damaged on disk."""
+        _parent, proj = self._topology()
+        tree = self._git(proj, "rev-parse", "HEAD^{tree}").stdout.strip()
+        head = self._git(proj, "rev-parse", "HEAD").stdout.strip()
+        target = None
+        for i in range(4000):
+            sha = self._git(proj, "commit-tree", tree, "-p", head,
+                            "-m", "hunt %d" % i).stdout.strip()
+            # width 7 deliberately: that is the abbreviation this registry records,
+            # so `mangled` comes out at 6 chars — UC-XA5's exact shape.
+            if sha.startswith("0") and sha[:7].isdigit():
+                target = sha[:7]
+                break
+        self.assertIsNotNone(target, "fixture stopped minting a leading-zero sha")
+        mangled = str(int(target))
+        self.assertNotEqual(mangled, target)
+        self._done_item("DEF-ZERO", mangled)
+        self.assertEqual(self._prov(_parent), [])
+
+    def test_AC_128_2_check12_an_all_digit_ref_BELOW_the_hex_floor_is_still_asked_about(self):
+        """Found by mutation: `return False` on the all-digit branch SURVIVED, because
+        every other case sits at or above the 6-char hex floor. Int-coercion shortens
+        a sha by however many leading zeros it ate, so a 4- or 5-digit ref can still
+        be a repairable sha — and excluding it would route it to the MALFORMED
+        advisory, i.e. silently out of the existence check, which is the hiding place
+        §17h names. Below git's own 4-char abbreviation floor there is nothing to ask,
+        so THAT is malformed."""
+        self.assertTrue(wi._is_sha_shaped("1234"))          # 4 digits: askable
+        self.assertTrue(wi._is_sha_shaped("12345"))         # 5 digits: askable
+        self.assertFalse(wi._is_sha_shaped("123"))          # under git's floor
+        self.assertFalse(wi._is_sha_shaped("delta-052"))    # not a sha at all
+        # and it reaches the ALARM, not the advisory, when it resolves nowhere
+        _parent, _proj = self._topology()
+        self._done_item("DEF-SHORT", "1234")
+        f = self._prov()
+        self.assertEqual([x["severity"] for x in f], ["block"], f)
+        self.assertEqual(f[0]["absent"], ["1234"], f)
+
+    def test_AC_128_2_check12_a_TRUNCATED_batch_answer_is_unreadable_not_absence(self):
+        """Found by mutation: dropping the length check SURVIVED. `cat-file
+        --batch-check` is POSITIONAL — one answer line per input line — so a SHORT
+        answer silently shifts every mapping after the cut and refs start reading as
+        absent because their neighbour's line was consumed. This is the v143
+        truncation class that made `worktree-guard` report NOT ESTABLISHED after the
+        repo's history simply grew past a 64 KiB pipe buffer: nothing regressed, the
+        world got bigger. A partial answer must read COULD-NOT-LOOK, never absence."""
+        _parent, proj = self._topology()
+        sha = self._commit(proj, "src/tr.ts", "tr\n", "a real commit")
+        self._done_item("DEF-REAL", sha)
+        real_git = wi._git
+
+        def truncating(repo, *args, _stdin=None):
+            rc, out = real_git(repo, *args, _stdin=_stdin)
+            if _stdin is not None and out:
+                out = "\n".join(out.split("\n")[:-1])      # lose the last line
+            return rc, out
+
+        wi._git = truncating
+        try:
+            f = self._prov()
+        finally:
+            wi._git = real_git
+        self.assertEqual([x["severity"] for x in f], ["unknown"], f)
+        self.assertIn("COULD NOT LOOK", f[0]["message"])
+        self.assertNotIn("EXIST IN NEITHER REPO", f[0]["message"])
+
+    # -- the EARLIEST catchable point: the append path, where the data enters ----
+    def _append(self, iid, event, agent, ref):
+        args = argparse.Namespace(project=self.project, id=iid, event=event,
+                                  agent=agent, ref=ref, note=None, ts=None,
+                                  observe=None, tokens=None, duration_ms=None,
+                                  note_path=None, amend=None)
+        err, out = io.StringIO(), io.StringIO()
+        code = 0
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
+            try:
+                wi.cmd_append(args)
+            except SystemExit as ex:
+                code = ex.code or 0
+        return code, err.getvalue() + out.getvalue()
+
+    def _open_defect(self, iid):
+        self.write_item("active", iid, "defect", [
+            {"ts": _dt(1, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(1, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(1, 2), "event": "confirmed", "agent": "engineer"},
+        ])
+
+    def test_AC_128_2_append_REFUSES_a_ref_that_is_not_a_commit_sha(self):
+        """`UC-ML1` put an architecture-delta DOCUMENT id (`delta-052`) in a field the
+        contract reserves for a sha, and it sat there unnoticed until a control was
+        built. There is no legitimate use, so this is refused rather than warned:
+        refusing costs one corrected command, accepting costs a permanently
+        unverifiable ref — and it is the shape a mistyped sha hides behind."""
+        self._topology()
+        self._open_defect("DEF-DOC")
+        code, out = self._append("DEF-DOC", "fixed", "engineer", "delta-052")
+        self.assertEqual(code, 1, out)
+        self.assertIn("REFUSED", out)
+        self.assertIn("CONTRACT.md", out)
+        self.assertIn("--note", out)                    # names the remedy
+        items, _d = wi.load_all_items(self.project)
+        self.assertEqual([e for e in items["DEF-DOC"].events
+                          if e.get("event") == "fixed"], [], "nothing was written")
+
+    def test_AC_128_2_append_WARNS_but_still_RECORDS_a_sha_absent_everywhere(self):
+        """Deliberately asymmetric to the refusal above. The event log IS the source
+        of truth, so losing a real state transition because git could not vouch for
+        its sha is worse than recording a suspect one. check 12 is the blocking
+        control; this puts the complaint in front of the agent that made the mistake
+        while it still remembers what it committed."""
+        self._topology()
+        self._open_defect("DEF-GONE")
+        code, out = self._append("DEF-GONE", "fixed", "engineer", "deadbee")
+        self.assertEqual(code, 0, out)
+        self.assertIn("WARNING", out)
+        self.assertIn("DEFECT-OAG-072", out)
+        self.assertIn("worktree-guard", out)
+        self.assertIn("BLOCK the loop", out)
+        items, _d = wi.load_all_items(self.project)
+        self.assertEqual([str(e["ref"]) for e in items["DEF-GONE"].events
+                          if e.get("event") == "fixed"], ["deadbee"],
+                         "the transition must NOT be lost")
+
+    def test_AC_128_1_append_accepts_a_PARENT_lane_sha_in_silence(self):
+        """The regression that matters most here: before the fix a parent-lane sha
+        would have been the thing that looked destroyed. It must pass without a
+        murmur, or every parent-lane append trains the agent to ignore the warning."""
+        parent, _proj = self._topology()
+        sha = self._commit(parent, "process/ap.md", "ap\n", "parent-lane work")
+        self._open_defect("DEF-PAR")
+        code, out = self._append("DEF-PAR", "fixed", "engineer", sha)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("WARNING", out)
+        self.assertNotIn("REFUSED", out)
+
+    def test_AC_128_1_append_accepts_a_PROJECT_lane_sha_in_silence(self):
+        _parent, proj = self._topology()
+        sha = self._commit(proj, "src/ap.ts", "ap\n", "project-lane work")
+        self._open_defect("DEF-PRJ")
+        code, out = self._append("DEF-PRJ", "fixed", "engineer", sha)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("WARNING", out)
+        self.assertNotIn("REFUSED", out)
+
+    def test_AC_128_4_check12_a_contradicted_lane_is_reported_but_never_BLOCKS(self):
+        """AC-128.4. Advisory on purpose: resolution no longer trusts `lane:`, so a
+        wrong one costs a misrouted DISPATCH (DEFECT-OAG-076), not a wrong push
+        reading — and blocking the loop on a stale field would stop delivery over a
+        bookkeeping error."""
+        parent, proj = self._topology()
+        sha = self._commit(proj, "src/l.ts", "l\n", "project-lane work")
+        self._done_item("DEF-BADLANE", sha, lane=wi.LANE_PARENT)
+        f = self._prov(parent)
+        self.assertEqual([x["severity"] for x in f], ["advisory"], f)
+        self.assertEqual(f[0]["ids"], ["DEF-BADLANE"])
+        self.assertIn("declares lane:parent-repo", f[0]["message"])
+        self.assertIn("dispatch-check", f[0]["message"])
+
+    def test_AC_128_4_check12_a_TWO_LANE_item_is_not_reported_at_all(self):
+        """DEFECT-OAG-091's real shape — one project ref and one parent ref, declaring
+        either. A single-valued field cannot express that, so the declaration is
+        INCOMPLETE not FALSE, and flagging it would manufacture a violation."""
+        parent, proj = self._topology()
+        p_sha = self._commit(proj, "src/t.ts", "t\n", "project half")
+        q_sha = self._commit(parent, "process/t.md", "t\n", "parent half")
+        self.write_item("done", "DEF-TWOLANE", "defect", [
+            {"ts": _dt(1, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(1, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(1, 2), "event": "confirmed", "agent": "engineer"},
+            {"ts": _dt(1, 3), "event": "fixed", "agent": "engineer", "ref": p_sha},
+            {"ts": _dt(1, 4), "event": "validated", "agent": "tester", "ref": q_sha},
+        ], extra_fm={"lane": wi.LANE_PROJECT})
+        self.assertEqual(self._prov(parent), [])
+
+    def test_AC_128_4_check12_an_UNDECLARED_lane_is_not_reported(self):
+        """382 of 478 items (79.9%) have no `lane:`. Treating that as a violation
+        would fail four fifths of the registry on its first run."""
+        parent, proj = self._topology()
+        sha = self._commit(proj, "src/n.ts", "n\n", "no lane declared")
+        self._done_item("DEF-NOLANE", sha, lane=None)
+        self.assertEqual(self._prov(parent), [])
+
+    def test_AC_128_2_check12_is_UNCONDITIONAL_and_reaches_the_exit_code(self):
+        """A gate with an off switch is a gate that cannot fail (§17i). No flag
+        reaches this check, and its block must actually stop the pull — asserted
+        through the real CLI, not the pure function."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        parent, _proj = self._topology()
+        self._done_item("DEF-LOST", "deadbee")
+        code, out = self._run_cli()
+        self.assertEqual(code, 2, out)
+        self.assertIn("ref-provenance", out)
+        self.assertIn("EXIST IN NEITHER REPO", out)
+
+    def test_AC_128_2_check12_registry_wide_findings_are_deduped_by_ref(self):
+        """Two items citing one destroyed sha is ONE loss, named twice — a per-item
+        finding would make a single incident look like a spreading one."""
+        parent, _proj = self._topology()
+        self._done_item("DEF-A", "deadbee")
+        self._done_item("DEF-B", "deadbee")
+        f = self._prov(parent)
+        self.assertEqual(len(f), 1, f)
+        self.assertEqual(f[0]["ids"], ["DEF-A", "DEF-B"])
+        self.assertEqual(f[0]["absent"], ["deadbee"])
 
 
 if __name__ == "__main__":

@@ -326,6 +326,32 @@ parts-check:
 #                         and pressures agents to close real findings. Declared
 #                         per queue as a `kind` row in queues/policy.csv.
 #   4 retro-debt          delegated to the retro-debt computation
+#  11 stalled-work        AN ITEM CLAIMED OR SCHEDULED WITH NO RECORDED ACTIVITY
+#                         (DEFECT-OAG-127). Check 1 sees VALIDATION states only and
+#                         only blocks when the work is provably finished, so work
+#                         abandoned in `fixing`/`building`/`reproducing`/`deploying`/
+#                         `reworking` — and an item SCHEDULED into `ready` that
+#                         nobody pulled — was invisible to EVERY limb. Measured on
+#                         the real 2026-08-19 tree: 11 of 12 occupied slots
+#                         invisible, six idle 4.92-7.31d and three scheduled
+#                         5.12-8.11d, while `wip 9` read exactly as nine agents
+#                         working. Population DERIVED from state-graphs.json
+#                         (non-terminal + non-backlog queue + not owner=external),
+#                         so a state added later is covered by construction.
+#                         Thresholds anchored on MEASURED MEDIAN dwell (24h for the
+#                         agent-owned states = 58-3300x their medians; 48h for
+#                         ready/scheduled, a different quantity), tunable per queue
+#                         with a `stall_hours` row in queues/policy.csv. It reports
+#                         the IDLE FACT only — nothing records a dispatch, so it
+#                         cannot tell an in-flight agent from work nobody holds, and
+#                         it does not pretend to: the remedy asks for re-dispatch,
+#                         release-as-blocked, or the event already earned. A slot
+#                         whose idle time cannot be established BLOCKS (§17i).
+#                         AND: the header line now carries the OCCUPANCY vs ACTIVITY
+#                         split for every WIP-stage queue on EVERY run, because
+#                         `wip: 7` reads the same whether seven agents are working or
+#                         seven items are abandoned — that reading deferred 35 items
+#                         for capacity that existed.
 #   5 awaiting-observation [state-graph v9] every item parked in
 #                         `awaiting_observation` (shipped, green, UNPROVEN) is
 #                         reported AND its liveness predicate RE-EVALUATED, exactly
@@ -334,6 +360,16 @@ parts-check:
 #                         not-yet (exit 3) is ADVISORY; a broken/absent predicate
 #                         BLOCKS, because an unrunnable liveness predicate is not a
 #                         predicate (v125 §17c.2).
+#  6-11 DELEGATED checks   each computed by its own committed analyser, never
+#                         re-implemented here: 6 test-requirement-gate (§17d) ·
+#                         7 worktree-guard (DEFECT-OAG-076) · 8 container-reap ·
+#                         9 make-refs-tracked · 10 acceptance-audit ·
+#                         11 board-mapping (DEFECT-OAG-099) — every state in
+#                         state-graphs.json must carry a board-status row, because
+#                         an unmapped state does not fail, it renders as unstarted
+#                         BACKLOG (twice now: `cancelled`, `awaiting_observation`).
+#                         Offline, project-free: `make board-audit`.
+#                         An analyser that would not RUN reports UNKNOWN, never clean.
 #
 # Exit 2 iff a BLOCKING check fired. An advisory-only run exits 0, says so, and
 # still prints the advisory (`!` line) so it cannot be read as satisfied.
@@ -465,6 +501,66 @@ test-board-project:
 
 board-audit:
 	$(BOARDPY) .claude/tools/linear-project.py --audit $(if $(PROJECT),--project $(PROJECT),)
+
+# --- board-sweep: the BATCH wrapper above the single-item projection ----------
+# DEFECT-OAG-099. The old "full sweep" was orchestration around `board-project`:
+# loop every id, in filesystem order, writing every item whether or not it needed
+# writing. On the observed run that spent the rate budget on 269 ALREADY-CORRECT
+# items and then ran out, leaving 5 DONE items showing Blocked. A week later the
+# same shape left UC-CSP1-1/UC-CSP1-2 — both TERMINAL — lagging for seven days,
+# violating the STAGE F invariant that a terminal or blocked board status must
+# never lag its item file by more than the current cycle.
+#
+# `linear-project.py` is deliberately UNCHANGED (small, testable, credential-safe).
+# The wrapper adds only what a BATCH knows and a single item cannot:
+#   ORDER    an explicit id list, or priority: terminal lag, then parked lag, then
+#            the rest, most-recently-changed first inside a class.
+#   SKIP     an item whose board status already equals its derived state is not
+#            written at all — the only limb that REDUCES the spend rather than
+#            reordering who loses to it.
+#   SHORTFALL on a rate limit: stop, name every id that did not land in priority
+#            order, LOUDLY, and write a resume file so the retry starts there.
+#
+# It REFUSES to run while STATE_STATUS has drifted from state-graphs.json — a
+# state the graph defines and the mapping lacks renders as unstarted Backlog, which
+# has now happened twice (cancelled, awaiting_observation). That is a precondition
+# of the sweep, not a per-item surprise.
+#
+# MEASURED, not assumed (board-sweep.test.py): a single-item projection costs 2
+# requests unlabelled, 3 labelled (4 the first time a label is created), of which
+# TWO are re-reads of IMMUTABLE team metadata. A first full reconcile of ~274 items
+# therefore costs ~800 requests HOWEVER it is ordered — the wrapper does not make
+# the budget larger and does not pretend to. `--budget-probe` (default on) reads
+# the API's own rate-limit headers before and after and reports the REAL numbers;
+# if they are absent it says NOT ESTABLISHED rather than quoting a documented one.
+#
+#   make board-sweep PROJECT=OagEventSource                     # all, priority order
+#   make board-sweep PROJECT=P IDS=UC-CSP1-1,UC-CSP1-2          # these, this order
+#   make board-sweep-resume PROJECT=P                           # finish what a rate limit cut off
+#   make board-sweep PROJECT=P COMPARE=full                     # also catch description drift
+#   make board-sweep-plan PROJECT=P                             # priority order, NO network/secret
+#   make board-sweep-dry PROJECT=P                              # read the board, write nothing
+#   make test-board-sweep                                       # offline suite (29 tests)
+# Exit codes: 0 clean · 2 something outstanding · 3 rate-limited (resume written)
+#             4 another sweep holds the lock · 5 refused before spending anything
+.PHONY: board-sweep board-sweep-resume board-sweep-plan board-sweep-dry test-board-sweep
+board-sweep:
+	$(BOARDPY) .claude/tools/board-sweep.py --project $(PROJECT) \
+	  $(if $(IDS),--ids $(IDS),--all) $(if $(COMPARE),--compare $(COMPARE),) \
+	  $(if $(MAX_WRITES),--max-writes $(MAX_WRITES),)
+
+board-sweep-resume:
+	$(BOARDPY) .claude/tools/board-sweep.py --project $(PROJECT) \
+	  --ids-file $(if $(RESUME),$(RESUME),.claude/state/board-sweep-$(PROJECT).resume)
+
+board-sweep-plan:
+	$(BOARDPY) .claude/tools/board-sweep.py --project $(PROJECT) --all --offline-plan
+
+board-sweep-dry:
+	$(BOARDPY) .claude/tools/board-sweep.py --project $(PROJECT) --all --dry-run
+
+test-board-sweep:
+	$(BOARDPY) .claude/tools/board-sweep.test.py
 
 # --- acceptance sweep + gate (OI-ACCEPTANCE-PARSER-SCORES-ZERO-SILENTLY) -------
 # `parse_acceptance()` returned a COUNT, and `0` conflated two irreconcilable facts:

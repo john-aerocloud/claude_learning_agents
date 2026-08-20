@@ -312,7 +312,8 @@ def test_every_real_item_state_is_projectable():
     just against the graph: every (type, state) pair actually present in this
     project's item files must resolve to a status without raising. This is the
     sweep that would have caught the live UC-HF042 and UC-ML1 misrenders."""
-    pairs = lp.project_state_pairs("OagEventSource")
+    require_corpus()
+    pairs = lp.project_state_pairs(CORPUS_PROJECT)
     check("real item pairs were found (audit is not vacuous)", len(pairs) > 0)
     unresolvable = []
     for itype, state in sorted(pairs):
@@ -560,7 +561,8 @@ def test_render_shows_the_unreadable_banner_to_a_human():
 def test_tree_sweep_classifies_every_real_item_and_is_non_vacuous():
     # validates: AC-AP.3, AC-AP.5
     """AC-AP.3 — the sweep is the deliverable. Runs over the REAL corpus."""
-    rows = lp.sweep_acceptance("OagEventSource")
+    require_corpus()
+    rows = lp.sweep_acceptance(CORPUS_PROJECT)
     check("the sweep sees the whole corpus (>400 items)", len(rows) > 400)
     counts = {}
     for r in rows:
@@ -601,6 +603,32 @@ def _run_cli(*argv):
     return r.returncode, r.stdout + r.stderr
 
 
+class CorpusUnavailable(Exception):
+    """This worktree does not hold the corpus a test needs.
+
+    NOT a failure and NOT a pass — a THIRD outcome, and keeping it distinct is the
+    whole point. `work/*` is gitignored per-worktree, so a ROC worktree holds only ROC
+    and every test keyed to `work/OagEventSource/` is unrunnable here. Those tests
+    harvest REAL item files deliberately (verbatim corpus shapes are what makes them
+    strong), so the cure is NOT to synthesise them into something weaker — it is to say
+    plainly that the coverage was not exercised, and to keep the exit code non-zero so
+    nobody can read a partial run as green (an unrun test is a failure).
+    """
+
+
+#: The project whose real corpus several tests are keyed to.
+CORPUS_PROJECT = "OagEventSource"
+
+
+def require_corpus():
+    """Raise CorpusUnavailable unless this worktree actually holds the corpus."""
+    d = HERE.parents[1] / "work" / CORPUS_PROJECT / "items"
+    if not d.is_dir() or not any(d.glob("*/*.md")):
+        raise CorpusUnavailable(
+            "work/%s/items is absent in this worktree — run this suite from the "
+            "integration tree (or any tree holding that project)" % CORPUS_PROJECT)
+
+
 def _scratch_corpus(tmp, ids, declared="{}"):
     """A scratch repo root holding REAL item files, copied byte-for-byte."""
     import shutil
@@ -613,7 +641,9 @@ def _scratch_corpus(tmp, ids, declared="{}"):
                 shutil.copy2(src, d / f"{iid}.md")
                 break
         else:
-            raise AssertionError(f"real item {iid} not found — fixture must be harvested")
+            raise CorpusUnavailable(
+                f"real item {iid} not found — fixture must be harvested from "
+                f"work/{CORPUS_PROJECT}/items, absent in this worktree")
     reg = tmp / "declared.json"
     reg.write_text(declared)
     return tmp, reg
@@ -675,9 +705,80 @@ def test_audit_goes_RED_on_a_stale_declaration_so_it_can_only_shrink():
         check("RED: it says to delete the row", "NO LONGER one" in out)
 
 
+def _synth_corpus(tmp, items, declared="{}"):
+    """A scratch repo root holding SYNTHESISED item files.
+
+    Deliberately NOT `_scratch_corpus`: that helper harvests real items out of
+    `work/OagEventSource/`, which does not exist in a per-project worktree (`work/*`
+    is gitignored, so a ROC worktree holds only ROC). A shared tool whose tests can
+    only run in one worktree cannot be fixed from the worktree its bug is blocking —
+    found while fixing DEF-ROC-077 from the ROC worktree. `items` is {id: body}.
+    """
+    d = tmp / "work" / "SCRATCH" / "items" / "active"
+    d.mkdir(parents=True, exist_ok=True)
+    for iid, body in items.items():
+        (d / f"{iid}.md").write_text(
+            "---\nid: %s\ntype: defect\ntitle: \"synthetic\"\n---\n\n%s" % (iid, body),
+            encoding="utf-8")
+    reg = tmp / "declared.json"
+    reg.write_text(declared)
+    return tmp, reg
+
+
+#: An acceptance section the parser reads CLEANLY — so the item is NOT a finding.
+_CLEAN_ACCEPTANCE = """## Acceptance
+
+- **AC-1.1** — the thing happens.
+- **AC-1.2** — the other thing happens.
+"""
+
+
+def test_audit_does_NOT_demand_deleting_ANOTHER_projects_declaration():
+    # validates: AC-AP.4 (scoping limb) — DEF-ROC-077.
+    # The registry is GLOBAL (`.claude/tools/acceptance-audit-declared.json`) but a
+    # sweep is PER-PROJECT. Reading "not a finding in THIS project" as "no longer a
+    # finding anywhere" made every OTHER project's row look stale, and the remedy it
+    # printed — "delete the row" — would DESTROY a legitimate declaration belonging to
+    # a project this run never looked at. Absence of evidence, not evidence of absence
+    # (the DEF-ROC-046 class). It blocked ROC's loop-gate on 5 OAG rows.
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        root, reg = _synth_corpus(
+            Path(td), {"DEF-SCRATCH-001": _CLEAN_ACCEPTANCE},
+            declared='{"declared": {"DEFECT-OTHERPROJ-001": {"status": "truncated",'
+                     ' "authority": "another project ruling"}}}')
+        code, out = _run_cli("--acceptance-audit", "--project", "SCRATCH",
+                             "--root", str(root), "--declared", str(reg))
+        check("GREEN: an out-of-scope declaration does NOT fail the audit", code == 0)
+        check("GREEN: it never tells you to delete another project's row",
+              "DEFECT-OTHERPROJ-001 is declared as a known acceptance finding"
+              not in out)
+        check("but it is NOT silent — the out-of-scope row is named and counted "
+              "(§17h: absence must be distinguishable from ignorance)",
+              "DEFECT-OTHERPROJ-001" in out and "not evaluated" in out)
+
+
+def test_audit_STILL_goes_RED_on_a_stale_declaration_for_an_IN_SCOPE_item():
+    # validates: AC-AP.4 — the scoping fix must not blunt the ratchet. An item that IS
+    # in this project's sweep and is no longer a finding must STILL fail, or the fix
+    # has turned a working ratchet into a high-water mark.
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        root, reg = _synth_corpus(
+            Path(td), {"DEF-SCRATCH-002": _CLEAN_ACCEPTANCE},
+            declared='{"declared": {"DEF-SCRATCH-002": {"status": "truncated",'
+                     ' "authority": "stale"}}}')
+        code, out = _run_cli("--acceptance-audit", "--project", "SCRATCH",
+                             "--root", str(root), "--declared", str(reg))
+        check("RED: an IN-SCOPE stale declaration still fails (ratchet intact)",
+              code != 0)
+        check("RED: it still says to delete the row", "NO LONGER one" in out)
+
+
 def test_audit_is_GREEN_on_the_real_corpus_with_the_committed_registry():
     # validates: AC-AP.3
-    code, out = _run_cli("--acceptance-audit", "--project", "OagEventSource")
+    require_corpus()
+    code, out = _run_cli("--acceptance-audit", "--project", CORPUS_PROJECT)
     check("the committed registry makes the real corpus PASS", code == 0)
     check("the sweep prints a measured size for EVERY class, incl. the healthy ones "
           "(§17h: no class is pre-judged benign)",
@@ -738,7 +839,8 @@ def test_extractor_populations_are_pinned_in_both_directions():
     ALSO goes red, so the ledger must be updated rather than quietly rotting — the
     `f694ea3` failure was precisely a ledger everyone believed and nobody re-measured.
     """
-    pop = lp.extractor_population("OagEventSource")
+    require_corpus()
+    pop = lp.extractor_population(CORPUS_PROJECT)
     must_match = {"acceptance", "defect_fields", "job_resolved", "persona_resolved",
                   "block_note"}
     for key in must_match:
@@ -774,44 +876,66 @@ def test_extractor_populations_are_pinned_in_both_directions():
 
 
 
+#: Every module-level `test_*`, in DEFINITION order, derived — never hand-listed.
+#:
+#: DEF-ROC-077's validation found the reason this must be derived: two tests added by
+#: that very fix were defined in this file and **never added to the old hand-maintained
+#: dispatch list**, so `python3 linear-project.test.py` would never have run them. A
+#: test that cannot run is the same class as a gate that cannot fail — and this file
+#: already carries `test_graph_states_are_derived_not_hand_listed` about exactly this
+#: shape, one function over. Registration is now structural: define a `test_*` and it
+#: runs. `test_every_test_in_this_module_is_actually_dispatched` keeps that honest.
+def discover_tests():
+    import inspect
+    fns = [(v, inspect.getsourcelines(v)[1]) for k, v in globals().items()
+           if k.startswith("test_") and callable(v)]
+    return [f for f, _ in sorted(fns, key=lambda t: t[1])]
+
+
+def test_every_test_in_this_module_is_actually_dispatched():
+    # validates: the registration mechanism itself. A hand-listed runner silently drops
+    # any test whose author forgets the list — measured, not hypothetical (DEF-ROC-077).
+    defined = {k for k in globals() if k.startswith("test_") and callable(globals()[k])}
+    dispatched = {f.__name__ for f in discover_tests()}
+    missing = sorted(defined - dispatched)
+    check("every defined test_* is dispatched (none silently unregistered): %s" % missing,
+          not missing)
+    check("discovery is non-vacuous — it finds the real suite, not an empty set",
+          len(dispatched) > 25)
+
+
 def run():
-    for fn in [
-        test_parse_acceptance_joins_wrapped_lines,
-        test_frontmatter_and_helpers,
-        test_reference_resolution,
-        test_render_description_sections,
-        test_labels_and_status,
-        test_state_status_covers_every_graph_state,
-        test_state_status_has_no_state_the_graph_does_not_define,
-        test_graph_states_are_derived_not_hand_listed,
-        test_cancelled_resolves_to_a_real_terminal_status,
-        test_awaiting_observation_resolves_to_a_parked_status,
-        test_unmapped_state_is_loud_not_silently_backlog,
-        test_every_real_item_state_is_projectable,
-        test_level3_subheading_does_not_terminate_acceptance,
-        test_every_acceptance_section_is_read_not_only_the_first,
-        test_prose_only_acceptance_is_unenumerated_not_zero,
-        test_backticked_ids_in_a_numbered_list_parse,
-        test_fault_set_numbered_list_with_no_bold_ids,
-        test_fault_set_ids_in_prose_with_no_list_marker,
-        test_genuinely_no_acceptance_is_representable_as_none,
-        test_empty_acceptance_section_is_distinct_from_unreadable,
-        test_a_dropped_id_is_reported_as_truncated_not_silently_lost,
-        test_ids_never_capture_a_trailing_sentence_period,
-        test_label_distinguishes_unreadable_from_needs_acceptance,
-        test_render_shows_the_unreadable_banner_to_a_human,
-        test_tree_sweep_classifies_every_real_item_and_is_non_vacuous,
-        test_audit_goes_RED_on_a_real_item_with_unenumerable_acceptance,
-        test_audit_goes_RED_on_a_real_truncated_item_and_names_the_dropped_id,
-        test_audit_goes_RED_on_a_declaration_with_no_authority,
-        test_audit_goes_RED_on_a_stale_declaration_so_it_can_only_shrink,
-        test_audit_is_GREEN_on_the_real_corpus_with_the_committed_registry,
-        test_extractor_populations_are_pinned_in_both_directions,
-    ]:
+    # Each test is isolated: a raising test is recorded and the run CONTINUES. The old
+    # runner let one exception abort the file, so a single broken fixture hid every
+    # later test — the same "one failure conceals the others" shape as the defects this
+    # suite guards. Observed for real: `_scratch_corpus` raises in a per-project
+    # worktree (it harvests `work/OagEventSource/`, which `work/*` gitignores), which
+    # aborted the whole suite before reaching most of it.
+    errored, skipped = [], []
+    for fn in discover_tests():
         print(f"* {fn.__name__}")
-        fn()
-    if FAILS:
-        print(f"\nFAILED ({len(FAILS)}): {FAILS}")
+        try:
+            fn()
+        except CorpusUnavailable as exc:
+            skipped.append(fn.__name__)
+            print(f"  SKIP - {exc}")
+        except Exception as exc:                                  # noqa: BLE001
+            errored.append(fn.__name__)
+            print(f"  ERROR- {type(exc).__name__}: {exc}")
+    if FAILS or errored or skipped:
+        if FAILS:
+            print(f"\nFAILED ({len(FAILS)}): {FAILS}")
+        if errored:
+            print(f"ERRORED ({len(errored)}): {errored}")
+        if skipped:
+            # Loud, counted, and it still exits non-zero: partial coverage must never
+            # read as green (§17h — absence must be distinguishable from ignorance,
+            # and an unrun test is a failure).
+            print(f"\nNOT EXERCISED HERE ({len(skipped)}) — this worktree does not hold "
+                  f"work/{CORPUS_PROJECT}/items, so these did not run. They are NOT "
+                  f"passes. Run this suite from the integration tree to exercise them:")
+            for n in skipped:
+                print(f"  - {n}")
         return 1
     print("\nALL PASS")
     return 0

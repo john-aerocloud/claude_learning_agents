@@ -1283,6 +1283,13 @@ challenged a reported number, and the fifth by reading code.**
    for"* — came true against the rule that wrote it. The generalising claim: **an
    externally-blocked item is not blocked, it is UNVERIFIED-blocked, until something that can
    fail says so.** A blocker is a claim about the world, and the world changes without telling us.
+   **STATUS — READ THIS BEFORE RELYING ON THIS LIMB: it is NOT YET ENFORCED.** The mechanism is
+   registered as `OI-ROC-005` (owner cicd + orchestrator, acceptance = the refusal firing, with a
+   NON-VACUITY criterion requiring one real probe observed moving `standing` → `cleared`), deferred
+   only because `work-items.py` is the single script every concurrent dispatch calls and three were
+   live (§F2b). Recorded here per §17c.5 rather than left to read as a live control — **a limb that
+   says "must" while nothing refuses is precisely the prose-remedy failure this limb exists to name**,
+   and it stays labelled until `OI-ROC-005` lands.
 Target: CFR (a never-fired capability, an unread real field, or a dead gate is caught by a
 lane instead of surviving millions of events into `done`) + MTTR, and for limb 6 specifically
 **gross lead time** — the `external` owner share and median time-in-`blocked`.

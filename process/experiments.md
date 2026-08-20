@@ -1496,6 +1496,16 @@ that the defect this retro came from needed exactly that discipline twice: once 
 If probes honestly report `BLOCKER: standing` and the `external` share of GLT does not fall, then
 blockers genuinely stay closed, the ceremony is pure cost, and the row is **KILLED, not re-tuned**.
 
+### Status at opening — NOT YET ENFORCED
+
+The mechanism is **registered, not shipped**: `OI-ROC-005` (owner cicd + orchestrator), because
+`work-items.py` is the one script every concurrent `wi-append` calls and three agents were live
+mid-dispatch when this retro closed (§F2b). Registered rather than prosed per §17c.5 — **scoring
+this row before `OI-ROC-005` lands would be scoring a rule nothing enforces.** First scoring is
+therefore gated on that item, and its `AC-005.6` migration (the 12 items currently in `blocked`)
+is part of the mechanism, not follow-up: a rule that binds only future parks leaves the entire
+measured 46.3% untouched.
+
 ### Registry accounting — recorded rather than perpetuated
 
 ROC's own **EXP-136..142 have no table rows at all** — they exist only as `##` sections in this

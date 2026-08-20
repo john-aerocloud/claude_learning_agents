@@ -4792,6 +4792,53 @@ class TestRefRepoScoping(Base):
         self._done_item("DEF-ZERO", mangled)
         self.assertEqual(self._prov(_parent), [])
 
+    def test_AC_128_2_check12_an_all_digit_ref_BELOW_the_hex_floor_is_still_asked_about(self):
+        """Found by mutation: `return False` on the all-digit branch SURVIVED, because
+        every other case sits at or above the 6-char hex floor. Int-coercion shortens
+        a sha by however many leading zeros it ate, so a 4- or 5-digit ref can still
+        be a repairable sha — and excluding it would route it to the MALFORMED
+        advisory, i.e. silently out of the existence check, which is the hiding place
+        §17h names. Below git's own 4-char abbreviation floor there is nothing to ask,
+        so THAT is malformed."""
+        self.assertTrue(wi._is_sha_shaped("1234"))          # 4 digits: askable
+        self.assertTrue(wi._is_sha_shaped("12345"))         # 5 digits: askable
+        self.assertFalse(wi._is_sha_shaped("123"))          # under git's floor
+        self.assertFalse(wi._is_sha_shaped("delta-052"))    # not a sha at all
+        # and it reaches the ALARM, not the advisory, when it resolves nowhere
+        _parent, _proj = self._topology()
+        self._done_item("DEF-SHORT", "1234")
+        f = self._prov()
+        self.assertEqual([x["severity"] for x in f], ["block"], f)
+        self.assertEqual(f[0]["absent"], ["1234"], f)
+
+    def test_AC_128_2_check12_a_TRUNCATED_batch_answer_is_unreadable_not_absence(self):
+        """Found by mutation: dropping the length check SURVIVED. `cat-file
+        --batch-check` is POSITIONAL — one answer line per input line — so a SHORT
+        answer silently shifts every mapping after the cut and refs start reading as
+        absent because their neighbour's line was consumed. This is the v143
+        truncation class that made `worktree-guard` report NOT ESTABLISHED after the
+        repo's history simply grew past a 64 KiB pipe buffer: nothing regressed, the
+        world got bigger. A partial answer must read COULD-NOT-LOOK, never absence."""
+        _parent, proj = self._topology()
+        sha = self._commit(proj, "src/tr.ts", "tr\n", "a real commit")
+        self._done_item("DEF-REAL", sha)
+        real_git = wi._git
+
+        def truncating(repo, *args, _stdin=None):
+            rc, out = real_git(repo, *args, _stdin=_stdin)
+            if _stdin is not None and out:
+                out = "\n".join(out.split("\n")[:-1])      # lose the last line
+            return rc, out
+
+        wi._git = truncating
+        try:
+            f = self._prov()
+        finally:
+            wi._git = real_git
+        self.assertEqual([x["severity"] for x in f], ["unknown"], f)
+        self.assertIn("COULD NOT LOOK", f[0]["message"])
+        self.assertNotIn("EXIST IN NEITHER REPO", f[0]["message"])
+
     def test_AC_128_4_check12_a_contradicted_lane_is_reported_but_never_BLOCKS(self):
         """AC-128.4. Advisory on purpose: resolution no longer trusts `lane:`, so a
         wrong one costs a misrouted DISPATCH (DEFECT-OAG-076), not a wrong push

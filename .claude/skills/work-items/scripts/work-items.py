@@ -2786,7 +2786,23 @@ def _batch_ref_existence(project, refs):
             unreadable.append(lane)
             continue
         lines = out.split("\n")
-        if len(lines) != len(pairs):             # never guess off a short answer
+        # THE ANSWER IS VALIDATED, NOT COUNTED. `--batch-check` is POSITIONAL, one
+        # answer per input line, and every answer is either `<oid> <type> <size>` or
+        # `<input> missing`. A TRUNCATED or otherwise malformed reply therefore
+        # shifts the mapping and refs begin reading ABSENT because a neighbour's
+        # line was consumed — a FALSE destroyed-work alarm off a plumbing fault.
+        # A length check alone does NOT catch it: with one input, losing the only
+        # line leaves [""], whose length still matches, and the blank parses as
+        # not-a-commit. This is the v143 truncation class (worktree-guard read NOT
+        # ESTABLISHED once the repo's history grew past a 64 KiB pipe buffer —
+        # nothing regressed, the world got bigger), so the protocol is checked
+        # shape-wise and any violation is COULD-NOT-LOOK.
+        def _ok(line):
+            parts = line.split()
+            return (len(parts) == 3 and parts[1] in ("commit", "tree", "blob", "tag")
+                    ) or (len(parts) == 2 and parts[1] == "missing")
+
+        if len(lines) != len(pairs) or not all(_ok(l) for l in lines):
             unreadable.append(lane)
             continue
         for (ref, _cand), line in zip(pairs, lines):

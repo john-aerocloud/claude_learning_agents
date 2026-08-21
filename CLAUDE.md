@@ -80,8 +80,8 @@ See `README.md` for the full system. In short:
   discover you have swept someone's work, the non-destructive repair is
   `reset --soft HEAD~1` → `reset HEAD -- .` → re-add only your paths; never
   rewrite a commit another agent has already built on.
-  **Three limits of the pathspec rule, all hit on 2026-08-14 — know them before
-  you rely on it:**
+  **Five limits of the pathspec rule — know them before you rely on it (1-4 were
+  all hit on 2026-08-14; 5 on 2026-08-20):**
   1. **It does not protect CO-OWNED files.** Two agents editing the same file
      still collide; the pathspec only removes the *index* race. (EXP-120's
      original claim was too broad and was corrected.)
@@ -113,6 +113,33 @@ See `README.md` for the full system. In short:
      in a shared tree, list what you are about to take
      (`git stash list`/`status -u`) and say so, or reconcile in a `git worktree`
      instead so no other agent's files are in scope at all.
+  5. **`--abort` is the WRONG WAY OUT of an in-progress operation here; the verb
+     you want is `--quit`.** An abandoned `.git/sequencer` sat in the shared
+     `work/OagEventSource` tree for SIX HOURS on 2026-08-20 holding a two-step
+     revert todo with `head=b55d15e0` — a saved head that was by then **56
+     commits** behind HEAD, the entire output of seven agents in one session.
+     `git revert --abort` rewinds to that saved head, so the documented way out
+     of a stuck revert was a 56-commit destruction with no prompt. Three things
+     make this the shared-tree class rather than ordinary git advice: the state
+     is **invisible to `git status --porcelain`**, so every cleanliness check
+     here passes with it armed; the **wrong verb is the natural one**; and the
+     saved head goes stale *by design* here, because the prescribed commit path
+     (`isolated-commit.js` = `commit-tree` + ref CAS) never clears branch state
+     the way `git commit` does, so the blast radius grows with every commit.
+     **So: `git <revert|cherry-pick|rebase|merge> --quit`** — it clears the state
+     and leaves HEAD and the working tree exactly as they are. Never `--abort`,
+     and **never `--continue` first**: one `--continue` rewrites
+     `sequencer/abort-safety` to the current head and RE-ARMS the rewind that
+     git had been refusing (measured, both arms, in
+     `.claude/tools/sequencer-guard.test.js`; `git rebase --abort` has no safety
+     check at all and resets the branch unconditionally). Before you clear
+     anything, **establish what the state describes** — the 2026-08-20 operator
+     verified the revert had already been completed by `a8bd0dee`, an ancestor
+     of `origin/main`, so the todo was residue describing finished work. And a
+     rebase in a shared tree has no clean exit at all (`rebase --quit` leaves
+     HEAD detached, which is limit 3) — do it in a `git worktree`. `make
+     sequencer-guard` reports every armed state **with the number of commits
+     `--abort` would discard**, and runs before every pull as loop-gate check 14.
   Commit **agent-structure / process** changes (`.claude/`, `process/` incl.
   `process/machinery/`, `CLAUDE.md`, `README.md`) in THIS parent repo. The parent `.gitignore`s
   `/work/*/`, so it never tracks project contents; `work/README.md` and

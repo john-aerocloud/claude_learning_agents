@@ -4019,6 +4019,16 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
     # --- 8. orphaned local containers (DEFECT-OAG-091) — DELEGATED, AND IT REAPS
     findings.extend(compute_container_reap(project))
 
+    # --- 14. an in-progress git operation ARMED in a shared tree — DELEGATED ----
+    #         (OI-ABANDONED-SEQUENCER-STATE-ARMS-A-56-COMMIT-DESTRUCTION, AC-SEQ.2).
+    #         The third member of the shared-tree family CLAUDE.md documents (`git
+    #         stash -u`, `git checkout`) and the first one a gate looks for. It hangs
+    #         here because the state is INVISIBLE to `git status --porcelain`: every
+    #         cleanliness check in this system passes with an armed sequencer, so the
+    #         only way it is ever seen is a check that looks for the state itself,
+    #         before the next wave of dispatches adds to the pile at stake.
+    findings.extend(compute_sequencer_guard())
+
     # --- 9. a file a committed make target RUNS must be on trunk — DELEGATED ---
     #        (OI-GITIGNORE-SWALLOWS-COMMITTED-TOOLS). This is the ONLY workflow that
     #        can run it: the analyser lives in the agent-system repo, so a project's
@@ -4588,6 +4598,126 @@ def compute_container_reap(project, timeout=CREAP_TIMEOUT):
         f"count here means dispatches are dying before `ddb-local-down`, which is a "
         f"defect about the dispatch, not about the reaper."
         + probe_tail + fail_tail))]
+
+
+# ---------------------------------------------------------------------------
+# loop-gate check 14 — AN IN-PROGRESS GIT OPERATION ARMED IN A SHARED TREE
+# (OI-ABANDONED-SEQUENCER-STATE-ARMS-A-56-COMMIT-DESTRUCTION, AC-SEQ.2)
+#
+# `.git/sequencer` sat in the shared `work/OagEventSource` tree for SIX HOURS
+# holding a two-step revert todo with `head=b55d15e0`. That saved head was FIFTY-SIX
+# commits behind HEAD — the entire output of seven agents in one session (2 resolved
+# defects, 2 closed open-items, 6 registered findings) — and `git revert --abort`
+# rewinds to it. The revert it described had already been completed by another route
+# (`a8bd0dee`, an ancestor of origin/main), so it was residue describing finished
+# work, and the natural way out of a stuck revert was a 56-commit destruction.
+#
+# WHY IT HANGS HERE RATHER THAN ANYWHERE ELSE. The state is INVISIBLE to
+# `git status --porcelain`, so every cleanliness check in this system — this gate's
+# own dirty-tree reasoning, the fold-forward check — passes with it armed. Only a
+# check that looks for the state itself can see it, and the loop is the only
+# continuously-running workflow: it finds it BEFORE the next wave of dispatches
+# adds more commits to the pile at stake. It was found ONCE, by a tester noticing
+# it as an aside at the end of an unrelated validation.
+#
+# The analysis lives in ONE place — .claude/tools/sequencer-guard.js — and is
+# DELEGATED to, never re-implemented (checks 4, 6, 7, 8, 9, 10 already follow).
+# It is READ-ONLY: it never runs `--abort`, `--quit` or any writing verb. Unlike
+# check 8 it must NOT self-heal — clearing the state requires first establishing
+# what it describes (the incident's operator verified `a8bd0dee` had completed the
+# revert), and that is a judgement, not a sweep.
+#
+# SEVERITY, per §F8a ("a gate blocks only on harm that stopping relieves"), decided
+# deliberately because the two cases are genuinely different:
+#   commits at stake, or residue we could not MEASURE, or state abandoned past the
+#   grace window  -> BLOCK. Stopping is precisely the remedy and the remedy is one
+#         command (`git <verb> --quit`). Pulling more work makes it strictly worse:
+#         the prescribed shared-tree commit path (isolated-commit.js: `commit-tree`
+#         + ref CAS) never clears branch state the way `git commit` does, so every
+#         commit the next wave lands ADDS to the count at stake. That is how the
+#         gap reached 56. An unmeasurable state fails CLOSED — a count we could not
+#         establish is not a count of zero (§17c.2).
+#   fresh, and NOTHING at stake  -> ADVISORY. A conflicted merge or single-pick
+#         revert someone is resolving right now discards no commits at all
+#         (measured), and stopping the line for it would be perverse. Still printed
+#         every cycle, so it can never read as satisfied.
+#   unrunnable  -> UNKNOWN ("? " line). An unevaluated precondition is not a met one.
+# ---------------------------------------------------------------------------
+SEQG_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "..", "..", "..", "tools", "sequencer-guard.js")
+SEQG_TIMEOUT = 120.0
+
+
+def compute_sequencer_guard(timeout=SEQG_TIMEOUT):
+    """Sweep the parent repo, every worktree and every nested project repo for an
+    armed in-progress git operation, and report HOW MANY COMMITS `--abort` would
+    discard. Returns 0 or 1 finding."""
+    common = {"check": "sequencer-guard", "ids": []}
+    try:
+        proc = subprocess.run(
+            ["node", os.path.normpath(SEQG_SCRIPT), "scan",
+             "--repo-root", ROOT, "--json"],
+            capture_output=True, text=True, timeout=timeout)
+        report = json.loads(proc.stdout)
+    except Exception as exc:                                    # noqa: BLE001
+        return [dict(common, severity="unknown", message=(
+            f"[sequencer-guard] NOT ESTABLISHED — the guard would not run "
+            f"({type(exc).__name__}: {str(exc)[:160]}). An unrunnable guard is not a "
+            f"clean tree, and this state is INVISIBLE to `git status --porcelain`, so "
+            f"nothing else in this system is looking: an abandoned `.git/sequencer` "
+            f"once sat armed for six hours over 56 commits of seven agents' work. "
+            f"Remedy: `make sequencer-guard`."))]
+
+    verdict = report.get("verdict")
+    if verdict == "CLEAN":
+        return []
+
+    worst = report.get("worstDiscard", 0)
+    unmeasured = report.get("unmeasured", 0)
+    detail = []
+    for r in report.get("repos", []):
+        for s in r.get("states", []):
+            n = s.get("discard")
+            detail.append(
+                "%s in %s: %s commit(s) at stake, idle %s, %s"
+                % (s.get("kind"), r.get("dir"),
+                   "NOT ESTABLISHED" if n is None else n,
+                   "UNKNOWN" if s.get("ageS") is None else "%ss" % s.get("ageS"),
+                   "ARMED NOW" if s.get("armedNow") else "one `--continue` from armed"))
+    detail_txt = "; ".join(detail)[:900] or "see `make sequencer-guard`"
+    quits = "; ".join(sorted({
+        "git -C %s %s" % (r.get("dir"), s.get("quit"))
+        for r in report.get("repos", []) for s in r.get("states", [])}))[:500]
+
+    if verdict == "ADVISORY":
+        return [dict(common, severity="advisory", worst_discard=worst, message=(
+            f"ADVISORY (does NOT block the pull) [sequencer-guard] an in-progress git "
+            f"operation is present but NOTHING is at stake yet: {detail_txt}. This is "
+            f"what a conflict someone is resolving right now looks like, and "
+            f"`--abort` on it discards no commits (measured). It is reported because "
+            f"the state is INVISIBLE to `git status --porcelain` and because the count "
+            f"grows with every commit that lands while it sits: the founding incident "
+            f"reached 56 commits over six hours. If it is not yours, clear it with "
+            f"`--quit` (never `--abort`): {quits}."))]
+
+    return [dict(common, severity="block", worst_discard=worst,
+                 unmeasured=unmeasured, message=(
+        f"[sequencer-guard] AN IN-PROGRESS GIT OPERATION IS ARMED IN A SHARED TREE — "
+        f"up to {worst} commit(s) would be made unreachable"
+        + (f", and {unmeasured} state(s) could not be measured at all (fails CLOSED)"
+           if unmeasured else "")
+        + f": {detail_txt}. `git status --porcelain` says NOTHING about this, which is "
+        f"why every cleanliness check here passes with it armed — it was found once, "
+        f"by a tester noticing it as an aside. THE SAFE VERB IS THE OBSCURE ONE: "
+        f"`--quit` clears the state and leaves HEAD and the working tree exactly as "
+        f"they are; `--abort` rewinds to a saved head that goes stale by design here "
+        f"(the prescribed `commit-tree` + ref-CAS commit path never clears branch "
+        f"state, so the gap grows with every commit — it reached 56 over six hours). "
+        f"Do NOT `--continue` either: one `--continue` rewrites `abort-safety` to the "
+        f"current head and RE-ARMS the rewind (measured, both arms, "
+        f".claude/tools/sequencer-guard.test.js). Remedy: establish what the state "
+        f"describes (the founding incident verified `a8bd0dee` had already completed "
+        f"the revert and was an ancestor of origin/main), then {quits}."))]
 
 
 def cmd_loop_gate(a):

@@ -333,6 +333,22 @@ cycles keep the plain trunk working tree. Target: commit-attribution-correctness
 (CFR) + GLT (no reconciliation rework).
 
 ## DORA + Theory of Constraints (your optimisation job)
+- **`reported` is YOUR time thief — triage in the SAME turn you register (v146).** Measured
+  2026-08-21: `reported` is **11.22% of gross lead time at a median 24.1 h across 84 items**,
+  zero backfill, and the state's owner is the orchestrator. That is second only to pure queue
+  wait, and unlike queue wait it is entirely yours. It is not think-time: a defect sits in
+  `reported` because nobody fired `triaged`.
+  **RULE:** when you register a defect from a dispatch report that ALREADY carries its
+  reproduction and its cause, fire `triaged` (and `confirmed`, where the report establishes
+  the reproduction) in the SAME turn. Do not park a defect in `reported` to "look at it
+  later" — the evidence does not improve by ageing, and the 24.1 h median is that habit.
+  Demonstrated the same day: `DEFECT-OAG-138` went `reported → triaged → confirmed → fixed`
+  in one turn, because the finding dispatch had already reproduced it, located the cause
+  (`Math.max(...)` argument-count bound) and landed the fix — so there was nothing to wait for.
+  **The exception is real and must stay:** if the report does NOT establish a reproduction,
+  `reported` is the honest state and triaging it would be the phantom-fix failure `/defect`
+  exists to prevent. Park it there deliberately and say what reproduction is owed — but that
+  is a judgement you make and record, not a queue you let fill.
 - Every state change is a `wi-append` event (carrying `--tokens`/`TOKENS=` from the
   returning agent, per below); all metrics derive from `make wi-project`. There is no
   per-dispatch ledger bracketing — the DORA ledger is frozen (§F0).

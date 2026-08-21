@@ -3591,6 +3591,26 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
         queue = graphs.queue_for(state)
         owner = graphs.owner_of(state)
         scheduled = (queue == STALLED_WORK_SCHEDULED_QUEUE)
+        # HONOUR THE REMEDY THIS CHECK PRINTS (DEF-ROC-083). Its own message offers
+        # "de-schedule it and record an explicit dated decision (`defer_until:`)", and
+        # until now it did not read the field — so doing exactly what the gate said
+        # left the pull blocked with no way out. A gate that cannot be SATISFIED is the
+        # mirror of the gate-that-cannot-fail this project logs most, and it is worse
+        # in one way: the first merely fails to catch things, the second stops all work.
+        #
+        # NARROW BY CONSTRUCTION, and the narrowness is the point:
+        #  - only the SCHEDULED kind. `ready` is a schedule nobody has started, so
+        #    deferring it is a real scheduling decision. A CLAIMED wip slot is work
+        #    someone is supposed to be holding, and a date in the future says nothing
+        #    about whether anyone is holding it — that still blocks.
+        #  - EXPIRY still bites. A defer whose date has passed blocks again, which is
+        #    what stops `defer_until` from becoming a permanent silencer.
+        #  - UNPARSEABLE is not a decision (`_defer_until` returns None), matching the
+        #    rule the aged-backlog check already applies.
+        if scheduled:
+            deferred_to = _defer_until(it)
+            if deferred_to is not None and deferred_to > now:
+                continue
         kind = "scheduled-not-pulled" if scheduled else "claimed-no-activity"
         common = {"check": "stalled-work", "ids": [iid], "state": state,
                   "queue": queue, "owner": owner, "kind": kind,

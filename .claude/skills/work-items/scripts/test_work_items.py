@@ -5649,5 +5649,80 @@ class TestRefRepoScoping(Base):
         self.assertEqual(f[0]["absent"], ["deadbee"])
 
 
+class TestStalledWorkHonoursItsOwnRemedy(TestLoopGate):
+    """DEF-ROC-083 — the `stalled-work` check PRINTS `defer_until:` as a remedy and
+    does not read it, so the block it raises cannot be cleared by doing what it says.
+
+    A gate that cannot fail is the failure this project logs most often. This is its
+    mirror: a gate that cannot be SATISFIED. Measured on ROC 2026-08-21 — `UC-ROC-093`
+    was given `defer_until: 2026-09-04`, the field survived the renderer, and the gate
+    kept blocking the pull on it with a message naming that exact field.
+
+    The expiry behaviour must survive the fix: a defer that has PASSED blocks again,
+    which is what stops `defer_until` becoming a permanent silencer."""
+
+    def _scheduled_uc(self, day=1):
+        return [{"ts": _dt(day, 0), "event": "registered", "agent": "flow-manager"},
+                {"ts": _dt(day, 1), "event": "made_ready", "agent": "flow-manager"}]
+
+    def _stalled(self, findings):
+        return [f for f in findings
+                if f["check"] == "stalled-work" and f["severity"] == "block"]
+
+    def test_AC_083_1_an_UNEXPIRED_defer_clears_the_stalled_work_block(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(29))
+        # scheduled on day 1, NOW is day 30 -> 29 days idle, far past any threshold
+        self.write_item("active", "UC-OLD", "use-case", self._scheduled_uc(1))
+        before = self._stalled(self._gate())
+        self.assertIn("UC-OLD", [i for f in before for i in f["ids"]], before)
+
+        self.write_item("active", "UC-OLD", "use-case", self._scheduled_uc(1),
+                        extra_fm={"defer_until": "2026-12-31"})
+        after = self._stalled(self._gate())
+        self.assertNotIn("UC-OLD", [i for f in after for i in f["ids"]],
+                         "the check still blocks an item deferred exactly as its own "
+                         "remedy instructs")
+
+    def test_AC_083_2_an_EXPIRED_defer_blocks_again(self):
+        """Otherwise `defer_until` is a permanent silencer, which is worse than the
+        stall it hides."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(29))
+        self.write_item("active", "UC-OLD", "use-case", self._scheduled_uc(1),
+                        extra_fm={"defer_until": "2026-06-20"})   # NOW is 2026-06-30
+        f = self._stalled(self._gate())
+        self.assertIn("UC-OLD", [i for x in f for i in x["ids"]], f)
+
+    def test_AC_083_3_an_UNPARSEABLE_defer_is_not_a_decision(self):
+        """A value nobody can read must not buy silence — same rule the aged-backlog
+        check already applies."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(29))
+        self.write_item("active", "UC-OLD", "use-case", self._scheduled_uc(1),
+                        extra_fm={"defer_until": "whenever"})
+        f = self._stalled(self._gate())
+        self.assertIn("UC-OLD", [i for x in f for i in x["ids"]], f)
+
+    def test_AC_083_4_a_defer_does_NOT_excuse_a_CLAIMED_slot_only_a_scheduled_one(self):
+        """The two stall kinds are different facts. `ready` is a schedule nobody has
+        started, and deferring it is a legitimate scheduling decision. A `wip` slot is
+        CLAIMED — work someone is supposed to be holding — and a date in the future
+        says nothing about whether it is being worked, so it must still block."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(29))
+        evs = [{"ts": _dt(1, 0), "event": "reported", "agent": "orchestrator"},
+               {"ts": _dt(1, 1), "event": "triaged", "agent": "orchestrator"},
+               {"ts": _dt(1, 2), "event": "confirmed", "agent": "engineer"}]
+        self.write_item("active", "DEF-CLAIMED", "defect", evs,
+                        extra_fm={"defer_until": "2026-12-31"})
+        f = self._stalled(self._gate())
+        self.assertIn("DEF-CLAIMED", [i for x in f for i in x["ids"]], f)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

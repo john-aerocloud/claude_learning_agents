@@ -986,3 +986,39 @@ finding with its measured size** and explicitly *"may never be described as beni
 verbatim.
 
 **Integration:** already live as plain practice in `process-current.md §17h`; row pruned.
+
+## EXP-128 — ADOPTED at v147 (2026-08-21, OagEventSource retro)
+
+**Outcome: ADOPTED. The metric moved, and the mechanism is load-bearing in the instrument the
+retro itself reads.**
+
+The row's problem was that *"the retro's own constraint instrument was 44.98% interpolation
+presented as measurement"* — 138 of 282 flow items were migration backfill whose event timestamps
+were synthesised by spreading a span evenly across transitions, so every state got an identical
+duration, and that was pooled into the figure used to NAME the constraint.
+
+**What it produced, now permanent in `views/stats.md`:** backfill is HELD APART and excluded from
+every ranking figure; the excluded total and share are stated (`30463054 s across 136 interpolated
+items, 15.02% of the naive total`); each state carries its own `backfill %` column; and the
+denominator is declared as **measured dwell only**. §17f carries the reading rule it earned — *do
+not name a constraint from a state whose backfill share is high*.
+
+**Evidence it is load-bearing rather than decorative — from the retro that retired it:** v147
+named `queue`/`open` as the constraint *because* those rows read **0.00% backfill**, and
+deliberately did **not** name `dev-validating` (62.50% backfill), `deploying` (65.49%),
+`building` (75.60%) or `ready` (81.41%) — every one of which would have out-ranked real states if
+the interpolation were still pooled. Two consecutive retros (v146, v147) have made their
+constraint call on the measured-only denominator, and v146's finding (that the denominator also
+counted decided-and-parked inventory as waiting) was only *visible* because this row had already
+separated measurement from interpolation.
+
+**Integration:** the partition lives in the `wi-project` fold and in `stats.md`'s own header text,
+not in an agent instruction — so there is no agent file to rewrite and no scaffolding to strip. The
+reading rule is §17f. Row pruned at v147 to hold the registry at its 8-row cap.
+
+**Original row text, verbatim:**
+
+```
+| EXP-128 | v132 (2026-08-06, OagEventSource) | `work-items.py` `_compute_glt` + `_is_interpolated` + the `loop-gate` backlog advisory (all LANDED this retro, 4 new tests, 209 green) + process-current.md §17f limbs 3-4 | **Problem:** the retro's own constraint instrument was **44.98% interpolation presented as measurement**. 138 of 282 flow items are migration backfill whose event timestamps were synthesised by spreading a span evenly across their transitions, so every state segment came out identical to the second (UC-14 and UC-16: five consecutive segments of exactly 304,800.0s, and byte-identical timestamps between two different items). Backfill lands only on the states migrated items walked, so pooling it biased the time-thief ranking toward exactly those stages: `deploying` read 12.30% against a measured 6.00% (73.15% backfill), `building` 10.12% against 2.03% (88.96%), `ready` 10.54% against 2.79% (85.42%). THREE consecutive retros named a delivery stage as the constraint and spent their change budget mechanising it; EXP-123 was opened to reduce `queue` and scored NEGATIVE against a share metric that cannot distinguish 'work waits longer' from 'there is more work'. v128 diagnosed that confound precisely and ROUTED the fix — *"stats.md must report median per-item dwell in registered/ready alongside the share"* — as prose in a version comment with no owner, no item and no test. It never landed: the **seventh** recorded prose-only remedy, and §17c.3 (a comment is not a control) was never applied to the retro's own output. **Solution:** segregate, never pool. `_is_interpolated` flags an item when >=3 non-zero state segments agree to within max(1s, 0.05%); its dwell is reported in its own `backfill_s` column and EXCLUDED from every measured figure, with the per-state backfill share printed beside it. Every by_state/by_owner row also carries `median_per_item_s` + `n_items` — count-independent, which is v128's owed fix implemented rather than re-routed. The `loop-gate` backlog advisory reports median in-queue AGE and names the oldest item, so a depth nobody can act on becomes an age somebody can. §17f gains limb 3 (no constraint may be named from a figure without stating its backfill share and its per-item median) and limb 4 (a metric fix a retro routes MUST land as code in that same retro). | lead time for changes (median, trailing 30d); secondary guard: CFR must not rise | Retros stop aiming at delivery stages inflated by migration and start aiming at the real constraint, so median lead time FALLS. The measured constraint at open is **`queue` 57.80%, median 166,319s/item** (within it `open` 39.73%, median 3.07d across 51 items) while every working owner is fast — cicd median **655s**, engineer **2,053s**, tester **3,723s**. Anticipated: trailing-30d median lead time below 12,430s, `queue` median/item falling, CFR not rising above 8.9%. | 3 retros | active | **Measurement:** trailing-30d median lead time is **12,430s** at open. Scored at each of the next 3 retros. **POSITIVE** only if median lead time falls AND the named constraint is attacked with an exploit/subordinate move that cites the median column, not the share. **NEGATIVE** if lead time is flat-or-worse, or if a retro again names a constraint off a high-backfill state, or if `queue`'s median/item rises. Deliberately falsifiable in the direction that matters: if fixing the instrument does not change WHERE retros aim or WHETHER lead time moves, the measurement was never the blocker and this row must be KILLED rather than re-prescribed — exactly the mistake made with v128's prose. applies-to: every project whose item substrate was migrated or backfilled, and every retro that reads `views/stats.md`. Founding: this retro's measurement + principle-failure `2026-08-06-retro-constraint-named-from-interpolated-dwell.md`. Opened cap-neutral: EXP-118 ADOPTED and archived this retro (POSITIVE x2, folded into ui-designer.md §3b as plain practice with its scaffolding stripped); registry stays at **8, AT cap**. |
+```
+

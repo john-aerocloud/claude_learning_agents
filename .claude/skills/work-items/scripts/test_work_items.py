@@ -1210,13 +1210,26 @@ class TestRetro(Base):
         routine, incidents, due, detail, _m = self._debt(threshold=3)
         self.assertEqual(len(routine), 1)
 
-    # ---- retro-mark writes the marker file ----
-    def test_retro_mark_writes_file(self):
+    # ---- retro-mark records the boundary — in the PROJECT substrate ----------
+    # AC-PCM.1. This test used to assert the marker was written to the TRACKED
+    # path process/dora/retro-marker/<project>.txt. Repointing it to the new
+    # store WITHOUT a red step would have converted the whole change into a false
+    # green (delta-075 §9), so it is split: the positive assertion moves to the
+    # new store, and the negative — the old path is NOT written — is asserted
+    # here as well as in TestRetroLogStore's fitness function.
+    def test_retro_mark_records_the_boundary_in_the_project_substrate(self):
         wi.cmd_retro_mark(argparse.Namespace(project=self.project, now="2026-06-20T00:00:00Z"))
-        p = os.path.join(self.tmp, "process", "dora", "retro-marker", f"{self.project}.txt")
+        p = os.path.join(self.tmp, "work", self.project, "items", "retro-log.md")
         self.assertTrue(os.path.exists(p))
-        with open(p) as f:
-            self.assertEqual(f.read().strip(), "2026-06-20T00:00:00Z")
+        self.assertEqual(wi._read_retro_marker(self.project),
+                         wi.parse_ts("2026-06-20T00:00:00Z"))
+
+    def test_retro_mark_does_not_write_the_frozen_parent_repo_marker(self):
+        legacy = os.path.join(self.tmp, "process", "dora", "retro-marker",
+                              f"{self.project}.txt")
+        wi.cmd_retro_mark(argparse.Namespace(project=self.project, now="2026-06-20T00:00:00Z"))
+        self.assertFalse(os.path.exists(legacy),
+                         "a documented read/close still writes a tracked parent file")
 
     def test_retro_debt_writes_statusline(self):
         self._make_done_slice("SLC-1", [10])
@@ -1274,12 +1287,14 @@ class TestPartsCheck(Base):
             json.dump(doc, f)
 
     def _marker(self, ts="2026-06-01T00:00:00Z", constraint=None):
-        p = wi._retro_marker_path(self.project)
-        os.makedirs(os.path.dirname(p), exist_ok=True)
-        with open(p, "w", encoding="utf-8") as f:
-            f.write(ts + "\n")
+        """Seed the LIVE store — the project's own cadence log. (The FROZEN
+        parent-repo files are still read as a fallback; that path is covered in
+        TestRetroLogStore, which drains a legacy-seeded project end to end.)"""
+        ev = {"ts": ts, "event": wi.RETRO_CLOSED, "agent": "orchestrator"}
         if constraint:
-            wi._write_constraint_marker(self.project, constraint)
+            ev["constraint_owner"] = constraint["owner"]
+            ev["constraint_state"] = constraint["state"]
+        wi._append_retro_log(self.project, ev)
 
     def _run(self, threshold=3, now=NOW):
         ns = argparse.Namespace(project=self.project, threshold=threshold, now=now)
@@ -5649,6 +5664,350 @@ class TestRefRepoScoping(Base):
         self.assertEqual(f[0]["absent"], ["deadbee"])
 
 
+# --------------------------------------------------------------------------- #
+# OI-PARTS-CHECK-MARKER-DIRTIES-THE-TREE-AND-DEFERS-FOLD-FORWARD
+#   AC-PCM.1  a retro-mark / parts-check run leaves the PARENT worktree clean
+#   AC-PCM.2  `project-update` does not exit 3 as a consequence of a preceding
+#             parts-check (the gate's input is `git status --porcelain`)
+#   AC-PCM.3  retro cadence stays DERIVABLE (and absence still fails CLOSED)
+#   AC-PCM.4  non-vacuity: RED on a tree deliberately dirtied by the marker
+#
+# THE DECIDED SHAPE (v146 retro, option 3): the last-retro instant and the
+# constraint-as-of-that-retro live in the PROJECT's own event substrate, as an
+# append-only log at work/<project>/items/retro-log.md. The parent-repo files
+# process/dora/retro-marker/*.txt are FROZEN — never written again, still READ
+# as a fallback so no project's cadence moves on the cutover.
+#
+# WHY THE SUBSTRATE AND NOT A GIT TAG (the option that looks free and is not):
+# the process-v<NN> tag namespace is GLOBAL and retro debt is PER-PROJECT, so
+# ROC's next tag would silently become OagEventSource's "last retro". The marker
+# FILE and the git TAG are the same defect in different clothes — a global store
+# asked to hold per-project state. Pinned by test_ac_pcm_3_two_projects_*.
+# --------------------------------------------------------------------------- #
+class TestRetroLogStore(Base):
+    def _stats(self, owner, state):
+        d = os.path.join(self.tmp, "work", self.project, "views")
+        os.makedirs(d, exist_ok=True)
+        doc = {"overall": {"gross_lead_time": {
+            "by_owner": {owner: {"pct_of_glt": 60.0, "backfill_pct_of_state": 0.0}},
+            "by_state": {state: {"pct_of_glt": 42.0, "backfill_pct_of_state": 0.0}}}}}
+        with open(os.path.join(d, "stats.json"), "w", encoding="utf-8") as f:
+            json.dump(doc, f)
+
+    def _legacy_marker(self, ts, project=None, constraint=None):
+        """Write the FROZEN parent-repo files exactly as the pre-cutover code did."""
+        project = project or self.project
+        p = wi._legacy_retro_marker_path(project)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(ts + "\n")
+        if constraint:
+            cp = wi._legacy_constraint_marker_path(project)
+            with open(cp, "w", encoding="utf-8") as f:
+                f.write("%s\t%s\n" % (constraint[0], constraint[1]))
+
+    def _process_tree(self):
+        """Every file under the temp ROOT's process/ dir, with its bytes — the
+        parent-repo footprint. statusline.json is gitignored in the real repo, so
+        it is excluded: it can never dirty a tracked tree."""
+        out = {}
+        base = os.path.join(self.tmp, "process")
+        for dirpath, _dirs, files in os.walk(base):
+            for fn in files:
+                fp = os.path.join(dirpath, fn)
+                rel = os.path.relpath(fp, self.tmp)
+                if rel.endswith(os.path.join("dora", "statusline.json")):
+                    continue
+                with open(fp, "rb") as f:
+                    out[rel] = f.read()
+        return out
+
+    def _mark(self, ts, project=None):
+        with contextlib.redirect_stdout(io.StringIO()):
+            wi.cmd_retro_mark(argparse.Namespace(project=project or self.project,
+                                                 now=ts))
+
+    # ---- AC-PCM.1 — the write lands in the project substrate, not the parent --
+    def test_ac_pcm_1_retro_mark_writes_the_project_retro_log(self):
+        self._mark("2026-06-20T00:00:00Z")
+        log = os.path.join(self.tmp, "work", self.project, "items", "retro-log.md")
+        self.assertTrue(os.path.exists(log), "retro-mark wrote no per-project log")
+        evs = wi._read_retro_log(self.project)
+        self.assertEqual(len(evs), 1)
+        self.assertEqual(evs[0]["event"], "retro_closed")
+        self.assertEqual(evs[0]["ts"], "2026-06-20T00:00:00Z")
+        self.assertEqual(wi._read_retro_marker(self.project),
+                         wi.parse_ts("2026-06-20T00:00:00Z"))
+
+    def test_ac_pcm_1_retro_mark_leaves_the_parent_process_tree_byte_identical(self):
+        """THE fitness function (delta-075 R10): any write under process/ is RED.
+        Not a budget — a documented read has zero write footprint on the shared
+        tree, and the friction is a RATE (one dirty-tree event per invocation)."""
+        self._stats("queue", "open")
+        before = self._process_tree()
+        self._mark("2026-06-20T00:00:00Z")
+        self.assertEqual(self._process_tree(), before)
+        self.assertFalse(os.path.exists(wi._legacy_retro_marker_path(self.project)))
+        self.assertFalse(os.path.exists(wi._legacy_constraint_marker_path(self.project)))
+
+    def test_ac_pcm_1_parts_check_drain_leaves_the_parent_process_tree_identical(self):
+        """parts-check is the per-close READ. Its drain must not touch process/."""
+        self._legacy_marker("2026-06-01T00:00:00Z", constraint=("queue", "open"))
+        self._stats("queue", "open")
+        self.write_item("done", "DEF-1", "defect", [
+            {"ts": _dt(15, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(15, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(15, 2), "event": "confirmed", "agent": "engineer"},
+            {"ts": _dt(15, 3), "event": "fixed", "agent": "engineer"},
+            {"ts": _dt(15, 5), "event": "validated", "agent": "tester"}])
+        before = self._process_tree()
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            with self.assertRaises(SystemExit) as e:
+                wi.cmd_parts_check(argparse.Namespace(
+                    project=self.project, threshold=3, now=NOW))
+        self.assertEqual(e.exception.code, 0, out.getvalue())
+        self.assertEqual(self._process_tree(), before,
+                         "parts-check wrote a parent-repo file")
+        evs = wi._read_retro_log(self.project)
+        self.assertEqual([x["event"] for x in evs], ["debt_drained"])
+        # and the boundary really moved — a drain that records nothing is a no-op
+        self.assertEqual(wi._read_retro_marker(self.project), wi.parse_ts(NOW))
+
+    def test_ac_pcm_1_escalating_parts_check_appends_nothing(self):
+        """An escalation may NEVER drain debt — so it may never append."""
+        self._legacy_marker("2026-06-01T00:00:00Z", constraint=("queue", "open"))
+        self._stats("tester", "validating")            # constraint SHIFTED
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            with self.assertRaises(SystemExit) as e:
+                wi.cmd_parts_check(argparse.Namespace(
+                    project=self.project, threshold=3, now=NOW))
+        self.assertEqual(e.exception.code, 2, out.getvalue())
+        self.assertEqual(wi._read_retro_log(self.project), [])
+        self.assertEqual(wi._read_retro_marker(self.project),
+                         wi.parse_ts("2026-06-01T00:00:00Z"))
+
+    # ---- AC-PCM.3 — cadence stays derivable, and the cutover moves nothing ----
+    def test_ac_pcm_3_legacy_marker_is_read_through_when_no_log_exists(self):
+        """THE CUTOVER PIN. Every existing project (OagEventSource, ROC, AdixOut,
+        OperationalFlowSimulator) has a frozen tracked marker and no log yet. Its
+        next retro-debt must return the SAME boundary — no spurious full retro,
+        which is what the naive `gitignore + git rm --cached` form would cause."""
+        self._legacy_marker("2026-06-14T09:00:00Z")
+        self.assertEqual(wi._read_retro_marker(self.project),
+                         wi.parse_ts("2026-06-14T09:00:00Z"))
+        kind, ts, src = wi._retro_verdict(self.project)
+        self.assertEqual(kind, "known")
+        self.assertEqual(ts, wi.parse_ts("2026-06-14T09:00:00Z"))
+        self.assertIn("frozen", src)
+
+    def test_ac_pcm_3_legacy_constraint_marker_is_read_through(self):
+        self._legacy_marker("2026-06-01T00:00:00Z", constraint=("queue", "open"))
+        self.assertEqual(wi._read_constraint_marker(self.project), ("queue", "open"))
+
+    def test_ac_pcm_3_the_log_is_authoritative_once_it_exists(self):
+        """ONE writer wins (EXP-047) — the log is not reconciled against the
+        frozen file with a max(); if it exists it IS the record, even when it
+        names an EARLIER instant than the fossil."""
+        self._legacy_marker("2026-06-25T00:00:00Z")
+        self._mark("2026-06-10T00:00:00Z")
+        self.assertEqual(wi._read_retro_marker(self.project),
+                         wi.parse_ts("2026-06-10T00:00:00Z"))
+        _k, _t, src = wi._retro_verdict(self.project)
+        self.assertIn("retro-log.md", src)
+
+    def test_ac_pcm_3_newest_log_event_wins_and_the_log_is_append_only(self):
+        self._mark("2026-06-10T00:00:00Z")
+        self._mark("2026-06-20T00:00:00Z")
+        evs = wi._read_retro_log(self.project)
+        self.assertEqual([e["ts"] for e in evs],
+                         ["2026-06-10T00:00:00Z", "2026-06-20T00:00:00Z"])
+        self.assertEqual(wi._read_retro_marker(self.project),
+                         wi.parse_ts("2026-06-20T00:00:00Z"))
+
+    def test_ac_pcm_3_constraint_rides_the_log_event(self):
+        self._stats("queue", "open")
+        self._mark("2026-06-20T00:00:00Z")
+        self.assertEqual(wi._read_constraint_marker(self.project), ("queue", "open"))
+        ev = wi._read_retro_log(self.project)[-1]
+        self.assertEqual((ev["constraint_owner"], ev["constraint_state"]),
+                         ("queue", "open"))
+
+    def test_ac_pcm_3_constraint_read_scans_back_past_events_without_one(self):
+        """A drain that could not read the constraint must not ERASE the last
+        known one — the reader takes the newest event that CARRIES one."""
+        self._stats("queue", "open")
+        self._mark("2026-06-10T00:00:00Z")
+        os.remove(os.path.join(self.tmp, "work", self.project, "views", "stats.json"))
+        self._mark("2026-06-20T00:00:00Z")        # no constraint readable
+        self.assertEqual(wi._read_constraint_marker(self.project), ("queue", "open"))
+        self.assertEqual(wi._read_retro_marker(self.project),
+                         wi.parse_ts("2026-06-20T00:00:00Z"))
+
+    # ---- AC-PCM.3 — PER-PROJECT INDEPENDENCE (the anti-git-tag pin) ----------
+    def test_ac_pcm_3_two_projects_retro_histories_cannot_alias(self):
+        """The reason a global store (the marker dir, or a process-v<NN> git tag)
+        is wrong: one project's retro must never read as another's."""
+        other = "OtherProj"
+        os.makedirs(os.path.join(self.tmp, "work", other, "items", "active"),
+                    exist_ok=True)
+        self._mark("2026-06-20T00:00:00Z")                 # TestProj retro'd
+        k, _ts, why = wi._retro_verdict(other)
+        self.assertEqual(k, "unknown", why)                # OtherProj did NOT
+        self._mark("2026-06-28T00:00:00Z", project=other)  # now OtherProj does
+        self.assertEqual(wi._read_retro_marker(self.project),
+                         wi.parse_ts("2026-06-20T00:00:00Z"))
+        self.assertEqual(wi._read_retro_marker(other),
+                         wi.parse_ts("2026-06-28T00:00:00Z"))
+
+    def test_ac_pcm_3_the_log_is_not_an_item_and_perturbs_no_derived_view(self):
+        """It lives IN items/ but not in active/|done/, so it is invisible to
+        load_all_items — no state, no queue, no GLT share, and therefore it can
+        never move the constraint that parts-check reads."""
+        self.write_item("active", "UC-1", "use-case", [
+            {"ts": _dt(10, 0), "event": "registered", "agent": "flow-manager"}])
+        before, _d = wi.load_all_items(self.project)
+        self._mark("2026-06-20T00:00:00Z")
+        after, _d2 = wi.load_all_items(self.project)
+        self.assertEqual(sorted(after), sorted(before))
+        self.assertEqual(sorted(after), ["UC-1"])
+
+    # ---- AC-PCM.3 / delta-074 R10 — ABSENCE IS A VERDICT, NOT 1970 -----------
+    def test_ac_pcm_3_absent_record_reads_UNKNOWN_and_still_fails_closed(self):
+        """Once the store is per-project, absence is the ROUTINE state of a new
+        project — so the overloaded 1970 sentinel becomes load-bearing on the
+        happy path. It must print UNKNOWN and the paths looked at, and keep its
+        exit-2 direction. A legibility change, never a softening."""
+        self.write_item("done", "DEF-1", "defect", [
+            {"ts": _dt(15, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(15, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(15, 2), "event": "confirmed", "agent": "engineer"},
+            {"ts": _dt(15, 3), "event": "fixed", "agent": "engineer"},
+            {"ts": _dt(15, 5), "event": "validated", "agent": "tester"}])
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            with self.assertRaises(SystemExit) as e:
+                wi.cmd_retro_debt(argparse.Namespace(
+                    project=self.project, threshold=3, now=NOW))
+        txt = out.getvalue()
+        self.assertEqual(e.exception.code, 2, txt)         # FAIL CLOSED
+        self.assertIn("UNKNOWN", txt)
+        self.assertNotIn("1970-01-01", txt)
+        self.assertIn("retro-log.md", txt)                 # names where it looked
+        self.assertIn("RETRO DUE", txt)
+
+    def test_ac_pcm_3_known_record_prints_the_instant_not_a_verdict_word(self):
+        """The happy path's wording is UNCHANGED — this is a relocation, and a
+        changed line here would be a changed cadence signal."""
+        self._legacy_marker("2026-06-14T09:00:00Z")
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            with self.assertRaises(SystemExit):
+                wi.cmd_retro_debt(argparse.Namespace(
+                    project=self.project, threshold=3, now=NOW))
+        self.assertIn("since last retro 2026-06-14T09:00:00Z => ok", out.getvalue())
+
+    # ---- SCOPE FENCE (delta-075 §5.1) — these must NOT have moved ------------
+    def test_scope_fence_read_constraint_still_reads_project_views_stats(self):
+        self._stats("queue", "open")
+        self.assertEqual(wi._read_constraint(self.project)["owner"], "queue")
+        os.remove(os.path.join(self.tmp, "work", self.project, "views", "stats.json"))
+        self.assertIsNone(wi._read_constraint(self.project))
+
+    def test_scope_fence_retro_mark_still_warns_loudly_when_constraint_unreadable(self):
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            wi.cmd_retro_mark(argparse.Namespace(project=self.project,
+                                                 now="2026-06-20T00:00:00Z"))
+        self.assertIn("WARNING", out.getvalue())
+        self.assertIn("escalate", out.getvalue())
+
+
+class TestRetroMarkerTreeCleanliness(unittest.TestCase):
+    """AC-PCM.1/2/4 over a REAL git repo shaped like the parent worktree.
+
+    The gate this defect trips is `.claude/scripts/worktree update`'s
+    `[ -n "$(git status --porcelain)" ] && exit 3`, so `git status --porcelain`
+    IS the acceptance surface — asserted here against real git, not simulated.
+
+    AC-PCM.4 is discharged by test_..._RED_witness_..., which reproduces the
+    fault by writing the tracked path exactly as the pre-cutover code did. A
+    suite that only ever ran the post-fix path would prove nothing.
+    """
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="wi-clean-")
+        self.project = "TestProj"
+        self._orig_root, wi.ROOT = wi.ROOT, self.tmp
+        self._orig_statusline = wi.STATUSLINE
+        wi.STATUSLINE = os.path.join(self.tmp, "process", "dora", "statusline.json")
+        os.makedirs(os.path.join(self.tmp, "process", "dora", "retro-marker"))
+        os.makedirs(os.path.join(self.tmp, "work", self.project, "items", "active"))
+        # Mirror the parent repo's ignore semantics EXACTLY by copying its real
+        # .gitignore — the two facts this acceptance rests on are both in there
+        # and neither is mine to restate: `/work/*/` (each project is its own
+        # gitignored repo, so the cadence log is invisible to this gate) and
+        # `/process/dora/statusline.json` (already machine-local, which is why
+        # parts-check's OTHER write never dirtied a tree). Copying rather than
+        # hand-writing means un-ignoring either one turns this test RED for a
+        # real reason instead of leaving the fixture quietly wrong.
+        shutil.copy(os.path.join(self._orig_root, ".gitignore"),
+                    os.path.join(self.tmp, ".gitignore"))
+        # ... and the fact that makes the fault possible at all: the parent-repo
+        # marker directory is TRACKED.
+        with open(os.path.join(self.tmp, "process", "dora", "retro-marker",
+                               f"{self.project}.txt"), "w") as f:
+            f.write("2026-06-01T00:00:00Z\n")
+        self._git("init", "-q", "-b", "main")
+        self._git("config", "user.email", "t@t")
+        self._git("config", "user.name", "t")
+        self._git("add", "-A")
+        self._git("commit", "-qm", "seed")
+        self.assertEqual(self._porcelain(), "")
+
+    def tearDown(self):
+        wi.ROOT, wi.STATUSLINE = self._orig_root, self._orig_statusline
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _git(self, *args):
+        return subprocess.run(("git", "-C", self.tmp) + args,
+                              capture_output=True, text=True).stdout
+
+    def _porcelain(self):
+        return self._git("status", "--porcelain").strip()
+
+    def test_ac_pcm_4_RED_witness_writing_the_tracked_marker_dirties_the_tree(self):
+        """The fault, reproduced: this is what every parts-check used to do."""
+        with open(os.path.join(self.tmp, "process", "dora", "retro-marker",
+                               f"{self.project}.txt"), "w") as f:
+            f.write("2026-06-20T00:00:00Z\n")
+        self.assertNotEqual(self._porcelain(), "",
+                            "the RED witness did not reproduce")
+        self.assertIn("retro-marker", self._porcelain())
+
+    def test_ac_pcm_1_and_2_retro_mark_then_parts_check_leave_the_tree_clean(self):
+        """AC-PCM.2's ordering — the one that HID the fault: the check runs FIRST,
+        and only then is the fold-forward gate evaluated."""
+        d = os.path.join(self.tmp, "work", self.project, "views")
+        os.makedirs(d)
+        with open(os.path.join(d, "stats.json"), "w") as f:
+            json.dump({"overall": {"gross_lead_time": {
+                "by_owner": {"queue": {"pct_of_glt": 60.0,
+                                       "backfill_pct_of_state": 0.0}},
+                "by_state": {"open": {"pct_of_glt": 42.0,
+                                      "backfill_pct_of_state": 0.0}}}}}, f)
+        with contextlib.redirect_stdout(io.StringIO()):
+            wi.cmd_retro_mark(argparse.Namespace(project=self.project,
+                                                 now="2026-06-20T00:00:00Z"))
+        self.assertEqual(self._porcelain(), "",
+                         "retro-mark dirtied the parent worktree")
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit) as e:
+                wi.cmd_parts_check(argparse.Namespace(
+                    project=self.project, threshold=3,
+                    now="2026-06-21T00:00:00Z"))
+        self.assertEqual(e.exception.code, 0)
+        self.assertEqual(self._porcelain(), "",
+                         "parts-check dirtied the parent worktree")
+        # the record IS there — clean because it is in the project's own repo,
+        # which the parent gitignores, not because nothing was written
+        self.assertEqual(wi._read_retro_marker(self.project),
+                         wi.parse_ts("2026-06-21T00:00:00Z"))
 class TestStalledWorkHonoursItsOwnRemedy(TestLoopGate):
     """DEF-ROC-083 — the `stalled-work` check PRINTS `defer_until:` as a remedy and
     does not read it, so the block it raises cannot be cleared by doing what it says.

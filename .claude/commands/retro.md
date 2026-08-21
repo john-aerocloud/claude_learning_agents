@@ -125,9 +125,16 @@ Act as the **orchestrator**. Own this; gather input but make the process call.
    owning agent file as plain practice instead, with no registry row.
 
 8. **CLOSE — drain the retro-debt counter.** Run `make retro-mark PROJECT=$1`.
-   This writes the last-retro marker that `make retro-debt` reads, so the §F8 gate
-   returns `ok` again and the loop may resume pulls. (This is the v82 replacement
-   for the old "record a `retro` ledger row" reset — there is no DORA CSV write.)
+   This appends a `retro_closed` event (with the constraint as of this close) to
+   this project's own append-only cadence log, `work/$1/items/retro-log.md`, which
+   is what `make retro-debt` reads — so the §F8 gate returns `ok` again and the
+   loop may resume pulls. (This is the v82 replacement for the old "record a
+   `retro` ledger row" reset — there is no DORA CSV write.) **It writes nothing in
+   the parent repo**, deliberately: the tracked marker it replaced left this
+   worktree dirty and so DEFERRED the very fold-forward step 8a below performs
+   (`OI-PARTS-CHECK-MARKER-DIRTIES-THE-TREE-AND-DEFERS-FOLD-FORWARD`). The frozen
+   pre-cutover files under `process/dora/retro-marker/` are read as a fallback and
+   never written — see the README there.
    Re-run `make retro-debt PROJECT=$1` to confirm the debt is drained (exit 0).
 8a. **FOLD BACK to main AUTOMATICALLY (§0a) — the retro is not closed until process
    learning is reintegrated, and that happens UNATTENDED.** Every change this retro

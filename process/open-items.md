@@ -478,16 +478,26 @@ BEHAVIOUR is live as plain cicd.md practice; only the SCORED registry row is def
 score/adopt-or-retire across the merged set and give bootstrap-parity a row (target: CFR on first-account
 deploys) if a slot frees. Owner: next AdixOut retro (§25a registry prune).
 
-## `prod-deploying` has no `blocked` exit for a single-environment project (2026-08-20, ROC v145 — DEFERRED, review 2026-09-17)
+## `prod-deploying` has no `blocked` exit for a single-environment project (2026-08-20, ROC v145 — **PROMOTED from latent to LIVE 2026-08-21**)
 Retired from `process/experiments.md` at v145 as one of six `##` sections that never had a registry
 row (full text + disposition in `experiments-archive.md`). The gap is real: an item that reaches
 `prod-deploying` in a project with no prod environment has no legal exit and strands, accruing wip
 time that reads as delivery. It is DEFERRED rather than built because it is off the current
 constraint (`blocked`/`external`, 41–42% of GLT) and ROC has no prod environment to strand an item
 in — measured `prod-deploying` dwell is 191 s across ONE item, i.e. the harm is latent, not live.
-Bring it forward the moment any project gains a second environment, or an item strands. Fix shape:
-a `blocked` exit from `prod-deploying` in `state-graphs.json` with the §17c.6 probe requirement, so
-the park is re-checkable like any other. Owner: cicd + the work-item machinery.
+**UPDATE 2026-08-21 — no longer latent, and no longer about a second environment.** ROC's owner ruled
+that `aas-dev` is its ONE cloud environment (local emulators aside), so `prod-deploying` is not a state
+ROC can ever legitimately leave forwards. `UC-ROC-084` was stranded there since 2026-07-31 with its
+deliverable ALREADY LIVE, and had to be **cancelled** — because `promoted` would assert a prod deploy
+that cannot have happened and `deploy_failed` would assert a failure that did not occur. So the graph
+forced a delivered use-case to be recorded as cancelled, which under-counts delivery in the metrics.
+That is the cost, it is now realised rather than hypothetical, and it will recur for every
+single-environment project. Fix shape:
+EITHER a terminal exit from `prod-deploying` meaning *delivered, and no promotion target exists*, OR
+— better — a per-project declaration of which environments exist, so `dev_validated` does not route to
+`prod-deploying` at all in a project that has no prod. The second removes the state rather than adding
+an exit to it, and a state a project can never leave is worse than a state it never enters.
+Owner: cicd + the work-item machinery.
 
 ## "dep satisfied" is undefined, so two flow-managers read it oppositely (2026-08-20, ROC v145 — DEFERRED, review 2026-09-17)
 Retired from `process/experiments.md` at v145 (same six row-less sections; full text in

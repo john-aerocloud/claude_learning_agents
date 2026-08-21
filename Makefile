@@ -101,6 +101,29 @@ worktree-guard:
 worktree-reap:
 	$(WORKTREE) reap $(if $(DIR),$(DIR),--all)
 
+# --- an IN-PROGRESS git operation left ARMED in a shared tree -------------------
+# (OI-ABANDONED-SEQUENCER-STATE-ARMS-A-56-COMMIT-DESTRUCTION)
+#
+# `.git/sequencer` sat in the shared work/OagEventSource tree for SIX HOURS holding
+# a two-step revert todo whose saved head was FIFTY-SIX commits behind HEAD — the
+# whole output of seven agents in one session — and `git revert --abort` rewinds to
+# that saved head. `git status --porcelain` says NOTHING about it, so every
+# cleanliness check here (loop-gate, the fold-forward dirty check) passed with it
+# armed. THE SAFE VERB IS THE OBSCURE ONE: `--quit` clears the state and leaves HEAD
+# and the working tree alone; `--abort` is the one everybody knows.
+#
+# Detects .git/sequencer, REVERT_HEAD, CHERRY_PICK_HEAD, MERGE_HEAD and
+# rebase-merge/rebase-apply across the parent repo, every worktree AND every nested
+# project repo (the incident was in a nested one), and reports HOW MANY COMMITS
+# `--abort` would discard — "state present" is ignorable, "56 commits" is not.
+# READ-ONLY: it never runs a writing git verb. Also wired as loop-gate check 14, so
+# it runs before EVERY pull; a gate in no workflow is not a gate.
+#   make sequencer-guard [DIR=<path>] [GRACE_MIN=30] [JSON=1]
+# Exit 2 iff commits are at stake / residue is abandoned or unmeasurable.
+sequencer-guard:
+	@node .claude/tools/sequencer-guard.js scan $(if $(DIR),$(DIR),) \
+	  $(if $(GRACE_MIN),--grace-min $(GRACE_MIN),) $(if $(JSON),--json,)
+
 # --- a file a committed make target RUNS must be on trunk -----------------------
 # (OI-GITIGNORE-SWALLOWS-COMMITTED-TOOLS, AC-GI.3)
 #
@@ -360,9 +383,13 @@ parts-check:
 #                         not-yet (exit 3) is ADVISORY; a broken/absent predicate
 #                         BLOCKS, because an unrunnable liveness predicate is not a
 #                         predicate (v125 §17c.2).
-#  6-11 DELEGATED checks   each computed by its own committed analyser, never
+#  6-14 DELEGATED checks   each computed by its own committed analyser, never
 #                         re-implemented here: 6 test-requirement-gate (§17d) ·
 #                         7 worktree-guard (DEFECT-OAG-076) · 8 container-reap ·
+#                         14 sequencer-guard — an in-progress git operation left
+#                         ARMED in a shared tree, reported WITH the count of commits
+#                         `--abort` would discard; invisible to `git status
+#                         --porcelain`, so no other check here can see it ·
 #                         9 make-refs-tracked · 10 acceptance-audit ·
 #                         11 board-mapping (DEFECT-OAG-099) — every state in
 #                         state-graphs.json must carry a board-status row, because
@@ -1100,7 +1127,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap make-refs-tracked container-reap container-orphans stack-claim stack-release stack-status sso-login retro-debt retro-mark loop-gate test-wi wi-append wi-project wi-validate wi-migrate doc-lint process-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated test-requirement-gate test-requirement-gate-baseline board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery
+.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap sequencer-guard make-refs-tracked container-reap container-orphans stack-claim stack-release stack-status sso-login retro-debt retro-mark loop-gate test-wi wi-append wi-project wi-validate wi-migrate doc-lint process-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated test-requirement-gate test-requirement-gate-baseline board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery
 
 # --- Viggo-fix UC-W7: Country/Nationality ID remediation (T-SQL) --------------
 # Data-driven, self-building T-SQL remediation script set + its local stand-up

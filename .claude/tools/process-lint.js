@@ -65,6 +65,15 @@ const FROZEN_LEGACY_IDS = new Set([
 // Projects an id or a `routed` cell may name. Used for the per-project INFO count.
 const KNOWN_PROJECTS = ['ROC', 'OagEventSource', 'AdixOut', 'OperationalFlowSimulator', 'OAG'];
 
+// One project, two spellings. A project's experiment ids use the SAME short token as its work
+// items (`EXP-OAG-001` beside `DEFECT-OAG-nnn`), while its `routed` cells spell the project out.
+// Both must fold to ONE name or the per-project cap in C4 is silently doubled — the cap defeated
+// by an alias rather than by an argument, which is this registry's own recurring failure class
+// (a control that exists, is believed, and does not fire). Canonical name on the RIGHT.
+const PROJECT_ALIASES = { OAG: 'OagEventSource', OFS: 'OperationalFlowSimulator' };
+
+const canonicalProject = (p) => PROJECT_ALIASES[p] || p;
+
 const PER_PROJECT_CAP = 8;
 
 // --- process-current.md -----------------------------------------------------
@@ -119,9 +128,9 @@ function parseRegistry(text) {
 
 function projectOf(row) {
   const namespaced = /^EXP-([A-Za-z][A-Za-z0-9]*)-\d+$/.exec(row.id);
-  if (namespaced) return namespaced[1];
+  if (namespaced) return canonicalProject(namespaced[1]);
   for (const p of KNOWN_PROJECTS) {
-    if (new RegExp(`\\b${p}\\b`).test(row.routed || '')) return p;
+    if (new RegExp(`\\b${p}\\b`).test(row.routed || '')) return canonicalProject(p);
   }
   return 'unattributed';
 }

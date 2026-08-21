@@ -3279,6 +3279,222 @@ class TestLoopGate(Base):
         self.assertEqual(f[0]["severity"], "unknown")
         self.assertIn("NOT ESTABLISHED", f[0]["message"])
 
+    # ---- check 14: an in-progress git operation ARMED in a shared tree ------
+    #
+    # (OI-ABANDONED-SEQUENCER-STATE-ARMS-A-56-COMMIT-DESTRUCTION, AC-SEQ.2.)
+    # `.git/sequencer` sat in the SHARED work/OagEventSource tree for six hours
+    # holding a two-step revert todo whose saved head was FIFTY-SIX commits behind
+    # HEAD — the whole output of seven agents in one session — and `git revert
+    # --abort` rewinds to it. `git status --porcelain` reports NOTHING about it, so
+    # every cleanliness check in this system, including this gate, passed with it
+    # armed; it was found once, by a tester noticing it as an aside.
+    #
+    # WHY IT HANGS HERE. The loop is the only continuously-running workflow, so it
+    # is the only place the state is looked at before the next wave of dispatches
+    # adds more commits to the pile at stake — and the pile GROWS here by design,
+    # because the prescribed shared-tree commit path (isolated-commit.js:
+    # commit-tree + ref CAS) never clears branch state the way `git commit` does.
+    #
+    # The first two cases drive the REAL analyser over a REAL planted sequencer in
+    # a REAL two-repo topology — nothing is stubbed, and the state is planted only
+    # ever in a temp tree (arming one in the shared tree is the hazard itself). The
+    # rest substitute the script, as checks 6/7/8 do, because their claim is about
+    # the finding's SEVERITY and MESSAGE.
+
+    def _plant_stale_sequencer(self, repo, n_after=5):
+        """A REAL stopped revert sequencer, then `n_after` commits landing on top of
+        it the way agents actually commit here (commit-tree + ref CAS, which unlike
+        `git commit` never clears branch state — exactly why the founding state
+        survived 56 commits). Returns (saved_head, [shas at stake])."""
+        def w(rel, text):
+            path = os.path.join(repo, rel)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+
+        def c(msg):
+            self._git(repo, "add", "-A")
+            self._git(repo, "commit", "-q", "-m", msg)
+            return subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"],
+                                  check=True, capture_output=True,
+                                  text=True).stdout.strip()
+
+        self._init_repo(repo)
+        w("f.txt", "A\n")
+        w("o.txt", "x\n")
+        c("c1")
+        w("f.txt", "B\n")
+        c_f = c("cF")
+        w("o.txt", "x\ny\n")
+        c_o = c("cO")
+        w("f.txt", "C\n")
+        c("cLater")
+        # cO reverts cleanly, cF then CONFLICTS: the sequencer stops and stays.
+        r = subprocess.run(["git", "-C", repo, "revert", "--no-edit", c_o, c_f],
+                           capture_output=True, text=True)
+        self.assertNotEqual(r.returncode, 0, "the revert was meant to conflict")
+        seq = os.path.join(repo, ".git", "sequencer")
+        self.assertTrue(os.path.isdir(seq), "no sequencer planted")
+        with open(os.path.join(seq, "head"), encoding="utf-8") as f:
+            saved = f.read().strip()
+        # tidy the tree WITHOUT `git reset`, which would clear the very state we plant
+        self._git(repo, "checkout", "-q", "HEAD", "--", "f.txt")
+        after = []
+        for i in range(1, n_after + 1):
+            w("agent%d.txt" % i, "work %d\n" % i)
+            self._git(repo, "add", "--", "agent%d.txt" % i)
+            tree = subprocess.run(["git", "-C", repo, "write-tree"], check=True,
+                                  capture_output=True, text=True).stdout.strip()
+            parent = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"],
+                                    check=True, capture_output=True,
+                                    text=True).stdout.strip()
+            sha = subprocess.run(["git", "-C", repo, "commit-tree", tree, "-p",
+                                  parent, "-m", "agent commit %d" % i], check=True,
+                                 capture_output=True, text=True).stdout.strip()
+            self._git(repo, "update-ref", "refs/heads/main", sha)
+            after.append(sha)
+        return saved, after
+
+    def _seqg(self, findings):
+        return [f for f in findings if f["check"] == "sequencer-guard"]
+
+    def test_sequencer_guard_clean_tree_produces_no_finding(self):
+        """AC-SEQ.2 — the differential arm: the check is not a blanket alarm."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        parent, proj, _wt = self._parent_topology()
+        orig, wi.ROOT = wi.ROOT, parent
+        try:
+            findings = self._gate()
+        finally:
+            wi.ROOT = orig
+        self.assertEqual(self._seqg(findings), [])
+
+    def test_sequencer_guard_armed_state_in_the_NESTED_repo_BLOCKS_and_names_the_count(self):
+        """AC-SEQ.2 — the founding shape end to end: the state is in the NESTED
+        project repo (a parent-only sweep would see nothing), it is INVISIBLE to
+        `git status --porcelain`, and the finding carries the COUNT — because
+        "state present" is ignorable and "N commits at stake" is not."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        parent, proj, _wt = self._parent_topology()
+        saved, after = self._plant_stale_sequencer(proj, n_after=5)
+        porcelain = subprocess.run(["git", "-C", proj, "status", "--porcelain"],
+                                   check=True, capture_output=True, text=True)
+        self.assertEqual(porcelain.stdout.strip(), "",
+                         "the whole point: this state is invisible to porcelain")
+        truth = int(subprocess.run(
+            ["git", "-C", proj, "rev-list", "--count", "%s..HEAD" % saved],
+            check=True, capture_output=True, text=True).stdout.strip())
+        self.assertEqual(truth, len(after) + 1)
+
+        orig, wi.ROOT = wi.ROOT, parent
+        try:
+            findings = self._gate()
+            f = self._seqg(findings)
+            self.assertEqual(len(f), 1, findings)
+            self.assertEqual(f[0]["severity"], "block")
+            self.assertEqual(f[0]["worst_discard"], truth)
+            self.assertIn("%d commit(s) would be made unreachable" % truth,
+                          f[0]["message"])
+            self.assertIn("--quit", f[0]["message"])
+            code, out = self._run()
+        finally:
+            wi.ROOT = orig
+        self.assertEqual(code, 2)
+        self.assertIn("sequencer-guard", out)
+
+    def _fake_seqg(self, payload, exit_code=0):
+        js = os.path.join(self.tmp, "fake-seqg.js")
+        log = os.path.join(self.tmp, "seqg-argv.json")
+        with open(js, "w", encoding="utf-8") as f:
+            f.write("require('fs').writeFileSync(%s, JSON.stringify(process.argv.slice(2)));\n"
+                    % json.dumps(log))
+            f.write("console.log(JSON.stringify(%s));\n" % json.dumps(payload))
+            f.write("process.exit(%d);\n" % exit_code)
+        return js, log
+
+    def _gate_with_seqg(self, payload, **kw):
+        js, log = self._fake_seqg(payload)
+        orig, wi.SEQG_SCRIPT = wi.SEQG_SCRIPT, js
+        try:
+            findings = self._gate(**kw)
+        finally:
+            wi.SEQG_SCRIPT = orig
+        with open(log, encoding="utf-8") as f:
+            argv = json.load(f)
+        return findings, argv
+
+    def _state(self, kind="sequencer", discard=0, age_s=10, armed=False, quit_="revert --quit"):
+        return {"kind": kind, "verb": "revert", "discard": discard, "ageS": age_s,
+                "armedNow": armed, "quit": quit_, "stale": False}
+
+    def test_sequencer_guard_fresh_with_nothing_at_stake_is_ADVISORY(self):
+        """AC-SEQ.2 — §F8a: a conflicted merge someone is resolving RIGHT NOW
+        discards no commits (measured), so stopping the line for it would be
+        perverse. It is still printed, so it can never read as satisfied."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        findings, _argv = self._gate_with_seqg({
+            "verdict": "ADVISORY", "worstDiscard": 0, "unmeasured": 0,
+            "repos": [{"dir": "/tmp/x", "states": [
+                self._state(kind="MERGE_HEAD", discard=0, quit_="merge --quit")]}],
+        })
+        f = self._seqg(findings)
+        self.assertEqual(len(f), 1, findings)
+        self.assertEqual(f[0]["severity"], "advisory")
+        self.assertNotIn("sequencer-guard", self._checks(findings))
+        self.assertIn("merge --quit", f[0]["message"])
+
+    def test_sequencer_guard_unmeasurable_state_fails_CLOSED(self):
+        """AC-SEQ.2 — a count we could not establish is not a count of zero
+        (§17c.2). It blocks, and it says which limb was unmeasured."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        findings, _argv = self._gate_with_seqg({
+            "verdict": "BLOCK", "worstDiscard": 0, "unmeasured": 1,
+            "repos": [{"dir": "/tmp/x", "states": [self._state(discard=None)]}],
+        })
+        f = self._seqg(findings)
+        self.assertEqual(len(f), 1, findings)
+        self.assertEqual(f[0]["severity"], "block")
+        self.assertIn("could not be measured", f[0]["message"])
+        self.assertIn("NOT ESTABLISHED", f[0]["message"])
+        self.assertIn("sequencer-guard", self._checks(findings))
+
+    def test_sequencer_guard_is_READ_ONLY_never_a_writing_verb(self):
+        """AC-SEQ.2 — unlike check 8 this one must NOT self-heal: clearing the state
+        needs someone to establish what it DESCRIBES first (the founding operator
+        verified a8bd0dee had already completed the revert). A gate that could run
+        `--abort` would be the destruction it exists to prevent."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        _findings, argv = self._gate_with_seqg({
+            "verdict": "CLEAN", "worstDiscard": 0, "unmeasured": 0, "repos": []})
+        self.assertEqual(argv[0], "scan", "the only permitted verb: %s" % argv)
+        for forbidden in ("--abort", "--quit", "--continue", "reset", "clear", "reap"):
+            self.assertNotIn(forbidden, argv)
+
+    def test_sequencer_guard_unrunnable_is_unknown_never_a_silent_pass(self):
+        """AC-SEQ.2 — an unevaluated precondition is not a met one (§17c.2), and
+        this state is invisible to everything else, so silence here is total."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        orig, wi.SEQG_SCRIPT = wi.SEQG_SCRIPT, os.path.join(self.tmp, "nope.js")
+        try:
+            findings = self._gate()
+        finally:
+            wi.SEQG_SCRIPT = orig
+        f = self._seqg(findings)
+        self.assertEqual(len(f), 1, findings)
+        self.assertEqual(f[0]["severity"], "unknown")
+        self.assertIn("NOT ESTABLISHED", f[0]["message"])
+
     # ---- check 9: a file a committed make target RUNS must be on trunk -------
     #
     # (OI-GITIGNORE-SWALLOWS-COMMITTED-TOOLS, AC-GI.3.) A blanket .gitignore on

@@ -29,10 +29,29 @@
  *      named in a `class A,B,C <...changed...>;` statement, and the endpoints of
  *      an added/removed edge (`a -->|...| b`).
  *      (The mark forms have varied across slices — `:::changed`,
- *       `:::s005h3changed`, `:::s007aChanged`, `class wsfn,conn,games changed;`
+ *       `:::s005h3changed`, `:::s007aChanged`, `class wsfn,conn,games changed`
  *       — so the rule is: any class name CONTAINING "changed" (case-insensitive)
  *       is a change mark; `:::stable`/`:::delivered`/`:::store`/`:::gate`/
- *       `:::actor`/`:::compute`/`:::secret` are NOT.)
+ *       `:::actor`/`:::compute`/`:::secret` are NOT. The TRAILING SEMICOLON IS
+ *       OPTIONAL and the house style omits it — see below; requiring it was a
+ *       three-percent-recall blindness that lasted until 2026-08-21.)
+ *
+ *      RECALL IS ASSERTED, NOT ASSUMED
+ *      (OI-IMPACTED-TESTS-CANNOT-SEE-190-OF-192-CHANGE-MARKS).
+ *      The `class …` statement form was read by a regex ending `\s*;`, so a
+ *      trailing semicolon was REQUIRED while the house style omits it: measured on
+ *      the real committed corpus it saw 6 of 169 class statements (16 of 270 marked
+ *      nodes). A `class X …changed` mark has NO consumer but this tool, so 163
+ *      statements were written into a void; commit d92f5dd8 changed the graph ONLY
+ *      by adding one such mark and this tool reported ZERO candidate nodes — a
+ *      false CLEAN over a control whose behaviour had changed. The regex is gone:
+ *      `class` statements are read by parseMermaidStructure() like every other
+ *      node identity, and the recall claim is now MEASURED against the real corpus
+ *      in impacted-tests-class-stmt-recall.test.js (169/169) rather than pinned on
+ *      a hand-written `class a,b changed;` line that carried the code's own
+ *      assumption. A change-marking statement the parse reads no node out of is
+ *      REPORTED in the run (unreadClassStatements), because the fault was a
+ *      SILENT false negative and the only cure for that is self-observation.
  *
  *      WHY DIFF-SOURCED, NOT A FULL-FILE SCAN (OI-42, proven on s009):
  *      classDef marks are CLEARED at delivery by RECOLOURING the classDef (green)
@@ -144,28 +163,44 @@ const NODE_DECL_RE = /^[+\- ]?\s*([A-Za-z0-9_-]+)\s*[[({]/;
 // Inline class application on a node line: `someId[...]:::className`
 const INLINE_MARK_RE = /([A-Za-z0-9_-]+)\s*(?:\[[^\]]*\]|\([^)]*\)|\{[^}]*\})?\s*:::([A-Za-z0-9_]+)/g;
 
-// Statement form: `class A,B,C className;`
-const CLASS_STMT_RE = /(?:^|\s)class\s+([A-Za-z0-9_,\s-]+?)\s+([A-Za-z0-9_]+)\s*;/g;
+// Statement form: `class A,B,C className` — with or WITHOUT a trailing semicolon.
+// There is deliberately NO REGEX for this any more
+// (OI-IMPACTED-TESTS-CANNOT-SEE-190-OF-192-CHANGE-MARKS). The one there used to be
+// ended `\s*;`, so the semicolon was REQUIRED while this repo's house style omits
+// it: measured on the real corpus it read 6 of 169 class statements (16 of 270
+// marked nodes), and a `class X …changed` mark has NO consumer but this tool, so
+// 163 statements were being written into a void. Commit d92f5dd8 changed the graph
+// ONLY by adding `class declared-corpus-absences oiReachChanged` and this tool
+// extracted ZERO nodes from its diff — a false CLEAN over a control whose
+// behaviour had changed; f059f0e2 then worked around it by hand, adding a `;` to
+// that ONE line. Making the semicolon optional would have been the same class of
+// mistake (delta-074 R12: no control is verified by text-slicing an artifact whose
+// layout it does not own), so identity comes from the same structural tokeniser
+// that supplies it everywhere else: tokeniseMermaid() ends a statement at `\n` OR
+// `;`, skips comments, quoted/bracket-balanced labels and `|edge labels|`, and
+// parseMermaidStructure() reads `class A,B <cls>` off the resulting tokens. So the
+// semicolon is irrelevant and nothing new over-matches.
+
+// Is this line/body a `class …` STATEMENT (as opposed to a `classDef`, an id
+// called `classy`, or a node declaration)? Statement-leading only: mermaid has no
+// mid-line `class` statement, and the old regex's `(?:^|\s)class` alternative is
+// exactly what let label prose containing the word "class" reach the parse.
+const CLASS_STMT_LEAD_RE = /^\s*class\s/;
+
+// The node ids a `class A,B <...changed...>` statement MARKS, read structurally.
+// Empty for `class A,B stable` (names nodes, marks nothing) and for anything that
+// is not a class statement.
+function classStatementMarkedNodes(body) {
+  if (!CLASS_STMT_LEAD_RE.test(body)) return [];
+  return [...parseMermaidStructure(body).marked];
+}
 
 /**
  * Node ids carrying a CHANGED mark in the given .mmd text (working-tree state).
+ * Structural: inline `:::mark` and `class A,B mark` statements alike.
  */
 function extractMarkedNodes(text) {
-  const out = new Set();
-  let m;
-  INLINE_MARK_RE.lastIndex = 0;
-  while ((m = INLINE_MARK_RE.exec(text)) !== null) {
-    if (isChangedClass(m[2])) out.add(m[1]);
-  }
-  CLASS_STMT_RE.lastIndex = 0;
-  while ((m = CLASS_STMT_RE.exec(text)) !== null) {
-    if (!isChangedClass(m[2])) continue;
-    for (const id of m[1].split(',')) {
-      const t = id.trim();
-      if (t) out.add(t);
-    }
-  }
-  return [...out];
+  return [...parseMermaidStructure(text).marked];
 }
 
 // Edge endpoints on a line: `a -->|"label"| b`, `a -.->|x| b`, `a --- b`, etc.
@@ -188,18 +223,12 @@ function extractNodesFromDiffLines(diffText) {
     // comments and pure type/layout directives carry no node id of interest.
     if (/^\s*(%%|classDef|linkStyle|subgraph|flowchart|graph|end\b|direction\b)/.test(body)) continue;
 
-    // (1) `class A,B,C <...changed...>;` statement — only when the class is a
-    //     change mark (a `class A,B stable;` line is not a change).
-    CLASS_STMT_RE.lastIndex = 0;
-    let cm = CLASS_STMT_RE.exec(body);
-    if (cm && /^\s*class\s/.test(body)) {
-      if (isChangedClass(cm[2])) {
-        for (const id of cm[1].split(',')) {
-          const t = id.trim();
-          if (t) out.add(t);
-        }
-      }
-      continue; // a `class ...;` statement is not a decl/edge line
+    // (1) `class A,B,C <...changed...>` statement (trailing `;` optional — the
+    //     house style omits it) — only when the class is a change mark; a
+    //     `class A,B stable` line names nodes but marks no change.
+    if (CLASS_STMT_LEAD_RE.test(body)) {
+      for (const id of classStatementMarkedNodes(body)) out.add(id);
+      continue; // a `class ...` statement is never a decl/edge line
     }
 
     // (2) node declaration: `id["label"]...` / `id(...)` / `id{...}`
@@ -220,6 +249,31 @@ function extractNodesFromDiffLines(diffText) {
     if (em) { out.add(em[1]); out.add(em[2]); }
   }
   return [...out];
+}
+
+/**
+ * Class statements the diff OFFERED that the parse read NO node out of, returned
+ * as their raw line bodies.
+ *
+ * WHY THIS EXISTS. The fault above was a false NEGATIVE that was also SILENT: a
+ * statement the parser could not read looked exactly like a window in which
+ * nothing changed. AC-JUNK made the parse report what it REJECTS; this makes it
+ * report what it FAILED TO READ, which is the same obligation from the other
+ * side. A statement whose class is not a change mark (`class A,B stable`) is read
+ * correctly and is not reported; only a statement that NAMES A CHANGE and yields
+ * no node is.
+ */
+function unreadClassStatementLines(diffText) {
+  const out = [];
+  for (const line of diffText.split('\n')) {
+    if (line[0] !== '+' && line[0] !== '-') continue;
+    if (line.startsWith('+++') || line.startsWith('---')) continue;
+    const body = line.slice(1);
+    if (!CLASS_STMT_LEAD_RE.test(body)) continue;
+    if (!isChangedClass(body)) continue;      // not a change mark at all
+    if (classStatementMarkedNodes(body).length === 0) out.push(body);
+  }
+  return out;
 }
 
 /**
@@ -695,6 +749,7 @@ function run({ root, project, since }) {
   //    long-delivered prior-slice marks (recoloured-but-still-named-"changed")
   //    that are in neither diff, which is exactly the s009 over-report.
   const changed = new Set();
+  const unreadClassStatements = [];
   let resolvedDiffRoot = null;
   if (files.length) {
     // EXP-104: resolve the git root that actually owns `since` BEFORE diffing —
@@ -707,6 +762,10 @@ function run({ root, project, since }) {
     const workingDiff = gitDiff(diffRoot, [], files);
     for (const id of extractNodesFromDiffLines(workingDiff)) changed.add(id);
     resolvedDiffRoot = diffRoot;
+    // recall, self-observed: a change-marking `class` statement the parse could
+    // not read a node out of is REPORTED, never silently dropped.
+    for (const l of unreadClassStatementLines(committedDiff)) unreadClassStatements.push(l);
+    for (const l of unreadClassStatementLines(workingDiff)) unreadClassStatements.push(l);
   }
   const candidates = [...changed].sort();
 
@@ -781,6 +840,10 @@ function run({ root, project, since }) {
     // the structural gate, reported not silent: a dropped candidate a reader
     // cannot see is indistinguishable from an input that never contained it.
     rejected, declaredNodes, candidateCount: candidates.length,
+    // a change-marking `class` statement the parse could not read (should be
+    // empty; non-empty means this tool has met a form it cannot see, which is the
+    // fault OI-IMPACTED-TESTS-CANNOT-SEE-190-OF-192-CHANGE-MARKS was).
+    unreadClassStatements,
   };
 }
 
@@ -803,6 +866,15 @@ function formatReport(res, { project, since, root }) {
     lines.push('  (b) add `%% @alias <nodeId>=<tag>,<tag>` comment lines to the .mmd (this');
     lines.push('  tool reads them and unions the aliased tag\'s specs into the node\'s coverage).');
     lines.push('  This is flagged as a follow-up, not auto-fixed by this tool run.');
+    lines.push('');
+  }
+  if (res.unreadClassStatements && res.unreadClassStatements.length) {
+    lines.push('## WARNING: UNREAD `class` STATEMENT(S) — this tool met a mark form it cannot read');
+    lines.push(`  ${res.unreadClassStatements.length} change-marking \`class\` statement(s) on in-window diff`);
+    lines.push('  lines yielded NO node id. Every such mark is INVISIBLE to this report, so the');
+    lines.push('  window below may read CLEAN while a marked node changed');
+    lines.push('  (OI-IMPACTED-TESTS-CANNOT-SEE-190-OF-192-CHANGE-MARKS). Fix the parse, not the mark:');
+    for (const l of res.unreadClassStatements.slice(0, 10)) lines.push(`    ${l.trim()}`);
     lines.push('');
   }
   if (res.changedNodes.length === 0) {
@@ -897,6 +969,8 @@ if (require.main === module) main();
 
 module.exports = {
   extractMarkedNodes,
+  classStatementMarkedNodes,
+  unreadClassStatementLines,
   extractNodesFromDiffLines,
   extractAllNodeIds,
   tokeniseMermaid,

@@ -182,3 +182,27 @@ test('AC-L.8 the per-project hard cap is ENFORCED, and an unattributed row is a 
   assert.strictEqual(v.length, 1, v.join('\n'));
   assert.match(v[0], /^C4 1 row\(s\) name no project/);
 });
+
+test('AC-L.9 one project spelled two ways counts as ONE project, so the cap cannot be doubled', () => {
+  // OagEventSource's work items are all `OAG`-prefixed (`DEFECT-OAG-nnn`, `OI-OAG-*`), so its
+  // experiment ids read `EXP-OAG-nnn` while its `routed` cells spell the project out in full.
+  // Both spellings name the SAME project. Before this, `projectOf` returned 'OAG' for the
+  // id-namespaced rows and 'OagEventSource' for the routed-cell rows, so the per-project cap of
+  // 8 was silently a cap of 16 — C4 defeated not by an argument but by an alias. That is the
+  // same shape as every other finding in this registry: a control that exists and does not fire.
+  // Five rows carrying the short id token, four carrying the long name in `routed` (frozen
+  // legacy ids, so C3 stays silent and only C4 is under test).
+  const idRows = Array.from({ length: 5 }, (_, i) => `| EXP-OAG-${String(i + 1).padStart(3, '0')} | v145 | active |`);
+  const legacy = ['EXP-127', 'EXP-128', 'EXP-129', 'EXP-131'];
+  const routedRows = legacy.map((id) => `| ${id} | v145 (OagEventSource retro) | active |`);
+  const exp = ['# Experiment registry', '', '| id | routed | status |', '|----|--------|--------|',
+    ...idRows, ...routedRows, ''].join('\n');
+  const { violations, info } = lint.lint(fixture(CLEAN_PROC, exp));
+
+  // 5 + 4 = 9 rows for one project, against the cap of 8.
+  assert.strictEqual(violations.length, 1, violations.join('\n'));
+  assert.match(violations[0], /^C4 OagEventSource has 9 active rows against the per-project hard cap of 8/);
+
+  // And it must be reported under ONE canonical name, never split across two INFO lines.
+  assert.strictEqual(info.filter((l) => /^OAG:/.test(l)).length, 0, info.join('\n'));
+});

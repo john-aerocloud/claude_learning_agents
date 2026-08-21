@@ -459,10 +459,15 @@ function main(argv) {
   const a = parseArgs(argv.slice(1));
   const repoRoot = path.resolve(a['repo-root'] || REPO_ROOT_DEFAULT);
   const root = a._[0] ? path.resolve(a._[0]) : repoRoot;
+  // A NAMED dir means "sweep THIS tree", so it also becomes the worktree base
+  // unless --repo-root was given explicitly. Otherwise `scan <somewhere>` would
+  // silently drag in every worktree of the agent-system repo and report state that
+  // has nothing to do with the tree the operator asked about.
+  const base = a['repo-root'] ? repoRoot : root;
   const graceMin = a['grace-min'] !== undefined
     ? Number.parseFloat(a['grace-min']) : DEFAULT_GRACE_MIN;
   const res = scan(root, {
-    repoRoot,
+    repoRoot: base,
     graceMin: Number.isFinite(graceMin) ? graceMin : DEFAULT_GRACE_MIN,
   });
   process.stdout.write((a.json ? JSON.stringify(res, null, 2) : res.message) + '\n');

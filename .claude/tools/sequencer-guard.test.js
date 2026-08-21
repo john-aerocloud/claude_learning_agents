@@ -352,6 +352,21 @@ test('AC-SEQ.1 the scan MUTATES NOTHING — a detector that could destroy what i
     'the state must still be there for a human to inspect before clearing it');
 });
 
+test('AC-SEQ.1 `scan <dir>` sweeps THAT tree only — a named dir must not drag in '
+  + 'every worktree of the agent-system repo', () => {
+  const root = tmpdir('scoped');
+  const repo = initRepo(path.join(root, 'r'));
+  write(repo, 'f.txt', 'A\n');
+  commit(repo, 'c1');
+
+  const r = runTool(['scan', repo, '--json']);
+  assert.equal(r.code, 0, r.out + r.err);
+  const rep = JSON.parse(r.out);
+  assert.equal(rep.verdict, 'CLEAN');
+  assert.equal(rep.treesScanned, 1,
+    `only the named tree may be swept: ${JSON.stringify(rep)}`);
+});
+
 // --- AC-SEQ.2 — severity ------------------------------------------------------
 
 test('AC-SEQ.2 commits at stake => BLOCK, even while the state is fresh', () => {

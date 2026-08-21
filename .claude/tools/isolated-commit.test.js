@@ -94,6 +94,16 @@ function indexBytes(repo) {
   return fs.readFileSync(path.join(repo, '.git', 'index'));
 }
 
+/** node:assert's `throws` returns undefined, so capture the error to inspect its code. */
+function grab(fn) {
+  try {
+    fn();
+  } catch (e) {
+    return e;
+  }
+  throw new assert.AssertionError({ message: 'expected a throw, got none' });
+}
+
 function runCli(repo, args) {
   return spawnSync(process.execPath, [TOOL_PATH, ...args], {
     encoding: 'utf8',
@@ -430,4 +440,231 @@ test('AC-DEFECT-OAG-058.9 the root Makefile exposes the tool as a parameterised,
   assert.match(mk, /^commit-isolated:/m, 'no `commit-isolated` target');
   assert.match(mk, /node \.claude\/tools\/isolated-commit\.js/, 'the target must invoke the tool');
   assert.match(mk, /^\.PHONY:.*\bcommit-isolated\b/m, '`commit-isolated` must be declared PHONY');
+});
+
+// =============================================================================
+// AC-MSGCROSS.* — THE MESSAGE, not the content
+// (OI-CO-OWNED-LEDGER-FILES-CROSS-ATTRIBUTE-WORK-AND-ONE-CROSSED-A-COMMIT-MESSAGE,
+//  limb B). Measured 2026-08-21: TWO commits landed carrying a CONCURRENT AGENT'S
+//  MESSAGE TEXT over their own correct tree —
+//    e29fb8f0 (OI-DIVERSION-ALARM's tree)  + 6cc2b368 (OI-GENESIS-SCOPE-HOOKS' msg)
+//    49e9f0a8 (SPEC-078-B's tree)          + f14b0a3a (OI-CROSS-ROUTE's msg)
+//  Both pairs are BYTE-IDENTICAL in message (sha256 730784a0…, ca17fae5…), which is
+//  the detectable signature this AC family pins.
+//
+//  THE MECHANISM, established before the guard was written: the message was staged
+//  in the agent SCRATCHPAD as `msg.txt` — a per-SESSION directory that every
+//  concurrent subagent of one orchestrator session shares — and a second agent
+//  overwrote that file between the moment the first wrote it and the moment
+//  `isolated-commit` read it. The private index is minted per invocation
+//  (`mkdtemp`), so the git plumbing was never the shared state; the MESSAGE INPUT
+//  CHANNEL was. The Makefile's own worked example taught the hazard
+//  (`MSG_FILE=/tmp/msg.txt`).
+//
+//    AC-MSGCROSS.1  a message byte-identical to a recent ancestor's is REFUSED,
+//                   naming the colliding sha, with the ref UNMOVED — because two
+//                   identical messages on a shared tree is the crossing signature,
+//                   not intent. The escape hatch proves the refusal is the control.
+//    AC-MSGCROSS.2  the predicate discriminates: only a normalised-identical
+//                   message matches, and the scan depth is bounded.
+//    AC-MSGCROSS.3  a message file OVERWRITTEN DURING the invocation (the exact
+//                   clobber, injected at its real window) is caught; nothing lands.
+//    AC-MSGCROSS.4  the message on the created commit object is READ BACK and
+//                   compared before the ref is advanced; a corrupted write is
+//                   refused and leaves the branch where it was. `commit-tree`'s
+//                   one real normalisation (trailing newlines collapse to one) must
+//                   NOT fire it.
+//    AC-MSGCROSS.5  a --message-file whose basename carries NO identity token —
+//                   `msg.txt`, `msg12.txt`, `msgA.txt`, the measured collision
+//                   family — is refused up front, because a shared filename is the
+//                   mechanism and the victim of a clobber cannot detect it.
+//    AC-MSGCROSS.6  the Makefile no longer TEACHES the shared filename.
+// =============================================================================
+
+/** Two agents, one shared message file: B overwrites it before A's commit reads it. */
+function crossedPair(repo) {
+  const theirs = 'fix(genesis-scope): supply probeRead and evicted (OI-GENESIS-SCOPE-HOOKS)\n\nthe other agent\'s body\n';
+  write(repo, 'src/mine.ts', 'export const mine = 2;\n');
+  return theirs;
+}
+
+test('AC-MSGCROSS.1 CONTROL DISABLED: the crossing lands silently — two adjacent commits with byte-identical messages (reproduces e29fb8f0/6cc2b368)', () => {
+  const repo = makeRepo();
+  const theirs = crossedPair(repo);
+  // the VICTIM commits first, carrying the other agent's clobbered message text
+  const a = tool.isolatedCommit({ repo, message: theirs, paths: ['src/mine.ts'], allowDuplicateMessage: true });
+  write(repo, 'src/theirs.ts', 'export const theirs = 2;\n');
+  // the OWNER then commits its own message on top — and nothing objects
+  const b = tool.isolatedCommit({ repo, message: theirs, paths: ['src/theirs.ts'], allowDuplicateMessage: true });
+  assert.notEqual(a.sha, b.sha);
+  assert.equal(
+    git(repo, ['log', '-1', '--format=%B', a.sha]).trim(),
+    git(repo, ['log', '-1', '--format=%B', b.sha]).trim(),
+    'the reproduction requires the two messages to be byte-identical, as both real pairs were',
+  );
+});
+
+test('AC-MSGCROSS.1 CONTROL ENABLED: the second commit is REFUSED, names the colliding sha, and leaves the branch unmoved', () => {
+  const repo = makeRepo();
+  const theirs = crossedPair(repo);
+  const a = tool.isolatedCommit({ repo, message: theirs, paths: ['src/mine.ts'] });
+  const before = git(repo, ['rev-parse', 'HEAD']);
+  write(repo, 'src/theirs.ts', 'export const theirs = 2;\n');
+  const err = grab(() => tool.isolatedCommit({ repo, message: theirs, paths: ['src/theirs.ts'] }));
+  assert.equal(err.code, 6, err.message);
+  assert.match(err.message, /MESSAGE-CROSSING GUARD FIRED/);
+  assert.match(err.message, new RegExp(a.sha.slice(0, 8)), 'the refusal must NAME the colliding sha');
+  assert.equal(git(repo, ['rev-parse', 'HEAD']), before, 'the ref must not move');
+});
+
+test('AC-MSGCROSS.1 the CLI exits 6 on a crossed message and 0 with the escape hatch', () => {
+  const repo = makeRepo();
+  const theirs = crossedPair(repo);
+  tool.isolatedCommit({ repo, message: theirs, paths: ['src/mine.ts'] });
+  write(repo, 'src/theirs.ts', 'export const theirs = 2;\n');
+  const bad = runCli(repo, ['--repo', repo, '--message', theirs, '--', 'src/theirs.ts']);
+  assert.equal(bad.status, 6, bad.stderr);
+  const ok = runCli(repo, ['--repo', repo, '--message', theirs, '--allow-duplicate-message', '--', 'src/theirs.ts']);
+  assert.equal(ok.status, 0, ok.stderr);
+});
+
+test('AC-MSGCROSS.2 the duplicate predicate discriminates, and is bounded by scan depth', () => {
+  const repo = makeRepo();
+  const msg = 'feat(x): a unique intent (ITEM-1)\n\nbody\n';
+  write(repo, 'src/mine.ts', 'export const mine = 2;\n');
+  const a = tool.isolatedCommit({ repo, message: msg, paths: ['src/mine.ts'] });
+  const head = git(repo, ['rev-parse', 'HEAD']);
+  // identical modulo TRAILING newlines only => a match (commit-tree collapses those)
+  assert.equal(tool.duplicateMessageAncestor(repo, head, `${msg}\n\n\n`).sha, a.sha);
+  // a one-character difference => NOT a match
+  assert.equal(tool.duplicateMessageAncestor(repo, head, msg.replace('unique', 'uniqud')), null);
+  // internal whitespace is significant: this is a byte comparison, not a fuzzy one
+  assert.equal(tool.duplicateMessageAncestor(repo, head, msg.replace('\n\nbody', '\n\n body')), null);
+  // bounded: depth 0 scans nothing, so even the exact message does not match
+  assert.equal(tool.duplicateMessageAncestor(repo, head, msg, 0), null);
+});
+
+test('AC-MSGCROSS.3 CONTROL ENABLED: a message file OVERWRITTEN during the invocation is caught; nothing lands', () => {
+  const repo = makeRepo();
+  const shared = path.join(repo, '..', `msg-shared-${path.basename(repo)}.txt`);
+  fs.writeFileSync(shared, 'fix(a): MY intent (ITEM-1)\n');
+  write(repo, 'src/mine.ts', 'export const mine = 2;\n');
+  const before = git(repo, ['rev-parse', 'HEAD']);
+  const err = grab(() =>
+    tool.isolatedCommit({
+      repo,
+      message: fs.readFileSync(shared, 'utf-8'),
+      messageFile: shared,
+      paths: ['src/mine.ts'],
+      // the clobber, at its real window: a concurrent agent's write between the
+      // moment this invocation read the file and the moment it commits.
+      hooks: { beforeCommitTree: () => fs.writeFileSync(shared, 'fix(b): THEIR intent (ITEM-9)\n') },
+    }),
+  );
+  assert.equal(err.code, 6, err.message);
+  assert.match(err.message, /MESSAGE FILE WAS OVERWRITTEN/);
+  assert.equal(git(repo, ['rev-parse', 'HEAD']), before);
+  fs.rmSync(shared, { force: true });
+});
+
+test('AC-MSGCROSS.3 CONTROL NOT FIRING: an untouched message file commits normally', () => {
+  const repo = makeRepo();
+  const owned = path.join(repo, '..', `msg-owned-${path.basename(repo)}.txt`);
+  fs.writeFileSync(owned, 'fix(a): MY intent (ITEM-1)\n');
+  write(repo, 'src/mine.ts', 'export const mine = 2;\n');
+  const res = tool.isolatedCommit({
+    repo,
+    message: fs.readFileSync(owned, 'utf-8'),
+    messageFile: owned,
+    paths: ['src/mine.ts'],
+  });
+  assert.equal(git(repo, ['log', '-1', '--format=%B']).trim(), 'fix(a): MY intent (ITEM-1)');
+  assert.ok(res.sha);
+  fs.rmSync(owned, { force: true });
+});
+
+test('AC-MSGCROSS.4 the created commit object is read back; a corrupted message is refused with the ref unmoved', () => {
+  const repo = makeRepo();
+  write(repo, 'src/mine.ts', 'export const mine = 2;\n');
+  const before = git(repo, ['rev-parse', 'HEAD']);
+  const err = grab(() =>
+    tool.isolatedCommit({
+      repo,
+      message: 'fix(a): MY intent (ITEM-1)\n',
+      paths: ['src/mine.ts'],
+      // fault injection: the ONLY way to observe the read-back check, because the git
+      // layer does not corrupt. It is the belt-and-braces backstop, and an
+      // unobservable check is not a check (DEFECT-OAG-073).
+      hooks: { corruptMessageForCommitTree: () => 'fix(b): SOMEONE ELSE\'S intent (ITEM-9)\n' },
+    }),
+  );
+  assert.equal(err.code, 6, err.message);
+  assert.match(err.message, /MESSAGE READ-BACK MISMATCH/);
+  assert.equal(git(repo, ['rev-parse', 'HEAD']), before, 'a mismatch must not advance the ref');
+});
+
+test('AC-MSGCROSS.4 NON-VACUITY: commit-tree adds a trailing newline, and that must NOT fire the read-back check', () => {
+  const repo = makeRepo();
+  write(repo, 'src/mine.ts', 'export const mine = 2;\n');
+  // MEASURED 2026-08-21 (and the first measurement was WRONG because shell `$()` had
+  // already eaten the trailing newlines, which is why this is asserted rather than
+  // commented): `commit-tree -m` stores the message VERBATIM and adds exactly ONE
+  // trailing newline if absent. Trailing blank lines, trailing spaces, internal blank
+  // lines, CRLF, leading blank lines and a leading `#` all survive untouched. So the
+  // read-back comparison strips trailing newlines and nothing else.
+  const res = tool.isolatedCommit({
+    repo,
+    message: 'fix(a): subj\n\n\nbody   \n\n\n',
+    paths: ['src/mine.ts'],
+  });
+  assert.ok(res.sha, 'a trailing-newline-only difference must NOT be read as a crossing');
+  // read the OBJECT verbatim (untrimmed): trailing spaces and blank lines are the point
+  assert.equal(tool.commitObjectMessage(repo, res.sha), 'fix(a): subj\n\n\nbody   \n\n\n');
+  // and the +1-newline direction, the only alteration git makes
+  write(repo, 'src/theirs.ts', 'export const theirs = 2;\n');
+  const r2 = tool.isolatedCommit({ repo, message: 'fix(b): no trailing newline', paths: ['src/theirs.ts'] });
+  assert.equal(tool.commitObjectMessage(repo, r2.sha), 'fix(b): no trailing newline\n');
+});
+
+test('AC-MSGCROSS.5 a --message-file with no identity token is refused; the measured collision family is the case list', () => {
+  // the scratchpad really held msg.txt, msg1..msg11, msgA, msgB on 2026-08-21
+  for (const bad of ['msg.txt', 'msg1.txt', 'msg11.txt', 'msgA.txt', 'msgB.txt', 'msg12.txt', 'message.txt', 'commit-msg.txt', 'm.txt', 'msg-tmp.txt']) {
+    assert.ok(
+      tool.sharedMessageFileRefusal(`/some/scratchpad/${bad}`),
+      `${bad} is collision-prone and must be refused`,
+    );
+  }
+  for (const ok of ['msg-OI-CROSS-ROUTE.txt', 'msg-SPEC-078-B.txt', 'msg-DEFECT-OAG-137.txt', 'msg-UC-ML5.txt', 'spec078b-record-49e9f0a8-message-clobber.txt', 'msg.OI-DIVERSION-ALARM.txt']) {
+    assert.equal(
+      tool.sharedMessageFileRefusal(`/some/scratchpad/${ok}`),
+      null,
+      `${ok} carries an identity token and must be accepted`,
+    );
+  }
+});
+
+test('AC-MSGCROSS.5 the CLI refuses a shared message-file name (exit 2) and the escape hatch is explicit', () => {
+  const repo = makeRepo();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oagmsg-'));
+  const shared = path.join(dir, 'msg.txt');
+  fs.writeFileSync(shared, 'fix(a): MY intent (ITEM-1)\n');
+  write(repo, 'src/mine.ts', 'export const mine = 2;\n');
+  const bad = runCli(repo, ['--repo', repo, '--message-file', shared, '--', 'src/mine.ts']);
+  assert.equal(bad.status, 2, bad.stderr);
+  assert.match(bad.stderr, /identity token/);
+  const ok = runCli(repo, ['--repo', repo, '--message-file', shared, '--allow-shared-message-file', '--', 'src/mine.ts']);
+  assert.equal(ok.status, 0, ok.stderr);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('AC-MSGCROSS.6 the Makefile does not TEACH the shared filename, and wires both escape hatches', () => {
+  const mk = fs.readFileSync(path.join(__dirname, '..', '..', 'Makefile'), 'utf-8');
+  const block = mk.slice(mk.indexOf('commit-isolated:'), mk.indexOf('commit-isolated:') + 4000);
+  assert.equal(
+    /MSG_FILE=\/tmp\/msg\.txt/.test(mk),
+    false,
+    'the worked example must not be the shared filename that caused the crossing',
+  );
+  assert.match(block, /MSG_DUP_OK/);
+  assert.match(block, /MSG_FILE_SHARED_OK/);
 });

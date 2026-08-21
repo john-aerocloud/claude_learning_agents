@@ -235,7 +235,11 @@ class TestCommitMessageRoundTrip(unittest.TestCase):
         message = ('fix(x): keep $HOME, a `backtick` and a "quote" intact\n'
                    '\n'
                    'A body line with ^anchor$ and, a comma.\n')
-        msg_file = os.path.join(self.tmp, "msg.txt")
+        # NOT `msg.txt`: a message-file name with no identity token is now REFUSED,
+        # because several agents each choosing `msg.txt` in the shared per-session
+        # scratchpad is how a COMMIT MESSAGE CROSSED between two agents on 2026-08-21
+        # (e29fb8f0, 49e9f0a8). The name below is what the guard asks for.
+        msg_file = os.path.join(self.tmp, "msg-AC-WN6-durable-prose.txt")
         with open(msg_file, "w", encoding="utf-8") as f:
             f.write(message)
         r = run_make("commit-isolated", REPO=self.repo, MSG_FILE=msg_file, PATHS=path)
@@ -308,6 +312,13 @@ class TestGeneralisationSweep(unittest.TestCase):
         # offending character back out — emitting what they found into their own
         # `[ -n "…" ]` string would reproduce the bug inside the check for it.
         "NOTE_HAZARD", "MSG_HAZARD",
+        # the two MESSAGE-GUARD escape hatches
+        # (OI-CO-OWNED-LEDGER-FILES-CROSS-ATTRIBUTE-WORK-AND-ONE-CROSSED-A-COMMIT-MESSAGE).
+        # Boolean opt-outs, not prose: each expands to a fixed literal FLAG NAME
+        # (`--allow-duplicate-message` / `--allow-shared-message-file`) or to nothing,
+        # and neither ever echoes its own value into a shell string. Same disposition,
+        # and the same reason, as NOTE_HAZARD/MSG_HAZARD.
+        "MSG_DUP_OK", "MSG_FILE_SHARED_OK",
     }
 
     def setUp(self):

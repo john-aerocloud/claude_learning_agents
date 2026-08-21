@@ -932,7 +932,10 @@ test-requirement-gate-baseline:
 # only (a stale entry silently reverts my file at the next whole-index commit).
 # Pure git + filesystem; NO creds, NO network.
 # Exit 3 = declared-subset assertion fired (nothing committed); 4 = nothing to
-# commit for those paths; 5 = branch could not be advanced.
+# commit for those paths; 5 = branch could not be advanced; 6 = a MESSAGE guard
+# fired. NOTE: `make` cannot pass a >2 exit code through — it prints `Error 6` and
+# exits 2 (same limitation test-requirement-gate documents), so read the printed
+# code, or call the node tool directly when you need the real status.
 #
 # THE MESSAGE IS DURABLE PROSE, so it gets the same treatment as an event note
 # (OI-WI-APPEND-NOTE-PATH-MANGLES-CONTENT). `--message "$(MSG)"` is the identical shape
@@ -945,11 +948,32 @@ test-requirement-gate-baseline:
 # refused rather than silently mangled. A permanent commit nobody re-reads is exactly
 # where silent corruption survives longest.
 #
-#   SAFE (use this by default):
-#     make commit-isolated REPO=work/OagEventSource MSG_FILE=/tmp/msg.txt \
+# AND THE MESSAGE FILE MUST BE UNIQUE TO YOU, which is a SECOND failure this target
+# used to TEACH: its worked example handed out one fixed, shared /tmp message path.
+# On 2026-08-21 several concurrent agents each wrote `msg.txt` into the SHARED
+# per-session agent scratchpad (it held msg.txt, msg1..msg11, msgA, msgB) and a COMMIT
+# MESSAGE CROSSED between two of them: e29fb8f0 landed one agent's tree under another
+# agent's message, and 49e9f0a8 did it again 16 minutes later. isolated-commit's
+# declared-subset assertion guards CONTENT and said nothing about the message, so the
+# class was invisible to the one tool built to prevent this family — and the VICTIM of a
+# clobber cannot detect it at all. Same shape as the co-owned class-deps.mmd /
+# edge-ledger.md append-target: a shared location plus a non-unique name.
+# So the tool now OWNS the name (`make commit-msg-file`), refuses a name with no
+# identity token, re-reads the file before committing, reads the message back off the
+# commit object, and refuses a message identical to a recent ancestor's.
+#
+#   SAFE (use this by default — the minted path cannot collide):
+#     P=$$(make -s commit-msg-file); cat > "$$P" <<'EOF'
+#     fix(x): intent (DEF-…)
+#     EOF
+#     make commit-isolated REPO=work/OagEventSource MSG_FILE="$$P" \
 #                          PATHS="src/app/src/a.ts src/app/tests/a.test.ts"
+#   Also fine — name the file after your work item:  MSG_FILE=<scratchpad>/msg-<ITEM-ID>.txt
 #   OK for a one-liner with no metacharacters:
 #     make commit-isolated REPO=work/OagEventSource MSG="fix(x): intent (DEF-…)" PATHS="a b"
+#   Escape hatches, both explicit and both loud in the refusal text:
+#     MSG_DUP_OK=1          a genuine re-commit of the same intent
+#     MSG_FILE_SHARED_OK=1  a deliberately shared message-file name (single agent)
 MSG_HAZARD = $(if $(strip $(findstring $$,$(value MSG))$(findstring `,$(value MSG))$(findstring ",$(value MSG))$(findstring \,$(value MSG))),1,)
 commit-isolated:
 	@if [ -n "$(MSG_HAZARD)" ]; then \
@@ -958,14 +982,25 @@ commit-isolated:
 	  echo "  corruption here survives indefinitely: a \$$ is expanded away and a backtick"; \
 	  echo "  is RUN as a command (this really happened — the macOS 'open' binary ran)."; \
 	  echo "  Use the file route, which cannot be corrupted:"; \
-	  echo "    cat > /tmp/msg.txt <<'EOF'"; \
+	  echo "    P=\$$(make -s commit-msg-file)"; \
+	  echo "    cat > \"\$$P\" <<'EOF'"; \
 	  echo "    <your message, metacharacters and all>"; \
 	  echo "    EOF"; \
-	  echo "    make commit-isolated REPO=$(REPO) MSG_FILE=/tmp/msg.txt PATHS=\"$(PATHS)\""; \
+	  echo "    make commit-isolated REPO=$(REPO) MSG_FILE=\"\$$P\" PATHS=\"$(PATHS)\""; \
 	  exit 1; \
 	fi
 	node .claude/tools/isolated-commit.js --repo "$(REPO)" \
-	  $(if $(MSG),--message "$(MSG)",) $(if $(MSG_FILE),--message-file "$(MSG_FILE)",) -- $(PATHS)
+	  $(if $(MSG),--message "$(MSG)",) $(if $(MSG_FILE),--message-file "$(MSG_FILE)",) \
+	  $(if $(MSG_DUP_OK),--allow-duplicate-message,) \
+	  $(if $(MSG_FILE_SHARED_OK),--allow-shared-message-file,) -- $(PATHS)
+
+# Print a message-file path that CANNOT collide (pid + randomness + a digest of the
+# declared paths), so a caller does not get to choose a colliding name. A convention
+# ("please pick a unique filename") is the class of control this project keeps finding
+# does not fire — the numbering that kept msg1..msg11 apart was unique by ACCIDENT.
+#   P=$$(make -s commit-msg-file [PATHS="a b"])
+commit-msg-file:
+	@node .claude/tools/isolated-commit.js --mint-message-file -- $(PATHS)
 
 # --- IMP-008 WAF runner-IP exclusion helpers ----------------------------------
 # Add/remove a CIDR from the oxo-test-runner-ips WAFv2 IP set (us-east-1,
@@ -1127,7 +1162,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap sequencer-guard make-refs-tracked container-reap container-orphans stack-claim stack-release stack-status sso-login retro-debt retro-mark loop-gate test-wi wi-append wi-project wi-validate wi-migrate doc-lint process-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated test-requirement-gate test-requirement-gate-baseline board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery
+.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap sequencer-guard make-refs-tracked container-reap container-orphans stack-claim stack-release stack-status sso-login retro-debt retro-mark loop-gate test-wi wi-append wi-project wi-validate wi-migrate doc-lint process-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated commit-msg-file test-requirement-gate test-requirement-gate-baseline board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery
 
 # --- Viggo-fix UC-W7: Country/Nationality ID remediation (T-SQL) --------------
 # Data-driven, self-building T-SQL remediation script set + its local stand-up

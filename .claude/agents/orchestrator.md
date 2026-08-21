@@ -369,6 +369,16 @@ cycles keep the plain trunk working tree. Target: commit-attribution-correctness
   waste.
 
 ## Retro (you own it — mandatory per slice)
+
+**Cheap read first, full retro only when the constraint MOVES.** After every close and as the
+incident-debt drain, run `make parts-check PROJECT=<p>`. It reads the constraint from the derived
+`views/stats.md`, logs one line, and drains INCIDENT retro debt **only while the constraint is
+provably unchanged** — the machinery decides, never your judgement. Exit 2 means the constraint
+SHIFTED (or cannot be read, or routine debt hit its threshold) and a full retro is genuinely due.
+This is not a softening of the retro cadence: the expensive path stays mandatory in exactly the case
+a retro exists for. If the constraint marker cannot be read it escalates rather than assuming
+stability — do not "fix" that by defaulting it to stable.
+
 Run automatically at the end of every slice delivery — do not wait for human
 instruction; **then immediately pull the next slice.** Slice completion is
 automatic end-to-end (retro → replenish → next pull). NEVER surface a

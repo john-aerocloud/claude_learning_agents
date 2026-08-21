@@ -3827,12 +3827,24 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
                     f"{len(unreadable)} item(s) in {q} CANNOT BE COMPUTED, so the "
                     f"aging gate above did not consider them at all: "
                     + "; ".join(f"{m} ({w})" for m, w in unreadable[:6])
+                    + (f"; and {len(unreadable) - 6} more not listed"
+                       if len(unreadable) > 6 else "")
                     + f". An item with no computable age is exempt from every "
                       f"age-based limb for ever — that is not the same as clean "
-                      f"(§17i). Remedy: give it a genesis event, `make wi-append "
-                      f"PROJECT={project} ID=<id> EVENT=<genesis> AGENT=<agent>` "
-                      f"(state = fold(events); an item with an empty `events:` list "
-                      f"has no history for anything to measure)."),
+                      f"(§17i). Remedy (DEF-ROC-084 — the previous wording named an "
+                      f"event this graph REFUSES): append an `amended` event CARRYING "
+                      f"`--ts` set to the item's true registration instant — "
+                      f"`sh .claude/skills/work-items/scripts/work-items append "
+                      f"--project {project} --id <id> --event amended --agent "
+                      f"flow-manager --ts <YYYY-MM-DDTHH:MM:SSZ> --note-file <path>`. "
+                      f"NOT a genesis event: an empty `events:` list ALREADY folds to "
+                      f"the type's `initial` state, so `reported`-from-`reported` is "
+                      f"not a legal transition and the sole writer rejects it. And NOT "
+                      f"without `--ts`: a default now-stamp resets the item's age to "
+                      f"zero, so the repair would destroy the very measurement this "
+                      f"check exists to restore (recover the true instant from the "
+                      f"commit that ADDED the item file: `git -C <repo> log "
+                      f"--diff-filter=A --format=%aI -1 -- <path>`, converted to UTC)."),
             })
         if not undecided:
             continue

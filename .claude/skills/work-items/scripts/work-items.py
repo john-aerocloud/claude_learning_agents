@@ -2197,8 +2197,10 @@ def _render_stats_md(stats):
 # Subcommands: retro-debt (the §F8 cadence GATE) + retro-mark (drain the debt)
 #
 # Reimplemented over ITEM EVENTS (ledger cutover: replaces `dora.py retro-debt`,
-# which counted frozen-ledger rows). The "last retro" marker is a one-line ISO
-# timestamp at process/dora/retro-marker/<project>.txt, written by retro-mark.
+# which counted frozen-ledger rows). The "last retro" boundary is the newest event
+# in the project's own append-only cadence log, work/<project>/items/retro-log.md,
+# written by retro-mark and by parts-check's drain (see the block below it for why
+# it is there and not in the shared parent repo, and why not a git tag).
 #
 # Debt since the marker:
 #   ROUTINE   = slice/chunk aggregates that BUBBLED to done after the marker
@@ -2216,22 +2218,179 @@ def _render_stats_md(stats):
 # uc-rework) batches to the threshold; a single incident (defect-resolve) fires
 # immediately. (IMP-019, v101: uc-rework reclassified incident->routine.)
 # ---------------------------------------------------------------------------
-def _retro_marker_path(project):
+# --- THE CADENCE RECORD LIVES IN THE PROJECT'S OWN EVENT SUBSTRATE ----------
+#
+# `work/<project>/items/retro-log.md` — an append-only log of one event per retro
+# close / per cheap incident-drain, carrying the instant AND the constraint as of
+# that close. Written by `retro-mark` and by `parts-check`'s drain; read by
+# `compute_retro_debt` and `cmd_parts_check`. Nothing else writes it.
+#
+# WHY IT MOVED HERE (v146 retro ruling on
+# OI-PARTS-CHECK-MARKER-DIRTIES-THE-TREE-AND-DEFERS-FOLD-FORWARD, 5 sightings):
+# it used to be a TRACKED one-line file in the shared parent repo,
+# `process/dora/retro-marker/<project>.txt`. So a documented READ (`parts-check`,
+# which STAGE F runs after every close and as the incident-debt drain) left the
+# parent worktree DIRTY, and `.claude/scripts/worktree update` exits 3 DEFERRED on
+# an unclean worktree — i.e. every loop cycle silently skipped the fold-forward
+# that CLAUDE.md §0a Rule 4 requires to run CONTINUOUSLY. Unbounded, once per
+# invocation, and WORSENING with throughput.
+#
+# WHY *THIS* STORE, AND WHY NOT THE OBVIOUS CHEAPER ONE. The tempting fix is to
+# derive last-retro from the newest `process-v<NN>` GIT TAG: no new state, dirties
+# nothing, and the retro already writes it. It is wrong for one decisive reason —
+# THE TAG NAMESPACE IS GLOBAL AND RETRO DEBT IS PER-PROJECT. ROC's next tag would
+# silently become OagEventSource's "last retro" and this project's incident debt
+# would read as drained by another project's work
+# (process/principle-failures/2026-08-20-global-registry-per-project-reality.md).
+# The marker FILE and the git TAG are the same defect in different clothes: a
+# GLOBAL store asked to hold PER-PROJECT state. `work/<project>/items/` is the
+# only store that cannot make one project's record stand in for another's, which
+# is v82's single-source-of-truth rule doing real work rather than being cited.
+#
+# TWO PROPERTIES THAT MAKE IT SAFE, both pinned by tests:
+#  * it lives IN `items/` but NOT in `items/{active,done}/`, so `load_all_items`
+#    never sees it: no state, no queue, no GLT share — therefore it can never
+#    perturb the constraint that `parts-check` reads out of `views/stats.json`.
+#    (Precedent: `items/blocks.csv` is a non-item file in the same directory.)
+#  * the parent repo gitignores `/work/*/`, so writing here is INVISIBLE to the
+#    fold-forward gate. The record is still written — the tree is clean because
+#    the write went to the repo that owns the fact, not because nothing happened.
+#
+# THE OLD PARENT-REPO FILES ARE FROZEN, NOT DELETED. They are never written again
+# but are still READ as a fallback (`_retro_verdict`). That is deliberate and it
+# is the whole cutover strategy: `git rm --cached` + a `.gitignore` rule would
+# fold forward into every OTHER instance worktree, DELETE their working marker,
+# and force ROC / AdixOut / OperationalFlowSimulator into a spurious full retro
+# mid-cycle with nothing in their tree explaining why (delta-075 R7). With the
+# fallback, no other project moves at all until its own next retro-mark.
+RETRO_LOG_NAME = "retro-log.md"
+RETRO_CLOSED = "retro_closed"
+RETRO_DRAINED = "debt_drained"
+
+
+def _retro_log_path(project):
+    return os.path.join(items_dir(project), RETRO_LOG_NAME)
+
+
+def _legacy_retro_marker_path(project):
+    """FROZEN as of the v146 ruling — read only, never written."""
     return os.path.join(ROOT, "process", "dora", "retro-marker", f"{project}.txt")
 
 
-def _read_retro_marker(project):
-    """Return the last-retro datetime (UTC), or epoch (all-time) if absent."""
-    p = _retro_marker_path(project)
-    if os.path.exists(p):
+def _legacy_constraint_marker_path(project):
+    """FROZEN as of the v146 ruling — read only, never written."""
+    return os.path.join(ROOT, "process", "dora", "retro-marker",
+                        f"{project}.constraint.txt")
+
+
+def _read_retro_log(project):
+    """The project's retro events, oldest first. [] if there is no log."""
+    p = _retro_log_path(project)
+    if not os.path.exists(p):
+        return []
+    try:
+        with open(p, encoding="utf-8") as f:
+            fm_text, _body = _split_frontmatter(f.read())
+    except OSError:
+        return []
+    evs = parse_frontmatter(fm_text).get("events") or []
+    return [e for e in evs if isinstance(e, dict) and e.get("ts")]
+
+
+_RETRO_LOG_BODY = """
+## What this is
+
+The **authoritative, append-only record of this project's retro cadence** — one
+event per retro close (`retro_closed`) or per cheap incident-debt drain
+(`debt_drained`), each carrying the constraint as of that close. `retro-debt`
+measures debt SINCE the newest event here; `parts-check` compares the current
+constraint against the newest one recorded here.
+
+It lives in `items/` but **not** in `items/active/` or `items/done/`, so it is not
+a work item and no fold, queue, metric or derived view sees it.
+
+Written only by `make retro-mark` and `make parts-check`. Do not hand-edit.
+`process/dora/retro-marker/*.txt` in the parent repo is the FROZEN pre-cutover
+record — read as a fallback, never written again. See
+`OI-PARTS-CHECK-MARKER-DIRTIES-THE-TREE-AND-DEFERS-FOLD-FORWARD`.
+"""
+
+
+def _append_retro_log(project, event):
+    """Append ONE event. The only writer of the cadence record."""
+    events = _read_retro_log(project) + [event]
+    lines = ["---", "id: RETRO-LOG", f"project: {_q(project)}",
+             "# append-only cadence record — NOT a work item (see the body)",
+             "events:"]
+    for ev in events:
+        parts = [f"ts: {_q(ev.get('ts'))}", f"event: {_q(ev.get('event'))}",
+                 f"agent: {_q(ev.get('agent'))}"]
+        for k in ("constraint_owner", "constraint_state"):
+            if ev.get(k) not in (None, ""):
+                parts.append(f"{k}: {_q(ev.get(k))}")
+        lines.append("  - {" + ", ".join(parts) + "}")
+    lines += ["---", _RETRO_LOG_BODY]
+    p = _retro_log_path(project)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+
+def _rel(path):
+    try:
+        return os.path.relpath(path, ROOT)
+    except ValueError:
+        return path
+
+
+def _retro_verdict(project):
+    """(kind, ts, source) — `("known", dt, where)` or `("unknown", None, why)`.
+
+    A VERDICT, not a sentinel (delta-074 R10). The old reader returned epoch for
+    "absent", so `retro-debt` PRINTED `since last retro 1970-01-01` as if it were
+    a fact — one channel carrying three different meanings (never retro'd / record
+    lost / fresh tree). While the record was tracked, absence was rare; now that it
+    is per-project, absence is the ROUTINE state of a new project, so the
+    overloaded channel would be load-bearing on the happy path. The exit-2
+    direction is UNCHANGED — this is legibility, never a softening.
+    """
+    evs = _read_retro_log(project)
+    for ev in reversed(evs):
+        ts = parse_ts(str(ev.get("ts")))
+        if ts:
+            return ("known", ts, _rel(_retro_log_path(project)))
+    legacy = _legacy_retro_marker_path(project)
+    if os.path.exists(legacy):
         try:
-            with open(p, encoding="utf-8") as f:
+            with open(legacy, encoding="utf-8") as f:
                 ts = parse_ts(f.readline().strip())
-                if ts:
-                    return ts
+            if ts:
+                return ("known", ts, f"{_rel(legacy)} (frozen pre-cutover record)")
         except OSError:
             pass
-    return datetime(1970, 1, 1, tzinfo=timezone.utc)
+    return ("unknown", None,
+            f"no retro record at {_rel(_retro_log_path(project))}; no frozen "
+            f"marker at {_rel(legacy)} — all-time debt shown, a FULL retro is owed")
+
+
+def _read_retro_marker(project):
+    """The last-retro datetime (UTC), or epoch (= all-time debt) if UNKNOWN.
+
+    FAIL-CLOSED and that is the property that makes a per-project store safe: an
+    absent record cannot silently SKIP a retro, it forces one (every close and
+    resolve in project history counts as debt), and the resulting retro's
+    `retro-mark` re-seeds the log — so the system self-heals after exactly one
+    retro. Callers wanting to SHOW the boundary must use `_retro_verdict`.
+    """
+    _kind, ts, _why = _retro_verdict(project)
+    return ts or datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def _retro_since_phrase(project):
+    kind, ts, why = _retro_verdict(project)
+    if kind == "known":
+        return ts.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return f"UNKNOWN ({why})"
 
 
 def _terminal_ts(item):
@@ -2315,7 +2474,7 @@ def cmd_retro_debt(a):
     reason = ("incident (immediate)" if incidents else
               f"routine {len(routine)}>={threshold}" if len(routine) >= threshold else
               f"routine {len(routine)}<{threshold}")
-    since = marker.strftime("%Y-%m-%dT%H:%M:%SZ")
+    since = _retro_since_phrase(a.project)
     print(f"retro-debt[{a.project}] = {n} (routine {len(routine)}/{threshold}, "
           f"incidents {len(incidents)}) since last retro {since} "
           f"=> {'RETRO DUE — drain before advancing ['+reason+']' if due else 'ok'}")
@@ -2330,15 +2489,15 @@ def cmd_retro_mark(a):
     """Write the last-retro marker = now — the reset `/retro` calls at close to
     drain the debt. ALSO records the constraint as of this retro, so a later
     `parts-check` can tell a stable constraint from a shifted one (v136)."""
-    ts = a.now or now_iso()
-    p = _retro_marker_path(a.project)
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    with open(p, "w", encoding="utf-8") as f:
-        f.write(ts.strip() + "\n")
-    print(f"retro-mark: {a.project} last-retro set to {ts.strip()}")
+    ts = (a.now or now_iso()).strip()
     con = _read_constraint(a.project)
+    ev = {"ts": ts, "event": RETRO_CLOSED, "agent": "orchestrator"}
     if con is not None:
-        _write_constraint_marker(a.project, con)
+        ev["constraint_owner"] = con["owner"]
+        ev["constraint_state"] = con["state"]
+    _append_retro_log(a.project, ev)
+    print(f"retro-mark: {a.project} last-retro set to {ts}")
+    if con is not None:
         print(f"retro-mark: {a.project} constraint recorded as "
               f"owner={con['owner']} state={con['state']}")
     else:
@@ -2367,11 +2526,6 @@ def cmd_retro_mark(a):
 # So the expensive path is still mandatory in exactly the case a retro exists for:
 # something about where time goes has changed.
 # ---------------------------------------------------------------------------
-def _constraint_marker_path(project):
-    return os.path.join(ROOT, "process", "dora", "retro-marker",
-                        f"{project}.constraint.txt")
-
-
 def _read_constraint(project):
     """The current constraint from the DERIVED views: the top GLT-share owner and
     the top GLT-share state. Returns None if it cannot be read — which callers
@@ -2411,15 +2565,21 @@ def _read_constraint(project):
             "state": state, "state_pct": state_pct}
 
 
-def _write_constraint_marker(project, con):
-    p = _constraint_marker_path(project)
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    with open(p, "w", encoding="utf-8") as f:
-        f.write(f"{con['owner']}\t{con['state']}\n")
-
-
 def _read_constraint_marker(project):
-    p = _constraint_marker_path(project)
+    """The constraint as of the last close — `(owner, state)` or None.
+
+    Rides the cadence log event (so ONE store holds both halves of the fact and
+    they cannot drift), scanning newest-first for an event that CARRIES one: a
+    close whose constraint was unreadable must not ERASE the last known
+    constraint, or the next parts-check would escalate on a bookkeeping gap
+    rather than on a real shift. Falls back to the FROZEN parent-repo
+    `<project>.constraint.txt` so no project loses stability at the cutover.
+    """
+    for ev in reversed(_read_retro_log(project)):
+        owner, state = ev.get("constraint_owner"), ev.get("constraint_state")
+        if owner and state:
+            return (str(owner), str(state))
+    p = _legacy_constraint_marker_path(project)
     if not os.path.exists(p):
         return None
     try:
@@ -2475,10 +2635,12 @@ def cmd_parts_check(a):
               f"is due on the routine arm.")
         sys.exit(2)
 
-    # Stable + only incident debt => the cheap path is legitimate. Drain it.
-    ts = stamp
-    with open(_retro_marker_path(a.project), "w", encoding="utf-8") as f:
-        f.write(ts + "\n")
+    # Stable + only incident debt => the cheap path is legitimate. Drain it — by
+    # APPENDING to the project's own cadence log, never by writing a tracked file
+    # in the shared parent repo (that write is what deferred the fold-forward).
+    _append_retro_log(a.project, {
+        "ts": stamp, "event": RETRO_DRAINED, "agent": "orchestrator",
+        "constraint_owner": cur["owner"], "constraint_state": cur["state"]})
     print(f"parts-check[{a.project}] @ {stamp} => OK (constraint STABLE) — {line}; "
           f"shifted since last close? n. Drained {len(incidents)} incident(s): "
           f"{', '.join(i for i, _t in incidents) or 'none'}. "
@@ -4005,7 +4167,7 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
             "message": (f"[retro-debt] RETRO DUE [{reason}] — routine "
                         f"{len(routine)}/{threshold}, incidents "
                         f"{len(incidents)} since "
-                        f"{marker.strftime('%Y-%m-%dT%H:%M:%SZ')} "
+                        f"{_retro_since_phrase(project)} "
                         f"({', '.join(ids) or '—'}). Remedy: fire /retro, then "
                         f"`make retro-mark PROJECT={project}` to drain it."),
         })

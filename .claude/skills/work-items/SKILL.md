@@ -113,7 +113,16 @@ stopping actually relieves**; a real finding that stopping would only make worse
 reported as an **ADVISORY** that does not touch the exit code (see check 3 below).
 
 - **`make retro-debt PROJECT=P [THRESHOLD=3]`** — the §F8 cadence gate. Exit 2 = RETRO
-  DUE; `make retro-mark PROJECT=P` drains it at the retro's close.
+  DUE; `make retro-mark PROJECT=P` drains it at the retro's close. The last-retro
+  boundary is the newest event in that project's OWN append-only cadence log,
+  `work/P/items/retro-log.md` (written only by `retro-mark` and by `parts-check`'s
+  drain, and carrying the constraint as of that close). It lives in `items/` but not
+  in `items/{active,done}/`, so no fold, queue or metric sees it. Absent ⇒ the tool
+  prints **UNKNOWN** and the paths it looked at — never a `1970-01-01` sentinel
+  dressed as a fact — and counts all-time debt, i.e. it FAILS CLOSED. The tracked
+  files under `process/dora/retro-marker/` are FROZEN: read as a fallback, never
+  written (writing them dirtied the parent worktree and deferred every
+  fold-forward — `OI-PARTS-CHECK-MARKER-DIRTIES-THE-TREE-AND-DEFERS-FOLD-FORWARD`).
 - **`make loop-gate PROJECT=P [STALE_HOURS=4] [THRESHOLD=3] [NO_OBSERVE=1]
   [OBSERVE_TIMEOUT=120] [NOW=…]`** — the §F8a **pull precondition** gate; run it before
   EVERY pull (`loop-run.md` step 0b). Six checks:

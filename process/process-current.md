@@ -1,7 +1,7 @@
 ---
-process_version: 144
-effective_from: 2026-08-20
-supersedes: v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
+process_version: 145
+effective_from: 2026-08-21
+supersedes: v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
 status: active
 ---
 
@@ -162,7 +162,7 @@ The prior multi-store model (ledger + `state.md` + `items.csv` state + `queues/*
 # Table of contents
 
 - **§F0** — CUTOVER: the work item is the single source of truth (READ FIRST)
-- **STAGE 0** — Principles & metrics (§0a–§5a), incl. **§0c** reporting to the human (ADHD-readable)
+- **STAGE 0** — Principles & metrics (§0a–§5a), incl. **§0c** reporting to the human (ADHD-readable) and **§0e** re-read your authorisations before escalating a block
 - **STAGE 1** — Next-work selection & gates (§6–§10)
 - **STAGE 2** — Planning: slice / use-cases / acceptance (§11–§12)
 - **STAGE 3** — Build (trunk, TDD) (§13–§17a)
@@ -390,6 +390,64 @@ state is prevented rather than repaired). This is routed as **plain practice in 
 agent, with NO experiment row** — "the documenter produces a handover pack" is a
 did-we-do-the-work measurement that cannot come back negative, which §25a/EXP-063 explicitly
 disqualifies as an experiment.
+
+## 0e. ON A BLOCK, RE-READ YOUR AUTHORISATIONS BEFORE YOU ESCALATE [v145, retro 2026-08-21]
+
+**An escalation that names no checked authorisation is not an escalation — it is a stall.**
+
+Before any agent hands a block to the human, it MUST re-read its own standing instructions and
+**state in the escalation which authorisation it checked and why that authorisation does not cover
+the blocked action.** No named check ⇒ the escalation is invalid and the agent keeps working.
+
+**MEASURED COST OF NOT DOING THIS (2026-08-21, OagEventSource).** The `loop-gate` blocked because an
+expired SSO token made an `awaiting_observation` predicate unrunnable. The orchestrator ran
+`aws sso login --no-browser`, it waited on a device code nobody was there to type, and the
+orchestrator **stopped and escalated** — while a standing instruction in its own context read *"AWS
+SSO re-login authorized — run `aws sso login` myself when the token expires; don't ask the user."*
+
+| | |
+|---|---|
+| loop blocked | **40,542 s = 11.26 h** |
+| Ready depth throughout | **4** (WIP 1) |
+| added directly to the constraint | **162,168 item-seconds** of pure `queue` dwell |
+| actual fix, once attempted | **< 2 min** — the plain browser flow, 6 profiles, gate BLOCKED → OK with **no code change** |
+
+The constraint is `queue` at **64.43%** of gross lead time. This stall fed the constraint directly and
+every second of it was avoidable.
+
+**THE FAILURE MODE, NAMED SO IT IS RECOGNISABLE.** A real observation (`--no-browser` hangs) → a
+mechanism inferred from it (SSO cannot be done unattended) → **the inference recorded as though it
+were the observation.** It was written into an item as fact, where the next agent would have read it
+and escalated too. This is §17c's boundary-between-measured-and-inferred rule applied to an agent's
+own capabilities rather than to product data.
+
+**THREE INSTANCES IN ONE SESSION, which is why this is a rule and not a note:**
+1. escalated an action it was explicitly authorised to take;
+2. closed the same turn with *"Want me to pull that set and keep the loop running?"* — while a
+   standing instruction says the loop is autonomous and flow-mechanics questions are never put to
+   the human;
+3. passed `make loop-gate ARGS=--no-observe` — an unsupported variable (`NO_OBSERVE=1`) — from a
+   Makefile recipe it had **already read earlier in the same session**, so the gate silently ran in
+   the wrong mode.
+
+**THE ROOT CAUSE IS THAT NOTHING PROMPTS THE RE-READ.** The instruction was in context and simply not
+consulted, because escalating is cheaper *in the moment* than re-reading — and the cost is paid
+later, invisibly, in overnight queue dwell that no gate measures. This section is that prompt.
+
+**WHAT THIS DOES NOT LICENSE.** It does not soften any gate. An unevaluable predicate MUST still
+block the pull (state-graph v9, §17c.2) — the precedent is `DEF-ROC-004` sitting `blocked` **28.8
+days** after both its blockers had gone. The remedy is for the agent to CLEAR the block, never for
+the gate to stop reporting it. Nor does it license acting outside an authorisation: if the re-read
+shows the action is genuinely not authorised, escalate — and now the escalation can say so.
+
+**THREE THINGS AN AGENT MUST TRY BEFORE ESCALATING A BLOCK:**
+1. **Re-read the standing authorisations** (its own instructions, `CLAUDE.md`, its agent file) and
+   name the relevant one.
+2. **Re-read the mechanism** it is invoking — the actual recipe, flag or target, not its memory of
+   it. Variable and flag names are checked at the source, never recalled.
+3. **Try the plain form before concluding a class is impossible.** One flag failing is evidence about
+   that flag. Generalising from it to the mechanism is the inference error above.
+
 
 ## 1. Operating principles (beliefs)
 See `principles/` for the full statements. In force: XP, always-TDD, value

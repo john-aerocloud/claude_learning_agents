@@ -933,3 +933,56 @@ Ten occasions, six roles, and this one arrives *inside the experiment built to s
 
 ---
 
+## EXP-132 — ADOPTED (v145, 2026-08-21, OagEventSource retro)
+
+**Target metric:** lead time (orchestrator overhead / avoidable full-retro cost).
+**Result: POSITIVE — the metric moved, measured on a single heavy session.**
+
+`parts-check` fired **8 times** on 2026-08-20 and **drained 5 incidents**
+(DEFECT-OAG-123, -130, -134, -136, -099) without paying full-retro overhead once — the constraint
+was `queue` 64.0%/`open` 55.3% at every reading and genuinely never shifted, so every drain was
+correct. Five avoided full retros in one day, on a day that resolved seven defects.
+
+It also demonstrated the fail-safe direction: `retro-mark` warns when it cannot read the constraint
+and the next `parts-check` then ESCALATES rather than assuming stability.
+
+**Integration:** folded into `.claude/agents/orchestrator.md` (§Retro, opening paragraph) as plain
+operating practice; EXP/vNN scaffolding stripped. Row pruned from the live registry.
+**Residual noted, tracked separately:** every invocation writes a tracked marker file that dirties
+the parent worktree and defers fold-forward — `OI-PARTS-CHECK-MARKER-DIRTIES-THE-TREE-AND-DEFERS-FOLD-FORWARD`,
+ruled by `delta-075`, build scheduled. Adoption is of the *constraint read*, not of the marker store.
+
+## EXP-142 — ADOPTED (v145, 2026-08-21, OagEventSource retro)
+
+**Target metric:** change failure rate (the shrink-only test-requirement ratchet must not drift up).
+**Result: POSITIVE — measured under the heaviest concurrency this project has run.**
+
+Across **28 agent dispatches** in one session the limb-1 floor held at **1739** and limb-2 at **15**,
+and **not one agent raised it** — several volunteered in their reports that they had *not*
+re-baselined, and two traced a transient 1740 to another agent's file rather than moving the floor.
+The auto-shrink also fired: the floor came down 1747 → 1739 and stayed.
+
+It caught real defects rather than only counting: a **spread-override on a real capture** (an
+engineer's first amendment case — "spreading an override over a real capture invents a record reality
+never sent"), and untagged cases in three separate files. One engineer restructured its fixture to a
+harvested prior *because* the gate refused it.
+
+**Integration:** already live as plain practice in `process-current.md §17d.5` plus
+`.claude/tools/test-requirement-gate.js`; row pruned, scaffolding needed no stripping.
+
+## EXP-135 — ADOPTED (v145, 2026-08-21, OagEventSource retro)
+
+**Target metric:** change failure rate (an exclusion must not read as a health verdict).
+**Result: POSITIVE — the mechanism fired inside a real architecture ruling, not a test.**
+
+`delta-072` (`DEFECT-OAG-136`, airport identity) invoked §17h **as its authority**: *"the old
+`iata:string` required was an artefact of the EXCLUDED population that outlived the exclusion — the
+exact §17h shape."* The excluded population was US general-aviation/unscheduled traffic, admitted by
+the owner at 29.8%/31.2% of SRQ's real traffic — i.e. §17h is what let the architect see that a
+passing type constraint was encoding a stale exclusion.
+
+It fired a second time the same day: `S6` (FAA-only airfields, 5 of 965 nodes) was ruled a **COUNTED
+finding with its measured size** and explicitly *"may never be described as benign"* — §17h limb 2
+verbatim.
+
+**Integration:** already live as plain practice in `process-current.md §17h`; row pruned.

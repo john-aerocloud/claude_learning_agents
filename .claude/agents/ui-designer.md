@@ -211,6 +211,18 @@ displayed figure passes, and you emit these as testable acceptance conditions:
    description (the item's job, the ledger `note`), never a machine-internal
    token alone (`row:700`, a bare `SLC-vision`).
 4. **Empty/unknown ≠ zero** — distinguish "no data" ("—") from a real 0.
+5. **UNKNOWN is a THIRD state, never folded into the negative** — a surface
+   that could not ESTABLISH a fact says so; it never renders "we failed to find
+   out" as "the fact is false". `DEF-ROC-091`: the Relink tab asserted
+   *"Currently self-managed (owns its own rules)"* whenever `currentParent` was
+   falsy, so `undefined` (**the probe that would establish it FAILED**) rendered
+   identically to `null` (genuinely self-managed) — the screen stated a config
+   fact it did not have. Any surface reading a remote/derived fact carries
+   THREE outcomes, never two: established-true, established-false,
+   could-not-establish. This is §17i on a screen (*a control that cannot report
+   is not a control; silence is never a pass*), and it is this project's
+   twelfth registered instance of the absence-vs-ignorance class — the base
+   rate is why it is a checklist item and not advice.
 This is the standing answer to the "looks-present-but-isn't-readable" class
 .
 

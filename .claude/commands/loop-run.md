@@ -153,6 +153,21 @@ Each cycle:
    vs gross-lead-time block (§F `agent_cycle_time`) is derived by `make wi-project`.
    GLT stays the honest TOTAL elapsed; §F is its complement (work-effort vs wait/
    overhead), e.g. `make wi-append … EVENT=built_green AGENT=engineer TOKENS=<n> DURATION_MS=<n>`.
+   - **PLUMBING EVENTS CARRY THEM TOO — otherwise §E cannot come back non-zero (v150, ROC).**
+     `stats.md` §E has reported **plumbing 0.0% / delivery 100.0%** for three consecutive retros,
+     each concluding "coverage too sparse to act on". That reading is wrong: `TOKENS=` was
+     specified ONLY on the stage events (`built_green`/`deployed`/`validated`), and **all three
+     are classified DELIVERY**, so the plumbing share is 0.0% BY CONSTRUCTION — a metric that
+     cannot come back non-zero, which is §17i's class arriving in the cost split. Measured the
+     cycle this was found: one `product` replenishment (**179,231 tokens / 549,039 ms**) and one
+     `flow-manager` promotion (**76,532 tokens / 312,395 ms**) — 255,763 tokens and 14.4 minutes
+     of unambiguous flow mechanics with **no event to record them on**. *Therefore:* the
+     replenishment/flow events — `created`, `registered`, `made_ready`, `pulled`, `blocked`,
+     `unblocked`, `collision` — carry `TOKENS=`/`DURATION_MS=` from the dispatch that produced
+     them exactly as the stage events do. **YOU hold those numbers, not the specialist**: a
+     dispatched agent generally cannot see its own `subagent_tokens`, and both dispatches this
+     cycle correctly said so rather than inventing one — so read them off the dispatch result and
+     attach them yourself, and never ask the agent to self-report a figure it cannot observe.
    - **`deployed` under a PIPELINE (push→CI) deploy (2026-07-22, UC-ADIX-015).** When
      the deploy is pipeline-triggered (push to `main` → CI applies the infra), NO agent
      runs an interactive `sst deploy`, so none fires `deployed` automatically and the UC

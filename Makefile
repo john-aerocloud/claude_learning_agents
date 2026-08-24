@@ -491,6 +491,34 @@ wi-project:
 # make wi-validate PROJECT=OagEventSource
 wi-validate:
 	$(WORKITEMS) validate --project $(PROJECT)
+
+# One line per item: id, state, value/cost, defer_until, title. The triage read.
+# WHY THIS EXISTS (v150 retro, ROC): deciding the aged-backlog gate's items means
+# reading id + title + value + cost + defer_until for each — and `sed`-ing whole
+# item files to get it produced a 45 KB dump for eight items, then a second
+# hand-rolled `awk` for the same five fields. Two of the retro's three largest
+# reads were this, and both were pure overhead: a parameterised target replaces a
+# repeated hand-assembly (§36). STATE comes from the derived view, never re-folded.
+#   make item-brief PROJECT=ROC IDS="DEF-ROC-040 OI-ROC-002"
+#   make item-brief PROJECT=ROC QUEUE=intake
+item-brief:
+	@dir="work/$(PROJECT)/items"; \
+	ids="$(IDS)"; \
+	if [ -n "$(QUEUE)" ]; then \
+	  ids=$$(awk -F'|' '$$2 ~ /^ *$(QUEUE) *$$/ {print $$4}' "work/$(PROJECT)/views/queues.md" | tr ',' ' '); \
+	fi; \
+	if [ -z "$$ids" ]; then echo "usage: make item-brief PROJECT=<p> [IDS=\"A B\"] [QUEUE=<q>]" >&2; exit 2; fi; \
+	printf '%-16s %-20s %5s %5s %-12s %s\n' ID STATE VALUE COST DEFER TITLE; \
+	for id in $$ids; do \
+	  f=$$(ls "$$dir/active/$$id.md" "$$dir/done/$$id.md" 2>/dev/null | head -1); \
+	  if [ -z "$$f" ]; then printf '%-16s %-20s\n' "$$id" "NOT-FOUND"; continue; fi; \
+	  st=$$(awk -F'|' -v i="$$id" '$$2 ~ "^ *"i" *$$" {gsub(/^ +| +$$/,"",$$4); print $$4; exit}' "work/$(PROJECT)/views/state.md"); \
+	  v=$$(awk -F': ' '/^value:/{print $$2; exit}' "$$f"); \
+	  c=$$(awk -F': ' '/^cost:/{print $$2; exit}' "$$f"); \
+	  d=$$(awk -F': ' '/^defer_until:/{print $$2; exit}' "$$f"); \
+	  t=$$(awk -F'title: ' '/^title:/{print $$2; exit}' "$$f" | tr -d '"' | cut -c1-100); \
+	  printf '%-16s %-20s %5s %5s %-12s %s\n' "$$id" "$${st:-?}" "$${v:-?}" "$${c:-?}" "$${d:--}" "$$t"; \
+	done
 # One-shot migration from items.csv + ledger into per-item files.
 wi-migrate:
 	$(WORKITEMS) migrate --project $(PROJECT)
@@ -1162,7 +1190,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap sequencer-guard make-refs-tracked container-reap container-orphans stack-claim stack-release stack-status sso-login retro-debt retro-mark loop-gate test-wi wi-append wi-project wi-validate wi-migrate doc-lint process-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated commit-msg-file test-requirement-gate test-requirement-gate-baseline board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery
+.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap sequencer-guard make-refs-tracked container-reap container-orphans stack-claim stack-release stack-status sso-login retro-debt retro-mark loop-gate test-wi wi-append wi-project wi-validate wi-migrate item-brief doc-lint process-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated commit-msg-file test-requirement-gate test-requirement-gate-baseline board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery
 
 # --- Viggo-fix UC-W7: Country/Nationality ID remediation (T-SQL) --------------
 # Data-driven, self-building T-SQL remediation script set + its local stand-up

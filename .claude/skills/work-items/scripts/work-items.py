@@ -3551,6 +3551,28 @@ def stalled_work_states(graphs, policy):
 STALLED_WORK_SCHEDULED_QUEUE = "ready"
 
 
+def _last_event_ts(item):
+    """The latest PARSEABLE event timestamp on an item, or None.
+
+    DEF-ROC-089. Used only by `stalled-work`'s CLAIMED limb, to answer "has
+    anything been recorded against this occupied WIP slot lately". Deliberately
+    NOT used by any age/park computation: `_current_segment` merges same-state
+    segments so that an `amended` cannot reset a park's age (v145), and that must
+    stay true.
+
+    Unparseable timestamps are SKIPPED rather than treated as now — a garbled `ts`
+    must not manufacture activity that would hold a slot open.
+    """
+    latest = None
+    for ev in (item.events or []):
+        ts = parse_ts(ev.get("ts"))
+        if ts is None:
+            continue
+        if latest is None or ts > latest:
+            latest = ts
+    return latest
+
+
 def _open_segment_entered(graphs, item, state, now):
     """(entered_ts, None) for the item's still-open segment in `state`, or
     (None, reason) when the idle time CANNOT BE COMPUTED.
@@ -3798,14 +3820,56 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
                     f"PROJECT={project} ID={iid} EVENT=<genesis> AGENT=<agent>`), "
                     f"then re-run.")))
             continue
-        idle_s = (now - entered).total_seconds()
+        # DEF-ROC-089 — MEASURE FROM THE LAST RECORDED ACTIVITY, not from the
+        # state entry. This check's own remedy (c) reads "if it IS being worked,
+        # append the event already earned so the clock restarts", and until now
+        # nothing restarted it: `entered` moves only on a STATE CHANGE. From
+        # `fixing` the legal events are fixed/blocked/amended/validating, so the
+        # one HONEST option for work in progress (`amended`) could not clear the
+        # gate and the other three are false statements about the work. Measured
+        # 2026-08-24: an `amended` carrying a real measurement was appended to
+        # DEF-ROC-053 and the next gate run still reported "NO RECORDED EVENT
+        # since", sixty seconds later.
+        #
+        # This is the SECOND time this check has printed a remedy it did not
+        # honour — DEF-ROC-083 was the `defer_until` limb — and the comment above
+        # that fix names the failure mode: a gate that cannot be SATISFIED is
+        # worse than one that cannot fail, because it stops all work.
+        #
+        # `max(...)` is what keeps the check's teeth: the clock is the LATER of
+        # "entered the state" and "last event", so an item with no events since
+        # entry is unchanged, and a STALE event cannot hold a slot open either.
+        # The gaming objection — spam `amended` to keep a slot — is answered on
+        # DEF-ROC-089: the gate already invites that exact append, and an
+        # `amended` is a permanent audited note where an idle slot is not.
+        # NARROW TO THE `claimed` LIMB, AND THE NARROWNESS IS LOAD-BEARING.
+        # `_current_segment` merges adjacent same-state segments ON PURPOSE (v145):
+        # attaching a reversal probe to a 34-day park is an `amended`, and if that
+        # reset the clock then migrating the parks to make their age VISIBLE would
+        # instead have HIDDEN it — on the single largest contributor to gross lead
+        # time. That reasoning is correct and is untouched here.
+        #
+        # The two limbs ask different questions, which is why one answer cannot
+        # serve both:
+        #   - SCHEDULED / parked / aged-backlog ask "how long has this SAT here?"
+        #     An amendment is commentary on a wait, not the end of it. Clock =
+        #     state entry. (v145, DEF-ROC-083.)
+        #   - CLAIMED asks "is anyone HOLDING this WIP slot?" — its own message
+        #     says "nothing is known to be happening in it". There, a recorded
+        #     event IS the thing being asked about, and its own remedy (c) says so.
+        # So only the claimed limb reads activity.
+        last_event = _last_event_ts(it) if not scheduled else None
+        activity_from = max(entered, last_event) if last_event else entered
+        idle_s = (now - activity_from).total_seconds()
+        measured_from = ("its last recorded event" if last_event and last_event > entered
+                         else f"entering '{state}'")
         if idle_s <= thr_h * 3600.0:
             continue
         if scheduled:
             msg = (
-                f"[stalled-work] {iid} has been SCHEDULED in '{state}' for "
-                f"{_hms(idle_s)} with NO RECORDED EVENT since (threshold "
-                f"{thr_h:.0f}h). A scheduled item nobody pulls is invisible aging "
+                f"[stalled-work] {iid} has been SCHEDULED in '{state}' with NO "
+                f"activity for {_hms(idle_s)}, measured from {measured_from} "
+                f"(threshold {thr_h:.0f}h). A scheduled item nobody pulls is invisible aging "
                 f"inventory: it holds a '{queue}' slot, and '{queue}' depth then "
                 f"reads as if the schedule were being honoured. Remedy — PULL it "
                 f"now (it was already chosen, so this is the cheapest work "
@@ -3815,9 +3879,9 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
                 f"largest measured contributor to gross lead time.")
         else:
             msg = (
-                f"[stalled-work] {iid} has been in '{state}' ({owner}) for "
-                f"{_hms(idle_s)} with NO RECORDED EVENT since (threshold "
-                f"{thr_h:.0f}h) — the '{queue}' slot is OCCUPIED and nothing is "
+                f"[stalled-work] {iid} has been in '{state}' ({owner}) with NO "
+                f"activity for {_hms(idle_s)}, measured from {measured_from} "
+                f"(threshold {thr_h:.0f}h) — the '{queue}' slot is OCCUPIED and nothing is "
                 f"known to be happening in it. THIS IS AN IDLE FACT, NOT A VERDICT: "
                 f"the event log cannot tell an in-flight dispatch from work nobody "
                 f"is holding, because no dispatch is recorded anywhere "

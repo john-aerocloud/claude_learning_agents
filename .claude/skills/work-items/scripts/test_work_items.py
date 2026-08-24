@@ -4679,6 +4679,93 @@ class TestStalledWork(Base):
             self.write_item("active", f"UC-R{i}", "use-case",
                             self._ready_uc(f"UC-R{i}", 29))
 
+    # ---- AC-089.* — the clock the remedy says to restart must be restartable --
+    def test_AC_089_1_an_amended_event_restarts_the_claimed_slot_clock(self):
+        """DEF-ROC-089. The check's own remedy (c) reads "if it IS being worked,
+        append the event already earned so the clock restarts". It measured time
+        since the item ENTERED the state, so only a STATE CHANGE moved it — and
+        from `fixing` the legal events are fixed/blocked/amended/validating, so
+        the only HONEST one (`amended`) could not clear the gate and the other
+        three are lies about the work. Measured on the real registry: an `amended`
+        carrying a genuine measurement was appended to DEF-ROC-053 and the next
+        gate run still said "NO RECORDED EVENT since", 60 seconds later."""
+        self._default_policy()
+        self._fresh_ready()
+        # entered `fixing` on day 23 (~7d stale) but ACTIVE 1 minute ago
+        events = self._fixing_defect(23) + [
+            {"ts": _dt(29, 23), "event": "amended", "agent": "orchestrator",
+             "note": "measured the rate; instrument committed"}]
+        self.write_item("active", "DEF-WORKED", "defect", events)
+        findings = self._gate()
+        self.assertEqual(
+            [f for f in self._blocks(findings) if "DEF-WORKED" in f["ids"]], [],
+            "an item with recorded activity inside the threshold is NOT idle")
+
+    def test_AC_089_2_a_genuinely_quiet_slot_still_blocks(self):
+        """The other direction, and the one that matters more: making any event
+        restart the clock must NOT turn the check off. No events at all since the
+        state was entered still blocks."""
+        self._default_policy()
+        self._fresh_ready()
+        self.write_item("active", "DEF-IDLE", "defect", self._fixing_defect(23))
+        findings = self._gate()
+        got = [f for f in self._blocks(findings) if "DEF-IDLE" in f["ids"]]
+        self.assertEqual(len(got), 1, findings)
+        self.assertEqual(got[0]["kind"], "claimed-no-activity")
+
+    def test_AC_089_2b_an_OLD_amended_does_not_keep_a_slot_alive(self):
+        """A stale `amended` is not activity. Entered day 20, last touched day 21,
+        so ~8 days quiet — still blocks, and the idle time is measured from the
+        EVENT, not from the state entry."""
+        self._default_policy()
+        self._fresh_ready()
+        events = self._fixing_defect(20) + [
+            {"ts": _dt(21, 0), "event": "amended", "agent": "orchestrator"}]
+        self.write_item("active", "DEF-STALE", "defect", events)
+        findings = self._gate()
+        got = [f for f in self._blocks(findings) if "DEF-STALE" in f["ids"]]
+        self.assertEqual(len(got), 1, findings)
+
+    def test_AC_089_3_an_amendment_does_NOT_reset_a_SCHEDULED_item_clock(self):
+        """The v145 behaviour DEF-ROC-089's fix must not break, and the reason it
+        exists: `_current_segment` merges adjacent same-state segments so that
+        attaching a reversal probe to a 34-day park — which is an `amended` —
+        cannot reset that park's age. Without the merge, migrating the parks to
+        make their age VISIBLE would have HIDDEN it, on the single largest
+        contributor to gross lead time.
+
+        So the two limbs must answer differently: CLAIMED asks "is anyone holding
+        this slot" (activity counts, AC-089.1); SCHEDULED asks "how long has this
+        sat here" (an amendment is commentary on a wait, not the end of it)."""
+        self._default_policy()
+        self._fresh_ready()
+        # scheduled long ago, amended one minute ago — must STILL block
+        events = self._scheduled_oi(20) + [
+            {"ts": _dt(29, 23), "event": "amended", "agent": "flow-manager",
+             "note": "attached a reversal probe"}]
+        self.write_item("active", "OI-PARKED", "open-item", events)
+        findings = self._gate()
+        got = [f for f in self._blocks(findings) if "OI-PARKED" in f["ids"]]
+        self.assertEqual(len(got), 1,
+                         "an amendment must not reset a SCHEDULED item's clock (v145)")
+        self.assertEqual(got[0]["kind"], "scheduled-not-pulled")
+        # and it is still measured from the state entry, not from the amendment
+        self.assertGreater(got[0]["idle_s"], 8 * 24 * 3600.0)
+
+    def test_AC_089_4_the_message_does_not_claim_no_events_when_events_exist(self):
+        """AC-089.4 — the printed sentence was false on its face. It must describe
+        what it actually measured."""
+        self._default_policy()
+        self._fresh_ready()
+        events = self._fixing_defect(20) + [
+            {"ts": _dt(21, 0), "event": "amended", "agent": "orchestrator"}]
+        self.write_item("active", "DEF-MSG", "defect", events)
+        findings = self._gate()
+        msg = [f for f in self._blocks(findings) if "DEF-MSG" in f["ids"]][0]["message"]
+        self.assertNotIn("NO RECORDED EVENT since", msg,
+                         "an item WITH events must not be described as having none")
+        self.assertIn("last recorded event", msg)
+
     # ---- AC-127.1 — the build states are no longer blind spots ---------------
     def test_AC_127_1_work_abandoned_in_a_build_state_blocks(self):
         """The reconstructed 2026-08-19 population: `fixing`/`building`/`reproducing`/
@@ -4847,7 +4934,15 @@ class TestStalledWork(Base):
         self._fresh_ready()
         self.write_item("active", "DEF-FIXING", "defect", self._fixing_defect(23))
         msg = self._blocks(self._gate())[0]["message"]
-        self.assertIn("NO RECORDED", msg.upper())
+        # DEF-ROC-089 changed the WORDING and this assertion moved with it. The
+        # old literal was "NO RECORDED EVENT since", which AC-089.4 removed
+        # BECAUSE IT WAS FALSE whenever events existed — an item amended sixty
+        # seconds ago was described as having no recorded event. The property
+        # this test actually guards is unchanged and is re-asserted below: state
+        # the FACT (no activity for X, and what X was measured from), never the
+        # INFERENCE (that the work was abandoned).
+        self.assertIn("no activity", msg.lower())
+        self.assertIn("measured from", msg.lower())
         self.assertNotIn("abandoned", msg.lower())
         self.assertIn("cannot tell", msg.lower())
 

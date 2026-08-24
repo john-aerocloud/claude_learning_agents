@@ -1130,3 +1130,46 @@ retros' records, and this retro has no standing to relabel them silently (v141's
 may not adopt-or-kill another project's rows cuts both ways). It is escalated as **the next retro's
 first item**, together with the **per-instance experiment allowance now owed twice over**, which has
 stopped being untidy and started blocking honest accounting.
+
+---
+
+## EXP-127 — KILLED at v149 (retro, OagEventSource 2026-08-24)
+
+**Outcome: KILLED — 2/2 scoring opportunities, metric unmoved, because the mechanism was never
+enforced.** Hypothesis PROMOTED, not discarded, to
+`OI-OAG-RESOURCE-CLASS-CAPS-ARE-PROSE-AND-NOTHING-REFUSES-A-DISPATCH` (value 18 / cost 3).
+
+**What it proposed** (§F2b, v131): declare a resource class on dispatch
+(`full-store-scan`/`full-test-suite`/`type-aware-lint`/`external-api`/`light`), cap concurrency PER
+CLASS independently of queue membership, and forbid a silent long-running command. Target metric
+**CFR**; measurement *"agent deaths per session attributable to watchdog stalls (not API errors —
+separate them)"* over 2 retros.
+
+**Why it was killed rather than adopted or given a third strike.** It is at its declared horizon,
+and it never had a chance to move anything: **nothing anywhere enforces a resource class.** This is
+the `EXP-143` shape from v144 — *unscoreable BY CONSTRUCTION because nothing refuses* — reaching
+its horizon. A row that cannot come back negative for the honest reason that its mechanism does not
+exist is not an experiment; it is an unbuilt work item wearing a registry id.
+
+**Why the hypothesis survives, and this is the part worth carrying.** It was **confirmed this
+cycle**, not merely un-refuted. Four agents were dispatched in one turn with **no class declared on
+any of them and nothing refused or warned**. Splitting the outcomes by the row's own measurement
+rule:
+
+| class | count | in the row's declared scope? |
+|---|---|---|
+| machine sleep (environment) | 4 | **no** — the row explicitly excludes API/environment deaths |
+| deliberately stopped by the orchestrator | 3 | no — not deaths |
+| **`no progress for 600s (stream watchdog did not recover)`** | **2** | **YES** |
+
+Two watchdog-stall deaths, at four-way concurrency, on a machine also carrying four foreign ROC
+emulator containers. **The prediction held and the control was absent.**
+
+Precedent applied: v145's `EXP-140` ruling — *ten strikes and a stated fix is not a finding any
+more; it is a backlog item that was invisible to the backlog.* Same treatment, one retro earlier in
+the row's life, and applied by the project to its own row rather than to another instance's.
+
+**Second independent witness already on record** (so this is not a single-session artifact):
+thirteen leaked DynamoDB Local containers once drove load average to **19.85** and made a two-file
+test run take **301 s instead of 877 ms — 340×**, producing reds that were green in isolation. Same
+"machine as a finite resource" failure from a different direction, measured, and still uncapped.

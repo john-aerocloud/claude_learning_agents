@@ -81,3 +81,36 @@ on the constraint (§5b). A constraint named from a denominator that is 65% deci
 that budget at the wrong target every cycle. This is the measurement equivalent of the class this
 project keeps finding — a control that reads confidently while the thing it measures is not the
 thing it names.
+
+---
+
+## SECOND LIMB, added v149 (retro 2026-08-24) — partition by LOOP UPTIME as well as by decision
+
+Same job, second confound on the same denominator (§5b.2). `defer_until` separates *decided* from
+*waiting*; this limb separates *latency* from *calendar*.
+
+**The measurement that opened it.** `queue` median/item went 119,684 s at the v147 close to
+**303,881 s** now, n unchanged at 218 — **+154%**. The loop was **stopped for 60.9 h** at the
+owner's request across that interval, and that downtime alone accounts for **72%** of the current
+median. v147's celebrated **−51%** across the previous interval is exposed to the same confound in
+the opposite direction. Two consecutive retros reasoned from a number neither could attribute.
+
+- **AC-031.6** — the fold emits, per interval between retro closes, the **loop uptime** for that
+  interval and splits each owner's dwell into `dwell_loop_running` and `dwell_loop_stopped`.
+- **AC-031.7** — non-vacuity, and this is the limb that matters: a fixture containing a synthetic
+  stop interval must move dwell out of `dwell_loop_running` and into `dwell_loop_stopped` **with
+  no change to total dwell**. Total is conserved; only its attribution moves. Red before the fix.
+- **AC-031.8** — the split is **REPORTED, never netted off**. A stopped loop is a real cost to the
+  person waiting for the work; it is simply not a cost any exploit/subordinate/elevate move can
+  reduce, and §5b.2 requires it stated rather than removed.
+- **AC-031.9** — where uptime cannot be determined for an interval, the fold emits **`UNKNOWN`**
+  and NOT zero. §5b.2 rule 4 exists because an unmeasured interval is unattributable, and a
+  default of zero would silently assert the loop ran the whole time.
+- **AC-031.10** — `make wi-validate` / `make loop-gate` behaviour unchanged, as AC-031.5.
+
+**Where uptime comes from — do not invent a new store.** The item event stream already carries
+every dispatch's timestamps, and `retro-log.md` already carries the close marks. An interval with
+no appended events across all items is a candidate stop; the honest signal is
+absence-of-events-across-the-whole-project, not a per-item gap (a single item can idle while the
+loop runs, which is precisely what `loop-gate`'s `stalled-work` check is for and must not be
+conflated with).

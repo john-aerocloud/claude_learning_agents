@@ -1022,3 +1022,111 @@ reading rule is §17f. Row pruned at v147 to hold the registry at its 8-row cap.
 | EXP-128 | v132 (2026-08-06, OagEventSource) | `work-items.py` `_compute_glt` + `_is_interpolated` + the `loop-gate` backlog advisory (all LANDED this retro, 4 new tests, 209 green) + process-current.md §17f limbs 3-4 | **Problem:** the retro's own constraint instrument was **44.98% interpolation presented as measurement**. 138 of 282 flow items are migration backfill whose event timestamps were synthesised by spreading a span evenly across their transitions, so every state segment came out identical to the second (UC-14 and UC-16: five consecutive segments of exactly 304,800.0s, and byte-identical timestamps between two different items). Backfill lands only on the states migrated items walked, so pooling it biased the time-thief ranking toward exactly those stages: `deploying` read 12.30% against a measured 6.00% (73.15% backfill), `building` 10.12% against 2.03% (88.96%), `ready` 10.54% against 2.79% (85.42%). THREE consecutive retros named a delivery stage as the constraint and spent their change budget mechanising it; EXP-123 was opened to reduce `queue` and scored NEGATIVE against a share metric that cannot distinguish 'work waits longer' from 'there is more work'. v128 diagnosed that confound precisely and ROUTED the fix — *"stats.md must report median per-item dwell in registered/ready alongside the share"* — as prose in a version comment with no owner, no item and no test. It never landed: the **seventh** recorded prose-only remedy, and §17c.3 (a comment is not a control) was never applied to the retro's own output. **Solution:** segregate, never pool. `_is_interpolated` flags an item when >=3 non-zero state segments agree to within max(1s, 0.05%); its dwell is reported in its own `backfill_s` column and EXCLUDED from every measured figure, with the per-state backfill share printed beside it. Every by_state/by_owner row also carries `median_per_item_s` + `n_items` — count-independent, which is v128's owed fix implemented rather than re-routed. The `loop-gate` backlog advisory reports median in-queue AGE and names the oldest item, so a depth nobody can act on becomes an age somebody can. §17f gains limb 3 (no constraint may be named from a figure without stating its backfill share and its per-item median) and limb 4 (a metric fix a retro routes MUST land as code in that same retro). | lead time for changes (median, trailing 30d); secondary guard: CFR must not rise | Retros stop aiming at delivery stages inflated by migration and start aiming at the real constraint, so median lead time FALLS. The measured constraint at open is **`queue` 57.80%, median 166,319s/item** (within it `open` 39.73%, median 3.07d across 51 items) while every working owner is fast — cicd median **655s**, engineer **2,053s**, tester **3,723s**. Anticipated: trailing-30d median lead time below 12,430s, `queue` median/item falling, CFR not rising above 8.9%. | 3 retros | active | **Measurement:** trailing-30d median lead time is **12,430s** at open. Scored at each of the next 3 retros. **POSITIVE** only if median lead time falls AND the named constraint is attacked with an exploit/subordinate move that cites the median column, not the share. **NEGATIVE** if lead time is flat-or-worse, or if a retro again names a constraint off a high-backfill state, or if `queue`'s median/item rises. Deliberately falsifiable in the direction that matters: if fixing the instrument does not change WHERE retros aim or WHETHER lead time moves, the measurement was never the blocker and this row must be KILLED rather than re-prescribed — exactly the mistake made with v128's prose. applies-to: every project whose item substrate was migrated or backfilled, and every retro that reads `views/stats.md`. Founding: this retro's measurement + principle-failure `2026-08-06-retro-constraint-named-from-interpolated-dwell.md`. Opened cap-neutral: EXP-118 ADOPTED and archived this retro (POSITIVE x2, folded into ui-designer.md §3b as plain practice with its scaffolding stripped); registry stays at **8, AT cap**. |
 ```
 
+
+
+## EXP-143 — RETIRED v148 (2026-08-24, ROC retro) — ADOPTED
+
+**ADOPTED at v148 (ROC retro 2026-08-24) — the metric MOVED and the mechanism is causally traceable to it.** Target was `external` owner share of GLT + median time-in-`blocked`. Measured at open (v144, 2026-08-20 baseline carried in the v146/v147 parts-checks): **external 40.41% / blocked 39.11%**. Measured now: **external 35.67% / blocked 33.76%** (-4.74pp and -5.35pp). CAUSAL INSTANCES, not just a moved number: the probes' FIRST run cleared two false parks — `DEF-ROC-008` (the deployed host reported `jiraEgress.configured=keyvault`; the park's premise was gone) and **`UC-ROC-023`, blocked 27.3 days on two preconditions that were BOTH already satisfied** and now the highest-value READY item. Its own stated falsifier was: if probes come back `BLOCKER: standing` honestly and the external share does NOT fall, blockers genuinely stay closed, the ceremony is pure cost, and the row is KILLED. The share fell and the releases are attributable, so the falsifier did not fire. ADOPTION: the behaviour is already load-bearing in the machinery (`PROBE=` required on `EVENT=blocked`, `loop-gate` re-runs every park's probe each cycle, `wi-validate` I7 catches a hand-edited park) and is documented as plain practice in §17c limb 6 — no scaffolding to remove. **LIMIT FOUND AND ROUTED, recorded so adoption is not read as 'solved':** a probe re-checks a PARK; nothing re-checks a DIAGNOSIS. Two items (`DEF-ROC-053`, `DEF-ROC-081`) reached `fixing` on mechanisms that were false, which probes cannot see. That gap is now §17ab plus the 2026-08-24 principle-failure, with a candidate mechanism (an evidence `ref:` required on `confirmed`) deferred to a future scored row.
+
+**Original row, verbatim:**
+
+| EXP-143 | v144 (2026-08-20, ROC, gap-closing retro on DEF-ROC-073/074/075/076) | process-current.md §17c limb 6 + `.claude/skills/work-items/scripts/work-items.py` (`PROBE=` on `EVENT=blocked`, sentinels `BLOCKER: standing` / `BLOCKER: cleared`, reusing the `parse_observe_spec`/`_run_observation` machinery already proven for `OBSERVE=`) + `loop-gate` check + per-project `work/<p>/Makefile` probe targets | **Problem:** the machinery enumerates TWO park states (`_PARKED_STATES = {"blocked", "awaiting_observation"}`) and requires a machine-checkable predicate for only ONE. `blocked` takes a prose `note:` and nothing else, so a blocker is never re-tested and the park never ends on its own. `DEF-ROC-004` sat `blocked` **28.8 days after both blockers had gone** (its subscription was created the day it was raised); the blockage was falsified in ~5 minutes by trying. `external` is **46.3% of ROC GLT at median 19.3 d/item** — the largest single cost — with no detector but a human re-asking. §17c limb 3 already required a re-check and was PROSE, so Layer 2's own sentence came true against it. **Solution:** make `blocked` carry the same burden of proof as `awaiting_observation` — `append` REFUSES `EVENT=blocked` without `PROBE=make:<target>`; `loop-gate` BLOCKS on `BLOCKER: cleared` (unblock is actionable) and on a BROKEN probe, advisory on `BLOCKER: standing`. | **gross lead time** (`external` owner share + median time-in-`blocked`) | `external` share of GLT falls from **46.3%** and median time-in-`blocked` falls from **~19.3 d**, because a cleared blocker is found by a cadenced probe instead of by a human happening to re-ask. Secondary: fewer items parked on a premise that has already rotted. | 3 retros or 6 weeks, whichever is later (external waits are long; a shorter horizon cannot distinguish the effect from noise) | active (0/3) | **FALSIFICATION, stated up front:** if probes come back `BLOCKER: standing` honestly and the `external` share does NOT fall, then blockers genuinely stay closed, the probe ceremony is pure cost, and this row is **KILLED not re-tuned**. **Second, non-obvious failure mode to check FIRST at every scoring:** a probe that is cheap to write badly will be written badly — a target that always prints `standing` is a mechanism that cannot fail, i.e. this experiment reproducing the exact class it was opened against. So scoring MUST sample real probe targets for non-vacuity, not merely count that they exist (the EXP-124 coverage-theatre trap). **Applies-to predicate (§25a):** any item of any type entering `blocked` — i.e. every `EVENT=blocked` append. Does NOT apply to `awaiting_observation` (already covered by `OBSERVE=`) nor to items blocked on another tracked item (a `deps:` edge is already machine-checkable and needs no probe). **SCORED v145 (2026-08-20, ROC) — STRIKE 1, UNSCOREABLE BY CONSTRUCTION: the mechanism is NOT YET ENFORCED.** Limb 6 shipped saying `EVENT=blocked` "requires `PROBE=`" while nothing refuses; caught ~4h later by ROC itself, labelled NOT YET ENFORCED, and registered as `OI-ROC-005` (commit `912c5dc`) — §17c.5 working, but it means the row cannot move a metric yet. `blocked` is meanwhile STILL the top time thief (41.10% of GLT, median **21.7 days** across 10 items, 0.00% backfill) and its count-independent median has RISEN from 19.3d (v144) — so the target metric is going the WRONG way while the mechanism is unbuilt, which is the honest reading, not a strike against the hypothesis. `OI-ROC-005` is this cycle's exploit move and the resumed loop's FIRST pull; AC-005.6 (migrate the 12 currently-`blocked` items, not just future parks) is the limb that decides whether the 41% moves at all. Strike 2 is due at the next ROC retro whether or not the item has landed. **STRIKE 1 SUPERSEDED SAME DAY — the mechanism LANDED (v145, `OI-ROC-005`) and its first cycle recovered two items.** `wi-append` now refuses `EVENT=blocked` without `PROBE=`, `loop-gate` re-runs every blocked item's probe every invocation, `wi-validate` I7 catches a hand-edit, and all seven parked ROC items were migrated in the same change (AC-005.6, so the rule is not future-only). NON-VACUITY SATISFIED AGAINST REALITY, which was AC-005.5 and the row's own stated risk: **two of the seven were FALSIFIED on the probes' first run** — `DEF-ROC-008` (deployed `jiraEgress.configured=keyvault`; real tickets `ROC-14`/`ROC-15` had already been raised through that very pipeline) and `UC-ROC-023` (the DEV live-acceptance UC, blocked **27.3 days** on two preconditions that were both already satisfied) — while five reported `standing` against real queries (23.2d, 34.4d, 20.2d, 20.1d, 4.2h). Same family, both answers: not a constant. **The metric is NOT yet claimed.** Two recoveries do not move a median computed over 10 items and ~3 weeks each; the honest next scoring is the trailing-30d `blocked` median and the `external` owner share at the next ROC retro, and the kill condition is unchanged — if probes are written that only ever print `standing`, this row dies. WATCH FOR: a probe that measures OUR permission instead of the condition (the first `DEF-ROC-008` probe counted `az keyvault list` = 0, which is what our operator identity is allowed to SEE — DEF-ROC-046's error inside the probe built to prevent it). |
+
+
+<!-- the ## section that accompanied EXP-143, moved here at v148 when the row was retired as ADOPTED. process-lint C2 caught it left behind in the live registry: a `## EXP-` section with no row is invisible to the per-project WIP cap it is supposed to be governed by. -->
+
+## EXP-143 — `blocked` is the one park state nothing re-checks
+
+**Opened** v144 (2026-08-20, ROC), gap-closing retro on `DEF-ROC-073`/`074`/`075`/`076`.
+
+### The finding in one sentence
+
+The process already had the right rule, already mechanised and already enforced — and had applied
+it to **one of the two park states the machinery itself enumerates**.
+
+### What makes this cheap and low-risk
+
+Nothing here is invented. `work-items.py` already contains `parse_observe_spec`,
+`observe_spec_in_effect`, `_run_observation`, a sentinel contract, a timeout, and the rule that
+"anything else" is a BROKEN predicate which blocks. §17c.2 already treats an unrunnable probe as a
+non-probe. This experiment **extends a proven mechanism to a second call site** — the same
+justification EXP-135 used when it copied `test-requirement-gate`'s tag-or-justify shape.
+
+### Why `blocked` is the right target and not a side-quest
+
+`external` is **46.3%** of ROC's gross lead time at a **median 19.3 days per item** — the single
+largest cost in the project, and `RESUME.md` names it as the constraint. Its only detector today is
+a human deciding to re-ask. `DEF-ROC-004` is the proof of what that costs: **28.8 days parked after
+both blockers had already gone.** Its `roc-test` subscription was created 2026-07-22 — *the same
+day the defect was raised* — and the namespace IP firewall now allowlists our operator egress. The
+blockage was falsified in about five minutes, by trying.
+
+### The evidence that this is a rule and not advice
+
+Three things, in ascending order of how uncomfortable they are:
+
+1. **The machinery already knows both are parks.**
+   `_PARKED_STATES = {"blocked", AWAITING_OBSERVATION}` — one line, both states, one predicate
+   requirement between them.
+2. **The stated reason for the existing requirement is not specific to observation.** `append`
+   refuses `not_yet_observed` without `OBSERVE=` because *"a park whose reason is only a `note:`
+   can never come back negative and therefore never ends"*. Substitute "blocked" and the sentence
+   is unchanged and still true.
+3. **§17c limb 3 already required the re-check, in prose.** It says an environmental premise ROTS
+   and needs "a registered item that re-checks it when the environment changes". `DEF-ROC-004`
+   **was** that registered item. Nothing re-checked it. So §17c Layer 2's own sentence — *"a remedy
+   written as prose reproduces the defect it was written for"* — came true **against the rule that
+   wrote it**. That is the strongest argument available for mechanising rather than restating.
+
+### The generalising claim
+
+**An externally-blocked item is not blocked; it is UNVERIFIED-blocked, until something that can
+fail says so.** A blocker is a claim about the world, and the world changes without telling us. This
+is `assert-real-state` (EXP-115) applied to the flow system rather than to the product — and note
+that the defect this retro came from needed exactly that discipline twice: once for the diagnosis
+(the reported symptom was real but its assumed cause was not) and once for the blocker.
+
+### Honest risks, checked FIRST at every scoring
+
+- **A probe that is cheap to write badly will be written badly.** A target that always prints
+  `BLOCKER: standing` is a mechanism that cannot fail — this experiment reproducing the exact class
+  it was opened against. Scoring must **sample real probe targets for non-vacuity**, never merely
+  count that they exist. Relabelling every park with a hollow probe is FAILURE, not success.
+- **It adds friction to the `blocked` transition**, which is a legitimate and often correct move.
+  If it pushes agents to avoid `blocked` and mis-park work elsewhere, that is a KILL signal.
+- **Cost is front-loaded** (writing probes) and the benefit is delayed (a blocker clearing), so an
+  early negative score is expected and is NOT grounds to kill before the stated horizon.
+
+### Falsification
+
+If probes honestly report `BLOCKER: standing` and the `external` share of GLT does not fall, then
+blockers genuinely stay closed, the ceremony is pure cost, and the row is **KILLED, not re-tuned**.
+
+### Status at opening — NOT YET ENFORCED
+
+The mechanism is **registered, not shipped**: `OI-ROC-005` (owner cicd + orchestrator), because
+`work-items.py` is the one script every concurrent `wi-append` calls and three agents were live
+mid-dispatch when this retro closed (§F2b). Registered rather than prosed per §17c.5 — **scoring
+this row before `OI-ROC-005` lands would be scoring a rule nothing enforces.** First scoring is
+therefore gated on that item, and its `AC-005.6` migration (the 12 items currently in `blocked`)
+is part of the mechanism, not follow-up: a rule that binds only future parks leaves the entire
+measured 46.3% untouched.
+
+### Registry accounting — recorded rather than perpetuated
+
+ROC's own **EXP-136..142 have no table rows at all** — they exist only as `##` sections in this
+file — so the standing "8 active, AT cap" reading is partly an artifact of ROC's rows being invisible
+to the very registry that caps them. EXP-143 is given a real row.
+
+**And an ID COLLISION surfaced at fold-forward, recorded rather than papered over.** `main` has
+authoritatively allocated **EXP-142** to a `test-requirement-gate` shrink-only-ratchet row, while
+ROC carries a local `## EXP-142` section ("a screen is evaluated as a SCREEN") that never got a row.
+**Same id, two different experiments.** ROC's EXP-140/141/142 were all minted against the stale
+high-water v141 recorded, so this is that failure surfacing a second time. `EXP-143` itself was
+verified free against `main` (whose high-water was EXP-142) before being kept, so this row is clean.
+
+The renumbering of ROC's colliding sections is deliberately **NOT done here**: it rewrites other
+retros' records, and this retro has no standing to relabel them silently (v141's own ruling that ROC
+may not adopt-or-kill another project's rows cuts both ways). It is escalated as **the next retro's
+first item**, together with the **per-instance experiment allowance now owed twice over**, which has
+stopped being untidy and started blocking honest accounting.

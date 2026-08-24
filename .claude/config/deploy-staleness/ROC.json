@@ -1,0 +1,10 @@
+{
+  "healthUrl": "https://pps-event-aggregation.aas.aegis.mobi/api/health",
+  "shaField": "buildSha",
+  "repoPath": "work/ROC",
+  "trunkRef": "origin/main",
+  "triggerPaths": ["src/app", "src/dashboard", "src/tools/replay-injector", ".github/workflows/deploy-ROC.yml"],
+  "insecureTls": true,
+  "staleCommits": 1,
+  "timeoutMs": 20000
+}

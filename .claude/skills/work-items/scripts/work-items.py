@@ -4263,7 +4263,107 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
     #         every pull pays that on every cycle for nothing.
     findings.extend(compute_ref_provenance(project, items=items))
 
+    # --- 15. is the DEPLOYED artifact the one on trunk? — DELEGATED -----------
+    #         (ROC retro 2026-08-24; DEF-ROC-086/087). The only check that reads
+    #         the OUTSIDE WORLD rather than our own event log. Deployment
+    #         frequency is a fold over item events, so a push that never deployed
+    #         emits nothing and the metric keeps reporting a healthy rate — ROC
+    #         ran three pushes dark at 6.57 deploys/active-day. Advisory: refusing
+    #         to pull cannot un-stale an environment.
+    findings.extend(compute_deploy_staleness(project))
+
     return findings
+
+
+# ---------------------------------------------------------------------------
+# loop-gate check 15 — IS THE DEPLOYED ARTIFACT THE ONE ON TRUNK?
+# (ROC retro 2026-08-24; DEF-ROC-086 / DEF-ROC-087)
+#
+# ROC's ONLY environment went THREE PUSHES with no deploy and nothing said so. A
+# CI test job failed; `deploy-test` declares `needs:` on it; so the deploy was
+# SKIPPED — not failed. A skipped job renders as a neutral dash and contributes
+# nothing to the run's conclusion, so the run read "a test broke" when the
+# consequence was "the environment is now N commits stale".
+#
+# WHY THIS BELONGS IN THE GATE AND NOT IN A RUNBOOK. Deployment frequency here is
+# a fold over ITEM EVENTS — an item entering `deploying` — i.e. an INTENTION an
+# agent recorded. A push that never deploys emits no event, so the one DORA metric
+# whose subject is the OUTSIDE WORLD is computed from statements about our own
+# intentions. Through the whole dark period ROC's deployment frequency read
+# 6.57/active-day. The metric that should have screamed could not see it. That is
+# the absence-vs-ignorance family (eleven registered instances in this project)
+# applied to the measurement layer: "no deploy event" read as "nothing to deploy"
+# when it meant "we have no idea".
+#
+# ADVISORY, never blocking — deliberately. A gate blocks only on harm that
+# stopping relieves, and refusing to pull work does not un-stale an environment;
+# it just adds a second problem on top of the first.
+# ---------------------------------------------------------------------------
+DEPSTALE_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "..", "..", "..", "tools", "deploy-staleness.js")
+DEPSTALE_TIMEOUT = 60.0
+
+
+def compute_deploy_staleness(project, timeout=DEPSTALE_TIMEOUT):
+    """Compare the DEPLOYED build identity against trunk. 0 or 1 finding."""
+    common = {"check": "deploy-staleness", "ids": []}
+    try:
+        proc = subprocess.run(
+            ["node", os.path.normpath(DEPSTALE_SCRIPT), "--project", project,
+             "--repo-root", ROOT, "--json"],
+            capture_output=True, text=True, timeout=timeout)
+        report = json.loads(proc.stdout)
+    except Exception as exc:                                    # noqa: BLE001
+        return [dict(common, severity="unknown", verdict="UNRUNNABLE", message=(
+            f"[deploy-staleness] NOT ESTABLISHED — the checker would not run "
+            f"({type(exc).__name__}: {str(exc)[:160]}). Nothing was checked, which is "
+            f"NOT the same as 'the environment is current': this is the only check "
+            f"that reads what the deployed host is actually running, and its absence "
+            f"is exactly the condition under which ROC ran three pushes dark. "
+            f"Remedy: `node .claude/tools/deploy-staleness.js --project {project} "
+            f"--repo-root . --json`."))]
+
+    verdict = report.get("verdict")
+    if verdict == "NOT-ESTABLISHED":
+        return [dict(common, severity="unknown", verdict=verdict, message=(
+            f"[deploy-staleness] NOT ESTABLISHED ({report.get('reason')}) — "
+            f"{report.get('detail') or 'no detail'}. An unanswerable question must "
+            f"never render as a clean answer. Until this is established, deployment "
+            f"frequency for {project} is a fold over recorded INTENTIONS and no "
+            f"statement about the deployed environment is supported by anything. "
+            f"Remedy: commit .claude/config/deploy-staleness/{project}.json (copy "
+            f"ROC's) or fix what the reason names."))]
+
+    if verdict != "stale":
+        return []
+
+    behind = report.get("behind")
+    dep = report.get("deployableChangesBehind")
+    age_h = (report.get("deployedAgeS") or 0) / 3600.0
+    if dep is True:
+        weight = ("At least one of those commits touches a DEPLOY-TRIGGER path, so "
+                  "there IS undelivered work sitting on trunk — this is the DEF-ROC-086 "
+                  "condition, live.")
+    elif dep is False:
+        weight = ("None of those commits touches a deploy-trigger path, so nothing "
+                  "deployable is missing — this is EXPECTED drift, not a dark deploy.")
+    else:
+        weight = ("Whether any of them touches a deploy-trigger path could NOT be "
+                  "determined, so treat the deployable subset as unknown rather than "
+                  "empty.")
+    return [dict(common, severity="advisory", verdict=verdict,
+                 deployed=report.get("deployedSha"), trunk=report.get("trunkSha"),
+                 behind=behind, deployable=dep, message=(
+        f"ADVISORY (does NOT block the pull) [deploy-staleness] {project}'s deployed "
+        f"host reports {str(report.get('deployedSha'))[:12]} while {report.get('trunkRef')} "
+        f"is {str(report.get('trunkSha'))[:12]} — the environment is {behind} commit(s) "
+        f"BEHIND trunk, and the deployed commit is {age_h:.1f}h old. {weight} This is "
+        f"advisory because stopping the pull cannot un-stale an environment. Read it "
+        f"as the answer to a question NO other signal answers: a deploy that never "
+        f"ran leaves no failed job (its `needs:` failed, so it was SKIPPED) and no "
+        f"item event, so deployment frequency keeps reporting a healthy rate while "
+        f"nothing reaches the environment. Any acceptance condition reading 'verified "
+        f"against the deployed host' is unmeetable until this closes."))]
 
 
 # ---------------------------------------------------------------------------

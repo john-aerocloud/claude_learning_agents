@@ -61,10 +61,18 @@ Act as the **orchestrator**. Own this; gather input but make the process call.
    anticipated-vs-observed score for the PREVIOUS change. Revert or rework any prior
    change that was not a net win across throughput (lead time), quality (CFR),
    frequency, and recovery (MTTR).
-5a. **Score the experiment registry — and keep it LEAN (§25a, v88).** The registry is a
-   WIP-limited queue with a **HARD CAP of 8 `active` rows**. Every retro MUST leave it at
-   or under the cap; if it is over, retire rows (adopt or kill) until it is not — reduction
-   is a required output of the retro, not optional.
+5a. **Score the experiment registry — and keep it LEAN (§25a, v88; cap scoped PER PROJECT
+   at v143).** The registry is a WIP-limited queue with a **HARD CAP of 8 `active` rows PER
+   PROJECT** — count YOUR project's rows, not the global total. Every retro MUST leave its
+   OWN project at or under the cap; if it is over, retire your own rows (adopt or kill)
+   until it is not — reduction is a required output of the retro, not optional.
+   **YOU HAVE NO STANDING OVER ANOTHER PROJECT'S ROWS** (v143/v145): a retro can only
+   adopt-or-kill rows whose evidence it holds. You MAY add evidence and a strike to another
+   instance's row — that is reporting, not retiring — and you MUST NOT delete one to make
+   room. This wording said "8 active rows" with no scope until v148, and a ROC retro read
+   the global count (11), concluded the cap was unmeetable, and began drafting a structural
+   repair for a rule that had already been repaired two versions earlier. The per-project
+   count was 3.
    - **Validity audit FIRST (EXP-063):** a row that describes a piece of work/feature, names
      no target DORA metric, or has a measurement that cannot come back NEGATIVE is not an
      experiment — delete it (keep sound load-bearing behaviour as plain agent practice; undo

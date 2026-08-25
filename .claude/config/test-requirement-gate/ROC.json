@@ -9,31 +9,64 @@
   "roots": [
     {
       "path": "work/ROC/src",
-      "limbs": ["ac", "authored"],
+      "limbs": [
+        "ac",
+        "authored"
+      ],
       "why": "The whole ROC test corpus: the Function App (tests/unit, tests/acceptance, tests/live), the dashboard (component, domain, api and Playwright e2e specs) and the replay-injector tool. Both limbs apply. `src/infra` holds no test files today; it is inside this root so any Terraform-side test lands under the gate automatically rather than needing a config change nobody remembers to make."
     },
     {
       "path": ".claude/tools",
-      "limbs": ["ac", "authored"],
+      "limbs": [
+        "ac",
+        "authored"
+      ],
       "why": "Cross-project agent-ops tooling that ROC agents edit (loop-gate, impacted-tests, isolated-commit, this gate). Scanned deliberately so a violation added from an ROC session blocks the ROC loop rather than only surfacing whenever another project's loop next runs. The limb-1 exemption for machinery invariant tests is taken as a VISIBLE allowlist entry below, not by silently omitting the limb here."
     },
     {
       "path": ".claude/skills/work-items/scripts",
-      "limbs": ["authored"],
+      "limbs": [
+        "authored"
+      ],
       "why": "The work-item machinery (python). Limb 1 does not apply: limb-1 case parsing is JS/TS only, and these are machinery invariant tests with no product acceptance criterion. Limb 2's exec-boundary rule DOES apply and it currently finds one real hit here."
     }
   ],
   "corpus": {
-    "readerModules": ["fixture-corpus-reader", "capture-provenance", "real-peek-rows"],
+    "readerModules": [
+      "fixture-corpus-reader",
+      "capture-provenance",
+      "real-peek-rows"
+    ],
     "_readerModules_why": "`real-peek-rows` is ROC's own real-capture module: the replay-injector's REAL_PEEK_MATRIX is three verbatim rows peeked off the live PPSM Service Bus. Without it named here, limb 2 could not see a mutation of the only multi-file real capture ROC has, and the gate would have reported clean over it -- the exact blindness DEF-ROC-045 is about.",
-    "fileReaders": ["readFileSync", "readFile", "loadFixture"],
-    "fixturePathTokens": ["fixtures/", "\"fixtures\"", "'fixtures'", "FIXTURES_ROOT", "FIXTURES_DIR", "CORPUS_ROOT", "LIVE_CAPTURE"],
+    "fileReaders": [
+      "readFileSync",
+      "readFile",
+      "loadFixture"
+    ],
+    "fixturePathTokens": [
+      "fixtures/",
+      "\"fixtures\"",
+      "'fixtures'",
+      "FIXTURES_ROOT",
+      "FIXTURES_DIR",
+      "CORPUS_ROOT",
+      "LIVE_CAPTURE"
+    ],
     "_fixturePathTokens_why": "MEASURED, not copied. ROC's idiom is `resolve(here, \"fixtures\", name)` -- the path segment is a SEPARATE argument, so the default `fixtures/` token (with the slash) matches none of it. Shipping the default list would have left limb 2 at 0 across the whole app test tree while looking configured, so the quoted bare-word forms and the `LIVE_CAPTURE` constant (def075's real wire capture) are named explicitly.",
     "extraRootIdentifiers": []
   },
   "derived": {
-    "types": ["FoldedAlertState"],
-    "fields": ["latestOutcome", "latestEventTs", "jiraIssueKey", "heldUntil", "pendingClearTs", "recordCount"],
+    "types": [
+      "FoldedAlertState"
+    ],
+    "fields": [
+      "latestOutcome",
+      "latestEventTs",
+      "jiraIssueKey",
+      "heldUntil",
+      "pendingClearTs",
+      "recordCount"
+    ],
     "_why": "`FoldedAlertState` is ROC's one fold-derived aggregate: every field here is derived by folding the decision log for one alert identity, so hand-setting one builds a prior no real decision stream can hold. `heldUntil` matters most -- the fold copies it VERBATIM off the terminal record and never re-derives it (delta 019 A8) precisely so a fixture edit cannot silently re-date a live hold; a test that hand-sets it re-introduces by hand the thing that invariant exists to prevent. FINDS ZERO TODAY, stated rather than left as a comfortable silence: no ROC test currently uses the `{...} as FoldedAlertState` cast form the rule matches, and the rule cannot see a folded field hand-set through a LOCAL BUILDER (a documented recall gap of the tool, not of this config). It is declared now so the first hand-set fold prior is caught at the moment it is written."
   },
   "allowlist": [
@@ -50,7 +83,7 @@
     }
   ],
   "baseline": {
-    "ac": 1144,
+    "ac": 1143,
     "authored": 3
   },
   "_baseline_why": "MEASURED 2026-08-24 at the first configured run (DEF-ROC-045), honestly and without mass-tagging. 342 files, 3210 cases scanned. LIMB 1 = 1144 cases (36%) with no AC reference in their own title, their suite, or their comments; 326 of the 1144 carry a file-level @covers and nothing per-case. Where it sits: 809 in work/ROC/src/app/tests, 223 in the dashboard's colocated component/domain/api specs, 96 in the dashboard Playwright e2e specs, 16 in the replay-injector. Nothing in .claude/tools after the machinery allowlist. Worth the retro's attention: ROC already writes AC tags heavily (3674 occurrences, in BOTH the `AC-076-2` hyphen family and the `AC-030.2` dot family), so this is not a project that never adopted the vocabulary -- it is a project where roughly a third of cases were written without naming what they validate, and the dashboard's colocated specs are the densest pocket. LIMB 2 = 3 static hits, each read individually at the first run: (1) .claude/skills/work-items/scripts/test_work_items.py:2912 exec-boundary-stubbed -- shared machinery debt, also carried in the OagEventSource baseline, so a fix slacks both ratchets at once; (2)+(3) def075NotHandledProbe.test.ts:105/106 delete-on-real-capture and mutate-real-capture, where `withReason()` deletes and re-sets `noAlertReason` on a copy of the REAL captured record. Those two are TRUE POSITIVES in shape but the test already DECLARES the synthetic in words -- 'Reality has not produced one yet -- the field ships in this commit -- so this confirms nothing about the wire (v123 rule 4)' -- which is the remedy the ruling accepts. They are left in the BASELINE rather than allowlisted on purpose: per the ruling the gate never makes the choice, so the retro decides whether a declared synthetic earns a visible exemption. Three hits found and EXCLUDED as measured false positives, not baselined (see the rowSelection allowlist entry). The ratchet refuses to write a HIGHER number (--write-baseline exits 2 without --allow-baseline-growth) and auto-tightens on any passing run whose count is lower, so these two integers can only fall."

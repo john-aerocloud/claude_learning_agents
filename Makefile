@@ -547,7 +547,7 @@ wi-migrate:
 # network, no secret. Non-zero on any finding. The same audit runs inside
 # test-board-project, so the drift cannot reach the board unnoticed.
 BOARDPY ?= $(shell sh .claude/skills/work-items/scripts/work-items --python)
-.PHONY: board-project test-board-project board-audit acceptance-audit
+.PHONY: roc-screen-gate board-project test-board-project board-audit acceptance-audit
 board-project:
 	$(BOARDPY) .claude/tools/linear-project.py --project $(PROJECT) --id $(ID)
 
@@ -826,6 +826,24 @@ roc-local-down:
 roc-e2e-battery:
 	@node .claude/tools/stack-claim.js claim --project ROC || true
 	npm --prefix $(ROC_APP) run local:e2e-battery $(if $(ROC_E2E_SPECS),-- $(ROC_E2E_SPECS),)
+
+# --- ROC screen gate (DEF-ROC-058) --------------------------------------------
+ROC_DASH := work/ROC/src/dashboard
+# THE STANDING SCREEN-LEVEL UI GATE. Judges each ASSEMBLED screen as a screen —
+# space allocation, column starvation, clipping, reachability and whether the
+# screen states a fact it does not have — at four viewports with a measured SHORT
+# page-area floor (1366x560), in real headless Chromium. No emulator, no read-api,
+# no dev server, ~3s; it is on the standing green bar, which the e2e sweep
+# (`make roc-e2e-battery`, the only tier that can judge PAINTED colour) is not.
+#
+# It also writes ONE SCREENSHOT PER SCREEN PER VIEWPORT, because DEF-ROC-058's
+# fourth blind spot is that nothing ever LOOKS at the render. Open them.
+#   make roc-screen-gate
+roc-screen-gate:
+	npm --prefix $(ROC_DASH) run test:browser -- src/screen
+	@echo ""
+	@echo "=== screenshots for a human to LOOK at: $(ROC_DASH)/test-results/screen-gate/ ==="
+	@ls -1 $(ROC_DASH)/test-results/screen-gate/ 2>/dev/null | sed 's/^/    /' || true
 
 # --- ROC living-demo scenario harness (UC-ROC-051/052/080) ---------------------
 ROC_DEMO := work/ROC

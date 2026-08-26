@@ -2717,7 +2717,28 @@ def cmd_parts_check(a):
 # `awaiting_observation` is deliberately NOT here: an item there HAS been dispatched
 # and the tester recorded a machine-checkable reason it could not conclude. It is
 # carried by check 5 instead — see the WHY block above.
-STALL_STATES = VALIDATING_STATES
+#
+# DEPLOY-PENDING STATES ARE IN SCOPE TOO (v152, ROC 2026-08-26). This is NOT the
+# "deploying is uncovered" claim — check 11 already covers `deploying`, at
+# STALLED_WORK_HOURS' 24h. The measured gap is the WINDOW BETWEEN THE TWO
+# THRESHOLDS: check 1 closes it at `--stale-hours` (4h) for validating states, so an
+# item whose work is PROVABLY DONE (a ref-bearing `built_green`) parked in
+# `deploying` was named by NOTHING for 4h-24h. `UC-ROC-102` sat there 12.0h — 260x
+# cicd's own `deploying` median of 166s across 52 items — and this morning's gate
+# BLOCKED on `UC-ROC-104` at 11.5h in `dev-validating` while saying nothing about it.
+#
+# The asymmetry had no justification: check 1's entire rationale is "the work is DONE
+# and only a dispatch is missing", and under a PIPELINE deploy (push -> CI, which is
+# ROC's only deploy path) that is exactly what `deploying` means — the deploy landed,
+# and only the `deployed` EVENT is missing. No agent fires it there: the loop-run
+# contract makes the ORCHESTRATOR fire the CI-confirmed `deployed`, so when it does
+# not, the item cannot reach a tester at all. That is a RECURRENCE, not a novelty —
+# `process/principle-failures/2026-07-22-uc-adix-015-missing-cicd-deployed-event-blocks-tester.md`
+# recorded the identical mechanism on AdixOut and promised an improvement slice that
+# was never built. The evidence quality is identical to the validating case (a
+# structured ref proving finished work), so the threshold now is too.
+DEPLOY_PENDING_STATES = {"deploying", "prod-deploying"}
+STALL_STATES = VALIDATING_STATES | DEPLOY_PENDING_STATES
 # Events that carry a `ref:` to FINISHED work. `fixed` = defect graph;
 # `built_green`/`deployed` = use-case dev lane; `promoted` = the cicd event that
 # ENTERS prod-validating (without it, a prod-validating stall would be a blind
@@ -3736,6 +3757,26 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
         else:
             push = ("push state COULD NOT BE ESTABLISHED — %s. This is not a pass "
                     "and not an alarm (§17i)" % res["reason"])
+        # The REMEDY IS STATE-DEPENDENT (v152). Telling someone to "dispatch the
+        # tester" at a `deploying` stall is the wrong instruction and cannot be
+        # followed: the graph has no validating edge from there, so the missing act is
+        # the `deployed` event, not a tester. A gate whose remedy the writer REJECTS
+        # is the DEF-ROC-084 class (its aged-backlog remedy named an event `wi-append`
+        # refuses, 7/7), so the two states get their own sentences.
+        if state in DEPLOY_PENDING_STATES:
+            nxt = "prod-validating" if state == "prod-deploying" else "dev-validating"
+            remedy = (f"Remedy: CONFIRM the deploy landed green (for a PIPELINE deploy "
+                      f"read the CI run, never an event note), then fire it yourself — "
+                      f"`make wi-append PROJECT={project} ID={iid} EVENT=deployed "
+                      f"AGENT=cicd REF=<deployed sha> NOTE_FILE=<path>` — and dispatch "
+                      f"the tester in the SAME turn (the deploy and the tester dispatch "
+                      f"are ONE act). Under a pipeline deploy NO agent fires `deployed`, "
+                      f"so until you do, {iid} cannot reach {nxt} and no tester is "
+                      f"dispatchable. Never spoof AGENT=cicd from an engineer/tester.")
+        else:
+            remedy = (f"Remedy: dispatch the tester now, then "
+                      f"`make wi-append PROJECT={project} ID={iid} "
+                      f"EVENT=validated|rejected AGENT=tester`.")
         findings.append({
             "check": "stalled-validation", "severity": "block",
             "ids": [iid], "state": state, "dwell_s": dwell, "ref": ref,
@@ -3745,9 +3786,7 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
             "message": (f"[stalled-validation] {iid} has been in '{state}' for "
                         f"{_hms(dwell)} (>{stale_hours}h); the work is DONE "
                         f"({ev.get('event')} ref {ref}, {push}){repaired} — only a dispatch "
-                        f"is missing. Remedy: dispatch the tester now, then "
-                        f"`make wi-append PROJECT={project} ID={iid} "
-                        f"EVENT=validated|rejected AGENT=tester`."),
+                        f"is missing. {remedy}"),
         })
 
     # --- 11. STALLED WORK — claimed or scheduled, with NO RECORDED ACTIVITY ---

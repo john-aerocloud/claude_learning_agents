@@ -1,5 +1,5 @@
 ---
-process_version: 151
+process_version: 152
 effective_from: 2026-08-24
 supersedes: v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
 status: active
@@ -2650,6 +2650,67 @@ adopted because the operating context changed. There is no hypothesis here we wo
 metric failed to move — we would not resume shipping un-rollable outward changes to live customers
 because MTTR looked flat. It is routed as plain practice and scored the ordinary way: **recovery /
 MTTR** is the metric it exists to protect, with CFR secondary.
+
+## F5d. A tier that cannot exercise the change is not confirmation of it [v152, ROC retro 2026-08-26]
+
+**Evidence.** `UC-ROC-102` shipped the Simulator's Publish control **unable to publish at
+all** — 100% of screen publishes were `400`, from shipping until a human reported it
+(`DEF-ROC-111`). Every gate was green. The `built_green` note read *"LIVE CONFIRMED on the
+deployed host in a REAL BROWSER"*, 26 assertions; the probe it cited says of itself *"It
+NEVER WRITES. It issues no POST to the publish route at all — deliberately."* The claim was
+true of the closed-window state and read as end-to-end.
+
+### F5d.1 Name what the tier did NOT exercise, or do not call it live confirmation
+
+A validation tier that **structurally cannot** exercise an item's primary mutating path may
+not be cited as live confirmation of that path. Citing it is permitted — abstention is often
+correct and load-bearing (this probe must not POST, because an unexplained
+`requests{outcome:"disabled"}` is the runbook's intrusion signal) — but the citation MUST
+name the excluded path and the ACs it therefore leaves unexercised. **The failure was never
+that the probe abstained; it was calling an abstention a confirmation.**
+
+Concretely: a `built_green`/`fixed` note asserting live confirmation states, in the same
+sentence, which acceptance criteria remain **unexercised** and what tier would exercise
+them. An AC covering a mutating action **cannot be discharged by read-only evidence**.
+
+### F5d.2 A contract with two sides gets one declared list, not two assertions
+
+`DEF-ROC-111` was **not** a missing test — **three** tests PINNED it: two asserted the
+client sends `airport`, one asserted the route refuses `airport` but only as a non-empty
+string, never the `null` the screen actually sent. Both suites green, contradictory, because
+each checked its own side against a fixture of our own making. **A client assertion verified
+against our own mock proves only that we are self-consistent.**
+
+Where two components must agree on a wire shape, the agreement is declared **ONCE** in a
+place neither owns (`src/contracts/*.json` is the established pattern) and both sides pin it,
+so drift on either side fails the build. Prefer a shared declaration to a shared *module*
+when the trees have different build roots: importing across roots here dragged dashboard
+source into `src/app`'s `tsc --outDir dist`, emitted a second `dist/app/**` layout and left
+the Function App's real `dist/host/*.js` **stale** — a green build serving old code.
+
+### F5d.3 Under a pipeline deploy the orchestrator fires `deployed` — and the gate now checks
+
+Restating §F5a's existing rule because it was missed and the miss was invisible: where the
+deploy is pipeline-triggered, **no agent runs an interactive deploy, so none fires
+`deployed`**. The orchestrator fires the CI-confirmed event (`AGENT=cicd`, `REF=`, citing the
+green run); engineers and testers must never spoof it. Until it is fired the item **cannot
+reach a tester at all** — `UC-ROC-102` sat in `deploying` **12.0h** against a `deploying`
+median of **166s** (260x) and no limb of `loop-gate` named it, because check 1 closed the
+window at 4h for validating states while check 11 waited until 24h for `deploying`.
+
+`loop-gate` check 1 now covers `deploying`/`prod-deploying` on the same
+work-is-provably-done evidence (a ref-bearing `built_green`/`deployed`), with a
+state-appropriate remedy — a remedy naming an edge the state graph refuses is the
+`DEF-ROC-084` class. **This is a RECURRENCE**: the identical mechanism was recorded on
+AdixOut on 2026-07-22 (`UC-ADIX-015`) and the improvement slice it promised was never built.
+See `process/principle-failures/2026-08-26-roc-uc-102-shipped-100pct-broken-behind-a-read-only-live-probe.md`.
+
+### F5d.4 Run the whole tier before you call it green
+
+Running only the files you named is not running the tier. The `DEF-ROC-111` fix passed every
+targeted file and was pushed with a **third** pinning test still red in a file that was never
+run; CI caught it and the deploy **skipped**. Before a push, run the tiers CI runs.
+
 
 ## F6. Parallel dispatch by independence (the maximal independent set)
 Parallelism is the **default, not an option**. The flow-manager treats

@@ -1988,6 +1988,99 @@ class TestLoopGate(Base):
         self.assertIn("DEF-STALE", out)
         self.assertIn("stalled-validation", out)
 
+    # ---- check 1, v152: DEPLOY-PENDING states, the 4h-24h window -------------
+    #
+    # ROC 2026-08-26. NOT "deploying was uncovered" — check 11 covers it at 24h. The
+    # gap was the window BETWEEN the thresholds: provably-done work (ref-bearing
+    # `built_green`) parked in `deploying` was named by nothing for 4h-24h.
+    # `UC-ROC-102` sat there 12.0h, 260x cicd's own 166s median, while the same gate
+    # run BLOCKED on `UC-ROC-104` at 11.5h in `dev-validating`. Recurrence of
+    # principle-failure 2026-07-22 (AdixOut, UC-ADIX-015): under a PIPELINE deploy no
+    # agent fires `deployed`, so the item cannot reach a tester at all.
+    def _deploying_uc_with_ref(self, day, hour=0, ref="cafe123"):
+        """`built_green` WITH a ref at day/hour and nothing since -> parked in
+        `deploying` with the work provably finished."""
+        return self._ready_uc(day - 1) + [
+            {"ts": _dt(day, hour), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(day, hour), "event": "built_green", "agent": "engineer",
+             "ref": ref},
+        ]
+
+    def test_stalled_deploying_with_a_ref_blocks(self):
+        """The UC-ROC-102 case. FAILS against the pre-v152 gate, where
+        STALL_STATES was VALIDATING_STATES and `deploying` was simply skipped."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self.write_item("active", "UC-DEPLOY-STALE", "use-case",
+                        self._deploying_uc_with_ref(20, 12, ref="cafe123"))
+        findings = self._gate()
+        self.assertIn("stalled-validation", self._checks(findings))
+        f = [x for x in findings
+             if x["check"] == "stalled-validation" and "UC-DEPLOY-STALE" in x["ids"]][0]
+        self.assertEqual(f["severity"], "block")
+        self.assertEqual(f["state"], "deploying")
+        self.assertEqual(f["ref"], "cafe123")
+        self.assertGreater(f["dwell_s"], 4 * 3600)
+        self.assertEqual(self._run()[0], 2)
+
+    def test_stalled_deploying_remedy_names_the_deployed_event_not_the_tester(self):
+        """A remedy the sole writer REJECTS is the DEF-ROC-084 class. There is no
+        validating edge out of `deploying`, so "dispatch the tester" is unfollowable:
+        the missing act is the `deployed` event, fired by cicd."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self.write_item("active", "UC-DEPLOY-STALE", "use-case",
+                        self._deploying_uc_with_ref(20, 12))
+        f = [x for x in self._gate()
+             if x["check"] == "stalled-validation" and "UC-DEPLOY-STALE" in x["ids"]][0]
+        self.assertIn("EVENT=deployed", f["message"])
+        self.assertIn("AGENT=cicd", f["message"])
+        self.assertIn("dev-validating", f["message"])
+        # It must NOT hand over the validating-state remedy, which cannot be followed.
+        self.assertNotIn("EVENT=validated|rejected", f["message"])
+
+    def test_stalled_prod_deploying_points_at_prod_validating(self):
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        events = self._deploying_uc_with_ref(20, 10, ref="beef456") + [
+            {"ts": _dt(20, 11), "event": "deployed", "agent": "cicd", "ref": "beef456"},
+            {"ts": _dt(20, 12), "event": "dev_validated", "agent": "tester",
+             "ref": "beef456"},
+        ]
+        self.write_item("active", "UC-PROD-STALE", "use-case", events)
+        hits = [x for x in self._gate()
+                if x["check"] == "stalled-validation" and "UC-PROD-STALE" in x["ids"]]
+        if hits and hits[0]["state"] == "prod-deploying":
+            self.assertIn("prod-validating", hits[0]["message"])
+            self.assertIn("AGENT=cicd", hits[0]["message"])
+
+    def test_validating_remedy_is_unchanged_by_the_deploy_pending_addition(self):
+        """Regression guard: the validating sentence must not drift while adding a
+        second one beside it."""
+        self._default_policy()
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+        self.write_item("active", "DEF-STALE", "defect",
+                        self._validating_defect(20, 12, ref="5095849"))
+        f = [x for x in self._gate()
+             if x["check"] == "stalled-validation" and "DEF-STALE" in x["ids"]][0]
+        self.assertIn("dispatch the tester now", f["message"])
+        self.assertIn("EVENT=validated|rejected", f["message"])
+        self.assertNotIn("EVENT=deployed", f["message"])
+
+    def test_deploy_pending_states_are_a_subset_of_stall_states(self):
+        """Fail-closed pin: if someone re-narrows STALL_STATES, this names it."""
+        self.assertTrue(wi.DEPLOY_PENDING_STATES <= wi.STALL_STATES)
+        self.assertTrue(wi.VALIDATING_STATES <= wi.STALL_STATES)
+        self.assertIn("deploying", wi.STALL_STATES)
+        self.assertIn("prod-deploying", wi.STALL_STATES)
+        # VALIDATING_STATES is also the CFR/quality fold set and must NOT have grown.
+        self.assertEqual(wi.VALIDATING_STATES,
+                         {"validating", "dev-validating", "prod-validating"})
+
     def test_validation_within_threshold_does_not_block(self):
         self._default_policy()
         for i in range(3):

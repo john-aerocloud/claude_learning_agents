@@ -279,9 +279,26 @@ def _run_observation(project, spec, timeout=DEFAULT_OBSERVE_TIMEOUT):
 # `standing` are advisory. The park is only honest while something can decide it
 # has ended.
 # ---------------------------------------------------------------------------
+#
+# THIRD VERDICT (v154 §F5e.1 q3, ROC 2026-08-26). `not-established` was added because a
+# probe that was being HONEST was reported as BROKEN. `probe-blocker-def-roc-053` prints
+# "BLOCKER: NOT OBSERVED in this window" — correctly refusing to call non-observation in a
+# bounded window a CLEARANCE, which would be exactly the §17i failure this whole scheme
+# exists to prevent. The contract admitted only `standing`/`cleared`, so the honest answer
+# read as an unreadable one and blocked the loop. The probe was right; the vocabulary was
+# wrong.
+#   `BLOCKER: not-established` -> the probe RAN and could not determine either way in the
+#                           window it had. ADVISORY. Not a pass, not an alarm, and NOT a
+#                           reason to stop looking (§17i).
+# FAIL-CLOSED IS PRESERVED, which is the whole reason this is safe: the verdict must be
+# EXPLICITLY PRINTED. A missing target, a crash, a timeout, no sentinel or both sentinels
+# are all still BROKEN, so a probe that does not exist still cannot masquerade as anything.
+# The difference between "I ran and cannot tell" and "I did not run" is now expressible,
+# and only the former is the probe's to claim.
 BLK_SENTINEL = "BLOCKER:"
 BLK_STANDING = "standing"
 BLK_CLEARED = "cleared"
+BLK_NOT_ESTABLISHED = "not-established"
 _BLK_SENTINEL_RE = re.compile(r"^\s*" + BLK_SENTINEL + r"\s*(\S+)\s*$",
                               re.IGNORECASE | re.MULTILINE)
 
@@ -304,8 +321,12 @@ def _run_probe(project, spec, sentinel, sentinel_re, names, timeout, what):
     Shared by the observation predicate (§17c.2) and the reversal probe (§17c.6):
     the scheme, the parser, the argv-list invocation, the timeout and the
     fail-CLOSED verdict reading are identical, and only the sentinel word and the
-    two verdict names differ. `names` is (positive, negative); the positive
-    verdict is the one with an ACTIONABLE dispatch behind it.
+    verdict names differ. `names` is (positive, negative) or, since v154 §F5e.1 q3,
+    (positive, negative, *others) — the positive verdict is the one with an ACTIONABLE
+    dispatch behind it, and any `others` are additional verdicts the probe may state
+    explicitly (the reversal probe's `not-established`). Fail-closed is unchanged: a
+    verdict must be PRINTED to be read, so a probe that did not run still reports
+    'broken' and can never masquerade as any of these.
 
     Returns (verdict, detail) where verdict is one of `names` or 'broken'.
     """
@@ -313,7 +334,8 @@ def _run_probe(project, spec, sentinel, sentinel_re, names, timeout, what):
         argv = parse_observe_spec(spec)
     except ValueError as e:
         return "broken", f"malformed {what} spec: {e}"
-    positive, negative = names
+    positive, negative, *others = names
+    allowed = (positive, negative, *others)
     repo = _project_repo(project)
     try:
         r = subprocess.run(["make", "-C", repo] + argv, capture_output=True,
@@ -328,18 +350,16 @@ def _run_probe(project, spec, sentinel, sentinel_re, names, timeout, what):
     if r.returncode != 0:
         return "broken", (f"the probe exited {r.returncode} — a {what} probe must "
                           f"exit 0 and report its verdict on stdout as "
-                          f"`{sentinel} {positive}|{negative}`: {tail}")
+                          f"`{sentinel} " + "|".join(allowed) + f"`: {tail}")
     verdicts = {m.group(1).strip().lower() for m in sentinel_re.finditer(out)}
-    verdicts &= {positive, negative}
-    if verdicts == {positive}:
-        return positive, out.strip()[-400:]
-    if verdicts == {negative}:
-        return negative, out.strip()[-400:]
+    verdicts &= set(allowed)
+    if len(verdicts) == 1:
+        return next(iter(verdicts)), out.strip()[-400:]
     if len(verdicts) > 1:
         return "broken", (f"the probe reported BOTH verdicts — ambiguous, so it "
                           f"establishes nothing: {tail}")
-    return "broken", (f"the probe printed no `{sentinel} {positive}` or "
-                      f"`{sentinel} {negative}` line, so its verdict is "
+    return "broken", (f"the probe printed no `{sentinel} "
+                      + "|".join(allowed) + f"` line, so its verdict is "
                       f"unreadable: {tail}")
 
 
@@ -348,7 +368,8 @@ def _run_blocker_probe(project, spec, timeout=DEFAULT_OBSERVE_TIMEOUT):
     'cleared' | 'standing' | 'broken'. Module-level so the loop-gate tests can
     substitute it (same seam as `_run_observation` / `_ref_on_trunk`)."""
     return _run_probe(project, spec, BLK_SENTINEL, _BLK_SENTINEL_RE,
-                      (BLK_CLEARED, BLK_STANDING), timeout, "reversal")
+                      (BLK_CLEARED, BLK_STANDING, BLK_NOT_ESTABLISHED), timeout,
+                      "reversal")
 
 
 def check_transition(graphs, itype, state, event, agent):
@@ -4276,6 +4297,18 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
                 f"lead time. If the wait is unbounded, escalate it, buy round it, or "
                 f"decide the item should not be blocked — never let the probe become "
                 f"the reason nobody looks.")))
+        elif verdict == BLK_NOT_ESTABLISHED:
+            findings.append(dict(common, severity="advisory", verdict=verdict,
+                                 detail=detail, message=(
+                f"NOT ESTABLISHED (does NOT block the pull) [blocked-park] {iid} parked "
+                f"{_hms(dwell)}: '{spec}' RAN and could not tell either way in the window "
+                f"it had{'; ' + detail if detail else ''}. This is not a pass and not an "
+                f"alarm (§17i) — it is the probe declining to call non-observation a "
+                f"clearance, which is correct. But NOTHING IS SATISFIED: the park is still "
+                f"costing gross lead time and nobody has established it should end. If the "
+                f"window is too small to ever conclude, widen it, force the trigger, or "
+                f"judge it statistically (§12d.3) — never let a permanent "
+                f"'not-established' become the reason nobody looks.")))
         else:
             findings.append(dict(common, severity="block", verdict="broken",
                                  detail=detail, message=(
@@ -4284,7 +4317,8 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
                 f"(§17c.2), and a probe that does not exist must NEVER masquerade "
                 f"as 'still blocked' — that is DEF-ROC-046's mistake in the other "
                 f"direction. Remedy: fix the probe (exit 0, printing "
-                f"`{BLK_SENTINEL} {BLK_CLEARED}`/`{BLK_SENTINEL} {BLK_STANDING}`) "
+                f"`{BLK_SENTINEL} {BLK_CLEARED}`/`{BLK_SENTINEL} {BLK_STANDING}`/"
+                f"`{BLK_SENTINEL} {BLK_NOT_ESTABLISHED}`) "
                 f"or record a corrected one with "
                 f"`make wi-append … EVENT=amended … PROBE=…`.")))
 

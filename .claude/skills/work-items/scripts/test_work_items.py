@@ -4455,6 +4455,45 @@ class TestReversalProbeRunner(Base):
         self.assertIn("roc-test subscription", run("cleared")[1])
         self.assertIn("403", run("standing")[1])
 
+    def test_v154_not_established_is_a_THIRD_verdict_and_fail_closed_survives(self):
+        """v154 §F5e.1 q3. `probe-blocker-def-roc-053` printed "BLOCKER: NOT OBSERVED in
+        this window" — correctly refusing to call non-observation in a bounded window a
+        CLEARANCE — and the contract, admitting only standing/cleared, reported the honest
+        answer as BROKEN and blocked the loop. The probe was right; the vocabulary was wrong.
+
+        NON-VACUITY: the first assertion FAILS before v154 (it read 'broken'). The rest are
+        the guard that matters — adding a third verdict must NOT weaken fail-closed, because
+        the whole scheme rests on a probe that did not run being unable to claim anything."""
+        self._probe_makefile(
+            "notest:\n\t@echo 'no divergence seen in 30 runs'\n\t@echo 'BLOCKER: not-established'\n"
+            "silent2:\n\t@echo 'I looked at some things'\n"
+            "crash2:\n\t@echo boom >&2; exit 1\n"
+            "ambig:\n\t@echo 'BLOCKER: not-established'; echo 'BLOCKER: cleared'\n")
+        run = lambda t: wi._run_blocker_probe(self.project, f"make:{t}")
+
+        # THE FIX: an explicitly stated third verdict is read, and carries the probe's words.
+        verdict, detail = run("notest")
+        self.assertEqual(verdict, wi.BLK_NOT_ESTABLISHED)
+        self.assertIn("no divergence seen", detail)
+
+        # FAIL-CLOSED, UNCHANGED — a probe that did not report cannot claim this verdict.
+        self.assertEqual(run("silent2")[0], "broken")
+        self.assertEqual(run("crash2")[0], "broken")
+        self.assertEqual(run("no-such-target-either")[0], "broken")
+        # ...and it does not become an escape hatch for ambiguity either.
+        self.assertEqual(run("ambig")[0], "broken")
+
+        # The remedy text must NAME the new verdict, or an author cannot discover it.
+        self.assertIn(wi.BLK_NOT_ESTABLISHED, run("silent2")[1])
+
+    def test_v154_not_established_is_ADVISORY_never_blocking(self):
+        """It must not block the pull — it is not an actionable dispatch — but it must also
+        never read as satisfied. §17i: not a pass, not an alarm, not a reason to stop."""
+        self.assertIn(wi.BLK_NOT_ESTABLISHED,
+                      (wi.BLK_CLEARED, wi.BLK_STANDING, wi.BLK_NOT_ESTABLISHED))
+        self.assertNotEqual(wi.BLK_NOT_ESTABLISHED, wi.BLK_CLEARED)
+        self.assertNotEqual(wi.BLK_NOT_ESTABLISHED, wi.BLK_STANDING)
+
     def test_a_timeout_is_broken_not_standing(self):
         self._probe_makefile("slow:\n\t@sleep 5\n\t@echo 'BLOCKER: standing'\n")
         verdict, detail = wi._run_blocker_probe(self.project, "make:slow", timeout=0.4)

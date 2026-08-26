@@ -86,6 +86,9 @@ class Graphs:
         self.queue_map = data.get("queue_map", {})
         self.state_owners = data.get("state_owners", {})
         self.types = data.get("types", {})
+        self.metric_events = {k: v for k, v in
+                              data.get("metric_events", {}).items()
+                              if not k.startswith("_")}
 
     def owner_of(self, state):
         """Who is accountable for time spent in `state` — an agent name, or the
@@ -119,6 +122,21 @@ class Graphs:
         """List of (event, to, agents) legal from `state` for this type."""
         return [(t["event"], t["to"], t.get("agents", []))
                 for t in self.transitions(itype) if t["from"] == state]
+
+    def is_annotation(self, itype, state, event):
+        """True when (state, event) is an ANNOTATION — a legal SELF-EDGE that
+        records a FACT about the item without moving its state [v10].
+
+        `amended` (a definition correction) and a change failure recorded outside
+        the deploy stages are both of this kind: something HAPPENED, and the item
+        is still exactly where it was. An annotation is time-preserving in
+        walk_states, and it is NOT a stage exit — counting it as one would inflate
+        the stage's exit denominator with a non-failure, so recording bad news
+        would make the stage's failure rate look BETTER (DEF-ROC-120)."""
+        for t in self.transitions(itype):
+            if t["from"] == state and t["event"] == event:
+                return t["to"] == state
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -1353,6 +1371,43 @@ REWORK_ENTRY_EVENTS = {"build_failed", "deploy_failed", "rejected", "retried", "
 # so CFR/quality-by-stage fold over the whole set (kept as one metric family).
 VALIDATING_STATES = {"validating", "dev-validating", "prod-validating"}
 
+# --- the events the METRICS FOLD OVER [state-graph v10, DEF-ROC-120 AC-120-4] --
+# Every name below is an input to a derived number. They are hoisted out of the
+# fold bodies and named so the completeness gate can ask the two questions that
+# were never asked of `deploy_failed`:
+#   (a) is every folded event DECLARED in state-graphs.json `metric_events` with
+#       the domain of states in which the thing it describes can actually happen,
+#       and is it a legal transition from every one of them? An event the fold
+#       counts but no role can record where it occurs makes a metric that can
+#       only return good news (the DEF-ROC-115 measurement: CFR read a false 0%).
+#   (b) can every folded event actually be PRODUCED by some state graph? A fold
+#       over a name no graph emits is a dead input that contributes zero for ever
+#       — `deploy`, `done` and `resolved` were exactly that until v10 (they are
+#       STATES, never events), so they are gone from these sets.
+CFR_PASS_EVENTS = ("validated",)          # a validation that succeeded
+# ... and the two failure kinds, which are scoped DIFFERENTLY on purpose:
+CFR_STAGE_FAIL_EVENT = "rejected"         # only as an exit from a VALIDATING state
+CFR_ANY_STAGE_FAIL_EVENT = "deploy_failed"  # wherever recorded — see _compute_dora
+TERMINAL_DELIVERY_EVENTS = ("validated", "closed")
+TERMINAL_ABANDON_EVENTS = ("not_reproduced", "declined")
+LEAD_TIME_START_EVENTS = ("built_green", "fixed")
+BUILD_FAIL_RECOVERY_EVENTS = {"built_green", "retried", "validated"}
+DEPLOY_FAIL_RECOVERY_EVENTS = {"built_green", "retried", "deployed", "validated"}
+REJECT_RECOVERY_EVENTS = {"validated"}
+DEFECT_RECOVERY_EVENTS = {"validated"}
+# quality-by-stage: the ONE exit event that counts as that stage failing.
+STAGE_FAIL_EXIT = {"building": "build_failed", "deploying": "deploy_failed",
+                   "prod-deploying": "deploy_failed", "validating": "rejected",
+                   "dev-validating": "rejected", "prod-validating": "rejected",
+                   "reproducing": "not_reproduced"}
+METRIC_FOLD_EVENTS = (
+    set(CFR_PASS_EVENTS) | {CFR_STAGE_FAIL_EVENT, CFR_ANY_STAGE_FAIL_EVENT}
+    | set(TERMINAL_DELIVERY_EVENTS) | set(TERMINAL_ABANDON_EVENTS)
+    | set(LEAD_TIME_START_EVENTS) | BUILD_FAIL_RECOVERY_EVENTS
+    | DEPLOY_FAIL_RECOVERY_EVENTS | REJECT_RECOVERY_EVENTS
+    | DEFECT_RECOVERY_EVENTS | set(STAGE_FAIL_EXIT.values())
+    | REWORK_ENTRY_EVENTS | {"reported"})
+
 # --- plumbing vs delivery cost classification (ported verbatim from dora.py's
 # cost-split, v59/EXP-067; the ledger it read is now frozen, so the SAME rule is
 # reimplemented here over item EVENTS so the metric stays continuous) -----------
@@ -1645,9 +1700,9 @@ def _compute_dora(graphs, flow_items, states, now, window_days):
     # deployment_frequency: terminal validated/done/deploy events per active-day
     terminal_ts = []
     for it in flow_items:
-        t = _last_ts(it, ("validated", "closed", "deploy"))
+        t = _last_ts(it, TERMINAL_DELIVERY_EVENTS)
         if t is None and states.get(it.id) in TERMINAL_STATES:
-            t = _last_ts(it, ("not_reproduced", "declined"))
+            t = _last_ts(it, TERMINAL_ABANDON_EVENTS)
         if t and _in_window(t, now, window_days):
             terminal_ts.append(t)
     days = {t.date() for t in terminal_ts}
@@ -1656,7 +1711,7 @@ def _compute_dora(graphs, flow_items, states, now, window_days):
     # lead_time_for_changes: built_green -> validated per item (median + p85)
     lts = []
     for it in flow_items:
-        bg = _first_ts(it, ("built_green", "fixed"))
+        bg = _first_ts(it, LEAD_TIME_START_EVENTS)
         vd_ts = _last_ts(it, ("validated",))
         if bg and vd_ts and vd_ts >= bg and _in_window(vd_ts, now, window_days):
             lts.append((vd_ts - bg).total_seconds())
@@ -1671,21 +1726,24 @@ def _compute_dora(graphs, flow_items, states, now, window_days):
     for it in flow_items:
         for st, evc in _exits_from(graphs, it).items():
             for name, c in evc.items():
-                if st in VALIDATING_STATES and name == "validated":
+                if st in VALIDATING_STATES and name in CFR_PASS_EVENTS:
                     validated += c
-                elif st in VALIDATING_STATES and name == "rejected":
+                elif st in VALIDATING_STATES and name == CFR_STAGE_FAIL_EVENT:
                     rejected += c
-                elif name == "deploy_failed":
+                elif name == CFR_ANY_STAGE_FAIL_EVENT:
+                    # counted WHEREVER it was recorded — CFR asks whether the
+                    # change failed, not which stage the item happened to be in
+                    # when the pipeline went red [v10, DEF-ROC-120].
                     deploy_failed += c
     cfr = _ratio(rejected + deploy_failed, validated + rejected + deploy_failed)
 
     # mttr: any failure event -> its recovery (aggregated across the classes in D)
     all_recoveries = []
     for it in flow_items:
-        all_recoveries += _duration_after(it, {"build_failed"}, {"built_green", "retried", "done", "validated"})
-        all_recoveries += _duration_after(it, {"deploy_failed"}, {"built_green", "retried", "deployed", "done", "validated"})
-        all_recoveries += _duration_after(it, {"rejected"}, {"validated", "resolved", "done"})
-        all_recoveries += _duration_after(it, {"reported"}, {"validated", "resolved"})
+        all_recoveries += _duration_after(it, {"build_failed"}, BUILD_FAIL_RECOVERY_EVENTS)
+        all_recoveries += _duration_after(it, {CFR_ANY_STAGE_FAIL_EVENT}, DEPLOY_FAIL_RECOVERY_EVENTS)
+        all_recoveries += _duration_after(it, {CFR_STAGE_FAIL_EVENT}, REJECT_RECOVERY_EVENTS)
+        all_recoveries += _duration_after(it, {"reported"}, DEFECT_RECOVERY_EVENTS)
 
     return {
         "deployment_frequency_per_active_day": freq,
@@ -1813,16 +1871,20 @@ def _compute_quality(graphs, flow_items, now, window_days):
     validating.rejection rate (each attributed to the state owner); overall
     rework rate; defect arrival rate over the window."""
     stage_exits = defaultdict(lambda: {"total": 0, "fail": 0})
-    FAIL_EXIT = {"building": "build_failed", "deploying": "deploy_failed",
-                 "prod-deploying": "deploy_failed", "validating": "rejected",
-                 "dev-validating": "rejected", "prod-validating": "rejected",
-                 "reproducing": "not_reproduced"}
+    FAIL_EXIT = STAGE_FAIL_EXIT
     for it in flow_items:
         for st, evc in _exits_from(graphs, it).items():
             if st not in FAIL_EXIT:
                 continue
-            tot = sum(evc.values())
-            fail = evc.get(FAIL_EXIT[st], 0)
+            # [v10] ANNOTATIONS (self-edges: `amended`, a change failure recorded
+            # outside the deploy stages) are NOT exits. Counting them would pad
+            # the denominator with non-failures, so an item that had MORE go
+            # wrong would report a LOWER stage failure rate — the same
+            # can-only-return-good-news bias DEF-ROC-120 is about, one layer down.
+            tot = sum(c for name, c in evc.items()
+                      if not graphs.is_annotation(it.type, st, name))
+            fail = evc.get(FAIL_EXIT[st], 0) if not graphs.is_annotation(
+                it.type, st, FAIL_EXIT[st]) else 0
             stage_exits[st]["total"] += tot
             stage_exits[st]["fail"] += fail
     by_stage = {}
@@ -1858,10 +1920,9 @@ def _compute_recovery(graphs, flow_items):
     build_fail, val_reject, defect = [], [], []
     for it in flow_items:
         build_fail += _duration_after(it, {"build_failed"},
-                                      {"built_green", "retried", "done", "validated"})
-        val_reject += _duration_after(it, {"rejected"},
-                                      {"validated", "resolved", "done"})
-        defect += _duration_after(it, {"reported"}, {"validated", "resolved"})
+                                      BUILD_FAIL_RECOVERY_EVENTS)
+        val_reject += _duration_after(it, {"rejected"}, REJECT_RECOVERY_EVENTS)
+        defect += _duration_after(it, {"reported"}, DEFECT_RECOVERY_EVENTS)
 
     def pack(xs):
         return {"median_s": _median(xs), "mean_s": _mean(xs), "n": len(xs)}
@@ -1949,10 +2010,15 @@ def per_item_metrics(graphs, item, now):
     # recoveries / MTTR: same trigger->recovery pairs the aggregate recovery uses.
     recoveries = []
     recoveries += _duration_after(item, {"build_failed"},
-                                  {"built_green", "retried", "done", "validated"})
-    recoveries += _duration_after(item, {"rejected"},
-                                  {"validated", "resolved", "done"})
-    recoveries += _duration_after(item, {"reported"}, {"validated", "resolved"})
+                                  BUILD_FAIL_RECOVERY_EVENTS)
+    # [v10] deploy_failed was MISSING here while the aggregate counted it, so an
+    # item's OWN recovery figure ignored every deploy/CI failure — the same
+    # only-good-news shape as DEF-ROC-120 itself, in the per-item projection this
+    # comment claims is definitionally consistent with the aggregate.
+    recoveries += _duration_after(item, {"deploy_failed"},
+                                  DEPLOY_FAIL_RECOVERY_EVENTS)
+    recoveries += _duration_after(item, {"rejected"}, REJECT_RECOVERY_EVENTS)
+    recoveries += _duration_after(item, {"reported"}, DEFECT_RECOVERY_EVENTS)
 
     tokens = _compute_token_cost([item])
     return {

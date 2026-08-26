@@ -271,6 +271,12 @@ hardcode the profile name.
    forward. A fixed-forward deploy failure that leaves no event makes CFR read a false 0%
    (the ec56025 gap). `deploy_failed` is a CFR change-failure; a pre-deploy build/test/lint
    red is NOT (that's a pipeline wait). Record the failure, then fix forward.
+   **From state-graph v10 it is recordable from EVERY active state** — `building`,
+   `deploying`, `reworking`, `fixing`, `reproducing` and any validating stage — as a
+   SELF-EDGE that annotates the item's history WITHOUT moving its state. So "the item
+   had already moved on" is no longer a reason the failure goes unrecorded, and you never
+   have to choose between a state you have not reached and losing the fact. `build_failed`
+   is recordable from the same set (DEF-ROC-120).
 4. Trunk-based: keep each change sequentially independent and small enough to
    land on main continuously. No long-lived branches. If a change cannot be made
    independent, say so and stop — do not create hidden coupling.

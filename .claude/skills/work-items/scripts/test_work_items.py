@@ -14,6 +14,7 @@ import subprocess
 import tempfile
 import unittest
 import contextlib
+import collections
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -6309,6 +6310,296 @@ class TestStalledWorkHonoursItsOwnRemedy(TestLoopGate):
         f = self._stalled(self._gate())
         self.assertIn("DEF-CLAIMED", [i for x in f for i in x["ids"]], f)
 
+# --------------------------------------------------------------------------- #
+# DEF-ROC-120 — a change failure must be RECORDABLE from wherever it happens,
+# and it must MOVE THE METRIC.
+#
+# Measured: `deploy_failed` was not a legal transition from `validating`, so when
+# DEF-ROC-115's own fix reddened CI and skipped the deploy for four commits, NO
+# ROLE could record the change failure. It was landed as an `amended` note, which
+# preserves the prose and does not touch the CFR computation (the fold counts
+# TYPED events) — so CFR read a FALSE 0% precisely when something had gone wrong.
+#
+# MODELLING (AC-120-3): a change failure is an ANNOTATION on the item's history,
+# not a workflow step. Where the failure IS the flow's own exit (`deploying`,
+# `prod-deploying`, and `build_failed` from `building`) it stays a real transition
+# to `reworking`. Everywhere else it is a SELF-EDGE: the fact is recorded, the
+# state does not move to somewhere the item has not been.
+# --------------------------------------------------------------------------- #
+class TestChangeFailureRecordable(Base):
+    """AC-120-1/2/3/4."""
+
+    # --- AC-120-1, and the NON-VACUITY pin -------------------------------- #
+    def test_AC_120_1_deploy_failed_is_legal_from_validating(self):
+        """NON-VACUITY: this is the exact transition the sole writer refused on
+        DEF-ROC-115. It is RED against state-graphs.json v9. (Asserting it from
+        `deploying`, where it has always been legal, would prove nothing.)"""
+        for itype in ("defect", "use-case"):
+            edges = {(t["from"], t["event"]) for t in self.graphs.transitions(itype)}
+            self.assertIn(("validating", "deploy_failed"), edges,
+                          f"{itype}: a change failure during `validating` cannot "
+                          f"be recorded by ANY role")
+
+    def test_AC_120_1_change_failure_recordable_from_every_validating_state(self):
+        edges = {(t["from"], t["event"])
+                 for t in self.graphs.transitions("use-case")}
+        for st in ("dev-validating", "prod-validating", "validating"):
+            self.assertIn((st, "deploy_failed"), edges, st)
+        self.assertIn(("deploying", "deploy_failed"), edges)
+
+    def test_AC_120_1_the_real_writer_accepts_it_from_validating(self):
+        """End to end through `append` — the command that refused it."""
+        self.write_item("active", "DEF-CF", "defect", [
+            {"ts": "2026-06-10T00:00:00Z", "event": "reported", "agent": "orchestrator"},
+            {"ts": "2026-06-10T01:00:00Z", "event": "triaged", "agent": "orchestrator"},
+            {"ts": "2026-06-10T02:00:00Z", "event": "confirmed", "agent": "engineer"},
+            {"ts": "2026-06-10T03:00:00Z", "event": "fixed", "agent": "engineer"},
+        ])
+        with contextlib.redirect_stdout(io.StringIO()):
+            wi.cmd_append(argparse.Namespace(
+                project=self.project, id="DEF-CF", event="deploy_failed",
+                agent="engineer", note="CI red, deploy skipped, fixing forward",
+                ref=None, ts="2026-06-10T04:00:00Z", tokens=None, duration_ms=None))
+        items, _ = wi.load_all_items(self.project)
+        self.assertEqual(items["DEF-CF"].events[-1]["event"], "deploy_failed")
+
+    # --- AC-120-3: an annotation, not a state move ------------------------ #
+    def test_AC_120_3_recording_a_failure_does_not_move_the_state(self):
+        self.write_item("active", "DEF-CF2", "defect", [
+            {"ts": "2026-06-10T00:00:00Z", "event": "reported", "agent": "orchestrator"},
+            {"ts": "2026-06-10T01:00:00Z", "event": "triaged", "agent": "orchestrator"},
+            {"ts": "2026-06-10T02:00:00Z", "event": "confirmed", "agent": "engineer"},
+            {"ts": "2026-06-10T03:00:00Z", "event": "fixed", "agent": "engineer"},
+        ])
+        with contextlib.redirect_stdout(io.StringIO()):
+            wi.cmd_append(argparse.Namespace(
+                project=self.project, id="DEF-CF2", event="deploy_failed",
+                agent="cicd", note="dark deploy", ref=None,
+                ts="2026-06-10T04:00:00Z", tokens=None, duration_ms=None))
+        items, _ = wi.load_all_items(self.project)
+        st = wi.compute_states(self.graphs, items)
+        self.assertEqual(st["DEF-CF2"], "validating",
+                         "recording a change failure must not fabricate progress "
+                         "(or regress) the item has not made")
+
+    def test_AC_120_3_annotation_is_time_preserving(self):
+        """A self-edge closes and reopens the same state at the same instant, so
+        gross lead time is untouched — same property `amended` relies on."""
+        base = [
+            {"ts": _dt(10, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(10, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(10, 2), "event": "confirmed", "agent": "engineer"},
+            {"ts": _dt(10, 3), "event": "fixed", "agent": "engineer"},
+            {"ts": _dt(10, 7), "event": "validated", "agent": "tester"},
+        ]
+        annotated = base[:4] + [
+            {"ts": _dt(10, 5), "event": "deploy_failed", "agent": "cicd"}] + base[4:]
+        self.write_item("done", "DEF-A", "defect", base)
+        self.write_item("done", "DEF-B", "defect", annotated)
+        items, _ = wi.load_all_items(self.project)
+        segs_a = wi.walk_states(self.graphs, items["DEF-A"], NOW_DT)
+        segs_b = wi.walk_states(self.graphs, items["DEF-B"], NOW_DT)
+        tot = lambda segs: sum((e - b).total_seconds() for _s, b, e in segs)
+        self.assertAlmostEqual(tot(segs_a), tot(segs_b), places=1)
+
+    # --- AC-120-2: the recorded failure MOVES CFR ------------------------- #
+    def _validating_change_failure_defect(self, iid, day):
+        """The DEF-ROC-115 shape: fixed -> CI red (deploy skipped) -> fixed
+        forward -> validated. The failure is recorded IN `validating`."""
+        return [
+            {"ts": _dt(day, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(day, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(day, 2), "event": "confirmed", "agent": "engineer"},
+            {"ts": _dt(day, 3), "event": "fixed", "agent": "engineer"},
+            {"ts": _dt(day, 4), "event": "deploy_failed", "agent": "engineer"},
+            {"ts": _dt(day, 6), "event": "validated", "agent": "tester"},
+        ]
+
+    def test_AC_120_2_a_validating_change_failure_moves_CFR(self):
+        """The gap that let this exist: a test that only checks the append
+        SUCCEEDS proves nothing about the metric. Fold it and read CFR."""
+        self.write_item("done", "DEF-CFR", "defect",
+                        self._validating_change_failure_defect("DEF-CFR", 12))
+        items, _ = wi.load_all_items(self.project)
+        st = wi.compute_states(self.graphs, items)
+        at = wi.compute_stats(self.graphs, items, st,
+                              now=NOW_DT)["overall"]["dora"]["all_time"]
+        self.assertEqual(at["n_deploy_failures"], 1)
+        self.assertGreater(at["change_failure_rate"], 0,
+                           "CFR still reads a FALSE 0% with a change failure on "
+                           "the stream")
+        # 1 deploy_failed + 1 validated => 1/2
+        self.assertAlmostEqual(at["change_failure_rate"], 0.5, places=4)
+
+    def test_AC_120_2_the_amended_note_it_replaces_does_NOT_move_CFR(self):
+        """Why the workaround was never a fix — the differential."""
+        evs = self._validating_change_failure_defect("DEF-AMD", 12)
+        evs[4] = {"ts": _dt(12, 4), "event": "amended", "agent": "orchestrator",
+                  "note": "CI red, deploy skipped, four commits dark"}
+        self.write_item("done", "DEF-AMD", "defect", evs)
+        items, _ = wi.load_all_items(self.project)
+        st = wi.compute_states(self.graphs, items)
+        at = wi.compute_stats(self.graphs, items, st,
+                              now=NOW_DT)["overall"]["dora"]["all_time"]
+        self.assertEqual(at["n_deploy_failures"], 0)
+        self.assertEqual(at["change_failure_rate"], 0.0)
+
+    def test_AC_120_2_a_change_failure_must_not_FLATTER_the_stage_it_lands_in(self):
+        """An annotation is not an exit. If it counted as one it would INFLATE the
+        validating stage's exit denominator with a non-failure, so recording a
+        change failure would make the tester's stage look BETTER — the same
+        can-only-return-good-news bias, one layer down."""
+        self.write_item("done", "DEF-Q1", "defect",
+                        self._validating_change_failure_defect("DEF-Q1", 12))
+        self.write_item("done", "DEF-Q2", "defect", [
+            {"ts": _dt(13, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(13, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(13, 2), "event": "confirmed", "agent": "engineer"},
+            {"ts": _dt(13, 3), "event": "fixed", "agent": "engineer"},
+            {"ts": _dt(13, 4), "event": "rejected", "agent": "tester"},
+            {"ts": _dt(13, 5), "event": "fixed", "agent": "engineer"},
+            {"ts": _dt(13, 6), "event": "validated", "agent": "tester"},
+        ])
+        items, _ = wi.load_all_items(self.project)
+        st = wi.compute_states(self.graphs, items)
+        q = wi.compute_stats(self.graphs, items, st,
+                             now=NOW_DT)["overall"]["quality"]["all_time"]
+        # real exits from `validating`: Q1 validated; Q2 rejected + validated.
+        # The deploy_failed ANNOTATION is not an exit => 1 failure of 3, not of 4.
+        self.assertEqual(q["by_stage"]["validating"]["n_exits"], 3)
+        self.assertAlmostEqual(q["by_stage"]["validating"]["failure_rate"],
+                               1 / 3, places=4)
+
+    def test_AC_120_2_an_amendment_does_not_flatter_a_stage_either(self):
+        """Same class, pre-existing: `amended` is a self-edge too, and it was
+        already diluting every stage denominator it landed in."""
+        self.write_item("done", "DEF-Q3", "defect", [
+            {"ts": _dt(13, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(13, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(13, 2), "event": "confirmed", "agent": "engineer"},
+            {"ts": _dt(13, 3), "event": "fixed", "agent": "engineer"},
+            {"ts": _dt(13, 4), "event": "amended", "agent": "product", "note": "n"},
+            {"ts": _dt(13, 5), "event": "rejected", "agent": "tester"},
+            {"ts": _dt(13, 6), "event": "fixed", "agent": "engineer"},
+            {"ts": _dt(13, 7), "event": "validated", "agent": "tester"},
+        ])
+        items, _ = wi.load_all_items(self.project)
+        st = wi.compute_states(self.graphs, items)
+        q = wi.compute_stats(self.graphs, items, st,
+                             now=NOW_DT)["overall"]["quality"]["all_time"]
+        self.assertEqual(q["by_stage"]["validating"]["n_exits"], 2)
+        self.assertAlmostEqual(q["by_stage"]["validating"]["failure_rate"],
+                               0.5, places=4)
+
+    # --- AC-120-4: the generalisation, over the WHOLE graph ---------------- #
+    def _metric_events(self):
+        with open(wi.GRAPHS_PATH, encoding="utf-8") as f:
+            return {k: v for k, v in json.load(f).get("metric_events", {}).items()
+                    if not k.startswith("_")}
+
+    CHANGE_AGENTS = {"engineer", "cicd", "tester"}
+
+    def _agent_worked_states(self, itype):
+        """`active-work`: every non-terminal state of this type whose owner is an
+        agent who MAKES or VERIFIES a change. A build or deploy can go red at any
+        moment work is live; it cannot go red in a queue, at intake, or while the
+        item is parked on something external."""
+        g = self.graphs
+        terminal = g.terminals(itype)
+        states = {g.initial(itype)}
+        for t in g.transitions(itype):
+            states.add(t["from"])
+            states.add(t["to"])
+        return sorted(s for s in states
+                      if s not in terminal
+                      and g.owner_of(s) in self.CHANGE_AGENTS)
+
+    def test_AC_120_4_every_metric_event_is_declared(self):
+        """COMPLETENESS, not just correctness (v124/EXP-121): an event the fold
+        COUNTS with no declared occurrence-domain is exactly how `deploy_failed`
+        stayed unrecordable — nothing ever asked where it can happen."""
+        self.assertEqual(set(self._metric_events()), set(wi.METRIC_FOLD_EVENTS),
+                         "state-graphs.json `metric_events` and the events the "
+                         "metrics actually fold over have diverged")
+
+    def test_AC_120_4_every_metric_event_can_actually_be_produced(self):
+        """The inverse sweep: a metric that folds over an event NO graph can emit
+        is a dead input — it can only ever contribute zero."""
+        producible = set()
+        for itype in self.graphs.types:
+            for t in self.graphs.transitions(itype):
+                producible.add(t["event"])
+            if self.graphs.kind(itype) == "flow":
+                producible.add(self.graphs.initial(itype))
+        for ev in wi.METRIC_FOLD_EVENTS:
+            self.assertIn(ev, producible,
+                          f"the metrics fold over '{ev}', which no state graph "
+                          f"can ever produce")
+
+    def test_AC_120_4_each_metric_event_is_reachable_wherever_it_can_occur(self):
+        """THE generalisation. For every event the metrics fold over, assert it is
+        a legal transition from every state in which the thing it describes can
+        actually happen — per type, over the graph, not over one path."""
+        spec = self._metric_events()
+        self.assertTrue(spec, "no `metric_events` declaration in state-graphs.json")
+        for ev, decl in spec.items():
+            domain = decl["occurs_in"]
+            self.assertIn(domain, ("active-work", "validating", "workflow"),
+                          f"{ev}: unknown occurs_in '{domain}'")
+            if domain == "workflow":
+                continue   # a flow STEP: the graph places it; covered by the
+                           # producible sweep above.
+            for itype in [t for t in self.graphs.types
+                          if self.graphs.kind(t) == "flow"]:
+                edges = {(t["from"], t["event"])
+                         for t in self.graphs.transitions(itype)}
+                if domain == "active-work":
+                    want = self._agent_worked_states(itype)
+                else:
+                    want = [s for s in self._agent_worked_states(itype)
+                            if s in wi.VALIDATING_STATES]
+                for st in want:
+                    self.assertIn((st, ev), edges,
+                                  f"{itype}: '{ev}' cannot be recorded from "
+                                  f"'{st}', but it can happen there")
+
+    def test_AC_120_4_annotation_edges_keep_a_rightful_owner(self):
+        """The graph exists so every transition has a rightful owner. Widening
+        WHERE a failure can be recorded must not widen WHO may record it."""
+        for itype in [t for t in self.graphs.types
+                      if self.graphs.kind(t) == "flow"]:
+            for ev in ("deploy_failed", "build_failed"):
+                agents = {tuple(sorted(t["agents"]))
+                          for t in self.graphs.transitions(itype)
+                          if t["event"] == ev}
+                self.assertLessEqual(len(agents), 1,
+                                     f"{itype}/{ev}: agent list is not uniform")
+                for a in agents:
+                    self.assertEqual(set(a), {"cicd", "engineer"}, f"{itype}/{ev}")
+
+    def test_AC_120_4_no_state_has_two_edges_for_one_event(self):
+        """Every fold in the machinery takes the FIRST matching transition, so a
+        duplicated (from, event) pair would make the graph AMBIGUOUS and the
+        annotation/real-transition split silently order-dependent. v10 adds edges
+        for events that already exist elsewhere in the same graph, so this is now
+        load-bearing rather than incidental."""
+        for itype in [t for t in self.graphs.types
+                      if self.graphs.kind(t) == "flow"]:
+            seen = collections.Counter(
+                (t["from"], t["event"]) for t in self.graphs.transitions(itype))
+            dupes = [k for k, n in seen.items() if n > 1]
+            self.assertEqual(dupes, [], f"{itype}: ambiguous transitions {dupes}")
+
+    def test_AC_120_4_a_queue_or_parked_state_needs_no_failure_edge(self):
+        """The domain is deliberately bounded: nothing is built in `ready`,
+        `registered` or `blocked`, so a build/deploy cannot fail there and the
+        gate must not demand a meaningless edge."""
+        for st in ("ready", "registered", "blocked", "awaiting_observation"):
+            self.assertNotIn(st, self._agent_worked_states("use-case"))
+        # ... and `reported` is intake/triage: no change is in flight there.
+        self.assertNotIn("reported", self._agent_worked_states("defect"))
+        # an open-item has no change-making state at all, so it needs no edge.
+        self.assertEqual(self._agent_worked_states("open-item"), [])
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

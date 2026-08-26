@@ -84,7 +84,19 @@ See `README.md` for the full system. In short:
   all hit on 2026-08-14; 5 on 2026-08-20):**
   1. **It does not protect CO-OWNED files.** Two agents editing the same file
      still collide; the pathspec only removes the *index* race. (EXP-120's
-     original claim was too broad and was corrected.)
+     original claim was too broad and was corrected.) **Measured 2026-08-26 on the
+     real 584 KB `edge-ledger.md` / 568 KB `class-deps.mmd`: four agents each
+     holding a copy read before any of them committed, four green commits, and
+     ONE OF FOUR rows and nodes left in HEAD** — not mis-attribution, SILENT
+     PERMANENT LOSS of already-committed work, invisible to the declared-subset
+     assertion because the path IS declared. So use **`make commit-isolated`** for a
+     co-owned append-target: it three-way merges the other agent's committed lines
+     back in (the same run leaves 4/4), REPORTS every merge, and refuses a genuinely
+     overlapping edit with exit 7 rather than guessing. **Its residue, which nothing
+     fixes at file granularity:** it commits whatever is SAVED under your declared
+     path, so if another agent saves the same co-owned file in the seconds between
+     your save and your commit, you commit THEIR copy under YOUR message. Save
+     immediately before committing, and read the merge report.
   2. **It cannot stage an UNTRACKED file** — `commit -- <new-path>` fails with
      "did not match any file(s) known to git". When you must add a new file, run
      `git add -- <your exact paths>` naming ONLY files you authored (never

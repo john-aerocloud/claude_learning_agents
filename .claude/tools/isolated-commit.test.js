@@ -659,7 +659,9 @@ test('AC-MSGCROSS.5 the CLI refuses a shared message-file name (exit 2) and the 
 
 test('AC-MSGCROSS.6 the Makefile does not TEACH the shared filename, and wires both escape hatches', () => {
   const mk = fs.readFileSync(path.join(__dirname, '..', '..', 'Makefile'), 'utf-8');
-  const block = mk.slice(mk.indexOf('commit-isolated:'), mk.indexOf('commit-isolated:') + 4000);
+  // to the NEXT target, not a fixed byte window: a window is a brittle assertion that
+  // fires on documentation growth rather than on the thing it is meant to check.
+  const block = mk.slice(mk.indexOf('commit-isolated:'), mk.indexOf('commit-msg-file:'));
   assert.equal(
     /MSG_FILE=\/tmp\/msg\.txt/.test(mk),
     false,
@@ -667,4 +669,285 @@ test('AC-MSGCROSS.6 the Makefile does not TEACH the shared filename, and wires b
   );
   assert.match(block, /MSG_DUP_OK/);
   assert.match(block, /MSG_FILE_SHARED_OK/);
+});
+
+// --- AC-COOWNED.* — the CO-OWNED APPEND-TARGET clobber -----------------------
+//
+// OI-CO-OWNED-LEDGER-FILES-CROSS-ATTRIBUTE-WORK-AND-ONE-CROSSED-A-COMMIT-MESSAGE,
+// limb A. CLAUDE.md limit 1 says the pathspec form removes the INDEX race but not
+// the collision on a CO-OWNED FILE. Measured 2026-08-26, and it is worse than the
+// item recorded: on a co-owned append-target the collision is not mis-attribution,
+// it is SILENT PERMANENT LOSS of the other agent's ALREADY-COMMITTED lines, and it
+// happens THROUGH this tool with exit 0 and a clean log.
+//
+//   A appends its row to the shared working-tree file and commits (exit 0).
+//   B, whose copy was read before A committed, saves its own copy and commits.
+//   B's blob is added from the WORKING TREE over a private index seeded from the
+//   NEW head, so it REPLACES A's blob. A's row is gone from HEAD. The
+//   declared-subset assertion cannot see it: the path IS declared.
+//
+// AC-COOWNED.1  CONTROL DISABLED reproduces the loss (A's committed row absent).
+// AC-COOWNED.2  CONTROL ENABLED: both agents' rows survive; B's commit carries
+//               the union, and B's own message.
+// AC-COOWNED.3  the trigger requires BOTH staleness AND my own novel content —
+//               a deliberate DELETION of a recently-added block is NOT resurrected.
+// AC-COOWNED.4  a genuinely OVERLAPPING edit is REFUSED (exit 7), not merged
+//               silently and not clobbered; HEAD unmoved.
+// AC-COOWNED.5  end-to-end through the real CLI on the real co-owned filenames
+//               (architecture/dependencies/{class-deps.mmd,edge-ledger.md}), two
+//               concurrent writers, both survive.
+// AC-COOWNED.6  the merge is REPORTED, never silent, and names the sha it merged.
+// AC-COOWNED.7  the WORKING TREE is left holding the union, so the NEXT agent's
+//               copy is not stale — otherwise the fix only defers the clobber.
+
+/** A repo whose co-owned ledger is an append-target, as the real ones are. */
+function makeLedgerRepo() {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'oagcoowned-'));
+  execFileSync('git', ['init', '-q', '-b', 'main', repo]);
+  git(repo, ['config', 'user.email', 'agent@example.test']);
+  git(repo, ['config', 'user.name', 'Agent']);
+  git(repo, ['config', 'commit.gpgsign', 'false']);
+  write(repo, LEDGER, '# edge ledger\n\nrow-1\nrow-2\n');
+  write(repo, 'src/mine.ts', 'export const mine = 1;\n');
+  git(repo, ['add', '-A']);
+  git(repo, ['commit', '-q', '-m', 'base ledger']);
+  return repo;
+}
+
+const LEDGER = 'architecture/dependencies/edge-ledger.md';
+const BASE_LEDGER = '# edge ledger\n\nrow-1\nrow-2\n';
+const A_LEDGER = '# edge ledger\n\nrow-1\nrow-2\nrow-A-agent-A-edge\n';
+const B_LEDGER = '# edge ledger\n\nrow-1\nrow-2\nrow-B-agent-B-edge\n';
+
+function headLedger(repo) {
+  return git(repo, ['show', `HEAD:${LEDGER}`]) + '\n';
+}
+
+test('AC-COOWNED.1 CONTROL DISABLED: B\'s stale co-owned blob SILENTLY REVERTS A\'s already-committed row (exit 0, clean log)', () => {
+  const repo = makeLedgerRepo();
+
+  // A appends and commits through the tool.
+  write(repo, LEDGER, A_LEDGER);
+  tool.isolatedCommit({ repo, message: 'docs(ledger): A appends its edge (ITEM-A)', paths: [LEDGER], coownedMerge: false });
+  assert.match(headLedger(repo), /row-A-agent-A-edge/);
+
+  // B's copy was read at BASE; B saves it and commits.
+  write(repo, LEDGER, B_LEDGER);
+  const r = tool.isolatedCommit({ repo, message: 'docs(ledger): B appends its edge (ITEM-B)', paths: [LEDGER], coownedMerge: false });
+
+  assert.equal(typeof r.sha, 'string');
+  assert.match(headLedger(repo), /row-B-agent-B-edge/);
+  assert.equal(
+    /row-A-agent-A-edge/.test(headLedger(repo)),
+    false,
+    'CONTROL DISABLED must reproduce the loss — A\'s committed row is gone',
+  );
+});
+
+test('AC-COOWNED.2 CONTROL ENABLED: both concurrent writers\' rows survive, and B keeps B\'s message', () => {
+  const repo = makeLedgerRepo();
+
+  write(repo, LEDGER, A_LEDGER);
+  tool.isolatedCommit({ repo, message: 'docs(ledger): A appends its edge (ITEM-A)', paths: [LEDGER] });
+
+  write(repo, LEDGER, B_LEDGER);
+  const r = tool.isolatedCommit({ repo, message: 'docs(ledger): B appends its edge (ITEM-B)', paths: [LEDGER] });
+
+  const head = headLedger(repo);
+  assert.match(head, /row-A-agent-A-edge/, 'A\'s committed row must survive B\'s commit');
+  assert.match(head, /row-B-agent-B-edge/, 'B\'s row must land');
+  assert.equal(/<<<<<<</.test(head), false, 'no conflict markers in a clean merge');
+  assert.match(tool.commitObjectMessage(repo, r.sha), /ITEM-B/, 'B\'s commit keeps B\'s message');
+  assert.equal(r.coownedMerges.length, 1);
+  assert.equal(r.coownedMerges[0].path, LEDGER);
+});
+
+test('AC-COOWNED.3 a deliberate DELETION of a recently-added block is NOT resurrected (the trigger needs my own novel content too)', () => {
+  const repo = makeLedgerRepo();
+
+  // A adds a block and commits.
+  write(repo, LEDGER, A_LEDGER);
+  tool.isolatedCommit({ repo, message: 'docs(ledger): A appends its edge (ITEM-A)', paths: [LEDGER] });
+
+  // B deliberately removes A's row and adds nothing of its own.
+  write(repo, LEDGER, BASE_LEDGER);
+  tool.isolatedCommit({ repo, message: 'docs(ledger): retract A\'s edge, it was wrong (ITEM-C)', paths: [LEDGER] });
+
+  assert.equal(
+    /row-A-agent-A-edge/.test(headLedger(repo)),
+    false,
+    'a pure deletion is an intent, not staleness — it must not be merged back',
+  );
+});
+
+test('AC-COOWNED.4 a genuinely OVERLAPPING concurrent edit is REFUSED (exit 7), never silently merged and never clobbered', () => {
+  const repo = makeLedgerRepo();
+
+  // Both agents rewrite THE SAME line differently, from the same base.
+  write(repo, LEDGER, '# edge ledger\n\nrow-1\nrow-2-as-A-says\n');
+  tool.isolatedCommit({ repo, message: 'docs(ledger): A rewrites row-2 (ITEM-A)', paths: [LEDGER] });
+
+  write(repo, LEDGER, '# edge ledger\n\nrow-1\nrow-2-as-B-says\nrow-B-agent-B-edge\n');
+  const err = grab(() =>
+    tool.isolatedCommit({ repo, message: 'docs(ledger): B rewrites row-2 (ITEM-B)', paths: [LEDGER] }),
+  );
+  assert.equal(err.code, 7, err.message);
+  assert.match(err.message, /CO-OWNED/);
+  assert.match(headLedger(repo), /row-2-as-A-says/, 'HEAD is unmoved — A\'s edit stands');
+  assert.equal(/row-B-agent-B-edge/.test(headLedger(repo)), false);
+});
+
+test('AC-COOWNED.5 END-TO-END through the real CLI on the real co-owned filenames: two concurrent writers, both survive', () => {
+  const repo = makeLedgerRepo();
+  const MMD = 'architecture/dependencies/class-deps.mmd';
+  write(repo, MMD, 'graph TD\n  a[a]\n  b[b]\n');
+  git(repo, ['add', '--', MMD]);
+  git(repo, ['commit', '-q', '-m', 'base graph']);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oagcoownedmsg-'));
+  const write2 = (name, text) => {
+    const p = path.join(dir, name);
+    fs.writeFileSync(p, text);
+    return p;
+  };
+
+  // A appends a node + its ledger row and commits.
+  write(repo, MMD, 'graph TD\n  a[a]\n  b[b]\n  nodeA[node-A ITEM-A]\n');
+  write(repo, LEDGER, A_LEDGER);
+  const ra = runCli(repo, [
+    '--repo', repo,
+    '--message-file', write2('msg-ITEM-A.txt', 'docs(graph): ITEM-A node + edge row (ITEM-A)\n'),
+    '--', MMD, LEDGER,
+  ]);
+  assert.equal(ra.status, 0, ra.stderr);
+
+  // B's copies were read BEFORE A committed. B saves them and commits.
+  write(repo, MMD, 'graph TD\n  a[a]\n  b[b]\n  nodeB[node-B ITEM-B]\n');
+  write(repo, LEDGER, B_LEDGER);
+  const rb = runCli(repo, [
+    '--repo', repo,
+    '--message-file', write2('msg-ITEM-B.txt', 'docs(graph): ITEM-B node + edge row (ITEM-B)\n'),
+    '--', MMD, LEDGER,
+  ]);
+  assert.equal(rb.status, 0, rb.stderr);
+
+  const mmd = git(repo, ['show', `HEAD:${MMD}`]);
+  const led = git(repo, ['show', `HEAD:${LEDGER}`]);
+  assert.match(mmd, /nodeA\[node-A ITEM-A\]/, 'A\'s graph node survives B\'s commit');
+  assert.match(mmd, /nodeB\[node-B ITEM-B\]/, 'B\'s graph node lands');
+  assert.match(led, /row-A-agent-A-edge/);
+  assert.match(led, /row-B-agent-B-edge/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('AC-COOWNED.6 the merge is REPORTED on stderr and names the sha it merged in — never silent', () => {
+  const repo = makeLedgerRepo();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oagcoownedrep-'));
+  const mf = (n, t) => { const p = path.join(dir, n); fs.writeFileSync(p, t); return p; };
+
+  write(repo, LEDGER, A_LEDGER);
+  const ra = runCli(repo, ['--repo', repo, '--message-file', mf('msg-ITEM-A.txt', 'docs(l): A (ITEM-A)\n'), '--', LEDGER]);
+  assert.equal(ra.status, 0, ra.stderr);
+  const shaA = git(repo, ['rev-parse', 'HEAD']);
+
+  write(repo, LEDGER, B_LEDGER);
+  const rb = runCli(repo, ['--repo', repo, '--message-file', mf('msg-ITEM-B.txt', 'docs(l): B (ITEM-B)\n'), '--', LEDGER]);
+  assert.equal(rb.status, 0, rb.stderr);
+  const said = rb.stderr + rb.stdout;
+  assert.match(said, /CO-OWNED/, 'the merge must announce itself');
+  assert.match(said, new RegExp(shaA.slice(0, 8)), 'and name the concurrent commit it merged');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('AC-COOWNED.7 the WORKING TREE is left holding the union, so the NEXT agent is not stale (otherwise the fix only defers the clobber)', () => {
+  const repo = makeLedgerRepo();
+
+  write(repo, LEDGER, A_LEDGER);
+  tool.isolatedCommit({ repo, message: 'docs(ledger): A appends (ITEM-A)', paths: [LEDGER] });
+
+  write(repo, LEDGER, B_LEDGER);
+  tool.isolatedCommit({ repo, message: 'docs(ledger): B appends (ITEM-B)', paths: [LEDGER] });
+
+  const onDisk = fs.readFileSync(path.join(repo, LEDGER), 'utf-8');
+  assert.match(onDisk, /row-A-agent-A-edge/, 'working tree must hold A\'s row after the merge');
+  assert.match(onDisk, /row-B-agent-B-edge/);
+  assert.equal(git(repo, ['status', '--porcelain', '--', LEDGER]), '', 'and it must be clean against HEAD');
+
+  // A THIRD writer, whose copy is the merged working tree, appends cleanly.
+  write(repo, LEDGER, `${onDisk}row-C-agent-C-edge\n`);
+  tool.isolatedCommit({ repo, message: 'docs(ledger): C appends (ITEM-D)', paths: [LEDGER] });
+  const head = headLedger(repo);
+  for (const row of ['row-A-agent-A-edge', 'row-B-agent-B-edge', 'row-C-agent-C-edge'])
+    assert.match(head, new RegExp(row), `${row} must survive three sequential concurrent writers`);
+});
+
+// AC-COOWNED.8  THE ACCEPTANCE LIMB: not "the code looks race-free" but FOUR real
+//               `isolated-commit` PROCESSES, at the measured four-way concurrency,
+//               each holding a copy of ONE co-owned file read BEFORE any of them
+//               committed — with the losing arm measured too. This project keeps
+//               finding controls that read healthy while doing nothing; a
+//               concurrency fix asserted rather than exercised is that shape.
+//
+//               The four commits are driven in sequence ON PURPOSE, because that is
+//               the real shape and it is deterministic: the agents read at T0, then
+//               each saves and commits after running its own gates. A literally
+//               simultaneous save+commit is a DIFFERENT hazard (this tool commits
+//               whatever is SAVED under a declared path — AC-DEFECT-OAG-058.3's
+//               limit) and is not what this guard addresses. The truly-parallel run,
+//               and the run against the real 585 KB / 575 KB files, are recorded on
+//               the item.
+
+/** N real `isolated-commit` processes, every one of them holding a copy read at T0. */
+function raceAppenders(repo, file, n, extraArgs = []) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oagrace-'));
+  const kids = [];
+  for (let i = 0; i < n; i += 1) {
+    const id = `AGENT-${String.fromCharCode(65 + i)}`;
+    // Each agent's copy is read NOW — before any of the others has committed. That
+    // is the whole hazard: every one of them is about to be stale.
+    const mine = `${fs.readFileSync(path.join(repo, file), 'utf-8')}row-from-${id}\n`;
+    const copy = path.join(dir, `copy-${id}`);
+    fs.writeFileSync(copy, mine);
+    const msg = path.join(dir, `msg-${id}-race.txt`);
+    fs.writeFileSync(msg, `docs(ledger): ${id} appends its row (${id})\n`);
+    kids.push({ id, copy, msg });
+  }
+  const results = kids.map((k) => {
+    // save-then-commit, exactly as an agent does it: the save is what makes the
+    // shared working tree hold a stale copy.
+    fs.copyFileSync(k.copy, path.join(repo, file));
+    return spawnSync(process.execPath, [TOOL_PATH, '--repo', repo, '--message-file', k.msg, ...extraArgs, '--', file], {
+      encoding: 'utf8',
+      env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1' },
+    });
+  });
+  fs.rmSync(dir, { recursive: true, force: true });
+  return { ids: kids.map((k) => k.id), results };
+}
+
+test('AC-COOWNED.8 CONTROL DISABLED: four writers at one co-owned file lose all but the last', () => {
+  const repo = makeLedgerRepo();
+  const { ids } = raceAppenders(repo, LEDGER, 4, ['--no-coowned-merge']);
+  const head = headLedger(repo);
+  const survived = ids.filter((id) => head.includes(`row-from-${id}`));
+  assert.deepEqual(survived, ['AGENT-D'], `only the last writer survives; got ${survived.join(',')}`);
+});
+
+test('AC-COOWNED.8 CONTROL ENABLED: four writers at one co-owned file — ALL FOUR rows survive, one commit each', () => {
+  const repo = makeLedgerRepo();
+  const { ids, results } = raceAppenders(repo, LEDGER, 4);
+  for (const r of results) assert.equal(r.status, 0, r.stderr);
+  const head = headLedger(repo);
+  for (const id of ids) assert.match(head, new RegExp(`row-from-${id}`), `${id}'s row must survive`);
+  assert.equal(/<<<<<<</.test(head), false, 'no conflict markers land in the file');
+  // one commit per agent, each carrying its own intent — no cross-attribution.
+  const log = git(repo, ['log', '--format=%s', '-4']);
+  for (const id of ids) assert.match(log, new RegExp(`\\(${id}\\)`), `${id} must own its own commit message`);
+});
+
+test('AC-COOWNED.9 the Makefile wires the co-owned escape hatch and does not leave the loss undocumented', () => {
+  const mk = fs.readFileSync(path.join(__dirname, '..', '..', 'Makefile'), 'utf-8');
+  const block = mk.slice(mk.indexOf('commit-isolated:'), mk.indexOf('commit-msg-file:'));
+  assert.match(block, /COOWNED_MERGE_OFF/);
+  assert.match(block, /--no-coowned-merge/);
 });

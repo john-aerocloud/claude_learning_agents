@@ -1,5 +1,5 @@
 ---
-process_version: 153
+process_version: 154
 effective_from: 2026-08-24
 supersedes: v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
 status: active
@@ -2710,6 +2710,68 @@ See `process/principle-failures/2026-08-26-roc-uc-102-shipped-100pct-broken-behi
 Running only the files you named is not running the tier. The `DEF-ROC-111` fix passed every
 targeted file and was pushed with a **third** pinning test still red in a file that was never
 run; CI caught it and the deploy **skipped**. Before a push, run the tiers CI runs.
+
+
+## F5e. A control is not finished until it can fire, is aimed at something real, and can say "I don't know" [v154, ROC retro 2026-08-26]
+
+**Evidence: NINE controls found faulty in ONE session, and every one of them read
+healthy.** They were found by agents doing something else entirely — never by anything
+looking for them. They fall into three kinds, and the kinds are the checklist.
+
+**PHANTOM — declared, never wired.** `deploy,wip_limit,1` sits in `policy.csv` and **no
+state maps to a `deploy` queue**, so the cap can never bind (`DEF-ROC-119`); `EXP-ROC-005`
+was cited by three live knobs with **no row in the registry or the archive**, so the WIP
+limit in force had never been scoreable; §F5a's *"the push and the tester dispatch are ONE
+act"* was documented and checked by nothing, so three testers left validated state on one
+disk; and `wi-append`/`wi-project` **write item files that nothing commits**, so a day's
+registrations existed only locally while `wi-validate` read clean — because it reads the
+disk.
+
+**MISCALIBRATED — measures something other than the claim.** `paintsScrollbarX` measured
+**Playwright's `--hide-scrollbars`**, not the app, and mis-filed a value-5 defect against
+three screens (`DEF-ROC-117`); `make-refs-tracked` reads a **guarded existence test**
+(`if [ -f X ]`) as an invocation and blocks on a file deliberately designed to be absent;
+the test-requirement gate's parser reads a runtime `test.skip(cond, msg)` as an untagged
+bare test; the screen gate's reachability limb inspects only **below/right**, never
+above/left.
+
+**VOCABULARY-LIMITED — cannot express the honest answer.** `deploy_failed` is not a legal
+transition from `validating`, so a change failure during validation **cannot be recorded by
+any role** and CFR reads a false 0% (`DEF-ROC-120`); and a blocker probe that correctly
+answers *"NOT OBSERVED in this window"* — refusing to call non-observation clearance — is
+reported by `loop-gate` as **unreadable**, because the contract admits only `standing` or
+`cleared`.
+
+### F5e.1 Three questions, asked of every control before it is called done
+
+1. **What would make you fire?** Demonstrate it: break the thing the control guards and
+   watch it go red, naming the instance. This is §EXP-122's non-vacuity limb, generalised
+   from tests to **every** gate, probe, cap and metric. `DEF-ROC-110` is the model — it
+   deleted its allowlist and proved the gate red by reverting one site.
+2. **What do you actually measure?** State the subject, and check the control can reach it.
+   A cap needs a queue with members. A probe needs a signal it can observe — with a
+   **positive control** proving the instrument works, as `DEF-ROC-085` did (`rows=0` beside
+   a known-good `rows=3`). A predicate that answers identically in every arm is measuring
+   its harness.
+3. **What can you NOT say?** Every control needs an expressible **not-established** answer
+   (§17i) and a legal way to record bad news. "Not observed" is not "cleared"; a superseded
+   CI run is neither a pass nor a fail; a change failure must be recordable from whatever
+   state the item is in when it happens.
+
+### F5e.2 A declared control with no possible subject is deleted, not left standing
+
+If a cap names a queue nothing maps to, or a knob cites an experiment that does not exist,
+**remove the declaration or wire it** — the same cycle. Leaving it reads as governance and
+is worse than an admitted gap, because it answers the question nobody then re-asks.
+
+### F5e.3 A green from a shared tree is not a green
+
+Every gate here scans the working tree, so with concurrent agents it reports the **union of
+everyone's uncommitted work**. Four gates reported another agent's state today
+(`check-docs`, `typecheck`, the test-requirement ratchet, and a load-induced timeout that
+was 19/19 green in isolation). **Before reporting a red, establish whose it is** — is the
+offending file tracked? — and say so. None of the four reached CI; the cost was attribution,
+paid four times.
 
 
 ## F6. Parallel dispatch by independence (the maximal independent set)

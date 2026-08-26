@@ -156,9 +156,50 @@ function tokenise(line) {
  * `echo "… dora.py check-drift …"` is prose, and a checker that reports prose is a
  * checker nobody runs.
  */
+/**
+ * Paths that are the operand of a SHELL EXISTENCE TEST, not something the recipe runs.
+ *
+ * `if [ -f X ]; then … else … fi` is a recipe that has been written to work in BOTH
+ * worlds — the whole point is that `X` may be absent. Reporting it as "a committed make
+ * target RUNS a file that is not on trunk" is false: the target runs whichever branch the
+ * test selects, and the absent branch is deliberate.
+ *
+ * DEF-ROC-115 / v154 §F5e. This fired on `quarantine-gate`, whose `if [ -f
+ * src/app/local/probe-real-bus-send.ts ]` guard exists PRECISELY because that path is the
+ * DEF-ROC-076 quarantined artefact: kept on disk as evidence, never committed, and absent
+ * in every fresh checkout. The gate blocked the loop on a file whose absence is the
+ * contract. That is §F5e question 2 — a control must measure what it claims to, and this
+ * one could not tell "runs it" from "asks whether it is there".
+ *
+ * Deliberately NARROW: only the operand of a file test is exempt. A path used anywhere
+ * else on the line is still a reference, so `[ -f X ] && node X` still reports `X`.
+ */
+const FILE_TEST_OPERAND =
+  /(?:\[\[?|\btest\b)\s+-[a-zA-Z]\s+([^\s'"`;|&\])]+)/g;
+
+function fileTestOperands(line) {
+  // A path is exempt only if EVERY occurrence on the line is a test operand. Strip the
+  // test constructs and see what is left: `[ -f X ] && node X` still runs X, so X stays a
+  // reference. Getting this wrong in the permissive direction would silently blind the
+  // checker to real invocations, which is the failure it exists to prevent — so the
+  // narrowness is asserted by its own test rather than left to the regex.
+  const remainder = line.replace(FILE_TEST_OPERAND, ' ');
+  const out = new Set();
+  for (const m of line.matchAll(FILE_TEST_OPERAND)) {
+    const raw = m[1];
+    if (!raw || raw.includes(UNRESOLVED) || path.isAbsolute(raw)) continue;
+    if (remainder.includes(raw)) continue;                      // also used outside the test
+    out.add(path.normalize(raw));
+  }
+  return out;
+}
+
 function refsInLine(line, vars, baseDirs, exists) {
   const out = [];
-  for (const tok of tokenise(expandMakeVars(line, vars))) {
+  const expanded = expandMakeVars(line, vars);
+  // Collected BEFORE tokenising, because tokenise() discards the `[ -f` context.
+  const guarded = fileTestOperands(expanded);
+  for (const tok of tokenise(expanded)) {
     if (!tok || tok.startsWith('-') || tok.startsWith('$')) continue;
     if (tok.includes(UNRESOLVED)) continue;
     if (/[*?[\]{}]/.test(tok)) continue;                        // a glob names no one file
@@ -166,6 +207,7 @@ function refsInLine(line, vars, baseDirs, exists) {
     if (path.isAbsolute(tok)) continue;                         // not ours to track
     const norm = path.normalize(tok);
     if (norm.startsWith('..')) continue;                        // outside the repo
+    if (guarded.has(norm)) continue;                            // `[ -f X ]` — asks, does not run
     if (!norm.includes(path.sep) && !baseDirs.some((d) => exists(path.posix.join(d, norm)))) continue;
     out.push(norm);
   }

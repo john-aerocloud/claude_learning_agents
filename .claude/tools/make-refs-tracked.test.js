@@ -435,3 +435,38 @@ test('AC-GI.3 --project resolves the project repo, so the loop-gate wiring needs
   assert.equal(report.verdict, 'PASS', r.stdout);
   assert.equal(r.status, 0);
 });
+
+
+// --- v154 §F5e: a guarded existence test is not an invocation (DEF-ROC-115) -----
+//
+// `quarantine-gate` blocked the ROC loop with "a COMMITTED MAKE TARGET RUNS
+// src/app/local/probe-real-bus-send.ts and it is NOT ON TRUNK". It does not run it — it
+// asks whether it is there, in an `if [ -f … ]` guard written precisely BECAUSE that path
+// is the DEF-ROC-076 quarantined artefact, absent in every fresh checkout by contract.
+//
+// NON-VACUITY: the first two cases FAIL against the pre-v154 extractor (they were the
+// live false positive); the third and fourth must keep passing, or the exemption is too
+// wide and the checker stops finding the thing it exists for.
+test('v154: a path that is only the operand of `[ -f ]` is not reported as run', () => {
+  const refs = tool.refsInLine('\t@if [ -f src/app/local/probe-real-bus-send.ts ]; then echo yes; fi',
+    {}, [''], () => false);
+  assert.deepEqual(refs, []);
+});
+
+test('v154: `test -f` and `[[ -e ]]` forms are exempt too', () => {
+  assert.deepEqual(tool.refsInLine('\t@test -f scripts/evidence.mjs && echo present', {}, [''], () => false), []);
+  assert.deepEqual(tool.refsInLine('\t@if [[ -e scripts/evidence.mjs ]]; then :; fi', {}, [''], () => false), []);
+});
+
+test('v154: a path that is TESTED and then RUN is still reported — the exemption is narrow', () => {
+  const refs = tool.refsInLine('\t@[ -f scripts/run.mjs ] && node scripts/run.mjs', {}, [''], () => false);
+  // refsInLine does not dedupe (pre-existing; callers do), so the path appears once per
+  // occurrence. What matters is that it is REPORTED AT ALL despite also being tested.
+  assert.ok(refs.includes('scripts/run.mjs'),
+    `a path that is tested AND run must still be reported, got ${JSON.stringify(refs)}`);
+});
+
+test('v154: an ordinary invocation is unaffected', () => {
+  const refs = tool.refsInLine('\t@node scripts/tier-determinism.mjs --limit 30', {}, [''], () => false);
+  assert.deepEqual(refs, ['scripts/tier-determinism.mjs']);
+});

@@ -817,6 +817,21 @@ roc-local-up:
 roc-local-down:
 	@node .claude/tools/stack-claim.js release --project ROC || true
 	npm --prefix $(ROC_APP) run local:down
+# UC-ROC-093 — THE TRAINER/TRAINEE PRACTICE CYCLE, end to end on the LOCAL stack.
+# Runs one NAMED scenario at a teaching pace through the real pipeline (Service Bus
+# emulator -> forwarder -> Event Hubs emulator -> consumer -> decision log) via the
+# trainer's own `npm run local:practice` command, then PRINTS the decision-log
+# read-back (row, outcome, Jira key, recordedTs and the OBSERVED gap in ms) so a
+# tester validates AC-093-4 by reading actual state rather than injector stdout.
+# It also drives the AC-093-3 refusal live: a non-allowlisted (cloud/production)
+# namespace must refuse the whole cycle and publish nothing.
+# Requires the stack up (`make roc-local-up`). Parameterised:
+#   make roc-practice-cycle
+#   make roc-practice-cycle ROC_UC093_SCENARIO=device-offline-recovery ROC_UC093_PACE=5000
+roc-practice-cycle:
+	@node .claude/tools/stack-claim.js claim --project ROC || true
+	$(if $(ROC_UC093_SCENARIO),ROC_UC093_SCENARIO=$(ROC_UC093_SCENARIO) ,)$(if $(ROC_UC093_PACE),ROC_UC093_PACE=$(ROC_UC093_PACE) ,)npm --prefix $(ROC_APP) run test:acceptance -- uc093-practice-cycle
+
 # The dashboard e2e BATTERY: runs the whole tests/e2e suite in ONE command by
 # resetting + seeding each spec's own precondition (see local/e2eBattery.ts).
 # Long-running (a fresh-stack reset per spec). Pass filter substrings to subset.

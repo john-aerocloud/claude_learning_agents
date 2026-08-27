@@ -1,0 +1,29 @@
+# HAND-AUTHORED, and legitimately so: a GitHub Actions workflow is a file WE OWN,
+# unlike the `gh` payloads beside it. It exists to reach one branch that the real
+# captures cannot: a COMPLETED run in which the configured deploy job is ABSENT,
+# i.e. the job was renamed (or the config points at a workflow it no longer
+# describes). Every real capture contains all five of the real workflow's jobs, so
+# that branch is unreachable from them.
+#
+# `deploy-prod` deliberately does not exist in any captured run.
+name: PPS Event Aggregation / Test
+on:
+  push:
+    branches: [main]
+jobs:
+  test-function-app:
+    name: Function App / lint, test and build
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo fn
+  test-web-app:
+    name: Web App / lint, test and build
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo web
+  deploy-prod:
+    name: Deploy to a production that does not exist
+    needs: [test-function-app, test-web-app]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo deploy

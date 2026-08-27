@@ -204,6 +204,63 @@ test("AC-131-3: a Deploy job still in_progress is IN-FLIGHT — never 'open', ne
     `must say plainly that nothing has landed yet, got: ${r.detail}`);
 });
 
+test("AC-131-3: a RUN still in progress whose deploy job has not been CREATED yet is IN-FLIGHT", () => {
+  // REAL capture 33098785042, taken live at 18:33Z on 2026-08-27 while the run was
+  // mid-flight. GitHub does not materialise a downstream job in the jobs list until
+  // it is queued or skipped, so the deploy job is ABSENT ALTOGETHER. The first
+  // version of this tool called that `deploy-job-not-in-run` and told the operator
+  // the job had probably been RENAMED — an honest NOT-ESTABLISHED with a WRONG
+  // diagnosis, which would have sent someone to edit the config on every push.
+  const r = run({ captureRun: "33098785042", noGit: true });
+  assert.strictEqual(r.verdict, "in-flight", JSON.stringify(r));
+  assert.strictEqual(r.reason, "deploy-job-not-yet-created");
+  assert.strictEqual(r.deployJobStatus, null);
+  assert.ok(/NOT a renamed job/.test(r.detail || ""),
+    `it must actively disclaim the rename, not merely omit it: ${r.detail}`);
+  assert.ok(/NOT a shut lane/.test(r.detail || ""), r.detail);
+  assert.ok(/NOTHING HAS LANDED/.test(r.detail || ""), r.detail);
+});
+
+test("AC-131-3: the HUMAN line for an uncreated deploy job says so, not \"is null\"", () => {
+  // `make deploy-lane PROJECT=ROC` is the standalone probe an operator reads, so its
+  // one line is a real surface. "is null" is the shape of a message nobody trusts.
+  const root = repoRootWith(BASE_CFG);
+  const stdout = execFileSync("node", [TOOL, "--project", "ROC", "--repo-root", root,
+    "--capture-dir", CAP, "--capture-run", "33098785042",
+    "--workflow", WORKFLOW, "--no-git"], { encoding: "utf8" });
+  assert.ok(!/is null/.test(stdout), stdout);
+  assert.ok(/IN-FLIGHT/.test(stdout), stdout);
+  assert.ok(/has not been created yet/.test(stdout), stdout);
+  assert.ok(/nothing has landed/i.test(stdout), stdout);
+});
+
+test("AC-131-2: an unfinished job's conclusion is the EMPTY STRING on the real wire, not null", () => {
+  // Pinned because the tool's failure set is a membership test: if "" were ever
+  // treated as a failure, every in-flight run would read as a shut lane. This is a
+  // fact about `gh`, taken from the real capture, not from the synthetic variant
+  // (which used null and would have hidden it).
+  const raw = JSON.parse(fs.readFileSync(path.join(CAP, "run-33098785042.json"), "utf8"));
+  const unfinished = raw.jobs.filter((j) => j.status === "in_progress");
+  assert.ok(unfinished.length > 0, "the capture must actually contain an unfinished job");
+  for (const j of unfinished) {
+    assert.strictEqual(j.conclusion, "", `${j.name} carried ${JSON.stringify(j.conclusion)}`);
+  }
+  const r = run({ captureRun: "33098785042", noGit: true });
+  assert.deepStrictEqual(r.blockingJobs, [],
+    "an empty-string conclusion must never be read as a failure");
+});
+
+test("AC-131-1: a COMPLETED run with no deploy job IS a config/rename problem", () => {
+  // The other half of the split: once the run is over, an absent deploy job really
+  // is a renamed job or a workflow the config no longer describes.
+  const root = repoRootWith({ ...BASE_CFG, deployJobId: "deploy-prod" });
+  const r = run({ root, captureRun: OPEN_RUN, noGit: true,
+    workflow: path.join(CAP, "renamed-deploy-job-workflow.yml") });
+  assert.strictEqual(r.verdict, "NOT-ESTABLISHED");
+  assert.strictEqual(r.reason, "deploy-job-not-in-run");
+  assert.ok(/rename/i.test(r.detail || ""), r.detail);
+});
+
 // ---------------------------------------------------------------------------
 // NOT-ESTABLISHED — an unanswerable question must never render as 'open'.
 // ---------------------------------------------------------------------------

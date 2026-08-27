@@ -153,8 +153,11 @@ function render(r) {
       + `; owner: ${(r.suspectItems || []).join(", ") || "UNKNOWN"}; ${r.runUrl}`;
   }
   if (r.verdict === "in-flight") {
-    return `deploy-lane[${r.project}] IN-FLIGHT — "${r.deployJobName}" is `
-      + `${r.deployJobStatus} at ${String(r.headSha).slice(0, 12)}; nothing has landed. ${r.runUrl}`;
+    const state = r.deployJobStatus
+      ? `is ${r.deployJobStatus}`
+      : "has not been created yet (the run is still going)";
+    return `deploy-lane[${r.project}] IN-FLIGHT — "${r.deployJobName}" ${state} at `
+      + `${String(r.headSha).slice(0, 12)}; nothing has landed. ${r.runUrl}`;
   }
   return `deploy-lane[${r.project}] NOT ESTABLISHED (${r.reason}) — ${r.detail || "no detail"}`;
 }
@@ -328,13 +331,16 @@ if (!runJobs.length) {
 
 const byName = new Map();
 for (const j of runJobs) if (!byName.has(j.name)) byName.set(j.name, j);
-const deployJob = byName.get(deployJobName);
-if (!deployJob) {
-  notEstablished("deploy-job-not-in-run",
-    `run ${targetId} carries no job named "${deployJobName}" (jobs present: `
-    + `${runJobs.map((j) => j.name).join(" | ")}). Either the workflow's deploy job was `
-    + `renamed without updating ${cfgPath}, or the run never reached it.`);
-}
+// ABSENT IS TWO DIFFERENT THINGS, and conflating them was a real bug caught live
+// on 2026-08-27 at 18:33Z (real capture run-33098785042.json). GitHub does not
+// materialise a downstream job in the jobs list until it is queued or skipped, so
+// on a run that is STILL GOING the deploy job is absent ALTOGETHER. The first
+// version of this tool answered `deploy-job-not-in-run` and told the operator the
+// job had probably been RENAMED — an honest NOT-ESTABLISHED carrying a WRONG
+// diagnosis, which would have sent someone to edit the config on every push. The
+// run's own status is what separates the two: not-completed => in-flight;
+// completed => the job really is missing, so the config or the workflow moved.
+const deployJob = byName.get(deployJobName) || null;
 
 // ---- who owns the fix -----------------------------------------------------
 // The truncated `displayTitle` gh returns (…, ~68 chars) frequently cuts the
@@ -416,9 +422,10 @@ const common = {
   workflow: cfg.workflowFile,
   deployJobId: DEPLOY_ID,
   deployJobName,
-  deployJobStatus: deployJob.status,
-  deployJobConclusion: deployJob.conclusion === undefined ? null : deployJob.conclusion,
-  deployJobUrl: deployJob.url || null,
+  deployJobStatus: deployJob ? deployJob.status : null,
+  deployJobConclusion: deployJob && deployJob.conclusion !== undefined
+    ? deployJob.conclusion : null,
+  deployJobUrl: (deployJob && deployJob.url) || null,
   needsClosure: closure,
   needsClosureJobNames: closureNames,
   nonBlockingFailures,
@@ -433,6 +440,31 @@ const common = {
   // the run's overall conclusion was NOT the input to the decision.
   decidedBy: "deploy-job-and-needs-closure",
 };
+
+if (!deployJob) {
+  if (String(run.status) !== "completed") {
+    // STATED RESIDUAL, not a hidden one: if a job in the needs closure has ALREADY
+    // failed while the deploy job is not yet created, the skip is a foregone
+    // conclusion and this under-calls it as in-flight for the few minutes until the
+    // run completes. That is deliberate — asserting `blocked` about a job GitHub has
+    // not created yet would be claiming to know an outcome we have not observed, and
+    // the gate runs before every pull, so it self-corrects on the next invocation.
+    out({ ...common, verdict: "in-flight", reason: "deploy-job-not-yet-created",
+      blockingJobs: [], detail:
+        `run ${targetId} is ${run.status} and "${deployJobName}" has not been created `
+        + `yet — GitHub does not list a downstream job until it is queued or skipped. `
+        + `NOTHING HAS LANDED and nothing is broken: this is a run still running, NOT a `
+        + `renamed job and NOT a shut lane. Jobs so far: `
+        + `${runJobs.map((j) => `${j.name} [${j.status}/${j.conclusion || "-"}]`).join(" | ")}. `
+        + `Re-read after the run completes.` });
+  }
+  notEstablished("deploy-job-not-in-run",
+    `run ${targetId} is COMPLETED and carries no job named "${deployJobName}" (jobs `
+    + `present: ${runJobs.map((j) => j.name).join(" | ")}). The run is over, so the job `
+    + `is genuinely missing: either the workflow's deploy job was renamed without `
+    + `updating ${cfgPath}, or deployJobId points at a workflow this config no longer `
+    + `describes. Nothing about the lane is established until that is fixed.`);
+}
 
 const closureJobs = closureNames
   .map((n) => byName.get(n))

@@ -89,6 +89,17 @@ const BASE_CFG = {
   trunkRef: "origin/main",
 };
 
+/** The ROC repo is a separate, parent-gitignored repo, so it is ABSENT from any
+ *  parent-repo worktree or export. The one case that needs real history therefore
+ *  declares it CANNOT BE RUN rather than failing — a test that would not run must
+ *  say so, never render as either a pass or a defect (§17i). Every other case here
+ *  is hermetic. */
+const REAL_HISTORY = fs.existsSync(path.join(BASE_CFG.repoPath, ".git"))
+  ? false   // node:test skips on a PRESENT `skip` key in some versions, so this must be false, never null
+  : `SKIPPED, NOT PASSED: ${BASE_CFG.repoPath} is absent (the project repo is a `
+    + `separate gitignored repo, so it is not in a parent-repo worktree or export). `
+    + `This case reads a REAL commit message and cannot be established without it.`;
+
 function run(opts = {}) {
   const cfg = opts.cfg === undefined ? BASE_CFG : opts.cfg;
   const root = opts.root || repoRootWith(cfg);
@@ -137,7 +148,8 @@ test("AC-131-4: a blocked lane names the OWNING ITEM, read out of the breaking c
     `must name the item in the breaking commit, got ${JSON.stringify(r.suspectItems)}`);
 });
 
-test("AC-131-4: the second real blocked run names ITS item from the FULL commit message", () => {
+test("AC-131-4: the second real blocked run names ITS item from the FULL commit message",
+  { skip: REAL_HISTORY }, () => {
   // gh's truncated title for this run is
   //   "fix(simulator-proof): the rot gate judged the item store from an UNCO…"
   // — the id was cut off. The real subject ends "(UC-ROC-106, ROC-19)".

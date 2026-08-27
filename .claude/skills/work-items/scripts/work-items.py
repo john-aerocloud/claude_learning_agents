@@ -386,6 +386,11 @@ def check_transition(graphs, itype, state, event, agent):
 # Item file I/O — hand-rolled YAML-ish frontmatter (contract's tiny subset)
 # ---------------------------------------------------------------------------
 class Item:
+    # The file's DECLARED derived block, attached by `load_item` for I8 only
+    # (None ⇒ constructed in memory / no block on disk). Never read to decide
+    # state: state is fold(events).
+    declared = None
+
     def __init__(self, path, fm, body):
         self.path = path
         self.fm = fm          # ordered dict of frontmatter fields (excluding derived)
@@ -603,7 +608,52 @@ def load_item(path):
         text = f.read()
     fm_text, body = _split_frontmatter(text)
     fm = parse_frontmatter(fm_text)
-    return Item(path, fm, body)
+    it = Item(path, fm, body)
+    # The file's OWN COPY of the derived block, kept as-declared and never used to
+    # decide anything — its only purpose is I8, which compares it against
+    # fold(events). `parse_frontmatter` deliberately discards everything under
+    # `derived:`, which is why nothing could see this class of drift before
+    # (OI-WI-VALIDATE-IGNORES-DERIVED-STATE-LEGALITY).
+    it.declared = _declared_derived_from_text(fm_text)
+    return it
+
+
+# --- the file's declared `derived:` block (READ FOR VALIDATION ONLY) ---------
+# `derived:` is a RENDERING of fold(events), marked "do not hand-edit" — and until
+# I8 nothing enforced that. Five use-case items were registered with hand-authored
+# blocks carrying the aggregate-only `state: planned` / `queue: null` and
+# `wi-validate` reported clean; the Linear projector's reality sweep was the only
+# thing that noticed. So the block is parsed here EXCLUSIVELY so the gate can
+# disagree with it. No other code path may read it: state is the fold, always.
+def _declared_derived_from_text(fm_text):
+    """Return {'state': …, 'queue': …} as DECLARED in the file, or None when the
+    item carries no `derived:` block at all. Missing keys are simply absent from
+    the dict (distinct from a key declared `null`)."""
+    lines = fm_text.split("\n")
+    start = None
+    for i, line in enumerate(lines):
+        if re.match(r"^derived:\s*$", line):
+            start = i
+            break
+    if start is None:
+        return None
+    out = {}
+    for line in lines[start + 1:]:
+        if line.strip() == "" or line.strip().startswith("#"):
+            continue
+        if not line.startswith(" "):
+            break                      # back to a top-level key: block is over
+        m = re.match(r"^  (state|queue):\s*(.*)$", line)
+        if m:
+            out[m.group(1)] = _parse_scalar(m.group(2))
+    return out
+
+
+def declared_derived(path):
+    """The `derived:` block as DECLARED in an item file on disk (validation only)."""
+    with open(path, encoding="utf-8") as f:
+        fm_text, _body = _split_frontmatter(f.read())
+    return _declared_derived_from_text(fm_text)
 
 
 # --- rendering -------------------------------------------------------------
@@ -860,6 +910,41 @@ def _bubble(graphs, items, kids, states, agg_item=None):
     if any(_child_past_initial(graphs, items, k, states) for k in kids):
         return "in_progress"
     return AGG_INITIAL
+
+
+# The AGGREGATE bubble's RANGE — every value `_bubble` above can return, and
+# therefore every state an aggregate may legitimately declare. Kept adjacent to
+# `_bubble` on purpose: if a future bubble rule can return something else, this set
+# is the line it has to cross, and TestLegalStatesDerivation drives `_bubble` over
+# every child configuration to prove the two agree (a legal set the code can step
+# outside is not a legal set).
+_BUBBLE_RANGE = {AGG_INITIAL, "in_progress"} | _PARKED_STATES
+
+
+def legal_states(graphs, itype):
+    """The set of states an item of `itype` may legitimately be IN — DERIVED from
+    state-graphs.json, never a hand-kept list (the pattern established by
+    OI-LINEAR-CANCELLED-STATE-UNMAPPED's fix, whose whole point was that a
+    hand-kept mirror of the graph goes stale silently).
+
+      FLOW      : the initial state plus every `from`/`to` in its transitions.
+      AGGREGATE : the initial state, its terminals, and the bubble's range — an
+                  aggregate has no own event stream, so its state is not folded
+                  but BUBBLED, and a flow-only state (`ready`, `building`) is not
+                  something it can ever legitimately be in.
+
+    Returns an empty set for an unknown type (the caller reports that separately)."""
+    tdef = graphs.types.get(itype)
+    if not tdef:
+        return set()
+    states = {graphs.initial(itype)} | graphs.terminals(itype)
+    if graphs.kind(itype) == "aggregate":
+        states |= _BUBBLE_RANGE
+    else:
+        for t in graphs.transitions(itype):
+            states.add(t["from"])
+            states.add(t["to"])
+    return {s for s in states if s}
 
 
 def _child_past_initial(graphs, items, k, states):
@@ -1167,9 +1252,50 @@ def cmd_append(a):
     # place here; `project` performs the physical relocation authoritatively.
     with open(path, "w", encoding="utf-8") as f:
         f.write(render_item(item, dv))
+    # …and PROPAGATE to the ancestors this transition moved. An aggregate's state
+    # is not folded from its own events, it BUBBLES from its children, so a child's
+    # append can change every ancestor's state — and re-rendering only the appended
+    # item left those blocks stale until the next `project`. That mattered little
+    # while nothing read them; I8 now compares each block against the fold, so a
+    # stale ancestor would fire the gate on an item nobody touched, every cycle,
+    # and the pressure would be to weaken I8 rather than to fix the write. Fix the
+    # write: the propagation happens here, where the state actually changes.
+    for anc_id in _propagation_targets(items, a.id):
+        anc = items.get(anc_id)
+        # Never (re)CREATE a file: if an ancestor has been relocated or removed by
+        # a concurrent agent since we loaded, writing its old path would resurrect
+        # a duplicate id (I4). Skipping is correct — `project` re-renders everything.
+        if anc is None or not os.path.exists(anc.path):
+            continue
+        with open(anc.path, "w", encoding="utf-8") as f:
+            f.write(render_item(anc, derived_block(graphs, items, states,
+                                                   children, anc_id)))
     new_state = states.get(a.id)
     print(f"append: {a.id} {state} --({a.event}/{a.agent})--> {new_state}")
     _maybe_relocate(a.project, a.id, item, new_state, graphs)
+
+
+def _propagation_targets(items, iid):
+    """Every TRANSITIVE parent of `iid` — the items whose derived state can move
+    because this one did. Walks ALL parents, not just the first: `compute_ancestors`
+    deliberately reports one chain for display, but a child with two parents bubbles
+    into both, and a rendering left stale in the second is exactly the drift I8
+    reports. Cycle-guarded (I3 is what rejects a cycle; this must not hang on one)."""
+    out, seen, frontier = [], {iid}, [iid]
+    while frontier:
+        nxt = []
+        for cur in frontier:
+            it = items.get(cur)
+            if not it:
+                continue
+            for p in it.parents:
+                if p in seen:
+                    continue
+                seen.add(p)
+                out.append(p)
+                nxt.append(p)
+        frontier = nxt
+    return out
 
 
 def _maybe_relocate(project, iid, item, state, graphs):
@@ -5214,7 +5340,7 @@ def cmd_loop_gate(a):
 
 
 # ---------------------------------------------------------------------------
-# Subcommand: validate — the drift GATE (invariants I1–I4)
+# Subcommand: validate — the drift GATE (invariants I1–I4, I6, I7, I8)
 # ---------------------------------------------------------------------------
 def cmd_validate(a):
     graphs = Graphs.load()
@@ -5224,7 +5350,7 @@ def cmd_validate(a):
         for v in violations:
             print(f"  - {v}", file=sys.stderr)
         sys.exit(1)
-    print(f"validate: {a.project} clean — I1–I4 + I6 + I7 all hold.")
+    print(f"validate: {a.project} clean — I1–I4 + I6 + I7 + I8 all hold.")
 
 
 def validate_items(graphs, project):
@@ -5316,6 +5442,20 @@ def validate_items(graphs, project):
                     violations.append(
                         f"(I7) {iid}: reversal probe is not evaluable: {e}")
 
+        # I8: the file's OWN `derived:` block agrees with fold(events) — the one
+        # thing every reader assumes this gate checks, and until now the only thing
+        # it did not (OI-WI-VALIDATE-IGNORES-DERIVED-STATE-LEGALITY). `derived:` is
+        # a RENDERING of the fold, but it is what the queue views, the board
+        # projector, `item-brief` and every agent that opens the file actually read.
+        # FOUNDING INSTANCE: five use-case items registered with hand-authored
+        # blocks carrying the AGGREGATE-ONLY `state: planned` / `queue: null` — a
+        # use-case graph has no `planned` state at all — and `wi-validate` reported
+        # `clean`. `wi-project` healed all five, so the machinery could compute the
+        # right answer the whole time; the gate simply never asked.
+        # The remedy is ALWAYS `make wi-project` (re-render), NEVER an edit to the
+        # block — editing it is the act that caused this.
+        violations.extend(_check_I8(graphs, iid, it, state, project))
+
         # I4b: a done FLOW item must live in done/ (aggregates always stay in
         # active/ — their state is DERIVED from children, not their own stream,
         # so a bubbled-done chunk/slice is not physically archived).
@@ -5338,6 +5478,56 @@ def validate_items(graphs, project):
         violations.append(f"(I3) dependency cycle in deps: {' -> '.join(cyc)}")
 
     return violations
+
+
+_I8_REMEDY = ("re-render it with `make wi-project PROJECT={project}` — the block is "
+              "a rendering of fold(events), so the fix is to regenerate it, never "
+              "to correct it in place")
+
+
+def _check_I8(graphs, iid, it, state, project):
+    """I8 — the DECLARED `derived:` block must agree with fold(events).
+
+    Four limbs, each failing CLOSED, in the order that gives the most useful
+    message first:
+      (a) the block exists and declares a state — `null`/absent is not a pass,
+          it is an item no derived view can see;
+      (b) the declared state is one the item's OWN type graph defines (the
+          founding instance: `planned` on a use-case);
+      (c) the declared state EQUALS the computed state — legality alone cannot
+          catch a plausible lie (`ready` on a use-case that folded to `done`);
+      (d) the declared queue equals queue_map[declared state].
+    """
+    out = []
+    remedy = _I8_REMEDY.format(project=project)
+    declared = it.declared
+    if declared is None:
+        out.append(f"(I8) {iid}: no `derived:` block — every derived view (queues, "
+                   f"board, item-brief) reads that block, so an item without one is "
+                   f"invisible to all of them; {remedy}")
+        return out
+    if "state" not in declared or declared.get("state") is None:
+        out.append(f"(I8) {iid}: `derived.state` is null/absent while fold(events) "
+                   f"says '{state}' — a provisional block was persisted; {remedy}")
+        return out
+    ds = declared.get("state")
+    legal = legal_states(graphs, it.type)
+    if legal and ds not in legal:
+        out.append(f"(I8) {iid}: `derived.state: {ds}` is not a state the "
+                   f"'{it.type}' graph defines (legal: {', '.join(sorted(legal))}); "
+                   f"fold(events) says '{state}'; {remedy}")
+    elif ds != state:
+        out.append(f"(I8) {iid}: `derived.state: {ds}` disagrees with fold(events), "
+                   f"which says '{state}' — the block is stale or hand-authored, and "
+                   f"the fold is the truth; {remedy}")
+    dq = declared.get("queue") if "queue" in declared else "<absent>"
+    exp_q = graphs.queue_for(ds)
+    if dq != exp_q:
+        out.append(f"(I8) {iid}: `derived.queue: {dq}` is not queue_map['{ds}'] "
+                   f"(= {exp_q}) — the queue is a pure function of the state, so a "
+                   f"declared queue that disagrees puts the item in the wrong queue "
+                   f"view or in none; {remedy}")
+    return out
 
 
 def _find_dep_cycle(items):

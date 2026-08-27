@@ -99,8 +99,20 @@ Makefile wraps each.
    transition; (I2) no terminal item sits in a non-null queue; (I3) every
    `parents`/`deps` id resolves and `deps` has no cycles; (I4) exactly one file per
    id across active/+done/, and a `done` item lives in `done/`; (I6) an
-   `awaiting_observation` flow item carries a valid observation predicate. **I5 is
+   `awaiting_observation` flow item carries a valid observation predicate; (I7) a
+   `blocked` flow item carries a valid reversal probe; **(I8) the item's own
+   `derived:` block agrees with `fold(events)`** — it exists, declares a non-null
+   state, that state is one its own type graph defines, it equals the computed
+   state, and `derived.queue` equals `queue_map[state]`. **I5 is
    RESERVED** for IMP-011's still-owed CORE-job invariant and is not reused.
+
+   **The remedy for an I8 violation is `make wi-project` — RE-RENDER the block, never
+   correct it in place.** I8 exists because five use-case items were once registered
+   with hand-authored blocks carrying the aggregate-only `state: planned` and
+   `wi-validate` reported *clean* while every derived view read the wrong state; the
+   gate that gets quoted as assurance was silent on the one thing a reader assumes it
+   checks (`OI-WI-VALIDATE-IGNORES-DERIVED-STATE-LEGALITY`). I1 guards the event log,
+   I8 guards the rendering, and neither sees the other's class.
 
 4. **`make wi-migrate PROJECT=P`** — one-shot migration from the legacy
    `items.csv` + ledger into per-item files. Run once per project; not part of the loop.

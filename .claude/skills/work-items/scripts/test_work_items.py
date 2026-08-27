@@ -69,7 +69,32 @@ class Base(unittest.TestCase):
         with open(item.path, "w", encoding="utf-8") as f:
             f.write(wi.render_item(item, {"state": None, "queue": None,
                                           "children": [], "ancestors": []}))
+        self._render_derived(iid)
         return item.path
+
+    def _render_derived(self, iid):
+        """Finalise the fixture's `derived:` block the way the machinery does.
+
+        The provisional `state: null` block written above is what `migrate` writes
+        before `project` finalises it — and under I8 (the drift gate now compares
+        the file's own block against fold(events)) a PERSISTED provisional block is
+        itself a violation, correctly: no derived view can see an item whose
+        rendered state is null. So a fixture must be as consistent as a real item.
+        Renders this item plus the ancestors it bubbles into — exactly what
+        `append` writes — so fixtures are correct in either write order (parent
+        first, or child first)."""
+        items, _dup = wi.load_all_items(self.project)
+        if iid not in items:
+            return
+        states = wi.compute_states(self.graphs, items)
+        children = wi.compute_children(items)
+        for target in [iid] + wi._propagation_targets(items, iid):
+            t = items.get(target)
+            if t is None:
+                continue
+            dv = wi.derived_block(self.graphs, items, states, children, target)
+            with open(t.path, "w", encoding="utf-8") as f:
+                f.write(wi.render_item(t, dv))
 
 
 # --------------------------------------------------------------------------- #

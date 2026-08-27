@@ -951,3 +951,464 @@ test('AC-COOWNED.9 the Makefile wires the co-owned escape hatch and does not lea
   assert.match(block, /COOWNED_MERGE_OFF/);
   assert.match(block, /--no-coowned-merge/);
 });
+
+// --- AC-142.* — DEFECT-OAG-142: the merge's BASE and the merge's SUBJECT ------
+//
+// The co-owned guard above is RIGHT and its four-writer measurement stands. These
+// cases are about the two things it got wrong: WHICH BASE it merges against, and
+// WHAT it merges. Both were measured on the real repo, twice, hours apart, on
+// `sst.config.ts` — the single most apply-critical file here, where the push IS the
+// apply.
+//
+// THE FOUNDING MEASUREMENT (reproduced against the real blobs, not reasoned about):
+//
+//   instance 1  head=bbeff483 286,597 B   mine=d365c555 293,027 B
+//               selected base 265bea2c^ = 245,841 B  (23 commits back)
+//               merged 308,488 B  — `const AEROBUS_PRODUCER_REGISTRY` twice
+//               reported "16 line(s) of THEIRS were merged back in", exit 0
+//   instance 2  head=55a27da0 293,963 B   mine=db1cd99a 294,075 B
+//               SAME selected base 265bea2c^  — +22,827 B, registry twice, exit 0
+//
+// WHY 265bea2c WAS CHOSEN BOTH TIMES, and it is not a fluke: `coownedStaleAgainst`
+// asked only "are this commit's added lines absent from MY copy". 265bea2c's 17
+// added lines were absent from my copy because a LATER commit had legitimately
+// superseded them — they were absent from HEAD too (inMine=0, inHEAD=0). Absence of
+// content HEAD does not have is not staleness; it is agreement. Two commits fired on
+// that reading, and the loop keeps the OLDEST, so the base went 23 commits back and
+// ~48 KB behind both sides. `merge-file --diff3` then saw a region that both sides
+// had "inserted" and `resolveAppendCollisions` kept BOTH copies of it.
+//
+// AC-142.1  a SUPERSEDED contribution (absent from mine AND from HEAD) is not
+//           evidence of staleness; a SURVIVING one still is.
+// AC-142.2  a stale base may not INFLATE the committed file — measured on the real
+//           39 KB-base-vs-310 KB-file shape, with the corruption reproduced in the
+//           CONTROL DISABLED arm.
+// AC-142.3  an ADD/ADD hunk whose two sides are IDENTICAL is a NO-OP: emitted once.
+//           A tool that reports lines merged when both sides agree reports a fiction.
+// AC-142.4  the duplication post-condition: no content novel to BOTH sides may come
+//           out of the merge more often than it went in — refuse, never commit.
+// AC-142.5  limb B: an item file's machine-regenerated DERIVED block is exempt, so
+//           an event append does not collide with another agent's `wi-project` run.
+// AC-142.6  limb B NON-VACUITY: the exemption is the derived block ONLY — two agents
+//           appending different EVENTS to the same item file both survive.
+// AC-142.7  the sentinel the exemption anchors on is the MACHINERY's, pinned to it.
+// AC-142.8  the merge report states the BYTE delta, so a set-difference line count
+//           can never again narrate a 15 KB inflation as "16 lines".
+
+const BIG_CONFIG = 'sst.config.ts';
+
+/** The ~377-line registry block, the shape of the real inline producer registry. */
+function registryBlock(prefixes) {
+  const L = ['const AEROBUS_PRODUCER_REGISTRY = {'];
+  for (let i = 0; i < 75; i += 1) {
+    L.push(`  "producer-${String(i).padStart(3, '0')}": {`);
+    L.push(`    sourcePrefixes: ["${prefixes}.producer.${i}", "${prefixes}.alt.${i}"],`);
+    L.push(`    bidirectional: "${prefixes}-bidi-${i}",`);
+    L.push(`    account: "6${String(i).padStart(11, '0')}",`);
+    L.push('  },');
+  }
+  L.push('} as const;');
+  return L;
+}
+
+const HEADER = Array.from({ length: 10 }, (_, i) => `// header line ${i}`);
+const TAIL = Array.from({ length: 10 }, (_, i) => `export const tail${i} = ${i};`);
+const LEGACY = Array.from({ length: 39 }, (_, i) => `const legacyScopeGate${i} = "DEFECT-OAG-043-lane-${i}";`);
+// The fixture is built AT THE REAL MAGNITUDE, not at a token scale: the measured
+// instances were a 245,841 B base against a ~294,000 B file with a ~22 KB region
+// duplicated. A small fixture would not exercise the same diff3 hunking at all.
+const BULK = Array.from(
+  { length: 3400 },
+  (_, i) => `export const preexistingResource${i} = { name: "resource-${i}", region: "eu-west-2", retain: true };`,
+);
+const LATER_BLOCK = Array.from(
+  { length: 300 },
+  (_, i) => `export const laterAddition${i} = { queue: "q-${i}", dlq: "q-${i}-dlq", visibility: 300 };`,
+);
+
+/**
+ * The real history shape: an old commit adds a block, later commits grow the file,
+ * a later commit REMOVES that old block. The old commit's contribution now survives
+ * in NEITHER side — which is exactly the condition that mis-selected 265bea2c.
+ * @returns {{repo:string, head:string, mine:string, legacySha:string}}
+ */
+function makeBigConfigRepo() {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'oag142-'));
+  execFileSync('git', ['init', '-q', '-b', 'main', repo]);
+  git(repo, ['config', 'user.email', 'agent@example.test']);
+  git(repo, ['config', 'user.name', 'Agent']);
+  git(repo, ['config', 'commit.gpgsign', 'false']);
+
+  const commit = (text, msg) => {
+    write(repo, BIG_CONFIG, text);
+    git(repo, ['add', '--', BIG_CONFIG]);
+    git(repo, ['commit', '-q', '-m', msg]);
+    return git(repo, ['rev-parse', 'HEAD']);
+  };
+
+  // c0 creates the path, already carrying the bulk of the file — as the real one did,
+  // which is why the mis-selected base was still 245,841 B.
+  commit(`${[...HEADER, ...BULK, ...TAIL].join('\n')}\n`, 'feat(config): initial config');
+  // c1 adds the legacy block — the contribution that will later be superseded.
+  const legacySha = commit(
+    `${[...HEADER, ...BULK, ...LEGACY, ...TAIL].join('\n')}\n`,
+    'fix(ingest): apply the airport-scope gate on BOTH live ingest lanes',
+  );
+  // c2..c6 grow the file; every one of these contributions survives in both sides.
+  const kept = [];
+  for (let i = 0; i < 5; i += 1) {
+    kept.push(`export const keptFeature${i} = "kept-${i}";`);
+    commit(`${[...HEADER, ...BULK, ...LEGACY, ...TAIL, ...kept].join('\n')}\n`, `feat(config): kept feature ${i}`);
+  }
+  // c7 adds a further block, so the base is ~48 KB behind both sides as it really was.
+  commit(
+    `${[...HEADER, ...BULK, ...LEGACY, ...LATER_BLOCK, ...TAIL, ...kept].join('\n')}\n`,
+    'feat(config): later additions',
+  );
+  // c8 inserts the big registry block.
+  commit(
+    `${[...HEADER, ...BULK, ...LEGACY, ...registryBlock('ids'), ...LATER_BLOCK, ...TAIL, ...kept].join('\n')}\n`,
+    'feat(aerobus): inline the producer registry',
+  );
+  // c9 supersedes the legacy block: it is now in NEITHER head NOR any current copy.
+  const head = commit(
+    `${[...HEADER, ...BULK, ...registryBlock('ids'), ...LATER_BLOCK, ...TAIL, ...kept].join('\n')}\n`,
+    'refactor(ingest): drop the superseded scope-gate constants',
+  );
+
+  // MY copy: HEAD plus the owner's ruling — three lines edited INSIDE the registry,
+  // exactly as the ruling that produced f64a13fa did.
+  const mineLines = [...HEADER, ...BULK, ...registryBlock('ids'), ...LATER_BLOCK, ...TAIL, ...kept];
+  const mine = mineLines
+    .join('\n')
+    .replace('"ids.producer.7", "ids.alt.7"', '"bos.producer.7", "daa.alt.7"')
+    .replace('bidirectional: "ids-bidi-7"', 'bidirectional: "bos-bidi-7"')
+    .replace('bidirectional: "ids-bidi-8"', 'bidirectional: "daa-bidi-8"')
+    .concat('\n');
+
+  return { repo, head, mine, legacySha };
+}
+
+const countOf = (text, needle) => text.split(needle).length - 1;
+const headBlobOf = (repo, file) => git(repo, ['show', `HEAD:${file}`]) + '\n';
+
+test('AC-142.1 a SUPERSEDED contribution is NOT evidence of staleness (the 265bea2c mis-selection)', () => {
+  // The real reading: 265bea2c's added lines were absent from my copy AND from HEAD.
+  const headText = 'keep-1\nkeep-2\nmine-novel-absent\n'.replace('mine-novel-absent\n', '');
+  const mineText = 'keep-1\nkeep-2\nrow-mine\n';
+  const history = [
+    // a commit whose contribution SURVIVES in HEAD and which I do have
+    { sha: 'aaaa1111', parentText: 'keep-1\n', text: 'keep-1\nkeep-2\n' },
+    // the 265bea2c shape: added lines superseded later, so absent from BOTH sides
+    { sha: 'bbbb2222', parentText: 'keep-1\n', text: 'keep-1\nsuperseded-a\nsuperseded-b\n' },
+  ];
+  assert.equal(
+    tool.coownedStaleAgainst({ headText, mineText, history }),
+    null,
+    'a contribution HEAD itself no longer carries cannot make my copy stale',
+  );
+});
+
+test('AC-142.1 NON-VACUITY: a SURVIVING contribution absent from my copy IS still selected', () => {
+  const headText = 'keep-1\nkeep-2\nrow-from-A\n';
+  const mineText = 'keep-1\nkeep-2\nrow-mine\n';
+  const history = [
+    { sha: 'cccc3333', parentText: 'keep-1\nkeep-2\n', text: 'keep-1\nkeep-2\nrow-from-A\n' },
+  ];
+  const stale = tool.coownedStaleAgainst({ headText, mineText, history });
+  assert.ok(stale, 'the concurrent-append signature must still fire');
+  assert.equal(stale.sha, 'cccc3333');
+});
+
+test('AC-142.2 CONTROL DISABLED (all three guards off = the historical tool): the merge DUPLICATES the registry and COMMITS it at exit 0 — reproduces e3ea51f9/f64a13fa', () => {
+  const { repo, mine } = makeBigConfigRepo();
+  write(repo, BIG_CONFIG, mine);
+  const res = tool.isolatedCommit({
+    repo,
+    message: 'chore(config): apply the ruling (ITEM-X)',
+    paths: [BIG_CONFIG],
+    staleEvidenceMustSurviveInHead: false,
+    addAddContentRule: false,
+    duplicationPostCondition: false,
+  });
+  assert.equal(typeof res.sha, 'string');
+  const committed = headBlobOf(repo, BIG_CONFIG);
+  assert.equal(
+    countOf(committed, 'const AEROBUS_PRODUCER_REGISTRY = {'),
+    2,
+    'CONTROL DISABLED must reproduce the corruption: the registry declared twice',
+  );
+  // The shape has to be the REAL one, or the diff3 hunking is not the one that
+  // corrupted trunk. MEASURED in this fixture: base 341,589 B, head 378,292 B, mine
+  // 378,293 B, committed 414,806 B — an inflation of +36,513 B. The real instances:
+  // base 245,841 B, head 293,963 B, +22,827 B.
+  const rootSha = git(repo, ['rev-list', '--max-parents=0', 'HEAD']);
+  const baseSize = git(repo, ['show', `${rootSha}:${BIG_CONFIG}`]).length;
+  const headSize = git(repo, ['show', `HEAD~1:${BIG_CONFIG}`]).length;
+  assert.ok(baseSize > 200000, `the mis-selected base must be a LARGE file, as it was; got ${baseSize} B`);
+  assert.ok(headSize - baseSize > 30000, `and tens of KB stale; got ${headSize - baseSize} B behind`);
+  assert.ok(
+    committed.length - mine.length > 20000,
+    `and the file must be INFLATED by tens of KB; got +${committed.length - mine.length} B`,
+  );
+  assert.equal(res.coownedMerges.length, 1, 'and it reports a merge it should never have made');
+  assert.ok(
+    res.coownedMerges[0].linesRecovered < 100,
+    `while narrating it as only ${res.coownedMerges[0].linesRecovered} line(s) — the set-difference count is blind to duplication, which is why AC-142.8 adds the byte delta`,
+  );
+});
+
+test('AC-142.2 CONTROL ENABLED: no merge is invented at all — the committed blob is BYTE-IDENTICAL to mine', () => {
+  const { repo, mine } = makeBigConfigRepo();
+  write(repo, BIG_CONFIG, mine);
+  const res = tool.isolatedCommit({
+    repo,
+    message: 'chore(config): apply the ruling (ITEM-X)',
+    paths: [BIG_CONFIG],
+  });
+  const committed = headBlobOf(repo, BIG_CONFIG);
+  assert.equal(countOf(committed, 'const AEROBUS_PRODUCER_REGISTRY = {'), 1, 'declared exactly once');
+  assert.equal(committed.length, mine.length, `no inflation: got ${committed.length} vs mine ${mine.length}`);
+  assert.equal(committed, mine, 'a file only one agent has touched must be committed verbatim');
+  assert.deepEqual(res.coownedMerges, [], 'and no merge may be reported — there was nothing to merge');
+});
+
+// The corruption now has to get past THREE independent guards, and each one alone
+// is sufficient. That matters because the base-selection fix removes this instance
+// while the other two remove the CLASS: `merge-file` can also duplicate at status 0,
+// with no conflict markers for the hunk rule to inspect at all.
+
+test('AC-142.2 the ADD/ADD CONTENT RULE alone blocks it: with the historical base still selected, the tool REFUSES (exit 7) — HEAD unmoved', () => {
+  const { repo, mine } = makeBigConfigRepo();
+  const before = git(repo, ['rev-parse', 'HEAD']);
+  write(repo, BIG_CONFIG, mine);
+  const err = grab(() =>
+    tool.isolatedCommit({
+      repo,
+      message: 'chore(config): apply the ruling (ITEM-X)',
+      paths: [BIG_CONFIG],
+      staleEvidenceMustSurviveInHead: false,
+      duplicationPostCondition: false,
+    }),
+  );
+  assert.equal(err.code, 7, err.message);
+  assert.match(err.message, /CO-OWNED CONFLICT/);
+  assert.equal(git(repo, ['rev-parse', 'HEAD']), before, 'HEAD unmoved — nothing committed');
+});
+
+test('AC-142.2 the DUPLICATION POST-CONDITION alone blocks it: historical base AND historical hunk rule, and it still REFUSES (exit 7) NAMING duplication', () => {
+  const { repo, mine } = makeBigConfigRepo();
+  const before = git(repo, ['rev-parse', 'HEAD']);
+  write(repo, BIG_CONFIG, mine);
+  const err = grab(() =>
+    tool.isolatedCommit({
+      repo,
+      message: 'chore(config): apply the ruling (ITEM-X)',
+      paths: [BIG_CONFIG],
+      staleEvidenceMustSurviveInHead: false,
+      addAddContentRule: false,
+    }),
+  );
+  assert.equal(err.code, 7, err.message);
+  assert.match(err.message, /DUPLICATION POST-CONDITION/, 'the refusal must NAME duplication, not read as a generic conflict');
+  assert.equal(git(repo, ['rev-parse', 'HEAD']), before, 'HEAD unmoved — nothing committed');
+});
+
+test('AC-142.3 an ADD/ADD hunk whose two sides are IDENTICAL is emitted ONCE, not twice', () => {
+  const diff3 = [
+    'common-before',
+    '<<<<<<< mine',
+    'block-line-1',
+    'block-line-2',
+    '||||||| base',
+    '=======',
+    'block-line-1',
+    'block-line-2',
+    '>>>>>>> head',
+    'common-after',
+  ].join('\n');
+  const r = tool.resolveAppendCollisions(diff3);
+  assert.ok(!r.conflict, 'identical sides are not a conflict');
+  assert.equal(countOf(r.text, 'block-line-1'), 1, 'identical sides must not be duplicated');
+  assert.equal(r.text, 'common-before\nblock-line-1\nblock-line-2\ncommon-after');
+});
+
+test('AC-142.3 an ADD/ADD hunk whose sides OVERLAP but neither contains the other is REFUSED, not silently doubled', () => {
+  const diff3 = [
+    '<<<<<<< mine',
+    'shared-line',
+    'only-mine',
+    '||||||| base',
+    '=======',
+    'shared-line',
+    'only-theirs',
+    '>>>>>>> head',
+  ].join('\n');
+  const r = tool.resolveAppendCollisions(diff3);
+  assert.ok(r.conflict, 'partially-overlapping insertions are the same region seen twice — refuse');
+});
+
+test('AC-142.3 NON-VACUITY: two genuinely DISJOINT appends are still kept, theirs first', () => {
+  const diff3 = [
+    'row-1',
+    '<<<<<<< mine',
+    'row-from-B',
+    '||||||| base',
+    '=======',
+    'row-from-A',
+    '>>>>>>> head',
+  ].join('\n');
+  const r = tool.resolveAppendCollisions(diff3);
+  assert.ok(!r.conflict);
+  assert.equal(r.text, 'row-1\nrow-from-A\nrow-from-B', 'commit order preserved, both rows kept');
+});
+
+test('AC-142.4 the duplication post-condition detects content novel to BOTH sides coming out more often than it went in', () => {
+  const base = 'a\n  },\n';
+  const mine = 'a\n  },\nnovel-both\nonly-mine\n';
+  const head = 'a\n  },\nnovel-both\nonly-theirs\n';
+  assert.deepEqual(
+    tool.duplicatedBeyondBothSides({
+      baseText: base, mineText: mine, headText: head,
+      mergedText: 'a\n  },\nnovel-both\nonly-theirs\nnovel-both\nonly-mine\n',
+    }),
+    ['novel-both'],
+    'a line both sides introduced, emitted twice, is a duplication',
+  );
+});
+
+test('AC-142.4 NON-VACUITY: a legitimate disjoint append, and structural repetition of lines the BASE already had, are NOT flagged', () => {
+  // Two agents each add a block; both blocks contain `  },`, which the base has too.
+  const base = 'a\n  },\nz\n';
+  const mine = 'a\n  },\nmine-1\n  },\nz\n';
+  const head = 'a\n  },\ntheirs-1\n  },\nz\n';
+  const merged = 'a\n  },\ntheirs-1\n  },\nmine-1\n  },\nz\n';
+  assert.deepEqual(
+    tool.duplicatedBeyondBothSides({ baseText: base, mineText: mine, headText: head, mergedText: merged }),
+    [],
+    'multiplicity of a line the common base already carried is structural, not duplication',
+  );
+});
+
+// --- limb B — the item file's machine-regenerated derived block ---------------
+
+const ITEM = 'items/active/UC-OAG-999.md';
+const SENTINEL =
+  '# --- everything below this line is DERIVED (rendered by the machinery). do not hand-edit. ---';
+
+/** An item file exactly as `wi-project` renders it. */
+function itemFile(events, timeInState) {
+  return [
+    '---',
+    'id: UC-OAG-999',
+    'type: use-case',
+    'events:',
+    ...events.map((e) => `  - {ts: "${e.ts}", event: ${e.event}, agent: ${e.agent}}`),
+    SENTINEL,
+    'derived:',
+    '  state: built_green',
+    '  metrics:',
+    `    time_in_state: {scheduled: ${timeInState}}`,
+    `    time_by_owner: {queue: ${timeInState}}`,
+    '---',
+    '',
+    '## body',
+    '',
+  ].join('\n');
+}
+
+const EV_A = { ts: '2026-08-26T09:00:00Z', event: 'pulled', agent: 'engineer' };
+const EV_B = { ts: '2026-08-26T10:00:00Z', event: 'built_green', agent: 'engineer' };
+const EV_C = { ts: '2026-08-26T11:00:00Z', event: 'validated', agent: 'tester' };
+
+function makeItemRepo() {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'oag142item-'));
+  execFileSync('git', ['init', '-q', '-b', 'main', repo]);
+  git(repo, ['config', 'user.email', 'agent@example.test']);
+  git(repo, ['config', 'user.name', 'Agent']);
+  git(repo, ['config', 'commit.gpgsign', 'false']);
+  // The common base's own recomputation — DISTINCT from both sides', because that
+  // is the measured shape: HEAD held one recomputation and my copy another, and
+  // BOTH differed from the base, so the merge saw a genuine same-line overlap.
+  write(repo, ITEM, itemFile([EV_A], '250000.00'));
+  git(repo, ['add', '-A']);
+  git(repo, ['commit', '-q', '-m', 'state: UC-OAG-999 pulled']);
+  return repo;
+}
+
+test('AC-142.5 CONTROL DISABLED (no derived exemption): one event append collides with another agent\'s wi-project regeneration and is REFUSED (exit 7) — reproduces the measured false positive', () => {
+  const repo = makeItemRepo();
+  // Another agent's `make wi-project` rewrote derived for all 538 items and committed.
+  write(repo, ITEM, itemFile([EV_A], '317563.82'));
+  git(repo, ['commit', '-q', '-m', 'chore(views): regenerate', '--', ITEM]);
+  // I append MY event; my copy carries MY OWN newer recomputation of the same block.
+  write(repo, ITEM, itemFile([EV_A, EV_B], '402535.49'));
+  const err = grab(() =>
+    tool.isolatedCommit({ repo, message: 'state: UC-OAG-999 built_green', paths: [ITEM], derivedExempt: false }),
+  );
+  assert.equal(err.code, 7, 'the pre-fix rule must refuse — this is the friction the item measured');
+  assert.match(err.message, /CO-OWNED/);
+});
+
+test('AC-142.5 CONTROL ENABLED: the derived block is exempt — the event append commits (exit 0) and carries MY regeneration', () => {
+  const repo = makeItemRepo();
+  write(repo, ITEM, itemFile([EV_A], '317563.82'));
+  git(repo, ['commit', '-q', '-m', 'chore(views): regenerate', '--', ITEM]);
+  write(repo, ITEM, itemFile([EV_A, EV_B], '402535.49'));
+  const res = tool.isolatedCommit({ repo, message: 'state: UC-OAG-999 built_green', paths: [ITEM] });
+  assert.equal(typeof res.sha, 'string');
+  const head = headBlobOf(repo, ITEM).replace(/\n$/, '');
+  assert.match(head, /event: built_green/, 'my authored event must land');
+  assert.equal(countOf(head, SENTINEL), 1, 'exactly one derived sentinel');
+  assert.equal(countOf(head, 'time_in_state'), 1, 'the derived block must not be doubled');
+  assert.match(head, /time_in_state: \{scheduled: 402535\.49\}/, 'and it is MY regeneration, not a merge of two');
+});
+
+test('AC-142.6 limb B NON-VACUITY: the exemption is the DERIVED BLOCK ONLY — two agents appending different EVENTS to the same item file both survive', () => {
+  const repo = makeItemRepo();
+  // Agent A appends its event and commits through the tool.
+  write(repo, ITEM, itemFile([EV_A, EV_B], '320000.00'));
+  tool.isolatedCommit({ repo, message: 'state: A appends built_green (ITEM-A)', paths: [ITEM] });
+  assert.match(headBlobOf(repo, ITEM), /event: built_green/);
+
+  // Agent B's copy was read BEFORE A committed; B appends a different event.
+  write(repo, ITEM, itemFile([EV_A, EV_C], '402535.49'));
+  const res = tool.isolatedCommit({ repo, message: 'state: B appends validated (ITEM-B)', paths: [ITEM] });
+  assert.equal(typeof res.sha, 'string');
+  const head = headBlobOf(repo, ITEM);
+  assert.match(head, /event: built_green/, "A's committed event must survive B's commit — the loss guard still holds on the authored region");
+  assert.match(head, /event: validated/, "B's event must land");
+  assert.equal(/<<<<<<</.test(head), false, 'no conflict markers');
+  assert.equal(countOf(head, SENTINEL), 1);
+  assert.equal(countOf(head, 'derived:'), 1, 'and the derived block is still singular');
+});
+
+test('AC-142.7 the exemption anchors on the MACHINERY\'s sentinel, pinned to the renderer that writes it', () => {
+  const py = fs.readFileSync(
+    path.join(__dirname, '..', 'skills', 'work-items', 'scripts', 'work-items.py'),
+    'utf-8',
+  );
+  assert.match(
+    py,
+    /# --- everything below this line is DERIVED/,
+    'the renderer must still write the anchor the exemption depends on — an exclusion without authority reads as healthy',
+  );
+  assert.equal(
+    tool.DERIVED_SENTINEL_PREFIX && py.includes(tool.DERIVED_SENTINEL_PREFIX),
+    true,
+    'and the tool must anchor on the exact prefix the renderer writes',
+  );
+});
+
+test('AC-142.8 the merge report states the BYTE delta, so a set-difference line count cannot narrate an inflation as "16 lines"', () => {
+  const repo = makeLedgerRepo();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oag142rep-'));
+  const mf = (n, t) => { const p = path.join(dir, n); fs.writeFileSync(p, t); return p; };
+  write(repo, LEDGER, A_LEDGER);
+  runCli(repo, ['--repo', repo, '--message-file', mf('msg-ITEM-A.txt', 'docs(l): A (ITEM-A)\n'), '--', LEDGER]);
+  write(repo, LEDGER, B_LEDGER);
+  const rb = runCli(repo, ['--repo', repo, '--message-file', mf('msg-ITEM-B.txt', 'docs(l): B (ITEM-B)\n'), '--', LEDGER]);
+  assert.equal(rb.status, 0, rb.stderr);
+  assert.match(rb.stderr + rb.stdout, /byte/i, 'the report must state the size change the merge made');
+  fs.rmSync(dir, { recursive: true, force: true });
+});

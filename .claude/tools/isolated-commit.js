@@ -290,21 +290,131 @@ function linesAdded(before, after) {
  * condition is what separates this guard from a false positive on every wholesale
  * rewrite (measured: without it, 20 of the file's own existing cases fired).
  *
+ * SURVIVING EVIDENCE ONLY (DEFECT-OAG-142 limb A, and it is the whole bug). A
+ * commit's contribution is evidence that MY copy is stale only if HEAD STILL HAS
+ * IT. If the lines are absent from HEAD too, their absence from my copy is not
+ * staleness — it is AGREEMENT: some later commit legitimately superseded them and
+ * both sides moved on together. Without this filter, `sst.config.ts` selected
+ * 265bea2c TWICE, hours apart, on a file only ONE agent had touched: its 17 added
+ * lines were in neither side (measured inMine=0, inHEAD=0), so the base went 23
+ * commits and ~48 KB behind both copies and the "merge" duplicated a 22 KB region
+ * into trunk at exit 0. Measured: with the filter, both instances select NOTHING.
+ *
+ * @param {boolean} [o.evidenceMustSurviveInHead=true] CONTROL toggle — false
+ *        reproduces the historical (defective) selection, for the test's losing arm.
  * @returns {{sha:string, added:string[]}|null} the OLDEST commit missing from my
  *          copy — its parent's blob is the merge base I actually started from.
  */
-function coownedStaleAgainst({ headText, mineText, history }) {
+function coownedStaleAgainst({ headText, mineText, history, evidenceMustSurviveInHead = true }) {
   if (linesAdded(headText, mineText).length === 0) return null; // no novel content
   const mine = new Set(contentLines(mineText));
+  const head = new Set(contentLines(headText));
   let oldest = null;
   for (const h of history) {
     if (h.parentText === null) continue; // created the path — see above
-    const added = linesAdded(h.parentText, h.text);
-    if (added.length === 0) continue;
+    const contributed = linesAdded(h.parentText, h.text);
+    const added = evidenceMustSurviveInHead ? contributed.filter((l) => head.has(l)) : contributed;
+    if (added.length === 0) continue; // nothing of it survives in HEAD — proves nothing
     if (added.some((l) => mine.has(l))) continue; // I have some of it; not cleanly stale
     oldest = { sha: h.sha, added };
   }
   return oldest;
+}
+
+// --- the DERIVED-BLOCK exemption (limb B) ------------------------------------
+//
+// `make wi-project` rewrites the machine-rendered `derived:` block of ALL items on
+// every run, and that block is a PURE FUNCTION of the event log and the clock —
+// time_in_state / time_by_owner carry no agent's intent at all. So two agents whose
+// copies were regenerated at different moments "both changed the same line", which
+// is a REAL overlap by the merge's own rule and was refused at exit 7 with nobody
+// else live. Merging two recomputations of one pure function is meaningless: exempt
+// the block from detection AND from the merge, keep MY regeneration, and let the
+// next `wi-project` reconcile it. The AUTHORED region above the sentinel — where
+// every event append lands — is merged exactly as before, so the loss guard is
+// untouched (AC-142.6).
+//
+// The anchor is the machinery's own sentinel line, written by
+// .claude/skills/work-items/scripts/work-items.py, and it is LIFECYCLE-STABLE: it is
+// re-emitted on every render, so it cannot rot the way a path- or name-based
+// exclusion does (OI-EXCLUSION-WITHOUT-AUTHORITY-READS-AS-HEALTHY).
+const DERIVED_SENTINEL_PREFIX = '# --- everything below this line is DERIVED';
+
+/**
+ * Split a rendered item file around its machine-written derived block.
+ * @returns {{before:string[], derived:string[], after:string[]}|null} null when the
+ *          anchor is absent or unterminated — then nothing is exempted, ever.
+ */
+function splitDerived(text) {
+  const src = String(text).split('\n');
+  const i = src.findIndex((l) => l.startsWith(DERIVED_SENTINEL_PREFIX));
+  if (i === -1) return null;
+  let j = -1;
+  for (let k = i + 1; k < src.length; k += 1) {
+    if (src[k].trim() === '---') { j = k; break; }
+  }
+  if (j === -1) return null; // no frontmatter terminator — do not guess
+  return { before: src.slice(0, i + 1), derived: src.slice(i + 1, j), after: src.slice(j) };
+}
+
+/** The text with its derived block removed; unchanged text when there is none. */
+function maskDerived(text) {
+  if (text === null || text === undefined) return text;
+  const s = splitDerived(text);
+  return s === null ? text : [...s.before, ...s.after].join('\n');
+}
+
+/**
+ * Put MY derived block back into a merged, masked text.
+ * @returns {{text:string}|{error:string}} an error when the merged text does not
+ *          carry exactly one anchor — a structural surprise is never guessed at.
+ */
+function spliceDerived(maskedText, derivedLines) {
+  const src = String(maskedText).split('\n');
+  const hits = src.filter((l) => l.startsWith(DERIVED_SENTINEL_PREFIX)).length;
+  if (hits !== 1)
+    return { error: `the merged text carries ${hits} derived sentinels; refusing to splice` };
+  const i = src.findIndex((l) => l.startsWith(DERIVED_SENTINEL_PREFIX));
+  return { text: [...src.slice(0, i + 1), ...derivedLines, ...src.slice(i + 1)].join('\n') };
+}
+
+/**
+ * THE DUPLICATION POST-CONDITION (DEFECT-OAG-142 limb A, AC-142.4).
+ *
+ * The base-selection fix removes the cause; this removes the CLASS. A three-way
+ * merge may reorder and interleave, but it may never make content APPEAR MORE OFTEN
+ * than the side that had it most — and the merge that corrupted trunk did exactly
+ * that while reporting "16 line(s) merged back in", because `linesAdded` is a SET
+ * difference and is therefore structurally blind to duplication.
+ *
+ * Scoped to content NOVEL TO BOTH SIDES relative to the common base. A line the base
+ * already carried (`  },`, a blank, boilerplate) legitimately multiplies when two
+ * agents each add a block, so counting those would refuse every honest append; a
+ * line only ONE side has cannot be doubled by keeping both sides. What remains —
+ * absent from the base, present in BOTH sides, emitted more often than either had it
+ * — is a duplication by definition. It fails CLOSED: refuse, never commit.
+ *
+ * @returns {string[]} the offending content lines; empty means clean.
+ */
+function duplicatedBeyondBothSides({ baseText, mineText, headText, mergedText }) {
+  const tally = (t) => {
+    const m = new Map();
+    for (const l of contentLines(t === null || t === undefined ? '' : t))
+      m.set(l, (m.get(l) || 0) + 1);
+    return m;
+  };
+  const base = tally(baseText);
+  const mine = tally(mineText);
+  const theirs = tally(headText);
+  const out = [];
+  for (const [line, n] of tally(mergedText)) {
+    if (base.has(line)) continue; // the base already carried it — multiplicity is structural
+    const a = mine.get(line) || 0;
+    const b = theirs.get(line) || 0;
+    if (a === 0 || b === 0) continue; // only one side contributed it — cannot be doubled
+    if (n > Math.max(a, b)) out.push(line);
+  }
+  return out;
 }
 
 // --- git plumbing ------------------------------------------------------------
@@ -387,9 +497,22 @@ function duplicateMessageAncestor(repo, head, message, depth = DUP_SCAN_DEPTH) {
  * A hunk with a NON-EMPTY base is a genuine overlap — both sides rewrote the SAME
  * existing lines — and is NEVER resolved silently. That is the exit-7 refusal.
  *
+ * AND "keep both" IS ONLY SOUND WHEN THE TWO SIDES ARE DISJOINT CONTRIBUTIONS
+ * (DEFECT-OAG-142 limb A). Against a stale base, a region BOTH sides already had
+ * looks like an ADD/ADD insertion, and keeping both emitted it TWICE — 22 KB and a
+ * second `const AEROBUS_PRODUCER_REGISTRY` into trunk, at exit 0. So, by content:
+ *   - either side EMPTY .............. keep the other
+ *   - one side CONTAINS the other .... keep the container; identical sides are
+ *                                     therefore a NO-OP BY CONSTRUCTION, which is
+ *                                     the point: a tool that reports lines merged
+ *                                     when both sides agree is reporting a fiction
+ *   - sides INTERSECT but neither contains the other .... the same region seen
+ *                                     twice, not two appends — REFUSE (exit 7)
+ *   - sides DISJOINT ................. keep both, theirs first (the real append case)
+ *
  * @returns {{text:string}|{conflict:string}}
  */
-function resolveAppendCollisions(diff3Text) {
+function resolveAppendCollisions(diff3Text, { contentRule = true } = {}) {
   const src = String(diff3Text).split('\n');
   const out = [];
   let i = 0;
@@ -415,6 +538,20 @@ function resolveAppendCollisions(diff3Text) {
     if (!closed) return { conflict: diff3Text };
     const nonBlank = (a) => a.some((l) => l.trim().length > 0);
     if (nonBlank(base)) return { conflict: diff3Text }; // both changed the SAME lines
+
+    // ADD/ADD with an empty base — resolve BY CONTENT, not by position.
+    // contentRule=false is the CONTROL toggle that restores the historical
+    // position-only "keep both" — the losing arm of AC-142.2, never for real use.
+    if (!contentRule) { out.push(...theirs, ...mine); continue; }
+    const setOf = (a) => new Set(a.map((l) => l.trim()).filter((l) => l.length > 0));
+    const sMine = setOf(mine);
+    const sTheirs = setOf(theirs);
+    const contains = (outer, inner) => [...inner].every((l) => outer.has(l));
+    if (sTheirs.size === 0) { out.push(...mine); continue; }
+    if (sMine.size === 0) { out.push(...theirs); continue; }
+    if (contains(sMine, sTheirs)) { out.push(...mine); continue; } // incl. IDENTICAL sides
+    if (contains(sTheirs, sMine)) { out.push(...theirs); continue; }
+    if ([...sMine].some((l) => sTheirs.has(l))) return { conflict: diff3Text };
     out.push(...theirs, ...mine);
   }
   return { text: out.join('\n') };
@@ -448,7 +585,17 @@ function indexEntry(repo, file, env) {
  *        | {merged:string, since:string, addedBack:number}   clean three-way merge
  *        | {conflict:string, since:string}                   genuinely overlapping — refuse
  */
-function resolveCoowned({ repo, privEnv, oldHead, file, depth = COOWNED_SCAN_DEPTH }) {
+function resolveCoowned({
+  repo,
+  privEnv,
+  oldHead,
+  file,
+  depth = COOWNED_SCAN_DEPTH,
+  derivedExempt = true,
+  evidenceMustSurviveInHead = true,
+  duplicationPostCondition = true,
+  addAddContentRule = true,
+}) {
   const headBlob = blobAt(repo, oldHead, file);
   if (headBlob === null) return null; // new file — nobody to clobber
   const mineEntry = indexEntry(repo, file, privEnv);
@@ -457,6 +604,14 @@ function resolveCoowned({ repo, privEnv, oldHead, file, depth = COOWNED_SCAN_DEP
   const mineBlob = gitRaw(repo, ['cat-file', 'blob', mineEntry.sha]);
   if (looksBinary(headBlob) || looksBinary(mineBlob)) return null;
 
+  // LIMB B — exempt the machine-regenerated derived block, but ONLY when BOTH sides
+  // are rendered item files. Asymmetric masking would be a structural difference
+  // worth surfacing, not something to paper over.
+  const mineSplit = derivedExempt ? splitDerived(mineBlob) : null;
+  const headSplit = derivedExempt ? splitDerived(headBlob) : null;
+  const exempting = mineSplit !== null && headSplit !== null;
+  const mask = exempting ? maskDerived : (t) => t;
+
   const log = gitTry(repo, ['log', `--max-count=${depth}`, '--format=%H', oldHead, '--', file]);
   if (!log.ok) return null;
   const history = [];
@@ -464,13 +619,19 @@ function resolveCoowned({ repo, privEnv, oldHead, file, depth = COOWNED_SCAN_DEP
     const text = blobAt(repo, sha, file);
     if (text === null) continue;
     const parentText = blobAt(repo, `${sha}^`, file);
-    history.push({ sha, text, parentText });
+    history.push({ sha, text: mask(text), parentText: parentText === null ? null : mask(parentText) });
   }
 
-  const stale = coownedStaleAgainst({ headText: headBlob, mineText: mineBlob, history });
+  const stale = coownedStaleAgainst({
+    headText: mask(headBlob),
+    mineText: mask(mineBlob),
+    history,
+    evidenceMustSurviveInHead,
+  });
   if (!stale) return null;
 
-  const baseText = blobAt(repo, `${stale.sha}^`, file);
+  const rawBase = blobAt(repo, `${stale.sha}^`, file);
+  const baseText = rawBase === null ? null : mask(rawBase);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'isolated-merge-'));
   try {
     const w = (n, t) => {
@@ -485,19 +646,58 @@ function resolveCoowned({ repo, privEnv, oldHead, file, depth = COOWNED_SCAN_DEP
         '-L', `${file} (MINE)`,
         '-L', `${file} (common base ${stale.sha.slice(0, 8)}^)`,
         '-L', `${file} (HEAD — concurrent agent)`,
-        w('mine', mineBlob), w('base', baseText === null ? '' : baseText), w('head', headBlob),
+        w('mine', mask(mineBlob)), w('base', baseText === null ? '' : baseText), w('head', mask(headBlob)),
       ],
       { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 },
     );
     if (res.status !== 0 && res.stdout === '')
       return { conflict: res.stderr || '(git merge-file gave no output)', since: stale.sha };
     const resolved =
-      res.status === 0 ? { text: res.stdout } : resolveAppendCollisions(res.stdout);
+      res.status === 0
+        ? { text: res.stdout }
+        : resolveAppendCollisions(res.stdout, { contentRule: addAddContentRule });
     if (resolved.conflict) return { conflict: resolved.conflict, since: stale.sha };
+
+    // THE DUPLICATION POST-CONDITION (AC-142.4) — checked on the MASKED texts the
+    // merge actually operated on, and BEFORE anything is written. `merge-file` can
+    // also duplicate at status 0, with no conflict markers for the hunk resolver to
+    // see, so this cannot live inside `resolveAppendCollisions`.
+    if (duplicationPostCondition) {
+      const dup = duplicatedBeyondBothSides({
+        baseText,
+        mineText: mask(mineBlob),
+        headText: mask(headBlob),
+        mergedText: resolved.text,
+      });
+      if (dup.length > 0)
+        return {
+          conflict: [
+            `DUPLICATION POST-CONDITION: the three-way merge against base ${stale.sha.slice(0, 8)}^ would`,
+            `emit ${dup.length} line(s) MORE OFTEN than either side had them — that is not a merge, it is a`,
+            'duplication, and it is how e3ea51f9/f64a13fa put a second copy of a 22 KB region into trunk',
+            'at exit 0. The base does not describe either side. First few offenders:',
+            ...dup.slice(0, 12).map((l) => `    ${l}`),
+          ].join('\n'),
+          since: stale.sha,
+          duplicated: dup,
+        };
+    }
+
+    // Put MY derived block back — it is a recomputation, not a contribution.
+    let finalText = resolved.text;
+    if (exempting) {
+      const spliced = spliceDerived(finalText, mineSplit.derived);
+      if (spliced.error)
+        return { conflict: `DERIVED-BLOCK SPLICE: ${spliced.error}`, since: stale.sha };
+      finalText = spliced.text;
+    }
+
     return {
-      merged: resolved.text,
+      merged: finalText,
       since: stale.sha,
-      addedBack: linesAdded(mineBlob, resolved.text).length,
+      addedBack: linesAdded(mineBlob, finalText).length,
+      byteDelta: Buffer.byteLength(finalText) - Buffer.byteLength(mineBlob),
+      derivedExempted: exempting,
       mode: mineEntry.mode,
       mineSha: mineEntry.sha,
     };
@@ -521,6 +721,15 @@ function resolveCoowned({ repo, privEnv, oldHead, file, depth = COOWNED_SCAN_DEP
  * @param {boolean} [o.coownedMerge=true] three-way merge a concurrent agent's
  *                               committed lines back into a CO-OWNED file rather
  *                               than silently reverting them (limb A)
+ * @param {boolean} [o.derivedExempt=true] exempt an item file's machine-regenerated
+ *                               derived block from detection and merge (limb B)
+ * @param {boolean} [o.staleEvidenceMustSurviveInHead=true] CONTROL toggle for the
+ *                               base-selection fix (limb A). false reproduces the
+ *                               historical selection and exists for the losing arm
+ *                               of AC-142.2 — never set it in anger.
+ * @param {boolean} [o.duplicationPostCondition=true] CONTROL toggle for AC-142.4.
+ * @param {boolean} [o.addAddContentRule=true] CONTROL toggle for AC-142.3 — false
+ *                               restores the historical position-only "keep both".
  * @param {boolean} [o.syncIndex=true]  resync the shared index for MY paths
  * @param {object} [o.hooks]     test seam: { beforeUpdateRef, beforeCommitTree,
  *                               corruptMessageForCommitTree }
@@ -536,6 +745,10 @@ function isolatedCommit({
   dupScanDepth = DUP_SCAN_DEPTH,
   coownedMerge = true,
   coownedScanDepth = COOWNED_SCAN_DEPTH,
+  derivedExempt = true,
+  staleEvidenceMustSurviveInHead = true,
+  duplicationPostCondition = true,
+  addAddContentRule = true,
   syncIndex = true,
   hooks = {},
 }) {
@@ -647,7 +860,17 @@ function isolatedCommit({
       coownedMerges.length = 0;
       if (coownedMerge && oldHead) {
         for (const file of changed) {
-          const r = resolveCoowned({ repo, privEnv, oldHead, file, depth: coownedScanDepth });
+          const r = resolveCoowned({
+            repo,
+            privEnv,
+            oldHead,
+            file,
+            depth: coownedScanDepth,
+            derivedExempt,
+            evidenceMustSurviveInHead: staleEvidenceMustSurviveInHead,
+            duplicationPostCondition,
+            addAddContentRule,
+          });
           if (!r) continue;
           if (r.conflict)
             throw new IsolatedCommitError(
@@ -676,6 +899,8 @@ function isolatedCommit({
             path: file,
             since: r.since,
             linesRecovered: r.addedBack,
+            byteDelta: r.byteDelta,
+            derivedExempted: r.derivedExempted,
             merged: r.merged,
             mineSha: r.mineSha,
           });
@@ -916,6 +1141,14 @@ committed, so committing yours REVERTS their already-committed lines with exit 0
 a clean log. Their lines are three-way merged back in and the merge is REPORTED; an
 overlapping edit is refused (exit 7) rather than guessed at.
 
+THE MERGE NEVER DUPLICATES (DEFECT-OAG-142). Staleness is only ever evidenced by
+content HEAD STILL HAS; two identical sides are a no-op; and content novel to BOTH
+sides may not leave the merge more often than it went in, or the commit is refused.
+An item file's machine-written \`derived:\` block is a pure function of the event log
+and the clock, so it is EXEMPT — yours is kept verbatim and \`wi-project\` reconciles it.
+The report states the BYTE delta, because the line count is a set difference and is
+blind to duplication.
+
   --allow-duplicate-message      commit a message identical to a recent ancestor's
   --allow-shared-message-file    accept a non-unique --message-file name
   --no-coowned-merge             commit MY blob verbatim over a co-owned file
@@ -945,6 +1178,13 @@ function main(argv) {
           `CO-OWNED MERGE — ${m.path}`,
           `  a concurrent agent committed to this file since ${m.since.slice(0, 8)}; your copy predated it.`,
           `  ${m.linesRecovered} line(s) of THEIRS were merged back in rather than reverted by your commit.`,
+          // The line count is a SET difference and is therefore blind to duplication:
+          // it said "16 line(s)" while 15 KB had been doubled into trunk. The byte
+          // delta is the number that cannot lie about that (AC-142.8).
+          `  size change vs your copy: ${m.byteDelta >= 0 ? '+' : ''}${m.byteDelta} byte(s).`,
+          ...(m.derivedExempted
+            ? ['  (the machine-regenerated DERIVED block was exempt; yours was kept verbatim)']
+            : []),
           m.writtenBack === false
             ? '  (the working-tree copy was NOT rewritten — it changed again while this commit ran)'
             : '  (the working tree now holds the union, so the next agent is not stale)',
@@ -980,6 +1220,11 @@ module.exports = {
   linesAdded,
   coownedStaleAgainst,
   resolveAppendCollisions,
+  duplicatedBeyondBothSides,
+  splitDerived,
+  maskDerived,
+  spliceDerived,
+  DERIVED_SENTINEL_PREFIX,
   COOWNED_SCAN_DEPTH,
   DUP_SCAN_DEPTH,
   normalizeDeclared,

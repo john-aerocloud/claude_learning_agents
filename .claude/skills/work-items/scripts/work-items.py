@@ -404,6 +404,11 @@ def check_transition(graphs, itype, state, event, agent):
 # Item file I/O — hand-rolled YAML-ish frontmatter (contract's tiny subset)
 # ---------------------------------------------------------------------------
 class Item:
+    # The file's DECLARED derived block, attached by `load_item` for I8 only
+    # (None ⇒ constructed in memory / no block on disk). Never read to decide
+    # state: state is fold(events).
+    declared = None
+
     def __init__(self, path, fm, body):
         self.path = path
         self.fm = fm          # ordered dict of frontmatter fields (excluding derived)
@@ -621,7 +626,52 @@ def load_item(path):
         text = f.read()
     fm_text, body = _split_frontmatter(text)
     fm = parse_frontmatter(fm_text)
-    return Item(path, fm, body)
+    it = Item(path, fm, body)
+    # The file's OWN COPY of the derived block, kept as-declared and never used to
+    # decide anything — its only purpose is I8, which compares it against
+    # fold(events). `parse_frontmatter` deliberately discards everything under
+    # `derived:`, which is why nothing could see this class of drift before
+    # (OI-WI-VALIDATE-IGNORES-DERIVED-STATE-LEGALITY).
+    it.declared = _declared_derived_from_text(fm_text)
+    return it
+
+
+# --- the file's declared `derived:` block (READ FOR VALIDATION ONLY) ---------
+# `derived:` is a RENDERING of fold(events), marked "do not hand-edit" — and until
+# I8 nothing enforced that. Five use-case items were registered with hand-authored
+# blocks carrying the aggregate-only `state: planned` / `queue: null` and
+# `wi-validate` reported clean; the Linear projector's reality sweep was the only
+# thing that noticed. So the block is parsed here EXCLUSIVELY so the gate can
+# disagree with it. No other code path may read it: state is the fold, always.
+def _declared_derived_from_text(fm_text):
+    """Return {'state': …, 'queue': …} as DECLARED in the file, or None when the
+    item carries no `derived:` block at all. Missing keys are simply absent from
+    the dict (distinct from a key declared `null`)."""
+    lines = fm_text.split("\n")
+    start = None
+    for i, line in enumerate(lines):
+        if re.match(r"^derived:\s*$", line):
+            start = i
+            break
+    if start is None:
+        return None
+    out = {}
+    for line in lines[start + 1:]:
+        if line.strip() == "" or line.strip().startswith("#"):
+            continue
+        if not line.startswith(" "):
+            break                      # back to a top-level key: block is over
+        m = re.match(r"^  (state|queue):\s*(.*)$", line)
+        if m:
+            out[m.group(1)] = _parse_scalar(m.group(2))
+    return out
+
+
+def declared_derived(path):
+    """The `derived:` block as DECLARED in an item file on disk (validation only)."""
+    with open(path, encoding="utf-8") as f:
+        fm_text, _body = _split_frontmatter(f.read())
+    return _declared_derived_from_text(fm_text)
 
 
 # --- rendering -------------------------------------------------------------
@@ -878,6 +928,41 @@ def _bubble(graphs, items, kids, states, agg_item=None):
     if any(_child_past_initial(graphs, items, k, states) for k in kids):
         return "in_progress"
     return AGG_INITIAL
+
+
+# The AGGREGATE bubble's RANGE — every value `_bubble` above can return, and
+# therefore every state an aggregate may legitimately declare. Kept adjacent to
+# `_bubble` on purpose: if a future bubble rule can return something else, this set
+# is the line it has to cross, and TestLegalStatesDerivation drives `_bubble` over
+# every child configuration to prove the two agree (a legal set the code can step
+# outside is not a legal set).
+_BUBBLE_RANGE = {AGG_INITIAL, "in_progress"} | _PARKED_STATES
+
+
+def legal_states(graphs, itype):
+    """The set of states an item of `itype` may legitimately be IN — DERIVED from
+    state-graphs.json, never a hand-kept list (the pattern established by
+    OI-LINEAR-CANCELLED-STATE-UNMAPPED's fix, whose whole point was that a
+    hand-kept mirror of the graph goes stale silently).
+
+      FLOW      : the initial state plus every `from`/`to` in its transitions.
+      AGGREGATE : the initial state, its terminals, and the bubble's range — an
+                  aggregate has no own event stream, so its state is not folded
+                  but BUBBLED, and a flow-only state (`ready`, `building`) is not
+                  something it can ever legitimately be in.
+
+    Returns an empty set for an unknown type (the caller reports that separately)."""
+    tdef = graphs.types.get(itype)
+    if not tdef:
+        return set()
+    states = {graphs.initial(itype)} | graphs.terminals(itype)
+    if graphs.kind(itype) == "aggregate":
+        states |= _BUBBLE_RANGE
+    else:
+        for t in graphs.transitions(itype):
+            states.add(t["from"])
+            states.add(t["to"])
+    return {s for s in states if s}
 
 
 def _child_past_initial(graphs, items, k, states):
@@ -1185,9 +1270,50 @@ def cmd_append(a):
     # place here; `project` performs the physical relocation authoritatively.
     with open(path, "w", encoding="utf-8") as f:
         f.write(render_item(item, dv))
+    # …and PROPAGATE to the ancestors this transition moved. An aggregate's state
+    # is not folded from its own events, it BUBBLES from its children, so a child's
+    # append can change every ancestor's state — and re-rendering only the appended
+    # item left those blocks stale until the next `project`. That mattered little
+    # while nothing read them; I8 now compares each block against the fold, so a
+    # stale ancestor would fire the gate on an item nobody touched, every cycle,
+    # and the pressure would be to weaken I8 rather than to fix the write. Fix the
+    # write: the propagation happens here, where the state actually changes.
+    for anc_id in _propagation_targets(items, a.id):
+        anc = items.get(anc_id)
+        # Never (re)CREATE a file: if an ancestor has been relocated or removed by
+        # a concurrent agent since we loaded, writing its old path would resurrect
+        # a duplicate id (I4). Skipping is correct — `project` re-renders everything.
+        if anc is None or not os.path.exists(anc.path):
+            continue
+        with open(anc.path, "w", encoding="utf-8") as f:
+            f.write(render_item(anc, derived_block(graphs, items, states,
+                                                   children, anc_id)))
     new_state = states.get(a.id)
     print(f"append: {a.id} {state} --({a.event}/{a.agent})--> {new_state}")
     _maybe_relocate(a.project, a.id, item, new_state, graphs)
+
+
+def _propagation_targets(items, iid):
+    """Every TRANSITIVE parent of `iid` — the items whose derived state can move
+    because this one did. Walks ALL parents, not just the first: `compute_ancestors`
+    deliberately reports one chain for display, but a child with two parents bubbles
+    into both, and a rendering left stale in the second is exactly the drift I8
+    reports. Cycle-guarded (I3 is what rejects a cycle; this must not hang on one)."""
+    out, seen, frontier = [], {iid}, [iid]
+    while frontier:
+        nxt = []
+        for cur in frontier:
+            it = items.get(cur)
+            if not it:
+                continue
+            for p in it.parents:
+                if p in seen:
+                    continue
+                seen.add(p)
+                out.append(p)
+                nxt.append(p)
+        frontier = nxt
+    return out
 
 
 def _maybe_relocate(project, iid, item, state, graphs):
@@ -2837,6 +2963,14 @@ DEFAULT_STALE_HOURS = 4.0
 # the first knob to tune from the measured age distribution (median 2.2d / oldest
 # 8.0d at open on OagEventSource), exactly as --stale-hours was.
 DEFAULT_MAX_BACKLOG_AGE_DAYS = 7.0
+
+# v155 — the TOTAL-AGE CEILING past which an in-date `defer_until:` stops exempting a
+# backlog item. Set well above DEFAULT_MAX_BACKLOG_AGE_DAYS on purpose: a defer is a
+# legitimate instrument and must stay cheap for a genuine wait. This is only the point
+# at which RE-DATING is no longer one of the available answers, because the measured
+# failure was serial re-dating (36 items, twice in 9 days, none reaching `done`), not
+# the first defer. 30d ~= four re-dates at the 7d threshold.
+DEFAULT_MAX_DEFER_TOTAL_DAYS = 30.0
 # §F2 seed defaults, used only when queues/policy.csv lacks the row. The retro
 # TUNES these in policy.csv — they are never the authority, just the fallback.
 POLICY_DEFAULTS = {
@@ -3764,7 +3898,8 @@ def _activity_phrase(row):
 def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
                       threshold=3, now=None, observe=True,
                       observe_timeout=DEFAULT_OBSERVE_TIMEOUT,
-                      max_backlog_age_days=DEFAULT_MAX_BACKLOG_AGE_DAYS):
+                      max_backlog_age_days=DEFAULT_MAX_BACKLOG_AGE_DAYS,
+                      max_defer_total_days=DEFAULT_MAX_DEFER_TOTAL_DAYS):
     """PURE-ish computation (the impurities are the read-only git query and the
     observation predicate, both injected via the module-level `_ref_on_trunk` /
     `_run_observation` so tests can substitute them).
@@ -4144,6 +4279,7 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
             continue
         undecided = []
         unreadable = []
+        over_ceiling = []
         for mid in members[q]:
             st_m = states.get(mid)
             ent, why = _open_segment_entered(graphs, items[mid], st_m, now)
@@ -4163,7 +4299,34 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
                 continue
             deferred_to = _defer_until(items[mid])
             if deferred_to is not None and deferred_to > now:
-                continue            # an in-date decision exists — respect it
+                # An in-date decision exists — respect it, but NOT for ever.
+                #
+                # v155, and this is the retro's root-cause fix. This branch used to
+                # be an unconditional `continue`, so an in-date defer exempted the
+                # item NO MATTER HOW MANY TIMES IT HAD BEEN RE-DATED. That made the
+                # gate satisfiable indefinitely WITHOUT MOVING ANY WORK: re-dating
+                # is the cheapest compliant action, so re-dating is what happened.
+                #
+                # MEASURED, OagEventSource 2026-08-27: the same 36-item batch had
+                # been mechanically re-staggered TWICE in 9 days (2026-08-18 and
+                # 2026-08-19) and NOT ONE of them had reached `done` in between.
+                # Items 22-25 days old were being re-dated three weeks out. The
+                # gate reported satisfied throughout, because each individual defer
+                # was a legal, in-date decision. The check measured DECISION and
+                # never MOVEMENT — this project's control-satisfiable-without-
+                # achieving-its-purpose family, arriving in the flow gate itself.
+                #
+                # So a defer buys TIME, not IMMUNITY: past a total-age ceiling,
+                # re-dating is no longer an available answer and the item must be
+                # scheduled, declined, or escalated. Deliberately keyed on TOTAL
+                # IN-QUEUE AGE rather than on a defer COUNT: the count is not
+                # recorded anywhere (frontmatter holds one value, overwritten each
+                # time), whereas age is already computed above and is exactly the
+                # quantity serial re-dating is used to hide.
+                if age_d <= max_defer_total_days:
+                    continue
+                over_ceiling.append((age_d, mid, deferred_to))
+                continue
             undecided.append((age_d, mid, deferred_to))
         if unreadable:
             # UNKNOWN, not block — and the asymmetry with check 11 is deliberate,
@@ -4197,6 +4360,37 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
                       f"check exists to restore (recover the true instant from the "
                       f"commit that ADDED the item file: `git -C <repo> log "
                       f"--diff-filter=A --format=%aI -1 -- <path>`, converted to UTC)."),
+            })
+        if over_ceiling:
+            over_ceiling.sort(reverse=True)
+            findings.append({
+                "check": "aged-backlog-defer-ceiling", "severity": "block",
+                "queue": q, "ids": [m for _a, m, _d in over_ceiling],
+                "max_defer_total_days": max_defer_total_days,
+                "message": (
+                    f"[aged-backlog-defer-ceiling] {len(over_ceiling)} item(s) in {q} "
+                    f"hold an IN-DATE defer but have now been in-queue longer than the "
+                    f"{max_defer_total_days:.0f}d total-age CEILING, so re-dating is no "
+                    f"longer an available answer: "
+                    + ", ".join(f"{m} ({a:.1f}d in queue, deferred to "
+                               f"{d.date().isoformat()})"
+                               for a, m, d in over_ceiling[:8])
+                    + (f" and {len(over_ceiling) - 8} more"
+                       if len(over_ceiling) > 8 else "")
+                    + f". A defer buys TIME, NOT IMMUNITY. This limb exists because "
+                      f"the in-date branch used to exempt an item no matter how many "
+                      f"times it had been re-dated, which made this gate satisfiable "
+                      f"INDEFINITELY WITHOUT MOVING ANY WORK — measured on "
+                      f"OagEventSource 2026-08-27: one 36-item batch re-staggered "
+                      f"TWICE in 9 days with NOT ONE item reaching `done` in between, "
+                      f"while the gate reported satisfied throughout because each "
+                      f"individual defer was legal and in-date. Remedy, per item — "
+                      f"SCHEDULE it (and pull it), or DECLINE it, or ESCALATE it to a "
+                      f"named party. Extending the date again is NOT one of the three, "
+                      f"and §F8a's prohibition still stands: do NOT close a real "
+                      f"finding to clear this gate. If a whole class of these is real "
+                      f"but never pulled, that is a CAPACITY decision for the retro "
+                      f"(a standing WIP allocation), not a dating decision."),
             })
         if not undecided:
             continue
@@ -5226,7 +5420,9 @@ def cmd_loop_gate(a):
         observe=getattr(a, "observe", True),
         observe_timeout=getattr(a, "observe_timeout", None) or DEFAULT_OBSERVE_TIMEOUT,
         max_backlog_age_days=getattr(a, "max_backlog_age_days", None)
-        or DEFAULT_MAX_BACKLOG_AGE_DAYS)
+        or DEFAULT_MAX_BACKLOG_AGE_DAYS,
+        max_defer_total_days=getattr(a, "max_defer_total_days", None)
+        or DEFAULT_MAX_DEFER_TOTAL_DAYS)
     blocking = [f for f in findings if f["severity"] == "block"]
     advisory = [f for f in findings if f["severity"] == "advisory"]
     unknown = [f for f in findings if f["severity"] == "unknown"]
@@ -5280,7 +5476,7 @@ def cmd_loop_gate(a):
 
 
 # ---------------------------------------------------------------------------
-# Subcommand: validate — the drift GATE (invariants I1–I4)
+# Subcommand: validate — the drift GATE (invariants I1–I4, I6, I7, I8)
 # ---------------------------------------------------------------------------
 def cmd_validate(a):
     graphs = Graphs.load()
@@ -5290,7 +5486,7 @@ def cmd_validate(a):
         for v in violations:
             print(f"  - {v}", file=sys.stderr)
         sys.exit(1)
-    print(f"validate: {a.project} clean — I1–I4 + I6 + I7 all hold.")
+    print(f"validate: {a.project} clean — I1–I4 + I6 + I7 + I8 all hold.")
 
 
 def validate_items(graphs, project):
@@ -5382,6 +5578,20 @@ def validate_items(graphs, project):
                     violations.append(
                         f"(I7) {iid}: reversal probe is not evaluable: {e}")
 
+        # I8: the file's OWN `derived:` block agrees with fold(events) — the one
+        # thing every reader assumes this gate checks, and until now the only thing
+        # it did not (OI-WI-VALIDATE-IGNORES-DERIVED-STATE-LEGALITY). `derived:` is
+        # a RENDERING of the fold, but it is what the queue views, the board
+        # projector, `item-brief` and every agent that opens the file actually read.
+        # FOUNDING INSTANCE: five use-case items registered with hand-authored
+        # blocks carrying the AGGREGATE-ONLY `state: planned` / `queue: null` — a
+        # use-case graph has no `planned` state at all — and `wi-validate` reported
+        # `clean`. `wi-project` healed all five, so the machinery could compute the
+        # right answer the whole time; the gate simply never asked.
+        # The remedy is ALWAYS `make wi-project` (re-render), NEVER an edit to the
+        # block — editing it is the act that caused this.
+        violations.extend(_check_I8(graphs, iid, it, state, project))
+
         # I4b: a done FLOW item must live in done/ (aggregates always stay in
         # active/ — their state is DERIVED from children, not their own stream,
         # so a bubbled-done chunk/slice is not physically archived).
@@ -5404,6 +5614,56 @@ def validate_items(graphs, project):
         violations.append(f"(I3) dependency cycle in deps: {' -> '.join(cyc)}")
 
     return violations
+
+
+_I8_REMEDY = ("re-render it with `make wi-project PROJECT={project}` — the block is "
+              "a rendering of fold(events), so the fix is to regenerate it, never "
+              "to correct it in place")
+
+
+def _check_I8(graphs, iid, it, state, project):
+    """I8 — the DECLARED `derived:` block must agree with fold(events).
+
+    Four limbs, each failing CLOSED, in the order that gives the most useful
+    message first:
+      (a) the block exists and declares a state — `null`/absent is not a pass,
+          it is an item no derived view can see;
+      (b) the declared state is one the item's OWN type graph defines (the
+          founding instance: `planned` on a use-case);
+      (c) the declared state EQUALS the computed state — legality alone cannot
+          catch a plausible lie (`ready` on a use-case that folded to `done`);
+      (d) the declared queue equals queue_map[declared state].
+    """
+    out = []
+    remedy = _I8_REMEDY.format(project=project)
+    declared = it.declared
+    if declared is None:
+        out.append(f"(I8) {iid}: no `derived:` block — every derived view (queues, "
+                   f"board, item-brief) reads that block, so an item without one is "
+                   f"invisible to all of them; {remedy}")
+        return out
+    if "state" not in declared or declared.get("state") is None:
+        out.append(f"(I8) {iid}: `derived.state` is null/absent while fold(events) "
+                   f"says '{state}' — a provisional block was persisted; {remedy}")
+        return out
+    ds = declared.get("state")
+    legal = legal_states(graphs, it.type)
+    if legal and ds not in legal:
+        out.append(f"(I8) {iid}: `derived.state: {ds}` is not a state the "
+                   f"'{it.type}' graph defines (legal: {', '.join(sorted(legal))}); "
+                   f"fold(events) says '{state}'; {remedy}")
+    elif ds != state:
+        out.append(f"(I8) {iid}: `derived.state: {ds}` disagrees with fold(events), "
+                   f"which says '{state}' — the block is stale or hand-authored, and "
+                   f"the fold is the truth; {remedy}")
+    dq = declared.get("queue") if "queue" in declared else "<absent>"
+    exp_q = graphs.queue_for(ds)
+    if dq != exp_q:
+        out.append(f"(I8) {iid}: `derived.queue: {dq}` is not queue_map['{ds}'] "
+                   f"(= {exp_q}) — the queue is a pure function of the state, so a "
+                   f"declared queue that disagrees puts the item in the wrong queue "
+                   f"view or in none; {remedy}")
+    return out
 
 
 def _find_dep_cycle(items):
@@ -5908,6 +6168,13 @@ def main(argv=None):
                          "(schedule it, or `defer_until: YYYY-MM-DD`) before it "
                          f"BLOCKS the loop (default {DEFAULT_MAX_BACKLOG_AGE_DAYS}). "
                          "Blocks on AGE-WITHOUT-A-DECISION, never on depth")
+    lg.add_argument("--max-defer-total-days", dest="max_defer_total_days",
+                    type=float, default=DEFAULT_MAX_DEFER_TOTAL_DAYS,
+                    help="TOTAL in-queue days after which an IN-DATE `defer_until:` "
+                         "stops exempting a backlog item, so re-dating is no longer "
+                         "an available answer and it must be scheduled, declined or "
+                         f"escalated (default {DEFAULT_MAX_DEFER_TOTAL_DAYS}). A defer "
+                         "buys time, not immunity")
     lg.add_argument("--threshold", type=int, default=3,
                     help="retro-debt routine threshold (passed through to the "
                          "retro-debt computation this delegates to)")

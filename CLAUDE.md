@@ -84,13 +84,67 @@ See `README.md` for the full system. In short:
   all hit on 2026-08-14; 5 on 2026-08-20):**
   1. **It does not protect CO-OWNED files.** Two agents editing the same file
      still collide; the pathspec only removes the *index* race. (EXP-120's
-     original claim was too broad and was corrected.)
+     original claim was too broad and was corrected.) **Measured 2026-08-26 on the
+     real 584 KB `edge-ledger.md` / 568 KB `class-deps.mmd`: four agents each
+     holding a copy read before any of them committed, four green commits, and
+     ONE OF FOUR rows and nodes left in HEAD** — not mis-attribution, SILENT
+     PERMANENT LOSS of already-committed work, invisible to the declared-subset
+     assertion because the path IS declared. So use **`make commit-isolated`** for a
+     co-owned append-target: it three-way merges the other agent's committed lines
+     back in (the same run leaves 4/4), REPORTS every merge, and refuses a genuinely
+     overlapping edit with exit 7 rather than guessing. **Its residue, which nothing
+     fixes at file granularity:** it commits whatever is SAVED under your declared
+     path, so if another agent saves the same co-owned file in the seconds between
+     your save and your commit, you commit THEIR copy under YOUR message. Save
+     immediately before committing, and read the merge report.
+     **The merge itself then had a second, opposite failure — silent DUPLICATION —
+     and it is fixed, but the lesson it teaches is permanent (`DEFECT-OAG-142`,
+     four instances on 2026-08-27 alone).** `coownedStaleAgainst` asked only *"are
+     this commit's added lines absent from MY copy"* and never *"does HEAD still
+     have them"*. **Absence of content HEAD does not have is AGREEMENT, not
+     staleness** — so a base 23 commits and ~48 KB behind *both* sides was
+     selected, `merge-file --diff3` saw a region both sides already had as an
+     ADD/ADD insertion against an empty base, and the resolver's "keep BOTH"
+     emitted it twice. It corrupted `sst.config.ts` twice (+377 lines, two
+     `AerobusPublishPolicy` resources), tripled a row in `open-decisions.md`
+     (a duplicate key reads BROKEN, so three parks lost their verdict), and
+     duplicated two events inside an item file's log — **manufacturing an illegal
+     state transition and stopping the loop.** *Why the report reassured while it
+     happened:* `addedBack` is a set difference, so a duplicated line is not
+     "novel" and **cannot be counted** — the message was structurally incapable of
+     seeing the corruption it announced. Now guarded three ways (staleness evidence
+     must survive in HEAD; ADD/ADD resolved by CONTENT so identical sides are a
+     no-op by construction; a duplication post-condition that fails closed), the
+     `derived:` block is exempt from both detection and merge, and the report states
+     the **byte delta**. **So: read the byte delta, and after any commit to a
+     co-owned append-target RE-READ THE FILE OUT OF HEAD and assert its invariant
+     (`git show HEAD:<path>`).** Two agents reached that rule independently, because
+     the pre-commit state and the merge report are both green in exactly the case
+     that breaks. And note the generalisable shape, which is worth more than the
+     bug: **wherever absence is treated as evidence, ask whether the thing still
+     exists on the reference side.** `sequencer-guard.js` is the pattern to copy —
+     it *reports* the stale saved head as the hazard instead of inferring from it.
   2. **It cannot stage an UNTRACKED file** — `commit -- <new-path>` fails with
-     "did not match any file(s) known to git". When you must add a new file, run
-     `git add -- <your exact paths>` naming ONLY files you authored (never
-     `add -A`/`add .`), then commit immediately so the window stays minimal.
-     Check `git diff --cached --name-only` is empty first; if it is not,
-     someone else is mid-commit — wait rather than sweep them.
+     "did not match any file(s) known to git". **But do NOT reach for
+     `git add` + `commit`: use `make commit-isolated`, which handles a new file
+     directly.** VERIFIED 2026-08-27 in the project repo, and it is by
+     construction, not luck: `isolated-commit.js` seeds a **PRIVATE index from
+     HEAD** (`GIT_INDEX_FILE`), **never reads the shared index**, `git add`s only
+     your declared paths into it — which is why an untracked declared path works —
+     then `write-tree` + `commit-tree` + a ref CAS. So it can neither miss a new
+     file nor sweep another agent's staged work, and the window simply does not
+     exist. Verified for `REPO=work/OagEventSource`; the parent-repo lane is
+     untested for this, so there the `git add` route below still applies.
+     **If you must use `git add` + `commit`, GATE on the index being empty — do
+     not merely print it:**
+     `test -z "$(git diff --cached --name-only)" || exit 1`, naming ONLY files you
+     authored (never `add -A`/`add .`). `git commit` without a pathspec takes the
+     WHOLE index, so the two-step form hands you another agent's staged work under
+     your message. On 2026-08-27 the ORCHESTRATOR did exactly this, having printed
+     the evidence in the same `&&` chain — a check nothing branches on is
+     decoration. The gate then fired correctly on its next new file, refusing while
+     another agent had one staged, and `make commit-isolated` committed the same
+     file with nothing swept: that is the route to use.
   3. **It assumes HEAD is on trunk, and nothing checks that.** NEVER
      `git checkout`/`switch` a branch inside a working tree another agent is
      using: their commit silently lands on YOUR branch, and your next checkout

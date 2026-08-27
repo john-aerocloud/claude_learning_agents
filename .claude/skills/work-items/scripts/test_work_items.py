@@ -70,7 +70,32 @@ class Base(unittest.TestCase):
         with open(item.path, "w", encoding="utf-8") as f:
             f.write(wi.render_item(item, {"state": None, "queue": None,
                                           "children": [], "ancestors": []}))
+        self._render_derived(iid)
         return item.path
+
+    def _render_derived(self, iid):
+        """Finalise the fixture's `derived:` block the way the machinery does.
+
+        The provisional `state: null` block written above is what `migrate` writes
+        before `project` finalises it — and under I8 (the drift gate now compares
+        the file's own block against fold(events)) a PERSISTED provisional block is
+        itself a violation, correctly: no derived view can see an item whose
+        rendered state is null. So a fixture must be as consistent as a real item.
+        Renders this item plus the ancestors it bubbles into — exactly what
+        `append` writes — so fixtures are correct in either write order (parent
+        first, or child first)."""
+        items, _dup = wi.load_all_items(self.project)
+        if iid not in items:
+            return
+        states = wi.compute_states(self.graphs, items)
+        children = wi.compute_children(items)
+        for target in [iid] + wi._propagation_targets(items, iid):
+            t = items.get(target)
+            if t is None:
+                continue
+            dv = wi.derived_block(self.graphs, items, states, children, target)
+            with open(t.path, "w", encoding="utf-8") as f:
+                f.write(wi.render_item(t, dv))
 
 
 # --------------------------------------------------------------------------- #
@@ -1930,19 +1955,23 @@ class TestLoopGate(Base):
 
     def _gate(self, stale_hours=4.0, threshold=3, now=NOW, observe=True,
               observe_timeout=None,
-              max_backlog_age_days=wi.DEFAULT_MAX_BACKLOG_AGE_DAYS):
+              max_backlog_age_days=wi.DEFAULT_MAX_BACKLOG_AGE_DAYS,
+              max_defer_total_days=wi.DEFAULT_MAX_DEFER_TOTAL_DAYS):
         return wi.compute_loop_gate(
             self.graphs, self.project, stale_hours=stale_hours,
             threshold=threshold, now=wi.parse_ts(now), observe=observe,
             observe_timeout=(wi.DEFAULT_OBSERVE_TIMEOUT if observe_timeout is None
                              else observe_timeout),
-            max_backlog_age_days=max_backlog_age_days)
+            max_backlog_age_days=max_backlog_age_days,
+            max_defer_total_days=max_defer_total_days)
 
     def _run(self, stale_hours=4.0, threshold=3, now=NOW, observe=True,
-             max_backlog_age_days=wi.DEFAULT_MAX_BACKLOG_AGE_DAYS):
+             max_backlog_age_days=wi.DEFAULT_MAX_BACKLOG_AGE_DAYS,
+             max_defer_total_days=wi.DEFAULT_MAX_DEFER_TOTAL_DAYS):
         ns = argparse.Namespace(project=self.project, stale_hours=stale_hours,
                                 threshold=threshold, now=now, observe=observe,
                                 max_backlog_age_days=max_backlog_age_days,
+                                max_defer_total_days=max_defer_total_days,
                                 observe_timeout=wi.DEFAULT_OBSERVE_TIMEOUT)
         with contextlib.redirect_stdout(io.StringIO()) as out:
             try:
@@ -2667,6 +2696,74 @@ class TestLoopGate(Base):
         self._open_items(2, day=10, extra_fm={"defer_until": "soon-ish"})
         self.assertIn("aged-backlog-undecided", self._checks(self._gate()))
         self.assertEqual(self._run()[0], 2)
+
+    # ---- check 4c: the DEFER CEILING (v155) ---------------------------------
+    # WHY THIS EXISTS. `test_in_date_defer_clears_the_block` above is correct and
+    # stays correct — but it was the WHOLE story, so an in-date defer exempted an
+    # item NO MATTER HOW MANY TIMES IT HAD BEEN RE-DATED. That made this gate
+    # satisfiable indefinitely WITHOUT MOVING ANY WORK, and re-dating is the
+    # cheapest compliant action, so re-dating is what happened: MEASURED on
+    # OagEventSource 2026-08-27, the same 36-item batch had been mechanically
+    # re-staggered TWICE in 9 days (08-18, 08-19) with NOT ONE item reaching `done`
+    # in between, while the gate reported satisfied throughout. The check measured
+    # DECISION and never MOVEMENT.
+    #
+    # Keyed on TOTAL IN-QUEUE AGE, not a defer COUNT, because the count is recorded
+    # nowhere (frontmatter holds one value, overwritten each re-date) while age is
+    # exactly the quantity serial re-dating is used to hide.
+    def test_in_date_defer_STOPS_exempting_past_the_total_age_ceiling(self):
+        """A defer buys TIME, not IMMUNITY. Past the ceiling, re-dating is no
+        longer one of the available answers."""
+        # 25d old at NOW (2026-06-30), deferred three weeks OUT — the exact shape
+        # the real corpus was in. Ceiling lowered to 20d so the arm is reachable
+        # without inventing a 30-day fixture.
+        self._open_items(2, day=5, extra_fm={"defer_until": "2026-07-21"})
+        findings = self._gate(max_defer_total_days=20.0)
+        checks = self._checks(findings)
+        self.assertIn("aged-backlog-defer-ceiling", checks)
+        # and it must NOT double-report as undecided — the defer IS in date
+        self.assertNotIn("aged-backlog-undecided", checks)
+        f = [x for x in findings
+             if x["check"] == "aged-backlog-defer-ceiling"][0]
+        self.assertEqual(f["severity"], "block")
+        self.assertEqual(sorted(f["ids"]), ["OI-A0", "OI-A1"])
+        code, out = self._run(max_defer_total_days=20.0)
+        self.assertEqual(code, 2)
+        self.assertIn("defer-ceiling", out)
+        self.assertIn("TIME, NOT IMMUNITY", out)
+        # the three permitted answers must be named, and re-dating ruled out
+        self.assertIn("SCHEDULE", out)
+        self.assertIn("DECLINE", out)
+        self.assertIn("ESCALATE", out)
+        self.assertIn("Extending the date again is NOT one of the three", out)
+        # and it must NOT become a licence to close real findings
+        self.assertIn("do NOT close a real finding", out)
+
+    def test_in_date_defer_UNDER_the_ceiling_still_clears_the_block(self):
+        """NON-VACUITY IN THE OTHER DIRECTION, and it is the one that matters:
+        the ceiling must not turn every defer into a block, or the cheap honest
+        instrument is destroyed and the gate becomes unsatisfiable."""
+        self._open_items(2, day=5, extra_fm={"defer_until": "2026-07-21"})
+        checks = self._checks(self._gate(max_defer_total_days=90.0))
+        self.assertNotIn("aged-backlog-defer-ceiling", checks)
+        self.assertNotIn("aged-backlog-undecided", checks)
+        self.assertEqual(self._run(max_defer_total_days=90.0)[0], 0)
+
+    def test_the_ceiling_does_not_fire_on_an_item_with_no_defer_at_all(self):
+        """An item with no defer is the `undecided` limb's business, not this
+        one's. Reporting it twice would make the two limbs indistinguishable."""
+        self._open_items(2, day=5)                       # 25d old, no defer
+        checks = self._checks(self._gate(max_defer_total_days=20.0))
+        self.assertIn("aged-backlog-undecided", checks)
+        self.assertNotIn("aged-backlog-defer-ceiling", checks)
+
+    def test_the_ceiling_does_not_fire_on_an_EXPIRED_defer(self):
+        """An expired defer is already handled as `undecided` (DEFER EXPIRED).
+        The ceiling is only about an IN-DATE defer that keeps being renewed."""
+        self._open_items(2, day=5, extra_fm={"defer_until": "2026-06-20"})
+        checks = self._checks(self._gate(max_defer_total_days=20.0))
+        self.assertIn("aged-backlog-undecided", checks)
+        self.assertNotIn("aged-backlog-defer-ceiling", checks)
 
     def test_wip_queue_is_untouched_by_the_age_check(self):
         """The check is scoped to BACKLOG queues; a WIP stage has its own cap and

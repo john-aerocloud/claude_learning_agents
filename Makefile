@@ -1017,9 +1017,23 @@ test-requirement-gate-baseline:
 #   Also fine — name the file after your work item:  MSG_FILE=<scratchpad>/msg-<ITEM-ID>.txt
 #   OK for a one-liner with no metacharacters:
 #     make commit-isolated REPO=work/OagEventSource MSG="fix(x): intent (DEF-…)" PATHS="a b"
-#   Escape hatches, both explicit and both loud in the refusal text:
+#
+# AND A CO-OWNED FILE IS THE SAME PROBLEM ONE LEVEL UP, measured 2026-08-26 against
+# the REAL 584 KB edge-ledger.md and 568 KB class-deps.mmd: four agents each holding a
+# copy read before any of them committed, four green commits, and ONE OF FOUR rows and
+# nodes left in HEAD. Three items' work destroyed silently, because the private index
+# is seeded from the NEW head and MY working-tree blob then REPLACES theirs — and the
+# declared-subset assertion cannot see it, because the path IS declared. With the guard
+# on, the same run leaves 4/4 in HEAD: a concurrent agent's committed lines are
+# three-way merged back in, the merge is REPORTED, and a genuinely OVERLAPPING edit is
+# refused (exit 7) rather than guessed at. Cost: +0.3-1.0s per commit at that file size.
+#
+#   Escape hatches, all explicit and all loud in the refusal text:
 #     MSG_DUP_OK=1          a genuine re-commit of the same intent
 #     MSG_FILE_SHARED_OK=1  a deliberately shared message-file name (single agent)
+#     COOWNED_MERGE_OFF=1   commit MY blob verbatim over a co-owned file — i.e.
+#                           REVERT a concurrent agent's committed lines. Deliberate
+#                           only; this is the losing arm of the measurement above.
 MSG_HAZARD = $(if $(strip $(findstring $$,$(value MSG))$(findstring `,$(value MSG))$(findstring ",$(value MSG))$(findstring \,$(value MSG))),1,)
 commit-isolated:
 	@if [ -n "$(MSG_HAZARD)" ]; then \
@@ -1038,7 +1052,8 @@ commit-isolated:
 	node .claude/tools/isolated-commit.js --repo "$(REPO)" \
 	  $(if $(MSG),--message "$(MSG)",) $(if $(MSG_FILE),--message-file "$(MSG_FILE)",) \
 	  $(if $(MSG_DUP_OK),--allow-duplicate-message,) \
-	  $(if $(MSG_FILE_SHARED_OK),--allow-shared-message-file,) -- $(PATHS)
+	  $(if $(MSG_FILE_SHARED_OK),--allow-shared-message-file,) \
+	  $(if $(COOWNED_MERGE_OFF),--no-coowned-merge,) -- $(PATHS)
 
 # Print a message-file path that CANNOT collide (pid + randomness + a digest of the
 # declared paths), so a caller does not get to choose a colliding name. A convention

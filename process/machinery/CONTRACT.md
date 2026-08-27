@@ -80,6 +80,9 @@ type graph, and:
   should exist. This is where "wanting an undefined action" surfaces as a governed proposal.
 
 There is no other way to change item state. No hand-editing of `derived:`; no separate queue file.
+**A hand-edited or stale `derived:` block is now a GATE violation (I8), not merely discouraged
+prose** — and `append` re-renders the appended item's ANCESTORS as well as the item, because an
+aggregate's state bubbles from its children and a rendering left stale is the same drift.
 
 **Cancelling / superseding an item [state-graph v5].** Every flow type (use-case, defect,
 open-item) has a `cancelled` terminal, reachable via a `cancelled` event (agents: orchestrator,
@@ -244,6 +247,26 @@ Exits non-zero if ANY invariant is violated:
 - (I6) an `awaiting_observation` FLOW item carries a VALID observation predicate [v9]. `append`
   refuses the transition without one, so a violation here means a hand-edit — the same role I2
   plays for the terminal/queue pair. Aggregates are exempt (they bubble into the state).
+- (I7) a `blocked` FLOW item carries a VALID reversal probe [v145, §17c.6] — exactly the role I6
+  plays for the sibling park state. Aggregates exempt for the same reason.
+- (I8) **the item's own `derived:` block AGREES with `fold(events)`** — the one thing every
+  reader assumes this gate checks, and until 2026-08-27 the only thing it did not
+  (`OI-WI-VALIDATE-IGNORES-DERIVED-STATE-LEGALITY`). Four limbs, each failing CLOSED: the block
+  EXISTS and declares a non-null `state:`; that state is one the item's OWN type graph defines
+  (the legal set is DERIVED from `state-graphs.json`, never hand-listed); it EQUALS the computed
+  state; and `derived.queue` equals `queue_map[state]`. FOUNDING INSTANCE: five `use-case` items
+  were registered with hand-authored blocks carrying the aggregate-only `state: planned` /
+  `queue: null` — the use-case graph has no `planned` state — and `validate` reported *clean*;
+  `project` then healed all five, so the machinery could compute the right answer the whole time
+  and the gate simply never asked. A gate that is silent on a class of corruption is worse than
+  an absent one, because `validate clean` is quoted as assurance.
+  **The remedy for an I8 violation is always `make wi-project` (RE-RENDER), never an edit to the
+  block** — editing it is the act that causes this. Note the division of labour: I1 guards the
+  EVENT LOG (it caught a co-owned-merge duplication that manufactured `scheduled → scheduled`),
+  I8 guards the RENDERING; neither sees the other's class, verified against that real instance.
+  Because an aggregate's state BUBBLES, `append` re-renders the appended item's ANCESTORS too —
+  otherwise a child's transition would leave every ancestor's block stale and I8 would fire on an
+  item nobody touched.
 
 ## 4. Statistics reset
 

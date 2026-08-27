@@ -153,7 +153,29 @@ test('AC-L.6 NON-VACUITY: the parser finds the live rows in the REAL experiments
   const real = fs.readFileSync(path.resolve(__dirname, '..', '..', 'process', 'experiments.md'), 'utf8');
   const { rows } = lint.parseRegistry(real);
   assert.ok(rows.length >= 5, `expected the real registry table to parse, got ${rows.length} rows`);
-  assert.ok(rows.some((r) => r.id === 'EXP-143'), 'EXP-143 not found in the real registry table');
+
+  // The anchor is the row SHAPE and the presence of live work, never a specific id.
+  //
+  // This assertion used to name `EXP-143`, and v148 retired that row out of the table —
+  // so the check went red for a REASON THAT WAS CORRECT BEHAVIOUR, and until then it had
+  // been silently anchored to a row that could vanish at any retro. That is the same fault
+  // OI-CO-OWNED-LEDGER-FILES and DEFECT-OAG-137 both hit: a check keyed to something the
+  // system itself moves (a retiring row, an item file relocating active/ -> done/) breaks
+  // on an ordinary state transition, and the breakage lands on trunk rather than on the
+  // thing that moved. A non-vacuity anchor must be LIFECYCLE-STABLE.
+  //
+  // Both limbs below still fail on the vacuous parse this test exists to catch (a parser
+  // returning [] or returning rows with no id/status), while surviving any adopt-or-kill.
+  assert.ok(
+    rows.every((r) => /^EXP-([A-Z0-9]+-)?\d+$/.test(r.id)),
+    `every parsed row must carry a well-formed id; got ${rows.map((r) => r.id).join(', ')}`,
+  );
+  // NB `line` is the line NUMBER; the row text lives in `routed` (which, per the ROC v150
+  // finding, captures the whole rest of the row rather than only the routed cell).
+  assert.ok(
+    rows.some((r) => /\bactive\b/.test(String(r.routed ?? ''))),
+    'the real registry must contain at least one ACTIVE row — an all-retired table means the parser found headings, not rows',
+  );
 });
 
 test('an absent file is reported, not silently clean', () => {

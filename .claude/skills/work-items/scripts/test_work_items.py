@@ -1628,6 +1628,8 @@ class TestRetroArmSeparation(Base):
 
     # -- what must NOT be weakened --------------------------------------------
     def test_a_full_retro_close_drains_BOTH_arms(self):
+        """AC-130-2 — separate markers must not mean an unreachable DRAIN either:
+        the full retro walks everything, so it clears both arms."""
         self._slice_close(0, 10)
         self._defect("DEF-1", 11)
         wi.cmd_retro_mark(argparse.Namespace(project=self.project,
@@ -1640,7 +1642,7 @@ class TestRetroArmSeparation(Base):
         self.assertEqual((len(routine), len(incidents), due), (0, 0, False))
 
     def test_fail_closed_no_record_at_all_forces_a_retro_on_BOTH_arms(self):
-        """The property that makes a per-project store safe: an absent record
+        """AC-130-2, the must-not-weaken clause. The property that makes a per-project store safe: an absent record
         cannot silently SKIP a retro, it FORCES one. Separating the markers must
         not create a hole in that."""
         self._slice_close(0, 10)
@@ -1656,7 +1658,7 @@ class TestRetroArmSeparation(Base):
             self.assertEqual((kind, ts), ("unknown", None))
 
     def test_fail_closed_a_log_of_drains_only_never_drains_the_routine_arm(self):
-        """A project that has ONLY ever had cheap drains has never had a full
+        """AC-130-2, the must-not-weaken clause. A project that has ONLY ever had cheap drains has never had a full
         retro, so its routine debt is ALL-TIME and a full retro is owed. The
         fail-closed direction, in the new arm."""
         self._drained(_dt(9, 0))
@@ -1675,7 +1677,7 @@ class TestRetroArmSeparation(Base):
         self.assertIn("retro", why.lower())
 
     def test_the_frozen_legacy_marker_seeds_BOTH_arms(self):
-        """The cutover fallback was a single retro-close instant, so it is a
+        """AC-130-2 at the cutover. The cutover fallback was a single retro-close instant, so it is a
         legitimate boundary for both arms. Losing it on one arm would force every
         pre-cutover project into a spurious all-time routine retro."""
         d = os.path.join(self.tmp, "process", "dora", "retro-marker")
@@ -1688,7 +1690,7 @@ class TestRetroArmSeparation(Base):
                          wi.parse_ts("2026-06-12T00:00:00Z"))
 
     def test_compute_retro_debt_returns_BOTH_markers_so_callers_cannot_share_one(self):
-        """The 5th return value is the pair, not a single instant — the shared
+        """AC-130-2 in the SIGNATURE, not just the behaviour. The 5th return value is the pair, not a single instant — the shared
         scalar IS the defect, so the signature must make sharing impossible."""
         self._closed("2026-06-01T00:00:00Z")
         self._drained(_dt(11, 0))
@@ -1697,7 +1699,7 @@ class TestRetroArmSeparation(Base):
         self.assertEqual(markers[wi.ARM_INCIDENT], wi.parse_ts(_dt(11, 0)))
 
     def test_the_arm_is_a_REQUIRED_argument_no_lane_can_omit_it(self):
-        """v124/EXP-121: a control that is OPTIONAL on a shared primitive is a
+        """AC-130-2 made unomittable. v124/EXP-121: a control that is OPTIONAL on a shared primitive is a
         control some lane omits. The arm has no default, so a future caller cannot
         silently re-share one marker across both arms."""
         with self.assertRaises(TypeError):
@@ -1708,7 +1710,7 @@ class TestRetroArmSeparation(Base):
             wi._read_retro_marker(self.project, "not-an-arm")
 
     def test_retro_debt_output_shows_BOTH_boundaries(self):
-        """One channel carrying two different meanings is what delta-074 R10 fixed
+        """AC-130-2 as the operator sees it. One channel carrying two different meanings is what delta-074 R10 fixed
         for absence; the same argument applies to the two arms."""
         self._closed("2026-06-01T00:00:00Z")
         self._drained(_dt(11, 0))

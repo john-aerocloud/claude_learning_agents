@@ -319,6 +319,26 @@ class TestGeneralisationSweep(unittest.TestCase):
         # and neither ever echoes its own value into a shell string. Same disposition,
         # and the same reason, as NOTE_HAZARD/MSG_HAZARD.
         "MSG_DUP_OK", "MSG_FILE_SHARED_OK",
+        # the CO-OWNED-MERGE escape hatch. Same SHAPE and same disposition as the two
+        # above: it expands to the fixed literal flag name `--no-coowned-merge` or to
+        # nothing, and never echoes its own value into a shell string.
+        #
+        # Declared here rather than left undeclared because its omission made
+        # committed trunk RED (`998e54f` added the variable to `Makefile` without a
+        # disposition, and this sweep caught it — working as designed).
+        #
+        # It is worth saying WHEN it is legitimate, because the sweep's job is to force
+        # exactly that reason to be written down. This escape turns OFF the three-way
+        # merge, so reaching for it as a reflex reproduces the silent LOSS the merge was
+        # built to stop (1-of-4 surviving writers, measured 2026-08-26). It is correct
+        # in one shape only: a WHOLE-FILE REPAIR of damage the merge itself caused,
+        # where a merge against the same wrong base would re-corrupt the repair. That is
+        # not hypothetical — on 2026-08-27 the merge duplicated a 377-line block in
+        # `sst.config.ts` twice from base `265bea2c`, three rows in `open-decisions.md`,
+        # and two events inside an item file's log (manufacturing an illegal transition
+        # and stopping the loop). Every one of those repairs had to run with the merge
+        # off. Read `git diff` first, every time; see `DEFECT-OAG-142`.
+        "COOWNED_MERGE_OFF",
     }
 
     def setUp(self):

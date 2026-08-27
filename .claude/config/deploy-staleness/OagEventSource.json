@@ -1,0 +1,23 @@
+{
+  "_why": "loop-gate check 15 reported NOT-ESTABLISHED (no-config) for OagEventSource on every cycle, which per EXP-ROC-003's own scoring trap is indistinguishable from a check that works. This establishes it against a real, reachable build identity rather than leaving the question unanswerable.",
+
+  "_what_it_measures": "The ADMIN-CONSOLE SPA job in DEV, and nothing else. `infra/scripts/deploy-admin.sh` writes dist/build-info.json with VITE_BUILD_SHA=github.sha, uploaded to the OAC-only bucket oag-admin-site-dev and served through CloudFront. Verified live 2026-08-27: sha db1cd99a6a1c5791fca127b2e6fd0a43a2674f83, builtAt 2026-08-27T08:31:27.124Z.",
+
+  "_what_it_does_NOT_measure_read_this_before_trusting_it": [
+    "It is NOT the ECS ingest lane. That lane is the ONLY live writer of the real feed, it is egress-only and deliberately serves no HTTP, and the solution architect RULED (delta-079) against contorting it into serving HTTP so this checker could reach it. Whether the ECS service ADOPTED a revision is DEFECT-OAG-144, keyed on the task-def BUILD_SHA env var inside the deploy job. Neither check substitutes for the other.",
+    "It is NOT the Lambda tier. flight-feed-api's Function URL is IAM-authorized and returns 403 to an unsigned request; this checker curls unsigned, so it cannot read it.",
+    "It is NOT prod. The admin console SPA job runs in the dev stage only.",
+    "CRUCIALLY, it would NOT have caught the 2026-08-27 failure it was registered during: infra.yml went sandbox/dev/acceptance-dev/admin-console-dev GREEN and then FAILED at the shared Aerobus hub audit, leaving prod-shared and prod SKIPPED. This endpoint reported the new sha correctly while prod never received it. So a `current` verdict here means 'the chain reached the admin-console job', NOT 'the chain finished'. A skipped job runs no steps (DEF-ROC-086) and this check is blind to it."
+  ],
+
+  "_therefore": "Treat `current` as a NARROW pass and never as evidence that a deploy completed. Its real value is the failure it CAN see: a chain that stopped BEFORE admin-console-dev, or a push that triggered no run at all, both of which leave this sha behind trunk while item events keep reporting deploys as intentions.",
+
+  "healthUrl": "https://d32iuawam3be7m.cloudfront.net/build-info.json",
+  "shaField": "sha",
+  "repoPath": "work/OagEventSource",
+  "trunkRef": "origin/main",
+  "triggerPaths": ["sst.config.ts", "src/app", "infra", "src/admin-app"],
+  "insecureTls": false,
+  "staleCommits": 1,
+  "timeoutMs": 20000
+}

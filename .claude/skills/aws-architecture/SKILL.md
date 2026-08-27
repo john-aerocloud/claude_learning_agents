@@ -442,6 +442,53 @@ Minimal pipeline stages, in order:
   `make wi-append` (the work-item substrate — see the `work-items` skill); alert
   via GitHub notification.
 
+### 9b. A green deploy step is NOT evidence the service adopted the code — ECS/Fargate
+
+**Measured live, OagEventSource sandbox, 2026-08-27 (`DEFECT-OAG-144` / delta-079). Do not
+re-derive this; it cost a day and it is a platform fact, not a project quirk.**
+
+Step 5 returning 0 tells you the deploy tool finished. On **ECS/Fargate it does not tell you the
+service is running your revision**, and the obvious checks are unreliable **in both directions**:
+
+- **`rolloutState: COMPLETED` and "has reached a steady state" are emitted every 30–60 s while
+  the service runs ZERO tasks.** A container that reaches `RUNNING` (image pull ~6 s, alive ~16 s)
+  and *then* exits satisfies both. Five pipeline jobs reported SUCCESS while the service ran a
+  revision three days stale.
+- **Therefore `waitForSteadyState` would have PASSED** on the bad revision. Adding it is not the fix.
+- **The reverting agent is the ECS deployment circuit breaker** (`rollback: true`), and its verdict
+  is a **race** against container-start timing landing after the deploy tool returned — the same
+  code got opposite verdicts on two consecutive revisions, both reported as a successful deploy.
+- **Task exit codes are not an oracle**: five consecutive crash-loop tasks on one revision exited
+  `1, 0, 0, 143, 143`.
+
+**The oracle is the task-definition `BUILD_SHA` env var** — immutable per revision. **Not a tag:**
+resource tags are set on the *service*/task-def by the IaC tool inconsistently (in the measured
+case only `sst:app`/`sst:stage` existed, so §2a/ADR-0007 was silently unmet and a tag-based check
+would have read absent-as-fine).
+
+So a deploy job that touches an ECS service **must** carry a positive, blocking, four-limb assertion:
+
+1. **INSTRUCTED** — the PRIMARY deployment's task-def carries the sha being deployed.
+2. **ADOPTED** — `runningCount == desiredCount` **and** every RUNNING task is on that revision.
+3. **DECLARED-ZERO CONFORMANCE** — a stage with no allocated tasks is asserted `0` **positively and
+   by name**. Without this, limb 2 is vacuous the moment a stage legitimately goes to zero tasks —
+   and "set desired to 0" is a common remedy, so this limb is what stops the remedy from blinding
+   the check.
+4. **NON-VACUITY** — a deploy that does not land makes it red, proven against a real bad revision.
+
+Poll on a bounded budget (10 s × 20 worked), then exit non-zero **printing the last N service
+events** — a blocking check that fails silently is not a check.
+
+**This is NOT the same question as deploy-staleness** (is the environment behind trunk?), and
+neither substitutes for the other: this one is blocking and job-internal, so it is **blind to a
+SKIPPED job** — and a `needs:`-skipped deploy is the failure mode that started the whole
+deploy-staleness line of work (`DEF-ROC-086`). Expect to want both.
+
+**Corollary for any egress-only service** (stream/queue consumer with no HTTP surface): do **not**
+add an HTTP health endpoint just so an external staleness checker can reach it. That widens the
+attack surface of a service deliberately built without one. Verify adoption **inside** the deploy
+job from the control plane, as above.
+
 ### 9a. Release management, versioning & provenance (ADR-0006)
 
 Source of truth: **AeroCloudSystems/ADR → ADR-0006**. Non-negotiables: (1) always

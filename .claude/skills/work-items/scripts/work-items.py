@@ -4916,7 +4916,12 @@ def compute_test_requirement_gate(project, timeout=TRG_TIMEOUT):
             f"Per the ruling it is either WASTE (delete it) or an UNDISCOVERED "
             f"acceptance criterion (register it, and the discovery gap earns a "
             f"retro). Remedy: `make test-requirement-gate PROJECT={project} "
-            f"VERBOSE=1`." + (f" Limb-2 hits: {worst}." if worst else "")
+            f"VERBOSE=1`. To find WHOSE it is rather than guessing: "
+            f"`make test-requirement-gate-clean PROJECT={project}` measures the "
+            f"COMMITTED tree — if HEAD scores the floor exactly the regression is in "
+            f"the uncommitted range; set-diff the two --json violation lists on "
+            f"limb|file:line|rule to name the lines (DEFECT-OAG-106)."
+            + (f" Limb-2 hits: {worst}." if worst else "")
             + (f" CONFIG ERRORS: {cfg_err}." if cfg_err else "")))]
 
     if ac or authored:

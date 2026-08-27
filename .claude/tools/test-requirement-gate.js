@@ -57,11 +57,31 @@
  *   node .claude/tools/test-requirement-gate.js --project OagEventSource [--json]
  *                                               [--mode enforce|ratchet|report]
  *                                               [--write-baseline]
+ *                                               [--clean-tree] [--repo-root <dir>]
+ *
+ * TRIAGING A RATCHET REGRESSION — "the gate reads 1757 against its 1755 floor and nobody
+ * knows whose +2 that is". The method that answered it (DEFECT-OAG-106, `AC-106.5`), after
+ * two earlier passes had failed to:
+ *
+ *   1. `--clean-tree` measures the COMMITTED (HEAD) copy of every scanned file, materialised
+ *      into a temp root, instead of the working tree. Each root is resolved in ITS OWN repo
+ *      (the parent repo and each project's nested repo are separate — CLAUDE.md's two lanes),
+ *      so this works across both. Auto-tighten is forced OFF: a diagnostic never moves a floor.
+ *   2. If `--clean-tree` scores the floor EXACTLY, the regression is in the unpushed/uncommitted
+ *      range and is YOURS (or a co-worker's untracked file — an untracked `*.scratch.test.ts`
+ *      another agent is mid-build on counts in the working tree and not at HEAD).
+ *   3. Set-diff the two `--json` violation lists on `limb|file:line|rule` to NAME the lines.
+ *      That is what localised the original +2 to two `test.skip` GUARDS on lines 44 and 48.
+ *
+ *   node …/test-requirement-gate.js --project P --clean-tree --json > /tmp/head.json
+ *   node …/test-requirement-gate.js --project P --json              > /tmp/tree.json
  */
 'use strict'
 
 const fs = require('node:fs')
+const os = require('node:os')
 const path = require('node:path')
+const { execFileSync } = require('node:child_process')
 
 // ---------------------------------------------------------------------------
 // The AC vocabulary. Reuses what the codebase already writes; a second one would
@@ -329,7 +349,36 @@ function enclosingOpen(code, at, open) {
 // ===========================================================================
 // LIMB 1 — describe/it extraction and AC resolution
 // ===========================================================================
-const RE_CALL = /(?<![\w$.'"`])(describe|it|test)((?:\.(?:only|skip|todo|concurrent|sequential|fails|each|runIf|skipIf))*)\s*\(/g
+const RE_CALL =
+  /(?<![\w$.'"`])(describe|it|test)((?:\.(?:describe|only|skip|todo|concurrent|sequential|serial|parallel|fails|fail|fixme|slow|each|runIf|skipIf))*)\s*\(/g
+
+/**
+ * A DIRECTIVE IS NOT A TEST CASE (DEFECT-OAG-106).
+ *
+ * Playwright's `skip`/`fixme`/`fail`/`slow` modifiers are DUAL-PURPOSE. With a TITLE they
+ * declare a case; with a CONDITION — or no argument at all — they are a runtime GUARD:
+ *
+ *   test.skip(!hasCreds(CREDS), 'ADMIN_STS_* creds not supplied in env')   // guard
+ *   test.skip()                                                            // guard, in a body
+ *   it.skip('AC-ES2.6 selecting prod shows prod data', () => {})           // a real case
+ *
+ * The gate admitted `.skip` and classified every match as a case, so a guard was reported as
+ * an untagged case with NO TITLE — and the ratchet became UNSATISFIABLE BY ITS OWN DICHOTOMY.
+ * A guard asserts nothing, so tagging it with an AC id would be a lie; and deleting it would
+ * let an operator-only LIVE-WRITE suite run unguarded, which is the exact protection
+ * `AC-104.1` exists to add. The cheapest path to green was to DELETE A SAFETY GUARD, so the
+ * gate penalised precisely the discipline we want from a destructive e2e spec. Measured on the
+ * OagEventSource tree at the time of the fix: 22 of the 1737 floor were directives.
+ *
+ * The discriminator is the FIRST ARGUMENT, and it is used for TWO things here — which is why
+ * `AC-106.7e` was red before this landed. A case declares a title; a guard's first argument is
+ * a condition or absent. The SAME predicate fixes title extraction: `title` used to be "the
+ * first string literal anywhere inside the parens", so a computed-title `describe(rel, fn)`
+ * STOLE the first case title in its own body and tagged every case inside it.
+ */
+const RE_GUARD_MOD = /\.(?:skip|fixme|fail|slow)$/
+/** `it.each([...])('title', fn)` and friends — the CASE is the SECOND call. */
+const RE_CURRIED = /\.(?:each|runIf|skipIf)$/
 
 function extractCases(src, scan) {
   const { codeOnly, comments, strings } = scan
@@ -337,21 +386,31 @@ function extractCases(src, scan) {
   RE_CALL.lastIndex = 0
   let m
   while ((m = RE_CALL.exec(codeOnly)) !== null) {
-    const kind = m[1]
+    const chain = m[1] + m[2]
     const start = m.index
     let openParen = m.index + m[0].length - 1
     let end = matchBracket(codeOnly, openParen)
     if (end === -1) continue
     // `it.each([...])('title', fn)` — the CASE is the second call.
-    if (/\.each$/.test(m[1] + m[2])) {
+    if (RE_CURRIED.test(chain)) {
       const next = codeOnly.indexOf('(', end + 1)
       if (next !== -1 && codeOnly.slice(end + 1, next).trim() === '') {
         const e2 = matchBracket(codeOnly, next)
         if (e2 !== -1) { openParen = next; end = e2 }
       }
     }
-    const title = (strings.find((s) => s.start > openParen && s.end <= end) || { text: '' }).text
-    calls.push({ kind: kind === 'describe' ? 'describe' : 'it', start, end, openParen, title })
+    // Does the call DECLARE A TITLE? `codeOnly` blanks string INTERIORS but keeps the
+    // quotes, so a quote/backtick as the first non-space character after `(` is a string
+    // literal first argument — the one thing that distinguishes a case from a guard.
+    const titled = /^\s*['"`]/.test(codeOnly.slice(openParen + 1, end))
+    const isDescribe = m[1] === 'describe' || /\.describe(?:\.|$)/.test(m[2])
+    // A guard modifier with no title is a DIRECTIVE: neither a case nor a suite. It stays
+    // in `calls` so the FILE-HEADER boundary (`firstCall`) is unchanged by this fix.
+    const kind = isDescribe ? 'describe' : (!titled && RE_GUARD_MOD.test(chain) ? 'directive' : 'it')
+    const title = titled
+      ? (strings.find((s) => s.start > openParen && s.end <= end) || { text: '' }).text
+      : ''
+    calls.push({ kind, start, end, openParen, title })
   }
   calls.sort((a, b) => a.start - b.start || b.end - a.end)
 
@@ -695,6 +754,43 @@ function walk(dir, out) {
   return out
 }
 
+/**
+ * Materialise the COMMITTED (HEAD) copy of every file the gate would scan into a fresh temp
+ * root, and return that root. Used by `--clean-tree`.
+ *
+ * WHY IT IS NOT `git archive`: the OagEventSource project repo carries a large real-capture
+ * corpus, so archiving it whole takes minutes and lands ~GB of fixtures the gate never reads.
+ * `ls-files` + `show` copies only the ~560 spec files, in about a second.
+ *
+ * WHY EACH ROOT IS RESOLVED SEPARATELY: `.claude/tools` lives in the PARENT repo and
+ * `work/<project>/src` lives in the project's own nested repo (CLAUDE.md's two lanes). Running
+ * `git -C <root>` lets git resolve the containing repo per root, so one call covers both.
+ */
+const SCANNED = /(\.test|\.spec)\.(ts|tsx|js|mjs|cjs)$|(^|\/)test_[^/]*\.py$|_test\.py$/
+
+function materialiseHeadTree(repoRoot, project) {
+  const dest = fs.mkdtempSync(path.join(os.tmpdir(), 'trg-head-'))
+  const git = (cwd, args) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 1 << 28 })
+  const put = (rel, body) => {
+    const abs = path.join(dest, rel)
+    fs.mkdirSync(path.dirname(abs), { recursive: true })
+    fs.writeFileSync(abs, body, 'utf8')
+  }
+  const cfgRel = `.claude/config/test-requirement-gate/${project}.json`
+  put(cfgRel, git(repoRoot, ['show', `HEAD:${cfgRel}`]))
+  const cfg = JSON.parse(fs.readFileSync(path.join(dest, cfgRel), 'utf8'))
+  for (const root of cfg.roots || []) {
+    const abs = path.join(repoRoot, root.path)
+    if (!fs.existsSync(abs)) continue
+    const listed = git(abs, ['ls-files']).split('\n').filter((f) => f && SCANNED.test(f))
+    for (const f of listed) put(path.join(root.path, f), git(abs, ['show', `HEAD:./${f}`]))
+    // A root that exists but holds no spec file would trip the gate's own "scans nothing"
+    // config error, which would be an artefact of the materialisation rather than a finding.
+    if (!listed.length) fs.mkdirSync(path.join(dest, root.path), { recursive: true })
+  }
+  return dest
+}
+
 function loadConfig(repoRoot, project) {
   const p = path.join(repoRoot, '.claude/config/test-requirement-gate', `${project}.json`)
   if (!fs.existsSync(p)) return null
@@ -909,13 +1005,24 @@ function main(argv) {
     console.error('test-requirement-gate: --project is required (or work/ACTIVE must name one)')
     process.exit(2)
   }
-  const r = runGate({ repoRoot, project, mode: arg('--mode', undefined) })
+  // `--clean-tree` is a DIAGNOSTIC: it measures HEAD, never the working tree, and it may
+  // never move a floor (a temp root's count is not this tree's count).
+  const cleanTree = has('--clean-tree')
+  const scanRoot = cleanTree ? materialiseHeadTree(repoRoot, project) : repoRoot
+  const r = runGate({ repoRoot: scanRoot, project, mode: arg('--mode', undefined) })
+  if (cleanTree) r.note = (r.note ? r.note + ' ' : '') +
+    `--clean-tree: measured the COMMITTED (HEAD) copy of every scanned file in ${scanRoot}, ` +
+    'not this working tree. A difference from the plain run is uncommitted or UNTRACKED work.'
 
   // NEVER process.exit() after writing to a pipe: node exits before stdout flushes and
   // the consumer gets TRUNCATED JSON. Set exitCode and let the runtime drain.
   if (has('--json')) { console.log(JSON.stringify(r, null, 2)); process.exitCode = r.exitCode; return }
 
   if (has('--write-baseline')) {
+    if (cleanTree) {
+      console.error('--clean-tree is a DIAGNOSTIC over a temp root; it may not write a baseline.')
+      process.exit(2)
+    }
     const p = path.join(repoRoot, '.claude/config/test-requirement-gate', `${project}.json`)
     const cfg = JSON.parse(fs.readFileSync(p, 'utf8'))
     const old = cfg.baseline || { ac: 0, authored: 0 }
@@ -947,7 +1054,7 @@ function main(argv) {
   // floor, tighten the floor now, mechanically, and say so.
   // It can only ever LOWER: the raise path stays manual and reviewed (--write-baseline
   // --allow-baseline-growth). A failing run tightens nothing.
-  if (r.exitCode === 0 && !has('--no-auto-tighten')) {
+  if (r.exitCode === 0 && !has('--no-auto-tighten') && !cleanTree) {
     const p = path.join(repoRoot, '.claude/config/test-requirement-gate', `${project}.json`)
     try {
       const cfg = JSON.parse(fs.readFileSync(p, 'utf8'))

@@ -960,12 +960,33 @@ test-tools:
 #   make test-requirement-gate [PROJECT=OagEventSource] [MODE=enforce|ratchet|report]
 #   make test-requirement-gate VERBOSE=1      # every limb-1 line
 #   make test-requirement-gate-baseline       # re-cut the ratchet floor (SHRINK only)
+#   make test-requirement-gate-clean          # measure HEAD, not the working tree
+#
+# TRIAGING A RATCHET REGRESSION — "it reads 1757 against its 1755 floor and nobody
+# knows whose +2 that is" (DEFECT-OAG-106 AC-106.5; two earlier passes failed to
+# answer it, this method answered it in one):
+#   1. `make test-requirement-gate-clean` measures the COMMITTED (HEAD) copy of every
+#      scanned file in a temp root — each root resolved in ITS OWN repo, so it spans
+#      both lanes. It NEVER moves a floor.
+#   2. If HEAD scores the floor exactly, the +2 is in the uncommitted range and is
+#      YOURS — or an UNTRACKED `*.scratch.test.ts` a co-worker is mid-build on, which
+#      counts in the working tree and not at HEAD.
+#   3. Set-diff the two --json violation lists on `limb|file:line|rule` to NAME the
+#      lines. That is how the original +2 was localised to two `test.skip` GUARDS.
+#      make test-requirement-gate-clean JSON=1 > /tmp/head.json
+#      make test-requirement-gate       JSON=1 > /tmp/tree.json
 test-requirement-gate:
 	node .claude/tools/test-requirement-gate.js --project $(PROJECT) \
 	  $(if $(MODE),--mode $(MODE),) $(if $(VERBOSE),--verbose,) $(if $(JSON),--json,)
 
 test-requirement-gate-baseline:
 	node .claude/tools/test-requirement-gate.js --project $(PROJECT) --write-baseline
+
+# Measure the COMMITTED tree, never the working tree. A pure diagnostic: it cannot
+# write a baseline and it cannot auto-tighten (see DEFECT-OAG-106, AC-106.5).
+test-requirement-gate-clean:
+	node .claude/tools/test-requirement-gate.js --project $(PROJECT) --clean-tree \
+	  $(if $(VERBOSE),--verbose,) $(if $(JSON),--json,)
 # --- DEFECT-OAG-058 commit-isolated: the ONLY safe commit on a shared tree ----
 # Up to five agents share one working tree and therefore ONE git index. Neither
 # previously-prescribed remedy works: `git add -- <mine>` + `git commit` commits
@@ -1223,7 +1244,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap sequencer-guard make-refs-tracked container-reap container-orphans stack-claim stack-release stack-status sso-login retro-debt retro-mark loop-gate test-wi wi-append wi-project wi-validate wi-migrate item-brief doc-lint process-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated commit-msg-file test-requirement-gate test-requirement-gate-baseline board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery
+.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap sequencer-guard make-refs-tracked container-reap container-orphans stack-claim stack-release stack-status sso-login retro-debt retro-mark loop-gate test-wi wi-append wi-project wi-validate wi-migrate item-brief doc-lint process-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated commit-msg-file test-requirement-gate test-requirement-gate-baseline test-requirement-gate-clean board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery
 
 # --- Viggo-fix UC-W7: Country/Nationality ID remediation (T-SQL) --------------
 # Data-driven, self-building T-SQL remediation script set + its local stand-up

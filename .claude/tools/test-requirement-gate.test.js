@@ -623,3 +623,237 @@ test('auto-tighten: --json is a pure read and must never move the floor', () => 
   JSON.parse(stdout) // must still be valid, untruncated JSON
   assert.deepStrictEqual(floorOf(root), { ac: 5, authored: 3 })
 })
+
+// ==========================================================================
+// DEFECT-OAG-106 — A DIRECTIVE IS NOT A TEST CASE.
+//
+// Playwright's `skip`/`fixme`/`fail`/`slow` modifiers are DUAL-PURPOSE: with a
+// title they declare a case, with a CONDITION (or nothing) they are a runtime
+// GUARD. The gate admitted `.skip` and classified every match as a case, so a
+// describe-level guard was reported as an untagged case with no title — and the
+// ratchet became UNSATISFIABLE BY ITS OWN DICHOTOMY: a guard asserts nothing so
+// it cannot honestly be tagged, and deleting it would let an operator-only
+// LIVE-WRITE suite run unguarded (the exact protection `AC-104.1` demands). The
+// cheapest path to green was to delete a safety guard, which is worse than no
+// gate. Measured on the real tree: 22 of the 1737 floor were directives.
+//
+// The distinction is the FIRST ARGUMENT: a case DECLARES A TITLE (a string
+// literal); a guard's first argument is a condition, or absent. The fix must be
+// a CLASSIFICATION correction and not an exclusion — every test below that
+// asserts a guard is ignored has a sibling asserting a real untagged case in the
+// same shape is STILL COUNTED.
+// ==========================================================================
+
+// The verbatim shape of `src/admin-app/e2e/ob8-scratch-repair.spec.ts:43-48`, which is the
+// fixture the defect names. Reproduced here rather than referenced because that file is in
+// the PROJECT repo and this test is parent-repo — but it is copied, not paraphrased.
+const OB8_GUARD_SHAPE = `
+import { test, expect } from '@playwright/test'
+const CREDS = credsFromEnv()
+
+test.describe('AC-104.1 scratch-airport repair @repair', () => {
+  test.skip(
+    !repairMode(),
+    'repair lane — run it via \`make -C work/OagEventSource admin-console-scratch-repair\`',
+  )
+  test.skip(!hasCreds(CREDS), 'ADMIN_STS_* creds not supplied in env')
+
+  test('AC-104.1 removes the scratch airport left by an interrupted run', async () => {})
+})
+`
+
+test('AC-106.1/AC-106.2: a describe-level `test.skip(cond, reason)` GUARD is a directive, not a case', () => {
+  const r = run({ 'tests/ob8.spec.ts': OB8_GUARD_SHAPE })
+  assert.deepStrictEqual(
+    lines(r, 'ac').map((v) => `${v.line}:${v.test}`),
+    [],
+    'the two guards must not be counted, and the one real case names AC-104.1',
+  )
+  assert.strictEqual(r.counts.cases, 1, 'exactly ONE case is declared in that file')
+})
+
+test('AC-106.3: a string-first `.skip` is a GENUINE skipped case and is STILL counted', () => {
+  const r = run({
+    'tests/a.test.ts': `
+describe('g', () => {
+  it.skip('an untagged skipped case', () => {})
+  test.skip('another untagged skipped case', () => {})
+})
+`,
+  })
+  assert.strictEqual(lines(r, 'ac').length, 2, 'the fix must not become a hole for real cases')
+  assert.strictEqual(r.counts.cases, 2)
+})
+
+test('AC-106.7a: a bare `test.skip()` inside a test BODY is a directive; the case around it still counts', () => {
+  const r = run({
+    'tests/a.test.ts': `
+test('an untagged case that bails out at runtime', async () => {
+  if (!liveEnv()) test.skip()
+  expect(1).toBe(1)
+})
+`,
+  })
+  assert.strictEqual(r.counts.cases, 1, 'the bare skip() is not a second case')
+  assert.strictEqual(lines(r, 'ac').length, 1, 'the ENCLOSING case is untagged and must still be counted')
+})
+
+test('AC-106.7b: `test.describe` is a SUITE — its title satisfies its cases, and `test.describe.skip` is not a case', () => {
+  const r = run({
+    'tests/a.spec.ts': `
+test.describe('AC-Z.9 — the suite states the criterion', () => {
+  test('a case with no tag of its own', async () => {})
+})
+test.describe.skip('AC-Z.9 — a whole suite skipped', () => {
+  test('AC-Z.9 another case', async () => {})
+})
+`,
+  })
+  assert.deepStrictEqual(lines(r, 'ac'), [], 'a Playwright suite title is one of the three sanctioned places')
+  assert.strictEqual(r.counts.cases, 2, 'two cases; neither describe is one')
+})
+
+test('AC-106.7b-inverse: NON-VACUITY — an UNTAGGED `test.describe` suite still yields a counted case', () => {
+  const r = run({
+    'tests/a.spec.ts': `
+test.describe('a suite naming no criterion', () => {
+  test('a case naming no criterion', async () => {})
+})
+`,
+  })
+  assert.strictEqual(lines(r, 'ac').length, 1)
+})
+
+test('AC-106.7c: `fixme`/`fail`/`slow` guards are directives — and their TITLED forms are counted cases', () => {
+  const guards = run({
+    'tests/a.spec.ts': `
+test.describe('AC-Z.1 g', () => {
+  test.fixme(!ready(), 'not implemented on this env')
+  test.fail(isBroken(), 'known-broken upstream')
+  test.slow(isCi(), 'triples the timeout on CI')
+  test('AC-Z.1 the one real case', async () => {})
+})
+`,
+  })
+  assert.deepStrictEqual(lines(guards, 'ac'), [])
+  assert.strictEqual(guards.counts.cases, 1)
+
+  // The same modifiers with a TITLE are real cases the gate previously could not see at
+  // all (`fixme`/`fail`/`slow` were absent from its modifier set), so a pending test
+  // escaped limb 1 entirely. Closing the over-count must not leave that under-count.
+  const cases = run({
+    'tests/b.spec.ts': `
+test.fixme('an untagged pending case', async () => {})
+test.fail('an untagged expected-to-fail case', async () => {})
+test.slow('an untagged slow case', async () => {})
+`,
+  })
+  assert.strictEqual(cases.counts.cases, 3)
+  assert.strictEqual(lines(cases, 'ac').length, 3)
+})
+
+test('AC-106.7d: a HELPER that wraps `test.skip` is still a directive at the wrapped site', () => {
+  const r = run({
+    'tests/a.spec.ts': `
+function requireLiveCreds(reason) {
+  test.skip(!hasCreds(), reason)
+}
+test.describe('AC-Z.2 g', () => {
+  requireLiveCreds('ADMIN_STS_* creds not supplied in env')
+  test('AC-Z.2 the one real case', async () => {})
+})
+`,
+  })
+  assert.deepStrictEqual(lines(r, 'ac'), [])
+  assert.strictEqual(r.counts.cases, 1)
+})
+
+test('AC-106.7e: NON-VACUITY — a computed-title `describe(rel, fn)` stays a SUITE, not a directive', () => {
+  const r = run({
+    'tests/a.test.ts': `
+for (const rel of FILES) {
+  describe(rel, () => {
+    it('AC-Z.3 the case is tagged and the suite must remain its ancestor', () => {})
+    it('an untagged sibling', () => {})
+  })
+}
+`,
+  })
+  assert.strictEqual(r.counts.cases, 2, 'both cases are cases; the describe is not one')
+  assert.strictEqual(lines(r, 'ac').length, 1, 'only the untagged sibling')
+})
+
+test('AC-106.7f: NON-VACUITY — `it.each(files)(...)` has a non-string first arg and is STILL a case', () => {
+  const r = run({
+    'tests/a.test.ts': `
+describe('g', () => {
+  it.each(FILES)('%s is untagged', (f) => {})
+  it.each([1, 2])('%s is untagged too', (n) => {})
+})
+`,
+  })
+  assert.strictEqual(lines(r, 'ac').length, 2, 'the .each currying rule must survive the directive rule')
+})
+
+// ==========================================================================
+// `--clean-tree` — the ratchet-regression triage method (DEFECT-OAG-106 `AC-106.5`).
+//
+// "It reads 1757 against its 1755 floor and nobody knows whose +2 that is" had
+// defeated two passes. Measuring the COMMITTED copy of every scanned file answers it:
+// if HEAD scores the floor exactly, the regression is in the uncommitted range.
+// ==========================================================================
+
+function gitScratch(committed, working, config) {
+  const root = scratch(committed, config)
+  const git = (...args) =>
+    execFileSync('git', ['-C', root, '-c', 'user.email=t@t', '-c', 'user.name=t'].concat(args),
+      { encoding: 'utf8' })
+  git('init', '-q', '-b', 'main')
+  git('add', '-A')
+  git('commit', '-q', '-m', 'committed corpus')
+  for (const [rel, body] of Object.entries(working || {})) {
+    const abs = path.join(root, rel)
+    fs.mkdirSync(path.dirname(abs), { recursive: true })
+    fs.writeFileSync(abs, body, 'utf8')
+  }
+  return root
+}
+
+test('AC-106.5: `--clean-tree` measures HEAD, so an UNTRACKED violating spec is not counted', () => {
+  const root = gitScratch(
+    { 'tests/a.test.ts': "it('AC-X.1 committed and tagged', () => {})\n" },
+    { 'tests/zz-scratch.test.ts': "it('an untracked diagnostic nobody committed', () => {})\n" },
+    { mode: 'ratchet', baseline: { ac: 0, authored: 0 } },
+  )
+  const dirty = runCli(root, ['--json', '--no-auto-tighten'])
+  assert.strictEqual(JSON.parse(dirty.stdout).counts.ac, 1, 'the working tree carries the violation')
+
+  const head = runCli(root, ['--clean-tree', '--json'])
+  const r = JSON.parse(head.stdout)
+  assert.strictEqual(r.counts.ac, 0, 'HEAD is clean, so the +1 is in the uncommitted range')
+  assert.strictEqual(r.counts.files, 1, 'only the COMMITTED spec was materialised')
+  assert.match(r.note, /COMMITTED \(HEAD\)/)
+})
+
+test('AC-106.5: `--clean-tree` is a DIAGNOSTIC — it can neither auto-tighten nor write a baseline', () => {
+  const root = gitScratch(
+    { 'tests/a.test.ts': "it('AC-X.1 committed and tagged', () => {})\n" },
+    null,
+    { mode: 'ratchet', baseline: { ac: 5, authored: 3 } },
+  )
+  const diag = runCli(root, ['--clean-tree'])
+  assert.strictEqual(diag.status, 0, diag.stdout)
+  assert.doesNotMatch(diag.stdout, /RATCHET TIGHTENED/, 'a temp root\'s count is not this tree\'s count')
+  assert.deepStrictEqual(floorOf(root), { ac: 5, authored: 3 })
+
+  const write = runCli(root, ['--clean-tree', '--write-baseline'])
+  assert.strictEqual(write.status, 2, write.stdout)
+  assert.match(write.stdout, /may not write a baseline/)
+  assert.deepStrictEqual(floorOf(root), { ac: 5, authored: 3 })
+
+  // NON-VACUITY: the same run WITHOUT --clean-tree does tighten, so the guard above is
+  // suppressing a real write rather than describing a tool that never writes.
+  const plain = runCli(root, ['--no-auto-tighten', '--write-baseline'])
+  assert.strictEqual(plain.status, 0, plain.stdout)
+  assert.deepStrictEqual(floorOf(root), { ac: 0, authored: 0 })
+})

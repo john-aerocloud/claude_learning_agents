@@ -2897,6 +2897,14 @@ DEFAULT_STALE_HOURS = 4.0
 # the first knob to tune from the measured age distribution (median 2.2d / oldest
 # 8.0d at open on OagEventSource), exactly as --stale-hours was.
 DEFAULT_MAX_BACKLOG_AGE_DAYS = 7.0
+
+# v155 — the TOTAL-AGE CEILING past which an in-date `defer_until:` stops exempting a
+# backlog item. Set well above DEFAULT_MAX_BACKLOG_AGE_DAYS on purpose: a defer is a
+# legitimate instrument and must stay cheap for a genuine wait. This is only the point
+# at which RE-DATING is no longer one of the available answers, because the measured
+# failure was serial re-dating (36 items, twice in 9 days, none reaching `done`), not
+# the first defer. 30d ~= four re-dates at the 7d threshold.
+DEFAULT_MAX_DEFER_TOTAL_DAYS = 30.0
 # §F2 seed defaults, used only when queues/policy.csv lacks the row. The retro
 # TUNES these in policy.csv — they are never the authority, just the fallback.
 POLICY_DEFAULTS = {
@@ -3824,7 +3832,8 @@ def _activity_phrase(row):
 def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
                       threshold=3, now=None, observe=True,
                       observe_timeout=DEFAULT_OBSERVE_TIMEOUT,
-                      max_backlog_age_days=DEFAULT_MAX_BACKLOG_AGE_DAYS):
+                      max_backlog_age_days=DEFAULT_MAX_BACKLOG_AGE_DAYS,
+                      max_defer_total_days=DEFAULT_MAX_DEFER_TOTAL_DAYS):
     """PURE-ish computation (the impurities are the read-only git query and the
     observation predicate, both injected via the module-level `_ref_on_trunk` /
     `_run_observation` so tests can substitute them).
@@ -4204,6 +4213,7 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
             continue
         undecided = []
         unreadable = []
+        over_ceiling = []
         for mid in members[q]:
             st_m = states.get(mid)
             ent, why = _open_segment_entered(graphs, items[mid], st_m, now)
@@ -4223,7 +4233,34 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
                 continue
             deferred_to = _defer_until(items[mid])
             if deferred_to is not None and deferred_to > now:
-                continue            # an in-date decision exists — respect it
+                # An in-date decision exists — respect it, but NOT for ever.
+                #
+                # v155, and this is the retro's root-cause fix. This branch used to
+                # be an unconditional `continue`, so an in-date defer exempted the
+                # item NO MATTER HOW MANY TIMES IT HAD BEEN RE-DATED. That made the
+                # gate satisfiable indefinitely WITHOUT MOVING ANY WORK: re-dating
+                # is the cheapest compliant action, so re-dating is what happened.
+                #
+                # MEASURED, OagEventSource 2026-08-27: the same 36-item batch had
+                # been mechanically re-staggered TWICE in 9 days (2026-08-18 and
+                # 2026-08-19) and NOT ONE of them had reached `done` in between.
+                # Items 22-25 days old were being re-dated three weeks out. The
+                # gate reported satisfied throughout, because each individual defer
+                # was a legal, in-date decision. The check measured DECISION and
+                # never MOVEMENT — this project's control-satisfiable-without-
+                # achieving-its-purpose family, arriving in the flow gate itself.
+                #
+                # So a defer buys TIME, not IMMUNITY: past a total-age ceiling,
+                # re-dating is no longer an available answer and the item must be
+                # scheduled, declined, or escalated. Deliberately keyed on TOTAL
+                # IN-QUEUE AGE rather than on a defer COUNT: the count is not
+                # recorded anywhere (frontmatter holds one value, overwritten each
+                # time), whereas age is already computed above and is exactly the
+                # quantity serial re-dating is used to hide.
+                if age_d <= max_defer_total_days:
+                    continue
+                over_ceiling.append((age_d, mid, deferred_to))
+                continue
             undecided.append((age_d, mid, deferred_to))
         if unreadable:
             # UNKNOWN, not block — and the asymmetry with check 11 is deliberate,
@@ -4257,6 +4294,37 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
                       f"check exists to restore (recover the true instant from the "
                       f"commit that ADDED the item file: `git -C <repo> log "
                       f"--diff-filter=A --format=%aI -1 -- <path>`, converted to UTC)."),
+            })
+        if over_ceiling:
+            over_ceiling.sort(reverse=True)
+            findings.append({
+                "check": "aged-backlog-defer-ceiling", "severity": "block",
+                "queue": q, "ids": [m for _a, m, _d in over_ceiling],
+                "max_defer_total_days": max_defer_total_days,
+                "message": (
+                    f"[aged-backlog-defer-ceiling] {len(over_ceiling)} item(s) in {q} "
+                    f"hold an IN-DATE defer but have now been in-queue longer than the "
+                    f"{max_defer_total_days:.0f}d total-age CEILING, so re-dating is no "
+                    f"longer an available answer: "
+                    + ", ".join(f"{m} ({a:.1f}d in queue, deferred to "
+                               f"{d.date().isoformat()})"
+                               for a, m, d in over_ceiling[:8])
+                    + (f" and {len(over_ceiling) - 8} more"
+                       if len(over_ceiling) > 8 else "")
+                    + f". A defer buys TIME, NOT IMMUNITY. This limb exists because "
+                      f"the in-date branch used to exempt an item no matter how many "
+                      f"times it had been re-dated, which made this gate satisfiable "
+                      f"INDEFINITELY WITHOUT MOVING ANY WORK — measured on "
+                      f"OagEventSource 2026-08-27: one 36-item batch re-staggered "
+                      f"TWICE in 9 days with NOT ONE item reaching `done` in between, "
+                      f"while the gate reported satisfied throughout because each "
+                      f"individual defer was legal and in-date. Remedy, per item — "
+                      f"SCHEDULE it (and pull it), or DECLINE it, or ESCALATE it to a "
+                      f"named party. Extending the date again is NOT one of the three, "
+                      f"and §F8a's prohibition still stands: do NOT close a real "
+                      f"finding to clear this gate. If a whole class of these is real "
+                      f"but never pulled, that is a CAPACITY decision for the retro "
+                      f"(a standing WIP allocation), not a dating decision."),
             })
         if not undecided:
             continue
@@ -5286,7 +5354,9 @@ def cmd_loop_gate(a):
         observe=getattr(a, "observe", True),
         observe_timeout=getattr(a, "observe_timeout", None) or DEFAULT_OBSERVE_TIMEOUT,
         max_backlog_age_days=getattr(a, "max_backlog_age_days", None)
-        or DEFAULT_MAX_BACKLOG_AGE_DAYS)
+        or DEFAULT_MAX_BACKLOG_AGE_DAYS,
+        max_defer_total_days=getattr(a, "max_defer_total_days", None)
+        or DEFAULT_MAX_DEFER_TOTAL_DAYS)
     blocking = [f for f in findings if f["severity"] == "block"]
     advisory = [f for f in findings if f["severity"] == "advisory"]
     unknown = [f for f in findings if f["severity"] == "unknown"]
@@ -6032,6 +6102,13 @@ def main(argv=None):
                          "(schedule it, or `defer_until: YYYY-MM-DD`) before it "
                          f"BLOCKS the loop (default {DEFAULT_MAX_BACKLOG_AGE_DAYS}). "
                          "Blocks on AGE-WITHOUT-A-DECISION, never on depth")
+    lg.add_argument("--max-defer-total-days", dest="max_defer_total_days",
+                    type=float, default=DEFAULT_MAX_DEFER_TOTAL_DAYS,
+                    help="TOTAL in-queue days after which an IN-DATE `defer_until:` "
+                         "stops exempting a backlog item, so re-dating is no longer "
+                         "an available answer and it must be scheduled, declined or "
+                         f"escalated (default {DEFAULT_MAX_DEFER_TOTAL_DAYS}). A defer "
+                         "buys time, not immunity")
     lg.add_argument("--threshold", type=int, default=3,
                     help="retro-debt routine threshold (passed through to the "
                          "retro-debt computation this delegates to)")

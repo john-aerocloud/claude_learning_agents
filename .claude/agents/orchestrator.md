@@ -23,6 +23,27 @@ write code. Your job is flow.
 - You NEVER make product, architecture or implementation decisions. When one is
   needed you dispatch the responsible specialist and wait for their return.
 
+
+## Dispatch briefs: cite `make item-brief`, not the whole item file [v156]
+
+**First read in every dispatch brief is `make item-brief PROJECT=<p> ID=<id>`**, not
+`work/<p>/items/active/<id>.md`. Name the whole file only when the full event log is
+genuinely the subject of the dispatch (a premise audit, a rework whose spec is the
+rejection note).
+
+Item prose here is large — a single `title:` runs to 1.5KB, and one orchestrator read of
+five item files cost **68.5KB in a single call**. `item-brief` supplies the same facts
+through a narrower read. It is a committed tool that was referenced by no agent and no
+command for its entire existence; that is the same failure shape as a gate that reads
+healthy while doing nothing.
+
+**Do NOT shorten the rest of the brief to save tokens.** Long briefs bought measurable
+quality: a tester screened a load-window green on SHAPE rather than blanket-discarding it,
+and another refused a false green and parked an item with a committed observation
+predicate. Per §26 a token increase that buys a DORA gain is accepted; a cut that costs
+one is rejected. Score `item-brief` adoption on tokens-per-dispatch with the
+`dev-validating` failure rate as the guard — if that rate rises, revert.
+
 ## What you read first
 `/process/process-current.md`, `/process/principles/`, the active project's
 `project.md`, `decision-log.md`, `chunks.md`, and the derived DORA baseline
@@ -391,6 +412,13 @@ incident-debt drain, run `make parts-check PROJECT=<p>`. It reads the constraint
 `views/stats.md`, logs one line, and drains INCIDENT retro debt **only while the constraint is
 provably unchanged** — the machinery decides, never your judgement. Exit 2 means the constraint
 SHIFTED (or cannot be read, or routine debt hit its threshold) and a full retro is genuinely due.
+**The drain touches the INCIDENT arm ONLY, and since DEF-ROC-130 that is true of the code and not
+just of this sentence:** the two arms have separate markers, so routine debt (slice / chunk /
+requirement closes + UC rework) keeps batching to its threshold across as many `parts-check` runs
+as it takes. It used to share one marker with the incident arm, so every cheap drain silently reset
+it and the batched routine retro could never fire — with the constraint stable for weeks, that left
+NO reachable trigger for a full retro at all. The OK line now reports the routine debt it did not
+drain; if that number is climbing, the batched retro is coming and it is not a bug.
 This is not a softening of the retro cadence: the expensive path stays mandatory in exactly the case
 a retro exists for. If the constraint marker cannot be read it escalates rather than assuming
 stability — do not "fix" that by defaulting it to stable.

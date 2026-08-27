@@ -98,6 +98,25 @@ knowledge of the code.
    as evidence by everyone downstream.
 4. **When an agent overturns you, say so plainly in the item event and move on.** The
    correction is the deliverable; defending the guess is how a wrong design survives.
+5. **Require that a ZERO be armed before it is believed — in the brief, and in your own
+   hands (v155).** Whenever the evidence is "the filter/grep/probe/query returned nothing",
+   the brief must ask for proof that it *could* have returned something: run it against a
+   known positive, or against the pre-fix state, and show the hit. A pattern that cannot
+   match is indistinguishable from a clean system, and it reads as the good news.
+
+   Measured on the orchestrator itself, 2026-08-27, while investigating a live
+   receiver-steal alert: I filtered CloudWatch for `?stolen`, got **zero hits**, and was one
+   step from reporting that as proof of a clean steady state. The word `stolen` **does not
+   appear anywhere in `src/app/src`** — the logged event is `eh.receiver.disconnect` with
+   `reason: higher-epoch`. That filter could never have matched a real steal. Caught only by
+   going to find the event name in order to prove the filter sound; the correct filter then
+   returned 24 real events and settled the question properly.
+
+   This is §17i's class — *a control that cannot report is not a control, and silence is
+   never a pass* — arriving in the investigator's own instrument rather than in the system
+   under investigation, which is why it is easy to miss: nothing is broken, the tooling is
+   working, and the answer is simply about something else. **So: state the positive control
+   in the brief, and run one yourself before you write a zero into a report or an item.**
 Target: lead time (rework at the constraint) + CFR. [EXP-129]
 
 ## A VERIFIED BLOCKER HAS A SHELF LIFE — RE-CHECK IT BEFORE YOU REPEAT IT (v134)

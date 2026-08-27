@@ -2427,9 +2427,11 @@ def _render_stats_md(stats):
 #   INCIDENT  = defect items whose terminal validated/resolved event is after the
 #               marker (a defect against SHIPPED work is a real escape worth an
 #               immediate retro).
-# DUE iff routine >= threshold OR incidents >= 1. Routine (slice-closes +
-# uc-rework) batches to the threshold; a single incident (defect-resolve) fires
-# immediately. (IMP-019, v101: uc-rework reclassified incident->routine.)
+# DUE iff routine >= threshold OR incidents >= 1. Routine (aggregate-closes —
+# slice, chunk, requirement — plus uc-rework) batches to the threshold; a single
+# incident (defect-resolve) fires immediately. (IMP-019, v101: uc-rework
+# reclassified incident->routine. DEF-ROC-130: a requirement close now counts, and
+# THE TWO ARMS HAVE SEPARATE MARKERS — see ARM_DRAINED_BY.)
 # ---------------------------------------------------------------------------
 # --- THE CADENCE RECORD LIVES IN THE PROJECT'S OWN EVENT SUBSTRATE ----------
 #
@@ -2437,6 +2439,12 @@ def _render_stats_md(stats):
 # close / per cheap incident-drain, carrying the instant AND the constraint as of
 # that close. Written by `retro-mark` and by `parts-check`'s drain; read by
 # `compute_retro_debt` and `cmd_parts_check`. Nothing else writes it.
+#
+# READ PER ARM, NOT AS A WHOLE (DEF-ROC-130). The log holds TWO event types and
+# they do NOT mean the same thing: `retro_closed` drains both arms, `debt_drained`
+# drains the incident arm only. "The newest event in the log" is therefore NOT a
+# boundary — asking for it is what let the cheap drain erase routine debt. Always
+# go through `_retro_verdict(project, arm)`.
 #
 # WHY IT MOVED HERE (v146 retro ruling on
 # OI-PARTS-CHECK-MARKER-DIRTIES-THE-TREE-AND-DEFERS-FOLD-FORWARD, 5 sightings):
@@ -2480,6 +2488,60 @@ RETRO_LOG_NAME = "retro-log.md"
 RETRO_CLOSED = "retro_closed"
 RETRO_DRAINED = "debt_drained"
 
+# --- THE TWO ARMS OF RETRO DEBT HAVE SEPARATE MARKERS ------------------------
+# DEF-ROC-130, owner decision 2026-08-27: OPTION B — both arms count, and they
+# batch INDEPENDENTLY.
+#
+# THE FAULT THIS REPLACES. There used to be ONE marker: `_retro_verdict` walked
+# the cadence log with `for ev in reversed(evs)` and returned the last event's ts
+# WHATEVER ITS TYPE, and `compute_retro_debt` applied that single value to BOTH
+# arms. So `parts-check`'s cheap INCIDENT drain (`debt_drained`) also erased
+# accumulated ROUTINE debt — flatly contradicting parts-check's own comment that
+# it "drains the INCIDENT arm only". Measured on ROC 2026-08-27: UC-ROC-093's
+# validation at 13:44:02Z bubbled SLC-ROC-025 AND CHK-ROC-004 to done — two
+# genuine routine closes — and the drain 48 seconds later moved the shared marker
+# past them, so `retro-debt` read `routine 0/3`. And it was STRUCTURAL, not a
+# race: /loop-run step 5a runs parts-check after EVERY bubble, so on each run
+# routine was either already at the threshold or 0..2 and wiped. Routine could
+# only ever reach 3 if 3+ closes landed BETWEEN two consecutive runs. With the
+# constraint stable for weeks, the full retro had NO reachable trigger at all,
+# and /loop-run step 7's cadence property was vacuously satisfied.
+#
+# THE MAP BELOW IS THE FIX, and it is the whole of it: which cadence event
+# drains which arm.
+#   * a FULL retro (`retro_closed`) has walked everything, so it drains BOTH.
+#   * the cheap read (`debt_drained`) is licensed by a PROVEN-STABLE constraint
+#     to skip full-retro overhead on the incident arm ONLY (owner ruling
+#     2026-08-07, which OPTION B does not overturn) — so it drains INCIDENT and
+#     leaves ROUTINE untouched to batch to its threshold.
+#
+# FAIL-CLOSED IS PRESERVED PER ARM, and that is what keeps the per-project store
+# safe: an event type that drains NEITHER arm (an unrecognised or future event)
+# advances nothing, and a log with no arm-draining event at all reads UNKNOWN =>
+# all-time debt on that arm => a FULL retro is forced, never skipped.
+#
+# THE ARM IS A REQUIRED ARGUMENT, never a default (v124 / EXP-121: a control that
+# is OPTIONAL on a shared primitive is a control some lane omits — and sharing one
+# marker across the arms IS this defect). A caller that does not name its arm gets
+# a TypeError; a caller that names a nonexistent one gets a ValueError.
+ARM_ROUTINE = "routine"
+ARM_INCIDENT = "incident"
+
+ARM_DRAINED_BY = {
+    ARM_ROUTINE: (RETRO_CLOSED,),                  # only a FULL retro
+    ARM_INCIDENT: (RETRO_CLOSED, RETRO_DRAINED),   # the cheap read too
+}
+ARMS = (ARM_ROUTINE, ARM_INCIDENT)
+
+
+def _check_arm(arm):
+    if arm not in ARM_DRAINED_BY:
+        raise ValueError(
+            f"unknown retro-debt arm {arm!r}; expected one of {ARMS}. The arm is "
+            f"REQUIRED (DEF-ROC-130): the two arms have separate markers and a "
+            f"caller may not silently share one.")
+    return arm
+
 
 def _retro_log_path(project):
     return os.path.join(items_dir(project), RETRO_LOG_NAME)
@@ -2515,9 +2577,22 @@ _RETRO_LOG_BODY = """
 
 The **authoritative, append-only record of this project's retro cadence** — one
 event per retro close (`retro_closed`) or per cheap incident-debt drain
-(`debt_drained`), each carrying the constraint as of that close. `retro-debt`
-measures debt SINCE the newest event here; `parts-check` compares the current
-constraint against the newest one recorded here.
+(`debt_drained`), each carrying the constraint as of that close. `parts-check`
+compares the current constraint against the newest one recorded here.
+
+`retro-debt` measures each of its two arms since the newest event that drains
+THAT arm, and the two are different (DEF-ROC-130, owner decision 2026-08-27):
+
+* **routine** (slice / chunk / requirement closes + UC rework) — drained ONLY by
+  a full `retro_closed`.
+* **incident** (defect resolves) — drained by `retro_closed` OR by `parts-check`'s
+  cheap `debt_drained`, which is licensed only while the constraint is provably
+  unchanged.
+
+So a `debt_drained` here does NOT reset the routine counter; that arm keeps
+batching to its threshold until a full retro walks it. Reading "the newest event"
+as one shared boundary was the defect: it made the batched routine retro
+unreachable.
 
 It lives in `items/` but **not** in `items/active/` or `items/done/`, so it is not
 a work item and no fold, queue, metric or derived view sees it.
@@ -2556,8 +2631,13 @@ def _rel(path):
         return path
 
 
-def _retro_verdict(project):
-    """(kind, ts, source) — `("known", dt, where)` or `("unknown", None, why)`.
+def _retro_verdict(project, arm):
+    """(kind, ts, source) for ONE arm — `("known", dt, where)` / `("unknown", None, why)`.
+
+    `arm` is REQUIRED and selects which cadence events count as a drain
+    (`ARM_DRAINED_BY`): the routine arm advances ONLY on a full `retro_closed`,
+    the incident arm also on `parts-check`'s cheap `debt_drained` (DEF-ROC-130).
+    An event that drains neither arm advances neither — the fail-closed direction.
 
     A VERDICT, not a sentinel (delta-074 R10). The old reader returned epoch for
     "absent", so `retro-debt` PRINTED `since last retro 1970-01-01` as if it were
@@ -2567,8 +2647,11 @@ def _retro_verdict(project):
     overloaded channel would be load-bearing on the happy path. The exit-2
     direction is UNCHANGED — this is legibility, never a softening.
     """
+    drains = ARM_DRAINED_BY[_check_arm(arm)]
     evs = _read_retro_log(project)
     for ev in reversed(evs):
+        if str(ev.get("event") or "") not in drains:
+            continue
         ts = parse_ts(str(ev.get("ts")))
         if ts:
             return ("known", ts, _rel(_retro_log_path(project)))
@@ -2582,25 +2665,30 @@ def _retro_verdict(project):
         except OSError:
             pass
     return ("unknown", None,
-            f"no retro record at {_rel(_retro_log_path(project))}; no frozen "
-            f"marker at {_rel(legacy)} — all-time debt shown, a FULL retro is owed")
+            f"no {arm}-arm retro record at {_rel(_retro_log_path(project))} "
+            f"(nothing of type {'/'.join(drains)}); no frozen marker at "
+            f"{_rel(legacy)} — all-time debt shown, a FULL retro is owed")
 
 
-def _read_retro_marker(project):
-    """The last-retro datetime (UTC), or epoch (= all-time debt) if UNKNOWN.
+def _read_retro_marker(project, arm):
+    """This ARM's drain boundary (UTC), or epoch (= all-time debt) if UNKNOWN.
 
     FAIL-CLOSED and that is the property that makes a per-project store safe: an
     absent record cannot silently SKIP a retro, it forces one (every close and
     resolve in project history counts as debt), and the resulting retro's
     `retro-mark` re-seeds the log — so the system self-heals after exactly one
     retro. Callers wanting to SHOW the boundary must use `_retro_verdict`.
+
+    `arm` is REQUIRED (DEF-ROC-130). Fail-closed now holds PER ARM: a project
+    whose log carries only cheap `debt_drained` events has never had a full retro,
+    so its ROUTINE boundary reads UNKNOWN and its whole close history is owed.
     """
-    _kind, ts, _why = _retro_verdict(project)
+    _kind, ts, _why = _retro_verdict(project, arm)
     return ts or datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 
-def _retro_since_phrase(project):
-    kind, ts, why = _retro_verdict(project)
+def _retro_since_phrase(project, arm):
+    kind, ts, why = _retro_verdict(project, arm)
     if kind == "known":
         return ts.strftime("%Y-%m-%dT%H:%M:%SZ")
     return f"UNKNOWN ({why})"
@@ -2637,32 +2725,51 @@ def _aggregate_bubble_ts(graphs, items, iid, children):
 
 
 def compute_retro_debt(graphs, project, threshold, now):
-    """Pure computation. Returns (routine, incidents, due, detail[])."""
+    """Pure computation. Returns (routine, incidents, due, detail[], markers).
+
+    The 5th value is a PER-ARM dict, never a single instant: one shared marker IS
+    DEF-ROC-130, so the signature is shaped to make sharing impossible.
+
+    WHAT COUNTS AS ROUTINE. Every AGGREGATE close — slice, chunk AND requirement.
+    The `requirement` case is AC-130-4: the branch used to be guarded
+    `it.type in ("slice", "chunk")`, so REQ-ROC-002 completing on 2026-08-27 (an
+    entire requirement delivered, the largest learning event this system produces)
+    generated ZERO debt of either kind. The guard is now the KIND, so a new
+    aggregate type cannot be silently omitted the way `requirement` was; the
+    completeness of that is pinned by a test that enumerates the type graph.
+
+    WHAT COUNTS AS AN INCIDENT is UNCHANGED by DEF-ROC-130: a defect resolve, and
+    only that. A requirement close is routine — it batches, it does not fire.
+    """
     items, _dup = load_all_items(project)
     states = compute_states(graphs, items)
     children = compute_children(items)
-    marker = _read_retro_marker(project)
+    # SEPARATE MARKERS (DEF-ROC-130 / OPTION B). The routine arm is drained only
+    # by a full `retro_closed`; the incident arm also by parts-check's cheap
+    # `debt_drained`. Reading one marker for both is the defect.
+    markers = {arm: _read_retro_marker(project, arm) for arm in ARMS}
+    r_marker, i_marker = markers[ARM_ROUTINE], markers[ARM_INCIDENT]
 
     routine, incidents, detail = [], [], []
     for iid, it in items.items():
         kind = graphs.kind(it.type)
-        if kind == "aggregate" and it.type in ("slice", "chunk"):
+        if kind == "aggregate":
             if states.get(iid) == "done":
                 bt = _aggregate_bubble_ts(graphs, items, iid, children)
-                if bt and bt > marker and (now is None or bt <= now):
+                if bt and bt > r_marker and (now is None or bt <= now):
                     routine.append((iid, bt))
-                    detail.append((bt, "slice-close", iid))
+                    detail.append((bt, f"{it.type}-close", iid))
         elif it.type == "defect":
             if states.get(iid) in ("resolved", "done"):
                 t = _terminal_ts(it)
-                if t and t > marker and (now is None or t <= now):
+                if t and t > i_marker and (now is None or t <= now):
                     incidents.append((iid, t))
                     detail.append((t, "defect-resolve", iid))
         elif it.type == "use-case":
             for ev in it.events:
                 if ev.get("event") in ("build_failed", "rejected"):
                     t = parse_ts(ev.get("ts"))
-                    if t and t > marker and (now is None or t <= now):
+                    if t and t > r_marker and (now is None or t <= now):
                         # IMP-019 (v101): a dev-validation reject / build-fail that
                         # gets fixed + re-validated is the process WORKING, not an
                         # incident — batch it as ROUTINE (accrues toward the
@@ -2674,22 +2781,27 @@ def compute_retro_debt(graphs, project, threshold, now):
                         break
     due = (len(routine) >= threshold) or (len(incidents) >= 1)
     detail.sort(key=lambda d: d[0] or datetime(1970, 1, 1, tzinfo=timezone.utc))
-    return routine, incidents, due, detail, marker
+    return routine, incidents, due, detail, markers
 
 
 def cmd_retro_debt(a):
     graphs = Graphs.load()
     now = parse_ts(getattr(a, "now", None)) if getattr(a, "now", None) else None
     threshold = a.threshold
-    routine, incidents, due, detail, marker = compute_retro_debt(
+    routine, incidents, due, detail, _markers = compute_retro_debt(
         graphs, a.project, threshold, now)
     n = len(routine) + len(incidents)
     reason = ("incident (immediate)" if incidents else
               f"routine {len(routine)}>={threshold}" if len(routine) >= threshold else
               f"routine {len(routine)}<{threshold}")
-    since = _retro_since_phrase(a.project)
+    # BOTH boundaries, named. One channel carrying two meanings is what
+    # delta-074 R10 fixed for absence; DEF-ROC-130 is the same argument for the
+    # two arms — a reader could not otherwise tell which drain the count is since.
+    r_since = _retro_since_phrase(a.project, ARM_ROUTINE)
+    i_since = _retro_since_phrase(a.project, ARM_INCIDENT)
     print(f"retro-debt[{a.project}] = {n} (routine {len(routine)}/{threshold}, "
-          f"incidents {len(incidents)}) since last retro {since} "
+          f"incidents {len(incidents)}) since last retro {r_since} [routine arm] "
+          f"/ {i_since} [incident arm] "
           f"=> {'RETRO DUE — drain before advancing ['+reason+']' if due else 'ok'}")
     for ts, kind, ident in detail:
         tss = ts.strftime("%Y-%m-%dT%H:%M:%SZ") if ts else "—"
@@ -2809,7 +2921,7 @@ def cmd_parts_check(a):
     genuinely due (constraint shifted, unreadable, or routine debt at threshold)."""
     graphs = Graphs.load()
     now = parse_ts(getattr(a, "now", None)) if getattr(a, "now", None) else None
-    routine, incidents, _due, _detail, marker = compute_retro_debt(
+    routine, incidents, _due, _detail, _markers = compute_retro_debt(
         graphs, a.project, a.threshold, now)
 
     cur = _read_constraint(a.project)
@@ -2839,8 +2951,16 @@ def cmd_parts_check(a):
               f"(exploit / subordinate / elevate). The cheap path is NOT available.")
         sys.exit(2)
 
-    # Routine debt still batches to its own threshold — parts-check drains the
-    # INCIDENT arm only. A slice/chunk close backlog is a different signal.
+    # Routine debt batches to its OWN threshold against its OWN marker —
+    # parts-check drains the INCIDENT arm only. An aggregate-close backlog (slice,
+    # chunk or requirement) is a different signal and keeps its batched full retro.
+    #
+    # This comment used to be TRUE OF INTENT AND FALSE OF BEHAVIOUR (DEF-ROC-130):
+    # the drain below wrote a `debt_drained` event that the single shared marker
+    # read for both arms, so the routine count was reset on every run and this
+    # branch could only fire if 3+ closes landed between two consecutive runs.
+    # The arms now have separate markers (`ARM_DRAINED_BY`), so the drain below
+    # CANNOT erase what accumulates here, and this escalation is reachable.
     if len(routine) >= a.threshold:
         print(f"parts-check[{a.project}] @ {stamp} => ESCALATE — {line} "
               f"(unshifted), but ROUTINE debt is {len(routine)}/{a.threshold}. "
@@ -2857,9 +2977,17 @@ def cmd_parts_check(a):
     print(f"parts-check[{a.project}] @ {stamp} => OK (constraint STABLE) — {line}; "
           f"shifted since last close? n. Drained {len(incidents)} incident(s): "
           f"{', '.join(i for i, _t in incidents) or 'none'}. "
+          f"ROUTINE debt UNTOUCHED at {len(routine)}/{a.threshold} "
+          f"({', '.join(i for i, _t in routine) or 'none'}) — the arms have "
+          f"SEPARATE markers (DEF-ROC-130), so this drain cannot erase it and it "
+          f"keeps batching until a FULL /retro. "
           f"Full-retro overhead NOT paid, per the owner ruling of 2026-08-07; the "
           f"full retro remains mandatory the moment the constraint moves.")
-    write_statusline({f"retro_debt_{a.project}": 0, f"retro_due_{a.project}": False})
+    # The surviving routine debt, NOT 0. Writing 0 here was the display half of
+    # DEF-ROC-130: the statusline asserted the debt was gone while it was merely
+    # not-yet-at-threshold, so the operator could not see it accumulating either.
+    write_statusline({f"retro_debt_{a.project}": len(routine),
+                      f"retro_due_{a.project}": False})
     sys.exit(0)
 
 
@@ -4583,7 +4711,7 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
                 f"`make wi-append … EVENT=amended … PROBE=…`.")))
 
     # --- 4. retro debt (DELEGATED — do not duplicate that logic) -------------
-    routine, incidents, due, _detail, marker = compute_retro_debt(
+    routine, incidents, due, _detail, _markers = compute_retro_debt(
         graphs, project, threshold, now)
     if due:
         reason = ("incident (immediate)" if incidents
@@ -4596,7 +4724,9 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
             "message": (f"[retro-debt] RETRO DUE [{reason}] — routine "
                         f"{len(routine)}/{threshold}, incidents "
                         f"{len(incidents)} since "
-                        f"{_retro_since_phrase(project)} "
+                        f"{_retro_since_phrase(project, ARM_ROUTINE)} [routine] "
+                        f"/ {_retro_since_phrase(project, ARM_INCIDENT)} "
+                        f"[incident] "
                         f"({', '.join(ids) or '—'}). Remedy: fire /retro, then "
                         f"`make retro-mark PROJECT={project}` to drain it."),
         })

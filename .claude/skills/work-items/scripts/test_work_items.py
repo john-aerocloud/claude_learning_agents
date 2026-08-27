@@ -1247,8 +1247,10 @@ class TestRetro(Base):
         wi.cmd_retro_mark(argparse.Namespace(project=self.project, now="2026-06-20T00:00:00Z"))
         p = os.path.join(self.tmp, "work", self.project, "items", "retro-log.md")
         self.assertTrue(os.path.exists(p))
-        self.assertEqual(wi._read_retro_marker(self.project),
-                         wi.parse_ts("2026-06-20T00:00:00Z"))
+        # a FULL retro close drains BOTH arms (DEF-ROC-130)
+        for arm in wi.ARMS:
+            self.assertEqual(wi._read_retro_marker(self.project, arm),
+                             wi.parse_ts("2026-06-20T00:00:00Z"), arm)
 
     def test_retro_mark_does_not_write_the_frozen_parent_repo_marker(self):
         legacy = os.path.join(self.tmp, "process", "dora", "retro-marker",
@@ -1340,9 +1342,14 @@ class TestPartsCheck(Base):
         self.assertEqual(code, 0, out)
         self.assertIn("STABLE", out)
         self.assertIn("DEF-1", out)
-        # and the debt is genuinely drained, not merely reported as fine
-        self.assertGreater(wi._read_retro_marker(self.project),
+        # and the INCIDENT debt is genuinely drained, not merely reported as fine
+        self.assertGreater(wi._read_retro_marker(self.project, wi.ARM_INCIDENT),
                            wi.parse_ts("2026-06-14T00:00:00Z"))
+        # ...while the ROUTINE arm is left exactly where it was. THIS is
+        # DEF-ROC-130: the drain used to move one shared marker, so it silently
+        # erased accumulated slice/chunk/requirement closes too.
+        self.assertEqual(wi._read_retro_marker(self.project, wi.ARM_ROUTINE),
+                         wi.parse_ts("2026-06-01T00:00:00Z"))
 
     def test_shifted_constraint_escalates_and_does_NOT_drain(self):
         self._marker(ts="2026-06-01T00:00:00Z",
@@ -1353,9 +1360,10 @@ class TestPartsCheck(Base):
         self.assertEqual(code, 2, out)
         self.assertIn("CONSTRAINT SHIFTED", out)
         self.assertIn("queue/open -> tester/validating", out)
-        # the marker must be UNTOUCHED — an escalation may never drain debt
-        self.assertEqual(wi._read_retro_marker(self.project),
-                         wi.parse_ts("2026-06-01T00:00:00Z"))
+        # BOTH markers must be UNTOUCHED — an escalation may never drain debt
+        for arm in wi.ARMS:
+            self.assertEqual(wi._read_retro_marker(self.project, arm),
+                             wi.parse_ts("2026-06-01T00:00:00Z"), arm)
 
     def test_unreadable_constraint_escalates(self):
         """An instrument that cannot be read is NOT evidence of stability."""
@@ -1405,6 +1413,315 @@ class TestPartsCheck(Base):
         con = wi._read_constraint(self.project)
         self.assertIsNotNone(con)
         self.assertEqual(con["owner"], "engineer")   # the clean runner-up, not queue
+
+
+# --------------------------------------------------------------------------- #
+# DEF-ROC-130 — THE TWO RETRO ARMS GET SEPARATE MARKERS (owner decision: OPTION B)
+#
+# THE FAULT, measured on ROC's own committed cadence log 2026-08-27. `parts-check`
+# carried the comment "Routine debt still batches to its own threshold —
+# parts-check drains the INCIDENT arm only. A slice/chunk close backlog is a
+# different signal." The implementation contradicted it: the OK path appended a
+# `debt_drained` event, `_retro_verdict` returned THE LAST EVENT'S ts whatever its
+# type, and `compute_retro_debt` applied that ONE value to BOTH arms. So the cheap
+# incident drain silently erased accumulated routine debt. Replayed from the log:
+# UC-ROC-093's validation at 13:44:02Z bubbled SLC-ROC-025 AND CHK-ROC-004 to done
+# — two genuine routine closes — and the `debt_drained` at 13:44:50Z moved the
+# shared marker past them, so `retro-debt` 10 seconds later read `routine 0/3`.
+# Driving compute_retro_debt with each marker in turn isolated the cause: marker
+# 13:40:01Z -> routine 2, marker 13:44:50Z -> routine 0, same items, same `now`.
+#
+# THE ARITHMETIC IS WHY THIS IS STRUCTURAL, NOT A RACE: /loop-run step 5a runs
+# parts-check after EVERY bubble, so on each run routine is either already at the
+# threshold (escalate) or 0..2 and the drain wipes it. Routine could therefore only
+# ever reach 3 if 3+ closes landed BETWEEN two consecutive runs. With the
+# constraint stable for weeks, NO trigger for a full retro remained.
+#
+# THE DECISION (owner, 2026-08-27, recorded on DEF-ROC-130): OPTION B — both arms
+# count and they get SEPARATE MARKERS. The 2026-08-07 ruling stands: full-retro
+# overhead is still not paid on a clean run, because the cheap read still drains
+# the INCIDENT arm on a stable constraint. B only stops that drain erasing routine
+# debt, which was never the ruling's intent.
+#
+# WHICH EVENT DRAINS WHICH ARM, and it is the whole fix:
+#   routine  <- `retro_closed` ONLY   (only a FULL retro walks the close backlog)
+#   incident <- `retro_closed` OR `debt_drained`  (the cheap read is legitimate)
+# --------------------------------------------------------------------------- #
+class TestRetroArmSeparation(Base):
+    CON = {"owner": "queue", "state": "open"}
+
+    def _stats(self, owner="queue", state="open"):
+        d = os.path.join(self.tmp, "work", self.project, "views")
+        os.makedirs(d, exist_ok=True)
+        doc = {"overall": {"gross_lead_time": {
+            "by_owner": {owner: {"pct_of_glt": 60.0, "backfill_pct_of_state": 0.0},
+                         "engineer": {"pct_of_glt": 5.0,
+                                      "backfill_pct_of_state": 0.0}},
+            "by_state": {state: {"pct_of_glt": 42.0, "backfill_pct_of_state": 0.0},
+                         "fixing": {"pct_of_glt": 3.0,
+                                    "backfill_pct_of_state": 0.0}}}}}
+        with open(os.path.join(d, "stats.json"), "w", encoding="utf-8") as f:
+            json.dump(doc, f)
+
+    def _closed(self, ts="2026-06-01T00:00:00Z"):
+        """A FULL retro close on record — the state every project is in after /retro."""
+        wi._append_retro_log(self.project, {
+            "ts": ts, "event": wi.RETRO_CLOSED, "agent": "orchestrator",
+            "constraint_owner": self.CON["owner"],
+            "constraint_state": self.CON["state"]})
+
+    def _drained(self, ts):
+        """A cheap incident drain on record — what parts-check's OK path appends."""
+        wi._append_retro_log(self.project, {
+            "ts": ts, "event": wi.RETRO_DRAINED, "agent": "orchestrator",
+            "constraint_owner": self.CON["owner"],
+            "constraint_state": self.CON["state"]})
+
+    def _slice_close(self, i, day, itype="slice"):
+        """An aggregate that bubbles done at `day` 12:00 via one done child UC."""
+        self.write_item("done", f"UC-A{i}", "use-case", [
+            {"ts": _dt(day, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(day, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(day, 2), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(day, 3), "event": "built_green", "agent": "engineer"},
+            {"ts": _dt(day, 4), "event": "deployed", "agent": "cicd"},
+            {"ts": _dt(day, 12), "event": "validated", "agent": "tester"}],
+            parents=[f"AGG-A{i}"])
+        self.write_item("done", f"AGG-A{i}", itype, [
+            {"ts": _dt(day, 0), "event": "registered", "agent": "flow-manager"}])
+
+    def _defect(self, iid, day):
+        self.write_item("done", iid, "defect", [
+            {"ts": _dt(day, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(day, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(day, 2), "event": "confirmed", "agent": "engineer"},
+            {"ts": _dt(day, 3), "event": "fixed", "agent": "engineer"},
+            {"ts": _dt(day, 5), "event": "validated", "agent": "tester"}])
+
+    def _parts(self, now, threshold=3):
+        ns = argparse.Namespace(project=self.project, threshold=threshold, now=now)
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            try:
+                wi.cmd_parts_check(ns)
+                code = 0
+            except SystemExit as e:
+                code = e.code
+        return code, out.getvalue()
+
+    def _debt(self, threshold=3, now=NOW):
+        return wi.compute_retro_debt(self.graphs, self.project, threshold,
+                                     wi.parse_ts(now))
+
+    # -- AC-130-5: THE ARMING TEST. This is the one that must be red first. ----
+    def test_ac_130_5_routine_reaches_the_threshold_across_interleaved_parts_checks(self):
+        """N routine closes INTERLEAVED with parts-check runs still reach the
+        threshold. This is the shape /loop-run actually produces (step 5a runs
+        parts-check after EVERY bubble), and on the pre-fix code it is impossible:
+        each drain moved the one shared marker past the close that preceded it, so
+        the counter reset before it could ever accumulate."""
+        self._closed()
+        self._stats()
+        codes = []
+        for i, day in enumerate((10, 12, 14)):
+            self._slice_close(i, day)
+            codes.append(self._parts(now=_dt(day, 13))[0])
+        routine, incidents, due, _detail, _m = self._debt(now=_dt(15, 0))
+        self.assertEqual(len(routine), 3,
+                         "the interleaved incident drains erased routine debt — "
+                         "the arms are still sharing one marker")
+        self.assertEqual(len(incidents), 0)
+        self.assertTrue(due, "3 routine closes must make a full retro DUE")
+        self.assertEqual(codes[:2], [0, 0],
+                         "below the threshold on a stable constraint the cheap "
+                         "path is still legitimate (the 2026-08-07 ruling stands)")
+        self.assertEqual(codes[2], 2,
+                         "at the threshold parts-check must ESCALATE on the "
+                         "routine arm — that is the trigger this defect removed")
+
+    # -- AC-130-2: separate markers -------------------------------------------
+    def test_ac_130_2_the_incident_drain_does_not_move_the_routine_marker(self):
+        self._closed("2026-06-01T00:00:00Z")
+        self._stats()
+        self._slice_close(0, 10)
+        self._defect("DEF-1", 11)
+        code, out = self._parts(now=_dt(12, 0))
+        self.assertEqual(code, 0, out)
+        self.assertEqual(wi._read_retro_marker(self.project, wi.ARM_INCIDENT),
+                         wi.parse_ts(_dt(12, 0)),
+                         "the incident arm must be drained by the cheap read")
+        self.assertEqual(wi._read_retro_marker(self.project, wi.ARM_ROUTINE),
+                         wi.parse_ts("2026-06-01T00:00:00Z"),
+                         "the routine marker may ONLY move on a full retro close")
+
+    def test_ac_130_1_a_drain_reports_and_preserves_the_routine_debt(self):
+        """The measured ROC case, generalised: a real routine close that is under
+        the threshold survives the incident drain, and parts-check SAYS so — the
+        comment, the threshold and the behaviour now agree (AC-130-1)."""
+        self._closed()
+        self._stats()
+        self._slice_close(0, 10)
+        self._defect("DEF-1", 11)
+        before, _i, _d, _dt_, _m = self._debt(now=_dt(12, 0))
+        self.assertEqual(len(before), 1)
+        code, out = self._parts(now=_dt(12, 0))
+        self.assertEqual(code, 0, out)
+        after, incidents, _d2, _dt2, _m2 = self._debt(now=_dt(13, 0))
+        self.assertEqual(len(after), 1, "the drain erased a real routine close")
+        self.assertEqual(len(incidents), 0, "the incident arm WAS drained")
+        self.assertIn("routine", out.lower(),
+                      "the OK line must report the routine debt it did NOT drain, "
+                      "or the surviving debt is invisible to the operator")
+
+    def test_ac_130_2_statusline_reports_the_surviving_routine_debt_not_zero(self):
+        """parts-check used to write retro_debt=0 unconditionally. With the arms
+        independent that is a lie on the very path this defect is about."""
+        self._closed()
+        self._stats()
+        self._slice_close(0, 10)
+        self._defect("DEF-1", 11)
+        self._parts(now=_dt(12, 0))
+        with open(wi.STATUSLINE) as f:
+            d = json.load(f)
+        self.assertEqual(d[f"retro_debt_{self.project}"], 1)
+        self.assertFalse(d[f"retro_due_{self.project}"])
+
+    # -- AC-130-4: a requirement completing generates debt ---------------------
+    def test_ac_130_4_a_requirement_close_generates_routine_debt(self):
+        """REQ-ROC-002 completed on 2026-08-27 — an entire requirement delivered,
+        the largest learning event the system produces — and generated ZERO debt
+        of either kind, because the routine branch was guarded on
+        `it.type in ("slice", "chunk")`."""
+        self._closed()
+        self._slice_close(0, 10, itype="requirement")
+        routine, incidents, _due, detail, _m = self._debt(now=_dt(11, 0))
+        self.assertEqual([i for i, _t in routine], ["AGG-A0"])
+        self.assertEqual(len(incidents), 0,
+                         "a requirement close is ROUTINE — what counts as an "
+                         "INCIDENT is unchanged by this fix")
+        self.assertIn("requirement-close", [k for _t, k, _i in detail])
+
+    def test_ac_130_4_EVERY_aggregate_type_in_the_graph_generates_routine_debt(self):
+        """COMPLETENESS, not just the `requirement` case. `requirement` was omitted
+        for as long as it existed because the branch enumerated TYPES
+        (`("slice", "chunk")`) while the graph grew a third aggregate — a silent,
+        green omission of exactly the v124/EXP-121 shape. The guard is now the
+        KIND, and this test enumerates the type graph so a FOURTH aggregate type
+        cannot be added and silently generate no learning signal."""
+        aggregates = sorted(t for t, spec in self.graphs.types.items()
+                            if spec.get("kind") == "aggregate")
+        self.assertIn("requirement", aggregates)      # the one that was missing
+        self.assertGreaterEqual(len(aggregates), 3)
+        self._closed("2026-06-01T00:00:00Z")
+        for i, itype in enumerate(aggregates):
+            self._slice_close(i, 10 + i, itype=itype)
+        routine, incidents, _due, detail, _m = self._debt(now=_dt(20, 0))
+        self.assertEqual(sorted(x for x, _t in routine),
+                         [f"AGG-A{i}" for i in range(len(aggregates))],
+                         "an aggregate close generated no routine retro debt")
+        self.assertEqual(len(incidents), 0,
+                         "an aggregate close is ROUTINE — what counts as an "
+                         "INCIDENT is unchanged by this fix")
+        labels = sorted(k for _t, k, _i in detail)
+        self.assertEqual(labels, sorted(f"{t}-close" for t in aggregates),
+                         "each aggregate type must be DISTINGUISHABLE in the "
+                         "detail lines, or a reader cannot see which close it was")
+
+    # -- what must NOT be weakened --------------------------------------------
+    def test_a_full_retro_close_drains_BOTH_arms(self):
+        self._slice_close(0, 10)
+        self._defect("DEF-1", 11)
+        wi.cmd_retro_mark(argparse.Namespace(project=self.project,
+                                             now=_dt(12, 0)))
+        self.assertEqual(wi._read_retro_marker(self.project, wi.ARM_ROUTINE),
+                         wi.parse_ts(_dt(12, 0)))
+        self.assertEqual(wi._read_retro_marker(self.project, wi.ARM_INCIDENT),
+                         wi.parse_ts(_dt(12, 0)))
+        routine, incidents, due, _detail, _m = self._debt(now=_dt(13, 0))
+        self.assertEqual((len(routine), len(incidents), due), (0, 0, False))
+
+    def test_fail_closed_no_record_at_all_forces_a_retro_on_BOTH_arms(self):
+        """The property that makes a per-project store safe: an absent record
+        cannot silently SKIP a retro, it FORCES one. Separating the markers must
+        not create a hole in that."""
+        self._slice_close(0, 10)
+        self._defect("DEF-1", 11)
+        epoch = wi.datetime(1970, 1, 1, tzinfo=wi.timezone.utc)
+        self.assertEqual(wi._read_retro_marker(self.project, wi.ARM_ROUTINE), epoch)
+        self.assertEqual(wi._read_retro_marker(self.project, wi.ARM_INCIDENT), epoch)
+        routine, incidents, due, _detail, _m = self._debt(now=_dt(13, 0))
+        self.assertEqual((len(routine), len(incidents)), (1, 1))
+        self.assertTrue(due)
+        for arm in (wi.ARM_ROUTINE, wi.ARM_INCIDENT):
+            kind, ts, _why = wi._retro_verdict(self.project, arm)
+            self.assertEqual((kind, ts), ("unknown", None))
+
+    def test_fail_closed_a_log_of_drains_only_never_drains_the_routine_arm(self):
+        """A project that has ONLY ever had cheap drains has never had a full
+        retro, so its routine debt is ALL-TIME and a full retro is owed. The
+        fail-closed direction, in the new arm."""
+        self._drained(_dt(9, 0))
+        self._drained(_dt(11, 0))
+        self._slice_close(0, 10)
+        epoch = wi.datetime(1970, 1, 1, tzinfo=wi.timezone.utc)
+        self.assertEqual(wi._read_retro_marker(self.project, wi.ARM_ROUTINE), epoch)
+        self.assertEqual(wi._read_retro_marker(self.project, wi.ARM_INCIDENT),
+                         wi.parse_ts(_dt(11, 0)))
+        routine, _i, _due, _detail, _m = self._debt(now=_dt(13, 0))
+        self.assertEqual(len(routine), 1,
+                         "a close BEFORE the newest drain still counts as routine "
+                         "debt, because no full retro has ever walked it")
+        kind, _ts, why = wi._retro_verdict(self.project, wi.ARM_ROUTINE)
+        self.assertEqual(kind, "unknown")
+        self.assertIn("retro", why.lower())
+
+    def test_the_frozen_legacy_marker_seeds_BOTH_arms(self):
+        """The cutover fallback was a single retro-close instant, so it is a
+        legitimate boundary for both arms. Losing it on one arm would force every
+        pre-cutover project into a spurious all-time routine retro."""
+        d = os.path.join(self.tmp, "process", "dora", "retro-marker")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, f"{self.project}.txt"), "w") as f:
+            f.write("2026-06-12T00:00:00Z\n")
+        self.assertEqual(wi._read_retro_marker(self.project, wi.ARM_ROUTINE),
+                         wi.parse_ts("2026-06-12T00:00:00Z"))
+        self.assertEqual(wi._read_retro_marker(self.project, wi.ARM_INCIDENT),
+                         wi.parse_ts("2026-06-12T00:00:00Z"))
+
+    def test_compute_retro_debt_returns_BOTH_markers_so_callers_cannot_share_one(self):
+        """The 5th return value is the pair, not a single instant — the shared
+        scalar IS the defect, so the signature must make sharing impossible."""
+        self._closed("2026-06-01T00:00:00Z")
+        self._drained(_dt(11, 0))
+        _r, _i, _due, _detail, markers = self._debt(now=_dt(13, 0))
+        self.assertEqual(markers[wi.ARM_ROUTINE], wi.parse_ts("2026-06-01T00:00:00Z"))
+        self.assertEqual(markers[wi.ARM_INCIDENT], wi.parse_ts(_dt(11, 0)))
+
+    def test_the_arm_is_a_REQUIRED_argument_no_lane_can_omit_it(self):
+        """v124/EXP-121: a control that is OPTIONAL on a shared primitive is a
+        control some lane omits. The arm has no default, so a future caller cannot
+        silently re-share one marker across both arms."""
+        with self.assertRaises(TypeError):
+            wi._read_retro_marker(self.project)
+        with self.assertRaises(TypeError):
+            wi._retro_verdict(self.project)
+        with self.assertRaises(ValueError):
+            wi._read_retro_marker(self.project, "not-an-arm")
+
+    def test_retro_debt_output_shows_BOTH_boundaries(self):
+        """One channel carrying two different meanings is what delta-074 R10 fixed
+        for absence; the same argument applies to the two arms."""
+        self._closed("2026-06-01T00:00:00Z")
+        self._drained(_dt(11, 0))
+        self._slice_close(0, 10)
+        ns = argparse.Namespace(project=self.project, threshold=3, now=_dt(13, 0))
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            try:
+                wi.cmd_retro_debt(ns)
+            except SystemExit:
+                pass
+        txt = out.getvalue()
+        self.assertIn("2026-06-01T00:00:00Z", txt)   # the routine boundary
+        self.assertIn(_dt(11, 0).replace(":00Z", ":00Z"), txt)  # the incident one
 
 
 class TestProjectStatusline(Base):
@@ -6061,8 +6378,9 @@ class TestRetroLogStore(Base):
         self.assertEqual(len(evs), 1)
         self.assertEqual(evs[0]["event"], "retro_closed")
         self.assertEqual(evs[0]["ts"], "2026-06-20T00:00:00Z")
-        self.assertEqual(wi._read_retro_marker(self.project),
-                         wi.parse_ts("2026-06-20T00:00:00Z"))
+        for arm in wi.ARMS:      # a full close drains both (DEF-ROC-130)
+            self.assertEqual(wi._read_retro_marker(self.project, arm),
+                             wi.parse_ts("2026-06-20T00:00:00Z"), arm)
 
     def test_ac_pcm_1_retro_mark_leaves_the_parent_process_tree_byte_identical(self):
         """THE fitness function (delta-075 R10): any write under process/ is RED.
@@ -6095,8 +6413,13 @@ class TestRetroLogStore(Base):
                          "parts-check wrote a parent-repo file")
         evs = wi._read_retro_log(self.project)
         self.assertEqual([x["event"] for x in evs], ["debt_drained"])
-        # and the boundary really moved — a drain that records nothing is a no-op
-        self.assertEqual(wi._read_retro_marker(self.project), wi.parse_ts(NOW))
+        # and the INCIDENT boundary really moved — a drain that records nothing is
+        # a no-op. The ROUTINE boundary stays on the frozen legacy close, because
+        # a cheap drain is not a full retro (DEF-ROC-130).
+        self.assertEqual(wi._read_retro_marker(self.project, wi.ARM_INCIDENT),
+                         wi.parse_ts(NOW))
+        self.assertEqual(wi._read_retro_marker(self.project, wi.ARM_ROUTINE),
+                         wi.parse_ts("2026-06-01T00:00:00Z"))
 
     def test_ac_pcm_1_escalating_parts_check_appends_nothing(self):
         """An escalation may NEVER drain debt — so it may never append."""
@@ -6108,8 +6431,9 @@ class TestRetroLogStore(Base):
                     project=self.project, threshold=3, now=NOW))
         self.assertEqual(e.exception.code, 2, out.getvalue())
         self.assertEqual(wi._read_retro_log(self.project), [])
-        self.assertEqual(wi._read_retro_marker(self.project),
-                         wi.parse_ts("2026-06-01T00:00:00Z"))
+        for arm in wi.ARMS:
+            self.assertEqual(wi._read_retro_marker(self.project, arm),
+                             wi.parse_ts("2026-06-01T00:00:00Z"), arm)
 
     # ---- AC-PCM.3 — cadence stays derivable, and the cutover moves nothing ----
     def test_ac_pcm_3_legacy_marker_is_read_through_when_no_log_exists(self):
@@ -6118,12 +6442,16 @@ class TestRetroLogStore(Base):
         next retro-debt must return the SAME boundary — no spurious full retro,
         which is what the naive `gitignore + git rm --cached` form would cause."""
         self._legacy_marker("2026-06-14T09:00:00Z")
-        self.assertEqual(wi._read_retro_marker(self.project),
-                         wi.parse_ts("2026-06-14T09:00:00Z"))
-        kind, ts, src = wi._retro_verdict(self.project)
-        self.assertEqual(kind, "known")
-        self.assertEqual(ts, wi.parse_ts("2026-06-14T09:00:00Z"))
-        self.assertIn("frozen", src)
+        # the fossil is a single retro-close instant, so it seeds BOTH arms —
+        # losing it on one would force every pre-cutover project into a spurious
+        # all-time routine retro at the cutover (DEF-ROC-130).
+        for arm in wi.ARMS:
+            self.assertEqual(wi._read_retro_marker(self.project, arm),
+                             wi.parse_ts("2026-06-14T09:00:00Z"), arm)
+            kind, ts, src = wi._retro_verdict(self.project, arm)
+            self.assertEqual(kind, "known", arm)
+            self.assertEqual(ts, wi.parse_ts("2026-06-14T09:00:00Z"))
+            self.assertIn("frozen", src)
 
     def test_ac_pcm_3_legacy_constraint_marker_is_read_through(self):
         self._legacy_marker("2026-06-01T00:00:00Z", constraint=("queue", "open"))
@@ -6135,10 +6463,11 @@ class TestRetroLogStore(Base):
         names an EARLIER instant than the fossil."""
         self._legacy_marker("2026-06-25T00:00:00Z")
         self._mark("2026-06-10T00:00:00Z")
-        self.assertEqual(wi._read_retro_marker(self.project),
-                         wi.parse_ts("2026-06-10T00:00:00Z"))
-        _k, _t, src = wi._retro_verdict(self.project)
-        self.assertIn("retro-log.md", src)
+        for arm in wi.ARMS:
+            self.assertEqual(wi._read_retro_marker(self.project, arm),
+                             wi.parse_ts("2026-06-10T00:00:00Z"), arm)
+            _k, _t, src = wi._retro_verdict(self.project, arm)
+            self.assertIn("retro-log.md", src)
 
     def test_ac_pcm_3_newest_log_event_wins_and_the_log_is_append_only(self):
         self._mark("2026-06-10T00:00:00Z")
@@ -6146,8 +6475,11 @@ class TestRetroLogStore(Base):
         evs = wi._read_retro_log(self.project)
         self.assertEqual([e["ts"] for e in evs],
                          ["2026-06-10T00:00:00Z", "2026-06-20T00:00:00Z"])
-        self.assertEqual(wi._read_retro_marker(self.project),
-                         wi.parse_ts("2026-06-20T00:00:00Z"))
+        # "newest" is now PER ARM — newest event that drains THAT arm. Both these
+        # are full closes, so both arms land on the later one (DEF-ROC-130).
+        for arm in wi.ARMS:
+            self.assertEqual(wi._read_retro_marker(self.project, arm),
+                             wi.parse_ts("2026-06-20T00:00:00Z"), arm)
 
     def test_ac_pcm_3_constraint_rides_the_log_event(self):
         self._stats("queue", "open")
@@ -6165,8 +6497,9 @@ class TestRetroLogStore(Base):
         os.remove(os.path.join(self.tmp, "work", self.project, "views", "stats.json"))
         self._mark("2026-06-20T00:00:00Z")        # no constraint readable
         self.assertEqual(wi._read_constraint_marker(self.project), ("queue", "open"))
-        self.assertEqual(wi._read_retro_marker(self.project),
-                         wi.parse_ts("2026-06-20T00:00:00Z"))
+        for arm in wi.ARMS:
+            self.assertEqual(wi._read_retro_marker(self.project, arm),
+                             wi.parse_ts("2026-06-20T00:00:00Z"), arm)
 
     # ---- AC-PCM.3 — PER-PROJECT INDEPENDENCE (the anti-git-tag pin) ----------
     def test_ac_pcm_3_two_projects_retro_histories_cannot_alias(self):
@@ -6176,13 +6509,15 @@ class TestRetroLogStore(Base):
         os.makedirs(os.path.join(self.tmp, "work", other, "items", "active"),
                     exist_ok=True)
         self._mark("2026-06-20T00:00:00Z")                 # TestProj retro'd
-        k, _ts, why = wi._retro_verdict(other)
-        self.assertEqual(k, "unknown", why)                # OtherProj did NOT
+        for arm in wi.ARMS:
+            k, _ts, why = wi._retro_verdict(other, arm)
+            self.assertEqual(k, "unknown", why)            # OtherProj did NOT
         self._mark("2026-06-28T00:00:00Z", project=other)  # now OtherProj does
-        self.assertEqual(wi._read_retro_marker(self.project),
-                         wi.parse_ts("2026-06-20T00:00:00Z"))
-        self.assertEqual(wi._read_retro_marker(other),
-                         wi.parse_ts("2026-06-28T00:00:00Z"))
+        for arm in wi.ARMS:
+            self.assertEqual(wi._read_retro_marker(self.project, arm),
+                             wi.parse_ts("2026-06-20T00:00:00Z"), arm)
+            self.assertEqual(wi._read_retro_marker(other, arm),
+                             wi.parse_ts("2026-06-28T00:00:00Z"), arm)
 
     def test_ac_pcm_3_the_log_is_not_an_item_and_perturbs_no_derived_view(self):
         """It lives IN items/ but not in active/|done/, so it is invisible to
@@ -6220,14 +6555,23 @@ class TestRetroLogStore(Base):
         self.assertIn("RETRO DUE", txt)
 
     def test_ac_pcm_3_known_record_prints_the_instant_not_a_verdict_word(self):
-        """The happy path's wording is UNCHANGED — this is a relocation, and a
-        changed line here would be a changed cadence signal."""
+        """A KNOWN record prints the instant, never a verdict word.
+
+        The exact phrase this used to pin (`since last retro <ts> => ok`) changed
+        at DEF-ROC-130, deliberately and not as a side effect of a relocation: the
+        two arms now have separate markers, so ONE instant can no longer describe
+        the count. Printing one would be delta-074 R10's overloaded channel again,
+        in a new place. The property kept is the one that mattered — the instant
+        itself, on BOTH arms, with no verdict word."""
         self._legacy_marker("2026-06-14T09:00:00Z")
         with contextlib.redirect_stdout(io.StringIO()) as out:
             with self.assertRaises(SystemExit):
                 wi.cmd_retro_debt(argparse.Namespace(
                     project=self.project, threshold=3, now=NOW))
-        self.assertIn("since last retro 2026-06-14T09:00:00Z => ok", out.getvalue())
+        txt = out.getvalue()
+        self.assertIn("since last retro 2026-06-14T09:00:00Z [routine arm] "
+                      "/ 2026-06-14T09:00:00Z [incident arm] => ok", txt)
+        self.assertNotIn("UNKNOWN", txt)
 
     # ---- SCOPE FENCE (delta-075 §5.1) — these must NOT have moved ------------
     def test_scope_fence_read_constraint_still_reads_project_views_stats(self):
@@ -6330,9 +6674,13 @@ class TestRetroMarkerTreeCleanliness(unittest.TestCase):
         self.assertEqual(self._porcelain(), "",
                          "parts-check dirtied the parent worktree")
         # the record IS there — clean because it is in the project's own repo,
-        # which the parent gitignores, not because nothing was written
-        self.assertEqual(wi._read_retro_marker(self.project),
+        # which the parent gitignores, not because nothing was written. The drain
+        # moved the INCIDENT boundary to 06-21; the ROUTINE boundary stays on the
+        # 06-20 full close (DEF-ROC-130).
+        self.assertEqual(wi._read_retro_marker(self.project, wi.ARM_INCIDENT),
                          wi.parse_ts("2026-06-21T00:00:00Z"))
+        self.assertEqual(wi._read_retro_marker(self.project, wi.ARM_ROUTINE),
+                         wi.parse_ts("2026-06-20T00:00:00Z"))
 class TestStalledWorkHonoursItsOwnRemedy(TestLoopGate):
     """DEF-ROC-083 — the `stalled-work` check PRINTS `defer_until:` as a remedy and
     does not read it, so the block it raises cannot be cleared by doing what it says.

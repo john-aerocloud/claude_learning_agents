@@ -125,13 +125,27 @@ stopping actually relieves**; a real finding that stopping would only make worse
 reported as an **ADVISORY** that does not touch the exit code (see check 3 below).
 
 - **`make retro-debt PROJECT=P [THRESHOLD=3]`** — the §F8 cadence gate. Exit 2 = RETRO
-  DUE; `make retro-mark PROJECT=P` drains it at the retro's close. The last-retro
-  boundary is the newest event in that project's OWN append-only cadence log,
-  `work/P/items/retro-log.md` (written only by `retro-mark` and by `parts-check`'s
-  drain, and carrying the constraint as of that close). It lives in `items/` but not
-  in `items/{active,done}/`, so no fold, queue or metric sees it. Absent ⇒ the tool
-  prints **UNKNOWN** and the paths it looked at — never a `1970-01-01` sentinel
-  dressed as a fact — and counts all-time debt, i.e. it FAILS CLOSED. The tracked
+  DUE; `make retro-mark PROJECT=P` drains it at the retro's close. The boundaries live
+  in that project's OWN append-only cadence log, `work/P/items/retro-log.md` (written
+  only by `retro-mark` and by `parts-check`'s drain, and carrying the constraint as of
+  that close). It lives in `items/` but not in `items/{active,done}/`, so no fold,
+  queue or metric sees it.
+  **THE TWO ARMS HAVE SEPARATE BOUNDARIES (DEF-ROC-130) — the boundary is NOT "the
+  newest event in the log".** The log holds two event types that do not mean the same
+  thing, so each arm counts since the newest event that drains THAT arm:
+  * **routine** (slice / chunk / **requirement** closes + UC rework) — drained ONLY by
+    a full `retro_closed`, so it batches to `THRESHOLD` across as many `parts-check`
+    runs as it takes.
+  * **incident** (defect resolves) — drained by `retro_closed` **or** by
+    `parts-check`'s cheap `debt_drained`, which is licensed only while the constraint
+    is provably unchanged (owner ruling 2026-08-07).
+  Reading one shared boundary for both was DEF-ROC-130: `/loop-run` step 5a runs
+  `parts-check` after every bubble, so each cheap incident drain erased the routine
+  count and the batched routine retro was unreachable. Absent ⇒ the tool prints
+  **UNKNOWN** and the paths it looked at — never a `1970-01-01` sentinel dressed as a
+  fact — and counts all-time debt on that arm, i.e. it FAILS CLOSED **per arm**: a
+  project whose log holds only cheap drains has never had a full retro and owes its
+  whole close history. The tracked
   files under `process/dora/retro-marker/` are FROZEN: read as a fallback, never
   written (writing them dirtied the parent worktree and deferred every
   fold-forward — `OI-PARTS-CHECK-MARKER-DIRTIES-THE-TREE-AND-DEFERS-FOLD-FORWARD`).

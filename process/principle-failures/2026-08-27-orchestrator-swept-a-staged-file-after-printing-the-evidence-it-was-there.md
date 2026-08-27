@@ -49,21 +49,32 @@ limit-3/limit-4 destruction class, traded against pure mis-attribution of conten
 lost. Recorded instead. **This is a judgement, not a precedent:** with no concurrent writers,
 repair.
 
-## What would actually have prevented it
-
-The two-step is only needed because a pathspec commit cannot stage an untracked file. So:
+## What would actually have prevented it — and the route ALREADY EXISTED
 
 1. **Gate on the check, never print it** — `test -z "$(git diff --cached --name-only)" || exit 1`
    before `add`. A printed check in an `&&` chain is not a control.
-2. Better: give the machinery a **first-commit-of-a-new-file** route that stages and commits one
-   path atomically, so the window does not exist for anyone. `isolated-commit.js` already builds
-   commits with `commit-tree` + ref CAS and never consults the shared index — it is the natural
-   home, and it would close limit 2 rather than documenting around it.
+2. **`make commit-isolated` already commits an untracked file.** I proposed building this as a
+   remedy and then discovered, an hour later, that it was already there — which makes the whole
+   failure avoidable rather than merely explainable. It is true **by construction**:
+   `isolated-commit.js` seeds a **private index from HEAD** (`GIT_INDEX_FILE`), **never reads the
+   shared index**, `git add`s only the declared paths into it — so an untracked declared path
+   stages fine — then `write-tree` + `commit-tree` + ref CAS.
 
-`OI-CONCURRENT-AGENTS-SHARE-ONE-GIT-INDEX` is already in intake and is the registered home for
-(2). This is a fresh, measured instance for it — and note the instance arrived from the
-**orchestrator**, i.e. from the role that had just been reading the rule aloud to six dispatched
-agents.
+**So limit 2's `git add` + `commit` instruction was never necessary for the project repo, and it
+is what produced this failure.** The rule told me to open a window that the machinery already
+closes. `CLAUDE.md` limit 2 now says to use `make commit-isolated` for a new file, with the
+`git add` route kept only for the parent-repo lane, where I have not verified it.
+
+**Both halves were then measured within the hour, on the next new file I had to commit:** the gate
+fired and REFUSED, correctly, because another agent had a file staged — and `make commit-isolated`
+committed the same untracked file with that agent's work untouched, which they then committed
+themselves. So the corrected rule is not a hypothesis.
+
+`OI-CONCURRENT-AGENTS-SHARE-ONE-GIT-INDEX` remains the registered home for the residue. Note the
+instance arrived from the **orchestrator** — the role that had just been reciting the rule to six
+dispatched agents — and that the fix was **documentation of an existing capability**, not new code.
+That is the cheaper and more common repair, and it was missed for as long as the rule read the way
+it did.
 
 ## Same session, related but distinct
 

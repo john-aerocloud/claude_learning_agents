@@ -125,16 +125,26 @@ See `README.md` for the full system. In short:
      exists on the reference side.** `sequencer-guard.js` is the pattern to copy —
      it *reports* the stale saved head as the hazard instead of inferring from it.
   2. **It cannot stage an UNTRACKED file** — `commit -- <new-path>` fails with
-     "did not match any file(s) known to git". When you must add a new file, run
-     `git add -- <your exact paths>` naming ONLY files you authored (never
-     `add -A`/`add .`), then commit immediately so the window stays minimal.
-     **GATE on `git diff --cached --name-only` being empty — do not merely print
-     it.** If it is not empty, someone else is mid-commit: wait rather than sweep
-     them. `git commit` without a pathspec takes the WHOLE index, so the two-step
-     form hands you another agent's staged work under your message. On 2026-08-27
-     the ORCHESTRATOR did exactly this, having printed the evidence in the same
-     `&&` chain — a check nothing branches on is decoration. Write it as
-     `test -z "$(git diff --cached --name-only)" || exit 1`.
+     "did not match any file(s) known to git". **But do NOT reach for
+     `git add` + `commit`: use `make commit-isolated`, which handles a new file
+     directly.** VERIFIED 2026-08-27 in the project repo, and it is by
+     construction, not luck: `isolated-commit.js` seeds a **PRIVATE index from
+     HEAD** (`GIT_INDEX_FILE`), **never reads the shared index**, `git add`s only
+     your declared paths into it — which is why an untracked declared path works —
+     then `write-tree` + `commit-tree` + a ref CAS. So it can neither miss a new
+     file nor sweep another agent's staged work, and the window simply does not
+     exist. Verified for `REPO=work/OagEventSource`; the parent-repo lane is
+     untested for this, so there the `git add` route below still applies.
+     **If you must use `git add` + `commit`, GATE on the index being empty — do
+     not merely print it:**
+     `test -z "$(git diff --cached --name-only)" || exit 1`, naming ONLY files you
+     authored (never `add -A`/`add .`). `git commit` without a pathspec takes the
+     WHOLE index, so the two-step form hands you another agent's staged work under
+     your message. On 2026-08-27 the ORCHESTRATOR did exactly this, having printed
+     the evidence in the same `&&` chain — a check nothing branches on is
+     decoration. The gate then fired correctly on its next new file, refusing while
+     another agent had one staged, and `make commit-isolated` committed the same
+     file with nothing swept: that is the route to use.
   3. **It assumes HEAD is on trunk, and nothing checks that.** NEVER
      `git checkout`/`switch` a branch inside a working tree another agent is
      using: their commit silently lands on YOUR branch, and your next checkout

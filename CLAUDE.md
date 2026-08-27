@@ -97,12 +97,44 @@ See `README.md` for the full system. In short:
      path, so if another agent saves the same co-owned file in the seconds between
      your save and your commit, you commit THEIR copy under YOUR message. Save
      immediately before committing, and read the merge report.
+     **The merge itself then had a second, opposite failure — silent DUPLICATION —
+     and it is fixed, but the lesson it teaches is permanent (`DEFECT-OAG-142`,
+     four instances on 2026-08-27 alone).** `coownedStaleAgainst` asked only *"are
+     this commit's added lines absent from MY copy"* and never *"does HEAD still
+     have them"*. **Absence of content HEAD does not have is AGREEMENT, not
+     staleness** — so a base 23 commits and ~48 KB behind *both* sides was
+     selected, `merge-file --diff3` saw a region both sides already had as an
+     ADD/ADD insertion against an empty base, and the resolver's "keep BOTH"
+     emitted it twice. It corrupted `sst.config.ts` twice (+377 lines, two
+     `AerobusPublishPolicy` resources), tripled a row in `open-decisions.md`
+     (a duplicate key reads BROKEN, so three parks lost their verdict), and
+     duplicated two events inside an item file's log — **manufacturing an illegal
+     state transition and stopping the loop.** *Why the report reassured while it
+     happened:* `addedBack` is a set difference, so a duplicated line is not
+     "novel" and **cannot be counted** — the message was structurally incapable of
+     seeing the corruption it announced. Now guarded three ways (staleness evidence
+     must survive in HEAD; ADD/ADD resolved by CONTENT so identical sides are a
+     no-op by construction; a duplication post-condition that fails closed), the
+     `derived:` block is exempt from both detection and merge, and the report states
+     the **byte delta**. **So: read the byte delta, and after any commit to a
+     co-owned append-target RE-READ THE FILE OUT OF HEAD and assert its invariant
+     (`git show HEAD:<path>`).** Two agents reached that rule independently, because
+     the pre-commit state and the merge report are both green in exactly the case
+     that breaks. And note the generalisable shape, which is worth more than the
+     bug: **wherever absence is treated as evidence, ask whether the thing still
+     exists on the reference side.** `sequencer-guard.js` is the pattern to copy —
+     it *reports* the stale saved head as the hazard instead of inferring from it.
   2. **It cannot stage an UNTRACKED file** — `commit -- <new-path>` fails with
      "did not match any file(s) known to git". When you must add a new file, run
      `git add -- <your exact paths>` naming ONLY files you authored (never
      `add -A`/`add .`), then commit immediately so the window stays minimal.
-     Check `git diff --cached --name-only` is empty first; if it is not,
-     someone else is mid-commit — wait rather than sweep them.
+     **GATE on `git diff --cached --name-only` being empty — do not merely print
+     it.** If it is not empty, someone else is mid-commit: wait rather than sweep
+     them. `git commit` without a pathspec takes the WHOLE index, so the two-step
+     form hands you another agent's staged work under your message. On 2026-08-27
+     the ORCHESTRATOR did exactly this, having printed the evidence in the same
+     `&&` chain — a check nothing branches on is decoration. Write it as
+     `test -z "$(git diff --cached --name-only)" || exit 1`.
   3. **It assumes HEAD is on trunk, and nothing checks that.** NEVER
      `git checkout`/`switch` a branch inside a working tree another agent is
      using: their commit silently lands on YOUR branch, and your next checkout

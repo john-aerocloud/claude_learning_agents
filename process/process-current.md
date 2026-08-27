@@ -1,5 +1,5 @@
 ---
-process_version: 151
+process_version: 154
 effective_from: 2026-08-24
 supersedes: v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
 status: active
@@ -2650,6 +2650,129 @@ adopted because the operating context changed. There is no hypothesis here we wo
 metric failed to move — we would not resume shipping un-rollable outward changes to live customers
 because MTTR looked flat. It is routed as plain practice and scored the ordinary way: **recovery /
 MTTR** is the metric it exists to protect, with CFR secondary.
+
+## F5d. A tier that cannot exercise the change is not confirmation of it [v152, ROC retro 2026-08-26]
+
+**Evidence.** `UC-ROC-102` shipped the Simulator's Publish control **unable to publish at
+all** — 100% of screen publishes were `400`, from shipping until a human reported it
+(`DEF-ROC-111`). Every gate was green. The `built_green` note read *"LIVE CONFIRMED on the
+deployed host in a REAL BROWSER"*, 26 assertions; the probe it cited says of itself *"It
+NEVER WRITES. It issues no POST to the publish route at all — deliberately."* The claim was
+true of the closed-window state and read as end-to-end.
+
+### F5d.1 Name what the tier did NOT exercise, or do not call it live confirmation
+
+A validation tier that **structurally cannot** exercise an item's primary mutating path may
+not be cited as live confirmation of that path. Citing it is permitted — abstention is often
+correct and load-bearing (this probe must not POST, because an unexplained
+`requests{outcome:"disabled"}` is the runbook's intrusion signal) — but the citation MUST
+name the excluded path and the ACs it therefore leaves unexercised. **The failure was never
+that the probe abstained; it was calling an abstention a confirmation.**
+
+Concretely: a `built_green`/`fixed` note asserting live confirmation states, in the same
+sentence, which acceptance criteria remain **unexercised** and what tier would exercise
+them. An AC covering a mutating action **cannot be discharged by read-only evidence**.
+
+### F5d.2 A contract with two sides gets one declared list, not two assertions
+
+`DEF-ROC-111` was **not** a missing test — **three** tests PINNED it: two asserted the
+client sends `airport`, one asserted the route refuses `airport` but only as a non-empty
+string, never the `null` the screen actually sent. Both suites green, contradictory, because
+each checked its own side against a fixture of our own making. **A client assertion verified
+against our own mock proves only that we are self-consistent.**
+
+Where two components must agree on a wire shape, the agreement is declared **ONCE** in a
+place neither owns (`src/contracts/*.json` is the established pattern) and both sides pin it,
+so drift on either side fails the build. Prefer a shared declaration to a shared *module*
+when the trees have different build roots: importing across roots here dragged dashboard
+source into `src/app`'s `tsc --outDir dist`, emitted a second `dist/app/**` layout and left
+the Function App's real `dist/host/*.js` **stale** — a green build serving old code.
+
+### F5d.3 Under a pipeline deploy the orchestrator fires `deployed` — and the gate now checks
+
+Restating §F5a's existing rule because it was missed and the miss was invisible: where the
+deploy is pipeline-triggered, **no agent runs an interactive deploy, so none fires
+`deployed`**. The orchestrator fires the CI-confirmed event (`AGENT=cicd`, `REF=`, citing the
+green run); engineers and testers must never spoof it. Until it is fired the item **cannot
+reach a tester at all** — `UC-ROC-102` sat in `deploying` **12.0h** against a `deploying`
+median of **166s** (260x) and no limb of `loop-gate` named it, because check 1 closed the
+window at 4h for validating states while check 11 waited until 24h for `deploying`.
+
+`loop-gate` check 1 now covers `deploying`/`prod-deploying` on the same
+work-is-provably-done evidence (a ref-bearing `built_green`/`deployed`), with a
+state-appropriate remedy — a remedy naming an edge the state graph refuses is the
+`DEF-ROC-084` class. **This is a RECURRENCE**: the identical mechanism was recorded on
+AdixOut on 2026-07-22 (`UC-ADIX-015`) and the improvement slice it promised was never built.
+See `process/principle-failures/2026-08-26-roc-uc-102-shipped-100pct-broken-behind-a-read-only-live-probe.md`.
+
+### F5d.4 Run the whole tier before you call it green
+
+Running only the files you named is not running the tier. The `DEF-ROC-111` fix passed every
+targeted file and was pushed with a **third** pinning test still red in a file that was never
+run; CI caught it and the deploy **skipped**. Before a push, run the tiers CI runs.
+
+
+## F5e. A control is not finished until it can fire, is aimed at something real, and can say "I don't know" [v154, ROC retro 2026-08-26]
+
+**Evidence: NINE controls found faulty in ONE session, and every one of them read
+healthy.** They were found by agents doing something else entirely — never by anything
+looking for them. They fall into three kinds, and the kinds are the checklist.
+
+**PHANTOM — declared, never wired.** `deploy,wip_limit,1` sits in `policy.csv` and **no
+state maps to a `deploy` queue**, so the cap can never bind (`DEF-ROC-119`); `EXP-ROC-005`
+was cited by three live knobs with **no row in the registry or the archive**, so the WIP
+limit in force had never been scoreable; §F5a's *"the push and the tester dispatch are ONE
+act"* was documented and checked by nothing, so three testers left validated state on one
+disk; and `wi-append`/`wi-project` **write item files that nothing commits**, so a day's
+registrations existed only locally while `wi-validate` read clean — because it reads the
+disk.
+
+**MISCALIBRATED — measures something other than the claim.** `paintsScrollbarX` measured
+**Playwright's `--hide-scrollbars`**, not the app, and mis-filed a value-5 defect against
+three screens (`DEF-ROC-117`); `make-refs-tracked` reads a **guarded existence test**
+(`if [ -f X ]`) as an invocation and blocks on a file deliberately designed to be absent;
+the test-requirement gate's parser reads a runtime `test.skip(cond, msg)` as an untagged
+bare test; the screen gate's reachability limb inspects only **below/right**, never
+above/left.
+
+**VOCABULARY-LIMITED — cannot express the honest answer.** `deploy_failed` is not a legal
+transition from `validating`, so a change failure during validation **cannot be recorded by
+any role** and CFR reads a false 0% (`DEF-ROC-120`); and a blocker probe that correctly
+answers *"NOT OBSERVED in this window"* — refusing to call non-observation clearance — is
+reported by `loop-gate` as **unreadable**, because the contract admits only `standing` or
+`cleared`.
+
+### F5e.1 Three questions, asked of every control before it is called done
+
+1. **What would make you fire?** Demonstrate it: break the thing the control guards and
+   watch it go red, naming the instance. This is §EXP-122's non-vacuity limb, generalised
+   from tests to **every** gate, probe, cap and metric. `DEF-ROC-110` is the model — it
+   deleted its allowlist and proved the gate red by reverting one site.
+2. **What do you actually measure?** State the subject, and check the control can reach it.
+   A cap needs a queue with members. A probe needs a signal it can observe — with a
+   **positive control** proving the instrument works, as `DEF-ROC-085` did (`rows=0` beside
+   a known-good `rows=3`). A predicate that answers identically in every arm is measuring
+   its harness.
+3. **What can you NOT say?** Every control needs an expressible **not-established** answer
+   (§17i) and a legal way to record bad news. "Not observed" is not "cleared"; a superseded
+   CI run is neither a pass nor a fail; a change failure must be recordable from whatever
+   state the item is in when it happens.
+
+### F5e.2 A declared control with no possible subject is deleted, not left standing
+
+If a cap names a queue nothing maps to, or a knob cites an experiment that does not exist,
+**remove the declaration or wire it** — the same cycle. Leaving it reads as governance and
+is worse than an admitted gap, because it answers the question nobody then re-asks.
+
+### F5e.3 A green from a shared tree is not a green
+
+Every gate here scans the working tree, so with concurrent agents it reports the **union of
+everyone's uncommitted work**. Four gates reported another agent's state today
+(`check-docs`, `typecheck`, the test-requirement ratchet, and a load-induced timeout that
+was 19/19 green in isolation). **Before reporting a red, establish whose it is** — is the
+offending file tracked? — and say so. None of the four reached CI; the cost was attribution,
+paid four times.
+
 
 ## F6. Parallel dispatch by independence (the maximal independent set)
 Parallelism is the **default, not an option**. The flow-manager treats

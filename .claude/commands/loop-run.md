@@ -168,6 +168,18 @@ Each cycle:
      dispatched agent generally cannot see its own `subagent_tokens`, and both dispatches this
      cycle correctly said so rather than inventing one — so read them off the dispatch result and
      attach them yourself, and never ask the agent to self-report a figure it cannot observe.
+     - **LIMIT, measured within the hour of writing the rule above (`OI-ROC-008`): this is only
+       executable for events YOU fire.** `built_green`/`fixed`/`validated` are fired by the
+       engineer/tester themselves, and the numbers are visible only to you — so attaching them
+       would mean appending under `AGENT=engineer`, which is the spoofed attribution v143 and
+       `EXP-ROC-002` exist to stop, and it corrupts the very `by_owner` table the retro names the
+       constraint from. Three dispatches in one cycle proved the gap: `product` 179,231 tokens,
+       `flow-manager` 76,532, `engineer` 113,064 — every figure in the orchestrator's hand, every
+       agent correctly reporting it could not see its own, and **no legal event to carry any of
+       them.** So attach them on the events you legitimately own, and do NOT read a still-0.0%
+       plumbing share as this rule failing — the residue is `OI-ROC-008`, which needs either a
+       dispatch-cost annotation the orchestrator can attach WITHOUT owning the event, or a harness
+       that exposes usage to the subagent. Never spoof `AGENT=` to close the gap.
    - **`deployed` under a PIPELINE (push→CI) deploy (2026-07-22, UC-ADIX-015).** When
      the deploy is pipeline-triggered (push to `main` → CI applies the infra), NO agent
      runs an interactive `sst deploy`, so none fires `deployed` automatically and the UC

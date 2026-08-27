@@ -11,3 +11,6 @@ deploy,wip_limit,1,count,cicd,gross-lead-time,<created>,EXP-022
 rework,kind,wip,kind,flow-manager,mttr,<created>,EXP-123
 rework,min_items,0,count,flow-manager,mttr,<created>,EXP-022
 rework,wip_limit,2,count,flow-manager,mttr,<created>,EXP-022
+wip,kind,wip,kind,flow-manager,gross-lead-time,<created>,EXP-ROC-005
+wip,min_items,0,count,flow-manager,throughput,<created>,EXP-ROC-005
+wip,wip_limit,5,count,flow-manager,gross-lead-time,<created>,EXP-ROC-005

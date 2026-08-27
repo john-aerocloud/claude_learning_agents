@@ -419,11 +419,20 @@ function duplicatedBeyondBothSides({ baseText, mineText, headText, mergedText })
 
 // --- git plumbing ------------------------------------------------------------
 
+// A git output can be a WHOLE FILE — `show HEAD:<path>`, `diff`, `cat-file` — and
+// execFileSync's default maxBuffer is 1 MB, so any declared path bigger than that failed
+// the commit with a bare `spawnSync git ENOBUFS` and no clue which call blew up. Hit for
+// real on 2026-08-27 committing a 4.4 MB reference asset: the prescribed commit path simply
+// could not commit a large file. Same ceiling as the two call sites below that already set
+// it; the merge path was raised, the plumbing path was not.
+const GIT_MAX_BUFFER = 256 * 1024 * 1024;
+
 function gitOut(repo, args, env) {
   return execFileSync('git', ['-C', repo, ...args], {
     encoding: 'utf8',
     env: { ...process.env, ...(env || {}) },
     stdio: ['ignore', 'pipe', 'pipe'],
+    maxBuffer: GIT_MAX_BUFFER,
   }).trim();
 }
 
@@ -441,6 +450,7 @@ function gitRaw(repo, args, env) {
     encoding: 'utf8',
     env: { ...process.env, ...(env || {}) },
     stdio: ['ignore', 'pipe', 'pipe'],
+    maxBuffer: GIT_MAX_BUFFER,
   });
 }
 

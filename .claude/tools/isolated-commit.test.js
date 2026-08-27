@@ -1412,3 +1412,58 @@ test('AC-142.8 the merge report states the BYTE delta, so a set-difference line 
   assert.match(rb.stderr + rb.stdout, /byte/i, 'the report must state the size change the merge made');
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+// --- AC-DEFECT-OAG-058.9 — a declared path bigger than 1 MB is COMMITTABLE ---------------
+//
+// FOUND FOR REAL on 2026-08-27, committing a 4.4 MB reference asset
+// (OI-AIRPORT-FAA-INDEX-DROPPED-BY-BUILDER): the prescribed commit path exited with a bare
+// `spawnSync git ENOBUFS` and no indication of which call blew up or why. Cause:
+// `execFileSync`'s default `maxBuffer` is 1 MB, and this tool's git plumbing reads WHOLE
+// FILES through it (`show HEAD:<path>`, `diff`, `cat-file`). The merge path had already been
+// raised to 256 MB; the plumbing helpers had not, so the ceiling depended on which code path
+// a commit happened to take. A commit route that cannot commit a large file is not a route.
+
+test('AC-DEFECT-OAG-058.9 CONTROL DISABLED: git plumbing read at the DEFAULT 1MB buffer ENOBUFS on a 4MB file (reproduces the observed failure)', () => {
+  const repo = makeRepo();
+  const big = 'x'.repeat(4 * 1024 * 1024) + '\n';
+  write(repo, 'data/big.json', big);
+  git(repo, ['add', '--', 'data/big.json']);
+  git(repo, ['commit', '-q', '-m', 'base big']);
+
+  // The pre-fix helper, verbatim: no maxBuffer.
+  const err = grab(() =>
+    execFileSync('git', ['-C', repo, 'show', 'HEAD:data/big.json'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }),
+  );
+  assert.match(
+    String(err.message),
+    /ENOBUFS|maxBuffer/,
+    'the disabled arm must be observed failing, or the fix below proves nothing',
+  );
+});
+
+test('AC-DEFECT-OAG-058.9 CONTROL ENABLED: the tool commits a 4MB declared path, and a SECOND commit against it still works', () => {
+  const repo = makeRepo();
+  const big = (marker) => marker + 'x'.repeat(4 * 1024 * 1024) + '\n';
+
+  write(repo, 'data/big.json', big('first'));
+  const first = runCli(repo, ['--repo', repo, '--message', 'feat: add the big asset', '--', 'data/big.json']);
+  assert.equal(first.status, 0, first.stderr);
+  assert.deepEqual(filesInHead(repo), ['data/big.json']);
+
+  // The second commit is the one that exercises the plumbing READS (the co-owned staleness
+  // check reads HEAD's copy), so a one-shot add would not have caught the regression.
+  write(repo, 'data/big.json', big('second'));
+  const second = runCli(repo, ['--repo', repo, '--message', 'fix: rebuild the big asset', '--', 'data/big.json']);
+  assert.equal(second.status, 0, second.stderr);
+  assert.equal(git(repo, ['log', '-1', '--pretty=%s']), 'fix: rebuild the big asset');
+  // Read HEAD's copy with an EXPLICIT buffer: this harness's own `git()` helper carries the
+  // same 1 MB default the tool used to, which is itself evidence of how quietly this bites.
+  const headCopy = execFileSync('git', ['-C', repo, 'show', 'HEAD:data/big.json'], {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  assert.match(headCopy.slice(0, 6), /^second/);
+});

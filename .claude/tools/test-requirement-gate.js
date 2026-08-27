@@ -349,8 +349,60 @@ function enclosingOpen(code, at, open) {
 // ===========================================================================
 // LIMB 1 — describe/it extraction and AC resolution
 // ===========================================================================
-const RE_CALL =
-  /(?<![\w$.'"`])(describe|it|test)((?:\.(?:describe|only|skip|todo|concurrent|sequential|serial|parallel|fails|fail|fixme|slow|each|runIf|skipIf))*)\s*\(/g
+/**
+ * THE CALL-FORM LEDGER (§17g fault-class sweep, DEFECT-OAG-106).
+ *
+ * The founding fault was not "`.skip` was handled wrong". It was that the parser recognised a
+ * set of modifiers and had NO POSITION on what any of them MEANT for classification — so
+ * every match became a case by default, and the one dual-purpose modifier in the set became a
+ * false case silently. A modifier added later would inherit exactly the same default.
+ *
+ * So the modifier set and its classification are ONE declaration, and `RE_CALL` is BUILT from
+ * it (EXP-047 — never two writers of the same fact). A modifier that is not declared here is
+ * not recognised at all, which is the fail-CLOSED direction: an unrecognised call is invisible
+ * to limb 1 rather than counted as an untagged case nobody can satisfy.
+ *
+ *   guard  DUAL-PURPOSE. With a string-literal title it declares a CASE; with a condition, or
+ *          with no argument at all, it is a runtime DIRECTIVE and asserts nothing. This is the
+ *          class that broke the ratchet.
+ *   suite  forces the call to be a SUITE (`test.describe`), never a case. Its title is one of
+ *          the three sanctioned places an AC may be named.
+ *   curry  the CASE is the SECOND call — `it.each(rows)('title', fn)`.
+ *   plain  no effect on classification; declared so the parser SEES the call.
+ *
+ * Swept over the OagEventSource + ROC corpora at the time of the fix; every `describe|it|test`
+ * call form present in either tree is one of these, and the two that were misclassified
+ * (`skip` with a condition, `skip` with no argument) are pinned in this tool's own tests.
+ */
+const MODIFIER_LEDGER = {
+  describe: 'suite',
+  serial: 'plain',      // only ever follows `.describe`, but `test.serial(...)` is ava's CASE
+  parallel: 'plain',
+  skip: 'guard',
+  fixme: 'guard',
+  fail: 'guard',        // Playwright's `test.fail`; `fails` below is vitest's, and is NOT dual-purpose
+  slow: 'guard',
+  only: 'plain',
+  todo: 'plain',
+  concurrent: 'plain',
+  sequential: 'plain',
+  fails: 'plain',
+  each: 'curry',
+  runIf: 'curry',
+  skipIf: 'curry',
+}
+
+const MODIFIERS_BY_ROLE = (role) =>
+  Object.keys(MODIFIER_LEDGER).filter((k) => MODIFIER_LEDGER[k] === role)
+
+// `fails` must precede `fail` in the alternation for readability; the engine backtracks either
+// way, but a reader should not have to know that.
+const MODIFIER_ALTERNATION = Object.keys(MODIFIER_LEDGER)
+  .sort((a, b) => b.length - a.length || a.localeCompare(b))
+  .join('|')
+
+const RE_CALL = new RegExp(
+  `(?<![\\w$.'"\`])(describe|it|test)((?:\\.(?:${MODIFIER_ALTERNATION}))*)\\s*\\(`, 'g')
 
 /**
  * A DIRECTIVE IS NOT A TEST CASE (DEFECT-OAG-106).
@@ -376,9 +428,10 @@ const RE_CALL =
  * first string literal anywhere inside the parens", so a computed-title `describe(rel, fn)`
  * STOLE the first case title in its own body and tagged every case inside it.
  */
-const RE_GUARD_MOD = /\.(?:skip|fixme|fail|slow)$/
+const RE_GUARD_MOD = new RegExp(`\\.(?:${MODIFIERS_BY_ROLE('guard').join('|')})$`)
 /** `it.each([...])('title', fn)` and friends — the CASE is the SECOND call. */
-const RE_CURRIED = /\.(?:each|runIf|skipIf)$/
+const RE_CURRIED = new RegExp(`\\.(?:${MODIFIERS_BY_ROLE('curry').join('|')})$`)
+const RE_SUITE_MOD = new RegExp(`\\.(?:${MODIFIERS_BY_ROLE('suite').join('|')})(?:\\.|$)`)
 
 function extractCases(src, scan) {
   const { codeOnly, comments, strings } = scan
@@ -403,7 +456,7 @@ function extractCases(src, scan) {
     // quotes, so a quote/backtick as the first non-space character after `(` is a string
     // literal first argument — the one thing that distinguishes a case from a guard.
     const titled = /^\s*['"`]/.test(codeOnly.slice(openParen + 1, end))
-    const isDescribe = m[1] === 'describe' || /\.describe(?:\.|$)/.test(m[2])
+    const isDescribe = m[1] === 'describe' || RE_SUITE_MOD.test(m[2])
     // A guard modifier with no title is a DIRECTIVE: neither a case nor a suite. It stays
     // in `calls` so the FILE-HEADER boundary (`firstCall`) is unchanged by this fix.
     const kind = isDescribe ? 'describe' : (!titled && RE_GUARD_MOD.test(chain) ? 'directive' : 'it')
@@ -1084,6 +1137,9 @@ function main(argv) {
   process.exitCode = r.exitCode
 }
 
-module.exports = { runGate, formatReport, scanJs, scanPy, extractCases, computeTaint, globToRe }
+module.exports = {
+  runGate, formatReport, scanJs, scanPy, extractCases, computeTaint, globToRe,
+  MODIFIER_LEDGER, RE_CALL,
+}
 
 if (require.main === module) main(process.argv.slice(2))

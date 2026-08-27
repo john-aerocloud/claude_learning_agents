@@ -857,3 +857,61 @@ test('AC-106.5: `--clean-tree` is a DIAGNOSTIC — it can neither auto-tighten n
   assert.strictEqual(plain.status, 0, plain.stdout)
   assert.deepStrictEqual(floorOf(root), { ac: 0, authored: 0 })
 })
+
+// ==========================================================================
+// AC-106.7 — THE CALL-FORM LEDGER IS THE SWEEP, AND IT FAILS ON AN UNDECLARED FORM.
+//
+// The founding fault was not "`.skip` was handled wrong" — it was that the parser
+// recognised a set of modifiers and had NO POSITION on what any of them MEANT, so
+// every match became a case BY DEFAULT and the one dual-purpose modifier became a
+// false case silently. A modifier added later inherits the same default. So the set
+// and its classification are ONE declaration, `RE_CALL` is built from it, and these
+// tests are the completeness gate: a new modifier cannot enter undeclared, and an
+// undeclared one is invisible rather than miscounted.
+// ==========================================================================
+
+test('AC-106.7-ledger: every recognised modifier declares a role, and the regex is built from it', () => {
+  const roles = new Set(['guard', 'suite', 'curry', 'plain'])
+  for (const [mod, role] of Object.entries(gate.MODIFIER_LEDGER)) {
+    assert.ok(roles.has(role), `${mod} declares an unknown role ${JSON.stringify(role)}`)
+    assert.match(gate.RE_CALL.source, new RegExp(`\\b${mod}\\b`), `${mod} is declared but unrecognised`)
+  }
+  // …and nothing is recognised that is NOT declared. Parsed out of the built alternation, so
+  // this cannot drift from the regex the parser actually uses.
+  const recognised = gate.RE_CALL.source.match(/\(\?:([a-zA-Z|]+)\)\)\*/)[1].split('|')
+  assert.deepStrictEqual(
+    recognised.slice().sort(),
+    Object.keys(gate.MODIFIER_LEDGER).sort(),
+    'the regex and the ledger must be the same set — otherwise a modifier is classified by default',
+  )
+})
+
+test('AC-106.7-ledger: an UNDECLARED modifier is NOT recognised (fail-closed, not counted-by-default)', () => {
+  const r = run({
+    // `test.describe.configure({ mode: 'parallel' })` is real Playwright and is deliberately
+    // NOT in the ledger. Being invisible is the safe direction: it is not a case, and it is
+    // not an untagged violation nobody can satisfy.
+    'tests/a.spec.ts': `
+test.describe.configure({ mode: 'parallel' })
+test.wibble(someCondition, 'a modifier that does not exist')
+test('an untagged case, which IS counted', async () => {})
+`,
+  })
+  assert.strictEqual(r.counts.cases, 1, 'only the real case; neither unknown form is one')
+  assert.strictEqual(lines(r, 'ac').length, 1)
+})
+
+test('AC-106.7-ledger: EVERY guard modifier behaves both ways — directive without a title, case with one', () => {
+  for (const mod of Object.keys(gate.MODIFIER_LEDGER).filter((m) => gate.MODIFIER_LEDGER[m] === 'guard')) {
+    const guard = run({ 'tests/a.spec.ts': `test.${mod}(!ready(), 'a reason, not a title')\n` })
+    assert.strictEqual(guard.counts.cases, 0, `test.${mod}(cond, reason) must be a DIRECTIVE`)
+    assert.deepStrictEqual(lines(guard, 'ac'), [], `test.${mod}(cond, reason) must not be a violation`)
+
+    const bare = run({ 'tests/a.spec.ts': `test('AC-X.1 a case', () => { test.${mod}() })\n` })
+    assert.strictEqual(bare.counts.cases, 1, `a bare test.${mod}() must not be a second case`)
+
+    const titled = run({ 'tests/a.spec.ts': `test.${mod}('an untagged case', () => {})\n` })
+    assert.strictEqual(titled.counts.cases, 1, `test.${mod}('title', fn) IS a case`)
+    assert.strictEqual(lines(titled, 'ac').length, 1, `test.${mod}('title', fn) must still be counted`)
+  }
+})

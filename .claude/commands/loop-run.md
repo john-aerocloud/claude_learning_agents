@@ -39,7 +39,7 @@ state and flow decisions.
 > `wip_limit`; (4) retro debt due (§F8); (5) **awaiting observation** — every item parked in
 > `awaiting_observation` (shipped, green, UNPROVEN) has its liveness predicate RE-RUN on this
 > invocation, so an observation that has now landed BLOCKS for a tester dispatch, and a
-> predicate that cannot be evaluated BLOCKS too (state-graph v9, §12d.3/§17c). It also runs three DELEGATED checks: (6) the §17d
+> predicate that cannot be evaluated BLOCKS too (state-graph v9, §12d.3/§17c). It also runs DELEGATED checks: (16) the DEF-ROC-131 **deploy-lane** check (below — the only one whose remedy is a pull), (6) the §17d
 > **test-requirement gate**, (7) the DEFECT-OAG-076 **worktree guard**, and (8) the
 > DEFECT-OAG-091 **container reap** — which does not merely COUNT orphaned per-dispatch
 > containers, it REMOVES them, because a reaper nobody invokes is the same class of failure
@@ -50,6 +50,43 @@ state and flow decisions.
 > this machine trustworthy. Its finding is ADVISORY and never blocks; a RECURRING nonzero
 > count means dispatches are dying before `ddb-local-down`, which is a defect about the
 > dispatch. Fix what it names, then re-run to confirm exit 0.
+>
+> **Check 16 — IS THE DEPLOY LANE OPEN? And it is the one check whose remedy is a PULL
+> (DEF-ROC-131, owner ruling 2026-08-27: "we should not deploy things that are red — they
+> should get fixed", and "fix the loops to fix things").** Until this existed, this gate
+> carried nineteen findings and NOT ONE asked whether trunk CI was red — so the single
+> condition that stops ALL delivery for a project was invisible to the mechanism whose whole
+> purpose is holding the loop's preconditions. Measured 2026-08-27: four sequential genuine
+> reds, each SKIPPING the deploy job (`deploy-test` declares `needs: [test-function-app,
+> test-web-app]`, and a skipped job is a neutral dash that contributes nothing to the run's
+> conclusion); UC-ROC-105 and UC-ROC-106 built green, committed, PUSHED and undeployable —
+> therefore **un-validatable, because a tester cannot validate what is not deployed** — for
+> most of a cycle; this gate run repeatedly through that window reporting OK every time; and
+> the orchestrator finding out from an engineer's passing remark in a build report.
+>
+> It BLOCKS (`-` line, exit 2), and **the block is an instruction to DISPATCH, never a
+> wait.** A limb that merely refused the pull would convert a deploy stall into a TOTAL
+> stall, which is strictly worse. So it copies check 1's proven shape — name the failing
+> job, name the owning item, name the exact remedy — and the remedy it names is *fix the
+> red as this cycle's pull*. **It is NOT cleared by pulling something else and NOT cleared
+> by waiting**; it clears when the deploy job goes green. Record `build_failed` on the named
+> item BEFORE fixing forward (§3/EXP-108, recordable from every active state per
+> DEF-ROC-120) or CFR reads a false 0%. If the red genuinely is not ours to fix, that is a
+> `blocked` item with a named external precondition — never a silenced check.
+>
+> **It reads the DEPLOY JOB's own conclusion and its `needs` closure, NEVER the run's
+> overall conclusion**, and that distinction is the whole limb. `Dependency audit
+> (prod-runtime, blocking)` is red on EVERY push here (DEF-ROC-068, no upstream fix) and is
+> deliberately not in the deploy job's `needs:`, so all three real captures the delegated
+> tool is pinned against carry run conclusion `failure` **and one of them DEPLOYED**. A limb
+> reading the run conclusion would fire permanently and be ignored inside a day. Equally it
+> does not read a green-so-far run as a landed deploy: a Deploy job still `in_progress`
+> renders as NOT ESTABLISHED (`?` line), because on 2026-08-27 the ROC health endpoint
+> served the new `buildSha` mid-cutover — Function App swapped, Web App not — and
+> dispatching a tester there measures a half-completed deploy. Read it ALONGSIDE check 15:
+> 15 tells you the environment is N commits behind (the symptom, advisory); 16 tells you
+> WHICH JOB shut the lane and WHO owns the fix (the cause, blocking). Standalone probe:
+> `make deploy-lane PROJECT=<p> [JSON=1]`.
 >
 > **Check 3 has TWO severities (v126 addendum) — Little's Law governs WIP, not backlog depth.** A
 > **WIP-stage** queue over cap (`ready`/`wip`/`rework`) BLOCKS (`-` line, exit 2). A
@@ -231,6 +268,12 @@ Each cycle:
    constraint SHIFTS**, or when the routine-batch/incident threshold fires (§F8). A
    stable constraint on a clean run does not pay full-retro overhead; a shifted
    constraint is real learning that a retro must walk (exploit/subordinate/elevate).
+   **The routine-batch limb of that is REACHABLE (DEF-ROC-130).** Because this step
+   runs after EVERY bubble, the cheap drain used to reset the routine counter on every
+   run, so the batched routine retro could never fire. The two arms now have separate
+   markers: the drain clears incidents only, and routine closes accumulate across
+   however many bubbles it takes. Expect the OK line to report a climbing routine
+   count and then, at the threshold, an exit 2 on the routine arm.
 5b. **Full-sweep board reconcile — periodic BACKSTOP only (the primary path is the
    step-4 per-item push).** After a slice/chunk close, run
    `make board-sweep PROJECT=<project>` (the `linear`/`jira` projection agent uses the same

@@ -4669,6 +4669,15 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
     #         to pull cannot un-stale an environment.
     findings.extend(compute_deploy_staleness(project))
 
+    # --- 16. IS THE DEPLOY LANE OPEN? — DELEGATED ----------------------------
+    #         (DEF-ROC-131, owner ruling 2026-08-27). Check 15 asks the HOST what
+    #         it is running; this asks CI whether the DEPLOY JOB ran at all. They
+    #         are different questions with independent blind spots, and this is
+    #         the BLOCKING one: a stale environment cannot be un-staled by
+    #         refusing to pull, but a red trunk CAN be fixed, and per the ruling
+    #         that is the work. Deliberately LAST, so its block is the final word.
+    findings.extend(compute_deploy_lane(project))
+
     return findings
 
 
@@ -4761,6 +4770,170 @@ def compute_deploy_staleness(project, timeout=DEPSTALE_TIMEOUT):
         f"item event, so deployment frequency keeps reporting a healthy rate while "
         f"nothing reaches the environment. Any acceptance condition reading 'verified "
         f"against the deployed host' is unmeetable until this closes."))]
+
+
+# ---------------------------------------------------------------------------
+# loop-gate check 16 — IS THE DEPLOY LANE OPEN? (DEF-ROC-131)
+#
+# OWNER RULING, 2026-08-27: "we should not deploy things that are red — they
+# should get fixed", and "FIX THE LOOPS TO FIX THINGS."
+#
+# THE GAP. This gate could emit nineteen distinct findings and NOT ONE of them
+# asked whether trunk CI was red. So the single condition that stops ALL delivery
+# for a project was invisible to the mechanism whose entire purpose is holding the
+# loop's preconditions. Measured 2026-08-27: four sequential genuine reds, every
+# one of them SKIPPING `deploy-test` (it declares `needs: [test-function-app,
+# test-web-app]`); UC-ROC-105 and UC-ROC-106 built green, committed, PUSHED and
+# undeployable — therefore un-validatable, because a tester cannot validate what
+# is not deployed — for most of a cycle; `make loop-gate PROJECT=ROC` run
+# repeatedly through that window reporting OK on the pull question EVERY TIME;
+# and the orchestrator finding out from an engineer's passing remark in a build
+# report. Sixth registered instance this cycle of a control reading healthy while
+# the thing it guards actively fails (DEF-ROC-125..129) — except here the control
+# is the loop gate itself and the thing failing is delivery.
+#
+# WHY IT BLOCKS, AND WHY THAT IS NOT THE TRAP IT LOOKS LIKE. Check 15 (deploy
+# staleness) is ADVISORY on purpose: refusing to pull cannot un-stale an
+# environment. A SHUT LANE IS DIFFERENT — it CAN be opened, and the ruling says
+# open it. But a limb that merely BLOCKS would convert a deploy stall into a
+# TOTAL stall, which is strictly worse than the status quo. So this copies the
+# ONE check in this gate with a proven record of causing action — check 1,
+# stalled-validation, which found two items dwelling 35.5h and 27.3h awaiting a
+# dispatch nobody made: it BLOCKS, and it names the id and the exact remedy, and
+# `/loop-run` STEP 0b binds the loop to "the only permitted actions are the
+# remedies it names". The block is therefore not a wait — it is an INSTRUCTION TO
+# DISPATCH, and the remedy below is a dispatch, never a hold.
+#
+# THE DISCRIMINATION IS WHAT KEEPS IT TRUSTED. `Dependency audit (prod-runtime,
+# blocking)` is red on EVERY push on this repo (DEF-ROC-068, `deepmerge-ts` via
+# `flowbite-react` via the design system, pinned EXACTLY, no upstream fix) and is
+# DELIBERATELY not in the deploy job's `needs:`. Real run 33076365108 PROVES it:
+# the deploy succeeded GREEN while that job was red. All three real captures the
+# delegated tool is pinned against carry run conclusion `failure`; one of them
+# DEPLOYED. So the run's overall conclusion cannot tell an open lane from a shut
+# one, and a limb reading it would fire permanently and be ignored inside a day.
+# The tool reads the DEPLOY JOB'S OWN CONCLUSION and the transitive closure of
+# its `needs:` — never the run conclusion — and says so in `decidedBy`.
+#
+# AND IT MUST NOT READ GREEN-SO-FAR AS LANDED. Also measured this cycle: the ROC
+# health endpoint served the new `buildSha` while the Deploy job was still
+# `in_progress` (Function App swapped, Web App not). `in-flight` is therefore its
+# own verdict and renders as NOT ESTABLISHED, never as clean — firing "go
+# validate" on that dispatches a tester at a half-completed cutover.
+# ---------------------------------------------------------------------------
+DEPLOY_LANE_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "..", "..", "..", "tools", "deploy-lane.js")
+DEPLOY_LANE_TIMEOUT = 150.0
+
+
+def compute_deploy_lane(project, timeout=DEPLOY_LANE_TIMEOUT):
+    """Did the DEPLOY JOB on trunk actually run and pass? 0 or 1 finding.
+
+    DELEGATED to the ONE executable home of the needs-graph reading
+    (.claude/tools/deploy-lane.js) — never re-implemented here, and pinned there
+    against REAL captured `gh` payloads plus a live probe (`make deploy-lane`).
+    """
+    common = {"check": "deploy-lane", "ids": []}
+    try:
+        proc = subprocess.run(
+            ["node", os.path.normpath(DEPLOY_LANE_SCRIPT), "--project", project,
+             "--repo-root", ROOT, "--json"],
+            capture_output=True, text=True, timeout=timeout)
+        report = json.loads(proc.stdout)
+    except Exception as exc:                                    # noqa: BLE001
+        return [dict(common, severity="unknown", verdict="UNRUNNABLE", message=(
+            f"[deploy-lane] NOT ESTABLISHED — the checker would not run "
+            f"({type(exc).__name__}: {str(exc)[:160]}). Nothing was checked, which is "
+            f"NOT the same as 'the deploy lane is open': a shut lane is the single "
+            f"condition that stops ALL delivery for {project}, and it was invisible to "
+            f"this gate for the whole of 2026-08-27 (DEF-ROC-131). Remedy: `node "
+            f".claude/tools/deploy-lane.js --project {project} --repo-root . --json`; "
+            f"check `gh auth status` first."))]
+
+    verdict = report.get("verdict")
+    deploy_job = report.get("deployJobName") or "the deploy job"
+    sha = str(report.get("headSha") or "")[:12]
+    url = report.get("runUrl") or "(no run url)"
+
+    # OPEN — the deploy job succeeded. Say NOTHING, even when other jobs in the
+    # run are red: that silence IS the DEF-ROC-068 discrimination, and it is the
+    # half of this limb that decides whether anyone still reads it next week.
+    if verdict == "open":
+        return []
+
+    if verdict == "in-flight":
+        return [dict(common, severity="unknown", verdict=verdict, message=(
+            f"[deploy-lane] NOT ESTABLISHED — \"{deploy_job}\" is "
+            f"{report.get('deployJobStatus')} at {sha}, so NOTHING HAS LANDED yet and "
+            f"nothing is broken either. Do NOT read this as a deploy and do NOT "
+            f"dispatch validation against the host: on 2026-08-27 the {project} health "
+            f"endpoint served the NEW buildSha while this job was still in_progress — "
+            f"one app had swapped and another had not — so a tester dispatched here "
+            f"measures a half-completed cutover. Re-run this gate when the run "
+            f"completes. {url}"))]
+
+    if verdict != "blocked":
+        return [dict(common, severity="unknown", verdict=verdict, message=(
+            f"[deploy-lane] NOT ESTABLISHED ({report.get('reason')}) — "
+            f"{report.get('detail') or 'no detail'}. An unanswerable question must never "
+            f"render as a clean answer, and this is the question whose wrong answer cost "
+            f"most of a cycle (DEF-ROC-131). Until it is established, no statement that "
+            f"{project}'s work can reach an environment is supported by anything. "
+            f"Remedy: commit .claude/config/deploy-lane/{project}.json (copy ROC's) or "
+            f"fix what the reason names."))]
+
+    # BLOCKED — delivery is stopped. Name the job, name the owner, dispatch.
+    blocking = report.get("blockingJobs") or []
+    cause = ("; ".join(f"\"{j.get('name')}\" is {j.get('conclusion')}" for j in blocking)
+             or f"reason {report.get('reason')} (the tool could not see which job)")
+    suspects = [str(i) for i in (report.get("suspectItems") or [])]
+    if suspects:
+        owner = ", ".join(suspects)
+    elif report.get("suspectItemsEstablished") is False:
+        owner = ("NOT ESTABLISHED — the run title was truncated and the full commit "
+                 "message could not be read, so read the sha's message yourself; this "
+                 "is not 'no item involved'")
+    else:
+        owner = "no work-item id appears in the breaking commit"
+    behind = report.get("undeliveredCommits")
+    if behind is None:
+        stuck = ("How much is stuck behind it could NOT be established (no earlier run "
+                 "with a successful deploy job inside the scan bound — which on "
+                 "2026-08-27 was itself the symptom: the whole scan window was red).")
+    else:
+        stuck = (f"{behind} commit(s) have landed on trunk since the last successful "
+                 f"deploy and NONE of them can reach an environment"
+                 + (f"; items in that range: {', '.join(report.get('undeliveredItems') or []) or '—'}."
+                    if behind else "."))
+    return [dict(common, severity="block", verdict=verdict,
+                 ids=suspects, run=report.get("runId"),
+                 blocking_jobs=[j.get("name") for j in blocking],
+                 message=(
+        f"[deploy-lane] THE DEPLOY LANE IS SHUT for {project} — \"{deploy_job}\" is "
+        f"{report.get('deployJobConclusion')} at {sha} because {cause}. Owning item(s): "
+        f"{owner}. {stuck} EVERYTHING PUSHED IS THEREFORE UN-VALIDATABLE: a tester "
+        f"cannot validate what is not deployed, so every item awaiting validation is "
+        f"stalled by this one fact and will keep accruing lead time silently (that is "
+        f"exactly what happened to UC-ROC-105 and UC-ROC-106 on 2026-08-27). "
+        f"THIS BLOCK IS NOT A WAIT AND IS NOT CLEARED BY PULLING SOMETHING ELSE — per "
+        f"the owner ruling the red gets FIXED, and per /loop-run STEP 0b the only "
+        f"permitted action is the remedy named here. REMEDY, in order: (1) read the "
+        f"actual failure — `gh run view {report.get('runId')} --repo {report.get('repo')} "
+        f"--log-failed`; (2) record the change failure BEFORE fixing forward so CFR is "
+        f"not a false 0% (§3/EXP-108) — `make wi-append PROJECT={project} "
+        f"ID=<the item above> EVENT=build_failed AGENT=engineer NOTE_FILE=<path>`; it is "
+        f"recordable from every active state (DEF-ROC-120), so 'the item had moved on' is "
+        f"not a reason to skip it; (3) DISPATCH AN ENGINEER AT THE NAMED JOB AS THIS "
+        f"CYCLE'S PULL — the fix is the work, not an interruption to it; (4) push, then "
+        f"re-run this gate and see the lane OPEN before dispatching any tester. If the "
+        f"red is genuinely not ours to fix, that is a `blocked` item with a named "
+        f"external precondition, recorded — never a silenced check. NOTE: this limb "
+        f"reads the DEPLOY JOB'S conclusion and its `needs` closure "
+        f"({', '.join(report.get('needsClosureJobNames') or []) or 'none'}), NEVER the "
+        f"run's overall conclusion (which is \"{report.get('runConclusion')}\"); "
+        f"{len(report.get('nonBlockingFailures') or [])} other red job(s) in this run are "
+        f"OUTSIDE that closure and are not why "
+        f"({', '.join(report.get('nonBlockingFailures') or []) or 'none'}). {url}"))]
 
 
 # ---------------------------------------------------------------------------

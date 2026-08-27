@@ -162,6 +162,29 @@ make-refs-tracked:
 	@node .claude/tools/make-refs-tracked.js \
 	  $(if $(REPO),--repo $(REPO),--project $(PROJECT) --repo-root .) $(if $(JSON),--json,)
 
+# --- IS THE DEPLOY LANE OPEN? (DEF-ROC-131) -------------------------------------
+# The READ-ONLY live probe behind `loop-gate` check 16, and the thing that lets you
+# answer in one command the question that was invisible to this whole gate for the
+# better part of 2026-08-27: can anything we push actually reach an environment?
+#
+# It reads the DEPLOY JOB'S OWN CONCLUSION and the transitive closure of its
+# `needs:` (from the workflow source -- the GitHub jobs API does not carry `needs`),
+# NEVER the run's overall conclusion. That distinction is the whole tool: on this
+# repo `Dependency audit (prod-runtime, blocking)` is red on EVERY push
+# (DEF-ROC-068, no upstream fix) and is deliberately NOT in the deploy job's needs,
+# so ALL THREE real captures it is pinned against carry run conclusion `failure`
+# and one of them DEPLOYED. A limb reading the run conclusion would be on
+# permanently and ignored inside a day.
+#
+# Four verdicts, never two: open / blocked / in-flight (a deploy still running has
+# NOT landed -- the ROC health endpoint served the new buildSha mid-cutover on
+# 2026-08-27) / NOT-ESTABLISHED. Read-only: `gh` + `git log` + the workflow file;
+# no writes, no secrets. Self-tests: `make test-tools`.
+#   make deploy-lane PROJECT=ROC          # human line; exit 2 iff BLOCKED
+#   make deploy-lane PROJECT=ROC JSON=1   # the full report
+deploy-lane:
+	@node .claude/tools/deploy-lane.js --project $(PROJECT) --repo-root . $(if $(JSON),--json,)
+
 # --- orphaned LOCAL CONTAINERS (DEFECT-OAG-091) ---------------------------------
 # The container equivalent of worktree-reap, and the tool EXP-133 should have
 # shipped with the container-per-engineer. `ddb-local-down` is per-dispatch and must
@@ -1238,7 +1261,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap sequencer-guard make-refs-tracked container-reap container-orphans stack-claim stack-release stack-status sso-login retro-debt retro-mark loop-gate test-wi wi-append wi-project wi-validate wi-migrate item-brief doc-lint process-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated commit-msg-file test-requirement-gate test-requirement-gate-baseline board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery
+.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap sequencer-guard make-refs-tracked deploy-lane container-reap container-orphans stack-claim stack-release stack-status sso-login retro-debt retro-mark loop-gate test-wi wi-append wi-project wi-validate wi-migrate item-brief doc-lint process-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated commit-msg-file test-requirement-gate test-requirement-gate-baseline board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery
 
 # --- Viggo-fix UC-W7: Country/Nationality ID remediation (T-SQL) --------------
 # Data-driven, self-building T-SQL remediation script set + its local stand-up

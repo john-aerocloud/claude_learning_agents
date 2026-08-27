@@ -239,6 +239,8 @@
       "Bash(make test-tools)",
       "Bash(make dispatch-check *)",
       "Bash(make worktree-guard *)",
+      "Bash(make deploy-lane)",
+      "Bash(make deploy-lane *)",
       "Bash(make test-observatory)",
       "Bash(make browser-observatory)",
       "Bash(make run-local)",

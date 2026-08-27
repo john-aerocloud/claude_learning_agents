@@ -1,0 +1,11 @@
+{
+  "repo": "AeroCloudSystems/PpsEventAggregation",
+  "branch": "main",
+  "workflowFile": ".github/workflows/deploy-ROC.yml",
+  "deployJobId": "deploy-test",
+  "repoPath": "work/ROC",
+  "trunkRef": "origin/main",
+  "runLimit": 12,
+  "maxJobFetches": 6,
+  "timeoutMs": 60000
+}

@@ -218,11 +218,18 @@ class FoldForwardGate(unittest.TestCase):
         self._advance_main()
         self._real_writers()
         self.assertEqual(self._update().returncode, 0)
-        self.assertEqual(wi._read_retro_marker(PROJECT),
+        # BOTH arms survive the merge, each on its own boundary (DEF-ROC-130):
+        # `_real_writers` runs the full close at STAMP then the cheap drain at
+        # 06-21, so the incident arm is at the drain and the routine arm at the
+        # close. A merge that reset either would silently reset retro debt.
+        self.assertEqual(wi._read_retro_marker(PROJECT, wi.ARM_INCIDENT),
                          wi.parse_ts("2026-06-21T00:00:00Z"))
-        kind, _ts, src = wi._retro_verdict(PROJECT)
-        self.assertEqual(kind, "known")
-        self.assertIn("retro-log.md", src)
+        self.assertEqual(wi._read_retro_marker(PROJECT, wi.ARM_ROUTINE),
+                         wi.parse_ts(STAMP))
+        for arm in wi.ARMS:
+            kind, _ts, src = wi._retro_verdict(PROJECT, arm)
+            self.assertEqual(kind, "known", arm)
+            self.assertIn("retro-log.md", src)
 
     # --- the vacuity pin: why a LIVE exit 0 is not evidence ---------------- #
     def test_the_gate_is_unreachable_when_main_is_already_an_ancestor(self):

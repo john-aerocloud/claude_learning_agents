@@ -1,6 +1,7 @@
 {
   "_comment": "Declarative per-item-type state machines. THE auditable core of the event-sourced work-item model (design-rationale/work-item-state-model.md). An item's current state is fold(events) through its type's graph. Appending an event that is not a legal transition from the current state is REJECTED at write time — a half-transition (the drift class) becomes unrepresentable. Wanting a transition that does not exist here is not something an agent may just do: it must propose an amendment to this file WITH A REASON — a process experiment (EXP-NNN) routed through the retro/version-bump gate. Edit this file only via that gate.",
-  "version": 9,
+  "version": 10,
+  "_v10": "v10 (process/DEF-ROC-120, ROC 2026-08-26) — A CHANGE FAILURE IS AN ANNOTATION ON THE ITEM'S HISTORY, NOT A WORKFLOW STEP. MEASURED: DEF-ROC-115's own fix reddened CI and the deploy was consequently SKIPPED for four commits, and `deploy_failed` was not a legal transition from `validating` — so NO ROLE AT ALL could record the change failure. That is what makes it distinct from OI-ROC-006, which asks WHICH role may fire a transition it holds evidence for; here there was no transition to fire, by anyone. The engineer wrote the record BEFORE fixing forward exactly as v87/EXP-108 requires, was refused by the sole writer, correctly did NOT hand-edit item state, and escalated. It was landed as an `amended` note, which preserves the PROSE and does not touch the CFR computation — the metric folds over TYPED events — so CFR read a FALSE 0% for an item that had darkened the environment for four commits. A metric that can only return good news is worse than no metric: the error is never random, always flattering, and it fires precisely when something went wrong. THE MODELLING CHOICE, deliberately: NOT a new state, and NOT a forced move to `reworking`/`fixing`. Where the failure IS the flow's own exit — `deploying`/`prod-deploying` on `deploy_failed`, `building` on `build_failed` — it stays the REAL transition to `reworking` it has always been, because there the item genuinely does go back to the engineer. Everywhere else the item has NOT made that move, so forcing it would fabricate progress (or regress) that never happened, while leaving it unrecordable loses the fact — and those were the only two shapes the graph could express. So it is a SELF-EDGE, the same device `amended` uses (v7/v8): time-preserving in walk_states, invisible to fold(state), and still counted by the fold because CFR keys on the EVENT NAME, not on whichever state the item happened to be in. This does NOT weaken the graph's philosophy: the failure is recordable only by its rightful owners (cicd/engineer, uniform on every edge), item state still cannot be hand-edited, and every transition still has an owner. SCOPE: `deploy_failed` and `build_failed` are now legal from every `active-work` state — every non-terminal state whose owner is an agent who MAKES or VERIFIES a change (engineer/cicd/tester). Deliberately NOT from `registered`/`ready`/`scheduled`/`open` (owner `queue`: nothing is being built), NOT from `blocked`/`awaiting_observation` (owner `external`: parked), and NOT from `reported` (owner orchestrator: intake/triage, no change in flight) — so the gate never demands a meaningless edge. `open-item` has no such state and therefore correctly gains nothing. AC-120-4, THE DURABLE HALF: the new top-level `metric_events` block ENUMERATES every event the metrics fold over and DECLARES the domain in which each can occur, and the gate is two-directional — every folded event must be declared AND reachable from its whole domain, and every folded event must be PRODUCIBLE by some graph. The inverse sweep immediately found three dead fold inputs (`deploy`, `done`, `resolved` — they are STATES, never events, so those folds could only ever contribute zero) and a per-item recovery metric that omitted `deploy_failed` while the aggregate counted it; both are fixed in work-items.py. It also forced the companion fix in `_compute_quality`: an annotation is NOT a stage exit, so it no longer pads the stage denominator with a non-failure — which `amended` had already been quietly doing, making a stage's failure rate go DOWN when bad news was recorded against it.",
   "_v9": "v9 (process v125 §12d obligation 3 / §17c.1, OagEventSource 2026-08-01) — adds `awaiting_observation`: NON-TERMINAL, owner `external`, queue `waiting`. v125's changelog listed this state as a COMPLETED change and it was never added; §12d carried the interim instruction 'until it lands, the tester reports `not-yet-observed` in its return and the item is held out of `done` by hand'. It is the THIRD v125 remedy that existed only as prose (with `make wire-provenance`, which did not exist, and the corpus provenance markers no gate read) — which is exactly the Layer-2 failure §17c was written against, so §17c binds this change: the acceptance is the MECHANISM FIRING, not the state appearing in this file. FOUNDING CASE: UC-ML1 was shipped, deployed and independently re-verified green AND inert (2158 offline tests, 103 against real DynamoDB Local, the deployed Lambda bytes and the ECS image pulled by digest), and the tester then correctly REFUSED to append any event, because none of `dev_validated`/`validated`/`rejected` honestly represents 'shipped, deployed, re-verified green and inert, but UNPROVABLE until armed'. ENTRY `not_yet_observed` (agent tester) from ALL THREE validation states — `prod-validating` included deliberately, since all five v125 capabilities were prod-validated and had still never fired on real data, so omitting it would leave the founding class unrepresentable. EXIT `validated` -> done/resolved when the observation lands, `rejected` -> reworking/fixing when the observation FALSIFIES the capability, plus the `amended` self-edge (v8 generic invariant) and `cancelled` so a descoped park is never stuck. The entering event MUST carry a machine-checkable `observe:` predicate (`make:<target> [VAR=V]`, scheme required, shell metacharacters refused) — `append` REFUSES the transition without one, `validate` I6 catches a hand-edit, and `loop-gate` check 5 RE-EVALUATES it every cycle exactly as `blocked` is re-checked: exit 0 = observed (BLOCKS, a tester dispatch is now actionable), exit 3 = not-yet (ADVISORY, legitimate but never satisfied), any other exit = broken predicate (BLOCKS — an unrunnable liveness predicate is the `make wire-provenance` class). NOT added to `open-item`: an open item is a finding/decision-debt note with no deployable capability and no observation surface; one whose closure needs an observation belongs registered as a use-case or defect. AGGREGATE RULE: `awaiting_observation` is not in the done set, so an awaiting child can never let its parent read `done`; an aggregate whose non-terminal children are all parked (blocked or awaiting) bubbles to `awaiting_observation` when any of them is awaiting, else `blocked` — the unproven-capability fact takes precedence because it is the one that can silently read `done` later. Owner `external` (not `tester`) so the wait is never booked as the tester's effort (v126 constraint finding: a wait wearing the tester's name).",
   "_v8": "v8 (process v126 addendum, OagEventSource 2026-08-01) — completes v7's OWN invariant on the third flow graph. CONTRACT.md §2 already asserts 'every non-terminal flow state has an `amended` self-edge', and the v7 note claims it, but v7 delivered it on use-case and defect only; `open-item` was overlooked (its note says 'both flow graphs' — there are THREE). Founding case: the flow-manager needed to record a legitimate SCOPE NARROWING on the open-item OI-CHUNKS-STALE-REF, found `amended` illegal from `open`, and correctly refused to hand-work-around the graph rather than silently editing the Definition prose — the exact behaviour v7 (2) exists to make unnecessary. Adds `open --amended--> open` and `scheduled --amended--> scheduled` with the same uniform agent list. Contained by construction: a self-edge leaves fold(state) unchanged and is time-preserving in walk_states (it closes and reopens the same state at the same instant, contributing a zero-length segment), so no derived view, metric or queue moves. The invariant is now pinned GENERICALLY across every flow type and every reachable non-terminal state (TestAmendedSelfEdge), so a future type cannot reintroduce the gap.",
   "_v7": "v7 (process v123, OagEventSource retro 2026-07-30) — three expressiveness/attribution fixes, all founded on things an agent needed to record and the graph had no legal way to say. (1) VALIDATE-ONLY route: `ready --pulled_for_validation--> validating --validated--> done` for a UC whose entire scope is asserting behaviour that is ALREADY built and deployed. Before v7 the only route to `done` ran through `building`+`deploying`, so UC-XC4 (prod live-delivery smoke) was closed by the tester appending `built_green` AS `AGENT=engineer` and `deployed` AS `AGENT=cicd` as declared no-ops — spoofed attribution that process-current.md forbids, cited UC-XC2/XC3 as precedent (systemic), and injected phantom engineer/cicd GLT plus fake never-failable building/deploying exits into quality-by-stage. (2) `amended` SELF-EDGE on every non-terminal flow state: a definition correction discovered on an ALREADY-PULLED item is now recordable. Founding case: the per-slice architecture gate FALSIFIED UC-XE1's premise (the item would have had the engineer tear down a LIVE consumer feed carrying 51-61k events/day) — the highest-value event in the loop and previously invisible to fold(events). Self-edge is time-preserving in the fold (closes and reopens the same state at the same ts). (3) `unblocked` SYMMETRY: agents now match `blocked`'s list on both flow graphs. The orchestrator observes the external condition clear (it held the CloudWatch evidence that AdixOut's prod bus policy had landed) but could only record the block STARTING, not ENDING, and had to hand the fact to flow-manager to transcribe.",
@@ -48,6 +49,120 @@
     "wontfix": null,
     "cancelled": null
   },
+  "metric_events": {
+    "_comment": "[v10, DEF-ROC-120 AC-120-4] Every event the DERIVED METRICS fold over, and the domain of states in which the thing it describes can ACTUALLY HAPPEN. The gate (test_work_items.TestChangeFailureRecordable) is two-directional and is the durable half of the fix: every event work-items.py's METRIC_FOLD_EVENTS counts must appear here (COMPLETENESS — an undeclared folded event is exactly how `deploy_failed` stayed unrecordable, because nothing ever asked where it can occur), each must be a legal transition from EVERY state in its domain, and each must be producible by some graph (an event no graph emits is a dead input that can only ever contribute zero). `occurs_in` vocabulary: `active-work` = every non-terminal state whose owner is an agent who MAKES or VERIFIES a change (engineer/cicd/tester) — a build or deploy can go red at any moment work is live, and never in a queue, at intake, or while parked externally; `validating` = the validation states, for a verdict only a tester holding the validation can reach; `workflow` = the event IS a flow step, so the graph places it and only the producibility sweep applies.",
+    "deploy_failed": {
+      "occurs_in": "active-work",
+      "agents": [
+        "cicd",
+        "engineer"
+      ],
+      "counts_toward": [
+        "change_failure_rate",
+        "mttr",
+        "rework_rate",
+        "quality.deploying"
+      ],
+      "_why": "the CI/deploy pipeline can go red on any push, whatever stage the item is in, and a red deploy that is FIXED FORWARD leaves no other trace — so wherever it is unrecordable, CFR reads a false 0%."
+    },
+    "build_failed": {
+      "occurs_in": "active-work",
+      "agents": [
+        "cicd",
+        "engineer"
+      ],
+      "counts_toward": [
+        "mttr",
+        "rework_rate",
+        "quality.building"
+      ],
+      "_why": "the suite/lint/type-check can go red on any push. Deliberately NOT a CFR input — a pre-deploy red is a pipeline wait, not a change failure (v87). Found by the AC-120-4 sweep: before v10 the DEFECT graph had no `build_failed` edge AT ALL, so a defect fix that reddened the build was unrecordable from every one of its states."
+    },
+    "rejected": {
+      "occurs_in": "validating",
+      "agents": [
+        "tester"
+      ],
+      "counts_toward": [
+        "change_failure_rate",
+        "mttr",
+        "rework_rate",
+        "quality.validating"
+      ],
+      "_why": "a validation verdict; only reachable by a tester holding the validation."
+    },
+    "validated": {
+      "occurs_in": "validating",
+      "agents": [
+        "tester"
+      ],
+      "counts_toward": [
+        "change_failure_rate",
+        "deployment_frequency",
+        "lead_time_for_changes",
+        "mttr"
+      ],
+      "_why": "the other validation verdict, and the success term in the CFR denominator."
+    },
+    "built_green": {
+      "occurs_in": "workflow",
+      "counts_toward": [
+        "lead_time_for_changes",
+        "mttr"
+      ]
+    },
+    "fixed": {
+      "occurs_in": "workflow",
+      "counts_toward": [
+        "lead_time_for_changes"
+      ]
+    },
+    "deployed": {
+      "occurs_in": "workflow",
+      "counts_toward": [
+        "mttr"
+      ]
+    },
+    "retried": {
+      "occurs_in": "workflow",
+      "counts_toward": [
+        "mttr",
+        "rework_rate"
+      ]
+    },
+    "reopened": {
+      "occurs_in": "workflow",
+      "counts_toward": [
+        "rework_rate"
+      ]
+    },
+    "reported": {
+      "occurs_in": "workflow",
+      "counts_toward": [
+        "mttr",
+        "defect_arrivals"
+      ]
+    },
+    "closed": {
+      "occurs_in": "workflow",
+      "counts_toward": [
+        "deployment_frequency"
+      ]
+    },
+    "not_reproduced": {
+      "occurs_in": "workflow",
+      "counts_toward": [
+        "deployment_frequency",
+        "quality.reproducing"
+      ]
+    },
+    "declined": {
+      "occurs_in": "workflow",
+      "counts_toward": [
+        "deployment_frequency"
+      ]
+    }
+  },
   "types": {
     "use-case": {
       "kind": "flow",
@@ -58,13 +173,13 @@
         {"from": "ready",          "to": "building",         "event": "pulled",       "agents": ["orchestrator", "flow-manager"]},
         {"from": "building",       "to": "deploying",        "event": "built_green",  "agents": ["engineer", "documenter"]},
         {"from": "deploying",      "to": "dev-validating",   "event": "deployed",     "agents": ["cicd", "documenter"]},
-        {"from": "building",       "to": "reworking",        "event": "build_failed", "agents": ["engineer", "cicd"]},
+        {"from": "building",       "to": "reworking",        "event": "build_failed", "agents": ["cicd", "engineer"]},
         {"from": "deploying",      "to": "reworking",        "event": "deploy_failed","agents": ["cicd", "engineer"]},
         {"from": "dev-validating", "to": "prod-deploying",   "event": "dev_validated","agents": ["tester"]},
         {"from": "dev-validating", "to": "done",             "event": "validated",    "agents": ["tester"]},
         {"from": "dev-validating", "to": "reworking",        "event": "rejected",     "agents": ["tester"]},
         {"from": "prod-deploying", "to": "prod-validating",  "event": "promoted",     "agents": ["cicd"]},
-        {"from": "prod-deploying", "to": "reworking",        "event": "deploy_failed","agents": ["cicd"]},
+        {"from": "prod-deploying", "to": "reworking",        "event": "deploy_failed","agents": ["cicd", "engineer"]},
         {"from": "prod-validating","to": "done",             "event": "validated",    "agents": ["tester"]},
         {"from": "prod-validating","to": "reworking",        "event": "rejected",     "agents": ["tester"]},
         {"from": "reworking",      "to": "building",         "event": "retried",      "agents": ["engineer"]},
@@ -106,7 +221,18 @@
         {"from": "blocked",        "to": "cancelled",        "event": "cancelled",    "agents": ["orchestrator", "flow-manager"]},
         {"from": "dev-validating", "to": "cancelled",        "event": "cancelled",    "agents": ["orchestrator", "flow-manager"]},
         {"from": "prod-validating","to": "cancelled",        "event": "cancelled",    "agents": ["orchestrator", "flow-manager"]},
-        {"from": "prod-deploying", "to": "cancelled",        "event": "cancelled",    "agents": ["orchestrator", "flow-manager"]}
+        {"from": "prod-deploying", "to": "cancelled",        "event": "cancelled",    "agents": ["orchestrator", "flow-manager"]},
+        {"from": "building",        "to": "building",         "event": "deploy_failed", "agents": ["cicd", "engineer"]},
+        {"from": "reworking",       "to": "reworking",        "event": "deploy_failed", "agents": ["cicd", "engineer"]},
+        {"from": "dev-validating",  "to": "dev-validating",   "event": "deploy_failed", "agents": ["cicd", "engineer"]},
+        {"from": "prod-validating", "to": "prod-validating",  "event": "deploy_failed", "agents": ["cicd", "engineer"]},
+        {"from": "validating",      "to": "validating",       "event": "deploy_failed", "agents": ["cicd", "engineer"]},
+        {"from": "deploying",       "to": "deploying",        "event": "build_failed",  "agents": ["cicd", "engineer"]},
+        {"from": "prod-deploying",  "to": "prod-deploying",   "event": "build_failed",  "agents": ["cicd", "engineer"]},
+        {"from": "reworking",       "to": "reworking",        "event": "build_failed",  "agents": ["cicd", "engineer"]},
+        {"from": "dev-validating",  "to": "dev-validating",   "event": "build_failed",  "agents": ["cicd", "engineer"]},
+        {"from": "prod-validating", "to": "prod-validating",  "event": "build_failed",  "agents": ["cicd", "engineer"]},
+        {"from": "validating",      "to": "validating",       "event": "build_failed",  "agents": ["cicd", "engineer"]}
       ]
     },
     "defect": {
@@ -136,7 +262,13 @@
         {"from": "reported",    "to": "cancelled",   "event": "cancelled",     "agents": ["orchestrator", "flow-manager"]},
         {"from": "reproducing", "to": "cancelled",   "event": "cancelled",     "agents": ["orchestrator", "flow-manager"]},
         {"from": "fixing",      "to": "cancelled",   "event": "cancelled",     "agents": ["orchestrator", "flow-manager"]},
-        {"from": "blocked",     "to": "cancelled",   "event": "cancelled",     "agents": ["orchestrator", "flow-manager"]}
+        {"from": "blocked",     "to": "cancelled",   "event": "cancelled",     "agents": ["orchestrator", "flow-manager"]},
+        {"from": "reproducing", "to": "reproducing",  "event": "deploy_failed",  "agents": ["cicd", "engineer"]},
+        {"from": "fixing",      "to": "fixing",       "event": "deploy_failed",  "agents": ["cicd", "engineer"]},
+        {"from": "validating",  "to": "validating",   "event": "deploy_failed",  "agents": ["cicd", "engineer"]},
+        {"from": "reproducing", "to": "reproducing",  "event": "build_failed",   "agents": ["cicd", "engineer"]},
+        {"from": "fixing",      "to": "fixing",       "event": "build_failed",   "agents": ["cicd", "engineer"]},
+        {"from": "validating",  "to": "validating",   "event": "build_failed",   "agents": ["cicd", "engineer"]}
       ]
     },
     "open-item": {

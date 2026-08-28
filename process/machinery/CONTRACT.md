@@ -114,6 +114,31 @@ rather than silently editing the Definition prose, so the fact that the definiti
 visible to `fold(events)` and every derived view. The self-edge is time-preserving (it closes and
 reopens the same state at the same instant), so it never distorts gross lead time.
 
+**Recording a CHANGE FAILURE — an annotation, not a workflow step [state-graph v10].** A build
+or a deploy can go red at any moment work is live, not only while the item sits in `building` or
+`deploying`. Until v10 it could only be recorded there, so when `DEF-ROC-115`'s own fix reddened
+CI and the deploy was skipped for four commits, **no role at all** could append the fact (the
+item was in `validating`) — it was landed as an `amended` note, which keeps the prose and does
+**not** touch the CFR computation, because the metric folds over TYPED events. CFR therefore read
+a **false 0%** exactly when something had gone wrong.
+
+`deploy_failed` and `build_failed` (agents: cicd, engineer) are now legal from every
+**`active-work`** state — every non-terminal state whose owner is an agent who MAKES or VERIFIES a
+change (engineer/cicd/tester). Where the failure IS the flow's own exit (`deploying`/
+`prod-deploying` on `deploy_failed`, `building` on `build_failed`) it remains the real transition
+to `reworking`. **Everywhere else it is a SELF-EDGE**: the item has not made that move, so
+recording the fact must not fabricate progress it did not make, and the alternative — losing the
+fact — is what the defect was. Like `amended`, the self-edge is time-preserving and invisible to
+`fold(state)`; the fold still counts it because CFR keys on the event NAME. An **annotation is not
+a stage exit**, so it never pads a stage's exit denominator with a non-failure (which would make
+recording bad news lower the stage's failure rate).
+
+The durable half is the top-level **`metric_events`** block: it enumerates every event the metrics
+fold over and declares the domain in which each can occur (`active-work` / `validating` /
+`workflow`). The gate is two-directional — every folded event must be declared and legal from its
+whole domain, and every folded event must be producible by some graph. Add a metric input without
+declaring it, or fold over a name no graph emits, and the suite goes red.
+
 **Shipped, green and UNPROVEN — `awaiting_observation` [state-graph v9].** A capability is
 not `done` until it has been OBSERVED working on data the system did not author (§17c.1).
 When an item is built, deployed and independently re-verified green but the capability has
@@ -181,13 +206,14 @@ external condition cleared records it.
 - `work/<p>/views/stats.json` + `.md` — DORA + flow from event timestamps. Reports:
   - the **4 DORA metrics**: throughput (deploy frequency), lead time (registered→done),
     change-failure rate, MTTR (defect reported→resolved); plus WIP.
-    - **change-failure rate [state-graph v5]** = (validation `rejected` + `deploy_failed`) /
-      (validations + deploy failures). A `rejected` (tester validation failure) OR a
-      `deploy_failed` (deploy/CI-pipeline failure — e.g. a red pipeline on push) is a change
-      failure. `deploy_failed` (`deploying`/`prod-deploying` → `reworking`, fired by cicd/engineer)
-      exists so a **fixed-forward** deploy failure is not invisible: previously a red deploy
-      recorded only `built_green`, so CFR read a false 0%. Fire `deploy_failed` on any red
-      deploy even when you fix forward — the trace is what CFR counts.
+    - **change-failure rate [state-graph v5; recordable everywhere at v10]** = (validation
+      `rejected` + `deploy_failed`) / (validations + deploy failures). A `rejected` (tester
+      validation failure) OR a `deploy_failed` (deploy/CI-pipeline failure — e.g. a red pipeline
+      on push) is a change failure. `deploy_failed` exists so a **fixed-forward** deploy failure
+      is not invisible: previously a red deploy recorded only `built_green`, so CFR read a false
+      0%. Fire `deploy_failed` on any red deploy even when you fix forward — the trace is what CFR
+      counts, and it is counted **wherever it was recorded** (CFR asks whether the change failed,
+      not which stage the item happened to be in).
   - **(a) gross-lead-time decomposition** — `by_state` and `by_owner`: time attributed to
     agent-work vs `queue` wait-latency vs `external` blocked, so the largest time thief is named.
   - **(b) quality** — failure / rework rate **by stage** (which stage red-flags most).

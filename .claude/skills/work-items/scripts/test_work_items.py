@@ -14,6 +14,7 @@ import subprocess
 import tempfile
 import unittest
 import contextlib
+import collections
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -1246,8 +1247,10 @@ class TestRetro(Base):
         wi.cmd_retro_mark(argparse.Namespace(project=self.project, now="2026-06-20T00:00:00Z"))
         p = os.path.join(self.tmp, "work", self.project, "items", "retro-log.md")
         self.assertTrue(os.path.exists(p))
-        self.assertEqual(wi._read_retro_marker(self.project),
-                         wi.parse_ts("2026-06-20T00:00:00Z"))
+        # a FULL retro close drains BOTH arms (DEF-ROC-130)
+        for arm in wi.ARMS:
+            self.assertEqual(wi._read_retro_marker(self.project, arm),
+                             wi.parse_ts("2026-06-20T00:00:00Z"), arm)
 
     def test_retro_mark_does_not_write_the_frozen_parent_repo_marker(self):
         legacy = os.path.join(self.tmp, "process", "dora", "retro-marker",
@@ -1339,9 +1342,14 @@ class TestPartsCheck(Base):
         self.assertEqual(code, 0, out)
         self.assertIn("STABLE", out)
         self.assertIn("DEF-1", out)
-        # and the debt is genuinely drained, not merely reported as fine
-        self.assertGreater(wi._read_retro_marker(self.project),
+        # and the INCIDENT debt is genuinely drained, not merely reported as fine
+        self.assertGreater(wi._read_retro_marker(self.project, wi.ARM_INCIDENT),
                            wi.parse_ts("2026-06-14T00:00:00Z"))
+        # ...while the ROUTINE arm is left exactly where it was. THIS is
+        # DEF-ROC-130: the drain used to move one shared marker, so it silently
+        # erased accumulated slice/chunk/requirement closes too.
+        self.assertEqual(wi._read_retro_marker(self.project, wi.ARM_ROUTINE),
+                         wi.parse_ts("2026-06-01T00:00:00Z"))
 
     def test_shifted_constraint_escalates_and_does_NOT_drain(self):
         self._marker(ts="2026-06-01T00:00:00Z",
@@ -1352,9 +1360,10 @@ class TestPartsCheck(Base):
         self.assertEqual(code, 2, out)
         self.assertIn("CONSTRAINT SHIFTED", out)
         self.assertIn("queue/open -> tester/validating", out)
-        # the marker must be UNTOUCHED — an escalation may never drain debt
-        self.assertEqual(wi._read_retro_marker(self.project),
-                         wi.parse_ts("2026-06-01T00:00:00Z"))
+        # BOTH markers must be UNTOUCHED — an escalation may never drain debt
+        for arm in wi.ARMS:
+            self.assertEqual(wi._read_retro_marker(self.project, arm),
+                             wi.parse_ts("2026-06-01T00:00:00Z"), arm)
 
     def test_unreadable_constraint_escalates(self):
         """An instrument that cannot be read is NOT evidence of stability."""
@@ -1404,6 +1413,317 @@ class TestPartsCheck(Base):
         con = wi._read_constraint(self.project)
         self.assertIsNotNone(con)
         self.assertEqual(con["owner"], "engineer")   # the clean runner-up, not queue
+
+
+# --------------------------------------------------------------------------- #
+# DEF-ROC-130 — THE TWO RETRO ARMS GET SEPARATE MARKERS (owner decision: OPTION B)
+#
+# THE FAULT, measured on ROC's own committed cadence log 2026-08-27. `parts-check`
+# carried the comment "Routine debt still batches to its own threshold —
+# parts-check drains the INCIDENT arm only. A slice/chunk close backlog is a
+# different signal." The implementation contradicted it: the OK path appended a
+# `debt_drained` event, `_retro_verdict` returned THE LAST EVENT'S ts whatever its
+# type, and `compute_retro_debt` applied that ONE value to BOTH arms. So the cheap
+# incident drain silently erased accumulated routine debt. Replayed from the log:
+# UC-ROC-093's validation at 13:44:02Z bubbled SLC-ROC-025 AND CHK-ROC-004 to done
+# — two genuine routine closes — and the `debt_drained` at 13:44:50Z moved the
+# shared marker past them, so `retro-debt` 10 seconds later read `routine 0/3`.
+# Driving compute_retro_debt with each marker in turn isolated the cause: marker
+# 13:40:01Z -> routine 2, marker 13:44:50Z -> routine 0, same items, same `now`.
+#
+# THE ARITHMETIC IS WHY THIS IS STRUCTURAL, NOT A RACE: /loop-run step 5a runs
+# parts-check after EVERY bubble, so on each run routine is either already at the
+# threshold (escalate) or 0..2 and the drain wipes it. Routine could therefore only
+# ever reach 3 if 3+ closes landed BETWEEN two consecutive runs. With the
+# constraint stable for weeks, NO trigger for a full retro remained.
+#
+# THE DECISION (owner, 2026-08-27, recorded on DEF-ROC-130): OPTION B — both arms
+# count and they get SEPARATE MARKERS. The 2026-08-07 ruling stands: full-retro
+# overhead is still not paid on a clean run, because the cheap read still drains
+# the INCIDENT arm on a stable constraint. B only stops that drain erasing routine
+# debt, which was never the ruling's intent.
+#
+# WHICH EVENT DRAINS WHICH ARM, and it is the whole fix:
+#   routine  <- `retro_closed` ONLY   (only a FULL retro walks the close backlog)
+#   incident <- `retro_closed` OR `debt_drained`  (the cheap read is legitimate)
+# --------------------------------------------------------------------------- #
+class TestRetroArmSeparation(Base):
+    CON = {"owner": "queue", "state": "open"}
+
+    def _stats(self, owner="queue", state="open"):
+        d = os.path.join(self.tmp, "work", self.project, "views")
+        os.makedirs(d, exist_ok=True)
+        doc = {"overall": {"gross_lead_time": {
+            "by_owner": {owner: {"pct_of_glt": 60.0, "backfill_pct_of_state": 0.0},
+                         "engineer": {"pct_of_glt": 5.0,
+                                      "backfill_pct_of_state": 0.0}},
+            "by_state": {state: {"pct_of_glt": 42.0, "backfill_pct_of_state": 0.0},
+                         "fixing": {"pct_of_glt": 3.0,
+                                    "backfill_pct_of_state": 0.0}}}}}
+        with open(os.path.join(d, "stats.json"), "w", encoding="utf-8") as f:
+            json.dump(doc, f)
+
+    def _closed(self, ts="2026-06-01T00:00:00Z"):
+        """A FULL retro close on record — the state every project is in after /retro."""
+        wi._append_retro_log(self.project, {
+            "ts": ts, "event": wi.RETRO_CLOSED, "agent": "orchestrator",
+            "constraint_owner": self.CON["owner"],
+            "constraint_state": self.CON["state"]})
+
+    def _drained(self, ts):
+        """A cheap incident drain on record — what parts-check's OK path appends."""
+        wi._append_retro_log(self.project, {
+            "ts": ts, "event": wi.RETRO_DRAINED, "agent": "orchestrator",
+            "constraint_owner": self.CON["owner"],
+            "constraint_state": self.CON["state"]})
+
+    def _slice_close(self, i, day, itype="slice"):
+        """An aggregate that bubbles done at `day` 12:00 via one done child UC."""
+        self.write_item("done", f"UC-A{i}", "use-case", [
+            {"ts": _dt(day, 0), "event": "registered", "agent": "flow-manager"},
+            {"ts": _dt(day, 1), "event": "made_ready", "agent": "flow-manager"},
+            {"ts": _dt(day, 2), "event": "pulled", "agent": "orchestrator"},
+            {"ts": _dt(day, 3), "event": "built_green", "agent": "engineer"},
+            {"ts": _dt(day, 4), "event": "deployed", "agent": "cicd"},
+            {"ts": _dt(day, 12), "event": "validated", "agent": "tester"}],
+            parents=[f"AGG-A{i}"])
+        self.write_item("done", f"AGG-A{i}", itype, [
+            {"ts": _dt(day, 0), "event": "registered", "agent": "flow-manager"}])
+
+    def _defect(self, iid, day):
+        self.write_item("done", iid, "defect", [
+            {"ts": _dt(day, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(day, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(day, 2), "event": "confirmed", "agent": "engineer"},
+            {"ts": _dt(day, 3), "event": "fixed", "agent": "engineer"},
+            {"ts": _dt(day, 5), "event": "validated", "agent": "tester"}])
+
+    def _parts(self, now, threshold=3):
+        ns = argparse.Namespace(project=self.project, threshold=threshold, now=now)
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            try:
+                wi.cmd_parts_check(ns)
+                code = 0
+            except SystemExit as e:
+                code = e.code
+        return code, out.getvalue()
+
+    def _debt(self, threshold=3, now=NOW):
+        return wi.compute_retro_debt(self.graphs, self.project, threshold,
+                                     wi.parse_ts(now))
+
+    # -- AC-130-5: THE ARMING TEST. This is the one that must be red first. ----
+    def test_ac_130_5_routine_reaches_the_threshold_across_interleaved_parts_checks(self):
+        """N routine closes INTERLEAVED with parts-check runs still reach the
+        threshold. This is the shape /loop-run actually produces (step 5a runs
+        parts-check after EVERY bubble), and on the pre-fix code it is impossible:
+        each drain moved the one shared marker past the close that preceded it, so
+        the counter reset before it could ever accumulate."""
+        self._closed()
+        self._stats()
+        codes = []
+        for i, day in enumerate((10, 12, 14)):
+            self._slice_close(i, day)
+            codes.append(self._parts(now=_dt(day, 13))[0])
+        routine, incidents, due, _detail, _m = self._debt(now=_dt(15, 0))
+        self.assertEqual(len(routine), 3,
+                         "the interleaved incident drains erased routine debt — "
+                         "the arms are still sharing one marker")
+        self.assertEqual(len(incidents), 0)
+        self.assertTrue(due, "3 routine closes must make a full retro DUE")
+        self.assertEqual(codes[:2], [0, 0],
+                         "below the threshold on a stable constraint the cheap "
+                         "path is still legitimate (the 2026-08-07 ruling stands)")
+        self.assertEqual(codes[2], 2,
+                         "at the threshold parts-check must ESCALATE on the "
+                         "routine arm — that is the trigger this defect removed")
+
+    # -- AC-130-2: separate markers -------------------------------------------
+    def test_ac_130_2_the_incident_drain_does_not_move_the_routine_marker(self):
+        self._closed("2026-06-01T00:00:00Z")
+        self._stats()
+        self._slice_close(0, 10)
+        self._defect("DEF-1", 11)
+        code, out = self._parts(now=_dt(12, 0))
+        self.assertEqual(code, 0, out)
+        self.assertEqual(wi._read_retro_marker(self.project, wi.ARM_INCIDENT),
+                         wi.parse_ts(_dt(12, 0)),
+                         "the incident arm must be drained by the cheap read")
+        self.assertEqual(wi._read_retro_marker(self.project, wi.ARM_ROUTINE),
+                         wi.parse_ts("2026-06-01T00:00:00Z"),
+                         "the routine marker may ONLY move on a full retro close")
+
+    def test_ac_130_1_a_drain_reports_and_preserves_the_routine_debt(self):
+        """The measured ROC case, generalised: a real routine close that is under
+        the threshold survives the incident drain, and parts-check SAYS so — the
+        comment, the threshold and the behaviour now agree (AC-130-1)."""
+        self._closed()
+        self._stats()
+        self._slice_close(0, 10)
+        self._defect("DEF-1", 11)
+        before, _i, _d, _dt_, _m = self._debt(now=_dt(12, 0))
+        self.assertEqual(len(before), 1)
+        code, out = self._parts(now=_dt(12, 0))
+        self.assertEqual(code, 0, out)
+        after, incidents, _d2, _dt2, _m2 = self._debt(now=_dt(13, 0))
+        self.assertEqual(len(after), 1, "the drain erased a real routine close")
+        self.assertEqual(len(incidents), 0, "the incident arm WAS drained")
+        self.assertIn("routine", out.lower(),
+                      "the OK line must report the routine debt it did NOT drain, "
+                      "or the surviving debt is invisible to the operator")
+
+    def test_ac_130_2_statusline_reports_the_surviving_routine_debt_not_zero(self):
+        """parts-check used to write retro_debt=0 unconditionally. With the arms
+        independent that is a lie on the very path this defect is about."""
+        self._closed()
+        self._stats()
+        self._slice_close(0, 10)
+        self._defect("DEF-1", 11)
+        self._parts(now=_dt(12, 0))
+        with open(wi.STATUSLINE) as f:
+            d = json.load(f)
+        self.assertEqual(d[f"retro_debt_{self.project}"], 1)
+        self.assertFalse(d[f"retro_due_{self.project}"])
+
+    # -- AC-130-4: a requirement completing generates debt ---------------------
+    def test_ac_130_4_a_requirement_close_generates_routine_debt(self):
+        """REQ-ROC-002 completed on 2026-08-27 — an entire requirement delivered,
+        the largest learning event the system produces — and generated ZERO debt
+        of either kind, because the routine branch was guarded on
+        `it.type in ("slice", "chunk")`."""
+        self._closed()
+        self._slice_close(0, 10, itype="requirement")
+        routine, incidents, _due, detail, _m = self._debt(now=_dt(11, 0))
+        self.assertEqual([i for i, _t in routine], ["AGG-A0"])
+        self.assertEqual(len(incidents), 0,
+                         "a requirement close is ROUTINE — what counts as an "
+                         "INCIDENT is unchanged by this fix")
+        self.assertIn("requirement-close", [k for _t, k, _i in detail])
+
+    def test_ac_130_4_EVERY_aggregate_type_in_the_graph_generates_routine_debt(self):
+        """COMPLETENESS, not just the `requirement` case. `requirement` was omitted
+        for as long as it existed because the branch enumerated TYPES
+        (`("slice", "chunk")`) while the graph grew a third aggregate — a silent,
+        green omission of exactly the v124/EXP-121 shape. The guard is now the
+        KIND, and this test enumerates the type graph so a FOURTH aggregate type
+        cannot be added and silently generate no learning signal."""
+        aggregates = sorted(t for t, spec in self.graphs.types.items()
+                            if spec.get("kind") == "aggregate")
+        self.assertIn("requirement", aggregates)      # the one that was missing
+        self.assertGreaterEqual(len(aggregates), 3)
+        self._closed("2026-06-01T00:00:00Z")
+        for i, itype in enumerate(aggregates):
+            self._slice_close(i, 10 + i, itype=itype)
+        routine, incidents, _due, detail, _m = self._debt(now=_dt(20, 0))
+        self.assertEqual(sorted(x for x, _t in routine),
+                         [f"AGG-A{i}" for i in range(len(aggregates))],
+                         "an aggregate close generated no routine retro debt")
+        self.assertEqual(len(incidents), 0,
+                         "an aggregate close is ROUTINE — what counts as an "
+                         "INCIDENT is unchanged by this fix")
+        labels = sorted(k for _t, k, _i in detail)
+        self.assertEqual(labels, sorted(f"{t}-close" for t in aggregates),
+                         "each aggregate type must be DISTINGUISHABLE in the "
+                         "detail lines, or a reader cannot see which close it was")
+
+    # -- what must NOT be weakened --------------------------------------------
+    def test_a_full_retro_close_drains_BOTH_arms(self):
+        """AC-130-2 — separate markers must not mean an unreachable DRAIN either:
+        the full retro walks everything, so it clears both arms."""
+        self._slice_close(0, 10)
+        self._defect("DEF-1", 11)
+        wi.cmd_retro_mark(argparse.Namespace(project=self.project,
+                                             now=_dt(12, 0)))
+        self.assertEqual(wi._read_retro_marker(self.project, wi.ARM_ROUTINE),
+                         wi.parse_ts(_dt(12, 0)))
+        self.assertEqual(wi._read_retro_marker(self.project, wi.ARM_INCIDENT),
+                         wi.parse_ts(_dt(12, 0)))
+        routine, incidents, due, _detail, _m = self._debt(now=_dt(13, 0))
+        self.assertEqual((len(routine), len(incidents), due), (0, 0, False))
+
+    def test_fail_closed_no_record_at_all_forces_a_retro_on_BOTH_arms(self):
+        """AC-130-2, the must-not-weaken clause. The property that makes a per-project store safe: an absent record
+        cannot silently SKIP a retro, it FORCES one. Separating the markers must
+        not create a hole in that."""
+        self._slice_close(0, 10)
+        self._defect("DEF-1", 11)
+        epoch = wi.datetime(1970, 1, 1, tzinfo=wi.timezone.utc)
+        self.assertEqual(wi._read_retro_marker(self.project, wi.ARM_ROUTINE), epoch)
+        self.assertEqual(wi._read_retro_marker(self.project, wi.ARM_INCIDENT), epoch)
+        routine, incidents, due, _detail, _m = self._debt(now=_dt(13, 0))
+        self.assertEqual((len(routine), len(incidents)), (1, 1))
+        self.assertTrue(due)
+        for arm in (wi.ARM_ROUTINE, wi.ARM_INCIDENT):
+            kind, ts, _why = wi._retro_verdict(self.project, arm)
+            self.assertEqual((kind, ts), ("unknown", None))
+
+    def test_fail_closed_a_log_of_drains_only_never_drains_the_routine_arm(self):
+        """AC-130-2, the must-not-weaken clause. A project that has ONLY ever had cheap drains has never had a full
+        retro, so its routine debt is ALL-TIME and a full retro is owed. The
+        fail-closed direction, in the new arm."""
+        self._drained(_dt(9, 0))
+        self._drained(_dt(11, 0))
+        self._slice_close(0, 10)
+        epoch = wi.datetime(1970, 1, 1, tzinfo=wi.timezone.utc)
+        self.assertEqual(wi._read_retro_marker(self.project, wi.ARM_ROUTINE), epoch)
+        self.assertEqual(wi._read_retro_marker(self.project, wi.ARM_INCIDENT),
+                         wi.parse_ts(_dt(11, 0)))
+        routine, _i, _due, _detail, _m = self._debt(now=_dt(13, 0))
+        self.assertEqual(len(routine), 1,
+                         "a close BEFORE the newest drain still counts as routine "
+                         "debt, because no full retro has ever walked it")
+        kind, _ts, why = wi._retro_verdict(self.project, wi.ARM_ROUTINE)
+        self.assertEqual(kind, "unknown")
+        self.assertIn("retro", why.lower())
+
+    def test_the_frozen_legacy_marker_seeds_BOTH_arms(self):
+        """AC-130-2 at the cutover. The cutover fallback was a single retro-close instant, so it is a
+        legitimate boundary for both arms. Losing it on one arm would force every
+        pre-cutover project into a spurious all-time routine retro."""
+        d = os.path.join(self.tmp, "process", "dora", "retro-marker")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, f"{self.project}.txt"), "w") as f:
+            f.write("2026-06-12T00:00:00Z\n")
+        self.assertEqual(wi._read_retro_marker(self.project, wi.ARM_ROUTINE),
+                         wi.parse_ts("2026-06-12T00:00:00Z"))
+        self.assertEqual(wi._read_retro_marker(self.project, wi.ARM_INCIDENT),
+                         wi.parse_ts("2026-06-12T00:00:00Z"))
+
+    def test_compute_retro_debt_returns_BOTH_markers_so_callers_cannot_share_one(self):
+        """AC-130-2 in the SIGNATURE, not just the behaviour. The 5th return value is the pair, not a single instant — the shared
+        scalar IS the defect, so the signature must make sharing impossible."""
+        self._closed("2026-06-01T00:00:00Z")
+        self._drained(_dt(11, 0))
+        _r, _i, _due, _detail, markers = self._debt(now=_dt(13, 0))
+        self.assertEqual(markers[wi.ARM_ROUTINE], wi.parse_ts("2026-06-01T00:00:00Z"))
+        self.assertEqual(markers[wi.ARM_INCIDENT], wi.parse_ts(_dt(11, 0)))
+
+    def test_the_arm_is_a_REQUIRED_argument_no_lane_can_omit_it(self):
+        """AC-130-2 made unomittable. v124/EXP-121: a control that is OPTIONAL on a shared primitive is a
+        control some lane omits. The arm has no default, so a future caller cannot
+        silently re-share one marker across both arms."""
+        with self.assertRaises(TypeError):
+            wi._read_retro_marker(self.project)
+        with self.assertRaises(TypeError):
+            wi._retro_verdict(self.project)
+        with self.assertRaises(ValueError):
+            wi._read_retro_marker(self.project, "not-an-arm")
+
+    def test_retro_debt_output_shows_BOTH_boundaries(self):
+        """AC-130-2 as the operator sees it. One channel carrying two different meanings is what delta-074 R10 fixed
+        for absence; the same argument applies to the two arms."""
+        self._closed("2026-06-01T00:00:00Z")
+        self._drained(_dt(11, 0))
+        self._slice_close(0, 10)
+        ns = argparse.Namespace(project=self.project, threshold=3, now=_dt(13, 0))
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            try:
+                wi.cmd_retro_debt(ns)
+            except SystemExit:
+                pass
+        txt = out.getvalue()
+        self.assertIn("2026-06-01T00:00:00Z", txt)   # the routine boundary
+        self.assertIn(_dt(11, 0).replace(":00Z", ":00Z"), txt)  # the incident one
 
 
 class TestProjectStatusline(Base):
@@ -4634,6 +4954,259 @@ class TestReversalProbeRunner(Base):
         self.assertNotIn("shell", seen["kw"])
 
 
+# ==========================================================================
+# v157 — the three limbs that mechanise obligations this system had written
+# down and was not honouring. Each drives the REAL computation over REAL files
+# in the redirected ROOT; nothing here stubs the thing under test.
+# ==========================================================================
+class TestUndecidedArrival(Base):
+    """check 17 — §F9b: a finding is registered WITH its triage decision."""
+
+    # Helpers only, NOT the suite. Subclassing TestLoopGate would re-run its ~111
+    # test methods once per class here — 203s -> 370s of wall clock for zero extra
+    # coverage. (TestReversalProbeLoopGate and TestStalledWorkHonoursItsOwnRemedy
+    # DO subclass it, and correctly: they re-run the suite under changed
+    # conditions, which is the whole point of those two.)
+    _policy = TestLoopGate._policy
+    _gate = TestLoopGate._gate
+    _run = TestLoopGate._run
+    _checks = TestLoopGate._checks
+    _advisories = TestLoopGate._advisories
+    _open_items = TestLoopGate._open_items
+    NEVER_AGES = TestLoopGate.NEVER_AGES
+
+
+    def _close(self, ts="2026-06-20T00:00:00Z"):
+        wi.cmd_retro_mark(argparse.Namespace(project=self.project, now=ts))
+
+    def _finding(self, iid, day, extra_fm=None):
+        self._policy([("ready", "min_items", 0)])
+        self.write_item("active", iid, "open-item",
+                        [{"ts": _dt(day, 0), "event": "open",
+                          "agent": "orchestrator"}], extra_fm=extra_fm)
+
+    def test_AC157_1_an_arrival_since_the_close_with_no_decision_BLOCKS(self):
+        """The whole point: check 4's clock is 7 DAYS, so an arrival is invisible
+        to it for a week — exactly the window §F9b is about."""
+        self._close("2026-06-20T00:00:00Z")
+        self._finding("OI-N1", day=28)                    # 2d old: check 4 cannot see it
+        findings = self._gate()
+        checks = self._checks(findings)
+        self.assertIn("undecided-arrival", checks)
+        self.assertNotIn("aged-backlog-undecided", checks)   # non-vacuity: NEW reach
+        f = [x for x in findings if x["check"] == "undecided-arrival"][0]
+        self.assertEqual(f["ids"], ["OI-N1"])
+        self.assertIn("NOT A WAIT", f["message"])
+        self.assertIn("Do NOT close a real finding", f["message"])
+
+    def test_AC157_1_an_arrival_BEFORE_the_close_is_not_this_limb_business(self):
+        """Non-vacuity in the other direction. A pre-close item belongs to check
+        4; reporting it here too would give one item two different remedies."""
+        self._close("2026-06-29T00:00:00Z")
+        self._finding("OI-OLD", day=10)
+        self.assertNotIn("undecided-arrival", self._checks(self._gate()))
+
+    def test_AC157_1_a_finding_that_MOVED_is_decided(self):
+        """A decision is any legal first move off the initial state, not a
+        specific event name — the rule is about the ACT."""
+        self._close("2026-06-20T00:00:00Z")
+        self._policy([("ready", "min_items", 0)])
+        self.write_item("active", "DEF-N1", "defect", [
+            {"ts": _dt(28, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(28, 1), "event": "triaged", "agent": "orchestrator"}])
+        self.assertNotIn("undecided-arrival", self._checks(self._gate()))
+
+    def test_AC157_1_a_USE_CASE_arrival_is_NOT_a_finding(self):
+        """Scope. A use-case is registered by product as ordinary replenishment;
+        'the discovering role held the context' does not apply to it, and
+        blocking on it would stop normal intake dead."""
+        self._close("2026-06-20T00:00:00Z")
+        self._policy([("ready", "min_items", 0)])
+        self.write_item("active", "UC-N1", "use-case",
+                        [{"ts": _dt(28, 0), "event": "registered",
+                          "agent": "flow-manager"}])
+        self.assertNotIn("undecided-arrival", self._checks(self._gate()))
+
+    def test_AC157_2_a_LONG_dated_defer_is_a_decision(self):
+        self._close("2026-06-20T00:00:00Z")
+        self._finding("OI-N2", day=28, extra_fm={"defer_until": "2026-07-20"})
+        self.assertNotIn("undecided-arrival", self._checks(self._gate()))
+
+    def test_AC157_2_a_SHORT_dated_defer_decides_nothing_and_still_blocks(self):
+        """THE MEASURED CASE (2026-08-28): §F9b was honoured 9/9 and six of the
+        nine decisions were the same next-day defer, expiring inside 13h. A
+        horizon under the age threshold exempts the item from a gate that would
+        not have fired until then anyway."""
+        self._close("2026-06-20T00:00:00Z")
+        self._finding("OI-N3", day=28, extra_fm={"defer_until": "2026-07-01"})
+        findings = self._gate()
+        self.assertIn("undecided-arrival", self._checks(findings))
+        f = [x for x in findings if x["check"] == "undecided-arrival"][0]
+        self.assertIn("DEFER TOO SHORT", f["message"])
+
+    def test_AC157_2_the_SHORT_defer_rule_also_binds_check_4(self):
+        """One rule, both limbs — or an aged item could still be snoozed daily."""
+        self._open_items(1, day=5, extra_fm={"defer_until": "2026-06-30T12:00:00Z"})
+        findings = self._gate()
+        self.assertIn("aged-backlog-undecided", self._checks(findings))
+        f = [x for x in findings if x["check"] == "aged-backlog-undecided"][0]
+        self.assertIn("DEFER TOO SHORT", f["message"])
+
+    def test_AC157_3_NO_retro_close_means_NOT_ESTABLISHED_never_a_block(self):
+        """Fail-closed is the WRONG default here and this pins it: with no close,
+        the epoch boundary would make every finding in project history an
+        'arrival' and block the pull on the entire backlog."""
+        self._finding("OI-N4", day=28)
+        findings = self._gate()
+        self.assertNotIn("undecided-arrival", self._checks(findings))
+        unk = [x for x in findings
+               if x["check"] == "undecided-arrival-unreadable"]
+        self.assertEqual(len(unk), 1)
+        self.assertEqual(unk[0]["severity"], "unknown")
+        self.assertIn("NOT ESTABLISHED", unk[0]["message"])
+
+
+class TestRetroOutputUnbuilt(Base):
+    """check 19 — is the retro's OWN output queue being worked?"""
+
+    # Helpers only, NOT the suite. Subclassing TestLoopGate would re-run its ~111
+    # test methods once per class here — 203s -> 370s of wall clock for zero extra
+    # coverage. (TestReversalProbeLoopGate and TestStalledWorkHonoursItsOwnRemedy
+    # DO subclass it, and correctly: they re-run the suite under changed
+    # conditions, which is the whole point of those two.)
+    _policy = TestLoopGate._policy
+    _gate = TestLoopGate._gate
+    _run = TestLoopGate._run
+    _checks = TestLoopGate._checks
+    _advisories = TestLoopGate._advisories
+    _open_items = TestLoopGate._open_items
+    NEVER_AGES = TestLoopGate.NEVER_AGES
+
+
+    def _slice(self, name, body):
+        d = os.path.join(self.tmp, "process", "improvement-slices")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, name + ".md"), "w", encoding="utf-8") as f:
+            f.write(body)
+
+    def _registry(self, body):
+        d = os.path.join(self.tmp, "process")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "experiments.md"), "w", encoding="utf-8") as f:
+            f.write(body)
+
+    def test_AC157_4_an_OPEN_slice_scored_by_an_ACTIVE_row_BLOCKS(self):
+        self._slice("IMP-901-a-thing", "# IMP-901\n\nno status line at all\n")
+        self._registry("| `EXP-Z-001` | v1 (2026-01-01, TestProj retro) | IMP-901-a-thing "
+                       "| p | s | m | e | 3 retros | active (1/3) | neg |\n")
+        findings = wi.compute_retro_output_unbuilt("TestProj")
+        blocking = [f for f in findings if f["severity"] == "block"]
+        self.assertEqual(len(blocking), 1)
+        self.assertEqual(blocking[0]["check"], "retro-output-unbuilt")
+        self.assertEqual(blocking[0]["ids"], ["IMP-901-a-thing"])
+        self.assertIn("EXP-Z-001", blocking[0]["message"])
+        self.assertIn("FALSE negative", blocking[0]["message"])
+
+    def test_AC157_4_a_DELIVERED_slice_is_not_reported_however_it_is_cited(self):
+        self._slice("IMP-902-done", "# IMP-902\n\n**Status:** delivered 2026-06-01\n")
+        self._registry("| `EXP-Z-002` | v1 (2026-01-01, TestProj retro) | IMP-902-done "
+                       "| p | s | m | e | 3 retros | active (1/3) | neg |\n")
+        self.assertEqual(wi.compute_retro_output_unbuilt("TestProj"), [])
+
+    def test_AC157_4_a_RETIRED_row_does_not_block_on_its_open_slice(self):
+        """Only a row still being SCORED can have its score corrupted."""
+        self._slice("IMP-903-open", "# IMP-903\n\n**Status:** QUEUED\n")
+        self._registry("| `EXP-Z-003` | v1 (2026-01-01, TestProj retro) | IMP-903-open "
+                       "| p | s | m | e | 3 retros | adopted | neg |\n")
+        findings = wi.compute_retro_output_unbuilt("TestProj")
+        self.assertEqual([f["severity"] for f in findings], ["advisory"])
+        self.assertEqual(findings[0]["check"], "retro-output-aging")
+
+    def test_AC157_4_an_uncited_open_slice_is_ADVISORY_and_names_the_missing_status(self):
+        """Refusing to pull cannot build a slice, so this half must not block —
+        the DEF-ROC-083 satisfiability rule."""
+        self._slice("IMP-904-nostatus", "# IMP-904\n\nnothing\n")
+        self._registry("| `EXP-Z-004` | v1 (2026-01-01, TestProj retro) | unrelated "
+                       "| p | s | m | e | 3 retros | active (1/3) | neg |\n")
+        findings = wi.compute_retro_output_unbuilt("TestProj")
+        self.assertEqual([f["severity"] for f in findings], ["advisory"])
+        self.assertIn("NO `**Status:**` line", findings[0]["message"])
+
+    def test_AC157_4_a_FOREIGN_projects_row_is_ADVISORY_not_a_block(self):
+        """§25a (v143/v145): this retro has NO STANDING over another project's
+        row, so blocking on one would be a gate it cannot satisfy."""
+        self._slice("IMP-905-theirs", "# IMP-905\n\n**Status:** QUEUED\n")
+        self._registry(
+            "| `EXP-OTH-001` | v1 (2026-01-01, OtherProject retro) | IMP-905-theirs "
+            "| p | s | m | e | 3 retros | active (1/3) | neg |\n")
+        findings = wi.compute_retro_output_unbuilt("TestProj")
+        self.assertEqual([f["check"] for f in findings],
+                         ["retro-output-unbuilt-elsewhere"])
+        self.assertEqual(findings[0]["severity"], "advisory")
+        self.assertIn("NO STANDING", findings[0]["message"])
+
+    def test_AC157_4_ownership_is_read_from_the_ORIGIN_cell_not_the_whole_row(self):
+        """A foreign row that merely MENTIONS this project in its prose is still
+        foreign — a mention is not ownership, and reading the whole row made a
+        real OagEventSource row block ROC's pull."""
+        self._slice("IMP-906-theirs", "# IMP-906\n\n**Status:** QUEUED\n")
+        self._registry(
+            "| `EXP-OTH-002` | v1 (2026-01-01, OtherProject retro) | IMP-906-theirs "
+            "| **Problem:** first seen on TestProj, then here | s | m | e "
+            "| 3 retros | active (1/3) | neg |\n")
+        findings = wi.compute_retro_output_unbuilt("TestProj")
+        self.assertEqual([f["check"] for f in findings],
+                         ["retro-output-unbuilt-elsewhere"])
+
+    def test_AC157_4_an_UNTAGGED_legacy_row_belongs_to_everyone_and_blocks(self):
+        """Fail closed on ambiguity: `EXP-131` names no project, so nobody is
+        entitled to treat it as somebody else's problem."""
+        self._slice("IMP-907-legacy", "# IMP-907\n\n**Status:** QUEUED\n")
+        self._registry(
+            "| `EXP-131` | v1 (2026-01-01) | IMP-907-legacy | p | s | m | e "
+            "| 3 retros | active (1/3) | neg |\n")
+        findings = wi.compute_retro_output_unbuilt("TestProj")
+        self.assertEqual([f["severity"] for f in findings], ["block"])
+
+    def test_AC157_4_no_slice_directory_at_all_reports_nothing(self):
+        self.assertEqual(wi.compute_retro_output_unbuilt("TestProj"), [])
+
+    def test_AC157_4_the_readers_resolve_ROOT_at_CALL_time(self):
+        """FITNESS FUNCTION. Binding these paths at import made the limb read the
+        REAL repo from inside a scratch fixture — a check answering about a tree
+        the caller never asked about. Pin the property, not the symptom."""
+        self.assertTrue(wi._improvement_slice_dir().startswith(self.tmp))
+        self.assertTrue(wi._experiments_file().startswith(self.tmp))
+
+
+class TestReconcileLatency(Base):
+    """check 18 — §0a Rule 4: is this instance's process learning on `main`?"""
+
+    # Helpers only, NOT the suite. Subclassing TestLoopGate would re-run its ~111
+    # test methods once per class here — 203s -> 370s of wall clock for zero extra
+    # coverage. (TestReversalProbeLoopGate and TestStalledWorkHonoursItsOwnRemedy
+    # DO subclass it, and correctly: they re-run the suite under changed
+    # conditions, which is the whole point of those two.)
+    _policy = TestLoopGate._policy
+    _gate = TestLoopGate._gate
+    _run = TestLoopGate._run
+    _checks = TestLoopGate._checks
+    _advisories = TestLoopGate._advisories
+    _open_items = TestLoopGate._open_items
+    NEVER_AGES = TestLoopGate.NEVER_AGES
+
+
+    def test_AC157_5_a_branch_that_is_not_this_projects_instance_reports_nothing(self):
+        """Established negative, not silence: on the integration tree there is
+        nothing to fold BACK."""
+        self.assertEqual(wi.compute_reconcile_latency("SomeOtherProject"), [])
+
+    def test_AC157_5_git_refusing_to_answer_is_NOT_ESTABLISHED_not_clean(self):
+        """§17i. ROOT here is a scratch dir that is not a git repo."""
+        findings = wi.compute_reconcile_latency("TestProj")
+        self.assertTrue(all(f["severity"] != "block" for f in findings), findings)
+
+
 class TestReversalProbeLoopGate(TestLoopGate):
     """AC-005.3 / AC-005.5 — the gate re-runs every blocked item's probe EVERY
     cycle. `cleared` BLOCKS (an `unblocked` dispatch is actionable); `standing` is
@@ -6060,8 +6633,9 @@ class TestRetroLogStore(Base):
         self.assertEqual(len(evs), 1)
         self.assertEqual(evs[0]["event"], "retro_closed")
         self.assertEqual(evs[0]["ts"], "2026-06-20T00:00:00Z")
-        self.assertEqual(wi._read_retro_marker(self.project),
-                         wi.parse_ts("2026-06-20T00:00:00Z"))
+        for arm in wi.ARMS:      # a full close drains both (DEF-ROC-130)
+            self.assertEqual(wi._read_retro_marker(self.project, arm),
+                             wi.parse_ts("2026-06-20T00:00:00Z"), arm)
 
     def test_ac_pcm_1_retro_mark_leaves_the_parent_process_tree_byte_identical(self):
         """THE fitness function (delta-075 R10): any write under process/ is RED.
@@ -6094,8 +6668,13 @@ class TestRetroLogStore(Base):
                          "parts-check wrote a parent-repo file")
         evs = wi._read_retro_log(self.project)
         self.assertEqual([x["event"] for x in evs], ["debt_drained"])
-        # and the boundary really moved — a drain that records nothing is a no-op
-        self.assertEqual(wi._read_retro_marker(self.project), wi.parse_ts(NOW))
+        # and the INCIDENT boundary really moved — a drain that records nothing is
+        # a no-op. The ROUTINE boundary stays on the frozen legacy close, because
+        # a cheap drain is not a full retro (DEF-ROC-130).
+        self.assertEqual(wi._read_retro_marker(self.project, wi.ARM_INCIDENT),
+                         wi.parse_ts(NOW))
+        self.assertEqual(wi._read_retro_marker(self.project, wi.ARM_ROUTINE),
+                         wi.parse_ts("2026-06-01T00:00:00Z"))
 
     def test_ac_pcm_1_escalating_parts_check_appends_nothing(self):
         """An escalation may NEVER drain debt — so it may never append."""
@@ -6107,8 +6686,9 @@ class TestRetroLogStore(Base):
                     project=self.project, threshold=3, now=NOW))
         self.assertEqual(e.exception.code, 2, out.getvalue())
         self.assertEqual(wi._read_retro_log(self.project), [])
-        self.assertEqual(wi._read_retro_marker(self.project),
-                         wi.parse_ts("2026-06-01T00:00:00Z"))
+        for arm in wi.ARMS:
+            self.assertEqual(wi._read_retro_marker(self.project, arm),
+                             wi.parse_ts("2026-06-01T00:00:00Z"), arm)
 
     # ---- AC-PCM.3 — cadence stays derivable, and the cutover moves nothing ----
     def test_ac_pcm_3_legacy_marker_is_read_through_when_no_log_exists(self):
@@ -6117,12 +6697,16 @@ class TestRetroLogStore(Base):
         next retro-debt must return the SAME boundary — no spurious full retro,
         which is what the naive `gitignore + git rm --cached` form would cause."""
         self._legacy_marker("2026-06-14T09:00:00Z")
-        self.assertEqual(wi._read_retro_marker(self.project),
-                         wi.parse_ts("2026-06-14T09:00:00Z"))
-        kind, ts, src = wi._retro_verdict(self.project)
-        self.assertEqual(kind, "known")
-        self.assertEqual(ts, wi.parse_ts("2026-06-14T09:00:00Z"))
-        self.assertIn("frozen", src)
+        # the fossil is a single retro-close instant, so it seeds BOTH arms —
+        # losing it on one would force every pre-cutover project into a spurious
+        # all-time routine retro at the cutover (DEF-ROC-130).
+        for arm in wi.ARMS:
+            self.assertEqual(wi._read_retro_marker(self.project, arm),
+                             wi.parse_ts("2026-06-14T09:00:00Z"), arm)
+            kind, ts, src = wi._retro_verdict(self.project, arm)
+            self.assertEqual(kind, "known", arm)
+            self.assertEqual(ts, wi.parse_ts("2026-06-14T09:00:00Z"))
+            self.assertIn("frozen", src)
 
     def test_ac_pcm_3_legacy_constraint_marker_is_read_through(self):
         self._legacy_marker("2026-06-01T00:00:00Z", constraint=("queue", "open"))
@@ -6134,10 +6718,11 @@ class TestRetroLogStore(Base):
         names an EARLIER instant than the fossil."""
         self._legacy_marker("2026-06-25T00:00:00Z")
         self._mark("2026-06-10T00:00:00Z")
-        self.assertEqual(wi._read_retro_marker(self.project),
-                         wi.parse_ts("2026-06-10T00:00:00Z"))
-        _k, _t, src = wi._retro_verdict(self.project)
-        self.assertIn("retro-log.md", src)
+        for arm in wi.ARMS:
+            self.assertEqual(wi._read_retro_marker(self.project, arm),
+                             wi.parse_ts("2026-06-10T00:00:00Z"), arm)
+            _k, _t, src = wi._retro_verdict(self.project, arm)
+            self.assertIn("retro-log.md", src)
 
     def test_ac_pcm_3_newest_log_event_wins_and_the_log_is_append_only(self):
         self._mark("2026-06-10T00:00:00Z")
@@ -6145,8 +6730,11 @@ class TestRetroLogStore(Base):
         evs = wi._read_retro_log(self.project)
         self.assertEqual([e["ts"] for e in evs],
                          ["2026-06-10T00:00:00Z", "2026-06-20T00:00:00Z"])
-        self.assertEqual(wi._read_retro_marker(self.project),
-                         wi.parse_ts("2026-06-20T00:00:00Z"))
+        # "newest" is now PER ARM — newest event that drains THAT arm. Both these
+        # are full closes, so both arms land on the later one (DEF-ROC-130).
+        for arm in wi.ARMS:
+            self.assertEqual(wi._read_retro_marker(self.project, arm),
+                             wi.parse_ts("2026-06-20T00:00:00Z"), arm)
 
     def test_ac_pcm_3_constraint_rides_the_log_event(self):
         self._stats("queue", "open")
@@ -6164,8 +6752,9 @@ class TestRetroLogStore(Base):
         os.remove(os.path.join(self.tmp, "work", self.project, "views", "stats.json"))
         self._mark("2026-06-20T00:00:00Z")        # no constraint readable
         self.assertEqual(wi._read_constraint_marker(self.project), ("queue", "open"))
-        self.assertEqual(wi._read_retro_marker(self.project),
-                         wi.parse_ts("2026-06-20T00:00:00Z"))
+        for arm in wi.ARMS:
+            self.assertEqual(wi._read_retro_marker(self.project, arm),
+                             wi.parse_ts("2026-06-20T00:00:00Z"), arm)
 
     # ---- AC-PCM.3 — PER-PROJECT INDEPENDENCE (the anti-git-tag pin) ----------
     def test_ac_pcm_3_two_projects_retro_histories_cannot_alias(self):
@@ -6175,13 +6764,15 @@ class TestRetroLogStore(Base):
         os.makedirs(os.path.join(self.tmp, "work", other, "items", "active"),
                     exist_ok=True)
         self._mark("2026-06-20T00:00:00Z")                 # TestProj retro'd
-        k, _ts, why = wi._retro_verdict(other)
-        self.assertEqual(k, "unknown", why)                # OtherProj did NOT
+        for arm in wi.ARMS:
+            k, _ts, why = wi._retro_verdict(other, arm)
+            self.assertEqual(k, "unknown", why)            # OtherProj did NOT
         self._mark("2026-06-28T00:00:00Z", project=other)  # now OtherProj does
-        self.assertEqual(wi._read_retro_marker(self.project),
-                         wi.parse_ts("2026-06-20T00:00:00Z"))
-        self.assertEqual(wi._read_retro_marker(other),
-                         wi.parse_ts("2026-06-28T00:00:00Z"))
+        for arm in wi.ARMS:
+            self.assertEqual(wi._read_retro_marker(self.project, arm),
+                             wi.parse_ts("2026-06-20T00:00:00Z"), arm)
+            self.assertEqual(wi._read_retro_marker(other, arm),
+                             wi.parse_ts("2026-06-28T00:00:00Z"), arm)
 
     def test_ac_pcm_3_the_log_is_not_an_item_and_perturbs_no_derived_view(self):
         """It lives IN items/ but not in active/|done/, so it is invisible to
@@ -6219,14 +6810,23 @@ class TestRetroLogStore(Base):
         self.assertIn("RETRO DUE", txt)
 
     def test_ac_pcm_3_known_record_prints_the_instant_not_a_verdict_word(self):
-        """The happy path's wording is UNCHANGED — this is a relocation, and a
-        changed line here would be a changed cadence signal."""
+        """A KNOWN record prints the instant, never a verdict word.
+
+        The exact phrase this used to pin (`since last retro <ts> => ok`) changed
+        at DEF-ROC-130, deliberately and not as a side effect of a relocation: the
+        two arms now have separate markers, so ONE instant can no longer describe
+        the count. Printing one would be delta-074 R10's overloaded channel again,
+        in a new place. The property kept is the one that mattered — the instant
+        itself, on BOTH arms, with no verdict word."""
         self._legacy_marker("2026-06-14T09:00:00Z")
         with contextlib.redirect_stdout(io.StringIO()) as out:
             with self.assertRaises(SystemExit):
                 wi.cmd_retro_debt(argparse.Namespace(
                     project=self.project, threshold=3, now=NOW))
-        self.assertIn("since last retro 2026-06-14T09:00:00Z => ok", out.getvalue())
+        txt = out.getvalue()
+        self.assertIn("since last retro 2026-06-14T09:00:00Z [routine arm] "
+                      "/ 2026-06-14T09:00:00Z [incident arm] => ok", txt)
+        self.assertNotIn("UNKNOWN", txt)
 
     # ---- SCOPE FENCE (delta-075 §5.1) — these must NOT have moved ------------
     def test_scope_fence_read_constraint_still_reads_project_views_stats(self):
@@ -6329,9 +6929,13 @@ class TestRetroMarkerTreeCleanliness(unittest.TestCase):
         self.assertEqual(self._porcelain(), "",
                          "parts-check dirtied the parent worktree")
         # the record IS there — clean because it is in the project's own repo,
-        # which the parent gitignores, not because nothing was written
-        self.assertEqual(wi._read_retro_marker(self.project),
+        # which the parent gitignores, not because nothing was written. The drain
+        # moved the INCIDENT boundary to 06-21; the ROUTINE boundary stays on the
+        # 06-20 full close (DEF-ROC-130).
+        self.assertEqual(wi._read_retro_marker(self.project, wi.ARM_INCIDENT),
                          wi.parse_ts("2026-06-21T00:00:00Z"))
+        self.assertEqual(wi._read_retro_marker(self.project, wi.ARM_ROUTINE),
+                         wi.parse_ts("2026-06-20T00:00:00Z"))
 class TestStalledWorkHonoursItsOwnRemedy(TestLoopGate):
     """DEF-ROC-083 — the `stalled-work` check PRINTS `defer_until:` as a remedy and
     does not read it, so the block it raises cannot be cleared by doing what it says.
@@ -6406,6 +7010,296 @@ class TestStalledWorkHonoursItsOwnRemedy(TestLoopGate):
         f = self._stalled(self._gate())
         self.assertIn("DEF-CLAIMED", [i for x in f for i in x["ids"]], f)
 
+# --------------------------------------------------------------------------- #
+# DEF-ROC-120 — a change failure must be RECORDABLE from wherever it happens,
+# and it must MOVE THE METRIC.
+#
+# Measured: `deploy_failed` was not a legal transition from `validating`, so when
+# DEF-ROC-115's own fix reddened CI and skipped the deploy for four commits, NO
+# ROLE could record the change failure. It was landed as an `amended` note, which
+# preserves the prose and does not touch the CFR computation (the fold counts
+# TYPED events) — so CFR read a FALSE 0% precisely when something had gone wrong.
+#
+# MODELLING (AC-120-3): a change failure is an ANNOTATION on the item's history,
+# not a workflow step. Where the failure IS the flow's own exit (`deploying`,
+# `prod-deploying`, and `build_failed` from `building`) it stays a real transition
+# to `reworking`. Everywhere else it is a SELF-EDGE: the fact is recorded, the
+# state does not move to somewhere the item has not been.
+# --------------------------------------------------------------------------- #
+class TestChangeFailureRecordable(Base):
+    """AC-120-1/2/3/4."""
+
+    # --- AC-120-1, and the NON-VACUITY pin -------------------------------- #
+    def test_AC_120_1_deploy_failed_is_legal_from_validating(self):
+        """NON-VACUITY: this is the exact transition the sole writer refused on
+        DEF-ROC-115. It is RED against state-graphs.json v9. (Asserting it from
+        `deploying`, where it has always been legal, would prove nothing.)"""
+        for itype in ("defect", "use-case"):
+            edges = {(t["from"], t["event"]) for t in self.graphs.transitions(itype)}
+            self.assertIn(("validating", "deploy_failed"), edges,
+                          f"{itype}: a change failure during `validating` cannot "
+                          f"be recorded by ANY role")
+
+    def test_AC_120_1_change_failure_recordable_from_every_validating_state(self):
+        edges = {(t["from"], t["event"])
+                 for t in self.graphs.transitions("use-case")}
+        for st in ("dev-validating", "prod-validating", "validating"):
+            self.assertIn((st, "deploy_failed"), edges, st)
+        self.assertIn(("deploying", "deploy_failed"), edges)
+
+    def test_AC_120_1_the_real_writer_accepts_it_from_validating(self):
+        """End to end through `append` — the command that refused it."""
+        self.write_item("active", "DEF-CF", "defect", [
+            {"ts": "2026-06-10T00:00:00Z", "event": "reported", "agent": "orchestrator"},
+            {"ts": "2026-06-10T01:00:00Z", "event": "triaged", "agent": "orchestrator"},
+            {"ts": "2026-06-10T02:00:00Z", "event": "confirmed", "agent": "engineer"},
+            {"ts": "2026-06-10T03:00:00Z", "event": "fixed", "agent": "engineer"},
+        ])
+        with contextlib.redirect_stdout(io.StringIO()):
+            wi.cmd_append(argparse.Namespace(
+                project=self.project, id="DEF-CF", event="deploy_failed",
+                agent="engineer", note="CI red, deploy skipped, fixing forward",
+                ref=None, ts="2026-06-10T04:00:00Z", tokens=None, duration_ms=None))
+        items, _ = wi.load_all_items(self.project)
+        self.assertEqual(items["DEF-CF"].events[-1]["event"], "deploy_failed")
+
+    # --- AC-120-3: an annotation, not a state move ------------------------ #
+    def test_AC_120_3_recording_a_failure_does_not_move_the_state(self):
+        self.write_item("active", "DEF-CF2", "defect", [
+            {"ts": "2026-06-10T00:00:00Z", "event": "reported", "agent": "orchestrator"},
+            {"ts": "2026-06-10T01:00:00Z", "event": "triaged", "agent": "orchestrator"},
+            {"ts": "2026-06-10T02:00:00Z", "event": "confirmed", "agent": "engineer"},
+            {"ts": "2026-06-10T03:00:00Z", "event": "fixed", "agent": "engineer"},
+        ])
+        with contextlib.redirect_stdout(io.StringIO()):
+            wi.cmd_append(argparse.Namespace(
+                project=self.project, id="DEF-CF2", event="deploy_failed",
+                agent="cicd", note="dark deploy", ref=None,
+                ts="2026-06-10T04:00:00Z", tokens=None, duration_ms=None))
+        items, _ = wi.load_all_items(self.project)
+        st = wi.compute_states(self.graphs, items)
+        self.assertEqual(st["DEF-CF2"], "validating",
+                         "recording a change failure must not fabricate progress "
+                         "(or regress) the item has not made")
+
+    def test_AC_120_3_annotation_is_time_preserving(self):
+        """A self-edge closes and reopens the same state at the same instant, so
+        gross lead time is untouched — same property `amended` relies on."""
+        base = [
+            {"ts": _dt(10, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(10, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(10, 2), "event": "confirmed", "agent": "engineer"},
+            {"ts": _dt(10, 3), "event": "fixed", "agent": "engineer"},
+            {"ts": _dt(10, 7), "event": "validated", "agent": "tester"},
+        ]
+        annotated = base[:4] + [
+            {"ts": _dt(10, 5), "event": "deploy_failed", "agent": "cicd"}] + base[4:]
+        self.write_item("done", "DEF-A", "defect", base)
+        self.write_item("done", "DEF-B", "defect", annotated)
+        items, _ = wi.load_all_items(self.project)
+        segs_a = wi.walk_states(self.graphs, items["DEF-A"], NOW_DT)
+        segs_b = wi.walk_states(self.graphs, items["DEF-B"], NOW_DT)
+        tot = lambda segs: sum((e - b).total_seconds() for _s, b, e in segs)
+        self.assertAlmostEqual(tot(segs_a), tot(segs_b), places=1)
+
+    # --- AC-120-2: the recorded failure MOVES CFR ------------------------- #
+    def _validating_change_failure_defect(self, iid, day):
+        """The DEF-ROC-115 shape: fixed -> CI red (deploy skipped) -> fixed
+        forward -> validated. The failure is recorded IN `validating`."""
+        return [
+            {"ts": _dt(day, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(day, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(day, 2), "event": "confirmed", "agent": "engineer"},
+            {"ts": _dt(day, 3), "event": "fixed", "agent": "engineer"},
+            {"ts": _dt(day, 4), "event": "deploy_failed", "agent": "engineer"},
+            {"ts": _dt(day, 6), "event": "validated", "agent": "tester"},
+        ]
+
+    def test_AC_120_2_a_validating_change_failure_moves_CFR(self):
+        """The gap that let this exist: a test that only checks the append
+        SUCCEEDS proves nothing about the metric. Fold it and read CFR."""
+        self.write_item("done", "DEF-CFR", "defect",
+                        self._validating_change_failure_defect("DEF-CFR", 12))
+        items, _ = wi.load_all_items(self.project)
+        st = wi.compute_states(self.graphs, items)
+        at = wi.compute_stats(self.graphs, items, st,
+                              now=NOW_DT)["overall"]["dora"]["all_time"]
+        self.assertEqual(at["n_deploy_failures"], 1)
+        self.assertGreater(at["change_failure_rate"], 0,
+                           "CFR still reads a FALSE 0% with a change failure on "
+                           "the stream")
+        # 1 deploy_failed + 1 validated => 1/2
+        self.assertAlmostEqual(at["change_failure_rate"], 0.5, places=4)
+
+    def test_AC_120_2_the_amended_note_it_replaces_does_NOT_move_CFR(self):
+        """Why the workaround was never a fix — the differential."""
+        evs = self._validating_change_failure_defect("DEF-AMD", 12)
+        evs[4] = {"ts": _dt(12, 4), "event": "amended", "agent": "orchestrator",
+                  "note": "CI red, deploy skipped, four commits dark"}
+        self.write_item("done", "DEF-AMD", "defect", evs)
+        items, _ = wi.load_all_items(self.project)
+        st = wi.compute_states(self.graphs, items)
+        at = wi.compute_stats(self.graphs, items, st,
+                              now=NOW_DT)["overall"]["dora"]["all_time"]
+        self.assertEqual(at["n_deploy_failures"], 0)
+        self.assertEqual(at["change_failure_rate"], 0.0)
+
+    def test_AC_120_2_a_change_failure_must_not_FLATTER_the_stage_it_lands_in(self):
+        """An annotation is not an exit. If it counted as one it would INFLATE the
+        validating stage's exit denominator with a non-failure, so recording a
+        change failure would make the tester's stage look BETTER — the same
+        can-only-return-good-news bias, one layer down."""
+        self.write_item("done", "DEF-Q1", "defect",
+                        self._validating_change_failure_defect("DEF-Q1", 12))
+        self.write_item("done", "DEF-Q2", "defect", [
+            {"ts": _dt(13, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(13, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(13, 2), "event": "confirmed", "agent": "engineer"},
+            {"ts": _dt(13, 3), "event": "fixed", "agent": "engineer"},
+            {"ts": _dt(13, 4), "event": "rejected", "agent": "tester"},
+            {"ts": _dt(13, 5), "event": "fixed", "agent": "engineer"},
+            {"ts": _dt(13, 6), "event": "validated", "agent": "tester"},
+        ])
+        items, _ = wi.load_all_items(self.project)
+        st = wi.compute_states(self.graphs, items)
+        q = wi.compute_stats(self.graphs, items, st,
+                             now=NOW_DT)["overall"]["quality"]["all_time"]
+        # real exits from `validating`: Q1 validated; Q2 rejected + validated.
+        # The deploy_failed ANNOTATION is not an exit => 1 failure of 3, not of 4.
+        self.assertEqual(q["by_stage"]["validating"]["n_exits"], 3)
+        self.assertAlmostEqual(q["by_stage"]["validating"]["failure_rate"],
+                               1 / 3, places=4)
+
+    def test_AC_120_2_an_amendment_does_not_flatter_a_stage_either(self):
+        """Same class, pre-existing: `amended` is a self-edge too, and it was
+        already diluting every stage denominator it landed in."""
+        self.write_item("done", "DEF-Q3", "defect", [
+            {"ts": _dt(13, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(13, 1), "event": "triaged", "agent": "orchestrator"},
+            {"ts": _dt(13, 2), "event": "confirmed", "agent": "engineer"},
+            {"ts": _dt(13, 3), "event": "fixed", "agent": "engineer"},
+            {"ts": _dt(13, 4), "event": "amended", "agent": "product", "note": "n"},
+            {"ts": _dt(13, 5), "event": "rejected", "agent": "tester"},
+            {"ts": _dt(13, 6), "event": "fixed", "agent": "engineer"},
+            {"ts": _dt(13, 7), "event": "validated", "agent": "tester"},
+        ])
+        items, _ = wi.load_all_items(self.project)
+        st = wi.compute_states(self.graphs, items)
+        q = wi.compute_stats(self.graphs, items, st,
+                             now=NOW_DT)["overall"]["quality"]["all_time"]
+        self.assertEqual(q["by_stage"]["validating"]["n_exits"], 2)
+        self.assertAlmostEqual(q["by_stage"]["validating"]["failure_rate"],
+                               0.5, places=4)
+
+    # --- AC-120-4: the generalisation, over the WHOLE graph ---------------- #
+    def _metric_events(self):
+        with open(wi.GRAPHS_PATH, encoding="utf-8") as f:
+            return {k: v for k, v in json.load(f).get("metric_events", {}).items()
+                    if not k.startswith("_")}
+
+    CHANGE_AGENTS = {"engineer", "cicd", "tester"}
+
+    def _agent_worked_states(self, itype):
+        """`active-work`: every non-terminal state of this type whose owner is an
+        agent who MAKES or VERIFIES a change. A build or deploy can go red at any
+        moment work is live; it cannot go red in a queue, at intake, or while the
+        item is parked on something external."""
+        g = self.graphs
+        terminal = g.terminals(itype)
+        states = {g.initial(itype)}
+        for t in g.transitions(itype):
+            states.add(t["from"])
+            states.add(t["to"])
+        return sorted(s for s in states
+                      if s not in terminal
+                      and g.owner_of(s) in self.CHANGE_AGENTS)
+
+    def test_AC_120_4_every_metric_event_is_declared(self):
+        """COMPLETENESS, not just correctness (v124/EXP-121): an event the fold
+        COUNTS with no declared occurrence-domain is exactly how `deploy_failed`
+        stayed unrecordable — nothing ever asked where it can happen."""
+        self.assertEqual(set(self._metric_events()), set(wi.METRIC_FOLD_EVENTS),
+                         "state-graphs.json `metric_events` and the events the "
+                         "metrics actually fold over have diverged")
+
+    def test_AC_120_4_every_metric_event_can_actually_be_produced(self):
+        """The inverse sweep: a metric that folds over an event NO graph can emit
+        is a dead input — it can only ever contribute zero."""
+        producible = set()
+        for itype in self.graphs.types:
+            for t in self.graphs.transitions(itype):
+                producible.add(t["event"])
+            if self.graphs.kind(itype) == "flow":
+                producible.add(self.graphs.initial(itype))
+        for ev in wi.METRIC_FOLD_EVENTS:
+            self.assertIn(ev, producible,
+                          f"the metrics fold over '{ev}', which no state graph "
+                          f"can ever produce")
+
+    def test_AC_120_4_each_metric_event_is_reachable_wherever_it_can_occur(self):
+        """THE generalisation. For every event the metrics fold over, assert it is
+        a legal transition from every state in which the thing it describes can
+        actually happen — per type, over the graph, not over one path."""
+        spec = self._metric_events()
+        self.assertTrue(spec, "no `metric_events` declaration in state-graphs.json")
+        for ev, decl in spec.items():
+            domain = decl["occurs_in"]
+            self.assertIn(domain, ("active-work", "validating", "workflow"),
+                          f"{ev}: unknown occurs_in '{domain}'")
+            if domain == "workflow":
+                continue   # a flow STEP: the graph places it; covered by the
+                           # producible sweep above.
+            for itype in [t for t in self.graphs.types
+                          if self.graphs.kind(t) == "flow"]:
+                edges = {(t["from"], t["event"])
+                         for t in self.graphs.transitions(itype)}
+                if domain == "active-work":
+                    want = self._agent_worked_states(itype)
+                else:
+                    want = [s for s in self._agent_worked_states(itype)
+                            if s in wi.VALIDATING_STATES]
+                for st in want:
+                    self.assertIn((st, ev), edges,
+                                  f"{itype}: '{ev}' cannot be recorded from "
+                                  f"'{st}', but it can happen there")
+
+    def test_AC_120_4_annotation_edges_keep_a_rightful_owner(self):
+        """The graph exists so every transition has a rightful owner. Widening
+        WHERE a failure can be recorded must not widen WHO may record it."""
+        for itype in [t for t in self.graphs.types
+                      if self.graphs.kind(t) == "flow"]:
+            for ev in ("deploy_failed", "build_failed"):
+                agents = {tuple(sorted(t["agents"]))
+                          for t in self.graphs.transitions(itype)
+                          if t["event"] == ev}
+                self.assertLessEqual(len(agents), 1,
+                                     f"{itype}/{ev}: agent list is not uniform")
+                for a in agents:
+                    self.assertEqual(set(a), {"cicd", "engineer"}, f"{itype}/{ev}")
+
+    def test_AC_120_4_no_state_has_two_edges_for_one_event(self):
+        """Every fold in the machinery takes the FIRST matching transition, so a
+        duplicated (from, event) pair would make the graph AMBIGUOUS and the
+        annotation/real-transition split silently order-dependent. v10 adds edges
+        for events that already exist elsewhere in the same graph, so this is now
+        load-bearing rather than incidental."""
+        for itype in [t for t in self.graphs.types
+                      if self.graphs.kind(t) == "flow"]:
+            seen = collections.Counter(
+                (t["from"], t["event"]) for t in self.graphs.transitions(itype))
+            dupes = [k for k, n in seen.items() if n > 1]
+            self.assertEqual(dupes, [], f"{itype}: ambiguous transitions {dupes}")
+
+    def test_AC_120_4_a_queue_or_parked_state_needs_no_failure_edge(self):
+        """The domain is deliberately bounded: nothing is built in `ready`,
+        `registered` or `blocked`, so a build/deploy cannot fail there and the
+        gate must not demand a meaningless edge."""
+        for st in ("ready", "registered", "blocked", "awaiting_observation"):
+            self.assertNotIn(st, self._agent_worked_states("use-case"))
+        # ... and `reported` is intake/triage: no change is in flight there.
+        self.assertNotIn("reported", self._agent_worked_states("defect"))
+        # an open-item has no change-making state at all, so it needs no edge.
+        self.assertEqual(self._agent_worked_states("open-item"), [])
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

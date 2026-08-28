@@ -131,6 +131,112 @@ describe('g', () => { it('one', () => {}) })
   assert.deepStrictEqual(rules(r, 'ac'), [])
 })
 
+// --------------------------------------------------------------------------
+// DEF-ROC-140 — Playwright's suite form. `test.describe(...)` was rejected
+// outright by the call regex (the lookbehind sees the `.` before `describe`,
+// and `test` cannot absorb `.describe`), so the suite did not exist for the
+// analyser and its cases inherited nothing. Every case below writes REAL
+// Playwright-shaped source and runs the REAL scanner, per this file's rule.
+// --------------------------------------------------------------------------
+
+test('limb1: AC-140-1 an AC tag on an enclosing test.describe satisfies its cases', () => {
+  const r = run({
+    'tests/a.spec.ts': `
+import { test, expect } from '@playwright/test'
+
+test.describe('UC live — regression: the other views still work (AC-PW1.2)', () => {
+  test('one', async ({ page }) => { await page.goto('/') })
+  test('two', async ({ page }) => { await page.goto('/') })
+})
+`,
+  })
+  assert.deepStrictEqual(rules(r, 'ac'), [])
+})
+
+test('limb1: AC-140-1 an untagged test.describe still leaves its cases violating — the suite is READ, not assumed', () => {
+  const r = run({
+    'tests/a.spec.ts': `
+import { test } from '@playwright/test'
+
+test.describe('a grouping that names no criterion', () => {
+  test('one', async () => {})
+})
+`,
+  })
+  assert.deepStrictEqual(rules(r, 'ac'), ['no-ac-reference'])
+  assert.strictEqual(lines(r, 'ac')[0].test, 'one')
+  assert.strictEqual(lines(r, 'ac')[0].suite, 'a grouping that names no criterion')
+})
+
+test('limb1: AC-140-2 the Playwright suite modifiers are recognised on the same footing', () => {
+  for (const form of [
+    'test.describe.serial',
+    'test.describe.parallel',
+    'test.describe.only',
+    'test.describe.skip',
+    'test.describe.fixme',
+    'test.describe.serial.only',
+  ]) {
+    const r = run({
+      'tests/a.spec.ts': `
+import { test } from '@playwright/test'
+
+${form}('AC-PW1.3 — the grouping states the criterion', () => {
+  test('one', async () => {})
+})
+`,
+    })
+    assert.deepStrictEqual(rules(r, 'ac'), [], `${form} must resolve its cases' AC tag`)
+  }
+})
+
+test('limb1: AC-140-3 test.describe.configure is neither a suite nor a case', () => {
+  const r = run({
+    'tests/a.spec.ts': `
+import { test } from '@playwright/test'
+
+test.describe.configure({ mode: 'parallel' })
+
+test('AC-PW1.4 the only case in this file', async () => {})
+`,
+  })
+  assert.deepStrictEqual(rules(r, 'ac'), [])
+  assert.strictEqual(r.counts.cases, 1)
+})
+
+test('limb1: AC-140-3 a configure() call cannot borrow the file header as a suite title either', () => {
+  const r = run({
+    'tests/a.spec.ts': `
+import { test } from '@playwright/test'
+
+test.describe.configure({ mode: 'serial' })
+
+test.describe('AC-PW1.5 — real suite', () => {
+  test('one', async () => {})
+})
+`,
+  })
+  assert.deepStrictEqual(rules(r, 'ac'), [])
+  assert.strictEqual(r.counts.cases, 1)
+})
+
+test('limb1: AC-140-1 a nested test.describe contributes its own tag to the cases below it', () => {
+  const r = run({
+    'tests/a.spec.ts': `
+import { test } from '@playwright/test'
+
+test.describe('outer, no criterion', () => {
+  test.describe('AC-PW1.6 — inner states it', () => {
+    test('one', async () => {})
+  })
+  test('two', async () => {})
+})
+`,
+  })
+  assert.deepStrictEqual(rules(r, 'ac'), ['no-ac-reference'])
+  assert.strictEqual(lines(r, 'ac')[0].test, 'two')
+})
+
 test('limb1: an AC-looking token inside a comment that is not an AC id is not accepted', () => {
   const r = run({
     'tests/a.test.ts': `

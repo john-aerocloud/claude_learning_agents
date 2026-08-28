@@ -329,7 +329,18 @@ function enclosingOpen(code, at, open) {
 // ===========================================================================
 // LIMB 1 — describe/it extraction and AC resolution
 // ===========================================================================
-const RE_CALL = /(?<![\w$.'"`])(describe|it|test)((?:\.(?:only|skip|todo|concurrent|sequential|fails|each|runIf|skipIf))*)\s*\(/g
+// `test.describe` is listed FIRST and explicitly, not folded into the modifier
+// list, because neither of the other two alternatives can reach it: the negative
+// lookbehind rejects the bare `describe` token (a `.` precedes it) and `test`
+// cannot absorb `.describe` unless `describe` is a modifier — which it must not
+// be, or `describe.describe` would parse. Playwright's suite form was therefore
+// invisible to the analyser entirely, and its cases inherited no suite title
+// (DEF-ROC-140: 7 real cases mis-counted, 3 of them a false ratchet regression
+// that blocked the loop). `configure` is deliberately ABSENT from the modifier
+// list: `test.describe.configure({…})` takes an options object, has no title,
+// and is neither a suite nor a case — with `configure` unlisted, no alternative
+// matches it, which is exactly right.
+const RE_CALL = /(?<![\w$.'"`])(test\.describe|describe|it|test)((?:\.(?:only|skip|todo|concurrent|sequential|fails|each|runIf|skipIf|serial|parallel|fixme))*)\s*\(/g
 
 function extractCases(src, scan) {
   const { codeOnly, comments, strings } = scan
@@ -351,7 +362,8 @@ function extractCases(src, scan) {
       }
     }
     const title = (strings.find((s) => s.start > openParen && s.end <= end) || { text: '' }).text
-    calls.push({ kind: kind === 'describe' ? 'describe' : 'it', start, end, openParen, title })
+    const isSuite = kind === 'describe' || kind === 'test.describe'
+    calls.push({ kind: isSuite ? 'describe' : 'it', start, end, openParen, title })
   }
   calls.sort((a, b) => a.start - b.start || b.end - a.end)
 

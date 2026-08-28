@@ -4954,6 +4954,259 @@ class TestReversalProbeRunner(Base):
         self.assertNotIn("shell", seen["kw"])
 
 
+# ==========================================================================
+# v157 — the three limbs that mechanise obligations this system had written
+# down and was not honouring. Each drives the REAL computation over REAL files
+# in the redirected ROOT; nothing here stubs the thing under test.
+# ==========================================================================
+class TestUndecidedArrival(Base):
+    """check 17 — §F9b: a finding is registered WITH its triage decision."""
+
+    # Helpers only, NOT the suite. Subclassing TestLoopGate would re-run its ~111
+    # test methods once per class here — 203s -> 370s of wall clock for zero extra
+    # coverage. (TestReversalProbeLoopGate and TestStalledWorkHonoursItsOwnRemedy
+    # DO subclass it, and correctly: they re-run the suite under changed
+    # conditions, which is the whole point of those two.)
+    _policy = TestLoopGate._policy
+    _gate = TestLoopGate._gate
+    _run = TestLoopGate._run
+    _checks = TestLoopGate._checks
+    _advisories = TestLoopGate._advisories
+    _open_items = TestLoopGate._open_items
+    NEVER_AGES = TestLoopGate.NEVER_AGES
+
+
+    def _close(self, ts="2026-06-20T00:00:00Z"):
+        wi.cmd_retro_mark(argparse.Namespace(project=self.project, now=ts))
+
+    def _finding(self, iid, day, extra_fm=None):
+        self._policy([("ready", "min_items", 0)])
+        self.write_item("active", iid, "open-item",
+                        [{"ts": _dt(day, 0), "event": "open",
+                          "agent": "orchestrator"}], extra_fm=extra_fm)
+
+    def test_AC157_1_an_arrival_since_the_close_with_no_decision_BLOCKS(self):
+        """The whole point: check 4's clock is 7 DAYS, so an arrival is invisible
+        to it for a week — exactly the window §F9b is about."""
+        self._close("2026-06-20T00:00:00Z")
+        self._finding("OI-N1", day=28)                    # 2d old: check 4 cannot see it
+        findings = self._gate()
+        checks = self._checks(findings)
+        self.assertIn("undecided-arrival", checks)
+        self.assertNotIn("aged-backlog-undecided", checks)   # non-vacuity: NEW reach
+        f = [x for x in findings if x["check"] == "undecided-arrival"][0]
+        self.assertEqual(f["ids"], ["OI-N1"])
+        self.assertIn("NOT A WAIT", f["message"])
+        self.assertIn("Do NOT close a real finding", f["message"])
+
+    def test_AC157_1_an_arrival_BEFORE_the_close_is_not_this_limb_business(self):
+        """Non-vacuity in the other direction. A pre-close item belongs to check
+        4; reporting it here too would give one item two different remedies."""
+        self._close("2026-06-29T00:00:00Z")
+        self._finding("OI-OLD", day=10)
+        self.assertNotIn("undecided-arrival", self._checks(self._gate()))
+
+    def test_AC157_1_a_finding_that_MOVED_is_decided(self):
+        """A decision is any legal first move off the initial state, not a
+        specific event name — the rule is about the ACT."""
+        self._close("2026-06-20T00:00:00Z")
+        self._policy([("ready", "min_items", 0)])
+        self.write_item("active", "DEF-N1", "defect", [
+            {"ts": _dt(28, 0), "event": "reported", "agent": "orchestrator"},
+            {"ts": _dt(28, 1), "event": "triaged", "agent": "orchestrator"}])
+        self.assertNotIn("undecided-arrival", self._checks(self._gate()))
+
+    def test_AC157_1_a_USE_CASE_arrival_is_NOT_a_finding(self):
+        """Scope. A use-case is registered by product as ordinary replenishment;
+        'the discovering role held the context' does not apply to it, and
+        blocking on it would stop normal intake dead."""
+        self._close("2026-06-20T00:00:00Z")
+        self._policy([("ready", "min_items", 0)])
+        self.write_item("active", "UC-N1", "use-case",
+                        [{"ts": _dt(28, 0), "event": "registered",
+                          "agent": "flow-manager"}])
+        self.assertNotIn("undecided-arrival", self._checks(self._gate()))
+
+    def test_AC157_2_a_LONG_dated_defer_is_a_decision(self):
+        self._close("2026-06-20T00:00:00Z")
+        self._finding("OI-N2", day=28, extra_fm={"defer_until": "2026-07-20"})
+        self.assertNotIn("undecided-arrival", self._checks(self._gate()))
+
+    def test_AC157_2_a_SHORT_dated_defer_decides_nothing_and_still_blocks(self):
+        """THE MEASURED CASE (2026-08-28): §F9b was honoured 9/9 and six of the
+        nine decisions were the same next-day defer, expiring inside 13h. A
+        horizon under the age threshold exempts the item from a gate that would
+        not have fired until then anyway."""
+        self._close("2026-06-20T00:00:00Z")
+        self._finding("OI-N3", day=28, extra_fm={"defer_until": "2026-07-01"})
+        findings = self._gate()
+        self.assertIn("undecided-arrival", self._checks(findings))
+        f = [x for x in findings if x["check"] == "undecided-arrival"][0]
+        self.assertIn("DEFER TOO SHORT", f["message"])
+
+    def test_AC157_2_the_SHORT_defer_rule_also_binds_check_4(self):
+        """One rule, both limbs — or an aged item could still be snoozed daily."""
+        self._open_items(1, day=5, extra_fm={"defer_until": "2026-06-30T12:00:00Z"})
+        findings = self._gate()
+        self.assertIn("aged-backlog-undecided", self._checks(findings))
+        f = [x for x in findings if x["check"] == "aged-backlog-undecided"][0]
+        self.assertIn("DEFER TOO SHORT", f["message"])
+
+    def test_AC157_3_NO_retro_close_means_NOT_ESTABLISHED_never_a_block(self):
+        """Fail-closed is the WRONG default here and this pins it: with no close,
+        the epoch boundary would make every finding in project history an
+        'arrival' and block the pull on the entire backlog."""
+        self._finding("OI-N4", day=28)
+        findings = self._gate()
+        self.assertNotIn("undecided-arrival", self._checks(findings))
+        unk = [x for x in findings
+               if x["check"] == "undecided-arrival-unreadable"]
+        self.assertEqual(len(unk), 1)
+        self.assertEqual(unk[0]["severity"], "unknown")
+        self.assertIn("NOT ESTABLISHED", unk[0]["message"])
+
+
+class TestRetroOutputUnbuilt(Base):
+    """check 19 — is the retro's OWN output queue being worked?"""
+
+    # Helpers only, NOT the suite. Subclassing TestLoopGate would re-run its ~111
+    # test methods once per class here — 203s -> 370s of wall clock for zero extra
+    # coverage. (TestReversalProbeLoopGate and TestStalledWorkHonoursItsOwnRemedy
+    # DO subclass it, and correctly: they re-run the suite under changed
+    # conditions, which is the whole point of those two.)
+    _policy = TestLoopGate._policy
+    _gate = TestLoopGate._gate
+    _run = TestLoopGate._run
+    _checks = TestLoopGate._checks
+    _advisories = TestLoopGate._advisories
+    _open_items = TestLoopGate._open_items
+    NEVER_AGES = TestLoopGate.NEVER_AGES
+
+
+    def _slice(self, name, body):
+        d = os.path.join(self.tmp, "process", "improvement-slices")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, name + ".md"), "w", encoding="utf-8") as f:
+            f.write(body)
+
+    def _registry(self, body):
+        d = os.path.join(self.tmp, "process")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "experiments.md"), "w", encoding="utf-8") as f:
+            f.write(body)
+
+    def test_AC157_4_an_OPEN_slice_scored_by_an_ACTIVE_row_BLOCKS(self):
+        self._slice("IMP-901-a-thing", "# IMP-901\n\nno status line at all\n")
+        self._registry("| `EXP-Z-001` | v1 (2026-01-01, TestProj retro) | IMP-901-a-thing "
+                       "| p | s | m | e | 3 retros | active (1/3) | neg |\n")
+        findings = wi.compute_retro_output_unbuilt("TestProj")
+        blocking = [f for f in findings if f["severity"] == "block"]
+        self.assertEqual(len(blocking), 1)
+        self.assertEqual(blocking[0]["check"], "retro-output-unbuilt")
+        self.assertEqual(blocking[0]["ids"], ["IMP-901-a-thing"])
+        self.assertIn("EXP-Z-001", blocking[0]["message"])
+        self.assertIn("FALSE negative", blocking[0]["message"])
+
+    def test_AC157_4_a_DELIVERED_slice_is_not_reported_however_it_is_cited(self):
+        self._slice("IMP-902-done", "# IMP-902\n\n**Status:** delivered 2026-06-01\n")
+        self._registry("| `EXP-Z-002` | v1 (2026-01-01, TestProj retro) | IMP-902-done "
+                       "| p | s | m | e | 3 retros | active (1/3) | neg |\n")
+        self.assertEqual(wi.compute_retro_output_unbuilt("TestProj"), [])
+
+    def test_AC157_4_a_RETIRED_row_does_not_block_on_its_open_slice(self):
+        """Only a row still being SCORED can have its score corrupted."""
+        self._slice("IMP-903-open", "# IMP-903\n\n**Status:** QUEUED\n")
+        self._registry("| `EXP-Z-003` | v1 (2026-01-01, TestProj retro) | IMP-903-open "
+                       "| p | s | m | e | 3 retros | adopted | neg |\n")
+        findings = wi.compute_retro_output_unbuilt("TestProj")
+        self.assertEqual([f["severity"] for f in findings], ["advisory"])
+        self.assertEqual(findings[0]["check"], "retro-output-aging")
+
+    def test_AC157_4_an_uncited_open_slice_is_ADVISORY_and_names_the_missing_status(self):
+        """Refusing to pull cannot build a slice, so this half must not block —
+        the DEF-ROC-083 satisfiability rule."""
+        self._slice("IMP-904-nostatus", "# IMP-904\n\nnothing\n")
+        self._registry("| `EXP-Z-004` | v1 (2026-01-01, TestProj retro) | unrelated "
+                       "| p | s | m | e | 3 retros | active (1/3) | neg |\n")
+        findings = wi.compute_retro_output_unbuilt("TestProj")
+        self.assertEqual([f["severity"] for f in findings], ["advisory"])
+        self.assertIn("NO `**Status:**` line", findings[0]["message"])
+
+    def test_AC157_4_a_FOREIGN_projects_row_is_ADVISORY_not_a_block(self):
+        """§25a (v143/v145): this retro has NO STANDING over another project's
+        row, so blocking on one would be a gate it cannot satisfy."""
+        self._slice("IMP-905-theirs", "# IMP-905\n\n**Status:** QUEUED\n")
+        self._registry(
+            "| `EXP-OTH-001` | v1 (2026-01-01, OtherProject retro) | IMP-905-theirs "
+            "| p | s | m | e | 3 retros | active (1/3) | neg |\n")
+        findings = wi.compute_retro_output_unbuilt("TestProj")
+        self.assertEqual([f["check"] for f in findings],
+                         ["retro-output-unbuilt-elsewhere"])
+        self.assertEqual(findings[0]["severity"], "advisory")
+        self.assertIn("NO STANDING", findings[0]["message"])
+
+    def test_AC157_4_ownership_is_read_from_the_ORIGIN_cell_not_the_whole_row(self):
+        """A foreign row that merely MENTIONS this project in its prose is still
+        foreign — a mention is not ownership, and reading the whole row made a
+        real OagEventSource row block ROC's pull."""
+        self._slice("IMP-906-theirs", "# IMP-906\n\n**Status:** QUEUED\n")
+        self._registry(
+            "| `EXP-OTH-002` | v1 (2026-01-01, OtherProject retro) | IMP-906-theirs "
+            "| **Problem:** first seen on TestProj, then here | s | m | e "
+            "| 3 retros | active (1/3) | neg |\n")
+        findings = wi.compute_retro_output_unbuilt("TestProj")
+        self.assertEqual([f["check"] for f in findings],
+                         ["retro-output-unbuilt-elsewhere"])
+
+    def test_AC157_4_an_UNTAGGED_legacy_row_belongs_to_everyone_and_blocks(self):
+        """Fail closed on ambiguity: `EXP-131` names no project, so nobody is
+        entitled to treat it as somebody else's problem."""
+        self._slice("IMP-907-legacy", "# IMP-907\n\n**Status:** QUEUED\n")
+        self._registry(
+            "| `EXP-131` | v1 (2026-01-01) | IMP-907-legacy | p | s | m | e "
+            "| 3 retros | active (1/3) | neg |\n")
+        findings = wi.compute_retro_output_unbuilt("TestProj")
+        self.assertEqual([f["severity"] for f in findings], ["block"])
+
+    def test_AC157_4_no_slice_directory_at_all_reports_nothing(self):
+        self.assertEqual(wi.compute_retro_output_unbuilt("TestProj"), [])
+
+    def test_AC157_4_the_readers_resolve_ROOT_at_CALL_time(self):
+        """FITNESS FUNCTION. Binding these paths at import made the limb read the
+        REAL repo from inside a scratch fixture — a check answering about a tree
+        the caller never asked about. Pin the property, not the symptom."""
+        self.assertTrue(wi._improvement_slice_dir().startswith(self.tmp))
+        self.assertTrue(wi._experiments_file().startswith(self.tmp))
+
+
+class TestReconcileLatency(Base):
+    """check 18 — §0a Rule 4: is this instance's process learning on `main`?"""
+
+    # Helpers only, NOT the suite. Subclassing TestLoopGate would re-run its ~111
+    # test methods once per class here — 203s -> 370s of wall clock for zero extra
+    # coverage. (TestReversalProbeLoopGate and TestStalledWorkHonoursItsOwnRemedy
+    # DO subclass it, and correctly: they re-run the suite under changed
+    # conditions, which is the whole point of those two.)
+    _policy = TestLoopGate._policy
+    _gate = TestLoopGate._gate
+    _run = TestLoopGate._run
+    _checks = TestLoopGate._checks
+    _advisories = TestLoopGate._advisories
+    _open_items = TestLoopGate._open_items
+    NEVER_AGES = TestLoopGate.NEVER_AGES
+
+
+    def test_AC157_5_a_branch_that_is_not_this_projects_instance_reports_nothing(self):
+        """Established negative, not silence: on the integration tree there is
+        nothing to fold BACK."""
+        self.assertEqual(wi.compute_reconcile_latency("SomeOtherProject"), [])
+
+    def test_AC157_5_git_refusing_to_answer_is_NOT_ESTABLISHED_not_clean(self):
+        """§17i. ROOT here is a scratch dir that is not a git repo."""
+        findings = wi.compute_reconcile_latency("TestProj")
+        self.assertTrue(all(f["severity"] != "block" for f in findings), findings)
+
+
 class TestReversalProbeLoopGate(TestLoopGate):
     """AC-005.3 / AC-005.5 — the gate re-runs every blocked item's probe EVERY
     cycle. `cleared` BLOCKS (an `unblocked` dispatch is actionable); `standing` is

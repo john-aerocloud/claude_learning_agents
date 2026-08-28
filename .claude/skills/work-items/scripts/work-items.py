@@ -3099,6 +3099,60 @@ DEFAULT_MAX_BACKLOG_AGE_DAYS = 7.0
 # failure was serial re-dating (36 items, twice in 9 days, none reaching `done`), not
 # the first defer. 30d ~= four re-dates at the 7d threshold.
 DEFAULT_MAX_DEFER_TOTAL_DAYS = 30.0
+# MINIMUM DEFER HORIZON (v157, ROC). A `defer_until` closer than this to the
+# item's QUEUE ENTRY does not count as a decision at all.
+#
+# THE ARGUMENT IS ARITHMETIC, not taste: check 4 does not fire until an item has
+# sat DEFAULT_MAX_BACKLOG_AGE_DAYS without a decision, so a defer shorter than
+# that buys EXACTLY NOTHING the item did not already have for free. It costs one
+# line, satisfies the gate, and re-poses the same question a few hours later.
+#
+# MEASURED, 2026-08-28, which is why this exists: of the nine findings registered
+# in the v156 cycle, §F9b was honoured 9/9 — and SIX of the nine decisions were
+# the same `defer_until: 2026-08-28`, written in one batch, expiring inside 13
+# hours. `orchestrator`/`reported` rose 29.78% -> 31.32% of GLT in the same
+# cycle. A recorded decision that schedules nothing is decision theatre, and this
+# system has now met that shape twice: the OagEventSource 36-item batch
+# re-staggered twice in 9 days (which produced `aged-backlog-defer-ceiling`, a
+# TOTAL-AGE limb a fresh finding cannot reach for weeks), and this.
+#
+# MEASURED FROM `now`, NOT FROM QUEUE ENTRY, and the first attempt got this
+# wrong: from ENTRY, any future date trivially clears the bar on an item that is
+# already older than the threshold, so the rule protected arrivals and did
+# nothing about an aged item being snoozed daily — precisely the 7d-to-30d
+# window between this limb and the total-age ceiling. From `now` the question is
+# the one a defer actually answers ("do not ask me again until X"), it binds at
+# every age, and serial re-dating is still bounded by the 30d ceiling above.
+#
+# THE LEGITIMATE SHORT WAIT IS NOT COLLATERAL DAMAGE: "check back in four hours,
+# CI is running" is a `blocked` park with a re-checkable probe predicate, which
+# the state graph already supports and check 5 already re-checks every cycle.
+# That route stays open and is the honest one for a bounded wait.
+DEFAULT_MIN_DEFER_DAYS = DEFAULT_MAX_BACKLOG_AGE_DAYS
+
+
+def _defer_is_decision(item, entered, now, min_days=DEFAULT_MIN_DEFER_DAYS):
+    """(deferred_to, is_decision, why_not).
+
+    `is_decision` is True only for a defer that is BOTH in date AND at least
+    `min_days` in the FUTURE. A too-short defer is reported with its own reason,
+    so the remedy is never "add a bigger number" by guesswork.
+
+    `entered` is accepted and unused: it is what the first version of this rule
+    measured from, and the parameter is kept so the two call sites read the same
+    and the mistake is not silently re-made by someone re-adding it.
+    """
+    deferred_to = _defer_until(item)
+    if deferred_to is None:
+        return None, False, None
+    if deferred_to <= now:
+        return deferred_to, False, "DEFER EXPIRED"
+    if (deferred_to - now).total_seconds() < min_days * 86400.0:
+        return deferred_to, False, (
+            f"DEFER TOO SHORT — {deferred_to.date().isoformat()} is under "
+            f"{min_days:.0f}d away, which is inside the window this very gate "
+            f"already grants for free, so it decides nothing")
+    return deferred_to, True, None
 # §F2 seed defaults, used only when queues/policy.csv lacks the row. The retro
 # TUNES these in policy.csv — they are never the authority, just the fallback.
 POLICY_DEFAULTS = {
@@ -4425,8 +4479,13 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
             age_d = (now - ent).total_seconds() / 86400.0
             if age_d <= max_backlog_age_days:
                 continue
-            deferred_to = _defer_until(items[mid])
-            if deferred_to is not None and deferred_to > now:
+            # v157: a defer is a decision only if it is BOTH in date AND far
+            # enough out to decide anything (`_defer_is_decision`). A horizon
+            # shorter than this very threshold exempts the item from a gate that
+            # would not have fired yet anyway.
+            deferred_to, is_decision, short_why = _defer_is_decision(
+                items[mid], ent, now)
+            if is_decision:
                 # An in-date decision exists — respect it, but NOT for ever.
                 #
                 # v155, and this is the retro's root-cause fix. This branch used to
@@ -4455,7 +4514,7 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
                     continue
                 over_ceiling.append((age_d, mid, deferred_to))
                 continue
-            undecided.append((age_d, mid, deferred_to))
+            undecided.append((age_d, mid, short_why))
         if unreadable:
             # UNKNOWN, not block — and the asymmetry with check 11 is deliberate,
             # not an oversight: this queue class is ADVISORY BY DESIGN (blocking on
@@ -4524,12 +4583,12 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
             continue
         undecided.sort(reverse=True)
         shown = ", ".join(f"{mid} ({age:.1f}d"
-                          + (" — DEFER EXPIRED" if dt is not None else "")
-                          + ")" for age, mid, dt in undecided[:8])
+                          + (f" — {w}" if w else "")
+                          + ")" for age, mid, w in undecided[:8])
         more = (f" and {len(undecided) - 8} more" if len(undecided) > 8 else "")
         findings.append({
             "check": "aged-backlog-undecided", "severity": "block",
-            "queue": q, "ids": [mid for _a, mid, _d in undecided],
+            "queue": q, "ids": [mid for _a, mid, _w in undecided],
             "max_age_days": max_backlog_age_days,
             "message": (
                 f"[aged-backlog-undecided] {len(undecided)} item(s) in {q} have sat "
@@ -4539,10 +4598,16 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
                 f"DECISION, which is the count-independent quantity the retro can act "
                 f"on. Remedy, per item — EITHER schedule it (make it ready and pull "
                 f"it) OR record an explicit dated defer by adding `defer_until: "
-                f"YYYY-MM-DD` to its frontmatter. **Do NOT close a real finding to "
-                f"clear this gate** (§F8a); a dated defer is one line and is always "
-                f"the cheaper move. A defer that has EXPIRED re-blocks by design — "
-                f"re-decide it, do not extend it reflexively."),
+                f"YYYY-MM-DD` to its frontmatter, dated at least "
+                f"{DEFAULT_MIN_DEFER_DAYS:.0f}d in the FUTURE — a shorter horizon sits "
+                f"inside the window this gate already grants for free, so it "
+                f"decides nothing (v157). **Do NOT close a "
+                f"real finding to clear this gate** (§F8a); a dated defer is one "
+                f"line and is always the cheaper move. A defer that has EXPIRED "
+                f"re-blocks by design — re-decide it, do not extend it reflexively. "
+                f"For a genuinely SHORT, bounded wait the honest route is a "
+                f"`blocked` park with a re-checkable probe predicate, which check 5 "
+                f"re-reads every cycle."),
         })
 
     # --- 5. awaiting observation: RE-CHECK the predicate, every cycle [v9] ----
@@ -4808,6 +4873,53 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
     #         that is the work. Deliberately LAST, so its block is the final word.
     findings.extend(compute_deploy_lane(project))
 
+    # --- 17. A FINDING REGISTERED THIS CYCLE CARRIES NO DECISION (§F9b) -------
+    #         §F9b (v156) says a finding is registered WITH its triage decision, IN
+    #         THE SAME ACT. Check 4 cannot police that: its clock is SEVEN DAYS, so
+    #         an arrival is invisible to it for a week — exactly the window §F9b is
+    #         about. This limb reads the CYCLE instead.
+    #
+    #         WHAT IT FOUND ON ITS FIRST RUN, and it is not what was expected: §F9b
+    #         is honoured 9 of 9 — every defect registered since the v156 close
+    #         carried a decision in the SAME COMMIT that created its file (verified
+    #         with `git log -S defer_until`, not from the file's own text, which
+    #         carries no timestamp for a frontmatter scalar). But SIX of those nine
+    #         decisions were an identical `defer_until: 2026-08-28` written in one
+    #         batch — a defer to TOMORROW, which expired inside 13 hours and put
+    #         every one of them back in front of this gate. Meanwhile
+    #         `orchestrator`/`reported` rose 29.78% -> 31.32% of gross lead time,
+    #         median 8.7h -> 13.0h per item, and became the #1 owner. So the rule
+    #         bought a RECORDED decision and not a SCHEDULING one, which is the
+    #         `aged-backlog-defer-ceiling` pathology arriving a step earlier: the
+    #         system measures whether a decision EXISTS and never whether anything
+    #         MOVED. The minimum-horizon rule below (`_defer_is_decision`) is the
+    #         answer; this limb is what makes its effect observable at 13h instead
+    #         of 7 days.
+    findings.extend(compute_undecided_arrivals(
+        graphs, project, items, states, policy, now))
+
+    # --- 18. IS PROCESS LEARNING FOLDED BACK? (§0a Rule 4) -------------------
+    #         Reconcile latency is a gross-lead-time component the retro is
+    #         REQUIRED to measure and drive down, and it has risen across three
+    #         consecutive retros — 20.6h (v155) -> 23.3h (v156) -> 36.6h with 12
+    #         commits batched (v157) — while the retro that measured each rise
+    #         declared fold-back "run at close". Nothing checked. The integration
+    #         tree was CLEAN the whole time, so every one of those fold-backs
+    #         would have succeeded on a single command.
+    findings.extend(compute_reconcile_latency(project))
+
+    # --- 19. IS THE RETRO'S OWN OUTPUT BEING BUILT? -------------------------
+    #         The retro is the ONE part of this system whose outputs nothing
+    #         gates. Measured 2026-08-28: 33 improvement slices, EIGHT with no
+    #         status line at all, several QUEUED since 2026-06-06 — and
+    #         `IMP-033`, opened by the v150 retro four days earlier, has its
+    #         mechanism (`park_remedy`) in ZERO lines of machinery and ZERO
+    #         items, while its registry row `EXP-ROC-004` sits at strike 1 of 3
+    #         being SCORED AGAINST IT. That is the worst available outcome: the
+    #         three-strike budget burns down on a hypothesis nobody ever tested,
+    #         and the row dies reported as "no measurable effect".
+    findings.extend(compute_retro_output_unbuilt(project))
+
     return findings
 
 
@@ -4954,6 +5066,440 @@ def compute_deploy_staleness(project, timeout=DEPSTALE_TIMEOUT):
 DEPLOY_LANE_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                   "..", "..", "..", "tools", "deploy-lane.js")
 DEPLOY_LANE_TIMEOUT = 150.0
+
+
+# RESOLVED AT CALL TIME, never bound at import. `ROOT` is REDIRECTED by the test
+# harness (and could be by any embedder), and a constant frozen at import would
+# make this limb read the REAL repo from inside a scratch fixture — a check
+# answering about a tree the caller is not asking about.
+def _improvement_slice_dir():
+    return os.path.join(ROOT, "process", "improvement-slices")
+
+
+def _experiments_file():
+    return os.path.join(ROOT, "process", "experiments.md")
+
+# Words that end an improvement slice. Matched case-insensitively against the
+# `**Status:**` line. Deliberately GENEROUS — the point of this limb is the
+# slice that says nothing at all, or says QUEUED and has for months, not
+# policing anyone's wording.
+IMP_TERMINAL_WORDS = ("delivered", "done", "closed", "resolved", "superseded",
+                      "implemented", "adopted", "abandoned", "declined",
+                      "retired", "deferred")
+DEFAULT_RECONCILE_MAX_HOURS = 12.0
+RECONCILE_POLICY_PARAM = "reconcile_max_hours"
+# The finding types §F9b governs. A use-case is NOT one: it is registered by
+# product as part of ordinary replenishment and scheduled by flow-manager, so
+# "the discovering role held the context to decide" does not apply to it. A
+# defect and an open-item are both DISCOVERIES, and both are registered by
+# whichever role tripped over them.
+FINDING_TYPES = ("defect", "open-item")
+
+
+def _improvement_slices():
+    """[(name, status_line_or_None, is_open)] for every process/improvement-slices file."""
+    out = []
+    slice_dir = _improvement_slice_dir()
+    if not os.path.isdir(slice_dir):
+        return out
+    for fn in sorted(os.listdir(slice_dir)):
+        if not fn.startswith("IMP-") or not fn.endswith(".md"):
+            continue
+        status = None
+        try:
+            with open(os.path.join(slice_dir, fn), encoding="utf-8") as fh:
+                for line in fh:
+                    m = re.match(r"\*\*Status[^:]*:\*\*\s*(.+)", line.strip())
+                    if m:
+                        status = m.group(1).strip()
+                        break
+        except OSError:
+            status = None
+        low = (status or "").lower()
+        # NO STATUS LINE IS OPEN, NOT CLEAN (§17i). An unstated status is the
+        # cheapest way for a slice to disappear, and eight of ROC's did.
+        is_open = not any(w in low for w in IMP_TERMINAL_WORDS)
+        out.append((fn[:-3], status, is_open))
+    return out
+
+
+def _active_experiment_slice_citations(project=None):
+    """({IMP-slug: [mine]}, {IMP-slug: [others]}) for `active` registry rows.
+
+    Read from the registry TABLE, not from prose: only a row still being SCORED
+    can have its score corrupted by an unbuilt mechanism.
+
+    SPLIT BY STANDING (process §25a, v143/v145). A retro may adopt-or-kill only
+    rows whose evidence it holds; over another project's row it may report and
+    add a strike, never retire. So a slice cited ONLY by another project's rows
+    must not BLOCK this project's pull — the remedy would not be available, which
+    is the DEF-ROC-083 unsatisfiable-gate failure. Ownership is read from the
+    row's own text (its version cell names the project that opened it) rather
+    than from the `EXP-<TAG>-` prefix, because the tag is an abbreviation
+    (`OAG` for `OagEventSource`) and a convention is weaker evidence than a
+    statement. A row naming NO project belongs to everyone and stays blocking.
+    """
+    mine, others = defaultdict(list), defaultdict(list)
+    try:
+        with open(_experiments_file(), encoding="utf-8") as fh:
+            for line in fh:
+                if not line.lstrip().startswith("|"):
+                    continue
+                cells = [c.strip() for c in line.strip().strip("|").split("|")]
+                if len(cells) < 3:
+                    continue
+                row = cells[0].strip("`").strip()
+                if not row.startswith("EXP-"):
+                    continue
+                if not re.search(r"\bactive\b", line):
+                    continue
+                origin = cells[1] if len(cells) > 1 else ""
+                is_mine = _row_belongs_to(origin, row, project)
+                for slug in re.findall(r"IMP-\d+-[a-z0-9-]+", line):
+                    (mine if is_mine else others)[slug].append(row)
+    except OSError:
+        return {}, {}
+    return dict(mine), dict(others)
+
+
+def _row_belongs_to(origin, row_id, project):
+    """Is this registry row one THIS retro has standing over?
+
+    Read from the row's ORIGIN CELL (column 2, "v155 (2026-08-27, OagEventSource
+    retro — …)"), never from the whole row. Two earlier attempts were wrong in
+    instructive ways. Asking the FILESYSTEM which projects exist fails because a
+    per-project worktree contains exactly ONE, so every other project's rows read
+    as unowned. Searching the WHOLE ROW fails because these rows carry long prose
+    and one OagEventSource row happens to mention ROC in its problem statement —
+    a mention is not ownership. The origin cell is the row's own statement of
+    which retro opened it, which is the actual question.
+
+      * MINE    — the project's name appears in the ORIGIN cell, or in the row
+                  id (`EXP-ROC-…`).
+      * FOREIGN — the row carries SOMEBODY's tag (`EXP-<TAG>-<n>`) and it is not
+                  this project's. Advisory: §25a gives no standing over it.
+      * MINE    — an untagged legacy row (`EXP-131`) naming no project belongs to
+                  everyone, so it stays blocking. Fail closed on ambiguity.
+    """
+    if project and re.search(rf"\b{re.escape(project)}\b", f"{row_id} {origin}"):
+        return True
+    return not re.match(r"^EXP-[A-Za-z]+-\d+$", row_id)
+
+
+def compute_retro_output_unbuilt(project=None):
+    """Is the retro's OWN output queue being worked? 0-2 findings.
+
+    TWO SEVERITIES, and the split is the whole value of the limb:
+
+      * BLOCK — an OPEN slice cited by an ACTIVE experiment row. That row is
+        being scored, cycle after cycle, against a mechanism that does not
+        exist. It will exhaust its three strikes and be archived as "no
+        measurable effect" when the truth is "never built". A false NEGATIVE in
+        the registry is worse than no row: it retires a hypothesis AND records
+        a reason that is not true.
+      * ADVISORY — every other open slice, with its age. Aging inventory in the
+        retro's own output queue, which no other check in this gate can see.
+    """
+    slices = _improvement_slices()
+    if not slices:
+        return []
+    mine, others = _active_experiment_slice_citations(project)
+    scored_unbuilt, foreign, plain_open = [], [], []
+    for name, status, is_open in slices:
+        if not is_open:
+            continue
+        if mine.get(name):
+            scored_unbuilt.append((name, status, mine[name]))
+        elif others.get(name):
+            foreign.append((name, status, others[name]))
+        else:
+            plain_open.append((name, status, []))
+
+    findings = []
+    if scored_unbuilt:
+        findings.append({
+            "check": "retro-output-unbuilt", "severity": "block",
+            "ids": [n for n, _s, _r in scored_unbuilt],
+            "message": (
+                f"[retro-output-unbuilt] {len(scored_unbuilt)} improvement "
+                f"slice(s) are OPEN while an ACTIVE experiment row is being "
+                f"SCORED against them: "
+                + "; ".join(
+                    f"{n} (cited by {', '.join(r)}; status: "
+                    + (f"\"{s}\"" if s else "NO STATUS LINE")
+                    + ")" for n, s, r in scored_unbuilt[:6])
+                + (f" and {len(scored_unbuilt) - 6} more"
+                   if len(scored_unbuilt) > 6 else "")
+                + ". A row scored against a mechanism that was never built "
+                  "burns its three-strike budget and is then archived as \"no "
+                  "measurable effect\" — a FALSE negative, which is worse than "
+                  "no row at all: it retires the hypothesis AND records an "
+                  "untrue reason. Measured 2026-08-28: IMP-033 (v150 retro) has "
+                  "`park_remedy` in ZERO lines of machinery and ZERO items while "
+                  "EXP-ROC-004 sits at strike 1 of 3. Remedy, per slice — EITHER "
+                  "build it (it is the retro's own stated lever, so it is the "
+                  "cheapest high-value work available) OR mark the slice with a "
+                  "terminal `**Status:**` and PAUSE its row's strike clock in "
+                  "the registry, saying why. Do NOT let it be scored unbuilt."),
+        })
+    if foreign:
+        findings.append({
+            "check": "retro-output-unbuilt-elsewhere", "severity": "advisory",
+            "ids": [n for n, _s, _r in foreign],
+            "message": (
+                f"[retro-output-unbuilt-elsewhere] {len(foreign)} improvement "
+                f"slice(s) are OPEN while ANOTHER PROJECT's active experiment row "
+                f"is scored against them: "
+                + "; ".join(f"{n} (cited by {', '.join(r)})" for n, s, r in foreign[:6])
+                + ". Same hazard as the blocking limb — those rows will be archived "
+                  "as \"no measurable effect\" when the truth is \"never built\" — "
+                  "but ADVISORY here, because §25a (v143/v145) gives this retro NO "
+                  "STANDING over another project's rows: it may add evidence and a "
+                  "strike, never retire one. Blocking would make the gate "
+                  "unsatisfiable from this tree (DEF-ROC-083). Remedy: report it on "
+                  "the row so the owning project's next retro sees it."),
+        })
+    if plain_open:
+        findings.append({
+            "check": "retro-output-aging", "severity": "advisory",
+            "ids": [n for n, _s, _r in plain_open],
+            "message": (
+                f"[retro-output-aging] {len(plain_open)} improvement slice(s) are "
+                f"OPEN with no active experiment row scoring them"
+                + (f" — {sum(1 for _n, s, _r in plain_open if not s)} of them "
+                   f"carry NO `**Status:**` line at all, which is not the same as "
+                   f"clean (§17i)" if any(not s for _n, s, _r in plain_open) else "")
+                + f": {', '.join(n for n, _s, _r in plain_open[:10])}"
+                + (f" and {len(plain_open) - 10} more"
+                   if len(plain_open) > 10 else "")
+                + ". This is the retro's OWN output queue, and until now nothing "
+                  "in this gate could see it — which is how slices opened in June "
+                  "are still marked QUEUED. Advisory, because refusing to pull "
+                  "cannot build them; the retro is where they get scheduled, "
+                  "declined, or closed. Every retro owes each of these a "
+                  "decision, exactly as §F9b requires of a finding."),
+        })
+    return findings
+
+
+def compute_undecided_arrivals(graphs, project, items, states, policy, now):
+    """§F9b, mechanised: a finding registered THIS CYCLE and left undecided.
+
+    UNDECIDED means the item is still in its type's `initial` state AND carries
+    no in-date `defer_until`. Deliberately type-agnostic rather than a list of
+    "decision events": §F9b is about the ACT, and every legal first move off the
+    initial state IS a decision (triage it, decline it, park it, cancel it).
+
+    THE CLOCK IS THE CYCLE, not a calendar age, and the seam that leaves is
+    stated rather than hidden: a finding registered 1-7 days ago that survived a
+    retro close undecided falls between this limb (cohort: since the last close)
+    and check 4 (7 days). That gap is accepted for now because the cohort clock
+    is the unit §F9b is SCORED on and it needs no new committed state, and
+    because check 4 still catches the survivor at 7d. If the next retro finds
+    items living in the seam, the fix is a committed ratchet of undecided ids,
+    not a wider age window.
+
+    Severity BLOCK, with the same asymmetry that protects discovery in check 4:
+    the cheapest path to green is a one-line dated `defer_until:`, NEVER a close.
+    A gate whose cheapest remedy were "close it" would manufacture pressure to
+    close real findings, which §F8a bans outright. The guard on this limb is
+    findings-registered-per-cycle: if it suppresses discovery it is strictly
+    worse than the inventory it prevents, and it dies rather than being tuned.
+    """
+    # "SINCE THE LAST RETRO CLOSE" IS MEANINGLESS WITHOUT ONE, and fail-closed is
+    # the WRONG default here even though it is right almost everywhere else in
+    # this file. `_read_retro_marker` returns the epoch when the boundary is
+    # unknown, which for THIS limb would classify every finding the project has
+    # ever registered as "this cycle's arrival" and block the pull on the entire
+    # backlog — the DEF-ROC-083 unsatisfiable-gate failure, arriving through the
+    # back door of a safe-looking default. So say NOT ESTABLISHED (§17i) and let
+    # check 4's age limb, whose clock needs no boundary, do its job.
+    kind, boundary, why = _retro_verdict(project, ARM_ROUTINE)
+    if kind != "known" or boundary is None:
+        return [{
+            "check": "undecided-arrival-unreadable", "severity": "unknown",
+            "ids": [],
+            "message": (
+                f"[undecided-arrival-unreadable] NOT ESTABLISHED: §F9b was not "
+                f"evaluated at all, because this project has no known routine "
+                f"retro close to measure arrivals against ({why}). That is NOT "
+                f"the same as 'every arrival carried its decision'. It resolves "
+                f"itself at the next `make retro-mark PROJECT={project}`; until "
+                f"then only check 4's 7d age limb covers this queue."),
+        }]
+    undecided, unreadable = [], []
+    for iid in sorted(items):
+        it = items[iid]
+        if getattr(it, "type", None) not in FINDING_TYPES:
+            continue
+        st = states.get(iid)
+        if st != graphs.initial(it.type):
+            continue                       # it moved: a decision was recorded
+        q = graphs.queue_for(st)
+        if not q or queue_kind(policy, q) != QUEUE_KIND_BACKLOG:
+            continue
+        entered, why = _open_segment_entered(graphs, it, st, now)
+        if entered is None:
+            unreadable.append((iid, why))
+            continue
+        if entered < boundary:
+            continue                       # not this cycle's arrival
+        deferred_to, is_decision, short_why = _defer_is_decision(it, entered, now)
+        if is_decision:
+            continue                       # an explicit, in-date, real decision
+        undecided.append((entered, iid, short_why))
+
+    findings = []
+    if unreadable:
+        findings.append({
+            "check": "undecided-arrival-unreadable", "severity": "unknown",
+            "ids": [i for i, _w in unreadable],
+            "message": (
+                f"[undecided-arrival-unreadable] NOT ESTABLISHED: "
+                f"{len(unreadable)} finding(s) sit in their initial state but "
+                f"their REGISTRATION INSTANT cannot be computed, so §F9b was not "
+                f"evaluated for them at all: "
+                + "; ".join(f"{i} ({w})" for i, w in unreadable[:6])
+                + ". An arrival with no computable instant is exempt from this "
+                  "limb for ever, which is not the same as decided (§17i). "
+                  "Remedy: repair the event stream — see the "
+                  "[aged-backlog-unreadable] remedy, which is the same repair."),
+        })
+    if not undecided:
+        return findings
+    undecided.sort()
+    shown = ", ".join(
+        f"{iid} ({_hms((now - ent).total_seconds())} undecided"
+        + (f" — {w}" if w else "") + ")"
+        for ent, iid, w in undecided[:8])
+    more = f" and {len(undecided) - 8} more" if len(undecided) > 8 else ""
+    findings.append({
+        "check": "undecided-arrival", "severity": "block",
+        "ids": [iid for _e, iid, _w in undecided],
+        "since": boundary.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "message": (
+            f"[undecided-arrival] §F9b VIOLATED by {len(undecided)} finding(s) "
+            f"registered since the last retro close "
+            f"({boundary.strftime('%Y-%m-%dT%H:%M:%SZ')}) and still carrying NO "
+            f"decision: {shown}{more}. §F9b: a finding is registered WITH its "
+            f"triage decision, IN THE SAME ACT — the role that found it always "
+            f"held the context to decide it, and registering without deciding "
+            f"converts discovery into inventory on the state that is this "
+            f"project's #1 contributor to gross lead time. THIS BLOCK IS NOT A "
+            f"WAIT AND IS NOT CLEARED BY PULLING SOMETHING ELSE. Remedy, per "
+            f"item — EITHER record the decision now (`work-items append "
+            f"--project {project} --id <id> --event triaged --agent orchestrator "
+            f"--note-file <path>`, or the type's equivalent first move) OR add a "
+            f"one-line dated `defer_until: YYYY-MM-DD` to its frontmatter, "
+            f"dated at least {DEFAULT_MIN_DEFER_DAYS:.0f}d in the future — a shorter horizon "
+            f"decides nothing (v157), and a bounded short wait belongs in a "
+            f"`blocked` park with a probe predicate. **Do "
+            f"NOT close a real finding to clear this gate** (§F8a): the dated "
+            f"defer is always the cheaper move, and that asymmetry is what stops "
+            f"this limb from suppressing discovery. If it suppresses it anyway — "
+            f"findings-registered-per-cycle falls — this limb dies rather than "
+            f"being tuned."),
+    })
+    return findings
+
+
+def compute_reconcile_latency(project, max_hours=None, now=None):
+    """§0a Rule 4, mechanised: is this instance's process learning on `main`?
+
+    Reads the CURRENT branch's unmerged commits against `main` and the
+    INTEGRATION TREE's cleanliness, because those two facts together decide
+    whether the remedy is available:
+
+      * integration tree CLEAN  -> `make project-foldback` would exit 0. One
+        command, always available, so this BLOCKS.
+      * integration tree DIRTY  -> fold-back would exit 3 (DEFERRED) by design.
+        Blocking on something the loop cannot clear is the DEF-ROC-083 failure
+        (a gate that cannot be SATISFIED stops all work), so this is ADVISORY
+        and names the tree that has to be cleaned.
+
+    Nothing here reads project output: `work/*` is gitignored by the parent, so
+    only the process layer can ever be in these commits.
+    """
+    if now is None:
+        now = parse_ts(now_iso())
+    if max_hours is None:
+        max_hours = float(read_queue_policy(project).get("_global", {}).get(
+            RECONCILE_POLICY_PARAM) or DEFAULT_RECONCILE_MAX_HOURS)
+    common = {"check": "reconcile-latency", "ids": []}
+
+    def git(*args, cwd=ROOT):
+        return subprocess.run(["git", "-C", cwd, *args],
+                              capture_output=True, text=True, timeout=30)
+
+    try:
+        branch = git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+        if branch != f"instance/{project}":
+            # On the integration tree (or a detached//ad-hoc ref) there is
+            # nothing to fold BACK. This is an established negative, not silence.
+            return []
+        oldest = git("log", "--reverse", "--format=%aI", "main..HEAD").stdout
+        oldest = [ln for ln in oldest.splitlines() if ln.strip()]
+        if not oldest:
+            return []                       # fully folded
+        count = len(oldest)
+        first = parse_ts(oldest[0].strip())
+        if first is None:
+            raise ValueError(f"unparseable commit date {oldest[0]!r}")
+        main_tree = _main_worktree_path()
+        if main_tree is None:
+            raise ValueError("no worktree is checked out on `main`")
+        dirty = [ln for ln in git("status", "--porcelain",
+                                  cwd=main_tree).stdout.splitlines() if ln.strip()]
+    except Exception as exc:                                    # noqa: BLE001
+        return [dict(common, severity="unknown", message=(
+            f"[reconcile-latency] NOT ESTABLISHED — git would not answer "
+            f"({type(exc).__name__}: {str(exc)[:160]}). Nothing was checked, which "
+            f"is NOT the same as 'this instance is reconciled': unmerged process "
+            f"learning is invisible to every other check here, and it rose across "
+            f"three consecutive retros while each of them recorded fold-back as "
+            f"done. Remedy: `git rev-list --count main..HEAD` from the project "
+            f"worktree, then `make project-foldback PROJECT={project}`."))]
+
+    age_h = (now - first).total_seconds() / 3600.0
+    if age_h <= max_hours:
+        return []
+    head = (f"[reconcile-latency] instance/{project} is {count} commit(s) ahead "
+            f"of `main`, the oldest unmerged for {age_h:.1f}h (threshold "
+            f"{max_hours:.0f}h). §0a Rule 4: reconcile CONTINUOUSLY, never batch "
+            f"— rising instance->main latency IS a gross-lead-time cost, and "
+            f"nothing else in this gate can see it. ")
+    if dirty:
+        return [dict(common, severity="advisory", branch=branch, commits=count,
+                     age_h=round(age_h, 1), integration_dirty=len(dirty), message=(
+            head +
+            f"ADVISORY, not blocking, because the remedy is NOT AVAILABLE to this "
+            f"loop: the integration tree holds {len(dirty)} uncommitted change(s), "
+            f"so `make project-foldback PROJECT={project}` would exit 3 (DEFERRED) "
+            f"by design. Blocking on a condition the loop cannot clear is the "
+            f"DEF-ROC-083 failure — a gate that cannot be SATISFIED stops all work. "
+            f"Remedy: commit or discard the integration tree's changes, then "
+            f"`make project-foldback PROJECT={project}`."))]
+    return [dict(common, severity="block", branch=branch, commits=count,
+                 age_h=round(age_h, 1), integration_dirty=0, message=(
+        head +
+        f"The integration tree is CLEAN, so `make project-foldback "
+        f"PROJECT={project}` would exit 0 RIGHT NOW — one command, no judgement "
+        f"needed, no project output riding along (`work/*` is gitignored, so only "
+        f"the process layer moves). That is why this BLOCKS: it is the cheapest "
+        f"remedy in this gate. Run it, then re-run."))]
+
+
+def _main_worktree_path():
+    """The absolute path of the worktree checked out on `main`, or None."""
+    out = subprocess.run(["git", "-C", ROOT, "worktree", "list", "--porcelain"],
+                         capture_output=True, text=True, timeout=30).stdout
+    path = None
+    for line in out.splitlines():
+        if line.startswith("worktree "):
+            path = line[len("worktree "):].strip()
+        elif line.strip() == "branch refs/heads/main" and path:
+            return path
+    return None
 
 
 def compute_deploy_lane(project, timeout=DEPLOY_LANE_TIMEOUT):

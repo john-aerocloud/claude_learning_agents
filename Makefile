@@ -880,8 +880,20 @@ ROC_DASH := work/ROC/src/dashboard
 # space allocation, column starvation, clipping, reachability and whether the
 # screen states a fact it does not have — at four viewports with a measured SHORT
 # page-area floor (1366x560), in real headless Chromium. No emulator, no read-api,
-# no dev server, ~3s; it is on the standing green bar, which the e2e sweep
+# no dev server, ~11s; it is on the standing green bar, which the e2e sweep
 # (`make roc-e2e-battery`, the only tier that can judge PAINTED colour) is not.
+#
+# OI-ROC-009 ADDED A SECOND AXIS: ACCESSIBILITY. `screenAxe.browser.test.tsx` runs
+# axe-core over the REAL `<App/>` — reached by clicking the REAL nav — on all four
+# destinations at all four viewports. Until it landed, axe had never run in a real
+# browser on any standing bar: jsdom scans a composed <App/> but has no layout, so
+# every rule needing a box (target-size, scrollable-region-focusable) is
+# undecidable there; the per-use-case e2e scans need the dev server + read-api and
+# both their viewports are >=720 tall; and the DEF-ROC-058 limbs above are geometry
+# and honesty, never axe. It turns ON `target-size` (WCAG 2.2 AA 2.5.8), which axe
+# ships disabled, and turns OFF `color-contrast`, which this tier's stock-Tailwind
+# stylesheet cannot judge faithfully — both declared with a reason and a named
+# substitute in `SCREEN_AXE_RULE_SCOPE`, and pinned by name.
 #
 # It also writes ONE SCREENSHOT PER SCREEN PER VIEWPORT, because DEF-ROC-058's
 # fourth blind spot is that nothing ever LOOKS at the render. Open them.

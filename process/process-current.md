@@ -3458,6 +3458,58 @@ no cycle ends with the loop idle for want of an answer. **Scored on `EXP-ROC-013
 dates pass (the surface became a nicer waiting room), or if a taken default causes rework
 costing more than the wait it saved.
 
+## F9f. A live probe is not evidence until it has been run adversarially [v159, ROC]
+
+**Measured 2026-08-29, and the engineer that found it had already reported the probe as
+evidence twice.** `UC-ROC-112`'s live probe passed **7/7 twice** — and both greens were
+wrong for a reason neither the probe nor its author could see:
+
+> *"The probe counted rows the instant the `<h1>` appeared — which is when the view
+> MOUNTS, before its fetch resolves. Every count had been 0 and every expected answer had
+> been 0, because the window happened to be empty that hour, so **a race read as
+> agreement**."*
+
+When the live corpus later gained one record, **3 of 7 cases failed immediately**:
+`unhandled: tile=1 rendered=0` — the list showed nothing. A second case failed more
+sharply still: while the fetch is in flight there are no records and no active filter, so
+the toolbar is **not rendered at all**, and every control assertion had been reading an
+*absent* element rather than an empty one.
+
+**The part that generalises, and it is why this is a rule and not a defect note:** that
+probe already carried a *count-vacuity guard* — an explicit `DISCRIMINATING` marker
+designed to stop exactly this class. **It sat directly on top of a timing vacuity and
+never saw it.** A guard against one flavour of "passing for the wrong reason" is not a
+guard against the others, and a green from an unfalsified instrument is not evidence.
+
+### The rule
+
+**Before a live probe's result may be quoted as evidence — in an item event, a validation
+verdict, or a report — it must have been run in at least one condition its author did not
+contrive.** Specifically:
+
+- **Run it with default arguments.** All three of `UC-ROC-112`'s probe defects surfaced
+  only that way: it had only ever been run with `ROC_EXPECT_SHA` passed explicitly, and
+  run plainly it failed outright.
+- **Run it against a non-empty corpus, and against an empty one.** A probe whose expected
+  answer and observed answer are both zero has established nothing, however many
+  assertions it carries.
+- **Wait on the LOAD STATE, never on the expected answer.** "Not loaded yet" and "no
+  matches" are different facts and must not render identically. An error surface is a
+  failure, not a zero.
+- **Make it fail once, deliberately, and watch it fail.** Two of the three defects here
+  were in the probe's own identity and settling logic rather than in the feature — and the
+  offline suite was green throughout and could not have caught any of them.
+
+**Corollary for the orchestrator, which is where this bit hardest:** a validation verdict
+inherits the weakness of the instrument that produced it. When a tester and an engineer
+both run the *same* probe, that is **one measurement, not two**, and the agreement between
+them carries no independent weight. Say so when reporting it.
+
+**Target metric:** CFR, and quality at the validating stages. **Anticipated effect:** fewer
+items closed on evidence that later proves vacuous; the `dev-validating` failure rate may
+RISE first, which is the good outcome — a probe that can now fail is one that was
+previously silent.
+
 ## F10. Fleet — isolated per-project loops, one shared process spine
 Multiple projects run CONCURRENTLY, each as its own isolated loop, feeding ONE shared,
 project-agnostic process. Two layers, deliberately decoupled:

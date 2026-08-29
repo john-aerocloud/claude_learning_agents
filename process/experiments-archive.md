@@ -1488,3 +1488,39 @@ Original row, preserved verbatim:
 
 | EXP-ROC-013 | ROC | **Problem:** the loop STOPS at every owner judgement. `blocked` is **27.28%** of gross lead time at a median **8.8 days** (n=15) and `orchestrator`/`reported` is **33.78%** at a median 37h (n=105) — the top two GLT owners, and both are the same event: the loop reaches a decision it does not own and halts. Founding case `DEF-ROC-035`, escalated 2026-08-25 with three clean options and **unanswered four days later**, item parked 11.9d. Root cause: the process had no representation for a decision that is OWED BUT NOT YET MADE — a question has only asked/answered and no default, so the only legal behaviour while unanswered was to wait. Owner's words: *"you can hardly work for an hour without my help."* | **Solution:** §F9e — never ask a blocking question. Block the item with a checkable predicate, record the options plus a RECOMMENDED DEFAULT and its reasoning, publish to `work/<project>/open-decisions.md` with a DECIDE-BY date, and keep working. **When the date passes unanswered, the default is TAKEN.** The default must be the REVERSIBLE option, so its cost if wrong is bounded by the work done before it is overturned. | **Target DORA metric: lead time** — specifically the `blocked` share of GLT and the count of items parked on an unbounded external wait. | **Measurement (scored at each of the next 3 retros):** baseline `blocked` = **27.28%** of GLT, median **8.8d/item**, n=15; items on an unbounded external park = **6** (DEF-ROC-009 31.8d, DEF-ROC-035 11.9d, DEF-ROC-068 7.8d, DEF-ROC-073/074 7.8/8.8d, UC-ROC-022 43.0d, UC-ROC-083 28.8d). POSITIVE if the `blocked` median falls AND no cycle ends idle for want of an answer. **NEGATIVE — kill, do not re-tune — if any of:** (a) decisions are published but a default is NOT taken when its date passes, i.e. the surface became a nicer waiting room — audit: every `open-decisions.md` row whose decide-by is in the past must show a verdict; (b) a taken default causes rework costing more than the wait it saved; (c) the `blocked` median does not fall while park volume holds. | active (0/3) | v159, ROC 2026-08-29 |
 
+---
+
+## EXP-ROC-015 — KILLED (v175, ROC 2026-08-29): it caused a data-loss race
+
+**Outcome: KILLED, and not for the usual reason.** This row is not being retired for failing to move a metric — it is
+retired because the change it scored **created a defect that silently destroys the single source of truth**.
+
+`DEF-ROC-162`: `wi-project` loads a snapshot of all 373 item files and writes them all back, with no lock, no re-read
+and no compare-and-swap. Any `wi-append` landing during the run is **silently and permanently destroyed** — both
+commands exit 0, neither warns, and `wi-validate` reports the store CLEAN afterwards, because `derived == fold(events)`
+holds just as well over a log with an event missing from it. A real `confirmed` event was lost this way and was caught
+only by the `DEF-ROC-154` re-read-from-HEAD habit.
+
+**That race needs two concurrent writers, and §F13 supplied the second.** Under the prohibition it replaced,
+`wi-append` and `wi-project` were serialised inside the orchestrator and the window did not exist.
+
+**The ledger, stated plainly:** v163 named the orchestrator's serialisation of state events as the constraint. v164 —
+the owner, within the hour — falsified that with one number: **agent work-effort is 0.2% of gross lead time**, so a
+serialisation inside 0.2% cannot explain a 99.8% wait figure. This row was scoped down to "a real but SECONDARY
+inefficiency" on the spot and **never scored a single positive**. So it bought at most ~0.2%, and it cost silent
+permanent loss of the SSOT.
+
+**The lesson is about the retro that opened it, not about the mechanism.** A rule that looks like pure overhead may be
+holding a safety property that nothing states — the prohibition existed against a MEASURED hazard (an engineer editing
+`work-items.py` froze every state change in the project for hours) and its protective effect on the append/project race
+was never written down, so removing it looked free. **Before retiring a constraint, ask what it is preventing that
+nobody has written down** — and prefer to leave it in place until that question has an answer.
+
+**NOT reverted with it:** the v11 rights model (`OI-ROC-006`) is independent and stays — it governs whose judgement an
+event records, not who types the command, and it correctly refused the orchestrator three times in one session.
+§F13a (turn-ending) is likewise untouched.
+
+Original row, preserved verbatim:
+
+| EXP-ROC-015 | ROC | **Problem:** raising `wip` occupancy from **1 of 8 to 8 of 8** — an eight-fold rise in concurrency — produced only **1.43x** the completions (83 -> 119 trailing-14d) and 1.40x the agent work-effort. Badly sub-linear, and the gap identifies the constraint: `orchestrator`/`reported` is the #1 GLT owner at **33.90%**, median **58,718 s/item**, n=114, for the **seventh** consecutive read. Root cause is SELF-INFLICTED: the orchestrator instructs every dispatched agent *"do NOT run any `wi-*` command"*, so every state event in the project queues behind one actor by explicit instruction — an actor that also writes every dispatch brief, commit message, correction and report. | **Solution:** §F13 — a dispatched specialist fires the state events for the transitions it OWNS; the orchestrator fires only what it legitimately owns (`pulled`, `triaged`, `blocked`/`unblocked`, `made_ready`, the CI-confirmed pipeline `deployed`). The blanket prohibition is RETIRED and may be issued only against a NAMED, LIVE resource-class conflict (concretely: another dispatch mid-edit on `work-items.py`), which the brief must state. Now legitimate because `OI-ROC-006` landed — 101 per-transition allowlists removed, firing rights derived from the item's declared owner — so a specialist recording its own work is the rights model working, not a spoof. | **Target DORA metric: lead time.** **SCOPE CORRECTED v164 (owner):** this row is NO LONGER claimed as the constraint's fix — agent work-effort is **0.2% of GLT**, so a serialisation inside 0.2% cannot explain a 99.8% wait figure. It is a real but SECONDARY inefficiency; the constraint is turn-ending (`EXP-ROC-016`). Scored on its own narrow terms only: does distributing state events reduce orchestrator-held dwell at all. | **Measurement (scored at each of the next 3 retros):** baseline `reported` median **58,718 s**, `orchestrator` share **33.90%**, occupancy-to-completion ratio **8.0x concurrency : 1.43x throughput**. POSITIVE if completions rise super-linearly relative to occupancy AND the `reported` median falls. **NEGATIVE — kill, do not re-tune — if any of:** (a) `dev-validating` failure rate RISES from **9.2%** (already the highest stage in the system), meaning self-recorded state is claimed without the evidence an orchestrator would have demanded; (b) `make wi-validate` starts failing, i.e. distributed writes corrupt the log; (c) attribution quality falls — a rise in events whose `AGENT=` is contradicted by their own note. **Guarded:** `AGENT=` is still never spoofed, and `TOKENS=`/`DURATION_MS=` remain the orchestrator's to attach on events it owns (`OI-ROC-008`'s residue is unchanged — a specialist firing its own event carries no cost figure, and must NOT invent one). | active (0/3) | v163, ROC 2026-08-29 |
+

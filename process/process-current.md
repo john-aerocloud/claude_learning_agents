@@ -4160,7 +4160,66 @@ green.
 **Target metric:** CFR and rework. **Anticipated effect:** fewer greens claimed against a
 base that has moved, and no silent loss from stashing or merging over a concurrent agent.
 
-## F13. A SPECIALIST ADVANCES ITS OWN ITEM'S STATE — the orchestrator is not a state-machine clerk [v163, ROC]
+## F13. ~~A SPECIALIST ADVANCES ITS OWN ITEM'S STATE~~ — **REVERSED at v175, ROC** [v163, reversed v175]
+
+> ## THE ORCHESTRATOR IS THE SOLE EXECUTOR OF `wi-*` COMMANDS. A SPECIALIST NEVER RUNS ONE.
+>
+> **Owner ruling, 2026-08-29:** *"this is why the orchestrator is supposed to run the wi-\*
+> commands. you tried to say this was a problem before but this is evidence that it is not a
+> problem and it should not be run from subagents."*
+>
+> **`DEF-ROC-162` is that evidence.** `wi-project` loads a snapshot of all 373 item files and
+> writes them all back, with no lock, no re-read and no compare-and-swap. **Any `wi-append`
+> landing during the run is silently and permanently destroyed** — both commands exit 0,
+> neither warns, and **`wi-validate` reports the store CLEAN afterwards**, because the
+> invariant is `derived == fold(events)` and that holds just as well over a log with an event
+> missing from it. A real `confirmed` event was destroyed this way and was caught only by the
+> `DEF-ROC-154` re-read-from-HEAD habit.
+>
+> **That race requires two concurrent writers. §F13 created the second one.** With the
+> orchestrator as sole executor, `wi-append` and `wi-project` are serialised inside one actor
+> and the window does not exist.
+>
+> **The prohibition §F13 retired was PROTECTIVE, and I retired it while chasing an efficiency
+> that was then measured at approximately zero.** v163 named the orchestrator's serialisation
+> of state events as the constraint; **v164 — the owner, within the hour — falsified that**:
+> agent work-effort is **0.2% of gross lead time**, so a serialisation inside 0.2% cannot
+> explain a 99.8% wait figure, and `EXP-ROC-015` was scoped down to "a real but SECONDARY
+> inefficiency" on the spot. So the ledger on §F13 is: **it bought a secondary efficiency
+> worth ~0.2% at most, and it cost silent permanent loss of the single source of truth.**
+> Reversed, and `EXP-ROC-015` killed.
+>
+> ### What this does NOT reverse
+>
+> * **The v11 rights model stays exactly as it is** (`OI-ROC-006`). Firing rights are still
+>   derived from the item's declared owner; a verdict is still the tester's alone. That model
+>   refused the orchestrator **three times in one session** and was right every time. It
+>   governs *whose judgement an event may record*; §F13 was about *who types the command*, and
+>   only the second is reversed.
+> * **`AGENT=` still names the role whose JUDGEMENT the event records**, never the typist.
+>   The orchestrator records it **on that role's explicit report** — the specialist states the
+>   transition, the sha and the evidence, and the orchestrator transcribes it.
+> * **§F13a (turn-ending) is untouched.** That was v164's real constraint and has nothing to
+>   do with who runs `wi-*`.
+>
+> ### The cost of reversing, stated rather than hidden
+>
+> A transcribing orchestrator can soften or mis-state a verdict it did not reach. Two guards:
+> **it may not fire a verdict the specialist did not explicitly state**, and the event note
+> carries the specialist's own evidence rather than a paraphrase. If a report is ambiguous,
+> ask the specialist — do not decide on its behalf.
+>
+> ### And `DEF-ROC-162` still gets FIXED
+>
+> Serialising through one actor is an **operational mitigation, not a fix**. The store still
+> has no locking, and a second orchestrator — another project's instance, or a human at a
+> terminal — can still race it. A substrate that can silently lose its own source of truth
+> under *any* race is wrong independently of who usually writes it.
+
+**The v163 reasoning is preserved below for the record, because the measurement in it was
+sound and only the conclusion was wrong.**
+
+
 
 **This is the v163 retro's exploit, and it names a constraint the orchestrator created
 itself.**

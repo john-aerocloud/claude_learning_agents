@@ -223,7 +223,9 @@ Each cycle:
      stalls in `deploying`, blocking the tester. YOU (the orchestrator) fire the
      CI-confirmed `deployed` (`AGENT=cicd`, `REF=<deployed sha>`, `NOTE` citing the green
      CI run) once you confirm the pipeline deploy landed green — engineers/testers must
-     NOT spoof `AGENT=cicd`. (Interactive per-UC deploys are unchanged: cicd fires its own
+     NOT spoof `AGENT=cicd`. (§F13 REVERSED v175 — NO specialist runs a `wi-*` command; the
+     orchestrator executes every one, on the specialist's explicit report. Formerly:
+     interactive per-UC deploys had cicd fire its own
      `deployed`.) principle-failure
      `2026-07-22-uc-adix-015-missing-cicd-deployed-event-blocks-tester.md`; an
      improvement-slice will move this emission into the CI pipeline itself.

@@ -92,7 +92,10 @@ pipeline deploys the **ORCHESTRATOR** fires the CI-confirmed `deployed`
 (`AGENT=cicd`, `REF=<deployed sha>`, `NOTE` citing the green CI run URL/id) AFTER it
 confirms the pipeline deploy landed green. Engineers and testers MUST NOT spoof
 `AGENT=cicd` to unblock themselves — the event is fired once, by the orchestrator, on
-CI-confirmed evidence. (Interactive per-UC `sst deploy` is unchanged: cicd fires its own
+CI-confirmed evidence. (§F13 REVERSED v175: you no longer run ANY `wi-*` command — report the
+transition, its sha and its evidence, and the orchestrator records it. `wi-project` silently
+destroys a concurrent `wi-append` and `wi-validate` still reports clean, DEF-ROC-162. Formerly:
+interactive per-UC `sst deploy` had cicd fire its own
 `deployed` as it always has.) A queued improvement-slice makes the CI pipeline emit the
 `deployed` event itself, retiring the orchestrator step.
 
@@ -551,7 +554,8 @@ You own much of deploy frequency, change failure rate and MTTR — but these are
 DERIVED, not emitted to a CSV. They are computed by `make wi-project` from the
 affected items' event timestamps (a deploy rides the engineer's `built_green`
 done-condition; a pipeline break you own is a `build_failed` event; recovery is
-the subsequent `retried`/`built_green`). Your own state events go via `make
+the subsequent `retried`/`built_green`). **§F13 REVERSED v175 — you do NOT run `wi-*`;
+report the transition and the orchestrator records it.** Formerly your own state events went via `make
 wi-append` (e.g. `build_failed` when the pipeline reds a UC you own). **The DORA
 CSV ledger (`/process/dora/ledger.csv`) is FROZEN — do not write it and do not
 hook the dora-ledger skill into pipeline steps.**

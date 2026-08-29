@@ -515,15 +515,36 @@ so it runs without a permission prompt. That means:
   until the tester's evidence is on the item (§17a); the `linear`/`jira` projection
   agent then mirrors it to the board.
 
-- **You are NOT a state-machine clerk (§F13, v163).** A dispatched specialist fires the
-  state events for the transitions it OWNS. You fire only what you legitimately own:
-  `pulled`, `triaged`, `blocked`/`unblocked`, `made_ready`, and the CI-confirmed `deployed`
-  under a pipeline deploy (§F5a). **The blanket "do NOT run any `wi-*` command" instruction
-  in a dispatch brief is RETIRED** — issue it only against a NAMED, LIVE resource-class
-  conflict (concretely: another dispatch is mid-edit on `work-items.py`), and say which in
-  the brief. Measured at v163: 8x concurrency bought only 1.43x throughput, because every
-  state event queued behind you by your own instruction. `AGENT=` is still never spoofed —
-  the point is that a specialist attributing its OWN work needs no intermediary.
+- **YOU ARE THE SOLE EXECUTOR OF `wi-*` COMMANDS (§F13 REVERSED at v175, owner ruling).**
+  Every dispatch brief carries: **do NOT run any `wi-*` command — report your transition,
+  its sha and its evidence, and the orchestrator records it.** You run every `wi-append`,
+  `wi-project` and `wi-validate` in the project.
+  - **Why, and it is not preference — `DEF-ROC-162`.** `wi-project` loads a snapshot of all
+    item files and writes them all back with no lock, no re-read and no compare-and-swap, so
+    **any `wi-append` landing during the run is silently and permanently destroyed**. Both
+    commands exit 0; neither warns; **`wi-validate` reports the store CLEAN afterwards**,
+    because `derived == fold(events)` holds just as well over a log missing an event. A real
+    `confirmed` event was lost this way. **The race needs two concurrent writers — being the
+    only one is what removes it.**
+  - **v163 retired this prohibition and was wrong.** It named your serialisation of state
+    events as the constraint; v164 falsified that within the hour with one number — **agent
+    work-effort is 0.2% of gross lead time**, so a serialisation inside 0.2% cannot explain a
+    99.8% wait figure. It bought ~nothing and cost the SSOT. `EXP-ROC-015` killed.
+  - **`AGENT=` still names the role whose JUDGEMENT the event records, never the typist**, and
+    you record it **on that role's explicit report**. This is transcription, not attribution
+    laundering — and the difference is enforceable: **you may not fire a verdict the specialist
+    did not explicitly state.** If a report is ambiguous, ask; do not decide on its behalf.
+  - **The v11 rights model is UNCHANGED and still binds you** (`OI-ROC-006`): rights derive
+    from the item's declared owner, and a verdict is the tester's alone. It refused the
+    orchestrator three times in one session and was right each time. If a role you must record
+    for is not in the item's owner set, declare the owner set — never spoof `AGENT=`.
+  - **Serialising through you is a MITIGATION, not the fix.** `DEF-ROC-162` stays open: a
+    store that can silently lose its own source of truth under any race is wrong regardless of
+    who usually writes it. Until it lands, **do not run `wi-project` while a dispatch is
+    live** — read state directly from the item files instead.
+  - **The generalisable lesson, which cost more than the rule:** a constraint that looks like
+    pure overhead may be holding a safety property nobody wrote down. Before retiring one, ask
+    what it prevents that is not stated — and leave it until that has an answer.
 
 ## Improvement routing (process v17 §36)
 At retros and whenever an improvement lands, route it to the NARROWEST owner:

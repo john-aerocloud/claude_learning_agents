@@ -3387,6 +3387,75 @@ that cannot be drained, and nothing at the gate said so.
 limb is the one expected to move it: the finding-generation limb governs the tail, the
 requirement gate governs the head.
 
+## F9e. An owner decision is a BLOCKED ITEM WITH A DEFAULT, never a question [v158, ROC]
+
+**Owner ruling, 2026-08-29, and it names the constraint more precisely than six retros
+did:** *"you have work you can be doing but you keep stopping to ask me questions instead
+of blocking items, recording the decision and giving me an async way to handle those
+blocks"* — and, plainly: *"you can hardly work for an hour without my help."*
+
+**That is a correct description of the measured constraint, from the other side.**
+`blocked` is **27.28%** of gross lead time at a median **8.8 days** across 15 items, and
+`orchestrator`/`reported` is **33.78%**. Both are the same failure wearing two labels: the
+loop reaches a point where it needs a judgement, and **stops**. The founding case is
+`DEF-ROC-035` — escalated 2026-08-25 with three clean, well-formed options, and still
+unanswered **four days later**, because the escalation existed only as a sentence in a
+transcript. A question the owner must be PRESENT to receive is not an escalation; it is a
+stall with good manners.
+
+### The rule
+
+**Never ask a blocking question. Convert it, in the same act:**
+
+1. **Block the item** with the reason as a checkable predicate (§F7a).
+2. **Record the decision** — the options, and a **RECOMMENDED DEFAULT** with its reasoning.
+3. **Publish it to the async surface** — `work/<project>/open-decisions.md`, one row per
+   decision, carrying the default and a **DECIDE-BY date**.
+4. **Keep working.** Take the next independent thing.
+
+**If the decide-by date passes with no answer, the DEFAULT IS TAKEN and the loop
+proceeds.** Silence is a decision and is recorded as one. This is the load-bearing half: a
+default that merely waits politely is the same stall with an extra file.
+
+### Choosing the default — the constraint that makes this safe
+
+**The default must be the REVERSIBLE option**, and its cost if wrong must be no more than
+the work done under it before it is overturned. That is what makes taking it without an
+answer legitimate rather than presumptuous. Where no option is reversible, the default is
+the one that **preserves the most optionality** — and that case is rare enough that
+genuinely irreversible acts (§0b prod-DATA, an outward-facing side effect) remain the small
+set that really does wait.
+
+### What still reaches the human, and what no longer does
+
+- **Still a live gate:** requirement intake (§F5), and a genuinely irreversible operation.
+- **No longer a stall:** every "which of these should I do" — architecture options, label
+  wording, descope-or-wait, provisioning that is outside our control. Those become rows.
+- **The unbounded wait is the specific thing this kills.** An item parked on an external
+  precondition nobody has committed to is a decline nobody wrote down (§F9d). It gets a
+  default of *descope or decline*, a date, and it moves.
+
+### Why the surface, and not just the default
+
+Two independent failures this cycle, both real:
+
+- The owner **could not see** what was waiting on them. Four decisions were outstanding and
+  each existed only in a different part of a transcript.
+- The orchestrator **kept re-raising** them, spending the report on questions instead of
+  results — which is how "report the horizon, not the depth" (§F9d.2) gets inverted into
+  "report the blockers, not the progress".
+
+A single durable file with defaults and dates fixes both: the owner reads one place on
+their own clock, and the loop never has to ask twice.
+
+**Target metric:** lead time — specifically the `blocked` share of GLT (27.28%, median
+8.8d) and the count of items parked on an unbounded external wait. **Anticipated effect:**
+`blocked` median falls as parks acquire dates and defaults instead of open-ended waits, and
+no cycle ends with the loop idle for want of an answer. **Scored on `EXP-ROC-013`.**
+**NEGATIVE — kill it — if:** decisions are published but the defaults are never taken when
+dates pass (the surface became a nicer waiting room), or if a taken default causes rework
+costing more than the wait it saved.
+
 ## F10. Fleet — isolated per-project loops, one shared process spine
 Multiple projects run CONCURRENTLY, each as its own isolated loop, feeding ONE shared,
 project-agnostic process. Two layers, deliberately decoupled:

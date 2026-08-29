@@ -142,6 +142,8 @@
       "Bash(aws logs get-query-results *)",
       "Bash(curl http://localhost:*)",
       "Bash(curl https://checkip.amazonaws.com)",
+      "Bash(curl https://pps-event-aggregation.aas.aegis.mobi*)",
+      "Bash(curl -k https://pps-event-aggregation.aas.aegis.mobi*)",
       "Bash(kill *)",
       "Bash(lsof *)",
       "Bash(make -C work/oxo-online/src/infra deploy-oidc)",

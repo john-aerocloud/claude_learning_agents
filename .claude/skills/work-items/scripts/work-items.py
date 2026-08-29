@@ -5767,15 +5767,42 @@ def compute_deploy_lane(project, timeout=DEPLOY_LANE_TIMEOUT):
         return []
 
     if verdict == "in-flight":
+        # "is None" is the shape of a message nobody trusts, and it is what this
+        # printed whenever GitHub had not yet materialised the deploy job — which
+        # is most of a run's life (DEF-ROC-142 review).
+        job_state = (f"is {report.get('deployJobStatus')}" if report.get("deployJobStatus")
+                     else "has not been created yet (the run is still going)")
         return [dict(common, severity="unknown", verdict=verdict, message=(
-            f"[deploy-lane] NOT ESTABLISHED — \"{deploy_job}\" is "
-            f"{report.get('deployJobStatus')} at {sha}, so NOTHING HAS LANDED yet and "
+            f"[deploy-lane] NOT ESTABLISHED — \"{deploy_job}\" {job_state} "
+            f"at {sha}, so NOTHING HAS LANDED yet and "
             f"nothing is broken either. Do NOT read this as a deploy and do NOT "
             f"dispatch validation against the host: on 2026-08-27 the {project} health "
             f"endpoint served the NEW buildSha while this job was still in_progress — "
             f"one app had swapped and another had not — so a tester dispatched here "
             f"measures a half-completed cutover. Re-run this gate when the run "
             f"completes. {url}"))]
+
+    # DEF-ROC-142 — "trunk head has no run" is the ORDINARY state after every
+    # items-only, process or docs commit, because the deploy workflow is
+    # path-filtered. It must read as cannot-determine, with its real cause named:
+    # the generic branch below would tell the operator to go commit a config,
+    # which is both wrong and the fastest way to make a limb ignored. And it must
+    # NEVER be answered from another commit's run — that fallback BLOCKED a real
+    # cycle on 2026-08-29 and returns a false OPEN just as readily.
+    if report.get("reason") in ("no-run-for-trunk-head", "trunk-head-unresolved",
+                                "run-not-for-trunk-head"):
+        head = str(report.get("trunkHeadSha") or "")[:12] or "the trunk head"
+        return [dict(common, severity="unknown", verdict=verdict, message=(
+            f"[deploy-lane] NOT ESTABLISHED — no CI run belongs to trunk head {head}, so "
+            f"whether {project}'s work can reach an environment is UNKNOWN for this commit: "
+            f"it is NEITHER open NOR shut. This is ORDINARY — the deploy workflow is "
+            f"PATH-FILTERED, so an items-only, process or docs commit produces no run at "
+            f"all — and it is NOT a config fault. The verdict of a different commit's run "
+            f"is deliberately NOT reported here: doing that BLOCKED a real cycle on "
+            f"2026-08-29 naming a run from two days earlier, and the same fallback returns "
+            f"a false OPEN just as readily (DEF-ROC-142). If you need the lane established "
+            f"before dispatching validation, look at the last commit that DID touch a "
+            f"deploy path, or push one. Detail: {report.get('detail') or 'none'}"))]
 
     if verdict != "blocked":
         return [dict(common, severity="unknown", verdict=verdict, message=(

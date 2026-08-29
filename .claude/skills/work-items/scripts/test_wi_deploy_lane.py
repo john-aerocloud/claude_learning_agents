@@ -106,21 +106,33 @@ class Base(unittest.TestCase):
         self.argv_log = log
         return js
 
-    def real_tool_on_capture(self, run_id):
+    def real_tool_on_capture(self, run_id=None, head_sha=None, capture_dir=None):
         """Drive the REAL tool against a REAL captured gh payload. Only the FETCH is
-        redirected; the needs-closure reading and the verdict are the real code."""
+        redirected; the needs-closure reading, the RUN SELECTION and the verdict are
+        the real code. `head_sha` stands in for `git rev-parse origin/main`, which is
+        what the live path resolves (DEF-ROC-142)."""
+        extra = []
+        if run_id is not None:
+            extra += ["--capture-run", run_id]
+        if head_sha is not None:
+            extra += ["--head-sha", head_sha]
         js = os.path.join(self.tmp, "capture-wrapper.js")
         with open(js, "w", encoding="utf-8") as f:
             f.write(
                 "const {execFileSync}=require('node:child_process');\n"
                 "process.stdout.write(execFileSync('node',[%s,...process.argv.slice(2),\n"
-                "  '--capture-dir',%s,'--capture-run',%s,\n"
+                "  '--capture-dir',%s, ...%s,\n"
                 "  '--workflow',%s,'--no-git'],{encoding:'utf8'}));\n"
-                % (json.dumps(REAL_TOOL), json.dumps(CAPTURES), json.dumps(run_id),
+                % (json.dumps(REAL_TOOL), json.dumps(capture_dir or CAPTURES),
+                   json.dumps(extra),
                    json.dumps(os.path.join(CAPTURES, "roc-deploy-workflow.yml"))))
         wi.DEPLOY_LANE_SCRIPT = js
         wi.ROOT = REAL_ROOT   # so the tool reads the real committed ROC config
         return wi.compute_deploy_lane("ROC")
+
+    def sha_of(self, run_id):
+        with open(os.path.join(CAPTURES, "run-%s.json" % run_id), encoding="utf-8") as f:
+            return json.load(f)["headSha"]
 
     def lane(self, findings):
         return [f for f in findings if f["check"] == "deploy-lane"]
@@ -328,6 +340,136 @@ class TestWiredIntoTheGate(Base):
         text = out.getvalue()
         self.assertIn("THE DEPLOY LANE IS SHUT", text)
         self.assertIn("BLOCKED", text.splitlines()[0])
+
+
+# ---------------------------------------------------------------------------
+# DEF-ROC-142 — WHAT THE GATE PRINTS ABOUT A COMMIT WITH NO RUN.
+#
+# On 2026-08-29 09:14:40Z this gate emitted a BLOCKING `-` line naming run
+# 33101512536 at 94be99dc, while trunk head was an items-only commit that touched
+# none of the workflow's trigger paths and produced NO run at all. The `-` lines
+# are the only thing /loop-run STEP 0b acts on, so the two properties below are
+# the ones that decide whether this limb helps or lies: a commit with no run must
+# come out as a `?` (advisory, cannot-determine), and a GENUINELY shut lane must
+# still come out as a `-`.
+# ---------------------------------------------------------------------------
+NO_RUN_HEAD = "5e78eebca518835570ffa7ad3a2df79c18367f1a"   # a real items-only trunk sha
+SHUT_RUN = "33101512536"      # REAL capture: THE run the false block named
+
+
+class TestReportsOnTrunkHeadOnly(Base):
+    def test_AC_142_2_a_head_with_no_run_is_a_question_mark_never_a_block(self):
+        f = self.lane(self.real_tool_on_capture(head_sha=NO_RUN_HEAD))
+        self.assertEqual(len(f), 1, f)
+        self.assertEqual(f[0]["severity"], "unknown",
+                         "a `-` line here stops the loop on a commit CI was never "
+                         "asked to build; that is the 2026-08-29 false block")
+        self.assertNotIn("THE DEPLOY LANE IS SHUT", f[0]["message"])
+
+    def test_AC_142_2_it_names_the_ordinary_cause_not_a_config_remedy(self):
+        msg = self.lane(self.real_tool_on_capture(head_sha=NO_RUN_HEAD))[0]["message"]
+        self.assertIn("NOT ESTABLISHED", msg)
+        self.assertIn("PATH-FILTERED", msg)
+        self.assertIn("NEITHER open NOR shut", msg)
+        self.assertNotIn("copy ROC's", msg,
+                         "telling an operator to commit a config for the ordinary "
+                         "no-run case is the fastest way to make a limb ignored")
+
+    def test_AC_142_2_it_does_not_publish_the_other_commits_verdict(self):
+        # The capture dir's newest run (33076365108) is a SUCCESSFUL deploy of a
+        # different commit. Reporting it would be the false-OPEN direction, which
+        # is the blindness DEF-ROC-131 exists to end.
+        msg = self.lane(self.real_tool_on_capture(head_sha=NO_RUN_HEAD))[0]["message"]
+        self.assertNotIn("f950220f", msg.split("Detail:")[0])
+        self.assertEqual(self.lane(self.real_tool_on_capture(head_sha=NO_RUN_HEAD))[0]
+                         .get("run"), None)
+
+    def test_AC_142_3_NON_VACUITY_a_genuinely_shut_lane_still_BLOCKS(self):
+        """Replay run 33101512536 AS trunk head's run. A fix that made this limb
+        advisory in all cases would pass every other case here and be WORSE than
+        the bug: the owner ruling is that a red lane gets FIXED."""
+        f = self.lane(self.real_tool_on_capture(SHUT_RUN, head_sha=self.sha_of(SHUT_RUN)))
+        self.assertEqual(len(f), 1, f)
+        self.assertEqual(f[0]["severity"], "block")
+        self.assertIn("THE DEPLOY LANE IS SHUT", f[0]["message"])
+        self.assertIn(FN_JOB, f[0]["message"])
+        self.assertEqual(f[0]["run"], 33101512536)
+
+    def test_AC_142_3_the_shut_line_keeps_its_ITEM_ATTRIBUTION(self):
+        """The one true thing in the 2026-08-29 false finding was its attribution:
+        94be99dc really is UC-ROC-110's commit. gh truncated the title at
+        "…Decision Log, Sim…", so this is read from the real commit message."""
+        if not os.path.isdir(os.path.join(REAL_ROOT, "work", "ROC", ".git")):
+            self.skipTest("SKIPPED, NOT PASSED: work/ROC is absent (separate gitignored "
+                          "repo); this case reads a REAL commit message")
+        js = os.path.join(self.tmp, "wrapper-git.js")
+        with open(js, "w", encoding="utf-8") as f:
+            f.write(
+                "const {execFileSync}=require('node:child_process');\n"
+                "process.stdout.write(execFileSync('node',[%s,...process.argv.slice(2),\n"
+                "  '--capture-dir',%s,'--capture-run',%s,'--head-sha',%s,\n"
+                "  '--workflow',%s],{encoding:'utf8'}));\n"
+                % (json.dumps(REAL_TOOL), json.dumps(CAPTURES), json.dumps(SHUT_RUN),
+                   json.dumps(self.sha_of(SHUT_RUN)),
+                   json.dumps(os.path.join(CAPTURES, "roc-deploy-workflow.yml"))))
+        wi.DEPLOY_LANE_SCRIPT = js
+        wi.ROOT = REAL_ROOT
+        f = self.lane(wi.compute_deploy_lane("ROC"))
+        self.assertEqual(f[0]["severity"], "block")
+        self.assertEqual(f[0]["ids"], ["UC-ROC-110"], f[0]["message"])
+
+    def test_AC_142_1_an_uncreated_deploy_job_does_not_print_is_None(self):
+        """`make loop-gate` output is a surface a person reads. Before this, a run
+        whose deploy job GitHub had not yet materialised printed "is None"."""
+        f = self.lane(self.real_tool_on_capture("33098785042",
+                                                head_sha=self.sha_of("33098785042")))
+        self.assertEqual(len(f), 1, f)
+        self.assertEqual(f[0]["severity"], "unknown")
+        self.assertNotIn("is None", f[0]["message"])
+        self.assertIn("has not been created yet", f[0]["message"])
+
+    def test_AC_142_4_five_invocations_against_a_fixed_state_agree(self):
+        """Four different answers about the same question were observed in one
+        session on 2026-08-29."""
+        seen = set()
+        for _ in range(5):
+            f = self.lane(self.real_tool_on_capture(head_sha=self.sha_of("33076365108")))
+            seen.add(tuple(sorted((x["severity"], x["verdict"]) for x in f)) or ("silent",))
+        self.assertEqual(len(seen), 1, "five runs produced %s" % seen)
+
+
+class TestGateExitOnAHeadWithNoRun(Base):
+    def test_AC_142_2_the_gate_exits_0_and_prints_a_question_line(self):
+        """The exit code is what /loop-run STEP 0b honours. A commit CI never built
+        must not stop the loop — and must not read as clean either."""
+        wi.ROOT = self.tmp
+        os.makedirs(os.path.join(self.tmp, "process", "machinery"), exist_ok=True)
+        shutil.copy(os.path.join(self._orig_root, "process", "machinery", "state-graphs.json"),
+                    os.path.join(self.tmp, "process", "machinery", "state-graphs.json"))
+        wi.GRAPHS_PATH = os.path.join(self.tmp, "process", "machinery", "state-graphs.json")
+        for sub in ("active", "done"):
+            os.makedirs(os.path.join(self.tmp, "work", "P", "items", sub), exist_ok=True)
+        self.fake_tool({"verdict": "NOT-ESTABLISHED", "reason": "no-run-for-trunk-head",
+                        "trunkHeadSha": NO_RUN_HEAD, "detail": "no run has head %s" % NO_RUN_HEAD})
+        ns = __import__("argparse").Namespace(
+            project="P", stale_hours=4.0, threshold=3, now=None, observe=False,
+            observe_timeout=wi.DEFAULT_OBSERVE_TIMEOUT,
+            max_backlog_age_days=wi.DEFAULT_MAX_BACKLOG_AGE_DAYS,
+            max_defer_total_days=wi.DEFAULT_MAX_DEFER_TOTAL_DAYS)
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            with self.assertRaises(SystemExit):
+                wi.cmd_loop_gate(ns)
+        text = out.getvalue()
+        # The EXIT CODE is not asserted here: this scratch project is empty, so
+        # `ready-below-floor` blocks it for a reason that has nothing to do with
+        # the deploy lane. The claim is about WHICH LINE this limb produces —
+        # `?` lines never reach `blocking` and never affect the exit code
+        # (cmd_loop_gate splits on severity), so a `?` here cannot stop a loop
+        # and a `-` here always would.
+        self.assertIn("? [deploy-lane]", text)
+        self.assertNotIn("- [deploy-lane]", text,
+                         "a commit CI was never asked to build must not stop the loop")
+        self.assertIn("NEITHER open NOR shut", text)
 
 
 if __name__ == "__main__":

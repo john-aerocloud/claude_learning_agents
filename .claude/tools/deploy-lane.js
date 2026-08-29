@@ -58,8 +58,28 @@
  * half-completed cutover. So `in-flight` is its own verdict, and it is neither
  * open nor blocked.
  *
+ * AND IT MUST ANSWER ABOUT TRUNK HEAD, OR ABOUT NOTHING (DEF-ROC-142).
+ * The first version took `runList[0]` — the newest run of the workflow on the
+ * branch — and published its verdict as if it were head's. On 2026-08-29 at
+ * 09:14:40Z that BLOCKED a real cycle naming run 33101512536 at 94be99dc, while
+ * `origin/main` was 37dd579 whose deploy job had SUCCEEDED. Trunk head at that
+ * moment (ee1f7d9) was an items-only commit: it touched NONE of the workflow's
+ * trigger paths (`src/app/**`, `src/dashboard/**`, `src/tools/replay-injector/**`,
+ * the workflow file itself) and therefore produced ZERO runs. THAT STATE IS
+ * NORMAL — every items-only, process and docs commit on this trunk is in it, and
+ * this project makes them constantly. WHICH DIRECTION THE FALLBACK LIES IN IS AN
+ * ACCIDENT of which run happened to be newest: the same code emits a false OPEN
+ * just as readily, and that is the worse failure, because it is precisely the
+ * blindness this tool was built to end. So the run is now selected BY TRUNK HEAD'S
+ * SHA, never by recency; a head with no run is NOT-ESTABLISHED; and the run that
+ * was read is re-checked against head before any verdict is emitted. Two
+ * consequences worth stating: the selection no longer depends on list ORDER or on
+ * which runs the API happened to return (four different answers were observed in
+ * one session), and `no run for head` is reported as the ordinary thing it is
+ * rather than as a fault.
+ *
  * FOUR VERDICTS, NEVER TWO.
- *   open            the deploy job for the newest trunk run COMPLETED SUCCESS.
+ *   open            the deploy job for TRUNK HEAD's run COMPLETED SUCCESS.
  *   blocked         it did not, and the cause is inside its needs closure (or is
  *                   the deploy job itself). Delivery is stopped. Names the job,
  *                   the sha, the run URL and the owning item.
@@ -73,7 +93,15 @@
  * Usage
  *   node deploy-lane.js --project ROC --repo-root . --json
  *   node deploy-lane.js --project ROC --repo-root . --json \
- *        --capture-dir <dir> [--capture-run <id>] [--workflow <path>] [--no-git]
+ *        --capture-dir <dir> [--capture-run <id>] [--workflow <path>] [--no-git] \
+ *        [--head-sha <sha>]
+ *
+ *   `--head-sha` DECLARES what trunk head is instead of resolving it with
+ *   `git rev-parse <trunkRef>`. It exists so the selection rule can be tested
+ *   hermetically; the live path never passes it. `--capture-run` without
+ *   `--head-sha` is a REPLAY: the caller asserts the named run IS trunk head's,
+ *   and the payload says so (`runSelection: "capture-run-replay"`). Given both,
+ *   they must agree or nothing is established.
  *
  *   `--capture-dir` reads REAL CAPTURED `gh` output (`<dir>/run-list.json`,
  *   `<dir>/run-<id>.json`) instead of calling `gh`. It replaces the FETCH, not
@@ -115,6 +143,7 @@ const REPO_ROOT = path.resolve(arg("repo-root", process.cwd()));
 const CAPTURE_DIR = arg("capture-dir");
 const CAPTURE_RUN = arg("capture-run");
 const WORKFLOW_OVERRIDE = arg("workflow");
+const HEAD_SHA_ARG = arg("head-sha");
 const NO_GIT = flag("no-git");
 const AS_JSON = flag("json");
 
@@ -315,13 +344,97 @@ if (!Array.isArray(runList) || !runList.length) {
 }
 runList.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
 
-const targetId = CAPTURE_RUN || runList[0].databaseId;
+// ---- WHICH COMMIT ARE WE ANSWERING ABOUT? (DEF-ROC-142) -------------------
+// The run is chosen by TRUNK HEAD'S SHA, never by recency. `runList[0]` is the
+// newest run of this workflow on the branch, which is a DIFFERENT question: on a
+// path-filtered workflow the newest run routinely belongs to an older commit,
+// because every items-only / process / docs commit produces no run at all. The
+// old code published that run's verdict as head's — a false SHUT on 2026-08-29,
+// and a false OPEN just as readily.
+function shaEq(a, b) {
+  const x = String(a || "").toLowerCase();
+  const y = String(b || "").toLowerCase();
+  if (!x || !y) return false;
+  const n = Math.min(x.length, y.length);
+  if (n < 7) return false;              // too short to identify a commit
+  return x.slice(0, n) === y.slice(0, n);
+}
+
+let trunkHeadSha = null;
+let trunkHeadSource = null;
+let runSelection = null;
+if (HEAD_SHA_ARG) {
+  trunkHeadSha = HEAD_SHA_ARG;
+  trunkHeadSource = "--head-sha";
+} else if (CAPTURE_RUN) {
+  // REPLAY: the caller asserts the named run IS trunk head's run. Test-only —
+  // the live path passes neither flag. Recorded in the payload so a reading can
+  // never be mistaken for one taken against a resolved head.
+  trunkHeadSource = "capture-run-assertion";
+} else if (!NO_GIT) {
+  try {
+    trunkHeadSha = git("rev-parse", trunkRef);
+    trunkHeadSource = `git rev-parse ${trunkRef}`;
+  } catch (e) {
+    notEstablished("trunk-head-unresolved",
+      `\`git -C ${repoDir} rev-parse ${trunkRef}\` failed (${String(e.message).slice(0, 200)}), `
+      + `so the commit this question is ABOUT is unknown. A verdict read off whatever run `
+      + `happens to be newest would be a statement about a DIFFERENT commit (DEF-ROC-142). `
+      + `Fetch ${trunkRef} in ${repoDir}, or pass --head-sha.`);
+  }
+} else {
+  notEstablished("trunk-head-not-established",
+    `--no-git was given with no --head-sha and no --capture-run, so trunk head cannot be `
+    + `established. Nothing is known about the deploy lane, which is NOT the same as it `
+    + `being open (DEF-ROC-142).`);
+}
+
+let targetId;
+if (CAPTURE_RUN) {
+  targetId = CAPTURE_RUN;
+  runSelection = trunkHeadSha ? "capture-run-at-declared-head" : "capture-run-replay";
+} else {
+  const candidates = runList.filter((r) => shaEq(r.headSha, trunkHeadSha));
+  if (!candidates.length) {
+    const newest = runList[0];
+    notEstablished("no-run-for-trunk-head",
+      `no run of ${path.basename(cfg.workflowFile)} on ${branch} has head `
+      + `${String(trunkHeadSha).slice(0, 12)} (trunk head, per ${trunkHeadSource}), within the `
+      + `newest ${runList.length} run(s). THIS IS ORDINARY, NOT A FAULT: the workflow is `
+      + `PATH-FILTERED, so a commit touching none of its trigger paths — every items-only, `
+      + `process, or docs commit — produces no run at all. Nothing is therefore established `
+      + `about this commit: it is NEITHER open NOR shut, and the verdict of a different `
+      + `commit's run is not evidence about it (DEF-ROC-142: reading one BLOCKED a real cycle `
+      + `on 2026-08-29, and the same fallback returns a false OPEN just as readily). For `
+      + `reference only, NOT used: the newest run is ${newest.databaseId} at `
+      + `${String(newest.headSha).slice(0, 12)} (${newest.createdAt}), a DIFFERENT commit.`);
+  }
+  // Deterministic even if several runs share the head sha (a re-run, a manual
+  // dispatch): newest first, databaseId as the tie-break so ordering can never
+  // depend on how the API happened to return the list.
+  candidates.sort((a, b) => (String(b.createdAt).localeCompare(String(a.createdAt))
+    || Number(b.databaseId) - Number(a.databaseId)));
+  targetId = candidates[0].databaseId;
+  runSelection = "trunk-head";
+}
+
 let run;
 try {
   run = readRun(targetId);
 } catch (e) {
   notEstablished("gh-run-view-failed",
     `could not read run ${targetId} in ${cfg.repo} (${String(e.message).slice(0, 240)})`);
+}
+// The invariant restated where the verdict is actually formed: whatever route
+// chose this run, it must be TRUNK HEAD's. A mismatch here means the list and the
+// run disagree, or a replay was pointed at the wrong commit — never a verdict.
+if (trunkHeadSha === null) {
+  trunkHeadSha = run.headSha;           // the replay's asserted head
+} else if (!shaEq(run.headSha, trunkHeadSha)) {
+  notEstablished("run-not-for-trunk-head",
+    `run ${targetId} has head ${String(run.headSha).slice(0, 12)}, which is NOT trunk head `
+    + `${String(trunkHeadSha).slice(0, 12)} (per ${trunkHeadSource}). A verdict about another `
+    + `commit's run is not a verdict about trunk (DEF-ROC-142).`);
 }
 const runJobs = Array.isArray(run.jobs) ? run.jobs : [];
 if (!runJobs.length) {
@@ -436,8 +549,12 @@ const common = {
   lastOpenRunEstablished: lastOpenEstablished,
   undeliveredCommits,
   undeliveredItems,
+  trunkHeadSha,
+  trunkHeadSource,
+  runSelection,
   // Stated in the payload, not merely in a comment: the caller can assert that
-  // the run's overall conclusion was NOT the input to the decision.
+  // the run's overall conclusion was NOT the input to the decision, and (since
+  // DEF-ROC-142) that the run it decided about really is trunk head's.
   decidedBy: "deploy-job-and-needs-closure",
 };
 

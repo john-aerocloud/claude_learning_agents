@@ -22,19 +22,28 @@ hardcode the profile name.
 ## How you work
 1. Take the thin route (from `route.md`) chosen to advance the solution most per
    step. If no route exists yet, propose one as an ordered list of failing tests.
-2. **REFACTOR FIRST — before you write any new behaviour (§F14, owner ruling
-   2026-08-29).** On the code the coming change will touch: run the tests and START
-   GREEN (if they are red, that is a fix, not a refactor — a different act);
-   refactor behaviour-preservingly; re-run the SAME tests and prove still green;
-   **commit that separately**; only then start the new thing. A refactor mixed into a
-   feature diff is unreviewable and unrevertable — nobody can tell which hunk moved
-   code and which changed behaviour.
+2. **THE CYCLE IS REFACTOR → RED → GREEN (§F14, owner ruling 2026-08-29).** Not
+   red → green → refactor. **The refactor opens EVERY cycle, not just the first one of
+   an item.** Kent Beck's version is shorter than any explanation: *make the change
+   easy, then make the easy change.*
+   - **REFACTOR.** On a green tree, shape the code to receive the change you are about
+     to make. Behaviour-preserving — the tests are unchanged in what they assert.
+     Re-run them and prove still green; a refactor you do not re-verify is a change,
+     not an improvement. **Commit it separately**, before a line of the new behaviour
+     exists — a refactor mixed into a feature diff is unreviewable and unrevertable,
+     because nobody can tell which hunk moved code and which changed behaviour.
+   - **RED.** Write the failing test for the next increment. No production code
+     without a failing test first.
+   - **GREEN.** The minimum code to pass it. Then round again.
+   - **If the tree is not green when you arrive, you are FIXING, not refactoring.**
+     Different act, different name. Conflating them is how "refactor" becomes a word
+     for any edit made while the build is broken.
    - **Two goals, and they are the owner's words.** (a) **Rewrite tests to be
-     outside-in and connect them to personas and use-cases in a graph** — this is
-     where §F11.3's persona → job → use-case → variation → test chain actually gets
-     built, one touched use-case at a time, which turns the migration from a project
-     into a toll. (b) **Improve the KINDS of coupling — move things that change
-     together closer together.** Not less coupling; coupling that matches reality.
+     outside-in and connect them to personas and use-cases in a graph** — this is where
+     §F11.3's persona → job → use-case → variation → test chain actually gets built,
+     one touched use-case at a time, which turns the migration from a project into a
+     toll. (b) **Improve the KINDS of coupling — move things that change together
+     closer together.** Not less coupling; coupling that matches reality.
    - **You do not have to guess where.** The coupling analysis derives change-coupling
      from git history — which files actually change in the same commits — so the
      §F11.1 ratchet IS your work list. Read it off the GENERATED analysis, never off
@@ -42,202 +51,11 @@ hardcode the profile name.
    - **"I looked, and here is why I left it" is a valid outcome. Skipping the look is
      not.** Record what you refactored or deliberately did not, and why, on the item.
    - **BOUNDED, deliberately: only what the coming change touches.** An unbounded
-     refactor-first stalls delivery. The coming change names the blast radius.
-3. Strict TDD for the new behaviour: write a failing test (red) -> minimum code to
-   pass (green). No production code without a failing test first. Acceptance tests
-   define "done" for the slice; unit tests drive the design. **The design cleanup you
-   would once have done at the end of this cycle now happens at step 2 of the NEXT
-   piece of work** — that is the inversion, not a deletion.
-   - **Every acceptance condition is the UC's CONTRACT — a "thin/reuse" framing
-     WAIVES NONE of them (2026-07-23, UC-ADIX-020).** When a use-case is framed as
-     "thin" or "mostly reuse", you STILL owe EVERY acceptance condition on the UC —
-     plus the slice success-measure and the architecture-delta requirements it
-     traces to. "Thin" describes the ROUTE, it is NEVER a licence to silently drop a
-     condition and ship a partial UC as green. If a condition genuinely cannot or
-     should NOT be built, you must ESCALATE to product/solution-architect for an
-     explicit descope that REWRITES the acceptance text — never omit it silently.
-     And keep the change-graph (`.mmd`) CONSISTENT with the acceptance: do not leave
-     a required capability marked "deferred" in the diagram while the acceptance
-     still requires it. Founding failure: UC-ADIX-020 was built "thin"
-     (ceiling-adjust only) and silently dropped its own acceptance conditions 2 & 9
-     (suspend/revoke/terminate) — which the slice success-measure, delta 005
-     ("revocable — offboarding = revoke") and the J-CS-ENTITLE root-need all
-     required; the `.mmd` even marked `offboarding-revoke` "deferred" while the
-     acceptance still required it. The tester caught it at validation (the safety net
-     worked) but it cost a rework cycle. Sibling of the green-build-only-as-complete-
-     as-its-acceptance family (EXP-109/EXP-110/EXP-115).
-   - **"Reuse existing X" must be VERIFIED against the real deployed target, not
-     ASSUMED from another environment (2026-07-24, SLC-AIDX-011 scope-gap).** When a
-     slice/UC/architecture-delta says "reuse the existing X" (a stack, queue, table,
-     Lambda, bus, secret), assert-real-state FIRST: confirm X actually exists in the
-     TARGET deployed account/stack you are building against — never infer its presence
-     from a sibling environment. Founding case: UC-AIDX-028's "reuse the existing
-     C10/C11 ingest" premise was wrong — C10/C11 were SANDBOX-only; the account
-     migration had moved only the egress to dev-dataout, so the ingest was NOT there.
-     STOPPING (§F7) rather than building against an absent dependency was correct — it
-     let a predecessor UC (UC-030) + an architect delta (007) be inserted at the real
-     edge instead of compensating for a phantom. An "assumed-from-another-env" reuse is
-     a scope gap; falsify it against the live target before you build.
-   - **An "ensure/resolve" must handle a resource in a BAD/TRANSITIONAL state, not just
-     absent-vs-present (2026-07-24, DEF-ADIX-003 + UC-025).** For any idempotent
-     provisioning ("ensure") or resource resolution against AWS — secrets, queues,
-     eventing targets, per-container caches/resolvers — build the logic to handle the
-     resource's failure/transitional states, not only the there-or-not-there dichotomy:
-     a secret SCHEDULED-FOR-DELETION (`DescribeSecret` still returns the ARN mid-7-day
-     window) must be `RestoreSecret`d, not treated as provisioned; a queue in the ~60s
-     delete-recreate COOLDOWN (`QueueDeletedRecently`) must not block the caller past its
-     timeout (defer / heal-later), and not-found is the real SDK error name
-     (`QueueDoesNotExist`); an SQS DLQ target needs its RESOURCE POLICY, not just to
-     exist, for EventBridge to deliver; a per-container key CACHE must be ROTATION-AWARE
-     (invalidate+refetch on a verify failure / bounded TTL), never a stale-positive; a
-     freshly-created API-GW / EventBridge resource has a ~60s PROPAGATION lag — bounded-retry,
-     not immediate-fail. And prefer a SHARED recovery helper over per-path duplication:
-     DEF-ADIX-003's first fix landed the recovery in ONE secret path but not the other, so
-     the second offboard→reactivate still broke — the DRY fix `recoverIfScheduledForDeletion`
-     is now shared across both paths. Founding chain: DEF-ADIX-003 was THREE sequential
-     bugs in ONE offboard→reactivate flow (secret marked-for-deletion → DLQ cooldown timing
-     out the onboard Lambda → stale rotation-unaware cache); UC-025 added three more of the
-     same class. Every one was "handled absent/present but not the bad/transitional state".
-     Build the ensure/resolve against the architect's enumerated resource state-machine.
-   - **EventBridge target payload — pass a `detail` object VERBATIM with
-     `inputPath: "$.detail"`, NOT an `inputTransformer` `<placeholder>`; and always
-     wire a target `DeadLetterConfig` (2026-07-24, UC-AIDX-028's two reworks).** For an
-     EventBridge rule → SQS/target that must forward the event's `detail` object as the
-     message body:
-     - The DEFAULT rule delivery WRAPS the event (full envelope: `detail-type`,
-       `source`, `detail`, …), so a consumer that parses only the inner body treats it
-       as poison (UC-028 rework #1: C11's `parseEnvelope` rejected the wrapped event).
-     - To forward the inner object verbatim, use **`inputPath: "$.detail"`** (JSONPath
-       extraction). Do NOT use an `inputTransformer` with a bare `<detail>` object
-       placeholder: the `<placeholder>` idiom **quote-strips a nested OBJECT into
-       invalid JSON** (EventBridge `ERROR_CODE=INVALID_JSON`) — it only round-trips
-       STRING values (which is why the webhook router's flat string fields worked).
-       That was UC-028 rework #2.
-     - An EventBridge target with NO `DeadLetterConfig` makes delivery failures
-       (`FailedInvocations`) OPAQUE — you cannot see WHY delivery failed. Add a target
-       `DeadLetterConfig` so `ERROR_CODE`/`ERROR_MESSAGE` are inspectable, and
-       INSTRUMENT-FIRST: capture the real error before guessing at an opaque
-       cross-service delivery failure (the DLQ's `ERROR_CODE=INVALID_JSON` is what
-       pinpointed the `<placeholder>` bug). Leave an OFFLINE synth-pin behind for the
-       InputTransformer/`inputPath` shape + the `DeadLetterConfig`, so this
-       payload-shape class is caught offline next time, not only live.
-   - **An EXTERNAL-feed integration validated only against SYNTHETIC data is
-     built-to-a-guess, NOT done — pin against a REAL captured sample and treat the
-     live assert as a first-class acceptance step (2026-07-28, REQ-004 orphaned
-     consumer-side).** When you build ingestion/consumption of a feed whose contract
-     we do NOT own, your synth-pins must be pinned against the architect's REAL
-     captured wire sample (routing `source`/`detail-type`, delivery topology/bus,
-     envelope nesting) — not a shape you assume. A green synthetic suite proves only
-     self-consistency; it passes happily while the real contract differs on topology
-     or envelope, so it does not make the integration `built_green` in the real sense.
-     Do not report an external integration done until it has consumed a REAL message
-     from the REAL source end-to-end. Founding: REQ-004's dev consumer-side passed a
-     full synthetic suite (C12 bus, `source=oagEvents.producer`, top-level envelope)
-     yet was entirely orphaned from the real OAG feed (shared `oag-consumer-bus`,
-     `source=oag.eventstore`, envelope under `.detail`) — a large reconciliation
-     (delta 008) followed. Sibling of the EXP-115 whole-journey/live-assert family.
-   - **On a PUSH feed, a "gap" is the NORMAL join-mid-stream condition, not a dropped
-     delivery — tolerate it, do not pull-heal from a store that may not be the feed's
-     (2026-07-28, DEF-AIDX-007).** On an EventBridge (or any push/subscribe) feed the
-     first event we observe at `eventPosition > 0` means we JOINED mid-stream, not that
-     a delivery was lost — log + fold + continue (`GAP_HEAL_MODE` = tolerate). Do NOT
-     back-fill by pulling from an event store unless that store is provably the SAME
-     feed's source (DEF-007 gap-healed from the wrong/sandbox store on the push feed).
-     Select gap behaviour by feed MODE: a pull/catch-up feed heals; a push feed
-     tolerates.
-   - **A TEST YOU DID NOT RUN IS A TEST FAILED (2026-07-12).** "Green" /
-     `built_green` means the WHOLE suite passed — unit AND local/integration tiers.
-     **Needing Docker / DynamoDB-Local / an emulator is NOT a reason to skip a
-     test.** If the dependency is down, START it (`make -C <proj> local-up`; start
-     the Docker daemon itself if it isn't running) and RUN the tests. You may NOT
-     report an item green with ANY test unrun; "104/104 unit green" while the
-     local tier was skipped is NOT green — run the local tier and report it too.
-     Only if a dependency genuinely CANNOT be started in this environment is it a
-     BLOCKER you report explicitly (rare, justified) — never a silent skip. A
-     skipped local test let a stale `transactionIdentifier` assertion hide through
-     UC-ADIX-001/003/005 (principle-failure 2026-07-12).
-   - **"Green" includes the FULL BUILD GRAPH — `tsc -b` across ALL projects, not
-     just unit+lint (DEF-ROC-002 → DEF-ROC-006).** The fast test/lint gates
-     (vitest/eslint/oxlint) do NOT type-check the way the DEPLOY build does. Before
-     `built_green`/push, run the project's real build (`npm run build` / `make build`)
-     which type-checks EVERY tsconfig project — app source, node, AND committed
-     test/e2e specs. A committed spec that passes its runtime runner but fails `tsc -b`
-     is NOT green: DEF-ROC-006 shipped a Playwright e2e spec (`window`/`document` under
-     a dom-less tsconfig) that passed vitest+oxlint+Playwright yet broke the dashboard
-     `tsc -b` — which the CI DEPLOY build runs, so it would have turned CI red
-     post-push. Run the whole build locally so a type/build-graph break is caught before
-     push, not at deploy. (cicd: fold the dashboard/app `npm run build` into the
-     standing pre-push gate, not only the CI deploy step.)
-   - **Mirroring a stack to a new environment carries FIXTURES — strip them
-     (2026-07-29, AdixOut prod-branch).** When you stand up a NEW-environment stack by
-     mirroring a dev/reference boundary VERBATIM (especially prod), the dev/test
-     FIXTURES ride along — seed customers, hand-seeded data, and test doubles/receivers —
-     and MUST be stripped before any deploy: a real environment gets data ONLY via the
-     governed/real path, never a mirrored fixture. Founding case: the AdixOut prod branch
-     was built by mirroring dev verbatim, carrying the dev `synthetic-customer-a` seed,
-     hand-seeded legs, and the dev-only `WebhookTestReceiver` into the prod stack — caught
-     and stripped before any prod deploy. Audit a verbatim mirror for fixtures as an
-     explicit step; a mirrored fixture in a real stack is a defect.
-   - **A field with "never changes once set" semantics is derive-ONCE
-     (2026-07-29, DEF-AIDX-008 UFI-drift).** An identity field whose semantics say it is
-     fixed once set (e.g. the AIDX UFI `OriginDate`) must be derived ONCE, persisted, and
-     reused — NEVER recomputed from mutable operational data on later reads/writes.
-     `deriveOriginDate` recomputing from mutable operational timestamps drifted the UFI;
-     the fix pins it at ingest and reuses it. Derive-at-ingest + persist, never
-     recompute-from-mutable.
-   - **A TEST VALIDATES A REQUIREMENT, OR IT IS NOT A TEST — and a PRECONDITION MAY NOT BE
-     AUTHORED (v127 §17d, human ruling 2026-08-02).** Two obligations on every test you
-     write, both mechanised as `make test-requirement-gate PROJECT=<p>` and as `loop-gate`
-     check 6, so they are checked before every pull rather than remembered:
-     (1) **Name the acceptance criterion.** Every test case carries the `AC-<ID>.<n>` it
-     validates, in its own title, its suite title, or its comment. Coverage is NOT a goal
-     and is never a justification. A test that maps to no AC is exactly one of two things
-     and YOU must say which: **waste — delete it**, or **an acceptance criterion nobody
-     wrote down** — register it as a real AC and flag the discovery gap for the retro.
-     A file-level `@covers AC-x` does not discharge this: it is a claim about the module,
-     not about this case.
-     (2) **Never author the precondition.** If your prior is built by MUTATING a real
-     capture — `delete capture.x.y`, an override spread over a corpus-loaded fixture, a
-     hand-set FOLD-DERIVED field like `{state:'Cancelled'}` — you have authored the world,
-     and the test can only confirm the code. **Fold the prior from events, or harvest it.**
-     And never stub the boundary your claim is ABOUT: a fact about what a real command DOES
-     cannot be established by stubbing the exec boundary. Founding evidence, three
-     independent instances in ONE session: `uc-hf041-cancellation-recovery.test.ts` built
-     its "pre-fix stream" by re-ingesting a REAL capture with `statusDetails[].state`
-     DELETED — exactly the leaf whose presence breaks the heal — and stayed green at
-     2,171 tests while **nine real cancellations sat unhealed in prod** on the
-     passenger-facing feed, including the flight a customer reported; the
-     `awaiting_observation` probe test stubbed `subprocess.run` so it "only proved the
-     mapping agreed with itself", and against a real `make` every probe read BROKEN; and
-     the provenance ledger's `read` dispositions were declared, not proven — 8 fell when
-     tested differentially. The gate ships in RATCHET mode against a committed baseline
-     that may ONLY SHRINK; a count above it BLOCKS the loop. **Clearing the baseline by
-     mass-tagging is a FAILED experiment, not progress** (EXP-124) — it reproduces exactly
-     the coverage theatre the ruling rejects.
-   - **Real-source fixtures for external/live data (v61, DEFECT-OAG-016).** When
-     code consumes a shape you do not own — an API response, an event body, a
-     third-party schema — the test fixtures MUST be captured from the REAL source
-     (a recorded sample committed under `tests/fixtures/`), never hand-authored to
-     match the code's assumed shape. Hand-matched fixtures make the test and the
-     code share the same wrong assumption, so the suite is green while prod is
-     broken (152 FIDS tests passed against `departure.scheduled.*` fields that do
-     not exist in real OAG data -> the deployed board was empty). Pin the failing
-     test against the real shape FIRST.
-   - **Real-VOLUME/aging fixtures for windowed-scan folds (v78, DEFECT-OAG-040, EXP-092).**
-     Real *shape* is not enough. When your route makes a WINDOWED / bounded-scan /
-     pagination / recency-cutoff / backward-scan-from-head assumption over an event
-     stream (a fold, a read-model hydration, a bootstrap that scans back from head,
-     an incremental-poll cursor), the test corpus MUST include a real-VOLUME fixture
-     with enough intervening NON-target events that the target event AGES PAST the
-     window — so the bounded-window assumption is EXERCISED and can be falsified. A
-     low-volume / single-page fixture (even one captured from the real source) never
-     reproduces the aging and false-greens the fold. State the scan-window bound as
-     an EXPLICIT invariant in route.md, not an implicit assumption. (DEFECT-OAG-040:
-     the FIDS status marker was seeded only within a bounded backward-scan window;
-     on the real feed a page of 66 EstimatedArrivalChanged pushed each flight's
-     OnBlock/OffBlock/TakenOff event out of the window → every flight fell back to
-     "Scheduled" while 412 unit tests stayed green. Gate/Arrival columns worked
-     because they read fields, not the window-seeded marker.)
+     refactor stalls delivery, and at cycle granularity the radius is smaller still —
+     which is why this belongs in the cycle rather than at the item boundary.
+3. Acceptance tests define "done" for the slice; unit tests drive the design. **The
+   design cleanup you would once have done at the END of a cycle now opens the NEXT
+   one** — that is the inversion, not a deletion.
 4. **THE EXIT GATE — you do not hand over until these hold (§F11, v160, owner-mandated).**
    Before you report a use-case or defect ready for the tester:
    - **Complexity and coupling did not get WORSE.** `AeroCloudSystems/CodeAnalysisTools` runs

@@ -12,13 +12,17 @@ deviate when a problem demands it, but log it.
 ## The defaults
 - **XP** — short loops, simple design, continuous refactor, customer (Product)
   on hand, collaborate across agents.
-- **Always TDD** — no production code without a failing test first; red -> green
-  ; acceptance tests define "done", unit tests drive design. **The refactor is NOT the
-  third beat of this cycle (§F14, owner ruling 2026-08-29) — it happens BEFORE the new
-  work, on a green tree, in its own commit.** Refactoring at the end competes with
-  "done" and is the step that gets minimised; refactoring first is safer (nothing is
-  half-built), pays into the change you are about to make rather than a hypothetical
-  future one, and is bounded by construction to what that change touches.
+- **Always TDD, and the cycle is REFACTOR → RED → GREEN** (§F14, owner ruling
+  2026-08-29) — *not* red → green → refactor. **The refactor opens every cycle**: on a
+  green tree, shape the code to receive the change (committed separately), then write the
+  failing test, then the minimum code to pass. No production code without a failing test
+  first; acceptance tests define "done", unit tests drive design. Beck's formulation is
+  shorter: *make the change easy, then make the easy change* — the refactor is what makes
+  it easy, so it necessarily comes first. Refactoring at the END competes with "done" and
+  is the beat that gets minimised; refactoring first is safer (nothing is half-built),
+  pays into the change you are about to make rather than a hypothetical future one, and is
+  bounded by construction to what that change touches. **If the tree is not green when you
+  arrive you are FIXING, not refactoring** — different act, different name.
 - **Slice value (Killick)** — ship the smallest increment that lets a real user
   do something valuable they could not before, tied to a Job to Be Done. If a
   slice only enables future work, it is too big/early. Value defines the slice,

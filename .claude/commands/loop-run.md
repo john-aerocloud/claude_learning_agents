@@ -176,7 +176,7 @@ Each cycle:
    each; note `achieved=K max=M` in the pull report.
 4. **Run the inner dev loop for each pulled UC, concurrently** (isolated by §40
    flags, never branches): `cicd` (if capability needed) → `ui-designer`
-   structure (if UI) → `engineer` (§F14 REFACTOR-FIRST on a green tree, committed separately, THEN TDD red→green for the new behaviour, on trunk) →
+   structure (if UI) → `engineer` (§F14: every cycle is REFACTOR → RED → GREEN — refactor on a green tree and commit it separately, then the failing test, then the code; on trunk) →
    `ui-designer` validate (if UI) → deploy (per-UC; **auto-approves under the §F5a
    policy assurance** — no human gate, §9a/§F5) → `tester` (validate in prod). Append the stage events
    via `make wi-append` as each completes: `built_green` (engineer, building→deploying),

@@ -304,6 +304,14 @@ class TestGeneralisationSweep(unittest.TestCase):
         # metacharacter of any kind — and the spec is invoked as an argv LIST, never
         # a shell string. Same disposition, and the same reason, as OBSERVE.
         "PROBE",
+        # OWNER [v11, OI-ROC-006]: a comma-separated list of ROLE NAMES from the
+        # closed `firing_rights.known_roles` set, not prose. It is never stored as
+        # human text — `owner_set` splits it and the append REFUSES any role the
+        # graph does not know, so a value carrying a shell metacharacter cannot
+        # name a role and is rejected on its meaning rather than surviving mangled
+        # into the permanent record. Same disposition, and the same reason, as
+        # AGENT and EVENT, which are the other closed-vocabulary fields.
+        "OWNER",
         "PATHS", "REPO", "NOW", "TS",
         # the file routes themselves: a PATH, which is the whole point — it has no
         # metacharacters, so nothing downstream can eat it.

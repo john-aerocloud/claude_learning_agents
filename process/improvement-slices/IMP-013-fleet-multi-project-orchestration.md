@@ -1,5 +1,7 @@
 # IMP-013 — Fleet / multi-project orchestration (main thread is not the per-UC worker)
 
+**Status:** SUPERSEDED (v159 retro, ROC 2026-08-29) — delivered as §F10 (Fleet: isolated per-project loops, one shared process spine) plus the worktree-per-project topology in §0a and `.claude/scripts/worktree`. The main thread is already a fleet supervisor whose cost is O(decisions); the residual (per-project background runners) is not this slice's framing.
+
 **Owner:** orchestrator → evolves into a fleet-manager role. Builds on IMP-012 (per-project Workflow loop + process-tax).
 **Why:** the human needs N projects running concurrently, each like the current single-project loop, switching between them — WITHOUT the single main thread becoming the bottleneck.
 

@@ -1,5 +1,7 @@
 # IMP-031 — the constraint metric counts DECIDED-AND-PARKED inventory as WAITING
 
+**Status:** QUEUED — BLOCKED ON THE OWNING PROJECT (re-decided v159 retro, ROC 2026-08-29). Cited by ACTIVE OagEventSource rows `EXP-OAG-005` and `EXP-OAG-002`, which are being scored against a mechanism that does not exist — the false-negative shape check 19 exists to catch. ROC has NO STANDING to retire it (§25a v143/v145): reporting it here and adding a strike is the whole of what ROC may do.
+
 **Opened:** 2026-08-21 (v146 retro, OagEventSource)
 **Owner:** work-item machinery (`.claude/skills/work-items/scripts/work-items.py`) — parent-repo lane
 **Targets:** lead time (via making the named constraint actionable)

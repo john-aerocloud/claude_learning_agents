@@ -1,0 +1,528 @@
+name: PPS Event Aggregation / Test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/app/**"
+      - "src/dashboard/**"
+      - "src/tools/replay-injector/**"
+      - ".github/workflows/deploy-ROC.yml"
+  pull_request:
+    paths:
+      - "src/app/**"
+      - "src/dashboard/**"
+      - "src/tools/replay-injector/**"
+      - ".github/workflows/deploy-ROC.yml"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  # DEF-ROC-024: key by ref, not a hardcoded constant. A hardcoded group name
+  # meant every PR shared one queue slot with every other PR AND with `main` --
+  # a new push's pending run evicted (cancelled) whatever was already pending in
+  # that group, no matter which branch it belonged to (7/10 PR runs cancelled
+  # over the last 50). `deploy-test` (the only job needing cross-push
+  # serialisation) is gated `if: github.event_name != 'pull_request'`, so the
+  # serialisation it needs exists only AMONG pushes to `main` -- all of which
+  # share refs/heads/main and so still share one group under this ref-keyed
+  # name. Every PR now gets its own ref-scoped group: a PR's own re-pushes can
+  # still self-cancel their own stale runs, without touching any other PR's or
+  # main's runs.
+  group: pps-event-aggregation-test-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  test-function-app:
+    name: Function App / lint, test and build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: src/app/.nvmrc
+          cache: npm
+          cache-dependency-path: src/app/package-lock.json
+      - run: npm ci --include=dev
+      - run: npm run lint
+      - run: npm run test
+      # DEF-ROC-070 -- `npm run build` (`tsc -p tsconfig.json`, the WHOLE project graph:
+      # src + local + tests) is a DIFFERENT, WIDER check than `build:functions` below
+      # (deploy-artifact-only, excludes tests/local -- see tsconfig.functions.json).
+      # Neither vitest nor eslint type-checks a test file's imports, so a spec that
+      # imports an untyped module (e.g. a plain .mjs script with no declaration file)
+      # can be green everywhere except here -- exactly the DEF-ROC-002/006 false-green
+      # class, now closed for src/app the same way DEF-ROC-006 closed it for the
+      # dashboard (deploy-ROC.yml already ran the dashboard's full `npm run build`;
+      # src/app's equivalent had never been wired into any gate, local or CI, until
+      # this line). Runs BEFORE the slow emulator/acceptance steps so a type-check
+      # red fails fast.
+      - run: npm run build
+      # UC-ROC-093 — THIS JOB SPAWNS ANOTHER PACKAGE, SO IT MUST INSTALL IT.
+      # `tests/acceptance/uc093-practice-cycle.test.ts` drives the trainer's real
+      # command (`npm --prefix src/tools/replay-injector run local:practice`) as a
+      # CHILD PROCESS, deliberately: what a trainer runs is a command, and
+      # src/app cannot import the injector anyway (separate npm packages,
+      # tsconfig.functions.json's rootDir makes it a hard TS6059). The
+      # test-replay-injector job installs that package — on a DIFFERENT runner, so
+      # this job could not see it, and the spec failed 5/5 with
+      # ERR_MODULE_NOT_FOUND for `xlsx`, which SKIPPED deploy-test and blocked
+      # UC-ROC-105 as well (run 33074315261 on 56900d8).
+      #
+      # Note what made that failure PARTIAL and therefore confusing: `tsx` itself
+      # resolved, because the vitest process inherits a PATH containing
+      # src/app/node_modules/.bin and src/app carries tsx as a devDep — so the
+      # child launched on an ACCIDENT and died only on `xlsx`, which src/app does
+      # not have. This step removes the accident; the spec also asserts both
+      # binaries resolve from the injector's OWN node_modules and names this step
+      # if they do not, so the next occurrence is a one-line diagnosis.
+      - name: Install replay-injector (the UC-ROC-093 practice cycle spawns it)
+        run: npm ci --include=dev --prefix ../tools/replay-injector
+      - name: Start local emulator stack
+        run: npm run local:up
+      - name: Wait for local emulators
+        # Real readiness poll (IMP-023), NOT a blind sleep: the SB/EH emulator
+        # containers open their AMQP port before their topic/hub entities finish
+        # syncing, so a fixed sleep is a coin-flip. Reuses the SAME proven
+        # helpers demo.sh already gates on (scenarios/lib.sh: wait_for_port +
+        # wait_for_log on the "Emulator Service is Successfully Up!" marker) so
+        # CI and local share one readiness mechanism, never two that can drift.
+        shell: bash
+        run: |
+          set -euo pipefail
+          # shellcheck source=../../scenarios/lib.sh
+          source "$GITHUB_WORKSPACE/scenarios/lib.sh"
+          wait_for_port localhost 5672  90 "Service Bus emulator"
+          wait_for_port localhost 5673  90 "Event Hubs emulator"
+          wait_for_port localhost 10000 90 "Azurite Blob (EH checkpoints)"
+          wait_for_port localhost 10002 90 "Azurite Table (decision log)"
+          SB_READY_MARKER="Emulator Service is Successfully Up!"
+          wait_for_log roc-local-servicebus "$SB_READY_MARKER" 90 "Service Bus topic/subscription"
+          wait_for_log roc-local-eventhubs  "$SB_READY_MARKER" 90 "Event Hubs hub/consumer-group"
+      - name: Run local acceptance tests
+        run: npm run test:acceptance
+      - name: Stop local emulator stack
+        if: always()
+        run: npm run local:down
+      - run: npm run build:functions
+
+  test-web-app:
+    name: Web App / lint, test and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: src/dashboard/package-lock.json
+      - name: Validate required config
+        run: |
+          missing=""
+          [ -z "${{ secrets.DESIGN_SYSTEM_TOKEN }}" ] && missing="$missing DESIGN_SYSTEM_TOKEN"
+          if [ -n "$missing" ]; then
+            echo "Missing required config:$missing"
+            exit 1
+          fi
+      # DESIGN_SYSTEM_TOKEN needs `read:packages`, SSO-authorized for
+      # AeroCloudSystems, to resolve @aerocloudsystems/design-system from
+      # GitHub Packages (npm.pkg.github.com). Never inline the token value.
+      - name: Configure GitHub Packages registry auth for @aerocloudsystems
+        working-directory: src/dashboard
+        run: cp .npmrc.example .npmrc
+      - working-directory: src/dashboard
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.DESIGN_SYSTEM_TOKEN }}
+        run: npm ci --include=dev
+      - working-directory: src/dashboard
+        run: npm run lint
+      - working-directory: src/dashboard
+        run: NODE_ENV=test npm run test
+      - working-directory: src/dashboard
+        run: npm run build
+
+  audit:
+    # DEF-ROC-025 -- dependency-vulnerability audit gate (process v91/EXP-112,
+    # v107, DEF-ROC-007). Prod-runtime-scoped (--omit=dev) on src/app and
+    # src/dashboard is BLOCKING (a high/critical there ships to customers);
+    # src/tools/replay-injector is never deployed, so its advisories (incl.
+    # xlsx, no upstream fix) are surfaced but tracked-only, never blocking --
+    # see Makefile's `audit` target for the full reasoning. Deliberately NOT
+    # in deploy-test's `needs:` (DEF-ROC-013 class: an advisory-only red must
+    # never block an application deploy).
+    name: Dependency audit (prod-runtime, blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm --prefix src/app ci
+      - name: Validate required config
+        run: |
+          missing=""
+          [ -z "${{ secrets.DESIGN_SYSTEM_TOKEN }}" ] && missing="$missing DESIGN_SYSTEM_TOKEN"
+          if [ -n "$missing" ]; then
+            echo "Missing required config:$missing"
+            exit 1
+          fi
+      - name: Configure GitHub Packages registry auth for @aerocloudsystems
+        run: cp src/dashboard/.npmrc.example src/dashboard/.npmrc
+      - env:
+          NODE_AUTH_TOKEN: ${{ secrets.DESIGN_SYSTEM_TOKEN }}
+        run: npm --prefix src/dashboard ci
+      - run: npm --prefix src/tools/replay-injector ci
+      - run: make audit
+
+  test-replay-injector:
+    # DEF-ROC-023 — src/tools/replay-injector (102 tests across 8 files) was never
+    # built, linted or tested by any workflow because the path filter above
+    # excluded it entirely. This job closes that gap. It is DELIBERATELY NOT in
+    # deploy-test's `needs:` (see below) — the injector is a standalone,
+    # never-deployed tool (`tsx` ad hoc), so its own local `test`/`lint`/`build`
+    # scripts are the whole job; no Azure emulator or live connectivity is
+    # required (its own suite runs against a mocked Service Bus sender).
+    name: Replay Injector / lint, test and build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/tools/replay-injector
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: src/tools/replay-injector/package-lock.json
+      - run: npm ci --include=dev
+      - run: npm run lint
+      - run: npm run test
+      - run: npm run build
+
+  deploy-test:
+    name: Deploy Function App and Web App to AAS test
+    if: github.event_name != 'pull_request'
+    needs: [test-function-app, test-web-app]
+    runs-on: ubuntu-latest
+    environment: test
+    env:
+      FUNCTION_RESOURCE_GROUP: rg-aas-pps-event-aggregation-function-test-cus-001
+      FUNCTION_APP_NAME: func-aas-pps-event-aggregation-test-cus-001
+      WEB_RESOURCE_GROUP: rg-aas-pps-event-aggregation-web-test-cus-001
+      WEB_APP_NAME: app-aas-pps-event-aggregation-web-test-cus-001
+      TEST_URL: https://app-aas-pps-event-aggregation-web-test-cus-001.azurewebsites.net
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build Function App package
+        working-directory: src/app
+        run: |
+          set -euo pipefail
+          npm ci --include=dev
+          npm run build:functions
+          stage="$RUNNER_TEMP/function-package"
+          mkdir -p "$stage"
+          cp host.json package.json package-lock.json "$stage/"
+          cp -R dist "$stage/dist"
+          # DEF-ROC-079 — the build identity travels INSIDE the artifact. The
+          # BUILD_SHA app setting is written through ARM and succeeds even when the
+          # publish that follows it fails, so an app setting can never prove which
+          # code is running. This file can: a failed publish leaves the previous one
+          # in place, so `buildSha` stays old and the post-deploy assertion FAILS.
+          printf '{"buildSha":"%s"}\n' "${{ github.sha }}" > "$stage/build-identity.json"
+          npm ci --omit=dev --ignore-scripts --prefix "$stage"
+          (cd "$stage" && zip -q -r "$RUNNER_TEMP/function-app.zip" .)
+
+      - name: Validate required config
+        run: |
+          missing=""
+          [ -z "${{ secrets.DESIGN_SYSTEM_TOKEN }}" ] && missing="$missing DESIGN_SYSTEM_TOKEN"
+          if [ -n "$missing" ]; then
+            echo "Missing required config:$missing"
+            exit 1
+          fi
+      # DESIGN_SYSTEM_TOKEN needs `read:packages`, SSO-authorized for
+      # AeroCloudSystems, to resolve @aerocloudsystems/design-system from
+      # GitHub Packages (npm.pkg.github.com). Never inline the token value.
+      - name: Configure GitHub Packages registry auth for @aerocloudsystems
+        run: cp src/dashboard/.npmrc.example src/dashboard/.npmrc
+
+      - name: Build Web App package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.DESIGN_SYSTEM_TOKEN }}
+        run: |
+          set -euo pipefail
+          npm ci --include=dev --prefix src/dashboard
+          npm run build --prefix src/dashboard
+          stage="$RUNNER_TEMP/web-package"
+          mkdir -p "$stage"
+          cp src/dashboard/server.mjs "$stage/server.mjs"
+          cp -R src/dashboard/dist "$stage/dist"
+          printf '%s\n' '{"name":"pps-event-aggregation-web","private":true,"type":"module","scripts":{"start":"node server.mjs"}}' > "$stage/package.json"
+          (cd "$stage" && zip -q -r "$RUNNER_TEMP/web-app.zip" .)
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Temporarily allow this runner to access Kudu
+        id: kudu-access
+        shell: bash
+        run: |
+          set -euo pipefail
+          runner_ip=$(curl -fsSL https://api.ipify.org)
+          echo "runner_ip=$runner_ip" >> "$GITHUB_OUTPUT"
+          scm_rules=$(python3 -c 'import json,sys; print(json.dumps([{"ipAddress":sys.argv[1]+"/32","action":"Allow","priority":110,"name":"github-actions-zip-deploy","description":"Temporary GitHub Actions ZIP deploy access"}]))' "$runner_ip")
+
+          allow_kudu() {
+            local app_command="$1"
+            local resource_group="$2"
+            local app_name="$3"
+
+            az "$app_command" update --resource-group "$resource_group" --name "$app_name" --set publicNetworkAccess=Enabled
+            az resource update \
+              --resource-group "$resource_group" \
+              --name "$app_name" \
+              --resource-type Microsoft.Web/sites \
+              --set properties.siteConfig.scmIpSecurityRestrictions="$scm_rules" properties.siteConfig.scmIpSecurityRestrictionsDefaultAction=Deny properties.siteConfig.ipSecurityRestrictions="$scm_rules" properties.siteConfig.ipSecurityRestrictionsDefaultAction=Deny
+          }
+
+          allow_kudu functionapp "$FUNCTION_RESOURCE_GROUP" "$FUNCTION_APP_NAME"
+          allow_kudu webapp "$WEB_RESOURCE_GROUP" "$WEB_APP_NAME"
+          sleep 90
+
+      # DEF-ROC-021 retry (deliberately narrowed scope) — wire the cloud Jira
+      # egress's Key Vault credential path. Stamped by the pipeline, same shape
+      # as BUILD_SHA above, because this AAS test Function App is not
+      # Terraform-managed.
+      #
+      # NEVER AZURE_CLIENT_ID. The 2026-08-05 incident: setting it globally
+      # repointed EVERY `DefaultAzureCredential` in the process — including the
+      # Functions host's own identity-based AzureWebJobsStorage/SERVICEBUS/
+      # EVENTHUB connections — at an identity holding only `Key Vault Secrets
+      # User`, and a host that cannot reach its own content share does not
+      # answer (502 for five minutes) while the control plane still reports
+      # `Running`. This retry names its OWN scoped variable instead:
+      # ROC_KEY_VAULT_CLIENT_ID, read by
+      # `KeyVaultSecretAdapter.managedIdentityClientId` and passed EXPLICITLY
+      # as `managedIdentityClientId` on the Key Vault credential only — the
+      # host's own connections are left resolving exactly as before.
+      #
+      # The clientId below is the app's EXISTING user-assigned identity
+      # (`id-aas-identity-cus-security`, object id a30f2c37-…) which already
+      # holds `Key Vault Secrets User` on `aasidcusseckv01` — no RBAC change.
+      #
+      # ROC_JIRA_REAL now gates BOTH the local file path and this Key Vault
+      # path (DEF-ROC-021 finding 1), so it is set true here too — without it
+      # the Key Vault branch would THROW by design (a working kill switch,
+      # unlike the first attempt) and `selectHostJiraResult` would degrade the
+      # egress to refusing rather than take the host down.
+      - name: Stamp the Jira Key Vault egress wiring onto the Function App
+        run: |
+          az functionapp config appsettings set \
+            --resource-group "$FUNCTION_RESOURCE_GROUP" \
+            --name "$FUNCTION_APP_NAME" \
+            --settings \
+              KEY_VAULT_URI="https://aasidcusseckv01.vault.azure.net/" \
+              ROC_KEY_VAULT_CLIENT_ID="62988811-e66d-4d9d-b446-e5dbb36f1ddc" \
+              ROC_JIRA_REAL="true" \
+            --output none
+
+      # DEF-ROC-035 — the OTel -> Dash0 telemetry leg. Same reasoning as the Jira
+      # Key Vault stamp above: aas-test is not Terraform-managed, so an app
+      # setting only exists if a step here sets it. Deliberately NON-BLOCKING
+      # (unlike the "Validate required config" fail-fast steps elsewhere in this
+      # workflow): the Dash0 ingestion endpoint + auth token are an outstanding
+      # human ask (docs/usage.md, Secrets section, Dash0 OTel telemetry), not a deploy prerequisite
+      # -- gating every ROC deploy on an unrelated observability secret would be
+      # disproportionate. Absent config -> the app-side exporter stays disabled
+      # (a loud `telemetry.dash0.disabled` startup warning, never a silent
+      # no-op -- see telemetry/dash0Metrics.ts) and this step says so in-band
+      # rather than pretending to be configured.
+      - name: Stamp the Dash0 OTel telemetry wiring onto the Function App (best-effort)
+        run: |
+          set -euo pipefail
+          if [ -n "${{ secrets.ROC_DASH0_AUTH_TOKEN }}" ] && [ -n "${{ vars.ROC_DASH0_OTLP_ENDPOINT }}" ]; then
+            az functionapp config appsettings set \
+              --resource-group "$FUNCTION_RESOURCE_GROUP" \
+              --name "$FUNCTION_APP_NAME" \
+              --settings \
+                OTEL_EXPORTER_OTLP_ENDPOINT="${{ vars.ROC_DASH0_OTLP_ENDPOINT }}" \
+                OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer ${{ secrets.ROC_DASH0_AUTH_TOKEN }}" \
+                OTEL_SERVICE_NAME="roc-aas-test" \
+                ROC_DEPLOYMENT_ENVIRONMENT="test" \
+              --output none
+            echo "Dash0 OTel telemetry wired (endpoint: ${{ vars.ROC_DASH0_OTLP_ENDPOINT }})."
+          else
+            echo "Dash0 OTel telemetry NOT wired -- ROC_DASH0_OTLP_ENDPOINT (repo/environment VAR) and/or ROC_DASH0_AUTH_TOKEN (secret) are unset. This is a known SETUP GAP (see docs/usage.md, Secrets section, Dash0 OTel telemetry), not a deploy failure: the app-side exporter stays disabled and logs telemetry.dash0.disabled at startup."
+          fi
+
+      # DEF-ROC-041 -- THE QUERYABLE LOG SINK. Without this step the Function App
+      # has no Application Insights, no Log Analytics workspace and no log
+      # exporter, so `console.error` goes to a host stream nobody can query --
+      # and the runbook step DEF-ROC-035's tester relied on ("query the log by
+      # quarantineMessageId", which is why the escaped node/device/messageId were
+      # accepted as safe to keep OFF the metric) was aspirational prose.
+      #
+      # BLOCKING, unlike the two best-effort stamps above, and the difference is
+      # the dependency: those wait on a secret nobody has supplied (Dash0) or
+      # degrade to a tested closed state. This one depends on nothing outside the
+      # subscription -- measured 2026-08-24: this service principal holds
+      # Contributor at subscription scope, both providers are Registered, and
+      # `az deployment group what-if` returns Create for both resources with no
+      # policy objection. A `|| true` here would turn "the alert cannot be
+      # worked" back into normal operation, which is the permissive-fallback
+      # class we have been bitten by. If it fails, the sink is missing: red.
+      #
+      # Idempotent (ARM incremental PUT) and deliberately re-run every deploy, so
+      # a platform-infra apply that deletes it (DEF-ROC-020, which is exactly how
+      # BUILD_SHA vanished on 2026-08-04) is SELF-HEALED at the next deploy
+      # rather than waiting for the 6-hourly drift alarm.
+      - name: Ensure the queryable log sink exists and the app points at it
+        run: scripts/ensure-log-sink.sh "$FUNCTION_RESOURCE_GROUP" "$FUNCTION_APP_NAME"
+
+      - name: Deploy Function App
+        run: |
+          az functionapp deployment source config-zip \
+            --resource-group "$FUNCTION_RESOURCE_GROUP" \
+            --name "$FUNCTION_APP_NAME" \
+            --src "$RUNNER_TEMP/function-app.zip" \
+            --timeout 900
+
+      # DEF-ROC-016 + DEF-ROC-079 — stamp the commit onto the app AFTER the code is
+      # published, never before. This step used to run first, with the reasoning that
+      # "the setting change restarts the app; the ZIP deploy that follows restarts it
+      # again, so ordering it first costs nothing." That was wrong, and the cost was the
+      # whole point of the check downstream: an ARM app-setting write succeeds even when
+      # the publish fails, so a failed deploy still advanced the reported build AND
+      # still satisfied the smoke test, because both sides of that comparison came from
+      # `github.sha`. Identity now travels inside the artifact
+      # (`build-identity.json`, written at packaging time and preferred by
+      # `buildIdentity.ts`); this setting remains only as the fallback the Terraform
+      # estates rely on, and it is written last so it can never front-run the code.
+      - name: Stamp the deployed build identity onto the Function App
+        run: |
+          az functionapp config appsettings set \
+            --resource-group "$FUNCTION_RESOURCE_GROUP" \
+            --name "$FUNCTION_APP_NAME" \
+            --settings BUILD_SHA="${{ github.sha }}" \
+            --output none
+
+      - name: Verify both Azure Functions triggers were indexed
+        shell: bash
+        run: |
+          set -euo pipefail
+          functions_file="$RUNNER_TEMP/functions.json"
+          function_url="https://${FUNCTION_APP_NAME}.azurewebsites.net"
+          for attempt in {1..30}; do
+            master_key=$(az functionapp keys list \
+              --resource-group "$FUNCTION_RESOURCE_GROUP" \
+              --name "$FUNCTION_APP_NAME" \
+              --query masterKey \
+              --output tsv 2>/dev/null || true)
+            if [[ -n "$master_key" ]] && \
+               curl -fsS \
+                 -H "x-functions-key: $master_key" \
+                 "$function_url/admin/functions" > "$functions_file"; then
+              if python3 - "$functions_file" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              functions = json.load(handle)
+
+          indexed = {}
+          for function in functions:
+              short_name = function.get("name", "").rsplit("/", 1)[-1]
+              bindings = function.get("config", {}).get("bindings", [])
+              indexed[short_name] = {binding.get("type") for binding in bindings}
+
+          assert "serviceBusTrigger" in indexed.get("roc-forwarder", set())
+          assert "eventHubTrigger" in indexed.get("roc-consumer", set())
+          PY
+              then
+                exit 0
+              fi
+            fi
+            sleep 10
+          done
+          echo "Function host did not index roc-forwarder and roc-consumer within five minutes" >&2
+          exit 1
+
+      - name: Deploy Web App
+        run: |
+          az webapp deploy \
+            --resource-group "$WEB_RESOURCE_GROUP" \
+            --name "$WEB_APP_NAME" \
+            --src-path "$RUNNER_TEMP/web-app.zip" \
+            --type zip \
+            --clean true \
+            --restart true \
+            --timeout 900000
+
+      # Both anonymous paths (REQ-ROC-005 AC-1 exempts `/health` + `/api/health` from
+      # the whole-host auth policy precisely so this gate can curl them unauthenticated).
+      # DEF-ROC-016 adds ONE assertion to the existing four: the running host reports the
+      # commit just deployed. That is what makes a deploy claim FALSIFIABLE — before it,
+      # a green gate proved only that some healthy build was answering.
+      #
+      # DEF-ROC-021 retry adds ONE more, deliberately narrow: `jiraEgress.configured`
+      # must read "keyvault" — a PURE derivation of the two settings the step above
+      # just stamped (`configuredJiraEgress`, jiraEgressStatus.ts), so it catches a
+      # silent stamp failure immediately rather than at the next drift probe. It does
+      # NOT assert `degraded`/absence of it: that field is only populated once a
+      # composition has actually run in this worker, which needs an inbound event
+      # (DEF-ROC-021 cause 1 — currently blocked, tracked separately) — so whether the
+      # credential itself resolves end-to-end is NOT asserted here and remains the
+      # item's honest open limit. It also does not touch `ok`, unchanged on purpose
+      # (jiraEgress never feeds health status — the 2026-08-05 amplification).
+      - name: Verify the test deployment and pipeline data-plane connectivity
+        shell: bash
+        env:
+          EXPECTED_BUILD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          for attempt in {1..30}; do
+            if curl -fsS "$TEST_URL/health" >/dev/null && \
+               curl -fsS "$TEST_URL/api/health" | python3 -c 'import json,os,sys; data=json.load(sys.stdin); assert data["ok"] is True and data["serviceBus"] == "reachable" and data["eventHubs"] == "reachable" and data["subscription"] == "roc-test" and data["buildSha"] == os.environ["EXPECTED_BUILD_SHA"] and data["jiraEgress"]["configured"] == "keyvault"'; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Test deployment did not become healthy within five minutes" >&2
+          exit 1
+
+      - name: Remove temporary Kudu and smoke-test access
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          remove_kudu_access() {
+            local app_command="$1"
+            local resource_group="$2"
+            local app_name="$3"
+
+            az resource update \
+              --resource-group "$resource_group" \
+              --name "$app_name" \
+              --resource-type Microsoft.Web/sites \
+              --set properties.siteConfig.scmIpSecurityRestrictions='[]' properties.siteConfig.scmIpSecurityRestrictionsDefaultAction=Deny properties.siteConfig.ipSecurityRestrictions='[]' properties.siteConfig.ipSecurityRestrictionsDefaultAction=Deny
+            az "$app_command" update --resource-group "$resource_group" --name "$app_name" --set publicNetworkAccess=Disabled
+          }
+
+          remove_kudu_access functionapp "$FUNCTION_RESOURCE_GROUP" "$FUNCTION_APP_NAME"
+          remove_kudu_access webapp "$WEB_RESOURCE_GROUP" "$WEB_APP_NAME"

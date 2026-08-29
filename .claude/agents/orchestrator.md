@@ -23,6 +23,27 @@ write code. Your job is flow.
 - You NEVER make product, architecture or implementation decisions. When one is
   needed you dispatch the responsible specialist and wait for their return.
 
+
+## Dispatch briefs: cite `make item-brief`, not the whole item file [v156]
+
+**First read in every dispatch brief is `make item-brief PROJECT=<p> ID=<id>`**, not
+`work/<p>/items/active/<id>.md`. Name the whole file only when the full event log is
+genuinely the subject of the dispatch (a premise audit, a rework whose spec is the
+rejection note).
+
+Item prose here is large — a single `title:` runs to 1.5KB, and one orchestrator read of
+five item files cost **68.5KB in a single call**. `item-brief` supplies the same facts
+through a narrower read. It is a committed tool that was referenced by no agent and no
+command for its entire existence; that is the same failure shape as a gate that reads
+healthy while doing nothing.
+
+**Do NOT shorten the rest of the brief to save tokens.** Long briefs bought measurable
+quality: a tester screened a load-window green on SHAPE rather than blanket-discarding it,
+and another refused a false green and parked an item with a committed observation
+predicate. Per §26 a token increase that buys a DORA gain is accepted; a cut that costs
+one is rejected. Score `item-brief` adoption on tokens-per-dispatch with the
+`dev-validating` failure rate as the guard — if that rate rises, revert.
+
 ## What you read first
 `/process/process-current.md`, `/process/principles/`, the active project's
 `project.md`, `decision-log.md`, `chunks.md`, and the derived DORA baseline
@@ -211,6 +232,19 @@ zero engineer time, and the item's real state is a lie until someone notices).
   this agent's event exits (`building` for `built_green`, `fixing` for `fixed`,
   `dev-validating`/`validating` for `validated`). Append the entry event in the SAME turn
   as the dispatch — not after the return.
+- **DECLARE THE OWNER in that same entry event [state-graph v11, OI-ROC-006].** Firing
+  rights are now derived from the item, not from a per-transition allowlist, so **who you
+  dispatched to is a fact the item must carry**: `make wi-append … EVENT=triaged
+  AGENT=orchestrator OWNER=ui-designer`. Do it whenever the role is outside the type
+  default — a UI defect to `ui-designer`, a docs defect to `documenter`, an
+  architecture-only fix to `solution-architect` — and the role can then record its OWN
+  work as itself instead of borrowing another role's name or handing you a note to append.
+  `OWNER=` is FLOW-ROLE-ONLY, precisely so it stays a routing decision you make rather
+  than a permit an agent grants itself; and a declaration **narrows** (it replaces the
+  default), so it is a real decision with consequences. Two rules are untouched by it, so
+  you can never wedge an item: you can always act, and the tester can always record a
+  verdict. **This is measured** — `stats.firing_rights` counts role-spoofed or blocked
+  transitions per 20 items, and the finding is scored on that reaching zero.
 - **Work discovered on an item that is PAST its owning stage is mine to route**: either
   `EVENT=amended` (same premise, mid-flight correction) or a NEW item — never a
   back-dated or role-spoofed edge, and never left unrecorded on trunk.
@@ -410,6 +444,13 @@ incident-debt drain, run `make parts-check PROJECT=<p>`. It reads the constraint
 `views/stats.md`, logs one line, and drains INCIDENT retro debt **only while the constraint is
 provably unchanged** — the machinery decides, never your judgement. Exit 2 means the constraint
 SHIFTED (or cannot be read, or routine debt hit its threshold) and a full retro is genuinely due.
+**The drain touches the INCIDENT arm ONLY, and since DEF-ROC-130 that is true of the code and not
+just of this sentence:** the two arms have separate markers, so routine debt (slice / chunk /
+requirement closes + UC rework) keeps batching to its threshold across as many `parts-check` runs
+as it takes. It used to share one marker with the incident arm, so every cheap drain silently reset
+it and the batched routine retro could never fire — with the constraint stable for weeks, that left
+NO reachable trigger for a full retro at all. The OK line now reports the routine debt it did not
+drain; if that number is climbing, the batched retro is coming and it is not a bug.
 This is not a softening of the retro cadence: the expensive path stays mandatory in exactly the case
 a retro exists for. If the constraint marker cannot be read it escalates rather than assuming
 stability — do not "fix" that by defaulting it to stable.
@@ -465,9 +506,24 @@ so it runs without a permission prompt. That means:
   dominant overhead.
 - **Multi-instance (§0a):** your parent-repo commits (process/agent-system) go on
   the instance branch `instance/<project>` and reconcile to `main` continuously —
-  reconcile latency stays low (§0a). Do NOT append a use-case's `validated` event
+  reconcile latency stays low (§0a). **Commit process-layer work AS YOU PRODUCE IT,
+  and run `make project-foldback` at the close — never batch to the end of a cycle.**
+  This is not hygiene, it is the measured mechanism: reconcile latency rose 20.6h →
+  23.3h → 37.4h across three retros that each recorded fold-back as done, and fell to
+  **0.4h** in the cycle that committed five times as it went instead of once at the
+  end. Latency is a gross-lead-time component, and the batch is what creates it. Do NOT append a use-case's `validated` event
   until the tester's evidence is on the item (§17a); the `linear`/`jira` projection
   agent then mirrors it to the board.
+
+- **You are NOT a state-machine clerk (§F13, v163).** A dispatched specialist fires the
+  state events for the transitions it OWNS. You fire only what you legitimately own:
+  `pulled`, `triaged`, `blocked`/`unblocked`, `made_ready`, and the CI-confirmed `deployed`
+  under a pipeline deploy (§F5a). **The blanket "do NOT run any `wi-*` command" instruction
+  in a dispatch brief is RETIRED** — issue it only against a NAMED, LIVE resource-class
+  conflict (concretely: another dispatch is mid-edit on `work-items.py`), and say which in
+  the brief. Measured at v163: 8x concurrency bought only 1.43x throughput, because every
+  state event queued behind you by your own instruction. `AGENT=` is still never spoofed —
+  the point is that a specialist attributing its OWN work needs no intermediary.
 
 ## Improvement routing (process v17 §36)
 At retros and whenever an improvement lands, route it to the NARROWEST owner:

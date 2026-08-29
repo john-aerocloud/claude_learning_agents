@@ -215,26 +215,62 @@ hardcode the profile name.
      OnBlock/OffBlock/TakenOff event out of the window → every flight fell back to
      "Scheduled" while 412 unit tests stayed green. Gate/Arrival columns worked
      because they read fields, not the window-seeded marker.)
-3a. **BEFORE EVERY PUSH — the §19c push boundary. Two checks, both cheap, both recorded.**
-   - **Coverage may not go down.** Run the project's coverage gate (`make coverage` then
-     `make coverage-gate`, or the project's equivalent). It is a RATCHET against a
-     committed floor, not a target. If coverage IMPROVED, **raise the floor in the same
-     push** — the gate prints the exact line; that is part of finishing the work, not a
-     later chore. If it FELL, cover the new code. Lowering the floor is not a normal
-     operation: it means deliberately shipping less-tested code and needs a reason in the
-     commit message that a reviewer can refuse. A gate reporting *cannot measure* is
-     never a pass — treat it as red and find out why.
-   - **Look at the coupling of what you are about to push, and ATTEMPT a refactor.** Read
-     the GENERATED coupling view (`make analysis-report` / the published quality page),
-     never your impression of the code. *Attempt* is the literal instruction: **"I looked,
-     and here is why I left it" is a valid outcome — skipping the look is not.** If you
-     refactor, re-run the tests; a refactor that is not re-verified is a change, not an
-     improvement.
-   - **Record the outcome on the item**, in the event note: what the coverage delta was,
-     and what you did or deliberately did not refactor and why. An unrecorded look is
-     indistinguishable from no look, and a rule nothing can falsify is decoration.
+3. **THE EXIT GATE — you do not hand over until these hold (§F11, v160, owner-mandated).**
+   Before you report a use-case or defect ready for the tester:
+   - **Complexity and coupling did not get WORSE.** `AeroCloudSystems/CodeAnalysisTools` runs
+     in the test step against a committed baseline that may only shrink. Excludes `items/**`;
+     generated files are excluded by the tool's own banner detection and listed in
+     `generated.csv`, so the exclusion is auditable. **Never widen the ignore list to move a
+     number.** If a necessary change genuinely worsens a measure, record that decision on the
+     item — do not silently re-baseline.
+   - **Coverage did not FALL.** Same may-only-shrink ratchet. **Coverage is a regression
+     detector, never a target** — a fall means a use-case lost its test or code shipped with
+     none. Writing a test to raise a number is the coverage theatre §17d forbids, and
+     `EXP-124` scores mass-tagging as FAILED. There is no target figure; do not invent one.
+   - **ALL tests are OUTSIDE-IN, attached to a node of the use-case VARIATION GRAPH**
+     (§F11.3, owner-amended v161). Exercise the use-case through its own public surface — the
+     API for a backend capability, the rendered UI for a screen — never an internal function
+     reached directly. **There is no permitted category of "fast internal test kept
+     alongside"**; that wording was superseded. Never stub the seam you are asserting across
+     (§17d) — it converts an outside-in test back into an inside-out one wearing the label.
+     - **An inside-out test is MIGRATION DEBT, not grandfathered.** Route it back to the
+       use-case it is really about and rewrite it from the outside. Do not delete it to move
+       a number (that loses the requirement it encodes) and do not leave it (that is the
+       state the ruling rejects). The count of tests attached to no variation may only
+       SHRINK.
+     - **NO DUPLICATES — think in a graph, not a list.** A use-case is a happy path plus
+       variations that COMPOSE. The unit of coverage is a **variation node**, certified by
+       **exactly one** test. Two tests on one node is a duplicate; a node with no test is a
+       gap; a test on no node is inside-out. A flat list makes all three invisible, which is
+       how ~3,900 tests accumulated against dozens of use-cases without anyone deciding it.
+     - **The chain is persona → job → use-case → variation → test, and every link is
+       mandatory.** All 116 ROC use-cases already carry `personas:` and `job:` — that half is
+       sound, do not redo it. Your test must trace to a person who wanted something.
+   - **AND YOU ATTEMPT AN IMPROVEMENT, not only a no-worse check (v156, owner instruction
+     2026-08-29).** "Did not get worse" is a floor; the owner asked for the active step. Look
+     at the coupling of the work you are about to hand over and **attempt a refactor**, then
+     re-run the tests. *Attempt* is literal: **"I looked, and here is why I left it" is a
+     valid outcome — skipping the look is not.** A mandatory refactor every time would be
+     ignored within a week; a mandatory LOOK is affordable every time. Read it off the
+     GENERATED analysis, never off your impression of the code — a hand-maintained coupling
+     map goes stale and then lies, which is worse than absent. A refactor you do not re-verify
+     is a change, not an improvement.
+   - **RECORD THE OUTCOME ON THE ITEM** — the coverage delta, and what you refactored or
+     deliberately did not, and why. An unrecorded look is indistinguishable from no look, and
+     a rule nothing can falsify is decoration, which is the failure this whole gate exists to
+     stop.
+   - **RAISING THE FLOOR AFTER AN IMPROVEMENT IS PART OF FINISHING THE WORK**, not a later
+     chore. A ratchet that only ever holds is a ratchet nobody turns.
+   - **THE GATE ITSELF MUST FAIL HONESTLY.** *Cannot measure* is never a pass and never a
+     plain fail — a caller who cannot tell a broken measurement from a real regression will
+     fix the wrong one. Any jitter tolerance is MEASURED and declared next to the numbers it
+     applies to, and an absurd one fails closed: switching a gate off has to look like
+     switching it off, not like configuring it. (Measured on OagEventSource 2026-08-29: v8
+     branch attribution is not bit-stable, ±0.01 between identical green runs.)
+   This is not the tester's job to catch. The tester validates in the deployed environment
+   (§17c); this is what you owe before they start.
 
-3. **Commit when green; push when the use-case is done (v60).** Every time the full
+4. **Commit when green; push when the use-case is done (v60).** Every time the full
    test suite goes from red to green, commit immediately to trunk — including at each
    green SUB-STEP of a larger UC (a passing red→green TDD increment), not only at the
    final green (v95): an agent can stall/be-interrupted mid-build, and any work not
@@ -290,6 +326,12 @@ hardcode the profile name.
    forward. A fixed-forward deploy failure that leaves no event makes CFR read a false 0%
    (the ec56025 gap). `deploy_failed` is a CFR change-failure; a pre-deploy build/test/lint
    red is NOT (that's a pipeline wait). Record the failure, then fix forward.
+   **From state-graph v10 it is recordable from EVERY active state** — `building`,
+   `deploying`, `reworking`, `fixing`, `reproducing` and any validating stage — as a
+   SELF-EDGE that annotates the item's history WITHOUT moving its state. So "the item
+   had already moved on" is no longer a reason the failure goes unrecorded, and you never
+   have to choose between a state you have not reached and losing the fact. `build_failed`
+   is recordable from the same set (DEF-ROC-120).
 4. Trunk-based: keep each change sequentially independent and small enough to
    land on main continuously. No long-lived branches. If a change cannot be made
    independent, say so and stop — do not create hidden coupling.

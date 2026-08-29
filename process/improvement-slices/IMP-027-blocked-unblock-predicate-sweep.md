@@ -1,5 +1,7 @@
 # IMP-027 — machine-checkable unblock predicate on `blocked`, swept every cycle
 
+**Status:** DELIVERED — recorded v159 retro, ROC 2026-08-29. `loop-gate` check 5 re-runs every park's predicate every cycle and BLOCKS both when an observation has landed and when a predicate cannot be evaluated; ROC's parks each carry a `make:probe-*` target and were exercised live this cycle (`probe-uc105-window-branch-live`, `probe-blocker-uc-roc-083`). Left open only because nobody stamped it. OagEventSource-origin: reported, not retired by ROC (§25a).
+
 **Opened:** 2026-07-30 (OagEventSource retro, process v123)
 **Owner:** work-items machinery + flow-manager
 **Founding evidence:** `process/open-items.md` → "OI — `external`-blocked items are never

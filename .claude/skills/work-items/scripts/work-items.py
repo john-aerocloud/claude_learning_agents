@@ -86,6 +86,78 @@ class Graphs:
         self.queue_map = data.get("queue_map", {})
         self.state_owners = data.get("state_owners", {})
         self.types = data.get("types", {})
+        self.metric_events = {k: v for k, v in
+                              data.get("metric_events", {}).items()
+                              if not k.startswith("_")}
+        # [v11, OI-ROC-006] Firing rights are DERIVED from the item, not enumerated
+        # per transition. See the `firing_rights` block in state-graphs.json for the
+        # three rules and the evidence that retired the allowlists.
+        self.firing_rights = data.get("firing_rights", {})
+
+    @property
+    def flow_roles(self):
+        """RULE 1 — the roles that own SEQUENCING on every item of every type."""
+        return set(self.firing_rights.get("flow_roles", []))
+
+    @property
+    def event_roles(self):
+        """RULE 2 — events whose MEANING names a role (the validation verdicts).
+        Both a grant and a restriction: the named role holds this event on EVERY
+        item, and nobody else holds it — not even the item's owner."""
+        return {k: set(v) for k, v in
+                self.firing_rights.get("event_roles", {}).items()
+                if not k.startswith("_")}
+
+    @property
+    def known_roles(self):
+        return set(self.firing_rights.get("known_roles", []))
+
+    def default_owners(self, itype):
+        """RULE 3's fallback for an item that declares no `owner:`."""
+        return set(self.firing_rights.get("default_owners", {}).get(itype, []))
+
+    def owners_of(self, item):
+        """The item's DECLARED owner set, or the type default when it declares
+        none. A declaration REPLACES the default — it narrows, never adds."""
+        declared = item.fm.get("owner") if getattr(item, "fm", None) else None
+        return owner_set(declared) or self.default_owners(item.type)
+
+    def may_fire(self, itype, owners, event, agent):
+        """(ok, reason) — the whole authorisation rule, in the order the rules are
+        declared. `reason` is None when permitted, else a one-line explanation
+        naming which rule refused and what would change it."""
+        if agent and self.known_roles and agent not in self.known_roles:
+            return (False, f"'{agent}' is not a known agent role "
+                           f"(known: {'/'.join(sorted(self.known_roles))})")
+        # RULE 2 IS CHECKED FIRST, and the order is the whole point: a verdict is
+        # the ONE thing a flow role may not fire either. Rule 1 grants sequencing,
+        # not certification — a loop that could certify its own throughput is the
+        # independence loss this replacement must not introduce.
+        roles = self.event_roles.get(event)
+        if roles is not None:                        # rule 2: a verdict
+            if agent in roles:
+                return (True, None)
+            return (False, f"'{event}' is a VERIFICATION VERDICT: its meaning is an "
+                           f"independent verdict, so it is {'/'.join(sorted(roles))}'s "
+                           f"on every item — neither an owner nor a flow role may "
+                           f"issue the verdict")
+        if agent in self.flow_roles:
+            return (True, None)                      # rule 1: sequencing
+        if agent in owners:                          # rule 3: the item's owner
+            return (True, None)
+        return (False, f"'{agent}' does not own this item (owner: "
+                       f"{', '.join(sorted(owners)) or 'none'})")
+
+    def allowed_agents(self, itype, event, owners=None):
+        """The agents that could fire `event` on an item of this type — for
+        MESSAGES and for test path-synthesis, never for the decision (which is
+        may_fire, and which needs the item)."""
+        if owners is None:
+            owners = self.default_owners(itype)
+        roles = self.event_roles.get(event)
+        if roles is not None:
+            return sorted(roles)                     # rule 2 beats rule 1
+        return sorted(set(owners) | self.flow_roles)
 
     def owner_of(self, state):
         """Who is accountable for time spent in `state` — an agent name, or the
@@ -115,10 +187,26 @@ class Graphs:
         # queue_map values may be null (JSON null -> Python None): no queue.
         return self.queue_map.get(state)
 
-    def legal_from(self, itype, state):
-        """List of (event, to, agents) legal from `state` for this type."""
-        return [(t["event"], t["to"], t.get("agents", []))
+    def legal_from(self, itype, state, owners=None):
+        """List of (event, to, agents) legal from `state` for this type. The third
+        element is the DERIVED agent set (v11) — the graph no longer stores one."""
+        return [(t["event"], t["to"], self.allowed_agents(itype, t["event"], owners))
                 for t in self.transitions(itype) if t["from"] == state]
+
+    def is_annotation(self, itype, state, event):
+        """True when (state, event) is an ANNOTATION — a legal SELF-EDGE that
+        records a FACT about the item without moving its state [v10].
+
+        `amended` (a definition correction) and a change failure recorded outside
+        the deploy stages are both of this kind: something HAPPENED, and the item
+        is still exactly where it was. An annotation is time-preserving in
+        walk_states, and it is NOT a stage exit — counting it as one would inflate
+        the stage's exit denominator with a non-failure, so recording bad news
+        would make the stage's failure rate look BETTER (DEF-ROC-120)."""
+        for t in self.transitions(itype):
+            if t["from"] == state and t["event"] == event:
+                return t["to"] == state
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -372,14 +460,31 @@ def _run_blocker_probe(project, spec, timeout=DEFAULT_OBSERVE_TIMEOUT):
                       "reversal")
 
 
-def check_transition(graphs, itype, state, event, agent):
-    """Return (ok, to_state, legal_here). ok iff `event` is a legal transition
-    from `state` for this type AND `agent` is in that transition's agents."""
-    legal_here = graphs.legal_from(itype, state)
-    for ev_name, to, agents in legal_here:
+def owner_set(declared):
+    """Normalise a declared `owner:` field (absent / scalar / list) to a set.
+    Absent or empty ⇒ empty set, which the caller reads as 'undeclared' and
+    replaces with the type default — never as 'nobody' and never as 'anybody'."""
+    if declared is None:
+        return set()
+    if isinstance(declared, str):
+        declared = declared.split(",")      # `--owner "ui-designer,engineer"`
+    return {str(x).strip() for x in declared if str(x).strip()}
+
+
+def check_transition(graphs, itype, state, event, agent, owners=None):
+    """Return (ok, to_state, legal_here, why). SHAPE comes from the graph (is this
+    event legal from this state); RIGHTS are DERIVED from the item [v11,
+    OI-ROC-006] — flow roles own sequencing, a verdict is the tester's, and
+    everything else belongs to the item's declared owner. `why` is None when
+    permitted, else the reason the rights check refused."""
+    if owners is None:
+        owners = graphs.default_owners(itype)
+    legal_here = graphs.legal_from(itype, state, owners)
+    for ev_name, to, _agents in legal_here:
         if ev_name == event:
-            return (agent in agents, to, legal_here)
-    return (False, None, legal_here)
+            ok, why = graphs.may_fire(itype, owners, event, agent)
+            return (ok, to, legal_here, why)
+    return (False, None, legal_here, None)
 
 
 # ---------------------------------------------------------------------------
@@ -1073,7 +1178,34 @@ def cmd_append(a):
         sys.exit(f"append: {a.id} is an aggregate ({item.type}); its state bubbles "
                  f"from children — you do not append flow events to it.")
 
-    ok, to, legal_here = check_transition(graphs, item.type, state, a.event, a.agent)
+    # --- ownership [v11, OI-ROC-006] -----------------------------------------
+    # `OWNER=` declares WHO the item is routed to, in the SAME act as the flow
+    # role's dispatch (v124). Only a flow role may declare it: otherwise an agent
+    # could grant itself, in one command, the right it is exercising in that same
+    # command — which is the self-serving derivation this replacement must not be.
+    declared_owner = owner_set(getattr(a, "owner", None))
+    if declared_owner and a.agent not in graphs.flow_roles:
+        print(f"append REJECTED: {a.id}: agent '{a.agent}' may not declare an "
+              f"owner.", file=sys.stderr)
+        print(f"  OWNER= is a ROUTING decision and belongs to a flow role "
+              f"({'/'.join(sorted(graphs.flow_roles))}), fired in the same act as "
+              f"the dispatch. An agent that could declare itself the owner would be "
+              f"granting itself the right it is using in the same command.",
+              file=sys.stderr)
+        sys.exit(1)
+    unknown = sorted(declared_owner - graphs.known_roles) if graphs.known_roles else []
+    if unknown:
+        print(f"append REJECTED: {a.id}: OWNER names {unknown}, which "
+              f"{'are' if len(unknown) > 1 else 'is'} not a known agent role.",
+              file=sys.stderr)
+        print(f"  known roles: {'/'.join(sorted(graphs.known_roles))}. An owner "
+              f"that names nobody would silently narrow the item to an empty set "
+              f"and make it unworkable by anyone but a flow role.", file=sys.stderr)
+        sys.exit(1)
+    owners = declared_owner or graphs.owners_of(item)
+
+    ok, to, legal_here, why = check_transition(graphs, item.type, state, a.event,
+                                               a.agent, owners)
     if not ok:
         legal_desc = ", ".join(f"{ev} (agents: {'/'.join(ags)})"
                                for ev, _to, ags in legal_here) or "(none — terminal state)"
@@ -1081,15 +1213,22 @@ def cmd_append(a):
         # distinguish wrong-agent from illegal-event for a clearer message
         ev_exists = any(ev == a.event for ev, _t, _ags in legal_here)
         if ev_exists:
-            print(f"  event '{a.event}' is legal here but not for agent '{a.agent}'.",
-                  file=sys.stderr)
+            print(f"  event '{a.event}' is legal here, but {why}.", file=sys.stderr)
+            print(f"  Firing rights are DERIVED from the item [v11], not from a "
+                  f"per-transition allowlist: a flow role may fire anything, a "
+                  f"verdict is the tester's, and everything else belongs to the "
+                  f"item's owner. If '{a.agent}' is the role doing this item's "
+                  f"work, the flow role that dispatched it declares that — "
+                  f"`make wi-append ... EVENT=<its own event> AGENT=<flow role> "
+                  f"OWNER={a.agent}` — rather than another role appending on its "
+                  f"behalf.", file=sys.stderr)
         else:
             print(f"  event '{a.event}' is not a legal transition from '{state}'.",
                   file=sys.stderr)
+            print("  If this transition SHOULD exist, open an amendment experiment "
+                  "(EXP-NNN) to add it to process/machinery/state-graphs.json — "
+                  "do not hand-edit item state.", file=sys.stderr)
         print(f"  legal events from here: {legal_desc}", file=sys.stderr)
-        print("  If this transition SHOULD exist, open an amendment experiment "
-              "(EXP-NNN) to add it to process/machinery/state-graphs.json — "
-              "do not hand-edit item state.", file=sys.stderr)
         sys.exit(1)
 
     # --- the observation predicate is REQUIRED, not optional [v9] -------------
@@ -1238,6 +1377,12 @@ def cmd_append(a):
         new_event["duration_ms"] = a.duration_ms
     if a.note:
         new_event["note"] = a.note
+    # The OWNER declaration is PERSISTED on the item, not just used for this one
+    # append: rights are derived from the item, so the item is where the routing
+    # decision has to be readable — by the next agent, by I1's replay of history,
+    # and by anyone reading the file (v11, OI-ROC-006).
+    if declared_owner:
+        item.fm["owner"] = sorted(declared_owner)
     item.fm.setdefault("events", [])
     item.fm["events"] = item.events + [new_event]
 
@@ -1478,6 +1623,43 @@ REWORK_ENTRY_EVENTS = {"build_failed", "deploy_failed", "rejected", "retried", "
 # uses one `validating`. Any `rejected` exit from ANY of these is a change failure,
 # so CFR/quality-by-stage fold over the whole set (kept as one metric family).
 VALIDATING_STATES = {"validating", "dev-validating", "prod-validating"}
+
+# --- the events the METRICS FOLD OVER [state-graph v10, DEF-ROC-120 AC-120-4] --
+# Every name below is an input to a derived number. They are hoisted out of the
+# fold bodies and named so the completeness gate can ask the two questions that
+# were never asked of `deploy_failed`:
+#   (a) is every folded event DECLARED in state-graphs.json `metric_events` with
+#       the domain of states in which the thing it describes can actually happen,
+#       and is it a legal transition from every one of them? An event the fold
+#       counts but no role can record where it occurs makes a metric that can
+#       only return good news (the DEF-ROC-115 measurement: CFR read a false 0%).
+#   (b) can every folded event actually be PRODUCED by some state graph? A fold
+#       over a name no graph emits is a dead input that contributes zero for ever
+#       — `deploy`, `done` and `resolved` were exactly that until v10 (they are
+#       STATES, never events), so they are gone from these sets.
+CFR_PASS_EVENTS = ("validated",)          # a validation that succeeded
+# ... and the two failure kinds, which are scoped DIFFERENTLY on purpose:
+CFR_STAGE_FAIL_EVENT = "rejected"         # only as an exit from a VALIDATING state
+CFR_ANY_STAGE_FAIL_EVENT = "deploy_failed"  # wherever recorded — see _compute_dora
+TERMINAL_DELIVERY_EVENTS = ("validated", "closed")
+TERMINAL_ABANDON_EVENTS = ("not_reproduced", "declined")
+LEAD_TIME_START_EVENTS = ("built_green", "fixed")
+BUILD_FAIL_RECOVERY_EVENTS = {"built_green", "retried", "validated"}
+DEPLOY_FAIL_RECOVERY_EVENTS = {"built_green", "retried", "deployed", "validated"}
+REJECT_RECOVERY_EVENTS = {"validated"}
+DEFECT_RECOVERY_EVENTS = {"validated"}
+# quality-by-stage: the ONE exit event that counts as that stage failing.
+STAGE_FAIL_EXIT = {"building": "build_failed", "deploying": "deploy_failed",
+                   "prod-deploying": "deploy_failed", "validating": "rejected",
+                   "dev-validating": "rejected", "prod-validating": "rejected",
+                   "reproducing": "not_reproduced"}
+METRIC_FOLD_EVENTS = (
+    set(CFR_PASS_EVENTS) | {CFR_STAGE_FAIL_EVENT, CFR_ANY_STAGE_FAIL_EVENT}
+    | set(TERMINAL_DELIVERY_EVENTS) | set(TERMINAL_ABANDON_EVENTS)
+    | set(LEAD_TIME_START_EVENTS) | BUILD_FAIL_RECOVERY_EVENTS
+    | DEPLOY_FAIL_RECOVERY_EVENTS | REJECT_RECOVERY_EVENTS
+    | DEFECT_RECOVERY_EVENTS | set(STAGE_FAIL_EXIT.values())
+    | REWORK_ENTRY_EVENTS | {"reported"})
 
 # --- plumbing vs delivery cost classification (ported verbatim from dora.py's
 # cost-split, v59/EXP-067; the ledger it read is now frozen, so the SAME rule is
@@ -1771,9 +1953,9 @@ def _compute_dora(graphs, flow_items, states, now, window_days):
     # deployment_frequency: terminal validated/done/deploy events per active-day
     terminal_ts = []
     for it in flow_items:
-        t = _last_ts(it, ("validated", "closed", "deploy"))
+        t = _last_ts(it, TERMINAL_DELIVERY_EVENTS)
         if t is None and states.get(it.id) in TERMINAL_STATES:
-            t = _last_ts(it, ("not_reproduced", "declined"))
+            t = _last_ts(it, TERMINAL_ABANDON_EVENTS)
         if t and _in_window(t, now, window_days):
             terminal_ts.append(t)
     days = {t.date() for t in terminal_ts}
@@ -1782,7 +1964,7 @@ def _compute_dora(graphs, flow_items, states, now, window_days):
     # lead_time_for_changes: built_green -> validated per item (median + p85)
     lts = []
     for it in flow_items:
-        bg = _first_ts(it, ("built_green", "fixed"))
+        bg = _first_ts(it, LEAD_TIME_START_EVENTS)
         vd_ts = _last_ts(it, ("validated",))
         if bg and vd_ts and vd_ts >= bg and _in_window(vd_ts, now, window_days):
             lts.append((vd_ts - bg).total_seconds())
@@ -1797,21 +1979,24 @@ def _compute_dora(graphs, flow_items, states, now, window_days):
     for it in flow_items:
         for st, evc in _exits_from(graphs, it).items():
             for name, c in evc.items():
-                if st in VALIDATING_STATES and name == "validated":
+                if st in VALIDATING_STATES and name in CFR_PASS_EVENTS:
                     validated += c
-                elif st in VALIDATING_STATES and name == "rejected":
+                elif st in VALIDATING_STATES and name == CFR_STAGE_FAIL_EVENT:
                     rejected += c
-                elif name == "deploy_failed":
+                elif name == CFR_ANY_STAGE_FAIL_EVENT:
+                    # counted WHEREVER it was recorded — CFR asks whether the
+                    # change failed, not which stage the item happened to be in
+                    # when the pipeline went red [v10, DEF-ROC-120].
                     deploy_failed += c
     cfr = _ratio(rejected + deploy_failed, validated + rejected + deploy_failed)
 
     # mttr: any failure event -> its recovery (aggregated across the classes in D)
     all_recoveries = []
     for it in flow_items:
-        all_recoveries += _duration_after(it, {"build_failed"}, {"built_green", "retried", "done", "validated"})
-        all_recoveries += _duration_after(it, {"deploy_failed"}, {"built_green", "retried", "deployed", "done", "validated"})
-        all_recoveries += _duration_after(it, {"rejected"}, {"validated", "resolved", "done"})
-        all_recoveries += _duration_after(it, {"reported"}, {"validated", "resolved"})
+        all_recoveries += _duration_after(it, {"build_failed"}, BUILD_FAIL_RECOVERY_EVENTS)
+        all_recoveries += _duration_after(it, {CFR_ANY_STAGE_FAIL_EVENT}, DEPLOY_FAIL_RECOVERY_EVENTS)
+        all_recoveries += _duration_after(it, {CFR_STAGE_FAIL_EVENT}, REJECT_RECOVERY_EVENTS)
+        all_recoveries += _duration_after(it, {"reported"}, DEFECT_RECOVERY_EVENTS)
 
     return {
         "deployment_frequency_per_active_day": freq,
@@ -1939,16 +2124,20 @@ def _compute_quality(graphs, flow_items, now, window_days):
     validating.rejection rate (each attributed to the state owner); overall
     rework rate; defect arrival rate over the window."""
     stage_exits = defaultdict(lambda: {"total": 0, "fail": 0})
-    FAIL_EXIT = {"building": "build_failed", "deploying": "deploy_failed",
-                 "prod-deploying": "deploy_failed", "validating": "rejected",
-                 "dev-validating": "rejected", "prod-validating": "rejected",
-                 "reproducing": "not_reproduced"}
+    FAIL_EXIT = STAGE_FAIL_EXIT
     for it in flow_items:
         for st, evc in _exits_from(graphs, it).items():
             if st not in FAIL_EXIT:
                 continue
-            tot = sum(evc.values())
-            fail = evc.get(FAIL_EXIT[st], 0)
+            # [v10] ANNOTATIONS (self-edges: `amended`, a change failure recorded
+            # outside the deploy stages) are NOT exits. Counting them would pad
+            # the denominator with non-failures, so an item that had MORE go
+            # wrong would report a LOWER stage failure rate — the same
+            # can-only-return-good-news bias DEF-ROC-120 is about, one layer down.
+            tot = sum(c for name, c in evc.items()
+                      if not graphs.is_annotation(it.type, st, name))
+            fail = evc.get(FAIL_EXIT[st], 0) if not graphs.is_annotation(
+                it.type, st, FAIL_EXIT[st]) else 0
             stage_exits[st]["total"] += tot
             stage_exits[st]["fail"] += fail
     by_stage = {}
@@ -1984,10 +2173,9 @@ def _compute_recovery(graphs, flow_items):
     build_fail, val_reject, defect = [], [], []
     for it in flow_items:
         build_fail += _duration_after(it, {"build_failed"},
-                                      {"built_green", "retried", "done", "validated"})
-        val_reject += _duration_after(it, {"rejected"},
-                                      {"validated", "resolved", "done"})
-        defect += _duration_after(it, {"reported"}, {"validated", "resolved"})
+                                      BUILD_FAIL_RECOVERY_EVENTS)
+        val_reject += _duration_after(it, {"rejected"}, REJECT_RECOVERY_EVENTS)
+        defect += _duration_after(it, {"reported"}, DEFECT_RECOVERY_EVENTS)
 
     def pack(xs):
         return {"median_s": _median(xs), "mean_s": _mean(xs), "n": len(xs)}
@@ -2075,10 +2263,15 @@ def per_item_metrics(graphs, item, now):
     # recoveries / MTTR: same trigger->recovery pairs the aggregate recovery uses.
     recoveries = []
     recoveries += _duration_after(item, {"build_failed"},
-                                  {"built_green", "retried", "done", "validated"})
-    recoveries += _duration_after(item, {"rejected"},
-                                  {"validated", "resolved", "done"})
-    recoveries += _duration_after(item, {"reported"}, {"validated", "resolved"})
+                                  BUILD_FAIL_RECOVERY_EVENTS)
+    # [v10] deploy_failed was MISSING here while the aggregate counted it, so an
+    # item's OWN recovery figure ignored every deploy/CI failure — the same
+    # only-good-news shape as DEF-ROC-120 itself, in the per-item projection this
+    # comment claims is definitionally consistent with the aggregate.
+    recoveries += _duration_after(item, {"deploy_failed"},
+                                  DEPLOY_FAIL_RECOVERY_EVENTS)
+    recoveries += _duration_after(item, {"rejected"}, REJECT_RECOVERY_EVENTS)
+    recoveries += _duration_after(item, {"reported"}, DEFECT_RECOVERY_EVENTS)
 
     tokens = _compute_token_cost([item])
     return {
@@ -2130,6 +2323,86 @@ def _render_item_metrics_text(m):
     return "\n".join(L)
 
 
+# ---------------------------------------------------------------------------
+# AC-006.5 — the EXP-ROC-002 scoring hook (OI-ROC-006)
+# ---------------------------------------------------------------------------
+# Score the finding on this count reaching ZERO, NEVER on "those ten transitions
+# now work". Two limbs, and the asymmetry between them is the honest part:
+#
+#   spoof_indicators       — an event whose agent could not fire it under the
+#                            CURRENT rights model. After v11 this is unreachable
+#                            through `append`, so a non-zero reading means a
+#                            hand-edit. It can therefore only ever confirm; on its
+#                            own it would be a metric that can only return good
+#                            news, which is the DEF-ROC-120 failure.
+#   disclosed_substitutions — the limb that can actually move. A transition an
+#                            agent was BLOCKED from making leaves no event at all,
+#                            so the only trace is the DISCLOSURE the agent wrote
+#                            in the note it did land ("fired as AGENT=cicd", "read
+#                            this note, not the agent field", "the engineer role
+#                            cannot fire pulled"). Every one of the ten recorded
+#                            instances did exactly that.
+#
+# So the count is a FLOOR, not a measurement — precisely as EXP-140 said of its own
+# tally ("all self-reported, so the true rate is a floor"). It is reported as such.
+_SUBSTITUTION_DISCLOSURE = re.compile(
+    r"append REJECTED"
+    r"|is legal here but not for agent"
+    r"|not permitted \(allowed"
+    r"|(?:can|could|may) ?not fire"
+    r"|the \w+ role cannot fire"
+    r"|read (?:this note|the attribution)[, ]+not the agent field"
+    r"|fired (?:by|as) the \w+(?:-\w+)? because"
+    r"|fired (?:it|them|this) as AGENT="
+    r"|AGENT=\w+ (?:substitution|spoof)"
+    r"|spoof"
+    r"|substitut(?:ed|ion) (?:the )?agent"
+    r"|state graph offers no path"
+    r"|no (?:legal )?(?:path|edge)(?: at all)? for the role"
+    r"|mechanical attestation"
+    r"|attribution precedent",
+    re.I)
+
+FIRING_RIGHTS_WINDOW = 20
+
+
+def compute_firing_rights_hook(graphs, items, window=FIRING_RIGHTS_WINDOW):
+    """Role-spoofed or blocked transitions per `window` items, derived from the
+    event stream (AC-006.5). Pure function of the items; no state anywhere."""
+    flow = [it for it in items.values() if graphs.kind(it.type) == "flow"]
+    flow.sort(key=lambda it: (it.events[0].get("ts") if it.events else "",
+                              it.id or ""), reverse=True)
+    win = flow[:window]
+    instances = []
+    for it in win:
+        owners = graphs.owners_of(it)
+        for ev in it.events:
+            agent, name = ev.get("agent"), ev.get("event")
+            note = ev.get("note") or ""
+            if agent and not graphs.may_fire(it.type, owners, name, agent)[0]:
+                instances.append({"id": it.id, "event": name, "agent": agent,
+                                  "ts": ev.get("ts"), "kind": "spoof_indicator"})
+            elif _SUBSTITUTION_DISCLOSURE.search(note):
+                instances.append({"id": it.id, "event": name, "agent": agent,
+                                  "ts": ev.get("ts"), "kind": "disclosed_substitution"})
+    spoof = sum(1 for i in instances if i["kind"] == "spoof_indicator")
+    disclosed = len(instances) - spoof
+    n = len(win)
+    return {
+        "window_items": window,
+        "items_in_window": n,
+        "spoof_indicators": spoof,
+        "disclosed_substitutions": disclosed,
+        "total": len(instances),
+        "per_20_items": round(len(instances) * 20.0 / n, 2) if n else None,
+        "instances": instances,
+        "_floor": "A FLOOR, not a measurement: a transition an agent was BLOCKED "
+                  "from making leaves no event, so only the disclosures an agent "
+                  "chose to write are visible. Score EXP-ROC-002 on this reaching "
+                  "zero — never on 'those ten transitions now work'.",
+    }
+
+
 def compute_stats(graphs, items, states, now=None):
     """Enhanced stats: DORA + gross-lead-time decomposition (by_state / by_owner)
     + quality-by-stage + recovery-by-class, sliced overall and by item type.
@@ -2150,6 +2423,7 @@ def compute_stats(graphs, items, states, now=None):
         "overall": _stats_for_set(graphs, flow, states, now),
         "by_type": {t: _stats_for_set(graphs, its, states, now)
                     for t, its in sorted(by_type.items())},
+        "firing_rights": compute_firing_rights_hook(graphs, items),
     }
     return result
 
@@ -2337,6 +2611,27 @@ def _render_stats_md(stats):
     section("Overall", stats["overall"])
     for t, s in stats["by_type"].items():
         section(f"By type — {t}", s)
+
+    # --- G. firing rights (OI-ROC-006 AC-006.5 / EXP-ROC-002 scoring hook) ----
+    fr = stats.get("firing_rights")
+    if fr:
+        L.append("\n### G. Firing rights — role-spoofed or blocked transitions "
+                 f"per {fr['window_items']} items\n")
+        L.append("_Rights derive from the item's declared owner (state-graph v11); "
+                 "the graph constrains transition SHAPE only. Score `EXP-ROC-002` on "
+                 "this count reaching ZERO — **never** on 'those ten transitions now "
+                 "work'._\n")
+        L.append(f"- **{_fmt(fr['per_20_items'])} per {fr['window_items']} items** "
+                 f"({fr['total']} in the last {fr['items_in_window']}): "
+                 f"{fr['spoof_indicators']} spoof-indicator, "
+                 f"{fr['disclosed_substitutions']} disclosed-substitution")
+        L.append(f"- _{fr['_floor']}_\n")
+        if fr["instances"]:
+            L.append("| Item | event | agent | kind |")
+            L.append("|------|-------|-------|------|")
+            for i in fr["instances"]:
+                L.append(f"| {i['id']} | {i['event']} | {i['agent']} | {i['kind']} |")
+            L.append("")
     return "\n".join(L) + "\n"
 
 
@@ -2361,9 +2656,11 @@ def _render_stats_md(stats):
 #   INCIDENT  = defect items whose terminal validated/resolved event is after the
 #               marker (a defect against SHIPPED work is a real escape worth an
 #               immediate retro).
-# DUE iff routine >= threshold OR incidents >= 1. Routine (slice-closes +
-# uc-rework) batches to the threshold; a single incident (defect-resolve) fires
-# immediately. (IMP-019, v101: uc-rework reclassified incident->routine.)
+# DUE iff routine >= threshold OR incidents >= 1. Routine (aggregate-closes —
+# slice, chunk, requirement — plus uc-rework) batches to the threshold; a single
+# incident (defect-resolve) fires immediately. (IMP-019, v101: uc-rework
+# reclassified incident->routine. DEF-ROC-130: a requirement close now counts, and
+# THE TWO ARMS HAVE SEPARATE MARKERS — see ARM_DRAINED_BY.)
 # ---------------------------------------------------------------------------
 # --- THE CADENCE RECORD LIVES IN THE PROJECT'S OWN EVENT SUBSTRATE ----------
 #
@@ -2371,6 +2668,12 @@ def _render_stats_md(stats):
 # close / per cheap incident-drain, carrying the instant AND the constraint as of
 # that close. Written by `retro-mark` and by `parts-check`'s drain; read by
 # `compute_retro_debt` and `cmd_parts_check`. Nothing else writes it.
+#
+# READ PER ARM, NOT AS A WHOLE (DEF-ROC-130). The log holds TWO event types and
+# they do NOT mean the same thing: `retro_closed` drains both arms, `debt_drained`
+# drains the incident arm only. "The newest event in the log" is therefore NOT a
+# boundary — asking for it is what let the cheap drain erase routine debt. Always
+# go through `_retro_verdict(project, arm)`.
 #
 # WHY IT MOVED HERE (v146 retro ruling on
 # OI-PARTS-CHECK-MARKER-DIRTIES-THE-TREE-AND-DEFERS-FOLD-FORWARD, 5 sightings):
@@ -2414,6 +2717,60 @@ RETRO_LOG_NAME = "retro-log.md"
 RETRO_CLOSED = "retro_closed"
 RETRO_DRAINED = "debt_drained"
 
+# --- THE TWO ARMS OF RETRO DEBT HAVE SEPARATE MARKERS ------------------------
+# DEF-ROC-130, owner decision 2026-08-27: OPTION B — both arms count, and they
+# batch INDEPENDENTLY.
+#
+# THE FAULT THIS REPLACES. There used to be ONE marker: `_retro_verdict` walked
+# the cadence log with `for ev in reversed(evs)` and returned the last event's ts
+# WHATEVER ITS TYPE, and `compute_retro_debt` applied that single value to BOTH
+# arms. So `parts-check`'s cheap INCIDENT drain (`debt_drained`) also erased
+# accumulated ROUTINE debt — flatly contradicting parts-check's own comment that
+# it "drains the INCIDENT arm only". Measured on ROC 2026-08-27: UC-ROC-093's
+# validation at 13:44:02Z bubbled SLC-ROC-025 AND CHK-ROC-004 to done — two
+# genuine routine closes — and the drain 48 seconds later moved the shared marker
+# past them, so `retro-debt` read `routine 0/3`. And it was STRUCTURAL, not a
+# race: /loop-run step 5a runs parts-check after EVERY bubble, so on each run
+# routine was either already at the threshold or 0..2 and wiped. Routine could
+# only ever reach 3 if 3+ closes landed BETWEEN two consecutive runs. With the
+# constraint stable for weeks, the full retro had NO reachable trigger at all,
+# and /loop-run step 7's cadence property was vacuously satisfied.
+#
+# THE MAP BELOW IS THE FIX, and it is the whole of it: which cadence event
+# drains which arm.
+#   * a FULL retro (`retro_closed`) has walked everything, so it drains BOTH.
+#   * the cheap read (`debt_drained`) is licensed by a PROVEN-STABLE constraint
+#     to skip full-retro overhead on the incident arm ONLY (owner ruling
+#     2026-08-07, which OPTION B does not overturn) — so it drains INCIDENT and
+#     leaves ROUTINE untouched to batch to its threshold.
+#
+# FAIL-CLOSED IS PRESERVED PER ARM, and that is what keeps the per-project store
+# safe: an event type that drains NEITHER arm (an unrecognised or future event)
+# advances nothing, and a log with no arm-draining event at all reads UNKNOWN =>
+# all-time debt on that arm => a FULL retro is forced, never skipped.
+#
+# THE ARM IS A REQUIRED ARGUMENT, never a default (v124 / EXP-121: a control that
+# is OPTIONAL on a shared primitive is a control some lane omits — and sharing one
+# marker across the arms IS this defect). A caller that does not name its arm gets
+# a TypeError; a caller that names a nonexistent one gets a ValueError.
+ARM_ROUTINE = "routine"
+ARM_INCIDENT = "incident"
+
+ARM_DRAINED_BY = {
+    ARM_ROUTINE: (RETRO_CLOSED,),                  # only a FULL retro
+    ARM_INCIDENT: (RETRO_CLOSED, RETRO_DRAINED),   # the cheap read too
+}
+ARMS = (ARM_ROUTINE, ARM_INCIDENT)
+
+
+def _check_arm(arm):
+    if arm not in ARM_DRAINED_BY:
+        raise ValueError(
+            f"unknown retro-debt arm {arm!r}; expected one of {ARMS}. The arm is "
+            f"REQUIRED (DEF-ROC-130): the two arms have separate markers and a "
+            f"caller may not silently share one.")
+    return arm
+
 
 def _retro_log_path(project):
     return os.path.join(items_dir(project), RETRO_LOG_NAME)
@@ -2449,9 +2806,22 @@ _RETRO_LOG_BODY = """
 
 The **authoritative, append-only record of this project's retro cadence** — one
 event per retro close (`retro_closed`) or per cheap incident-debt drain
-(`debt_drained`), each carrying the constraint as of that close. `retro-debt`
-measures debt SINCE the newest event here; `parts-check` compares the current
-constraint against the newest one recorded here.
+(`debt_drained`), each carrying the constraint as of that close. `parts-check`
+compares the current constraint against the newest one recorded here.
+
+`retro-debt` measures each of its two arms since the newest event that drains
+THAT arm, and the two are different (DEF-ROC-130, owner decision 2026-08-27):
+
+* **routine** (slice / chunk / requirement closes + UC rework) — drained ONLY by
+  a full `retro_closed`.
+* **incident** (defect resolves) — drained by `retro_closed` OR by `parts-check`'s
+  cheap `debt_drained`, which is licensed only while the constraint is provably
+  unchanged.
+
+So a `debt_drained` here does NOT reset the routine counter; that arm keeps
+batching to its threshold until a full retro walks it. Reading "the newest event"
+as one shared boundary was the defect: it made the batched routine retro
+unreachable.
 
 It lives in `items/` but **not** in `items/active/` or `items/done/`, so it is not
 a work item and no fold, queue, metric or derived view sees it.
@@ -2490,8 +2860,13 @@ def _rel(path):
         return path
 
 
-def _retro_verdict(project):
-    """(kind, ts, source) — `("known", dt, where)` or `("unknown", None, why)`.
+def _retro_verdict(project, arm):
+    """(kind, ts, source) for ONE arm — `("known", dt, where)` / `("unknown", None, why)`.
+
+    `arm` is REQUIRED and selects which cadence events count as a drain
+    (`ARM_DRAINED_BY`): the routine arm advances ONLY on a full `retro_closed`,
+    the incident arm also on `parts-check`'s cheap `debt_drained` (DEF-ROC-130).
+    An event that drains neither arm advances neither — the fail-closed direction.
 
     A VERDICT, not a sentinel (delta-074 R10). The old reader returned epoch for
     "absent", so `retro-debt` PRINTED `since last retro 1970-01-01` as if it were
@@ -2501,8 +2876,11 @@ def _retro_verdict(project):
     overloaded channel would be load-bearing on the happy path. The exit-2
     direction is UNCHANGED — this is legibility, never a softening.
     """
+    drains = ARM_DRAINED_BY[_check_arm(arm)]
     evs = _read_retro_log(project)
     for ev in reversed(evs):
+        if str(ev.get("event") or "") not in drains:
+            continue
         ts = parse_ts(str(ev.get("ts")))
         if ts:
             return ("known", ts, _rel(_retro_log_path(project)))
@@ -2516,25 +2894,30 @@ def _retro_verdict(project):
         except OSError:
             pass
     return ("unknown", None,
-            f"no retro record at {_rel(_retro_log_path(project))}; no frozen "
-            f"marker at {_rel(legacy)} — all-time debt shown, a FULL retro is owed")
+            f"no {arm}-arm retro record at {_rel(_retro_log_path(project))} "
+            f"(nothing of type {'/'.join(drains)}); no frozen marker at "
+            f"{_rel(legacy)} — all-time debt shown, a FULL retro is owed")
 
 
-def _read_retro_marker(project):
-    """The last-retro datetime (UTC), or epoch (= all-time debt) if UNKNOWN.
+def _read_retro_marker(project, arm):
+    """This ARM's drain boundary (UTC), or epoch (= all-time debt) if UNKNOWN.
 
     FAIL-CLOSED and that is the property that makes a per-project store safe: an
     absent record cannot silently SKIP a retro, it forces one (every close and
     resolve in project history counts as debt), and the resulting retro's
     `retro-mark` re-seeds the log — so the system self-heals after exactly one
     retro. Callers wanting to SHOW the boundary must use `_retro_verdict`.
+
+    `arm` is REQUIRED (DEF-ROC-130). Fail-closed now holds PER ARM: a project
+    whose log carries only cheap `debt_drained` events has never had a full retro,
+    so its ROUTINE boundary reads UNKNOWN and its whole close history is owed.
     """
-    _kind, ts, _why = _retro_verdict(project)
+    _kind, ts, _why = _retro_verdict(project, arm)
     return ts or datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 
-def _retro_since_phrase(project):
-    kind, ts, why = _retro_verdict(project)
+def _retro_since_phrase(project, arm):
+    kind, ts, why = _retro_verdict(project, arm)
     if kind == "known":
         return ts.strftime("%Y-%m-%dT%H:%M:%SZ")
     return f"UNKNOWN ({why})"
@@ -2571,32 +2954,51 @@ def _aggregate_bubble_ts(graphs, items, iid, children):
 
 
 def compute_retro_debt(graphs, project, threshold, now):
-    """Pure computation. Returns (routine, incidents, due, detail[])."""
+    """Pure computation. Returns (routine, incidents, due, detail[], markers).
+
+    The 5th value is a PER-ARM dict, never a single instant: one shared marker IS
+    DEF-ROC-130, so the signature is shaped to make sharing impossible.
+
+    WHAT COUNTS AS ROUTINE. Every AGGREGATE close — slice, chunk AND requirement.
+    The `requirement` case is AC-130-4: the branch used to be guarded
+    `it.type in ("slice", "chunk")`, so REQ-ROC-002 completing on 2026-08-27 (an
+    entire requirement delivered, the largest learning event this system produces)
+    generated ZERO debt of either kind. The guard is now the KIND, so a new
+    aggregate type cannot be silently omitted the way `requirement` was; the
+    completeness of that is pinned by a test that enumerates the type graph.
+
+    WHAT COUNTS AS AN INCIDENT is UNCHANGED by DEF-ROC-130: a defect resolve, and
+    only that. A requirement close is routine — it batches, it does not fire.
+    """
     items, _dup = load_all_items(project)
     states = compute_states(graphs, items)
     children = compute_children(items)
-    marker = _read_retro_marker(project)
+    # SEPARATE MARKERS (DEF-ROC-130 / OPTION B). The routine arm is drained only
+    # by a full `retro_closed`; the incident arm also by parts-check's cheap
+    # `debt_drained`. Reading one marker for both is the defect.
+    markers = {arm: _read_retro_marker(project, arm) for arm in ARMS}
+    r_marker, i_marker = markers[ARM_ROUTINE], markers[ARM_INCIDENT]
 
     routine, incidents, detail = [], [], []
     for iid, it in items.items():
         kind = graphs.kind(it.type)
-        if kind == "aggregate" and it.type in ("slice", "chunk"):
+        if kind == "aggregate":
             if states.get(iid) == "done":
                 bt = _aggregate_bubble_ts(graphs, items, iid, children)
-                if bt and bt > marker and (now is None or bt <= now):
+                if bt and bt > r_marker and (now is None or bt <= now):
                     routine.append((iid, bt))
-                    detail.append((bt, "slice-close", iid))
+                    detail.append((bt, f"{it.type}-close", iid))
         elif it.type == "defect":
             if states.get(iid) in ("resolved", "done"):
                 t = _terminal_ts(it)
-                if t and t > marker and (now is None or t <= now):
+                if t and t > i_marker and (now is None or t <= now):
                     incidents.append((iid, t))
                     detail.append((t, "defect-resolve", iid))
         elif it.type == "use-case":
             for ev in it.events:
                 if ev.get("event") in ("build_failed", "rejected"):
                     t = parse_ts(ev.get("ts"))
-                    if t and t > marker and (now is None or t <= now):
+                    if t and t > r_marker and (now is None or t <= now):
                         # IMP-019 (v101): a dev-validation reject / build-fail that
                         # gets fixed + re-validated is the process WORKING, not an
                         # incident — batch it as ROUTINE (accrues toward the
@@ -2608,22 +3010,27 @@ def compute_retro_debt(graphs, project, threshold, now):
                         break
     due = (len(routine) >= threshold) or (len(incidents) >= 1)
     detail.sort(key=lambda d: d[0] or datetime(1970, 1, 1, tzinfo=timezone.utc))
-    return routine, incidents, due, detail, marker
+    return routine, incidents, due, detail, markers
 
 
 def cmd_retro_debt(a):
     graphs = Graphs.load()
     now = parse_ts(getattr(a, "now", None)) if getattr(a, "now", None) else None
     threshold = a.threshold
-    routine, incidents, due, detail, marker = compute_retro_debt(
+    routine, incidents, due, detail, _markers = compute_retro_debt(
         graphs, a.project, threshold, now)
     n = len(routine) + len(incidents)
     reason = ("incident (immediate)" if incidents else
               f"routine {len(routine)}>={threshold}" if len(routine) >= threshold else
               f"routine {len(routine)}<{threshold}")
-    since = _retro_since_phrase(a.project)
+    # BOTH boundaries, named. One channel carrying two meanings is what
+    # delta-074 R10 fixed for absence; DEF-ROC-130 is the same argument for the
+    # two arms — a reader could not otherwise tell which drain the count is since.
+    r_since = _retro_since_phrase(a.project, ARM_ROUTINE)
+    i_since = _retro_since_phrase(a.project, ARM_INCIDENT)
     print(f"retro-debt[{a.project}] = {n} (routine {len(routine)}/{threshold}, "
-          f"incidents {len(incidents)}) since last retro {since} "
+          f"incidents {len(incidents)}) since last retro {r_since} [routine arm] "
+          f"/ {i_since} [incident arm] "
           f"=> {'RETRO DUE — drain before advancing ['+reason+']' if due else 'ok'}")
     for ts, kind, ident in detail:
         tss = ts.strftime("%Y-%m-%dT%H:%M:%SZ") if ts else "—"
@@ -2743,7 +3150,7 @@ def cmd_parts_check(a):
     genuinely due (constraint shifted, unreadable, or routine debt at threshold)."""
     graphs = Graphs.load()
     now = parse_ts(getattr(a, "now", None)) if getattr(a, "now", None) else None
-    routine, incidents, _due, _detail, marker = compute_retro_debt(
+    routine, incidents, _due, _detail, _markers = compute_retro_debt(
         graphs, a.project, a.threshold, now)
 
     cur = _read_constraint(a.project)
@@ -2773,8 +3180,16 @@ def cmd_parts_check(a):
               f"(exploit / subordinate / elevate). The cheap path is NOT available.")
         sys.exit(2)
 
-    # Routine debt still batches to its own threshold — parts-check drains the
-    # INCIDENT arm only. A slice/chunk close backlog is a different signal.
+    # Routine debt batches to its OWN threshold against its OWN marker —
+    # parts-check drains the INCIDENT arm only. An aggregate-close backlog (slice,
+    # chunk or requirement) is a different signal and keeps its batched full retro.
+    #
+    # This comment used to be TRUE OF INTENT AND FALSE OF BEHAVIOUR (DEF-ROC-130):
+    # the drain below wrote a `debt_drained` event that the single shared marker
+    # read for both arms, so the routine count was reset on every run and this
+    # branch could only fire if 3+ closes landed between two consecutive runs.
+    # The arms now have separate markers (`ARM_DRAINED_BY`), so the drain below
+    # CANNOT erase what accumulates here, and this escalation is reachable.
     if len(routine) >= a.threshold:
         print(f"parts-check[{a.project}] @ {stamp} => ESCALATE — {line} "
               f"(unshifted), but ROUTINE debt is {len(routine)}/{a.threshold}. "
@@ -2791,9 +3206,17 @@ def cmd_parts_check(a):
     print(f"parts-check[{a.project}] @ {stamp} => OK (constraint STABLE) — {line}; "
           f"shifted since last close? n. Drained {len(incidents)} incident(s): "
           f"{', '.join(i for i, _t in incidents) or 'none'}. "
+          f"ROUTINE debt UNTOUCHED at {len(routine)}/{a.threshold} "
+          f"({', '.join(i for i, _t in routine) or 'none'}) — the arms have "
+          f"SEPARATE markers (DEF-ROC-130), so this drain cannot erase it and it "
+          f"keeps batching until a FULL /retro. "
           f"Full-retro overhead NOT paid, per the owner ruling of 2026-08-07; the "
           f"full retro remains mandatory the moment the constraint moves.")
-    write_statusline({f"retro_debt_{a.project}": 0, f"retro_due_{a.project}": False})
+    # The surviving routine debt, NOT 0. Writing 0 here was the display half of
+    # DEF-ROC-130: the statusline asserted the debt was gone while it was merely
+    # not-yet-at-threshold, so the operator could not see it accumulating either.
+    write_statusline({f"retro_debt_{a.project}": len(routine),
+                      f"retro_due_{a.project}": False})
     sys.exit(0)
 
 
@@ -2905,6 +3328,60 @@ DEFAULT_MAX_BACKLOG_AGE_DAYS = 7.0
 # failure was serial re-dating (36 items, twice in 9 days, none reaching `done`), not
 # the first defer. 30d ~= four re-dates at the 7d threshold.
 DEFAULT_MAX_DEFER_TOTAL_DAYS = 30.0
+# MINIMUM DEFER HORIZON (v157, ROC). A `defer_until` closer than this to the
+# item's QUEUE ENTRY does not count as a decision at all.
+#
+# THE ARGUMENT IS ARITHMETIC, not taste: check 4 does not fire until an item has
+# sat DEFAULT_MAX_BACKLOG_AGE_DAYS without a decision, so a defer shorter than
+# that buys EXACTLY NOTHING the item did not already have for free. It costs one
+# line, satisfies the gate, and re-poses the same question a few hours later.
+#
+# MEASURED, 2026-08-28, which is why this exists: of the nine findings registered
+# in the v156 cycle, §F9b was honoured 9/9 — and SIX of the nine decisions were
+# the same `defer_until: 2026-08-28`, written in one batch, expiring inside 13
+# hours. `orchestrator`/`reported` rose 29.78% -> 31.32% of GLT in the same
+# cycle. A recorded decision that schedules nothing is decision theatre, and this
+# system has now met that shape twice: the OagEventSource 36-item batch
+# re-staggered twice in 9 days (which produced `aged-backlog-defer-ceiling`, a
+# TOTAL-AGE limb a fresh finding cannot reach for weeks), and this.
+#
+# MEASURED FROM `now`, NOT FROM QUEUE ENTRY, and the first attempt got this
+# wrong: from ENTRY, any future date trivially clears the bar on an item that is
+# already older than the threshold, so the rule protected arrivals and did
+# nothing about an aged item being snoozed daily — precisely the 7d-to-30d
+# window between this limb and the total-age ceiling. From `now` the question is
+# the one a defer actually answers ("do not ask me again until X"), it binds at
+# every age, and serial re-dating is still bounded by the 30d ceiling above.
+#
+# THE LEGITIMATE SHORT WAIT IS NOT COLLATERAL DAMAGE: "check back in four hours,
+# CI is running" is a `blocked` park with a re-checkable probe predicate, which
+# the state graph already supports and check 5 already re-checks every cycle.
+# That route stays open and is the honest one for a bounded wait.
+DEFAULT_MIN_DEFER_DAYS = DEFAULT_MAX_BACKLOG_AGE_DAYS
+
+
+def _defer_is_decision(item, entered, now, min_days=DEFAULT_MIN_DEFER_DAYS):
+    """(deferred_to, is_decision, why_not).
+
+    `is_decision` is True only for a defer that is BOTH in date AND at least
+    `min_days` in the FUTURE. A too-short defer is reported with its own reason,
+    so the remedy is never "add a bigger number" by guesswork.
+
+    `entered` is accepted and unused: it is what the first version of this rule
+    measured from, and the parameter is kept so the two call sites read the same
+    and the mistake is not silently re-made by someone re-adding it.
+    """
+    deferred_to = _defer_until(item)
+    if deferred_to is None:
+        return None, False, None
+    if deferred_to <= now:
+        return deferred_to, False, "DEFER EXPIRED"
+    if (deferred_to - now).total_seconds() < min_days * 86400.0:
+        return deferred_to, False, (
+            f"DEFER TOO SHORT — {deferred_to.date().isoformat()} is under "
+            f"{min_days:.0f}d away, which is inside the window this very gate "
+            f"already grants for free, so it decides nothing")
+    return deferred_to, True, None
 # §F2 seed defaults, used only when queues/policy.csv lacks the row. The retro
 # TUNES these in policy.csv — they are never the authority, just the fallback.
 POLICY_DEFAULTS = {
@@ -4231,8 +4708,13 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
             age_d = (now - ent).total_seconds() / 86400.0
             if age_d <= max_backlog_age_days:
                 continue
-            deferred_to = _defer_until(items[mid])
-            if deferred_to is not None and deferred_to > now:
+            # v157: a defer is a decision only if it is BOTH in date AND far
+            # enough out to decide anything (`_defer_is_decision`). A horizon
+            # shorter than this very threshold exempts the item from a gate that
+            # would not have fired yet anyway.
+            deferred_to, is_decision, short_why = _defer_is_decision(
+                items[mid], ent, now)
+            if is_decision:
                 # An in-date decision exists — respect it, but NOT for ever.
                 #
                 # v155, and this is the retro's root-cause fix. This branch used to
@@ -4261,7 +4743,7 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
                     continue
                 over_ceiling.append((age_d, mid, deferred_to))
                 continue
-            undecided.append((age_d, mid, deferred_to))
+            undecided.append((age_d, mid, short_why))
         if unreadable:
             # UNKNOWN, not block — and the asymmetry with check 11 is deliberate,
             # not an oversight: this queue class is ADVISORY BY DESIGN (blocking on
@@ -4330,12 +4812,12 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
             continue
         undecided.sort(reverse=True)
         shown = ", ".join(f"{mid} ({age:.1f}d"
-                          + (" — DEFER EXPIRED" if dt is not None else "")
-                          + ")" for age, mid, dt in undecided[:8])
+                          + (f" — {w}" if w else "")
+                          + ")" for age, mid, w in undecided[:8])
         more = (f" and {len(undecided) - 8} more" if len(undecided) > 8 else "")
         findings.append({
             "check": "aged-backlog-undecided", "severity": "block",
-            "queue": q, "ids": [mid for _a, mid, _d in undecided],
+            "queue": q, "ids": [mid for _a, mid, _w in undecided],
             "max_age_days": max_backlog_age_days,
             "message": (
                 f"[aged-backlog-undecided] {len(undecided)} item(s) in {q} have sat "
@@ -4345,10 +4827,16 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
                 f"DECISION, which is the count-independent quantity the retro can act "
                 f"on. Remedy, per item — EITHER schedule it (make it ready and pull "
                 f"it) OR record an explicit dated defer by adding `defer_until: "
-                f"YYYY-MM-DD` to its frontmatter. **Do NOT close a real finding to "
-                f"clear this gate** (§F8a); a dated defer is one line and is always "
-                f"the cheaper move. A defer that has EXPIRED re-blocks by design — "
-                f"re-decide it, do not extend it reflexively."),
+                f"YYYY-MM-DD` to its frontmatter, dated at least "
+                f"{DEFAULT_MIN_DEFER_DAYS:.0f}d in the FUTURE — a shorter horizon sits "
+                f"inside the window this gate already grants for free, so it "
+                f"decides nothing (v157). **Do NOT close a "
+                f"real finding to clear this gate** (§F8a); a dated defer is one "
+                f"line and is always the cheaper move. A defer that has EXPIRED "
+                f"re-blocks by design — re-decide it, do not extend it reflexively. "
+                f"For a genuinely SHORT, bounded wait the honest route is a "
+                f"`blocked` park with a re-checkable probe predicate, which check 5 "
+                f"re-reads every cycle."),
         })
 
     # --- 5. awaiting observation: RE-CHECK the predicate, every cycle [v9] ----
@@ -4517,7 +5005,7 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
                 f"`make wi-append … EVENT=amended … PROBE=…`.")))
 
     # --- 4. retro debt (DELEGATED — do not duplicate that logic) -------------
-    routine, incidents, due, _detail, marker = compute_retro_debt(
+    routine, incidents, due, _detail, _markers = compute_retro_debt(
         graphs, project, threshold, now)
     if due:
         reason = ("incident (immediate)" if incidents
@@ -4530,7 +5018,9 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
             "message": (f"[retro-debt] RETRO DUE [{reason}] — routine "
                         f"{len(routine)}/{threshold}, incidents "
                         f"{len(incidents)} since "
-                        f"{_retro_since_phrase(project)} "
+                        f"{_retro_since_phrase(project, ARM_ROUTINE)} [routine] "
+                        f"/ {_retro_since_phrase(project, ARM_INCIDENT)} "
+                        f"[incident] "
                         f"({', '.join(ids) or '—'}). Remedy: fire /retro, then "
                         f"`make retro-mark PROJECT={project}` to drain it."),
         })
@@ -4602,6 +5092,62 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
     #         ran three pushes dark at 6.57 deploys/active-day. Advisory: refusing
     #         to pull cannot un-stale an environment.
     findings.extend(compute_deploy_staleness(project))
+
+    # --- 16. IS THE DEPLOY LANE OPEN? — DELEGATED ----------------------------
+    #         (DEF-ROC-131, owner ruling 2026-08-27). Check 15 asks the HOST what
+    #         it is running; this asks CI whether the DEPLOY JOB ran at all. They
+    #         are different questions with independent blind spots, and this is
+    #         the BLOCKING one: a stale environment cannot be un-staled by
+    #         refusing to pull, but a red trunk CAN be fixed, and per the ruling
+    #         that is the work. Deliberately LAST, so its block is the final word.
+    findings.extend(compute_deploy_lane(project))
+
+    # --- 17. A FINDING REGISTERED THIS CYCLE CARRIES NO DECISION (§F9b) -------
+    #         §F9b (v156) says a finding is registered WITH its triage decision, IN
+    #         THE SAME ACT. Check 4 cannot police that: its clock is SEVEN DAYS, so
+    #         an arrival is invisible to it for a week — exactly the window §F9b is
+    #         about. This limb reads the CYCLE instead.
+    #
+    #         WHAT IT FOUND ON ITS FIRST RUN, and it is not what was expected: §F9b
+    #         is honoured 9 of 9 — every defect registered since the v156 close
+    #         carried a decision in the SAME COMMIT that created its file (verified
+    #         with `git log -S defer_until`, not from the file's own text, which
+    #         carries no timestamp for a frontmatter scalar). But SIX of those nine
+    #         decisions were an identical `defer_until: 2026-08-28` written in one
+    #         batch — a defer to TOMORROW, which expired inside 13 hours and put
+    #         every one of them back in front of this gate. Meanwhile
+    #         `orchestrator`/`reported` rose 29.78% -> 31.32% of gross lead time,
+    #         median 8.7h -> 13.0h per item, and became the #1 owner. So the rule
+    #         bought a RECORDED decision and not a SCHEDULING one, which is the
+    #         `aged-backlog-defer-ceiling` pathology arriving a step earlier: the
+    #         system measures whether a decision EXISTS and never whether anything
+    #         MOVED. The minimum-horizon rule below (`_defer_is_decision`) is the
+    #         answer; this limb is what makes its effect observable at 13h instead
+    #         of 7 days.
+    findings.extend(compute_undecided_arrivals(
+        graphs, project, items, states, policy, now))
+
+    # --- 18. IS PROCESS LEARNING FOLDED BACK? (§0a Rule 4) -------------------
+    #         Reconcile latency is a gross-lead-time component the retro is
+    #         REQUIRED to measure and drive down, and it has risen across three
+    #         consecutive retros — 20.6h (v155) -> 23.3h (v156) -> 36.6h with 12
+    #         commits batched (v157) — while the retro that measured each rise
+    #         declared fold-back "run at close". Nothing checked. The integration
+    #         tree was CLEAN the whole time, so every one of those fold-backs
+    #         would have succeeded on a single command.
+    findings.extend(compute_reconcile_latency(project))
+
+    # --- 19. IS THE RETRO'S OWN OUTPUT BEING BUILT? -------------------------
+    #         The retro is the ONE part of this system whose outputs nothing
+    #         gates. Measured 2026-08-28: 33 improvement slices, EIGHT with no
+    #         status line at all, several QUEUED since 2026-06-06 — and
+    #         `IMP-033`, opened by the v150 retro four days earlier, has its
+    #         mechanism (`park_remedy`) in ZERO lines of machinery and ZERO
+    #         items, while its registry row `EXP-ROC-004` sits at strike 1 of 3
+    #         being SCORED AGAINST IT. That is the worst available outcome: the
+    #         three-strike budget burns down on a hypothesis nobody ever tested,
+    #         and the row dies reported as "no measurable effect".
+    findings.extend(compute_retro_output_unbuilt(project))
 
     return findings
 
@@ -4695,6 +5241,631 @@ def compute_deploy_staleness(project, timeout=DEPSTALE_TIMEOUT):
         f"item event, so deployment frequency keeps reporting a healthy rate while "
         f"nothing reaches the environment. Any acceptance condition reading 'verified "
         f"against the deployed host' is unmeetable until this closes."))]
+
+
+# ---------------------------------------------------------------------------
+# loop-gate check 16 — IS THE DEPLOY LANE OPEN? (DEF-ROC-131)
+#
+# OWNER RULING, 2026-08-27: "we should not deploy things that are red — they
+# should get fixed", and "FIX THE LOOPS TO FIX THINGS."
+#
+# THE GAP. This gate could emit nineteen distinct findings and NOT ONE of them
+# asked whether trunk CI was red. So the single condition that stops ALL delivery
+# for a project was invisible to the mechanism whose entire purpose is holding the
+# loop's preconditions. Measured 2026-08-27: four sequential genuine reds, every
+# one of them SKIPPING `deploy-test` (it declares `needs: [test-function-app,
+# test-web-app]`); UC-ROC-105 and UC-ROC-106 built green, committed, PUSHED and
+# undeployable — therefore un-validatable, because a tester cannot validate what
+# is not deployed — for most of a cycle; `make loop-gate PROJECT=ROC` run
+# repeatedly through that window reporting OK on the pull question EVERY TIME;
+# and the orchestrator finding out from an engineer's passing remark in a build
+# report. Sixth registered instance this cycle of a control reading healthy while
+# the thing it guards actively fails (DEF-ROC-125..129) — except here the control
+# is the loop gate itself and the thing failing is delivery.
+#
+# WHY IT BLOCKS, AND WHY THAT IS NOT THE TRAP IT LOOKS LIKE. Check 15 (deploy
+# staleness) is ADVISORY on purpose: refusing to pull cannot un-stale an
+# environment. A SHUT LANE IS DIFFERENT — it CAN be opened, and the ruling says
+# open it. But a limb that merely BLOCKS would convert a deploy stall into a
+# TOTAL stall, which is strictly worse than the status quo. So this copies the
+# ONE check in this gate with a proven record of causing action — check 1,
+# stalled-validation, which found two items dwelling 35.5h and 27.3h awaiting a
+# dispatch nobody made: it BLOCKS, and it names the id and the exact remedy, and
+# `/loop-run` STEP 0b binds the loop to "the only permitted actions are the
+# remedies it names". The block is therefore not a wait — it is an INSTRUCTION TO
+# DISPATCH, and the remedy below is a dispatch, never a hold.
+#
+# THE DISCRIMINATION IS WHAT KEEPS IT TRUSTED. `Dependency audit (prod-runtime,
+# blocking)` is red on EVERY push on this repo (DEF-ROC-068, `deepmerge-ts` via
+# `flowbite-react` via the design system, pinned EXACTLY, no upstream fix) and is
+# DELIBERATELY not in the deploy job's `needs:`. Real run 33076365108 PROVES it:
+# the deploy succeeded GREEN while that job was red. All three real captures the
+# delegated tool is pinned against carry run conclusion `failure`; one of them
+# DEPLOYED. So the run's overall conclusion cannot tell an open lane from a shut
+# one, and a limb reading it would fire permanently and be ignored inside a day.
+# The tool reads the DEPLOY JOB'S OWN CONCLUSION and the transitive closure of
+# its `needs:` — never the run conclusion — and says so in `decidedBy`.
+#
+# AND IT MUST NOT READ GREEN-SO-FAR AS LANDED. Also measured this cycle: the ROC
+# health endpoint served the new `buildSha` while the Deploy job was still
+# `in_progress` (Function App swapped, Web App not). `in-flight` is therefore its
+# own verdict and renders as NOT ESTABLISHED, never as clean — firing "go
+# validate" on that dispatches a tester at a half-completed cutover.
+# ---------------------------------------------------------------------------
+DEPLOY_LANE_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "..", "..", "..", "tools", "deploy-lane.js")
+DEPLOY_LANE_TIMEOUT = 150.0
+
+
+# RESOLVED AT CALL TIME, never bound at import. `ROOT` is REDIRECTED by the test
+# harness (and could be by any embedder), and a constant frozen at import would
+# make this limb read the REAL repo from inside a scratch fixture — a check
+# answering about a tree the caller is not asking about.
+def _improvement_slice_dir():
+    return os.path.join(ROOT, "process", "improvement-slices")
+
+
+def _experiments_file():
+    return os.path.join(ROOT, "process", "experiments.md")
+
+# Words that end an improvement slice. Matched case-insensitively against the
+# `**Status:**` line. Deliberately GENEROUS — the point of this limb is the
+# slice that says nothing at all, or says QUEUED and has for months, not
+# policing anyone's wording.
+IMP_TERMINAL_WORDS = ("delivered", "done", "closed", "resolved", "superseded",
+                      "implemented", "adopted", "abandoned", "declined",
+                      "retired", "deferred")
+DEFAULT_RECONCILE_MAX_HOURS = 12.0
+RECONCILE_POLICY_PARAM = "reconcile_max_hours"
+# The finding types §F9b governs. A use-case is NOT one: it is registered by
+# product as part of ordinary replenishment and scheduled by flow-manager, so
+# "the discovering role held the context to decide" does not apply to it. A
+# defect and an open-item are both DISCOVERIES, and both are registered by
+# whichever role tripped over them.
+FINDING_TYPES = ("defect", "open-item")
+
+
+def _improvement_slices():
+    """[(name, status_line_or_None, is_open)] for every process/improvement-slices file."""
+    out = []
+    slice_dir = _improvement_slice_dir()
+    if not os.path.isdir(slice_dir):
+        return out
+    for fn in sorted(os.listdir(slice_dir)):
+        if not fn.startswith("IMP-") or not fn.endswith(".md"):
+            continue
+        status = None
+        try:
+            with open(os.path.join(slice_dir, fn), encoding="utf-8") as fh:
+                for line in fh:
+                    m = re.match(r"\*\*Status[^:]*:\*\*\s*(.+)", line.strip())
+                    if m:
+                        status = m.group(1).strip()
+                        break
+        except OSError:
+            status = None
+        low = (status or "").lower()
+        # NO STATUS LINE IS OPEN, NOT CLEAN (§17i). An unstated status is the
+        # cheapest way for a slice to disappear, and eight of ROC's did.
+        is_open = not any(w in low for w in IMP_TERMINAL_WORDS)
+        out.append((fn[:-3], status, is_open))
+    return out
+
+
+def _active_experiment_slice_citations(project=None):
+    """({IMP-slug: [mine]}, {IMP-slug: [others]}) for `active` registry rows.
+
+    Read from the registry TABLE, not from prose: only a row still being SCORED
+    can have its score corrupted by an unbuilt mechanism.
+
+    SPLIT BY STANDING (process §25a, v143/v145). A retro may adopt-or-kill only
+    rows whose evidence it holds; over another project's row it may report and
+    add a strike, never retire. So a slice cited ONLY by another project's rows
+    must not BLOCK this project's pull — the remedy would not be available, which
+    is the DEF-ROC-083 unsatisfiable-gate failure. Ownership is read from the
+    row's own text (its version cell names the project that opened it) rather
+    than from the `EXP-<TAG>-` prefix, because the tag is an abbreviation
+    (`OAG` for `OagEventSource`) and a convention is weaker evidence than a
+    statement. A row naming NO project belongs to everyone and stays blocking.
+    """
+    mine, others = defaultdict(list), defaultdict(list)
+    try:
+        with open(_experiments_file(), encoding="utf-8") as fh:
+            for line in fh:
+                if not line.lstrip().startswith("|"):
+                    continue
+                cells = [c.strip() for c in line.strip().strip("|").split("|")]
+                if len(cells) < 3:
+                    continue
+                row = cells[0].strip("`").strip()
+                if not row.startswith("EXP-"):
+                    continue
+                if not re.search(r"\bactive\b", line):
+                    continue
+                origin = cells[1] if len(cells) > 1 else ""
+                is_mine = _row_belongs_to(origin, row, project)
+                for slug in re.findall(r"IMP-\d+-[a-z0-9-]+", line):
+                    (mine if is_mine else others)[slug].append(row)
+    except OSError:
+        return {}, {}
+    return dict(mine), dict(others)
+
+
+def _row_belongs_to(origin, row_id, project):
+    """Is this registry row one THIS retro has standing over?
+
+    Read from the row's ORIGIN CELL (column 2, "v155 (2026-08-27, OagEventSource
+    retro — …)"), never from the whole row. Two earlier attempts were wrong in
+    instructive ways. Asking the FILESYSTEM which projects exist fails because a
+    per-project worktree contains exactly ONE, so every other project's rows read
+    as unowned. Searching the WHOLE ROW fails because these rows carry long prose
+    and one OagEventSource row happens to mention ROC in its problem statement —
+    a mention is not ownership. The origin cell is the row's own statement of
+    which retro opened it, which is the actual question.
+
+      * MINE    — the project's name appears in the ORIGIN cell, or in the row
+                  id (`EXP-ROC-…`).
+      * FOREIGN — the row carries SOMEBODY's tag (`EXP-<TAG>-<n>`) and it is not
+                  this project's. Advisory: §25a gives no standing over it.
+      * MINE    — an untagged legacy row (`EXP-131`) naming no project belongs to
+                  everyone, so it stays blocking. Fail closed on ambiguity.
+    """
+    if project and re.search(rf"\b{re.escape(project)}\b", f"{row_id} {origin}"):
+        return True
+    return not re.match(r"^EXP-[A-Za-z]+-\d+$", row_id)
+
+
+def compute_retro_output_unbuilt(project=None):
+    """Is the retro's OWN output queue being worked? 0-2 findings.
+
+    TWO SEVERITIES, and the split is the whole value of the limb:
+
+      * BLOCK — an OPEN slice cited by an ACTIVE experiment row. That row is
+        being scored, cycle after cycle, against a mechanism that does not
+        exist. It will exhaust its three strikes and be archived as "no
+        measurable effect" when the truth is "never built". A false NEGATIVE in
+        the registry is worse than no row: it retires a hypothesis AND records
+        a reason that is not true.
+      * ADVISORY — every other open slice, with its age. Aging inventory in the
+        retro's own output queue, which no other check in this gate can see.
+    """
+    slices = _improvement_slices()
+    if not slices:
+        return []
+    mine, others = _active_experiment_slice_citations(project)
+    scored_unbuilt, foreign, plain_open = [], [], []
+    for name, status, is_open in slices:
+        if not is_open:
+            continue
+        if mine.get(name):
+            scored_unbuilt.append((name, status, mine[name]))
+        elif others.get(name):
+            foreign.append((name, status, others[name]))
+        else:
+            plain_open.append((name, status, []))
+
+    findings = []
+    if scored_unbuilt:
+        findings.append({
+            "check": "retro-output-unbuilt", "severity": "block",
+            "ids": [n for n, _s, _r in scored_unbuilt],
+            "message": (
+                f"[retro-output-unbuilt] {len(scored_unbuilt)} improvement "
+                f"slice(s) are OPEN while an ACTIVE experiment row is being "
+                f"SCORED against them: "
+                + "; ".join(
+                    f"{n} (cited by {', '.join(r)}; status: "
+                    + (f"\"{s}\"" if s else "NO STATUS LINE")
+                    + ")" for n, s, r in scored_unbuilt[:6])
+                + (f" and {len(scored_unbuilt) - 6} more"
+                   if len(scored_unbuilt) > 6 else "")
+                + ". A row scored against a mechanism that was never built "
+                  "burns its three-strike budget and is then archived as \"no "
+                  "measurable effect\" — a FALSE negative, which is worse than "
+                  "no row at all: it retires the hypothesis AND records an "
+                  "untrue reason. Measured 2026-08-28: IMP-033 (v150 retro) has "
+                  "`park_remedy` in ZERO lines of machinery and ZERO items while "
+                  "EXP-ROC-004 sits at strike 1 of 3. Remedy, per slice — EITHER "
+                  "build it (it is the retro's own stated lever, so it is the "
+                  "cheapest high-value work available) OR mark the slice with a "
+                  "terminal `**Status:**` and PAUSE its row's strike clock in "
+                  "the registry, saying why. Do NOT let it be scored unbuilt."),
+        })
+    if foreign:
+        findings.append({
+            "check": "retro-output-unbuilt-elsewhere", "severity": "advisory",
+            "ids": [n for n, _s, _r in foreign],
+            "message": (
+                f"[retro-output-unbuilt-elsewhere] {len(foreign)} improvement "
+                f"slice(s) are OPEN while ANOTHER PROJECT's active experiment row "
+                f"is scored against them: "
+                + "; ".join(f"{n} (cited by {', '.join(r)})" for n, s, r in foreign[:6])
+                + ". Same hazard as the blocking limb — those rows will be archived "
+                  "as \"no measurable effect\" when the truth is \"never built\" — "
+                  "but ADVISORY here, because §25a (v143/v145) gives this retro NO "
+                  "STANDING over another project's rows: it may add evidence and a "
+                  "strike, never retire one. Blocking would make the gate "
+                  "unsatisfiable from this tree (DEF-ROC-083). Remedy: report it on "
+                  "the row so the owning project's next retro sees it."),
+        })
+    if plain_open:
+        findings.append({
+            "check": "retro-output-aging", "severity": "advisory",
+            "ids": [n for n, _s, _r in plain_open],
+            "message": (
+                f"[retro-output-aging] {len(plain_open)} improvement slice(s) are "
+                f"OPEN with no active experiment row scoring them"
+                + (f" — {sum(1 for _n, s, _r in plain_open if not s)} of them "
+                   f"carry NO `**Status:**` line at all, which is not the same as "
+                   f"clean (§17i)" if any(not s for _n, s, _r in plain_open) else "")
+                + f": {', '.join(n for n, _s, _r in plain_open[:10])}"
+                + (f" and {len(plain_open) - 10} more"
+                   if len(plain_open) > 10 else "")
+                + ". This is the retro's OWN output queue, and until now nothing "
+                  "in this gate could see it — which is how slices opened in June "
+                  "are still marked QUEUED. Advisory, because refusing to pull "
+                  "cannot build them; the retro is where they get scheduled, "
+                  "declined, or closed. Every retro owes each of these a "
+                  "decision, exactly as §F9b requires of a finding."),
+        })
+    return findings
+
+
+def compute_undecided_arrivals(graphs, project, items, states, policy, now):
+    """§F9b, mechanised: a finding registered THIS CYCLE and left undecided.
+
+    UNDECIDED means the item is still in its type's `initial` state AND carries
+    no in-date `defer_until`. Deliberately type-agnostic rather than a list of
+    "decision events": §F9b is about the ACT, and every legal first move off the
+    initial state IS a decision (triage it, decline it, park it, cancel it).
+
+    THE CLOCK IS THE CYCLE, not a calendar age, and the seam that leaves is
+    stated rather than hidden: a finding registered 1-7 days ago that survived a
+    retro close undecided falls between this limb (cohort: since the last close)
+    and check 4 (7 days). That gap is accepted for now because the cohort clock
+    is the unit §F9b is SCORED on and it needs no new committed state, and
+    because check 4 still catches the survivor at 7d. If the next retro finds
+    items living in the seam, the fix is a committed ratchet of undecided ids,
+    not a wider age window.
+
+    Severity BLOCK, with the same asymmetry that protects discovery in check 4:
+    the cheapest path to green is a one-line dated `defer_until:`, NEVER a close.
+    A gate whose cheapest remedy were "close it" would manufacture pressure to
+    close real findings, which §F8a bans outright. The guard on this limb is
+    findings-registered-per-cycle: if it suppresses discovery it is strictly
+    worse than the inventory it prevents, and it dies rather than being tuned.
+    """
+    # "SINCE THE LAST RETRO CLOSE" IS MEANINGLESS WITHOUT ONE, and fail-closed is
+    # the WRONG default here even though it is right almost everywhere else in
+    # this file. `_read_retro_marker` returns the epoch when the boundary is
+    # unknown, which for THIS limb would classify every finding the project has
+    # ever registered as "this cycle's arrival" and block the pull on the entire
+    # backlog — the DEF-ROC-083 unsatisfiable-gate failure, arriving through the
+    # back door of a safe-looking default. So say NOT ESTABLISHED (§17i) and let
+    # check 4's age limb, whose clock needs no boundary, do its job.
+    kind, boundary, why = _retro_verdict(project, ARM_ROUTINE)
+    if kind != "known" or boundary is None:
+        return [{
+            "check": "undecided-arrival-unreadable", "severity": "unknown",
+            "ids": [],
+            "message": (
+                f"[undecided-arrival-unreadable] NOT ESTABLISHED: §F9b was not "
+                f"evaluated at all, because this project has no known routine "
+                f"retro close to measure arrivals against ({why}). That is NOT "
+                f"the same as 'every arrival carried its decision'. It resolves "
+                f"itself at the next `make retro-mark PROJECT={project}`; until "
+                f"then only check 4's 7d age limb covers this queue."),
+        }]
+    undecided, unreadable = [], []
+    for iid in sorted(items):
+        it = items[iid]
+        if getattr(it, "type", None) not in FINDING_TYPES:
+            continue
+        st = states.get(iid)
+        if st != graphs.initial(it.type):
+            continue                       # it moved: a decision was recorded
+        q = graphs.queue_for(st)
+        if not q or queue_kind(policy, q) != QUEUE_KIND_BACKLOG:
+            continue
+        entered, why = _open_segment_entered(graphs, it, st, now)
+        if entered is None:
+            unreadable.append((iid, why))
+            continue
+        if entered < boundary:
+            continue                       # not this cycle's arrival
+        deferred_to, is_decision, short_why = _defer_is_decision(it, entered, now)
+        if is_decision:
+            continue                       # an explicit, in-date, real decision
+        undecided.append((entered, iid, short_why))
+
+    findings = []
+    if unreadable:
+        findings.append({
+            "check": "undecided-arrival-unreadable", "severity": "unknown",
+            "ids": [i for i, _w in unreadable],
+            "message": (
+                f"[undecided-arrival-unreadable] NOT ESTABLISHED: "
+                f"{len(unreadable)} finding(s) sit in their initial state but "
+                f"their REGISTRATION INSTANT cannot be computed, so §F9b was not "
+                f"evaluated for them at all: "
+                + "; ".join(f"{i} ({w})" for i, w in unreadable[:6])
+                + ". An arrival with no computable instant is exempt from this "
+                  "limb for ever, which is not the same as decided (§17i). "
+                  "Remedy: repair the event stream — see the "
+                  "[aged-backlog-unreadable] remedy, which is the same repair."),
+        })
+    if not undecided:
+        return findings
+    undecided.sort()
+    shown = ", ".join(
+        f"{iid} ({_hms((now - ent).total_seconds())} undecided"
+        + (f" — {w}" if w else "") + ")"
+        for ent, iid, w in undecided[:8])
+    more = f" and {len(undecided) - 8} more" if len(undecided) > 8 else ""
+    findings.append({
+        "check": "undecided-arrival", "severity": "block",
+        "ids": [iid for _e, iid, _w in undecided],
+        "since": boundary.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "message": (
+            f"[undecided-arrival] §F9b VIOLATED by {len(undecided)} finding(s) "
+            f"registered since the last retro close "
+            f"({boundary.strftime('%Y-%m-%dT%H:%M:%SZ')}) and still carrying NO "
+            f"decision: {shown}{more}. §F9b: a finding is registered WITH its "
+            f"triage decision, IN THE SAME ACT — the role that found it always "
+            f"held the context to decide it, and registering without deciding "
+            f"converts discovery into inventory on the state that is this "
+            f"project's #1 contributor to gross lead time. THIS BLOCK IS NOT A "
+            f"WAIT AND IS NOT CLEARED BY PULLING SOMETHING ELSE. Remedy, per "
+            f"item — EITHER record the decision now (`work-items append "
+            f"--project {project} --id <id> --event triaged --agent orchestrator "
+            f"--note-file <path>`, or the type's equivalent first move) OR add a "
+            f"one-line dated `defer_until: YYYY-MM-DD` to its frontmatter, "
+            f"dated at least {DEFAULT_MIN_DEFER_DAYS:.0f}d in the future — a shorter horizon "
+            f"decides nothing (v157), and a bounded short wait belongs in a "
+            f"`blocked` park with a probe predicate. **Do "
+            f"NOT close a real finding to clear this gate** (§F8a): the dated "
+            f"defer is always the cheaper move, and that asymmetry is what stops "
+            f"this limb from suppressing discovery. If it suppresses it anyway — "
+            f"findings-registered-per-cycle falls — this limb dies rather than "
+            f"being tuned."),
+    })
+    return findings
+
+
+def compute_reconcile_latency(project, max_hours=None, now=None):
+    """§0a Rule 4, mechanised: is this instance's process learning on `main`?
+
+    Reads the CURRENT branch's unmerged commits against `main` and the
+    INTEGRATION TREE's cleanliness, because those two facts together decide
+    whether the remedy is available:
+
+      * integration tree CLEAN  -> `make project-foldback` would exit 0. One
+        command, always available, so this BLOCKS.
+      * integration tree DIRTY  -> fold-back would exit 3 (DEFERRED) by design.
+        Blocking on something the loop cannot clear is the DEF-ROC-083 failure
+        (a gate that cannot be SATISFIED stops all work), so this is ADVISORY
+        and names the tree that has to be cleaned.
+
+    Nothing here reads project output: `work/*` is gitignored by the parent, so
+    only the process layer can ever be in these commits.
+    """
+    if now is None:
+        now = parse_ts(now_iso())
+    if max_hours is None:
+        max_hours = float(read_queue_policy(project).get("_global", {}).get(
+            RECONCILE_POLICY_PARAM) or DEFAULT_RECONCILE_MAX_HOURS)
+    common = {"check": "reconcile-latency", "ids": []}
+
+    def git(*args, cwd=ROOT):
+        return subprocess.run(["git", "-C", cwd, *args],
+                              capture_output=True, text=True, timeout=30)
+
+    try:
+        branch = git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+        if branch != f"instance/{project}":
+            # On the integration tree (or a detached//ad-hoc ref) there is
+            # nothing to fold BACK. This is an established negative, not silence.
+            return []
+        oldest = git("log", "--reverse", "--format=%aI", "main..HEAD").stdout
+        oldest = [ln for ln in oldest.splitlines() if ln.strip()]
+        if not oldest:
+            return []                       # fully folded
+        count = len(oldest)
+        first = parse_ts(oldest[0].strip())
+        if first is None:
+            raise ValueError(f"unparseable commit date {oldest[0]!r}")
+        main_tree = _main_worktree_path()
+        if main_tree is None:
+            raise ValueError("no worktree is checked out on `main`")
+        dirty = [ln for ln in git("status", "--porcelain",
+                                  cwd=main_tree).stdout.splitlines() if ln.strip()]
+    except Exception as exc:                                    # noqa: BLE001
+        return [dict(common, severity="unknown", message=(
+            f"[reconcile-latency] NOT ESTABLISHED — git would not answer "
+            f"({type(exc).__name__}: {str(exc)[:160]}). Nothing was checked, which "
+            f"is NOT the same as 'this instance is reconciled': unmerged process "
+            f"learning is invisible to every other check here, and it rose across "
+            f"three consecutive retros while each of them recorded fold-back as "
+            f"done. Remedy: `git rev-list --count main..HEAD` from the project "
+            f"worktree, then `make project-foldback PROJECT={project}`."))]
+
+    age_h = (now - first).total_seconds() / 3600.0
+    if age_h <= max_hours:
+        return []
+    head = (f"[reconcile-latency] instance/{project} is {count} commit(s) ahead "
+            f"of `main`, the oldest unmerged for {age_h:.1f}h (threshold "
+            f"{max_hours:.0f}h). §0a Rule 4: reconcile CONTINUOUSLY, never batch "
+            f"— rising instance->main latency IS a gross-lead-time cost, and "
+            f"nothing else in this gate can see it. ")
+    if dirty:
+        return [dict(common, severity="advisory", branch=branch, commits=count,
+                     age_h=round(age_h, 1), integration_dirty=len(dirty), message=(
+            head +
+            f"ADVISORY, not blocking, because the remedy is NOT AVAILABLE to this "
+            f"loop: the integration tree holds {len(dirty)} uncommitted change(s), "
+            f"so `make project-foldback PROJECT={project}` would exit 3 (DEFERRED) "
+            f"by design. Blocking on a condition the loop cannot clear is the "
+            f"DEF-ROC-083 failure — a gate that cannot be SATISFIED stops all work. "
+            f"Remedy: commit or discard the integration tree's changes, then "
+            f"`make project-foldback PROJECT={project}`."))]
+    return [dict(common, severity="block", branch=branch, commits=count,
+                 age_h=round(age_h, 1), integration_dirty=0, message=(
+        head +
+        f"The integration tree is CLEAN, so `make project-foldback "
+        f"PROJECT={project}` would exit 0 RIGHT NOW — one command, no judgement "
+        f"needed, no project output riding along (`work/*` is gitignored, so only "
+        f"the process layer moves). That is why this BLOCKS: it is the cheapest "
+        f"remedy in this gate. Run it, then re-run."))]
+
+
+def _main_worktree_path():
+    """The absolute path of the worktree checked out on `main`, or None."""
+    out = subprocess.run(["git", "-C", ROOT, "worktree", "list", "--porcelain"],
+                         capture_output=True, text=True, timeout=30).stdout
+    path = None
+    for line in out.splitlines():
+        if line.startswith("worktree "):
+            path = line[len("worktree "):].strip()
+        elif line.strip() == "branch refs/heads/main" and path:
+            return path
+    return None
+
+
+def compute_deploy_lane(project, timeout=DEPLOY_LANE_TIMEOUT):
+    """Did the DEPLOY JOB on trunk actually run and pass? 0 or 1 finding.
+
+    DELEGATED to the ONE executable home of the needs-graph reading
+    (.claude/tools/deploy-lane.js) — never re-implemented here, and pinned there
+    against REAL captured `gh` payloads plus a live probe (`make deploy-lane`).
+    """
+    common = {"check": "deploy-lane", "ids": []}
+    try:
+        proc = subprocess.run(
+            ["node", os.path.normpath(DEPLOY_LANE_SCRIPT), "--project", project,
+             "--repo-root", ROOT, "--json"],
+            capture_output=True, text=True, timeout=timeout)
+        report = json.loads(proc.stdout)
+    except Exception as exc:                                    # noqa: BLE001
+        return [dict(common, severity="unknown", verdict="UNRUNNABLE", message=(
+            f"[deploy-lane] NOT ESTABLISHED — the checker would not run "
+            f"({type(exc).__name__}: {str(exc)[:160]}). Nothing was checked, which is "
+            f"NOT the same as 'the deploy lane is open': a shut lane is the single "
+            f"condition that stops ALL delivery for {project}, and it was invisible to "
+            f"this gate for the whole of 2026-08-27 (DEF-ROC-131). Remedy: `node "
+            f".claude/tools/deploy-lane.js --project {project} --repo-root . --json`; "
+            f"check `gh auth status` first."))]
+
+    verdict = report.get("verdict")
+    deploy_job = report.get("deployJobName") or "the deploy job"
+    sha = str(report.get("headSha") or "")[:12]
+    url = report.get("runUrl") or "(no run url)"
+
+    # OPEN — the deploy job succeeded. Say NOTHING, even when other jobs in the
+    # run are red: that silence IS the DEF-ROC-068 discrimination, and it is the
+    # half of this limb that decides whether anyone still reads it next week.
+    if verdict == "open":
+        return []
+
+    if verdict == "in-flight":
+        # "is None" is the shape of a message nobody trusts, and it is what this
+        # printed whenever GitHub had not yet materialised the deploy job — which
+        # is most of a run's life (DEF-ROC-142 review).
+        job_state = (f"is {report.get('deployJobStatus')}" if report.get("deployJobStatus")
+                     else "has not been created yet (the run is still going)")
+        return [dict(common, severity="unknown", verdict=verdict, message=(
+            f"[deploy-lane] NOT ESTABLISHED — \"{deploy_job}\" {job_state} "
+            f"at {sha}, so NOTHING HAS LANDED yet and "
+            f"nothing is broken either. Do NOT read this as a deploy and do NOT "
+            f"dispatch validation against the host: on 2026-08-27 the {project} health "
+            f"endpoint served the NEW buildSha while this job was still in_progress — "
+            f"one app had swapped and another had not — so a tester dispatched here "
+            f"measures a half-completed cutover. Re-run this gate when the run "
+            f"completes. {url}"))]
+
+    # DEF-ROC-142 — "trunk head has no run" is the ORDINARY state after every
+    # items-only, process or docs commit, because the deploy workflow is
+    # path-filtered. It must read as cannot-determine, with its real cause named:
+    # the generic branch below would tell the operator to go commit a config,
+    # which is both wrong and the fastest way to make a limb ignored. And it must
+    # NEVER be answered from another commit's run — that fallback BLOCKED a real
+    # cycle on 2026-08-29 and returns a false OPEN just as readily.
+    if report.get("reason") in ("no-run-for-trunk-head", "trunk-head-unresolved",
+                                "run-not-for-trunk-head"):
+        head = str(report.get("trunkHeadSha") or "")[:12] or "the trunk head"
+        return [dict(common, severity="unknown", verdict=verdict, message=(
+            f"[deploy-lane] NOT ESTABLISHED — no CI run belongs to trunk head {head}, so "
+            f"whether {project}'s work can reach an environment is UNKNOWN for this commit: "
+            f"it is NEITHER open NOR shut. This is ORDINARY — the deploy workflow is "
+            f"PATH-FILTERED, so an items-only, process or docs commit produces no run at "
+            f"all — and it is NOT a config fault. The verdict of a different commit's run "
+            f"is deliberately NOT reported here: doing that BLOCKED a real cycle on "
+            f"2026-08-29 naming a run from two days earlier, and the same fallback returns "
+            f"a false OPEN just as readily (DEF-ROC-142). If you need the lane established "
+            f"before dispatching validation, look at the last commit that DID touch a "
+            f"deploy path, or push one. Detail: {report.get('detail') or 'none'}"))]
+
+    if verdict != "blocked":
+        return [dict(common, severity="unknown", verdict=verdict, message=(
+            f"[deploy-lane] NOT ESTABLISHED ({report.get('reason')}) — "
+            f"{report.get('detail') or 'no detail'}. An unanswerable question must never "
+            f"render as a clean answer, and this is the question whose wrong answer cost "
+            f"most of a cycle (DEF-ROC-131). Until it is established, no statement that "
+            f"{project}'s work can reach an environment is supported by anything. "
+            f"Remedy: commit .claude/config/deploy-lane/{project}.json (copy ROC's) or "
+            f"fix what the reason names."))]
+
+    # BLOCKED — delivery is stopped. Name the job, name the owner, dispatch.
+    blocking = report.get("blockingJobs") or []
+    cause = ("; ".join(f"\"{j.get('name')}\" is {j.get('conclusion')}" for j in blocking)
+             or f"reason {report.get('reason')} (the tool could not see which job)")
+    suspects = [str(i) for i in (report.get("suspectItems") or [])]
+    if suspects:
+        owner = ", ".join(suspects)
+    elif report.get("suspectItemsEstablished") is False:
+        owner = ("NOT ESTABLISHED — the run title was truncated and the full commit "
+                 "message could not be read, so read the sha's message yourself; this "
+                 "is not 'no item involved'")
+    else:
+        owner = "no work-item id appears in the breaking commit"
+    behind = report.get("undeliveredCommits")
+    if behind is None:
+        stuck = ("How much is stuck behind it could NOT be established (no earlier run "
+                 "with a successful deploy job inside the scan bound — which on "
+                 "2026-08-27 was itself the symptom: the whole scan window was red).")
+    else:
+        stuck = (f"{behind} commit(s) have landed on trunk since the last successful "
+                 f"deploy and NONE of them can reach an environment"
+                 + (f"; items in that range: {', '.join(report.get('undeliveredItems') or []) or '—'}."
+                    if behind else "."))
+    return [dict(common, severity="block", verdict=verdict,
+                 ids=suspects, run=report.get("runId"),
+                 blocking_jobs=[j.get("name") for j in blocking],
+                 message=(
+        f"[deploy-lane] THE DEPLOY LANE IS SHUT for {project} — \"{deploy_job}\" is "
+        f"{report.get('deployJobConclusion')} at {sha} because {cause}. Owning item(s): "
+        f"{owner}. {stuck} EVERYTHING PUSHED IS THEREFORE UN-VALIDATABLE: a tester "
+        f"cannot validate what is not deployed, so every item awaiting validation is "
+        f"stalled by this one fact and will keep accruing lead time silently (that is "
+        f"exactly what happened to UC-ROC-105 and UC-ROC-106 on 2026-08-27). "
+        f"THIS BLOCK IS NOT A WAIT AND IS NOT CLEARED BY PULLING SOMETHING ELSE — per "
+        f"the owner ruling the red gets FIXED, and per /loop-run STEP 0b the only "
+        f"permitted action is the remedy named here. REMEDY, in order: (1) read the "
+        f"actual failure — `gh run view {report.get('runId')} --repo {report.get('repo')} "
+        f"--log-failed`; (2) record the change failure BEFORE fixing forward so CFR is "
+        f"not a false 0% (§3/EXP-108) — `make wi-append PROJECT={project} "
+        f"ID=<the item above> EVENT=build_failed AGENT=engineer NOTE_FILE=<path>`; it is "
+        f"recordable from every active state (DEF-ROC-120), so 'the item had moved on' is "
+        f"not a reason to skip it; (3) DISPATCH AN ENGINEER AT THE NAMED JOB AS THIS "
+        f"CYCLE'S PULL — the fix is the work, not an interruption to it; (4) push, then "
+        f"re-run this gate and see the lane OPEN before dispatching any tester. If the "
+        f"red is genuinely not ours to fix, that is a `blocked` item with a named "
+        f"external precondition, recorded — never a silenced check. NOTE: this limb "
+        f"reads the DEPLOY JOB'S conclusion and its `needs` closure "
+        f"({', '.join(report.get('needsClosureJobNames') or []) or 'none'}), NEVER the "
+        f"run's overall conclusion (which is \"{report.get('runConclusion')}\"); "
+        f"{len(report.get('nonBlockingFailures') or [])} other red job(s) in this run are "
+        f"OUTSIDE that closure and are not why "
+        f"({', '.join(report.get('nonBlockingFailures') or []) or 'none'}). {url}"))]
 
 
 # ---------------------------------------------------------------------------
@@ -5458,13 +6629,18 @@ def validate_items(graphs, project):
                         f"(I1) {iid}: event #{idx + 1} '{name}' is not a legal "
                         f"transition from state '{st}'")
                     break  # can't fold further; one report per item is enough
-                # also check the agent is allowed for that transition
-                agents = next((t.get("agents", []) for t in graphs.transitions(it.type)
-                               if t["from"] == st and t["event"] == name), [])
-                if ev.get("agent") and ev.get("agent") not in agents:
+                # …and the FIRING RIGHTS, through the SAME derivation the writer
+                # uses [v11]. History is replayed against the CURRENT rights model
+                # on purpose: an event that could not be written today is drift,
+                # whether it arrived by hand-edit or by a rights change nobody
+                # reconciled. `default_owners` is the closure of the retired
+                # allowlists precisely so no honest historical event fails here.
+                owners = graphs.owners_of(it)
+                ok, why = graphs.may_fire(it.type, owners, name, ev.get("agent"))
+                if ev.get("agent") and not ok:
                     violations.append(
                         f"(I1) {iid}: event #{idx + 1} '{name}' by agent "
-                        f"'{ev.get('agent')}' not permitted (allowed: {agents})")
+                        f"'{ev.get('agent')}' not permitted — {why}")
                 st = nxt
 
         # I2: no item both terminal/done AND in a non-null queue
@@ -6006,6 +7182,15 @@ def main(argv=None):
                          "newline is REJECTED, because the event is stored as a "
                          "one-line inline map and would be silently truncated.")
     ap.add_argument("--ts")
+    ap.add_argument("--owner",
+                    help="declare WHO this item is routed to (comma-separated "
+                         "roles), in the same act as the dispatch [v11, "
+                         "OI-ROC-006]. Firing rights are derived from this: the "
+                         "declared owner may fire any transition legal from the "
+                         "item's state, and a declaration REPLACES the type "
+                         "default rather than adding to it. FLOW ROLES ONLY — an "
+                         "agent that could declare itself the owner would be "
+                         "granting itself the right it is exercising.")
     ap.add_argument("--observe",
                     help="REQUIRED when entering `awaiting_observation` (event "
                          "not_yet_observed): the machine-checkable liveness "

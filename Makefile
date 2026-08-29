@@ -162,6 +162,29 @@ make-refs-tracked:
 	@node .claude/tools/make-refs-tracked.js \
 	  $(if $(REPO),--repo $(REPO),--project $(PROJECT) --repo-root .) $(if $(JSON),--json,)
 
+# --- IS THE DEPLOY LANE OPEN? (DEF-ROC-131) -------------------------------------
+# The READ-ONLY live probe behind `loop-gate` check 16, and the thing that lets you
+# answer in one command the question that was invisible to this whole gate for the
+# better part of 2026-08-27: can anything we push actually reach an environment?
+#
+# It reads the DEPLOY JOB'S OWN CONCLUSION and the transitive closure of its
+# `needs:` (from the workflow source -- the GitHub jobs API does not carry `needs`),
+# NEVER the run's overall conclusion. That distinction is the whole tool: on this
+# repo `Dependency audit (prod-runtime, blocking)` is red on EVERY push
+# (DEF-ROC-068, no upstream fix) and is deliberately NOT in the deploy job's needs,
+# so ALL THREE real captures it is pinned against carry run conclusion `failure`
+# and one of them DEPLOYED. A limb reading the run conclusion would be on
+# permanently and ignored inside a day.
+#
+# Four verdicts, never two: open / blocked / in-flight (a deploy still running has
+# NOT landed -- the ROC health endpoint served the new buildSha mid-cutover on
+# 2026-08-27) / NOT-ESTABLISHED. Read-only: `gh` + `git log` + the workflow file;
+# no writes, no secrets. Self-tests: `make test-tools`.
+#   make deploy-lane PROJECT=ROC          # human line; exit 2 iff BLOCKED
+#   make deploy-lane PROJECT=ROC JSON=1   # the full report
+deploy-lane:
+	@node .claude/tools/deploy-lane.js --project $(PROJECT) --repo-root . $(if $(JSON),--json,)
+
 # --- orphaned LOCAL CONTAINERS (DEFECT-OAG-091) ---------------------------------
 # The container equivalent of worktree-reap, and the tool EXP-133 should have
 # shipped with the container-per-engineer. `ddb-local-down` is per-dispatch and must
@@ -427,7 +450,16 @@ test-wi:
 # State lives ONLY in the per-item files (work/$(PROJECT)/items/{active,done}/<ID>.md);
 # queues, stats and the dependency tree are DERIVED here, never stored-and-hand-synced.
 # Append an edge-checked event (the ONLY way to change item state; rejects illegal transitions):
-# make wi-append PROJECT=P ID=UC-1 EVENT=made_ready AGENT=flow-manager [REF=<sha>] [NOTE="..."] [TOKENS=<n>] [DURATION_MS=<n>] [OBSERVE=make:<target>]
+# make wi-append PROJECT=P ID=UC-1 EVENT=made_ready AGENT=flow-manager [REF=<sha>] [NOTE="..."] [TOKENS=<n>] [DURATION_MS=<n>] [OBSERVE=make:<target>] [OWNER=<role>[,<role>]]
+# OWNER = declare WHO this item is routed to, in the SAME act as the dispatch [v11,
+#   OI-ROC-006]. Firing rights are DERIVED from the item: a flow role may fire anything,
+#   a validation verdict is the tester's, and everything else belongs to the item's
+#   declared owner. Use it when an item is dispatched to a role outside the type default
+#   (a UI defect to `ui-designer`, a docs defect to `documenter`, an architecture-only
+#   fix to `solution-architect`) so that role can record its OWN work as itself instead
+#   of borrowing another role's name. A declaration REPLACES the default — it narrows.
+#   FLOW ROLES ONLY: an agent that could declare itself the owner would be granting
+#   itself, in one command, the right it is exercising in that same command.
 # TOKENS = subagent_tokens the dispatched specialist spent producing this transition (optional).
 # DURATION_MS = the dispatched agent's REAL cycle time in ms for this transition (optional;
 #   the dispatch layer's reported duration_ms). Feeds §F agent-cycle-time-vs-GLT in wi-project.
@@ -476,7 +508,7 @@ wi-append:
 	  exit 1; \
 	fi
 	$(WORKITEMS) append --project $(PROJECT) --id $(ID) --event $(EVENT) --agent $(AGENT) \
-	  $(if $(REF),--ref "$(REF)",) $(if $(NOTE),--note "$(NOTE)",) $(if $(NOTE_FILE),--note-file "$(NOTE_FILE)",) $(if $(TOKENS),--tokens "$(TOKENS)",) $(if $(DURATION_MS),--duration-ms "$(DURATION_MS)",) $(if $(OBSERVE),--observe "$(OBSERVE)",) $(if $(PROBE),--probe "$(PROBE)",)
+	  $(if $(REF),--ref "$(REF)",) $(if $(NOTE),--note "$(NOTE)",) $(if $(NOTE_FILE),--note-file "$(NOTE_FILE)",) $(if $(TOKENS),--tokens "$(TOKENS)",) $(if $(DURATION_MS),--duration-ms "$(DURATION_MS)",) $(if $(OBSERVE),--observe "$(OBSERVE)",) $(if $(PROBE),--probe "$(PROBE)",) $(if $(OWNER),--owner "$(OWNER)",)
 # Recompute ALL views (queues + stats + tree + re-render each item's derived block). Run after each loop.
 # make wi-project PROJECT=OagEventSource
 wi-project:
@@ -817,6 +849,21 @@ roc-local-up:
 roc-local-down:
 	@node .claude/tools/stack-claim.js release --project ROC || true
 	npm --prefix $(ROC_APP) run local:down
+# UC-ROC-093 — THE TRAINER/TRAINEE PRACTICE CYCLE, end to end on the LOCAL stack.
+# Runs one NAMED scenario at a teaching pace through the real pipeline (Service Bus
+# emulator -> forwarder -> Event Hubs emulator -> consumer -> decision log) via the
+# trainer's own `npm run local:practice` command, then PRINTS the decision-log
+# read-back (row, outcome, Jira key, recordedTs and the OBSERVED gap in ms) so a
+# tester validates AC-093-4 by reading actual state rather than injector stdout.
+# It also drives the AC-093-3 refusal live: a non-allowlisted (cloud/production)
+# namespace must refuse the whole cycle and publish nothing.
+# Requires the stack up (`make roc-local-up`). Parameterised:
+#   make roc-practice-cycle
+#   make roc-practice-cycle ROC_UC093_SCENARIO=device-offline-recovery ROC_UC093_PACE=5000
+roc-practice-cycle:
+	@node .claude/tools/stack-claim.js claim --project ROC || true
+	$(if $(ROC_UC093_SCENARIO),ROC_UC093_SCENARIO=$(ROC_UC093_SCENARIO) ,)$(if $(ROC_UC093_PACE),ROC_UC093_PACE=$(ROC_UC093_PACE) ,)npm --prefix $(ROC_APP) run test:acceptance -- uc093-practice-cycle
+
 # The dashboard e2e BATTERY: runs the whole tests/e2e suite in ONE command by
 # resetting + seeding each spec's own precondition (see local/e2eBattery.ts).
 # Long-running (a fresh-stack reset per spec). Pass filter substrings to subset.
@@ -833,8 +880,20 @@ ROC_DASH := work/ROC/src/dashboard
 # space allocation, column starvation, clipping, reachability and whether the
 # screen states a fact it does not have — at four viewports with a measured SHORT
 # page-area floor (1366x560), in real headless Chromium. No emulator, no read-api,
-# no dev server, ~3s; it is on the standing green bar, which the e2e sweep
+# no dev server, ~11s; it is on the standing green bar, which the e2e sweep
 # (`make roc-e2e-battery`, the only tier that can judge PAINTED colour) is not.
+#
+# OI-ROC-009 ADDED A SECOND AXIS: ACCESSIBILITY. `screenAxe.browser.test.tsx` runs
+# axe-core over the REAL `<App/>` — reached by clicking the REAL nav — on all four
+# destinations at all four viewports. Until it landed, axe had never run in a real
+# browser on any standing bar: jsdom scans a composed <App/> but has no layout, so
+# every rule needing a box (target-size, scrollable-region-focusable) is
+# undecidable there; the per-use-case e2e scans need the dev server + read-api and
+# both their viewports are >=720 tall; and the DEF-ROC-058 limbs above are geometry
+# and honesty, never axe. It turns ON `target-size` (WCAG 2.2 AA 2.5.8), which axe
+# ships disabled, and turns OFF `color-contrast`, which this tier's stock-Tailwind
+# stylesheet cannot judge faithfully — both declared with a reason and a named
+# substitute in `SCREEN_AXE_RULE_SCOPE`, and pinned by name.
 #
 # It also writes ONE SCREENSHOT PER SCREEN PER VIEWPORT, because DEF-ROC-058's
 # fourth blind spot is that nothing ever LOOKS at the render. Open them.
@@ -1244,7 +1303,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap sequencer-guard make-refs-tracked container-reap container-orphans stack-claim stack-release stack-status sso-login retro-debt retro-mark loop-gate test-wi wi-append wi-project wi-validate wi-migrate item-brief doc-lint process-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated commit-msg-file test-requirement-gate test-requirement-gate-baseline test-requirement-gate-clean board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery
+.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap sequencer-guard make-refs-tracked container-reap container-orphans stack-claim stack-release stack-status sso-login retro-debt retro-mark loop-gate test-wi wi-append wi-project wi-validate wi-migrate item-brief doc-lint process-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated commit-msg-file test-requirement-gate test-requirement-gate-baseline test-requirement-gate-clean board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery deploy-lane
 
 # --- Viggo-fix UC-W7: Country/Nationality ID remediation (T-SQL) --------------
 # Data-driven, self-building T-SQL remediation script set + its local stand-up

@@ -1,9 +1,71 @@
 ---
-process_version: 155
-effective_from: 2026-08-27
-supersedes: v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
+process_version: 169
+effective_from: 2026-08-29
+supersedes: v168, v167, v166, v165, v164, v163, v162, v161, v160, v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
 status: active
 ---
+
+<!-- v169 (RETRO, ROC 2026-08-29; INCIDENT arm, DEF-ROC-157 resolved. SHORT — the constraint is unchanged for an eleventh read and v167's reading still holds, so it is not re-derived. **THE FINDING IS A SHARPER SUB-SPECIES OF THIS PROJECT'S DOMINANT FAMILY, AND THREE INSTANCES WERE FOUND IN ONE FILE-SWEEP: A GUARD THAT SKIPS ON AN UNMEASURABLE INPUT ASSERTS NOTHING WHILE READING GREEN.**
+
+`DEF-ROC-157` was dispatched to fix ONE host-dependent assertion — a focus-ring contrast measured against an unguarded transparent background. The engineer swept for the same shape and found something worse: `StatTiles` AC-112-6 and `BreakdownTable` AC-113-2/AC-114-2 had *correctly* noticed the transparency problem and handled it **by skipping the assertion**. Probed live, the activator, the tile AND the body all measure `rgba(0,0,0,0)` — so those three loops **asserted nothing, on any host, ever**. The tester then seeded a real ~1.10:1 violation into each and confirmed all four now red. **The originally-reported defect was the least harmful of the four**, because a host-dependent check at least fails somewhere; a skipping check never does.
+
+WHY THIS IS NOT JUST §17i AGAIN, and why it earns its own clause: §17i asks *"can this come back negative?"*, and each of these three CAN — the assertion is real and would fire on an opaque background. **The defect is that the input never arrives**, so the negative branch is unreachable at runtime while the code reads as a complete check to anyone auditing it. The skip is also the RIGHT local instinct (asserting contrast against a transparent colour is meaningless), which is why it survived review three times. ROUTED as **§F11.5**: a guard that can decline to assert must **record that it declined**, and a declared assertion that never runs is a finding, not a pass. The cheap form is what the fix used — assert the PRECONDITION (`isFullyTransparent(against) === false`) before the property, so an unmeasurable input is a RED rather than a silent exit.
+
+**SECOND, AND IT IS THE CYCLE'S BEST EVIDENCE THAT THE VERIFY-THE-PREMISE DISCIPLINE PAYS:** the orchestrator's own hypothesis was FALSIFIED. I named `DecisionLogPage` AC-121-5 as "the same shape" on the engineer's report; the engineer verified at source and it is not — it decodes real PNG screenshots and diffs pixels, and never reads `cs.backgroundColor` at all. The tester independently re-confirmed the falsification. **Had either taken the orchestrator's word, a working test would have been "fixed".** That is the third disproved mechanism this week and the first where the wrong claim was MINE; the instruction to verify at source is now carrying its own weight against the role that issues it.
+
+CAPACITY, stated plainly because it is the honest headline of the day: **nine defects registered (`DEF-ROC-153`..`161`), about five closed.** Four are deferred to 2026-09-08 **on capacity, not on judgement**, and three of those four are one story — `DEF-ROC-158` (shared docker stack torn down on EXIT), `DEF-ROC-161` (six unit cases copy the working tree and assert over it; 5 failures, then 5 DIFFERENT failures, then 215/215 on an unchanged tree) and `DEF-ROC-160` (a control red across four commits into a workflow nobody reads). **Three tiers now red for reasons unrelated to the diff being gated.** That compounds: the rational response to a flaky gate is to re-run it, and that response is indistinguishable from ignoring a true finding. It is named here as the thing to attack next, ahead of new feature work.
+
+DELIVERED: `DEF-ROC-157` (four assertions repaired, `paintedBackground` PROMOTED not copied — six copies collapsed to one), and with it **`AC-146.1` MET** — the geometry tier now runs inside `Web App / lint, test and build`, which IS in `deploy-test`'s `needs:` closure, with the second-host floor tightening 1 -> 0 on the ratchet script's own live stdout rather than by hand. REGISTRY: 8/8, no row added. CONSTRAINT: unchanged, eleventh read. -->
+
+<!-- v168 (RETRO, ROC 2026-08-29; fired MECHANICALLY on the INCIDENT arm after DEF-ROC-150 resolved. SHORT by design — one incident, one finding, and the finding is worth the version. FOCUS QUESTION, default. ANSWER: the constraint is unchanged (`orchestrator`/`reported`, tenth read) and v167's reading still holds, so this retro does not re-derive it. **THE FINDING IS A NEW FAILURE MODE, AND IT IS THE THIRD INSTANCE OF ITS SHAPE TODAY: A DECISION RECORDED ON AN ITEM DIES WITH THE ITEM.**
+
+`DEF-ROC-150` found a host-dependent assertion it could not fix within scope (`OverviewPage.drawer` contrasts the UA focus ring — a PLATFORM CONSTANT — against an UNGUARDED transparent row background that `contrast()` reads as black: **1.1036 against assumed-black, 19.03:1 against the composited white an operator actually sees**). It correctly REFUSED to force `AC-150.4` around it. The orchestrator verified the mechanism at source and re-scoped `AC-150.5`. The tester **independently agreed on its own measurements** and observed, sharply, that **macOS passing is not correctness but coincidental luck from a bluer ring**. Three roles, three independent confirmations, one recorded ruling — **and then the item closed and the re-scope was never applied.** Line 122 is unchanged on trunk. Filed as `DEF-ROC-157` only because the orchestrator re-read the source after the close.
+
+WHY-CHAIN (4): (1) a verified defect survived the item that found it; (2) because the ruling lived in an `amended` EVENT NOTE on that item; (3) because an event log is an APPEND-ONLY HISTORY OF WHAT HAPPENED, not a carrier of WORK STILL OWED — when the item reaches `done` its notes move to `items/done/` and nothing reads them again; (4) ROOT CAUSE: **this system has exactly one durable carrier for outstanding work — a work item — and every other place we write things down is a record, not a queue.** `open-decisions.md` is the one deliberate exception, and it exists precisely because the same lesson was learned for owner decisions (§F9e: *"an escalation that lives only in a conversation is one the owner has to be present to receive"*). This is that sentence applied to an ITEM instead of a conversation.
+
+**ROUTED as §F9g, plain practice, no experiment row** (§25a: a fix is not an experiment; ROC is at 8/8 and retiring a live row for a safety rule would game the cap): **before an item leaves an active state, any finding, re-scope or ruling recorded on it that is NOT discharged by the closing change must become its own registered item.** The test is mechanical and needs no judgement — *"is there a sentence on this item describing work that the commit I am about to close does not contain?"* If yes, it is an item. A note is not a queue. The three instances today all have this shape and are worth naming together, because the pattern is what generalises: a `lane:` correction I recorded in an event and never applied (caught by re-reading the frontmatter); a merge report that read green while duplicating a row twice (caught by re-reading the file out of HEAD); and this one (caught by re-reading the source). **In every case the record said the thing was done and only the STATE said otherwise** — which is the same instruction `CLAUDE.md` already gives for co-owned commits, generalised: after acting, verify the STATE, never the REPORT of the action.
+
+ALSO THIS CYCLE: `DEF-ROC-150` delivered more than its item described — the tier was pinning no font AND measuring **Inter, the face the app actually ships, was absent from the stack entirely**, so it had been measuring a typeface the product never uses; the fix pins FILES not names, strips every generic (a trailing `sans-serif` is a live route back to the host), and handles a residual nobody predicted (FreeType hinting snapping advances, so the tier runs `--font-render-hinting=none`). Cross-host: ubuntu-latest **9 failures → 1**, macOS 297/297 same commit. The tester proved BOTH ratchet arms fire with a fabricated report and seeded two live `fontPinning` violations. `EXP-ROC-014`'s gate held throughout. REGISTRY: 8/8, unchanged, no row added. CONSTRAINT: unchanged, tenth read. -->
+
+<!-- v167 (RETRO, ROC 2026-08-29; fired MECHANICALLY on the INCIDENT arm after DEF-ROC-109 and DEF-ROC-148 resolved. FOCUS QUESTION, default. **ANSWER: `orchestrator`/`reported` holds the constraint for a NINTH read at 33.90% — but for the first time the COUNT-INDEPENDENT measure MOVED, median/item 45,622s -> 42,202s within the session**, as the flow-manager's 24 backlog decisions landed. v165 diagnosed this correctly one retro ago (the share is carried by the STANDING AGED BACKLOG, not by arrival triage, so seven retros of arrival rules could not reach it) and the exploit it named — decide the aged inventory — is the first thing to move the number. Continue it: intake 24 -> 22 -> 23 with three new registrations, so arrivals are still outrunning decisions. CFR **8.6%** (from 8.8%), MTTR unchanged, deploy frequency 7.85/active-day.
+
+**THE HEADLINE IS THAT A CHECK BUILT THIS MORNING PAID FOR ITSELF BEFORE THE DAY ENDED, AND WHAT IT FOUND FALSIFIES A BELIEF THIS PROCESS RECORDS AS SETTLED.** `make exit-gate-ran` (§F11.4 clause 1, shipped hours earlier for `DEF-ROC-153`) asks whether the exit gate produced a VERDICT for trunk head. Pointed at the run list it returned `DEF-ROC-156`: **of the 20 most recent trunk commits, 6 success, 2 failure, 5 CANCELLED and 7 with no run at all — 12 of 20 carry no verdict.** Cause: `concurrency.cancel-in-progress: false` protects a run that has STARTED; it does NOT stop GitHub cancelling one still QUEUED when a newer push arrives, which with six agents pushing is the normal case, not the edge. **And `cancelled` is not `failure`** — no red mark, nothing to notice. **v163 records this as solved** (*"So runs QUEUE"*): it fixed the in-progress half and the queued half was never tested. The other 7 are intermediate commits inside multi-commit pushes — ordinary GitHub behaviour, DECLARED rather than fixed, so nobody later reads per-commit coverage as a promise the mechanism cannot keep. WHY-CHAIN (4): (1) the gate's real trunk coverage is ~40%; (2) because a queued run is displaced and a cancelled run is not red; (3) because the fix for the racing problem addressed only the half that had been observed; (4) ROOT CAUSE, and it is the generalisable one: **we verify what our controls SAY and almost never that they SPOKE.** Both halves of that were found today, hours apart, by the only check that asks the second question.
+
+**SECOND, AND IT IS AN OWNER RULING ALREADY BANKED AS v166: the analysis tool is UNPINNED.** The methodological point worth keeping is what it did to the check. Under a track-latest policy the natural check reports the current version and always passes — a control that cannot come back negative, §17i, worse than nothing. So `make action-current` was INVERTED: **a PIN is now the violation.** Generalisable: when a policy changes direction, re-derive what can FAIL under it, because a check inherited from the old policy usually cannot fail under the new one. Evidence the unpin is live and honest rather than theoretical: `v1.8.0` released mid-session and `@v1` resolved to a THIRD distinct unreleased commit in one day, which the check reported as SPLIT rather than hiding.
+
+QUALITY, and it is the cycle's real result: **five items validated, every tester adversarial and none accepting a written claim.** DEF-ROC-149's tester induced SIX failures rather than watching a gate print PASS (discharging `EXP-ROC-014`'s §17c.2 proof-of-fire); DEF-ROC-152's independently reproduced the mutation and caught a stale figure in the engineer's own note; DEF-ROC-143's rebuilt BOTH prior escapes in an isolated fixture; DEF-ROC-109's tried to MAKE badge and filter diverge and seeded a parse failure in the new guard; DEF-ROC-148's raised a SECOND live ticket (ROC-35) and confirmed both in Jira itself rather than from the probe's own output — the probe-reporting-its-own-success circularity this project keeps finding. **Two engineers independently found the same defect from opposite directions with converging arithmetic** (`DEF-ROC-155`: vitest reports any file a test IMPORTS regardless of `coverage.include`, so writing a spec for a live probe DROPS the ratchet while leaving it untested keeps it clean — a detector that charges a penalty for the §F9f and §17c.2 compliance this process demands).
+
+EXPLOIT: continue deciding aged inventory — it is the only operation that touches already-accrued dwell, and it moved the median. SUBORDINATE, and this one is a correction to MY OWN behaviour rather than a new rule: **triaging an item you are HOLDING inflates WIP without putting anyone to work.** I did it to `DEF-ROC-154`, took `wip` to 9 against a cap of 8, and the gate blocked. `DEF-ROC-155` and `DEF-ROC-156` were therefore registered WITH their triage decision recorded on the item but deliberately LEFT IN INTAKE — §F9b is satisfied by recording the decision, not by firing the transition. ELEVATE: NOT taken, ninth time; agent work-effort remains **0.2%** of GLT. REGISTRY: 8/8, **no new row** — DEF-ROC-155/156 are defects and §F11.4 is a safety fix, and §25a is explicit that a fix is not an experiment; retiring a live row to make space for one would be gaming the cap. `EXP-ROC-016` scored again: the §F13a Stop hook fired TWICE more this session and forced continuation both times, so the mechanism is real and not merely written down — but its metric is still hours old and the honest reading remains that one session is not a measurement. CONSTRAINT TO ATTACK NEXT: `orchestrator`/`reported`, unchanged in identity for a ninth read, now with its first measured movement and a named remedy that is working. -->
+
+<!-- v166 (OWNER RULING, ROC 2026-08-29, within the hour of v165 and REVERSING two of its clauses). The owner, twice: *"really we should adopt as a matter of process the latest version"*, then explicitly *"the version pin on the code analysis tool needs to go - everytime it runs it should get the latest release"*. **SSF11.4 clauses 2 and 4 as written in v165 are SUPERSEDED.** Both lanes are now UNPINNED -- CI on `@v1`, the local image on `:latest` -- and the standing policy is to track upstream rather than to hold an immutable ref. **THE OBJECTION WAS RAISED, WITH THE MEASUREMENT, AND OVERRULED; RECORDING IT ONCE HERE SO IT IS NOT RE-LITIGATED AND NOT FORGOTTEN:** this exact ref took the gate DARK the same morning (`v1` moved onto an unreleased commit whose action.yml GitHub refuses to load; the job died in 19 SECONDS during `Set up job`, before a step ran, for three commits), and measured AFTER upstream fixed it, `v1` had ALREADY MOVED AGAIN to `1e581b4b` -- which is not the latest release either, so the CI ref tracks a moving target that is neither always a release nor always loadable. **WHAT MAKES THE RULING SAFE TO EXECUTE, and it is the reason this is a rebalance rather than a regression:** the failure is now DETECTED instead of silent. `make exit-gate-ran` asks whether the gate produced a VERDICT for trunk head and reports NO-VERDICT rather than reading silence as a pass -- it did not exist this morning, which is the only reason the outage needed a human reading a run list. Unpinning is affordable BECAUSE that check landed first. **`make action-current` is INVERTED to enforce the ruling rather than the old clause: a PIN is now the violation (exit 1).** That direction is deliberate -- the obvious check under a track-latest policy is one that prints the current version and always passes, which is a control that cannot come back negative and would be worse than nothing; the thing that CAN fail is drift back to a pin, so that is what it asserts. It also reports SPLIT loudly (advisory, never blocking, because with floating refs the lanes diverge through no act of ours and redding our lane on somebody else's push is the DEF-ROC-143 harm) -- and it fires today: CI's `@v1` resolves to an unreleased commit while the image's `:latest` is v1.7.1. **ONE HONEST GAP, not closed:** `uses:` cannot take an expression, so the CI lane is the MAJOR LINE, not literally the newest release tag; the image lane's `:latest` is. Closing it needs a resolve-then-checkout step, which puts a second repository INSIDE the workspace -- the `.trunk-mirror` trap this very workflow carries a scar from (DEF-ROC-042) -- so it is named here as an item rather than done inline. **Verified before the switch, on the real repo rather than from release notes:** v1.5.0 and v1.7.1 produce BYTE-IDENTICAL coupling/complexity/hotspot/generated CSVs (1056 commits, 1085 files, 15 couplings both), so nothing in the ratchet moved on the version change; the local lane runs green on `:latest` (DQG-VERDICT: PASS). **The v165 clause-3 requirement that both lanes name the SAME version survives in spirit and is now UNENFORCEABLE at config level** -- that is a real loss, stated plainly rather than papered over, and it is what SPLIT reports. -->
+
+<!-- v165 (RETRO, ROC 2026-08-29; fired MECHANICALLY on the INCIDENT arm -- `make retro-debt` reported RETRO DUE [incident (immediate)] after three defect resolves (DEF-ROC-143, 149, 152) and BLOCKED the pull. FOCUS QUESTION, default. **ANSWER: `orchestrator`/`reported` is #1 for the EIGHTH consecutive read at 33.90% (median 45,622s, n=116, backfill 0.00%), `external` 29.42%, `queue` 23.73% -- but the number has CHANGED CHARACTER and the previous seven readings would now be the wrong diagnosis.** MEASURED THIS CYCLE: items created in the last two days have a median `reported` dwell of **3,737s (~1h)** against the all-time **45,622s** -- a 12x difference. SSF9b (register WITH the triage decision) is WORKING ON ARRIVALS; every item registered this session carried its decision in the same act. What now carries the 33.90% is the **STANDING AGED BACKLOG**, and it is visible item by item: the top ten `reported` dwells are 4-7 day old defects (DEF-ROC-087 at **680,083s = 7.9 days**, then 091, 092, 085, 096...). So for seven retros this constraint was read as *arrival triage is slow* and remedied at the moment of arrival; the arrival remedy has landed and the metric did not move, because **the inventory that holds the time was already in the queue when those rules were written.** A rule about arrivals cannot reach it. EXPLOIT, and it ran DURING this cycle rather than being routed for later: a flow-manager dispatched over ALL 24 intake items to return schedule / decline / defer-with-a-date for each, which is the only operation that touches already-accrued dwell. SUBORDINATE: SSF9d's admission-by-displacement holds unchanged. ELEVATE: NOT taken -- agent work-effort is **0.2% of GLT**, so capacity remains 99.8% idle and adding any is unjustifiable for an eighth time.
+
+**THE CYCLE'S HEADLINE FINDING IS A NEW MEMBER OF THE OLDEST FAMILY, AND ITS MECHANISM HAS NEVER APPEARED HERE BEFORE.** `DEF-ROC-153`: the SSF11 engineering exit gate stopped running entirely. Not red -- **unloadable**. `AeroCloudSystems/CodeAnalysisTools`' floating `v1` tag was moved onto an unreleased commit whose `action.yml` puts input-only keys (`required:`, `default:`) inside the `outputs:` block; GitHub refuses to load such an action, so the job died in **19 seconds during `Set up job`, before a single step ran.** Measured across the tags: **0** invalid keys at v1.5.0 and earlier, **8** at v1.6.0, **14** at v1.7.0, **10** on the commit `v1` pointed at. Every prior instance of this project's most-registered family (OI-ROC-014, IMP-021, DEF-ROC-140, DEF-ROC-146, DEF-ROC-086) was **a control WE wrote that could not fail**. This one is **a control a THIRD PARTY switched off**, with no release, no PR into this repository, and no commit of ours -- the first run it reddened was an unrelated acceptance-heading edit to a work-item file, so it read as our breakage and was not. It was found by a human scanning a run list.
+
+**AND THE FIRST FIX MADE A SECOND FAULT, which is the more generalisable half.** Pinning CI to the v1.5.0 action SHA left `quality/analysis-config.json` still naming the LOCAL lane's image by the mutable tag `:v1` -- which resolves to **v1.7.0**. So CI ran the v1.5.0 binary while every developer's `make exit-gate` ran v1.7.0: two lanes, two tool versions, which is exactly the drift that file's own header exists to prevent, **arriving through the fix for it.** That header's wording is the lesson, and it was written in good faith three days earlier: it claimed *"same tool, same version tag, same flags"*. **A TAG IS NOT A VERSION.**
+
+WHY-CHAIN (4 levels) for the gate outage: (1) the exit gate produced no verdict for three pushes; (2) because the action could not be loaded; (3) because `@v1` is a MUTABLE ref that someone else repointed; (4) ROOT CAUSE: **this project verifies what its gates SAY and never that they SPOKE.** `loop-gate` carries twenty checks and not one asks whether the exit gate produced a verdict for trunk head. A gate that did not run is indistinguishable from a gate that passed -- which is DEF-ROC-086's skipped-not-failed shape, now reached by a second, entirely different road.
+
+ROUTED as **SSF11.4** (three clauses, all plain practice -- NO experiment row, deliberately: SS25a's validity bar says a fix is not an experiment, ROC is at 8/8 rows, and retiring a live row to make space for a safety fix would be gaming the cap, exactly as v151 declined to do). QUALITY THIS CYCLE, and it is the best evidence the SSF11 gate is real: **three testers, three passes, all adversarial.** DEF-ROC-149's tester induced **six** distinct failures rather than watching the gate print PASS -- each limb, the delete-to-pass interlock, the ratchet-growth refusal and the target-figure refusal, every one quoted and reverted -- which DISCHARGES `EXP-ROC-014`'s outstanding SS17c.2 proof-of-fire obligation. DEF-ROC-143's tester rebuilt BOTH prior escapes in an isolated git fixture. DEF-ROC-152's tester independently reproduced the mutation (predecessors green, exactly 5 of 10 outside-in red) and caught that the engineer's "93 cases" is 73 today. Not one accepted a written claim. DELIVERED: DEF-ROC-143, DEF-ROC-149, DEF-ROC-152 (the test-refactor PILOT: 53 authored variation nodes, casesWithNoVariation 4023 -> 3968, 28 duplicates removed, coverage ROSE 89.03 -> 89.18), and DEF-ROC-153's two pins. OWNER DECISION: **OD-ROC-005 ruled (c) case-by-case**, overturning the (a) default four days early; the ruling's mitigation -- every node that cannot be expressed outside-in records its judgement AND reason ON the node -- is recorded so the set stays enumerable without a rule. REGISTRY: 8/8, no row added; `EXP-ROC-014` proof-of-fire discharged; `EXP-ROC-016` fired for real (the SSF13a Stop hook blocked this very turn at a non-gate boundary and forced the retro to run inline) but its metric is hours old and unscoreable -- `reported`+`queue` is **57.63%** against its 57.6% baseline, recorded as strike 1 with the honest note that one session is not a measurement. CONSTRAINT TO ATTACK NEXT: `orchestrator`/`reported`, 33.90% -- same name for an eighth read, but for the first time located in the STANDING BACKLOG rather than at the arrival gate, which is a different lever. -->
+
+<!-- v164 (OWNER CORRECTION to the v163 retro, ROC 2026-08-29, within the hour). The owner: *"the slowdown really isnt the wi commands in orchestrator - the problem is the wait time for me to answer questions whilst you do not do things in the background"*. **CORRECT, AND v163's DIAGNOSIS WAS WRONG.** One number forbids it: agent work-effort is **0.2% of gross lead time**, so even with ZERO orchestrator state events, 99.8% of elapsed time is still wait -- a serialisation inside 0.2% cannot explain a 99.8% figure. SSF13 stands as a real but SECONDARY inefficiency and EXP-ROC-015's scope is corrected in place to say so. THE ACTUAL CONSTRAINT: the loop stops when the orchestrator stops talking, and that dead time is the human re-prompt gap recorded in the item log as `reported` + `queue` dwell (**57.6%** combined) -- which is why it READS as bookkeeping latency and is not. **SSF9.4 ALREADY FORBIDS THIS IN TERMS** -- *'ENDING THE TURN IS the stop, even with a polite report... do not end the turn at a non-gate boundary'* -- and was violated ~20 times in one session BY THE ROLE THAT OWNS IT, while that role wrote a retro naming a different cause. So this is not a missing rule, it is an unobeyed one: this project's most-registered failure family (a control that exists and is never consulted -- OI-ROC-014, IMP-021, DEF-ROC-140, DEF-ROC-146) arriving at the top of the process. ROUTED as **SSF13a**: mechanise SSF9.4 rather than restate it, per SS17c.5's prohibition on discharging this class with prose -- the loop SCHEDULES ITS OWN NEXT WAKE, so ending a turn does not end the loop, and the turn ends without a wake ONLY at SSF5 intake, requirement-complete, or a SS0b irreversible op. A blocked decision is NOT one of those, because SSF9e already converts it to a dated default. Scored on **EXP-ROC-016**, whose automatic kill is a wake that reports 'still waiting' -- the polite report SSF9.4 forbids, wearing a scheduler's clothes. Explicitly does NOT license acting without evidence, skipping a gate, or ceasing to report; the report becomes inline and terse ALONGSIDE the next dispatch. REGISTRY: **EXP-ROC-008 ADOPTED** -- CFR rose 7.4% -> 8.8% exactly as it predicted (with two build_faileds volunteered by the engineer that caused them), and control faults shifted to roughly **6 found deliberately against 2 by accident**, from a baseline where nine were found in one session and NOT ONE by anything looking for them. Qualified honestly in the archive: the two accidental finds were among the most consequential of the session, so SSF5e shifted the proportion without eliminating the class. SSF9f is its descendant and carries the mechanism forward. 8/8 at cap. -->
+
+<!-- v163 (RETRO, ROC 2026-08-29; fired on the ROUTINE arm at 6/3 after a session that closed REQ-ROC-019 end to end. FOCUS QUESTION, default. ANSWER: **the constraint changed hands, and the orchestrator now holds it.** v159 asked how to reach 2.2x and answered 'raise occupancy from 1 of 8'. This session took it to **8 of 8** -- and **8x concurrency bought 1.43x completions** (83 -> 119 trailing-14d) on 1.40x agent work-effort. Badly sub-linear, and the gap IS the finding: capacity stopped being the constraint and the orchestrator became it. WHY-CHAIN (5): (1) orchestrator/reported is #1 at **33.90%**, median **58,718s**, n=114, SEVENTH consecutive read; (2) every item's first transition and every subsequent state event is fired by ONE ACTOR; (3) 8x occupancy moved completions 1.4x, so the specialists were not the limit; (4) that actor also writes every dispatch brief, commit message, correction and report, all serialised; (5) ROOT CAUSE, SELF-INFLICTED: **the orchestrator instructs every agent 'do NOT run any wi-* command'**, so every state event queues behind it BY EXPLICIT INSTRUCTION. That instruction was not arbitrary -- it was written against a MEASURED hazard (an engineer editing work-items.py froze every state change in the project for hours, 28 declines staged and unfireable) -- but it was a PROXY for a narrow hazard, applied to every dispatch, and the proxy became the constraint. EXPLOIT: **SSF13 -- a specialist advances its own item's state.** Legitimate now because OI-ROC-006 LANDED: 101 per-transition allowlists removed, firing rights derived from the item's declared owner, so a specialist recording its own work is the rights model working rather than a spoof. The blanket prohibition is RETIRED and may be issued only against a NAMED LIVE resource-class conflict the brief must state. AGENT= still never spoofed; TOKENS=/DURATION_MS= stay the orchestrator's on events it owns, and OI-ROC-008's residue is explicitly unchanged rather than papered over. SUBORDINATE: SSF9d/SSF9d.2 hold -- **arrival:completion fell 2.16 -> 1.60**, not yet under the 1.5 kill line but moving, and completions rose 43% in one session. ELEVATE: NOT capacity -- occupancy is already at cap; the elevate move is **IMP-034** (the writer must defer the WRITE, not the LOOP), because writer contention is the hazard the retired instruction was proxying for. DELIVERED: REQ-ROC-019 complete end to end (UC-112 the ViewIntent channel + dimension registry, UC-113 the registry proven on a STORED column with both parsers made registry-driven, UC-114 proven on a DERIVED read-boundary field), plus DEF-ROC-055 and DEF-ROC-144 (two permanent-data-loss defects), DEF-ROC-142, OI-ROC-006, OI-ROC-014, and **SSF11's engineering exit gate LIVE with the project's first-ever coupling and coverage baselines** (4027 test cases, **4023 attached to no variation node**). QUALITY: CFR **8.8%** (from 7.8% -- the RISE EXP-ROC-008 predicts as its good outcome, and two build_faileds were recorded this session that a less honest cycle would have swallowed); dev-validating **9.2%** still the highest stage and now the named kill-arm for EXP-ROC-015; building 0.8%, deploying 0.0%. RECONCILE LATENCY **0** (v157: 37.4h) -- EXP-ROC-012's adopted practice holding. **THREE REJECTIONS THIS SESSION AND ALL THREE WERE RIGHT**, which is the quality story: two on DEF-ROC-143 (a table row borrowing its neighbour's marker text, then an inserted line doing the same) and one engineer that REFUSED THE ORCHESTRATOR'S SUGGESTED FIX after measuring it -- 'had I taken it on trust, this would have been rejection three'. REGISTRY: EXP-ROC-015 opened, 8/8 at cap. CONSTRAINT TO ATTACK NEXT: unchanged in identity for a seventh read but for the first time with the ORCHESTRATOR'S OWN INSTRUCTION named as the mechanism rather than the allowlist beneath it. -->
+
+<!-- v162 (ROC 2026-08-29; NOT a retro -- a measured finding from DEF-ROC-143's third round, routed immediately because it invalidates a habit every agent here has). **SSF12: in a shared tree, a cleanliness check is a SAMPLE, not evidence.** An engineer measured `git status --porcelain` reading EMPTY seconds before a merge failed on the very file it had just called clean. Up to eight agents share one working tree, so every `test -z "$(git status --porcelain)"` gate is true at the instant it runs and says NOTHING about the instant you act -- and the window between them is exactly where a concurrent save lands. The gates STAY (the index-emptiness gate refused a real sweep this session); what changes is that tree-cleanliness may never be REPORTED as evidence, and where the claim matters it is re-established AFTER the act -- the same discipline CLAUDE.md already requires for a co-owned append target. Prefer operations the window cannot invalidate: isolated-commit.js builds a PRIVATE index from HEAD and never consults the shared one, so its correctness does not depend on a sample at all. And WAIT rather than force -- the same engineer was blocked ~2 minutes by another agent's dirty file and POLLED until it was clean, rather than stashing (which steals untracked files, limit 4) or merging over (silent loss). **SSF12.1: a commit can be ORPHANED by a concurrent branch move.** That engineer's first commit 6db6d42 ended up on neither HEAD nor origin/main -- CLAUDE.md limit 3 arriving through a door nobody was watching, not a checkout the agent performed but one that happened AROUND it. No content lost, and the recovery is the copyable part: it re-ran EVERY gate against the moved HEAD, whose item store had itself changed, rather than assuming the earlier green still applied to a different base. So: after committing in a shared tree, assert reachability with `git merge-base --is-ancestor <sha> HEAD`, and re-validate before re-committing if it fails. A green obtained against a base that no longer exists is not a green. -->
+
+<!-- v161 (OWNER-DIRECTED, ROC 2026-08-29; amends v160's SSF11.3, which was TOO WEAK, within the hour of writing it). The owner's amendment, verbatim: *"1. all tests should be outside in. 2. any tests that are not need to be routed back to a usecase and rewritten as outside in - and moreover we do not want duplicate tests which means we need to approach the collection of usecases as a graph of variations not as a list of unconnected tests"* and *"to reiterate all the usecases should connect back to a persona"*. **WHAT v160 GOT WRONG:** it wrote *"internal tests are not banned; they are subordinate"*, which grandfathers the state the ruling rejects and leaves ~3,900 inside-out tests in place indefinitely. SUPERSEDED. Four clauses, and they are ONE RULE SEEN FROM FOUR SIDES. (1) ALL tests are outside-in, through the use-case's own public surface; there is no permitted category of fast-internal-test-kept-alongside. (2) An inside-out test is MIGRATION DEBT, not grandfathered -- routed back to the use-case it is really about and rewritten from the outside, never deleted to move a number (that loses the requirement it encodes) and never left alone. Ratchets on the mechanism already proven here: the count of tests attached to no variation may only SHRINK. (3) **THE SUBSTANTIVE CLAUSE, and the one that makes the other three achievable: the use-cases are a GRAPH OF VARIATIONS, not a list.** A use-case is a happy path plus variations that COMPOSE, and the unit of coverage is a VARIATION NODE certified by EXACTLY ONE test. Then all three concerns become readable facts about one structure -- a test on no node is inside-out, two tests on one node is a DUPLICATE, a node with no test is a GAP, and the shape of the subgraph is what the use-case actually does. A flat list can answer NONE of them, which is precisely how ~3,900 tests accumulated against dozens of use-cases without anyone deciding it should. The graph is AUTHORED, never derived from the tests -- deriving it would make it agree with itself, which is SS17i's cannot-come-back-negative shape and this project's dominant failure family. (4) The graph is ROOTED IN PERSONAS: persona -> job -> use-case -> variation -> test, every link mandatory, so a test traces to a PERSON WHO WANTED SOMETHING. **MEASURED, and it locates the break precisely: all 116 of 116 ROC use-cases ALREADY carry both `personas:` and `job:` -- zero missing** -- against a real catalog (product/personas.md, docs/personas-and-jobs.md), P1/P2 dominant across eight personas. So the chain is INTACT from persona down to the use-case and broken only BELOW it: use-case -> variation (no graph exists) and variation -> test (the tests attach to nothing). Much narrower than it first appears, and it says where the work is -- do NOT redo the persona/job modelling, build the two hops underneath it. **This completes SS17d rather than replacing it:** SS17d gives every test an owner (`AC-<ID>.<n>`) but leaves the SET unstructured, so nothing notices two tests naming the same criterion or a criterion with three variations and one test. The node names WHICH VARIATION. Routed to SSF11.3 + engineer.md; DEF-ROC-149's AC-149.3 materially rescoped mid-build and its engineer corrected in flight. -->
+
+<!-- v160 (OWNER-DIRECTED, ROC 2026-08-29; NOT a retro — retro-debt routine 2/3, no incident). Owner ruling, mandatory and quoted in full in SSF11: add the CodeAnalysisTools complexity/coupling tool INTO THE TEST STEP, constantly drive those numbers DOWN (ignoring items/), track coverage so it does not go wrong, and TEST FROM THE OUTSIDE -- use-cases, not functions -- all as EXIT CONDITIONS ON THE ENGINEERING STEP before the tester takes over. **THE FINDING THAT SHAPED THE FIX: the tool was ALREADY WIRED.** `code-analysis.yml` has been running on every push to main and weekly, already excluding `items/*`, already auto-detecting generated files -- and it uploads an artifact and GATES NOTHING, so nobody has ever read it. That is this project's most-registered family arriving again (OI-ROC-014 a declared control with no reader; IMP-021 a parser whose grammar is narrower than the declaration; DEF-ROC-140 a gate blind to every Playwright suite; DEF-ROC-146 a whole test tier no CI job runs). So the work is not integration, it is ACCOUNTABILITY: the same tool, moved into the gating path, with a may-only-shrink baseline. ROUTED: **SSF11** (three limbs) + the same three limbs written into `.claude/agents/engineer.md` as the step-3 exit gate, because a rule the engineer does not hold in its own file is one the orchestrator has to remember. **SSF11.2 REQUIRED AN EXPLICIT RECONCILIATION WITH A PRIOR OWNER RULING, and it is recorded rather than silently overwritten:** v127 states *"I do not care AT ALL about code coverage. The ONLY thing tests should be validating is the requirements."* The two are compatible and the distinction is the whole of it -- coverage as a TARGET stays forbidden (writing a test to raise a number is the theatre SS17d rejects and EXP-124 scores as FAILED), while coverage as a REGRESSION DETECTOR is now required, because a FALL means a use-case lost its test or code shipped with none, which is a statement about requirements and not about a percentage. The gate asks 'did it get worse', never 'is it high enough', and no target figure may be introduced. **SSF11.3 SHARPENS SS17d rather than replacing it:** SS17d requires every test to name its AC; this says WHERE the test must stand to make that claim honestly. The cost of getting it wrong is already in the record -- v127's founding case built its precondition by deleting the very leaf whose presence breaks the heal, and **2,171 tests were green while nine real cancellations sat unhealed in production**. An outside-in test could not have been written that way. Internal tests are subordinate, not banned. SCORED ON **EXP-ROC-014**, whose negative arms include the two ways this gate would rot: widening the ignore list or raising the baseline to pass (an automatic kill, the OI-ROC-006 anti-pattern), and introducing a coverage target figure. Proof-of-fire required per SS17c.2 -- each limb observed going RED once, quoted. **REGISTRY: EXP-ROC-009 KILLED at strike 2 on its own stated terms** -- v157 wrote 'if the reported median does not fall at v158 the row DIES with no further argument', and it rose 46,703s -> 73,588s. Killed without argument, because forbidding the argument in advance is the point. One measurement artifact recorded so the next retro does not misread it: this cycle took 28 DECLINES, and deciding an aged item moves its whole accrued dwell into the completed-item median -- so doing exactly the throughput work the owner asked for mechanically raises that number in the short run. Not a reprieve for the row, and not evidence the work was wrong; it is why SSF9d.2 is scored on the count-independent arrival:completion ratio instead. ROC back to 8/8 active rows. CONSTRAINT: orchestrator/reported 33.89%, STABLE. -->
+
+<!-- v159 (retro, ROC 2026-08-29; fired ON REQUEST by the owner mid-loop, NOT on debt — `make retro-debt` reported ok. FOCUS QUESTION, owner-set: ***"if you need the process to go 2.2x faster, what can you do to get there?"*** ANSWER — **NOTHING NEEDS TO GO FASTER. 2.2x is available inside limits this project has ALREADY DECLARED, and the only thing standing in the way is that the loop keeps stopping.** The arithmetic, from §B/§F: **87.01%** of gross lead time is WAITING states (`reported` 33.78, `blocked` 27.28, `registered` 10.68, `open` 7.26, `ready` 5.59, `awaiting_observation` 2.23, `scheduled` 0.19) against **13.00%** in working states — and measured agent work-effort is **0.20%** of elapsed (116,736s of 76,529,128s). Two independent routes to 2.2x, neither requiring anyone or anything to be quicker: the **concurrency route** takes `wip` occupancy from **1 of 8 to 2.2 of 8 — 28% of a cap that is already 8**, i.e. no ELEVATE, no model-tier change, no new agent; the **lead-time route** needs 55% of elapsed time removed, which is only **63% of the waiting** that already exists. Five consecutive retros correctly declined to ELEVATE on the 0.2% figure; this one states the corollary they stopped short of — *if capacity is 99.8% idle, throughput is bounded by STOPPING, and every stop is addressable.* **THE OWNER NAMED THE DOMINANT STOP, and it is the orchestrator, not any agent:** *"you have work you can be doing but you keep stopping to ask me questions instead of blocking items, recording the decision and giving me an async way to handle those blocks"* and *"you can hardly work for an hour without my help."* WHY-CHAIN (4 levels): (1) `blocked` 27.28% @ median 8.8d and `orchestrator`/`reported` 33.78% @ median 37h are the top two GLT owners; (2) both are the same event — the loop reaches a judgement and HALTS; (3) it halts because an escalation was delivered as a QUESTION IN A TRANSCRIPT, which requires the owner to be present to receive it; (4) ROOT CAUSE: **the process had no representation for a decision that is owed but not yet made.** A question has exactly two states, asked and answered, and no default — so the only legal behaviour while unanswered was to wait. Founding case `DEF-ROC-035`: escalated 2026-08-25 with three clean options, **unanswered four days**, item parked 11.9d. EXPLOIT: **§F9e — an owner decision is a BLOCKED ITEM WITH A DEFAULT, never a question.** Block with a checkable predicate, record the options and a RECOMMENDED DEFAULT with reasoning, publish to `work/<project>/open-decisions.md` with a DECIDE-BY date, keep working — and **when the date passes unanswered the DEFAULT IS TAKEN**, because a default that merely waits politely is the same stall with an extra file. Safe because the default must be the REVERSIBLE option, costing at most the work done before it is overturned. Four decisions that were sitting in this session's transcript were converted and shipped as `OD-ROC-001..004`, each defaulting to descope/decline on an unbounded external wait. SUBORDINATE: **§F9d + §F9d.2** (v158, same day) cap the ARRIVAL — measured 179 in / 83 out over 14 days = **2.16:1**, with the source event being sixteen requirements accepted in one sitting on 2026-08-18 and `/slice-next` correctly cascading them on 08-27. ELEVATE: **NOT capacity — the SERIALISATION POINT.** Measured in this very cycle and it is the new finding: one engineer's edit to `work-items.py`, the sole writer every `wi-append` shells out to, **froze every item state change in the project for the entire cycle** — 28 declines and ~6 amendments staged and unfireable for hours. §F2b resource-class exclusivity is correct as a safety rule and is ALSO a hard cap of 1 on concurrency for anything needing a state change. Routed as an improvement slice, not a rule: the writer needs a queued/deferred append so a lock defers a WRITE instead of stalling the LOOP. **DELIVERED THIS CYCLE:** `OI-ROC-006` firing-rights (allowlists removed, in flight at close); the `UC-ROC-112/113/114` reclassification (a three-way "collision" proved to be a mis-modelled `deps:` edge, and `UC-ROC-112` as specified shipped a **broken count** — a 24h tile routing to an all-time list, 42 records over 9.2 days, caught before a line was written); `OI-ROC-009`'s age restored; three wrong `lane:` values corrected; the ROC host allowlisted. **THE QUALITY RESULT OF THE CYCLE IS A REFUSAL:** an engineer sent to enable a maintenance-window env var in aas-test **declined and was right** — a written security control forbids it (*"no deployed environment can be made quiet by an environment variable"*), delta 019 §C1.4 had already ruled the live absence is *parity, not a gap*, and the setting would have armed a permanent nightly 02:00-04:00 suppression window on the **alert-RAISING** path. Its own report is the finding: *"nothing would have stopped me"* — typecheck green, seam pin green (it walks only `src/**` and `local/**`), drift SSOT updated — because **the control's stated policy test is an unticked checkbox that was never implemented.** Guard now being built. Both the orchestrator AND the flow-manager triage had asserted the change was safe and self-serviceable; the source said otherwise. RECONCILE LATENCY: **0.4h across 3 commits**, down from **37.4h** (v157), 23.3h (v156), 20.6h (v155) — the three-retro rise is BROKEN, by committing continuously rather than at the close. Scores `EXP-ROC-012` positive. REGISTRY: `EXP-ROC-013` opened for §F9e; 7 active ROC rows, under the per-project cap of 8. CONSTRAINT TO ATTACK NEXT: **`wip` occupancy itself.** For six reads the constraint was named as an owner (`orchestrator`/`reported`); that identification is not wrong but it is one level too shallow, because the owner is only ever the thing that stopped. The measurable target is occupancy 1 -> 2.2 of 8. -->
+
+<!-- v158 (OWNER-DIRECTED, ROC 2026-08-29; NOT a retro — `make retro-debt` reported ok (routine 0/3, incidents 0). Raised by the owner mid-loop: *"the lead time on everything is going up and up"* and *"the art is finishing things."* MEASURED IMMEDIATELY, and it reframes six retros of work: over the trailing 14 days ROC registered **179** items and finished **83** — arrival:completion **2.16:1**, net **+96**; July net +49, August net +99; two batch-generation days carry most of it (2026-08-18 **+38**, 2026-08-27 **+26**). **`orchestrator`/`reported` has been the named constraint for six consecutive reads while every remedy aimed at it SUCCEEDED ON ITS OWN TERMS** — §F9b honoured 9 of 9, v157 re-decided 17 findings onto a real staggered schedule — because all three remedies (§F9b, §F9b.1, §F9c) went at the QUALITY OF THE DECISION and **not one went at the NUMBER OF ARRIVALS**. A decision is not a finish: a decided item sits in the queue accruing dwell exactly as an undecided one does. **THE ERROR CORRECTED, and it is a misreading of our own rule:** v126 made intake-over-cap advisory for the **PULL** and was right (the remedy for a deep backlog is to deliver faster, so blocking delivery inverts the constraint); v156 then wrote *"Intake gains NO cap from this rule. Little's Law governs WIP, not backlog depth (v126)"*, carrying an argument about the DRAIN across to the FEED. They are opposite interventions, and Little's Law does not merely permit capping arrival, it PRESCRIBES it — L = λW, and with λ at 2.16× the departure rate W rises without bound whatever is done downstream. **ROUTED: §F9d — admission by displacement.** At or over the intake `wip_limit`, a new finding is admitted only by declining an existing intake item, attaching itself as evidence to one, or being declined at birth; below the cap, arrival is unrestricted. The §F8a objection is answered head-on rather than finessed: an item that sits fifteen days and is never pulled IS ALREADY A DECLINE — one nobody wrote down, that cost fifteen days of lead time to not-decide, and that misreports itself as planned work in every view. §F8a forbids closing a finding AS IF FIXED or to flatter a metric; it does not forbid declining one with its reason recorded, which is the honest position when the oldest intake item is 14.7d old against a whole-project finish rate near 6/day. Three evasions are priced in advance (no self-displacement, a re-defer is not a displacement, no batch exemption — N findings at the cap need N displacements). **SCORED ON EFFECT, per v157's own generalisable lesson:** the quantity is the trailing-14-day arrival:completion ratio, target ≤1.0, baseline 2.16:1 — NOT "did every registration carry a displacement", which is the compliance reading whose perfect score coexisted with a rising metric. Dies at strike 2 if the ratio does not fall below 1.5. **§F9d.1 — THE OTHER HALF, and possibly the larger one: a cycle that runs at WIP occupancy 1 of 8.** v157 recorded occupancy **1 of 8 all cycle** with that one item inactive for 23h of it, ran **as a single session with ZERO subagent dispatches**, and §F puts agent work-effort at **0.2% of GLT** (everyone doing the work is 11.98% combined). The system is not slow, it is IDLE — which is exactly why five retros correctly declined to ELEVATE. So the loop's obligation is to FILL WIP, not to pull one item and report: a pull of K < `wip_limit` is a FINDING about the dependency model, not an outcome; look ACROSS TYPES before concluding the set is full (a three-way collision inside one React file caps the use-case set at 1 and says nothing about whether a defect can run alongside); resource-class exclusivity (§F2b) stays but must be NAMED AND RARE, not the accidental default. The two limbs are scored together and can fail independently — arrivals falling while completions do not is a smaller queue and no delivery, which is not what was asked for. **NOT MECHANISED YET, and that is the known failure mode of this exact section** (v157: *"v156's two remedies were PROSE and §F9a's implementing item was never built"*): `loop-gate` lives in `work-items.py`, which an engineer holds exclusively this cycle under §F2b for `OI-ROC-006`. The mechanisation is owed as a registered item the moment that lock clears, and this note is the standing evidence if it is not. CONSTRAINT TO ATTACK NEXT: unchanged in identity — `orchestrator`/`reported`, 33.78%, median 37h/item, n=105 — but for the first time attacked at the arrival rate rather than at the decision quality. -->
+
+<!-- v157 (retro, ROC 2026-08-28; fired MECHANICALLY on INCIDENT debt — `make retro-debt` reported **RETRO DUE [incident (immediate)]**, routine 7/3 and 2 incidents, and BLOCKED the pull.) FOCUS QUESTION, default: *"what was the largest contributor to gross lead time, and what strategies can reduce it while protecting DORA?"* ANSWER — **`orchestrator`/`reported` is now the #1 owner at 31.32% (median 13.0h/item, n=105, backfill 0.00%), overtaking `external` at 30.95%; it is the SIXTH consecutive read of the same constraint, and this retro's whole finding is WHY the previous five retros' fixes did not move it.** `queue` 23.65%, engineer 7.81%, tester 4.17%, cicd 2.10% — everyone doing the work is **11.98%** combined. GLT/item: median 36,430s, p85 300,642s, n=104. **THE HEADLINE, and it is one layer down from v156's:** v156 routed §F9b (*a finding is registered WITH its triage decision, in the same act*) at this exact constraint. **§F9b was honoured 9 of 9** — every defect registered since the v156 close carried a decision in the SAME COMMIT that created its file, verified with `git log -S defer_until` rather than from item text, which carries no timestamp for a frontmatter scalar. **And `reported` still rose, 29.78% -> 31.32%, median 31,485s -> 46,703s.** The cause: **six of the nine decisions were the identical `defer_until: 2026-08-28`, written in one batch, expiring inside 13 hours.** So this is NOT the familiar "documented obligations are skipped". It is the finding that **a mechanised rule can also fail, when the mechanism checks COMPLIANCE instead of EFFECT** — a control satisfiable without achieving its purpose, this project's most-registered failure family, appearing INSIDE the fix for that family. EXP-ROC-009's own condition (c) had foreseen reflexive FAR-dated defers and pointed the 30d total-age ceiling at them; what arrived was the mirror, reflexive NEAR-dated defers, which a 30d ceiling on a one-day-old item can never reach. The guard was aimed at the wrong end of the range. WHY-CHAIN (5 levels): (1) `orchestrator`/`reported` is #1 at 31.32%; (2) leaving `reported` needs `triaged`, orchestrator-only (v156's chain, unchanged — `DEF-ROC-128` still unbuilt); (3) v156's two remedies were PROSE, and §F9a's implementing item was never built; (4) §F9b WAS obeyed, but the cheapest legal decision is a defer with no minimum horizon, so the decision collapsed to "ask me tomorrow"; (5) ROOT CAUSE: **every producer in this system is gated except the one that writes the gates.** Item transitions are edge-checked, tests must name their criterion, parks must carry a probe, deploys must show their `needs` closure — and the retro's own outputs (a fold-back, an improvement slice, a rule) are checked by nothing, so they are the only outputs that can quietly not happen. MEASURED THREE WAYS IN ONE CYCLE: **(a)** `instance/ROC` is **12 commits / 37.4h** ahead of `main` with the integration tree CLEAN throughout — every fold-back would have exited 0 on one command — and reconcile latency rose 20.6h (v155) -> 23.3h (v156) -> 37.4h, each of those retros recording step 8a as done; **(b)** 33 improvement slices, **8 with no `**Status:**` line at all**, several QUEUED since 2026-06-06, and `IMP-033` (opened by the v150 retro four days ago) has `park_remedy` in **ZERO lines of machinery and ZERO items** while `EXP-ROC-004` sat at strike 1 of 3 **being scored against it** — which would have archived the hypothesis as "no measurable effect" when the truth is "never built", a FALSE negative that is worse than no row; **(c)** §F9b above. EXPLOIT: **`loop-gate` check 17 `undecided-arrival`** (§F9b at the CYCLE clock, where check 4's is 7 days) **+ `_defer_is_decision`, a MINIMUM DEFER HORIZON** — a defer under `DEFAULT_MAX_BACKLOG_AGE_DAYS` in the future is not a decision, because that is the window the gate already grants for free, so it decides nothing. Measured from `now`, NOT from queue entry: the first version measured from entry and therefore did nothing about an aged item snoozed daily, which is the 7d-to-30d window between check 4 and the total-age ceiling. Folded into `EXP-ROC-009` rather than opened as a new row — same hypothesis, now with teeth — with the commitment that if the `reported` median does not fall at v158 the row DIES at strike 2 with no further argument. SUBORDINATE: **checks 18 `reconcile-latency` and 19 `retro-output-unbuilt`**, registered as `EXP-ROC-012`. Check 18 blocks only when the integration tree is CLEAN (fold-back would exit 0 — one command, always available) and stays ADVISORY when it is dirty, because blocking on a remedy the loop cannot reach is the `DEF-ROC-083` unsatisfiable-gate failure. Check 19 blocks on an open slice cited by an active row THIS project owns, is ADVISORY for another project's rows (§25a v143/v145 gives a retro no standing over those, only the right to report and add a strike), and ADVISORY for the rest of the aging queue. Ownership is read from the row's ORIGIN CELL, not the whole row — two earlier attempts were wrong in instructive ways, recorded in the code: asking the FILESYSTEM which projects exist fails because a per-project worktree contains exactly one, and searching the WHOLE ROW fails because one OagEventSource row mentions ROC in its prose and a mention is not ownership. ELEVATE: **NOT taken.** Everyone doing the work is 11.98% of GLT and `wip` occupancy was **1 of 8** all cycle (and that one item, `DEF-ROC-123`, had no recorded activity for 23h of it) — adding capacity to a system that is 99% idle buys nothing. **DELIVERED:** `DEF-ROC-140` — **the test-requirement gate was blind to EVERY PLAYWRIGHT SUITE.** `test.describe(...)` matched no branch of its call regex (the lookbehind rejects `describe` after a `.`, and `test` cannot absorb `.describe`), so 16 suites in 11 files were invisible and their cases inherited no suite title. limb1 1145 -> 1138; three of the seven mis-counted cases landed yesterday and BLOCKED the loop as a ratchet REGRESSION that had not happened, while the remedy the gate printed ("delete it, or register the criterion") would have damaged a correct test. The other four had been frozen in the 2026-08-24 baseline since the first measurement, so the committed floor of 1142 was unreachable by construction. Found by asking §F5e's second question of the parser — *what do you actually measure* — which is `EXP-ROC-008`'s mechanism working. **DECIDED, not delivered, and the capacity signal is deliberate:** 17 findings whose recorded "decisions" decided nothing were re-decided onto a REAL staggered schedule, two per slot from 2026-09-05, ordered by value/cost — not a batch re-stagger, which is the `aged-backlog-defer-ceiling` pathology. `DEF-ROC-055` (value 5, an uncaught poison loop that loses events for ever) takes the EARLIEST legal slot rather than a pull, and that is the honest capacity statement of this cycle: ROC has 54 items in intake and delivered machinery this cycle. QUALITY: CFR **7.8%** all-time (up from 7.4% — the RISE `EXP-ROC-008` predicts as its good outcome, failures becoming recordable); `dev-validating` **9.4% (11/117)**, still the highest in the system; `building` and `deploying` **0.0%**; rework 4.9% (13/267). REGISTRY: 6 ROC rows -> `EXP-ROC-004` **PAUSED at 0/3 (never built, clock stopped, resume condition recorded)**, strikes recorded on 006/007/008/009/010, `EXP-ROC-012` opened. TOKEN REVIEW (§24): §E reports 1.7% plumbing / 98.3% delivery. `EXP-ROC-010` (`make item-brief`) is **UNSCORED with no sample** — this cycle ran as a single session with ZERO subagent dispatches, so median-tokens-per-dispatch has no denominator; recorded as strike 1 rather than skipped, because a row that is never scored lives for ever. No new token change routed: the measurable cut from v156 has not yet had a chance to be measured, and routing a second one would make neither attributable. RECONCILE LATENCY: **37.4h with 12 commits batched** at retro open, up from 23.3h (v156) and 20.6h (v155) — THIRD consecutive rise, now mechanised as check 18 and scored on `EXP-ROC-012`. Fold-back run at close. CONSTRAINT TO ATTACK NEXT: `orchestrator`/`reported`, **31.32%, median 13.0h/item, n=105** — unchanged in identity for six reads, but for the first time with a mechanism on its cheapest evasion. -->
+
+<!-- v156 (retro, ROC 2026-08-27; fired MECHANICALLY on ROUTINE debt — `make retro-debt` reported **RETRO DUE [routine 7>=3]** and BLOCKED the pull. That is itself the headline: routine debt was structurally UNREACHABLE at the start of this cycle and reached 7/3 the moment the marker was split. Fold-forward ran first per STEP 0, exit 0; v155 merged clean.) FOCUS QUESTION, default: *"what was the largest contributor to gross lead time, and what strategies can reduce it while protecting DORA?"* ANSWER — **the constraint is unchanged in RANK for a fifth consecutive read, but the count-independent figure reframes what to do about it: agent work-effort is 0.17% of gross lead time.** §F reports **116,319s** of measured agent effort against **66,759,943s** elapsed. The system is not slow because anything is working slowly; it is slow because almost nothing is being worked on at any moment. GLT per item: median **38,749s**, p85 **323,126s**, n=101. By owner: `external` **31.73%** (median/item **620,515s = 7.2d**, n=17), `orchestrator` **29.78%** (median **31,485s = 8.7h**, n=98), `queue` **23.85%** (median 24,838s, n=103), engineer 8.10%, tester 4.36%, cicd 2.18%. By state: `reported` **29.78%** and `blocked` **29.60%** (median **1,215,508s = 14.1d**, n=14), backfill 0.00% on both — clean, and count-independent per §17f limb 6. **WHY THE TOP OWNER IS NOT THE TARGET, stated so the change-set is not judged against the wrong number:** `external` is 14 items parked on platform Ask A (RBAC grant) and Ask D (Easy Auth). The owner has CLOSED the ask list at two items, so nothing ROC does opens it; it is decision debt, not flow debt. The correct response to it was exercised THIS cycle and is worth recording as the pattern: discovery established that `REQ-ROC-020` (make the Global Fallback configurable) needs a rule-config WRITE path that does not exist on the deployed host, the owner chose **HOLD** rather than build, and product created no chunk/slice/UC — with the unblock condition recorded as a CHECKABLE predicate (`DEF-ROC-009` leaving `blocked`) rather than a memory. That reduces future exposure to the constraint without pretending to reduce the constraint. **SO THE EXPLOITABLE CONSTRAINT IS `orchestrator`/`reported` AT 29.78%, TWO POINTS BEHIND, AND IT IS ENTIRELY SELF-INFLICTED.** WHY-CHAIN (5 levels): (1) `orchestrator` is the #2 GLT owner and **every second of it is the `reported` state** — 98 items, median 8.7h each; (2) items dwell in `reported` because leaving it requires the `triaged` event, whose ONLY legal agent is `orchestrator`; (3) an orchestrator-only transition takes a median 8.7h because the orchestrator is a single serialised actor that also runs the pull loop, fires pipeline `deployed` events, dispatches every agent and reports to the human — triage competes with all of it and therefore happens in batches, whenever the orchestrator next looks; (4) triage is orchestrator-only because of the per-transition AGENT ALLOWLIST, under which the **flow-manager — the role that OWNS scheduling — is structurally forbidden from scheduling a defect** (`type: defect` has no `ready` state at all, and `triaged` excludes flow-manager); (5) ROOT CAUSE: **the allowlist makes the orchestrator a mandatory serialisation point for the first transition of all 130 defects.** MEASURED THIS CYCLE, twice, independently: the flow-manager dispatched to clear `aged-backlog-undecided` on six intake defects attempted `made_ready` on two and was REFUSED, so all six of its decisions became dated `defer_until` entries rather than the schedules two of them warranted on merit; and an engineer that reproduced `DEF-ROC-063` and found the premise FALSE had **no legal event of any kind** to record it — from `reproducing` its only forward event is `confirmed`, which would have been a lie. It declined, wrote its verdict to a file and handed it back. **THE GRAPH'S ONLY AFFORDANCE FOR AN HONEST NEGATIVE WAS A FALSE ASSERTION.** Registered as `DEF-ROC-128` with **ten** recorded instances across five roles; instance 10 is the mirror image — an engineer that sharpened `DEF-ROC-071`'s stated mechanism while building adjacent code could not append it, and the finding survives only because an orchestrator relayed it by hand. Instance 9 shows the graph COMPELLING a false record; instance 10 shows it SILENTLY DISCARDING a true one. **RECURRENCE, and this is why a principle-failure entry is opened rather than only an item:** `UC-ROC-093`'s own 2026-08-14 event log already called this *"the seventh recorded instance of the per-transition allowlist blocking legitimate work across four different roles in one day"* and said to note the incoherence explicitly. It was noted, three times, and never fixed — thirteen days and three instances later it is the measured #2 GLT owner. A root cause recorded and left is a system failure to smooth it (§5b). EXPLOIT: **§F9a — a role that PERFORMS work may always record its OUTCOME, including a negative one.** No role's only legal forward move may be a statement it believes false. Routed to `process-current.md` + `DEF-ROC-128` as the implementing item; explicitly NOT closable by adding one more agent to one more allowlist, which would be the fourth such extension. SUBORDINATE: **§F9b — a finding must be registered WITH its triage decision, in the same act.** The orchestrator registered **seven** findings this cycle (`DEF-ROC-125` through `DEF-ROC-131`, `OI-ROC-012`) and triaged **one**, piling six items onto the very queue it then named as the constraint. Each finding is real and §F8a rightly forbids closing one to shrink a number — but registering a finding and not deciding it converts discovery into inventory, and the discovering role always holds the context to decide. So intake gains no cap (Little's Law governs WIP, not backlog, v126) and instead the ARRIVAL carries its own decision. ELEVATE: **NOT taken, and the number that settles it is 0.17%.** Agent work-effort is 116,319s against 66,759,943s elapsed; raising `N` or moving an agent to a stronger tier buys nothing when capacity is idle 99.83% of the time. **DELIVERED:** `REQ-ROC-002` **complete** by aggregate fold (`UC-ROC-093` -> `SLC-ROC-025` -> `CHK-ROC-004`); `UC-ROC-107` (an operator opens a publish window and posts an event entirely from the Simulator screen — 22-assertion operator-only walk plus a negative test per blast-radius bound, including an out-of-band kill switch refusing in BOTH directions); `UC-ROC-093`; `UC-ROC-106` at the third attempt; `DEF-ROC-118`, `DEF-ROC-120`, `DEF-ROC-121` resolved; `DEF-ROC-063` **not_reproduced** with its cause pinned to `DEF-ROC-057`, whose fix landed **22 minutes** after the human's spreadsheet was saved; `UC-ROC-105` parked `awaiting_observation` — four criteria pass and the CENTRAL one (never mislabel a window-extended hold as "soak window") is unreachable on `aas-test` because `SEEDED_MAINTENANCE_WINDOWS` ships `enabled:false`, established by three live probes including one inside the seeded window's own 02:00-04:00 slot, with a committed predicate rather than a forced override. **A GREEN THAT WAS REFUSED IS THE QUALITY RESULT OF THE CYCLE.** QUALITY: `dev-validating` **9.6% (11/114)** is the highest failure rate in the system and two of this cycle's three rejections were DOC ROT on one document; `validating` 5.7% (5/88); `building` and `deploying` **0.0%**; rework 5.2% (13/252). CFR 8.16% all-time. **SEVEN FINDINGS REGISTERED AND SIX SHARE ONE SHAPE — a control reading healthy while the thing it guards is actively failing:** `DEF-ROC-125` `loop-gate` reported "3 containers, clean" at **load average 56.11** (22 `yes` processes, ~1300% CPU, from a peer session's load experiment — NOT killed, the peer was notified and stopped it); `DEF-ROC-126` `board-sweep` printed "nothing outstanding" while **190** items were stale, because its resume file is overwritten scope-blind by every run — **reproduced a second time within the hour**, discarding a 37-id NON-RETRYABLE failure list; `DEF-ROC-127` the co-owned guard cannot tell a REWRITE from a REVERT, so it fires on the loop's own step 6 and routes the documenter to `--no-coowned-merge`, the flag that reverts co-owned lines — verified 20 of 25 lines legitimately superseded with all substance intact; `DEF-ROC-128` above; `DEF-ROC-129` **`DEF-ROC-120`'s own class one layer down** — it made `build_failed` recordable from `deploying`, but `BUILD_FAIL_RECOVERY_EVENTS` omits `deployed` and from `deploying` that is the ONLY reachable resolve, so the first real firing (a genuine 27-minute recovery) reads `n=0`; `DEF-ROC-130` the retro cadence itself. **THE OWNER RULING THAT REDIRECTED THE CYCLE, and it reversed a recommendation of mine:** *"we should not deploy things that are red — they should get fixed"* and *"fix the loops to fix things."* I had recommended moving the rot gate's item-store arm OUT of the deploy-gating tier (`OI-ROC-012` option b) and the owner overruled it — correctly: moving a check out of the deploy gate does not make the underlying condition true, it only stops anyone being stopped by it. The arm STAYS and a true red still blocks; only the FALSE reds are in scope (the LIVE arm keys freshness on a pinned build sha, so it reds after ANY deploy — verified on `f950220f`, which changed a workflow file and one test, touched no screen, and left all five captures byte-identical by content hash, yet clearing it costs a real publish that raised real ticket `ROC-31`). Re-keying on CONTENT makes the check accurate, which is the opposite of bypassing. **THE SECOND HALF BECAME `DEF-ROC-131` AND IS THE MOST IMPORTANT MACHINERY OF THE CYCLE: `loop-gate` had 13+ checks and NOT ONE asked whether trunk was red.** Trunk was red for most of this cycle — four sequential genuine reds — and because `Deploy` has `needs: [test-function-app, test-web-app]` every one SKIPPED the deploy; `UC-ROC-105` and `UC-ROC-106` sat built-green, committed, pushed and UNDEPLOYABLE, therefore un-validatable, while `loop-gate` reported OK on every run and the orchestrator learned of it from an engineer's passing remark. Now check 16, and it reads the **DEPLOY job's own conclusion and its `needs` graph, never the run conclusion** — so `DEF-ROC-068`'s permanent audit red (deepmerge-ts via flowbite-react via the design system; re-verified against `registry.npmjs.org` this cycle — flowbite-react at latest `0.12.17` pins deepmerge-ts EXACTLY `7.1.5`, so the wait is unbounded and an `npm overrides` is the only route round it) does NOT fire it, which the successful deploy alongside that red proves. TOKEN REVIEW (§24): **21.75M** tokens, `engineer` **74.7%** (16.24M), `tester` 18.6%, `cicd` 5.4%, `orchestrator` 1.3%; coverage 16.0% so the split is directional. **§E came back 1.27% plumbing against 0.0% for three consecutive retros** — v150's rule working, because the previous 0.0% was 0.0% BY CONSTRUCTION. Highest-leverage reduction IDENTIFIED AND ROUTED: **`make item-brief` exists, is committed, and is referenced in ZERO agent files and ZERO commands.** A targeted-read tool sat idle all cycle while five dispatches read whole item files (one read of five items cost 68.5KB in a single call). That is the same shape as the six findings above — a built control that does nothing — and it is the rare token cut that cannot hurt DORA, because it replaces whole-file reads with the SAME facts. Long dispatch briefs were considered as the alternative cut and DECLINED per §26: they demonstrably bought quality this cycle (a tester screened a load-window green on shape rather than blanket-discarding it; another refused a false green and parked the item), and shortening them risks the 9.6% `dev-validating` rate. RECONCILE LATENCY: **23.3h with 5 commits batched** at retro open (oldest `f92b741`, 2026-08-26T18:17:31Z), up from v155's 20.6h and therefore TRENDING THE WRONG WAY across two consecutive retros — named here so the next retro scores the trend. Fold-back run at close. REGISTRY: 5 ROC rows -> `EXP-ROC-001` **ADOPTED** on real movement (see archive) -> 4, +2 new = **6, under the per-project cap of 8**. CONSTRAINT TO ATTACK NEXT: `orchestrator`/`reported` **29.78%, median 8.7h/item, n=98** — the exploitable one, whose root cause is now named and whose implementing item is `DEF-ROC-128`. `external` remains the top share and remains owner decision debt, not flow debt. -->
 
 <!-- v155 (retro, OagEventSource 2026-08-27; fired MECHANICALLY on incident debt — `make retro-debt` reported RETRO DUE [incident (immediate)] on the `DEFECT-OAG-142` resolve and BLOCKED the pull. Fold-forward ran first per STEP 0; main held nothing this instance lacked.) FOCUS QUESTION, default: *"what was the largest contributor to gross lead time, and what strategies can reduce it while protecting DORA?"* ANSWER — **the constraint is unchanged in rank but its ROOT CAUSE was measured for the first time, and it is that the gate guarding it can be satisfied without moving any work.** `queue` **68.66%** of measured GLT, median **567,165s (6.6d) per item**, n=222; state `open` **61.65%**, median **675,874s (7.8d)**, n=149, backfill 0.00% — clean, and count-independent as §17f limb 6 requires. WHY-CHAIN (4 levels): (1) `open` dominates because items sit in intake unpulled; (2) they are unpulled because WIP is saturated by `DEFECT-*` work — **6 of 7 slots at measurement** — and Ready is replenished from whatever is cheapest to DECIDE, not from a reserved class; (3) that persists because the only mechanism acting on aged intake is `loop-gate`'s `aged-backlog-undecided` check, and **a dated defer satisfies it without moving the item**; (4) ROOT CAUSE: **the gate measures DECISION, not MOVEMENT**, so its cheapest compliant action is re-dating — and re-dating is what happened. **THE MEASUREMENT THAT MADE THIS ACTIONABLE:** the same 36-item batch had been mechanically re-staggered **TWICE in 9 days** (08-18, 08-19), items 22-25 days old re-dated three weeks out, **not one reaching `done` in between**, with the gate reporting satisfied the whole time because every individual defer was legal and in date. That is §17i's control-satisfiable-without-achieving-its-purpose family arriving in the flow gate itself — the eighth registered instance and the first inside the flow machinery. EXPLOIT (waste at the constraint): **§F8a.2 + `--max-defer-total-days` (default 30)** — past a total-age ceiling an in-date defer stops exempting the item and the answers are SCHEDULE / DECLINE / ESCALATE; re-dating is not one of them. Keyed on TOTAL AGE rather than a defer COUNT **because the count is stored nowhere** (frontmatter holds one value, overwritten each re-date) while age is already computed and is exactly what serial re-dating hides — a rule needing a number nobody stores is a rule that cannot fire. 4 new tests, and the non-vacuity is a DIFFERENTIAL on one fixture (25d old, deferred 3 weeks out: ceiling 20d fires, ceiling 90d does not), plus two limbs pinning that it does NOT double-report an item with no defer or an EXPIRED one. `make test-wi` 610 -> 614. Deliberately did NOT tune the ceiling to fire on today's corpus (oldest 25d, ceiling 30d): making a check fire by lowering its threshold is the dishonest direction, so it is proven by test and will bite the genuinely-serial cases within days. SUBORDINATE: **§F2d — a starved CLASS needs a standing allocation, not better intentions.** When replenishing Ready, if intake holds any class that produced no `done` last cycle, at least one pick must come from it. EVIDENCE FROM THE CYCLE THAT FOUND IT: steering replenishment to the `OI-*` class closed **both** picks inside the same session (`OI-GH-WORKFLOW-CAPTURE-REFRESH-OWED`, `OI-WI-VALIDATE-IGNORES-DERIVED-STATE-LEGALITY`) — **2-for-2 in one cycle against 0-for-36 over 9 days**. ELEVATE: NOT taken; agent work-effort is **0.1% of GLT** (§F, 285,302s of effort against 245,638,692s elapsed), so capacity is manifestly not the binding constraint and raising `N` would buy nothing. **§E CAME BACK NON-ZERO FOR THE FIRST TIME: plumbing 14.8% / delivery 85.2%** at 9.2% coverage, against **0.0% for three consecutive retros**. That is v150's rule (replenishment/flow events carry `TOKENS=`) working exactly as written — the previous 0.0% was 0.0% BY CONSTRUCTION because only delivery-classified stage events carried tokens. §F populated too (duration coverage 6.9%). Both sections stop being decorative. TOKEN REVIEW (§24): ~2.4M subagent tokens across 12 dispatches, dominated by `engineer` (24.5M cumulative, 173,687s work-effort, median 2,044s/dispatch). Highest-leverage reduction identified and DECLINED: capping dispatch context would have prevented today's most valuable outputs, each of which came from an agent reading MORE than its brief — three items had their recorded mechanism falsified by a dispatch that went and checked (`OI-SANDBOX` three facts superseded, `OI-PARTS-CHECK` fixed 6.6d earlier, `DEFECT-OAG-140`'s fix doing less than half what the item claimed). Per §26 that is a token INCREASE buying a real DORA gain and is accepted. RECONCILE LATENCY: **20.6h with 10 commits batched** at retro open — above zero and therefore drifting toward the §0a Rule 4 ban; fold-back run at close, and it is named here so the next retro scores the trend rather than rediscovering it. DELIVERED: `DEFECT-OAG-142` **validated** (root cause: `coownedStaleAgainst` asked whether a commit's lines were absent from MY copy and never whether HEAD still had them — **absence of content HEAD does not have is AGREEMENT, not staleness** — selecting a base 23 commits behind BOTH sides; four corruptions in one session, one of which duplicated two events in an item log and MANUFACTURED AN ILLEGAL TRANSITION that stopped the loop; the report could not see it because `addedBack` is a set difference so a duplicated line is not novel). `OI-A-WEDGED-CI` closed (CI wedge gone: 7m10s named failure against 2h20m). `OI-PARTS-CHECK-MARKER` closed (premise stale — fixed 6.6d earlier, never given its event; the real gap was acceptance pinned at the gate's INPUT, never the gate). `OI-GH-WORKFLOW-CAPTURE-REFRESH-OWED` closed. `OI-WI-VALIDATE-IGNORES-DERIVED-STATE-LEGALITY` closed with **I8**. The owner's `bos.*`/`daa.*` grant applied and audited passing on **both** hubs. **A PRE-PUSH CATCH WORTH THE WHOLE CYCLE:** a correct new ECS-adoption gate was wired into `infra-sandbox`, the TOPOLOGICAL ROOT of the deploy chain, with no `continue-on-error` and a precondition that had not shipped — pushing it would have skipped EVERY downstream deploy including prod. delta-079 had ruled the interlock in ONE direction only. Registered as `OI-A-BLOCKING-STEP-AT-A-NEEDS-ROOT-HAS-CHAIN-WIDE-BLAST-RADIUS-AND-NOTHING-MODELS-IT`, and the tester CONFIRMED the gap independently: every test reading `infra.yml` reasons about steps in ISOLATION. Two generalisations kept: **a gate that asserts a REMEDY must ship WITH the remedy**, and **a blocking step's blast radius is the transitive closure of the jobs that `needs:` its job.** ORCHESTRATOR FAILURE, unsoftened: I swept another agent's staged file into `cfb42a18` via `add`+`commit` **having printed the evidence it was there in the same `&&` chain** — a check nothing branches on is decoration. Not repaired (four agents were committing; `reset --soft` could have discarded one) and recorded as a principle failure. **Then the better finding: `CLAUDE.md` limit 2's instruction was itself WRONG** — `make commit-isolated` already commits an untracked file, by construction (private index seeded from HEAD, shared index never read). The rule told agents to open a window the machinery already closes. Both halves measured within the hour: the new gate REFUSED correctly on the next new file, and `commit-isolated` committed it with nothing swept. **The repair was documentation of an existing capability, not new code** — the cheaper and more common repair, missed for exactly as long as the rule read the way it did. REGISTRY: 8 active (AT cap) -> **5** by three adoptions, all on real movement, then +2 new rows = **7, under cap**. CONSTRAINT TO ATTACK NEXT: `queue` **68.66%**, median **6.6d/item** — and for the first time the change-set attacks its measured root cause (a gate satisfiable without movement) rather than its symptom. -->
 <!-- v151 (OWNER INSTRUCTION, OagEventSource 2026-08-25 — NOT a retro; no DORA recompute, no experiment row, no retro-debt drain. The owner stated that **production is now live with customers** and asked for a process update covering (a) running the tester in development and then again in production and (b) a rollback strategy, on the standing requirement that we do not break prod.) HEADLINE — **the two-stage tester was ALREADY the rule and is restated; the actual gap is ROLLBACK, and this week produced the evidence that it is a real one.** §F5a/§11b already require `dev_validated` then an automatic `promoted` then a prod `validated`, and the state graph enforces the ORDER — `UC-ML5` and `UC-NCI1` both went through it correctly this week. So F5c.1 restates rather than invents, and names the thing that actually makes the second dispatch happen: `loop-gate`'s stalled-validation check, which is the only reason two items sat 47h in `prod-validating` and then moved. **WHAT WAS MISSING IS ROLLBACK AS A MECHANISM.** 'Reversibly rollable' existed only as the fourth bullet of §F5a's infra auto-approve list, with nothing computing it, and the word appears six times in the whole process as principle and never as procedure. **§F5b said feature-flagging is the escalation 'until evidenced' — THE EVIDENCE ARRIVED**: `DEFECT-OAG-140`, false `OagFlightDiverted` events delivered to BOTH live prod consumers (verified at source — 352 publish results, `failedEntryCount 0`, both fan-out lambdas enabled, DLQs at depth 0), **7 of 13 false, 53.8%**, undetected for five days. **AND THE NATURAL ROLLBACK WAS UNAVAILABLE**, which is the part that makes this a process change rather than a defect: `DIVERSION_MAPPER_ENABLED` is a bare `true` with `stageKeyed: 'none'`, so disarming prod also disarms dev and sandbox — i.e. the rollback would have destroyed the reproduction needed to fix the fault being rolled back. MEASURED: of five `outwardEmitting: true` arms only **two** carry a per-stage table. FOUR RULES ROUTED, all automated preconditions or automated signals — **§F5a's rejection of a human promotion gate is UNCHANGED and explicitly restated**, because the fix for 'prod has customers' is not a human clicking approve: (F5c.2) an outward-emitting arm MUST be stage-keyed with a lane term before the change that arms it may deploy — promoting `delta-078`'s architecture ruling into process, checkable from the registry the arms already declare themselves in; (F5c.3) every prod-affecting change names a ROLLBACK CLASS — **A** arm flip (seconds, no redeploy), **B** revert+redeploy (one pipeline), **C** irreversible — and **class C is the one that matters, because a published event cannot be unpublished**: AdixOut and FIDS received those diversions and no revert reaches them, so an outward-emitting change is class C for what it has already sent and class A only for what it has not, which is precisely why F5c.2 is a PRECONDITION; (F5c.4) an UNREHEARSED rollback is an unfired guard — this project's signature failure is a control that reads healthy while doing nothing and it has now been found in a gate, a census, a byte search, a vacuity check and an arm, so a rollback path nobody has executed is the same shape and must be rehearsed in dev and recorded on the item; (F5c.5) declare the DETECTION signal, because a rollback nobody triggers is not a rollback — `DEFECT-OAG-140` was found by a census five days late and nothing alarmed, and where no signal exists the item must SAY so, since an undetected class-C change is a risk the owner is entitled to see before it ships rather than after. **NO EXPERIMENT ROW, deliberately and stated in the section itself** — §25a's validity bar says a fix is not an experiment, and neither is mandatory safety practice adopted because the operating context changed: there is no hypothesis here we would abandon if the metric stayed flat, because we would not resume shipping un-rollable outward changes to live customers on the strength of a chart. It is routed as plain practice against **recovery/MTTR** primarily and CFR secondarily. (It also keeps OagEventSource at 8/8 honestly rather than retiring a live row to make room, which would have been gaming the cap.) NOT DONE HERE and left to the owner, because both are decisions rather than engineering: the mechanism-C corroboration ruling on `DEFECT-OAG-140` (how many messages before we believe a diversion — latency against truth, a consumer-contract call, pinned executably in `AC-140.5`), and whether to convert `DIVERSION_MAPPER_ENABLED` to a stage-keyed table with identical values as a separate reviewable commit. No arm was touched. **AUTHORED AS v150 AND RENUMBERED TO v151 AT COMMIT TIME - recording it because it is a KNOWN RECURRING TRAP and the record should show it caught rather than avoided:** ROC published its own v150 retro while this was being written, so `main` already held v150 by the time the commit ran. This is the v141/v144 renumbering trap, and it was caught by the commit failing rather than by a check - the fold-forward at the START of this turn reported `already up to date` and was correct AT THAT MOMENT, which is exactly the window the trap lives in. The section header, the `process_version`, the heading and the `supersedes` list were all moved together, and this record was reordered ABOVE ROC's so the file stays newest-first. -->
@@ -58,7 +120,7 @@ status: active
 <!-- v111 (FOCUSED retro, ROC 2026-07-27; on main v110 via fold-forward-FIRST — clean, no collision; §F8 routine-batch gate at SLC-ROC-014 close, NO prod incident): SLC-ROC-014 delivered the COMPLETE rules-EDITING capability (edit → mandatory draft-test → publish, live no-redeploy pickup, Simulator parity, content-hash attestation gate + who/when attribution) — UC-056/057/058 all live-stack validated + pushed to origin/main + deployed to aas-test. NO global §-body change. Routed outcomes: (1) engineer.md plain-practice fold — the pre-built_green green bar must exercise the REAL artifact for UI/pipeline slices (fully-themed live axe + same-element aria-label; focus preventScroll + no scrollable ancestor; composed-consumer-against-populated-store acceptance driving consume() end-to-end), extending v110's live-caught→offline-pin; recurring root cause logged in principle-failures/2026-07-27-offline-green-ne-live-correct-ui-pipeline.md. (2) work-items.py + linear-project.py + linear-mapping.md machinery fix (human "fix the in-progress clutter"): blocked never maps to In Progress (Todo/Backlog) and an aggregate whose only non-terminal children are all blocked derives blocked — parked-on-external trees drop out of the active lane in queues/stats/board (107 wi-tests green). (3) EXP-115 POSITIVE again (ROC live catches), EXP-117 → 2/3 POSITIVE (board cadence). Constraint UNCHANGED + not-agent-squeezable (external 46.66% Azure-block + queue 41.93% backlog; agents ≈11%); dev-validation 11.1% / CFR 10.1% is HONEST dev-catch (EXP-108), not decay — the in-system lever is shifting live-defect classes LEFT (measured next on SLC-ROC-015). Registry 7 active, under cap, no rows added. -->
 <!-- v110 (FOCUSED retro, AdixOut 2026-07-24; RECONCILED onto main v109 via fold-forward-then-reapply — main advanced to v109 (ROC SLC-ROC-013 retro) while this AdixOut retro was in flight, so renumbered v109→v110; retro-debt gate — 3 routine: UC-AIDX-028 rework (TWO reject→rework cycles) + SLC-AIDX-011/CHK-AIDX-010 closes, REQ-004's dev consumer-side walking skeleton: C12 bus+grant → C13 routing → C10/C11 ingest standup → OAG handoff, built + validated LIVE end-to-end (synthetic event → C12 → C13 → C10 → C11 → read model → egress). TIGHT: two fix-derived learnings folded as PLAIN PRACTICE, no experiment rows. Constraint UNCHANGED from v105/v108 (registered/queue = artifact latency, ~70% of GLT; squeezable in-system cost = engineer/multi-tenant-eventing). Both learnings were caught by LIVE assert-real-state validation that offline synth-pins passed. (1) SCOPE-GAP → engineer.md + solution-architect.md: "reuse existing X" must be VERIFIED against the real deployed TARGET account/stack, never assumed from a sibling env — SLC-AIDX-011's "reuse the existing C10/C11 ingest" was wrong (C10/C11 were sandbox-only; the migration moved only the egress to dev-dataout), so the engineer STOPPED (§F7) rather than build against an absent dependency and a predecessor UC-030 + architect delta 007 were inserted at the real edge; the §F7 stop was correct. Extends the v97 assert-real-state family. (2) EVENTBRIDGE TARGET PAYLOAD (the double-rework) → engineer.md: for an EventBridge rule→SQS/target that must forward the event's `detail` object verbatim, use `inputPath: "$.detail"` (JSONPath extraction), NOT an `inputTransformer` with a bare `<detail>` object placeholder — the `<placeholder>` idiom quote-strips a nested OBJECT into invalid JSON (`ERROR_CODE=INVALID_JSON`), it only round-trips STRING fields (why the webhook router's flat string fields worked). Root cause found only by adding a target `DeadLetterConfig` to capture the real `ERROR_CODE`/`ERROR_MESSAGE` — so: always wire a target `DeadLetterConfig` and INSTRUMENT-FIRST before guessing at an opaque cross-service delivery failure. UC-028 rework #1 = default-rule envelope-wrap poison (C11's parseEnvelope rejected the wrapped event); rework #2 = the `<placeholder>` INVALID_JSON. Engineer left OFFLINE synth-pins behind for the inputPath/InputTransformer shape + DeadLetterConfig so the payload-shape class is now caught offline (live-caught infra-shape defect → offline pin). Kept in engineer.md not the aws-architecture skill (no clean EventBridge-target section there; narrowest owner = engineer implementation behaviour). EXP-115 (whole-journey/JTBD live validation) scored POSITIVE again (dated confirming note): the live bus-driven E2E caught the scope-gap + BOTH UC-028 delivery bugs offline pins missed. CFR HONESTY: UC-028's two reworks + UC-027's earlier deploy_failed are real DEV-caught change-failures (EXP-108 integrity) — the process working (caught in dev before OAG/prod), NOT decay; CFR ~39% reflects honest dev-stage rejection accounting. Registry unchanged: 8 active (EXP-101,106,107,112,113,115,116,117) — AT cap-8; no rows added/retired. No global-section rules changed; routed changes = engineer.md (2 folds) + solution-architect.md (reuse-verify note) + EXP-115 confirming note. -->
 <!-- v109 (FOCUSED retro, ROC 2026-07-24; RECONCILED onto main v108 via fold-forward-FIRST — main had advanced to v108 (AdixOut tight retro) while this ROC session ran, so this entry is v109; triggered by the §F8 routine-batch gate at SLC-ROC-013 close, NO incident): SLC-ROC-013 (REQ-ROC-003 living-demo foundation, UC-051..055) delivered + validated live-stack + pushed to origin/main on green (CI deploying to aas-test). NO global §-body process change this cycle — the routed outcomes are (1) EXP-116 lean-orchestration ADOPTED into orchestrator.md as plain practice (guards proven safe 2/2, no DORA harm; registry 8→7), (2) EXP-117 board-push cadence advanced to 1/3 POSITIVE. Constraint UNCHANGED and confirmed not-agent-squeezable (`registered`/backlog-aging artifact 57.76% + external-blocked DEF-004 33.55%; agents ≈8.6%); change budget deliberately NOT spent chasing it (constraint-gate). J23 demo-grows DoD + demo-egress isolation pattern kept as ROC project artifacts, not over-generalised. TIGHT retro — score + adopt + drain + fold. -->
-# Current Process — v155
+# Current Process — v169
 
 <!-- v139 (owner instruction, OagEventSource 2026-08-13, NO retro — a direct standing
 instruction from the human owner, folded immediately rather than queued): every update to
@@ -2068,44 +2130,43 @@ agree.
   1 or 2, permanently removing that divergence class.
 Target: MTTR + CFR. (Per-role: `engineer.md`, `cicd.md`.) [EXP-070]
 
-## 19c. THE PUSH BOUNDARY: coverage may not go DOWN, and coupling is LOOKED AT [v156, owner instruction 2026-08-29]
-Two checks at the moment work leaves a machine. Both exist because this system keeps
-finding the same fault — **a control that exists but is not read** (`DEFECT-OAG-119`, a
-dev gate asserting nothing live; `DEFECT-OAG-108`, a governed path bypassed; the coverage
-provider *declared in config and never installed*, so coverage had never run once).
+## 19c. §F11's exit gate ALSO binds at the push boundary, and it gains one active step [v156→superseded-in-part by §F11; reconciled 2026-08-29]
 
-**(a) COVERAGE MAY NOT GO DOWN — it is a ratchet, not a target.**
-- The floor is COMMITTED (`src/app/coverage-floor.json` shape) and read by a gate that
-  fails the push. It is set to **where the project actually is**, never to an aspiration:
-  a fixed target is either unreachable — and then it gets waived, which is how a gate
-  becomes decoration — or already met, and then it does nothing.
-- **Raising the floor after an improvement is part of FINISHING the work**, not a
-  separate chore. The gate prints the exact line to paste.
-- Lowering it is not a normal operation. It means deliberately shipping less-tested code,
-  so it needs a reason **in the commit message** that a reviewer can refuse.
-- The gate MUST distinguish *cannot measure* from *below floor* and never let the first
-  read as a pass — a caller who cannot tell a broken measurement from a real regression
-  will fix the wrong one.
-- Any jitter tolerance must be **measured and declared next to the numbers**, and an
-  absurd one must fail closed: switching a gate off has to look like switching it off.
+**READ §F11 FIRST. It is the governing text** and it is broader than this section: complexity
+AND coupling AND coverage AND outside-in tests, as EXIT CONDITIONS on the engineering step,
+with `AeroCloudSystems/CodeAnalysisTools` as the named instrument.
 
-**(b) BEFORE PUSHING, LOOK AT THE COUPLING OF THE WORK YOU ARE ABOUT TO PUSH, AND ATTEMPT
-AN IMPROVING REFACTOR — then re-run the tests.**
-- *Attempt* is deliberate. **"I looked, and here is why I left it" is a valid outcome;
-  skipping the look is not.** A mandatory refactor before every push would be ignored
-  within a week; a mandatory *look* is affordable every time.
-- It is read off the **generated** coupling/dependency view, never off an impression. A
-  hand-maintained coupling map goes stale and then lies, which is worse than absent.
-- The outcome is **RECORDED on the item** — so *considered-and-declined* is
-  distinguishable from *not-done*. An unfalsifiable rule is decoration, which is the
-  exact failure this section exists to stop.
-- The tests must still pass afterwards. A refactor that is not re-verified is a change,
-  not an improvement.
+This section was written independently on OagEventSource the same day §F11 landed from ROC,
+and **most of it was duplicate.** It is cut to the parts §F11 does not already say. That
+duplication is itself recorded — see the fold-forward note in §19d.
 
-**Why the pair.** Coverage tells you whether the change is *tested*; coupling tells you
-whether the next change will be *possible*. Neither is visible in a diff, and both decay
-silently — so both are checked where the work leaves, and both are **published** rather
-than left in a CI log (`REQ-OAG-CODE-QUALITY-VISIBILITY`).
+**(a) The gate binds at the PUSH boundary too, not only at handover.** §F11 is an exit
+condition before the tester takes over. On a trunk-based, continuously-deployed project the
+push happens many times before that, and *the push is the apply*. So the ratchets are checked
+where work leaves the machine, not only where the item changes hands.
+
+**(b) NO-WORSE IS A FLOOR; YOU ALSO ATTEMPT AN IMPROVEMENT.** §F11.1 asks *did it get
+worse*. The owner also asked, verbatim, to *"look at and attempt refactors to improve
+coupling of work that is about to be pushed"*. So: read the GENERATED analysis, attempt a
+refactor, re-run the tests. **"I looked, and here is why I left it" is a valid outcome;
+skipping the look is not.** A mandatory refactor every time would be ignored within a week; a
+mandatory LOOK is affordable every time. And the outcome is **RECORDED on the item**, so
+*considered-and-declined* is distinguishable from *not-done* — an unfalsifiable rule is
+decoration, which is the family §F11 itself exists to fight.
+
+**(c) A RATCHET MUST FAIL HONESTLY, AND ITS TOLERANCE IS MEASURED.**
+- *Cannot measure* is a THIRD outcome, never folded into pass or fail. A caller who cannot
+  tell a broken measurement from a real regression will fix the wrong one.
+- Any jitter tolerance is **measured and declared next to the numbers it applies to**, and an
+  absurd one FAILS CLOSED — switching a gate off has to look like switching it off, not like
+  configuring it. (Measured, OagEventSource 2026-08-29: v8 branch attribution is not
+  bit-stable, ±0.01 across identical green runs. A gate that reds on noise is a gate someone
+  disables.)
+- **Raising the floor after an improvement is part of FINISHING the work.** A ratchet that
+  only ever holds is a ratchet nobody turns.
+- **A floor read off a RED run is not a floor.** Measured the same day: a baseline taken from
+  a run with five failing specs described a surface no green run reproduces, and the gate
+  caught it by reddening on the very next commit.
 Target: CFR + gross lead time. (Per-role: `engineer.md`.)
 
 ---
@@ -3118,6 +3179,979 @@ nothing is replenishable** (requirement complete). Four rules make this autonomo
    gate, requirement-complete, or a genuine blocker needing a human answer.
 Target: gross lead time (removes avoidable human-decision idle) + deployment frequency,
 guarded by CFR.
+
+
+## F9a. A role that DOES the work may always RECORD its outcome [v156, ROC]
+
+**No role's only legal forward move may be a statement it believes false.** This is a
+constraint on the type graph and on every future edit to it.
+
+**The evidence.** From `reproducing`, an engineer's only forward event is `confirmed`. An
+engineer that performs a reproduction and finds the premise FALSE therefore has **no legal
+event of any kind** — not even an annotation. Measured 2026-08-27: an engineer reproduced
+`DEF-ROC-063` across six viewports (60/60 checks, exit 0) on the deployed host, found the
+report false, and had to write its verdict to a scratch file and hand it back. It declined
+to fire `confirmed`. **The graph's only affordance for an honest negative was a false
+assertion**, and `confirmed` feeds the defect-confirmation and MTTR measures.
+
+The mirror case, same cycle: an engineer that sharpened `DEF-ROC-071`'s stated mechanism
+while building adjacent code could not append it (`amended` excludes `engineer` from
+`reported`). Instance 9 shows the graph COMPELLING a false record; instance 10 shows it
+SILENTLY DISCARDING a true one. **The engineer is the role most likely to disprove or
+sharpen an unpulled item's premise — because it reads the surrounding source in anger —
+and it is the one role that cannot say so.**
+
+**So:** whenever a transition's domain is widened or an allowlist is edited, assert that
+every role which can reach a state can also record what it found there. `DEF-ROC-128`
+(ten recorded instances across five roles) is the implementing item.
+
+**It may NOT be closed by adding one more role to one more allowlist** — that would be the
+fourth such extension. Attribution integrity is a real requirement and is what
+`EXP-ROC-002` protects, but it is currently enforced by conflating *"you may not
+impersonate someone else"* with *"you may not report what you found"*. Those are separable,
+and separating them is the fix.
+
+**Target metric:** lead time — specifically the `reported` state, **29.78% of GLT at
+median 8.7h/item across 98 items**, whose root cause is that the orchestrator is a
+mandatory serialisation point for the first transition of every defect.
+
+## F9b. A finding is registered WITH its triage decision, in the same act [v156, ROC]
+
+**The role that finds something holds the context to decide it. Deciding later is a second
+dispatch that may never come.**
+
+Measured 2026-08-27, and it is the orchestrator's own failure: seven findings were
+registered in one cycle (`DEF-ROC-125` … `DEF-ROC-131`, `OI-ROC-012`) and **one** was
+triaged. Six items were added to `reported` — the queue the same retro then named as the
+exploitable constraint. Every finding was real, and §F8a rightly forbids closing one to
+shrink a number; but **registering a finding and not deciding it converts discovery into
+inventory.**
+
+So at registration, the discovering role records ONE of:
+- **triage it now** (for a defect: `triaged`, which is the orchestrator's event — so an
+  orchestrator that registers a defect triages it in the same turn); or
+- **an explicit dated defer** with the reason and a near date tied to a named
+  precondition; or
+- **decline it**, with the reason.
+
+**Intake gains NO cap from this rule.** Little's Law governs WIP, not backlog depth
+(v126), and blocking on backlog inverts the constraint. This acts on the ARRIVAL, not the
+depth.
+
+**Note the interaction with §F8a.2:** a dated defer no longer exempts an item past a
+total-age ceiling, so a far date on an already-aged item does not buy the time it appears
+to.
+
+### F9b.1 — a defer under SEVEN DAYS is not a decision [v157, ROC]
+
+**AMENDED, and this reverses the "pick near dates" advice above, which was wrong.**
+
+v156 said to pick near dates tied to preconditions. Measured one cycle later: §F9b was
+honoured **9 of 9** — every finding registered since the v156 close carried a decision in
+the same commit that created its file — and `reported` still rose from **29.78% to 31.32%**
+of gross lead time, median **8.7h → 13.0h**. **Six of the nine decisions were the identical
+`defer_until: 2026-08-28`, written in one batch, expiring inside thirteen hours.** Every
+one was back in front of the gate by morning.
+
+So the rule is not "decide", it is **decide something that schedules**:
+
+- A `defer_until` must be **at least `DEFAULT_MAX_BACKLOG_AGE_DAYS` (7d) in the future**,
+  measured from now, or it does not count as a decision at all. The arithmetic is the
+  whole argument: check 4 grants seven days of silence for free, so a defer inside seven
+  days buys **exactly nothing the item did not already have**. It costs one line,
+  satisfies the gate, and re-poses the same question a few hours later.
+- Measured from **now**, not from queue entry. From entry, any future date trivially
+  clears the bar on an already-aged item, so the rule would protect arrivals and do
+  nothing about daily snoozing in the 7d-to-30d window below the total-age ceiling.
+- **A genuinely short, bounded wait is not what this forbids.** "Check back in four hours,
+  CI is running" is a `blocked` park with a re-checkable probe predicate — the graph
+  already supports it and `loop-gate` check 5 already re-reads it every cycle. That route
+  stays open and is the honest one.
+
+Mechanised as `_defer_is_decision`, shared by `loop-gate` check 4 and the new check 17
+`undecided-arrival`, which reads the CYCLE clock (since the last retro close) where check
+4 reads seven days — because §F9b's whole claim is that the decision is owed at
+REGISTRATION, and an arrival is invisible to a seven-day limb for a week.
+
+**The generalisable lesson, which outlives this rule:** ask of every control not only *did
+the rule fire* but *did the quantity move* — and where they disagree, believe the quantity
+and go looking for the cheapest legal way to satisfy the rule, because that is what will
+be happening. §F9b's compliance was perfect and its effect was negative.
+
+**Target metric:** lead time — the `reported` state share above. **Anticipated effect:**
+the median dwell in `reported` falls, because arrivals carry a decision that actually
+schedules. Scored on `EXP-ROC-009`, which **dies at strike 2** if the median does not fall
+at v158.
+
+### F9c. The retro's own outputs are gated too [v157, ROC]
+
+**Every producer in this system is gated except the one that writes the gates**, and that
+is why the same constraint survived five retros that each identified it correctly. Item
+transitions are edge-checked; a test must name its criterion; a park must carry a probe; a
+deploy must show its `needs` closure. A fold-back, an improvement slice and a routed rule
+were checked by nothing.
+
+- **`loop-gate` check 18 `reconcile-latency`** — §0a Rule 4 mechanised. Unmerged
+  `main..HEAD` commits older than 12h BLOCK **when the integration tree is clean** (so
+  `make project-foldback` would exit 0: one command, always available) and are ADVISORY
+  when it is dirty (fold-back would exit 3 by design, and blocking on a remedy the loop
+  cannot reach is the `DEF-ROC-083` unsatisfiable-gate failure). Baseline at v157: **37.4h,
+  12 commits**, third consecutive rise, integration tree clean throughout.
+- **`loop-gate` check 19 `retro-output-unbuilt`** — an OPEN improvement slice cited by an
+  ACTIVE registry row **this project owns** BLOCKS, because that row is being scored
+  against a mechanism that does not exist: it will exhaust its three strikes and be
+  archived as *"no measurable effect"* when the truth is *"never built"*. **A false
+  negative is worse than no row** — it retires the hypothesis AND records an untrue
+  reason. Another project's rows are ADVISORY only (§25a v143/v145: report and add a
+  strike, never retire). The remaining open slices are reported as aging inventory, which
+  every retro owes a decision exactly as §F9b requires of a finding.
+- **When a slice is not built, PAUSE its row's clock — do not score it and do not retire
+  it.** Record the resume condition, and let check 19 keep reporting the slice every run
+  so the pause cannot become a silencer. `EXP-ROC-004` is the founding case.
+
+## F9d. The intake cap gates ARRIVAL, not the pull — admission by displacement [v158, ROC]
+
+**Owner ruling, 2026-08-29: _"the lead time on everything is going up and up"_ and _"the
+art is finishing things."_**
+
+**The measurement that settles it.** Over the trailing 14 days ROC registered **179** items
+and finished **83** — arrival:completion **2.16 : 1**, net **+96**. July net **+49**, August
+net **+99**. Two days carry most of it (2026-08-18 **+38**, 2026-08-27 **+26**): batch
+finding-generation, from retros and gate sweeps. A queue fed at twice its drain rate makes
+rising lead time a **mechanical certainty**, not a puzzle. This is why `orchestrator`/
+`reported` has been the named constraint for **six consecutive reads** while every remedy
+aimed at it succeeded on its own terms.
+
+**The error this corrects, and it is a real misreading of our own rule.** v126 made
+intake-over-cap **advisory** for the **pull**, and was right: the remedy for a deep backlog
+is to deliver faster, so a block that stops delivery inverts the constraint. v156 then wrote
+*"Intake gains NO cap from this rule. Little's Law governs WIP, not backlog depth (v126)"* —
+carrying an argument about the **drain** across to the **feed**. Those are opposite
+interventions. Blocking the pull suppresses the drain; capping arrival suppresses the feed.
+**Little's Law does not merely permit the second, it prescribes it:** L = λW, and with λ
+(arrivals) at 2.16× the departure rate, W rises without bound whatever we do downstream.
+For three versions every remedy went at the *quality of the decision* — §F9b (decide at
+registration), §F9b.1 (a defer under 7d is not a decision), §F9c (gate the retro's own
+output) — and **not one went at the number of arrivals.**
+
+**And the decisions did improve.** §F9b was honoured **9 of 9**; v157 re-decided 17 findings
+onto a real staggered schedule. Intake still grew. That is the finding: **a decision is not a
+finish.** A decided item still sits in the queue accumulating dwell, and it counts in `L`
+exactly as an undecided one does.
+
+### The rule
+
+**When intake is AT or OVER its `wip_limit`, a new finding is admitted only by DISPLACEMENT.**
+In the same act that registers it, the discovering role must do one of:
+
+1. **Decline an existing intake item**, with the reason — the new finding takes its slot; or
+2. **Attach the finding as evidence to an existing item** rather than creating a new one
+   (the cheapest and usually the most honest option — see the duplicate/subsumption sweep
+   below); or
+3. **Decline the new finding at birth**, recorded with its evidence so it is findable if it
+   recurs.
+
+Registration without one of these is refused. **Below the cap, arrival is unrestricted** —
+this is a cap, not a tax on discovery.
+
+### The objection this must answer, because it is the strongest one
+
+**§F8a says: never close a verified-real finding to shrink a number.** That rule stands and
+this does not repeal it. The resolution is that **the choice was never "keep it or lose it"**:
+
+> An item that sits in a queue for fifteen days and is never pulled **is already a decline**
+> — one nobody wrote down, that cost fifteen days of lead time to not-decide, and that
+> misreports itself as planned work in every view.
+
+So the distinction §F8a draws is between closing a finding **as if fixed**, or to make a
+metric look good — still forbidden, and a lie — and **declining it with its reason recorded**,
+which is an explicit, honest product decision that we accept this defect. The second is what
+this rule requires. **Say plainly what is being accepted.** The oldest ROC intake item is
+14.7 days old against a whole-project finish rate near 6 items/day; pretending 54 items are
+scheduled work is the less honest position.
+
+### Anticipating the evasion — because every rule here has been met by its cheapest legal move
+
+v157's lesson, stated generally: *ask of every control not only did the rule fire, but did the
+quantity move; where they disagree, believe the quantity.* So, in advance:
+
+- **The displaced item may not be the one just registered**, nor one created this cycle. That
+  is self-satisfaction, and it is the obvious cheap move.
+- **A displacement is not a re-defer.** Moving an item's `defer_until` is not declining it and
+  does not free a slot; §F9b.1 already governs defers.
+- **Batch registration does not get a batch exemption.** N findings at the cap need N
+  displacements. A retro that generates 40 findings in a day is exactly the event this rule
+  exists to price — and pricing it is the point, not a side effect.
+
+### Scored on EFFECT, not on compliance
+
+**The scored quantity is the trailing-14-day arrival:completion ratio, and the target is
+≤ 1.0.** Not "did every registration carry a displacement" — that is the compliance reading
+whose perfect score coexisted with a rising metric at v157. Baseline at v158: **2.16 : 1
+(179 / 83)**. Secondary: intake depth (54) and the `reported` share of gross lead time
+(33.78%, median 37h, n=105).
+
+**If the ratio does not fall below 1.5 by the next retro, this rule is wrong and should die
+at strike 2** — the same commitment `EXP-ROC-009` carries. The honest alternative it would
+lose to: that findings are not over-generated at all, and the real fault is that the system
+finishes too little (see F9d.1, which is the other half of this and may be the larger half).
+
+### F9d.1 — a cycle that runs at WIP occupancy 1 of 8 is the other half [v158, ROC]
+
+**Capping arrivals only helps if the drain is real, and ours is barely running.** The numbers
+that make this a peer of the rule above, not a footnote:
+
+- v157 recorded `wip` occupancy at **1 of 8 all cycle**, and that one item had **no recorded
+  activity for 23h** of it.
+- v157 also recorded that the cycle ran **as a single session with ZERO subagent dispatches**
+  — an orchestration loop that dispatched nobody.
+- Agent work-effort is **0.2% of gross lead time** (§F). Everyone doing the work is **11.98%**
+  of GLT combined (§B).
+
+**The system is not slow. It is idle.** Which is why five retros correctly declined to
+ELEVATE (add capacity): capacity is not the constraint when it is 99% unused.
+
+So: **the loop's obligation is to FILL WIP, not to pull one item and report.** Concretely,
+when the maximal independent set comes back smaller than `wip_limit`:
+
+- **A pull of K < `wip_limit` is a finding, not an outcome.** Record why. "The independent set
+  was 1" is a statement about the *dependency model*, not about available work — with 54 items
+  in intake, a system that can only work on one thing has a modelling problem or a seam
+  problem, and both are fixable.
+- **Look across TYPES before concluding the set is full.** Defects and machinery items are
+  usually file-disjoint from UI use-cases; a three-way collision inside one React file
+  (`OverviewPage.tsx`, this cycle) caps the *use-case* set at 1 and says nothing about whether
+  a defect could run alongside it. Ready holding only same-seam items is itself the finding.
+- **Resource-class exclusivity is real and stays** (§F2b — e.g. an edit to `work-items.py`,
+  the sole writer every `wi-append` calls, runs alone). The point is that exclusivity should be
+  *named and rare*, not the accidental default.
+
+**Target metric:** lead time. **Anticipated effect:** median `wip` occupancy per cycle rises
+from 1 toward `wip_limit`, and the completion rate rises with it — which is the denominator of
+the ratio §F9d is scored on. **The two limbs are scored together, and they can fail
+independently:** if arrivals fall and completions do not, we have bought a smaller queue and no
+delivery, which is not what the owner asked for.
+
+### F9d.2 — the arrivals are REQUIREMENTS, not findings, and §F9d above would not have stopped them [v158, ROC]
+
+**Written within the hour of §F9d, against §F9d.** A flow-manager sweep of all 54 intake
+items went looking for the generating mechanism behind the 2.16:1 ratio and found it, and it
+is not the one §F9d prices.
+
+- **2026-08-18 (+38 net).** Sixteen requirements — `REQ-ROC-007` … `REQ-ROC-022` — registered
+  **in one sitting**. That is the source event.
+- **2026-08-27 (+26 net).** Twenty-two arrivals, **every one `agent: product`**:
+  `CHK-ROC-014`…`018`, `SLC-ROC-030`…`037`, `UC-ROC-108`…`116`. This is `/slice-next` JIT
+  replenishment (§F3) **working exactly as designed** — decomposing the 08-18 requirements
+  ahead of Ready starvation. **It is not a defect and must not be "fixed".** It is the
+  cascade, and treating the cascade as the fault would break the replenishment that keeps
+  the loop fed.
+- **A third, quieter source:** roughly half the 43 intake defects are self-referential
+  process/machinery findings thrown off by agents doing real work against the young v82
+  substrate — every dispatch stress-testing a gate for the first time. Expected to taper.
+  A real tax on throughput, **not noise to suppress**, and not the thing to attack.
+
+**So §F9d has a hole, and it is the main one.** §F9d caps FINDINGS against the intake
+`wip_limit`. The 08-18 batch entered through `/requirement`, the human gate, as
+requirements — and would have passed §F9d untouched. **A rule aimed at the wrong producer
+is the v157 failure repeating one layer out**, and it is recorded here rather than quietly
+patched because the compliance reading of §F9d would have looked perfect through the exact
+event that caused the problem.
+
+**The rule: the requirement gate must state the downstream cost before the human accepts.**
+
+A requirement is not one item. It is a commitment to a *cascade* of chunks, slices,
+use-cases and the defects they generate, drawn down at a **measurable** finish rate. Sixteen
+requirements accepted against a whole-project rate near **6 items/day** is accepting a queue
+that cannot be drained, and nothing at the gate said so.
+
+- At `/requirement`, before sign-off, the dossier carries the **current finish rate**, the
+  **current intake depth**, and the **implied completion horizon** for what is being
+  accepted — from `views/stats.md`, not from an estimate.
+- **This does NOT refuse the human's requirements, and must never be implemented as a
+  refusal.** §F5 makes requirement intake the human's call and that is unchanged. The
+  process failure was never that too much was asked for; it is that **nothing showed the
+  owner what accepting it meant.** Priced, the same sixteen may still be the right call —
+  but then the queue depth is a chosen position rather than a surprise, and the retro stops
+  re-diagnosing it every version.
+- **Corollary for the loop:** when intake is deep, the honest report to the owner is the
+  *horizon*, not the depth. "54 items" invites "close some". "At the current finish rate the
+  bottom of this queue is nine weeks out" invites the decision that actually matters.
+
+**Scored with §F9d on the same quantity** (trailing-14-day arrival:completion ratio). This
+limb is the one expected to move it: the finding-generation limb governs the tail, the
+requirement gate governs the head.
+
+## F9e. An owner decision is a BLOCKED ITEM WITH A DEFAULT, never a question [v158, ROC]
+
+**Owner ruling, 2026-08-29, and it names the constraint more precisely than six retros
+did:** *"you have work you can be doing but you keep stopping to ask me questions instead
+of blocking items, recording the decision and giving me an async way to handle those
+blocks"* — and, plainly: *"you can hardly work for an hour without my help."*
+
+**That is a correct description of the measured constraint, from the other side.**
+`blocked` is **27.28%** of gross lead time at a median **8.8 days** across 15 items, and
+`orchestrator`/`reported` is **33.78%**. Both are the same failure wearing two labels: the
+loop reaches a point where it needs a judgement, and **stops**. The founding case is
+`DEF-ROC-035` — escalated 2026-08-25 with three clean, well-formed options, and still
+unanswered **four days later**, because the escalation existed only as a sentence in a
+transcript. A question the owner must be PRESENT to receive is not an escalation; it is a
+stall with good manners.
+
+### The rule
+
+**Never ask a blocking question. Convert it, in the same act:**
+
+1. **Block the item** with the reason as a checkable predicate (§F7a).
+2. **Record the decision** — the options, and a **RECOMMENDED DEFAULT** with its reasoning.
+3. **Publish it to the async surface** — `work/<project>/open-decisions.md`, one row per
+   decision, carrying the default and a **DECIDE-BY date**.
+4. **Keep working.** Take the next independent thing.
+
+**If the decide-by date passes with no answer, the DEFAULT IS TAKEN and the loop
+proceeds.** Silence is a decision and is recorded as one. This is the load-bearing half: a
+default that merely waits politely is the same stall with an extra file.
+
+### Choosing the default — the constraint that makes this safe
+
+**The default must be the REVERSIBLE option**, and its cost if wrong must be no more than
+the work done under it before it is overturned. That is what makes taking it without an
+answer legitimate rather than presumptuous. Where no option is reversible, the default is
+the one that **preserves the most optionality** — and that case is rare enough that
+genuinely irreversible acts (§0b prod-DATA, an outward-facing side effect) remain the small
+set that really does wait.
+
+### What still reaches the human, and what no longer does
+
+- **Still a live gate:** requirement intake (§F5), and a genuinely irreversible operation.
+- **No longer a stall:** every "which of these should I do" — architecture options, label
+  wording, descope-or-wait, provisioning that is outside our control. Those become rows.
+- **The unbounded wait is the specific thing this kills.** An item parked on an external
+  precondition nobody has committed to is a decline nobody wrote down (§F9d). It gets a
+  default of *descope or decline*, a date, and it moves.
+
+### Why the surface, and not just the default
+
+Two independent failures this cycle, both real:
+
+- The owner **could not see** what was waiting on them. Four decisions were outstanding and
+  each existed only in a different part of a transcript.
+- The orchestrator **kept re-raising** them, spending the report on questions instead of
+  results — which is how "report the horizon, not the depth" (§F9d.2) gets inverted into
+  "report the blockers, not the progress".
+
+A single durable file with defaults and dates fixes both: the owner reads one place on
+their own clock, and the loop never has to ask twice.
+
+**Target metric:** lead time — specifically the `blocked` share of GLT (27.28%, median
+8.8d) and the count of items parked on an unbounded external wait. **Anticipated effect:**
+`blocked` median falls as parks acquire dates and defaults instead of open-ended waits, and
+no cycle ends with the loop idle for want of an answer. **Scored on `EXP-ROC-013`.**
+**NEGATIVE — kill it — if:** decisions are published but the defaults are never taken when
+dates pass (the surface became a nicer waiting room), or if a taken default causes rework
+costing more than the wait it saved.
+
+## F9f. A live probe is not evidence until it has been run adversarially [v159, ROC]
+
+**Measured 2026-08-29, and the engineer that found it had already reported the probe as
+evidence twice.** `UC-ROC-112`'s live probe passed **7/7 twice** — and both greens were
+wrong for a reason neither the probe nor its author could see:
+
+> *"The probe counted rows the instant the `<h1>` appeared — which is when the view
+> MOUNTS, before its fetch resolves. Every count had been 0 and every expected answer had
+> been 0, because the window happened to be empty that hour, so **a race read as
+> agreement**."*
+
+When the live corpus later gained one record, **3 of 7 cases failed immediately**:
+`unhandled: tile=1 rendered=0` — the list showed nothing. A second case failed more
+sharply still: while the fetch is in flight there are no records and no active filter, so
+the toolbar is **not rendered at all**, and every control assertion had been reading an
+*absent* element rather than an empty one.
+
+**The part that generalises, and it is why this is a rule and not a defect note:** that
+probe already carried a *count-vacuity guard* — an explicit `DISCRIMINATING` marker
+designed to stop exactly this class. **It sat directly on top of a timing vacuity and
+never saw it.** A guard against one flavour of "passing for the wrong reason" is not a
+guard against the others, and a green from an unfalsified instrument is not evidence.
+
+### The rule
+
+**Before a live probe's result may be quoted as evidence — in an item event, a validation
+verdict, or a report — it must have been run in at least one condition its author did not
+contrive.** Specifically:
+
+- **Run it with default arguments.** All three of `UC-ROC-112`'s probe defects surfaced
+  only that way: it had only ever been run with `ROC_EXPECT_SHA` passed explicitly, and
+  run plainly it failed outright.
+- **Run it against a non-empty corpus, and against an empty one.** A probe whose expected
+  answer and observed answer are both zero has established nothing, however many
+  assertions it carries.
+- **Wait on the LOAD STATE, never on the expected answer.** "Not loaded yet" and "no
+  matches" are different facts and must not render identically. An error surface is a
+  failure, not a zero.
+- **Make it fail once, deliberately, and watch it fail.** Two of the three defects here
+  were in the probe's own identity and settling logic rather than in the feature — and the
+  offline suite was green throughout and could not have caught any of them.
+
+**Corollary for the orchestrator, which is where this bit hardest:** a validation verdict
+inherits the weakness of the instrument that produced it. When a tester and an engineer
+both run the *same* probe, that is **one measurement, not two**, and the agreement between
+them carries no independent weight. Say so when reporting it.
+
+**Target metric:** CFR, and quality at the validating stages. **Anticipated effect:** fewer
+items closed on evidence that later proves vacuous; the `dev-validating` failure rate may
+RISE first, which is the good outcome — a probe that can now fail is one that was
+previously silent.
+
+## F9g. A NOTE IS NOT A QUEUE — a finding recorded on an item dies with the item [v168, ROC]
+
+`DEF-ROC-157`. A host-dependent assertion was found by an engineer, verified at source by the
+orchestrator, and **independently confirmed by a tester with its own measurements**. The
+orchestrator re-scoped the acceptance criterion and recorded the ruling as an `amended` event.
+Then the item closed, the re-scope was never applied, and the defect is still on trunk. It
+survived only because someone re-read the source afterwards.
+
+**An event log is an append-only history of WHAT HAPPENED. It is not a carrier of WORK STILL
+OWED.** When an item reaches `done` its notes move to `items/done/` and nothing reads them
+again. This system has exactly one durable carrier for outstanding work — **a work item** —
+and `open-decisions.md` is the single deliberate exception, created when the same lesson was
+learned for owner decisions (§F9e: *an escalation that lives only in a conversation is one the
+owner has to be present to receive*). This is that sentence, applied to an item.
+
+**THE RULE.** Before an item leaves an active state, any finding, re-scope or ruling recorded
+on it that the closing change does **not** discharge must be **registered as its own item**.
+The test is mechanical and requires no judgement:
+
+> *Is there a sentence on this item describing work that the commit I am about to close does
+> not contain?* If yes, it is an item.
+
+This binds the closing role — engineer, tester or orchestrator — not "someone later".
+
+**The generalisation, which is worth more than the rule.** Three instances landed in one
+session and they share a shape: a `lane:` correction recorded in an event whose edit had
+actually aborted; a co-owned merge whose report read green while duplicating a row; and this.
+**In every case the RECORD said the thing was done and only the STATE said otherwise.**
+`CLAUDE.md` already requires re-reading a co-owned file out of HEAD after committing; that is
+this rule in one narrow place. Generally: **after acting, verify the STATE, never the REPORT
+of the action** — and that includes your own report.
+
+## F11. The engineering step has an EXIT GATE: design metrics, coverage, and outside-in tests [v160, ROC]
+
+**Owner ruling, 2026-08-29, verbatim and mandatory:**
+
+> *"We need to add the code complexity analysis code tool that was built in the
+> CodeAnalysisTools repository into the test step of this project. We need to constantly
+> look at the numbers here (and ignore folders to do with items etc) in order to bring the
+> measures of complexity and coupling down. We also should be tracking test coverage and
+> ensuring its not going wrong. We also need to be testing things from the outside - we do
+> not want to test functions, we want to test usecases. This is a process update and these
+> things are mandatory - should be happening as part of the engineering step before being
+> happy with being done for the tester to take over."*
+
+**These are exit conditions on the ENGINEERING step.** An engineer does not report a use-case
+or defect ready for the tester until all three limbs below hold. They are not advisory, and
+they are not the tester's job to catch.
+
+### Why an exit gate and not a report
+
+`AeroCloudSystems/CodeAnalysisTools` was already wired into ROC — `code-analysis.yml`, on
+push to `main` and weekly, already excluding `items/*` and auto-detecting generated files.
+**It uploads an artifact and gates nothing, so nobody has ever read it.** That is this
+project's most-registered failure family (`OI-ROC-014`, `IMP-021`, `DEF-ROC-140`,
+`DEF-ROC-146`): a control that exists and is never consulted. A number nobody is accountable
+to does not move.
+
+### F11.1 — Complexity and coupling RATCHET DOWN
+
+The analysis runs **in the test step**, not in a side workflow, and its headline measures are
+held against a **committed baseline that may only shrink** — the `test-requirement-gate`
+shape, which is already proven in this project.
+
+- **Scope:** exclude `items/**` (the backlog: real work, but not code anyone reasons about,
+  and it dominates the report). Generated files are excluded by the tool's own
+  `detect-generated`, which reads the "do not hand-edit" banners — so `views/**` needs no
+  hand-maintained rule. **Everything excluded is listed in `generated.csv`, so the
+  exclusion stays auditable.** Never widen the ignore list to make a number move: that is
+  the allowlist-widening anti-pattern `OI-ROC-006` retired.
+- **The ratchet direction is DOWN.** A change that worsens the measure fails the gate. A
+  change that improves it may lower the baseline. **The baseline may never be raised** — if
+  a genuinely necessary change worsens a measure, that is an explicit, reasoned decision
+  recorded on the item, not a silent re-baselining.
+- **Read the hotspot and coupling reports, not just the totals.** A pair of files that keeps
+  changing together is a design statement; the point of the tool is to act on it.
+
+### F11.2 — Coverage as a REGRESSION DETECTOR, never as a target
+
+**This limb must be reconciled with §17d, and the reconciliation is load-bearing.** v127
+records the owner's ruling: *"I do not care AT ALL about code coverage. The ONLY thing tests
+should be validating is the requirements. If we are making up tests for coverage that do not
+map onto requirements then either (a) we are wasting time, or (b) we have identified a new
+acceptance criteria."*
+
+That ruling and this one are **compatible, and the distinction is the whole of it**:
+
+- **Coverage as a TARGET is still forbidden.** Writing a test to raise a number is coverage
+  theatre, and §17d's binary still binds: an untagged test is either waste (delete it) or an
+  undiscovered acceptance criterion (register it, and the discovery gap earns a retro).
+  `EXP-124` explicitly scores mass-tagging as FAILED.
+- **Coverage as a REGRESSION DETECTOR is required.** A *fall* in coverage means something
+  real: a use-case lost its test, or code shipped with none. That is a signal about
+  requirements, not about a percentage. So the gate asks **"did it get worse?"** and never
+  **"is it high enough?"** There is no target figure, and none may be introduced.
+
+Held against a committed baseline on the same may-only-shrink ratchet. A drop is a **finding
+to explain**, not a number to top up.
+
+### F11.3 — ALL tests are outside-in, and the use-cases form a GRAPH OF VARIATIONS [amended by owner ruling, v161]
+
+**Owner ruling, 2026-08-29, amending the first draft of this limb, which was too weak:**
+
+> *"1. all tests should be outside in. 2. any tests that are not need to be routed back to
+> a usecase and rewritten as outside in - and moreover we do not want duplicate tests which
+> means we need to approach the collection of usecases as a graph of variations not as a
+> list of unconnected tests."*
+
+The first draft said internal tests were "subordinate, not banned". **That is superseded.**
+The three clauses below are one rule seen from three sides.
+
+#### (1) ALL tests are outside-in
+
+The unit of test is the **use-case exercised through its own public surface** — the API for
+a backend capability, the rendered UI for a screen. Not an internal function reached
+directly.
+
+There is no permitted category of "fast internal test kept alongside". A test that reaches
+inside the implementation proves the code agrees with itself, and this project has the
+receipts: v127's founding case built its precondition by deleting the very leaf whose
+presence breaks the heal, and **2,171 tests were green while nine real cancellations sat
+unhealed in production.** The test did not miss the bug; it encoded the bug's assumption as
+its fixture. An outside-in test could not have been written that way.
+
+**The seam under test is never stubbed** (§17d, unchanged) — stubbing the boundary you are
+asserting across converts an outside-in test back into an inside-out one wearing the label.
+
+#### (2) An inside-out test is MIGRATION DEBT, not grandfathered
+
+Every existing test that is not outside-in must be **routed back to the use-case it is
+really about, and rewritten from the outside.** It is not deleted (that loses the
+requirement it encodes) and it is not left alone (that is the state this ruling rejects).
+
+**This is a large, real backlog and must be treated as one.** ROC currently carries ~2,566
+`src/app` + ~1,151 dashboard + ~203 injector tests against a use-case count in the dozens.
+That ratio is itself the finding.
+
+So it ratchets, on the mechanism already proven here: **the count of tests not attached to
+a use-case variation may only SHRINK.** Never raise the baseline; never delete a test merely
+to move the number — if a test genuinely asserts nothing worth naming, deleting it is
+honest, but say which and why (§17d's binary: waste, or an undiscovered acceptance
+criterion).
+
+#### (3) The use-cases are a GRAPH OF VARIATIONS, not a list of tests
+
+**This is the clause that makes the other two achievable, and it is the substantive one.**
+
+A use-case is not one behaviour. It is a **happy path plus its variations** — alternate
+flows, error branches, boundary conditions, absent-value cases — and those variations
+**compose**. "Device breakdown" × "empty window" × "unrecognised parameter" is a region of a
+space, not three unrelated files.
+
+Model that space explicitly. **The unit of coverage is a VARIATION NODE, and each node is
+certified by exactly one test.** Then all three of the owner's concerns become readable
+facts about one structure:
+
+| question | reading on the graph |
+|---|---|
+| is this test outside-in? | it is attached to a node, or it is attached to nothing |
+| is this test a DUPLICATE? | two tests on the same node |
+| is there a GAP? | a node with no test |
+| what does this use-case actually do? | the shape of its subgraph |
+
+**A flat list cannot answer any of them.** 2,566 tests tell you nothing about whether they
+cover forty distinct behaviours or four hundred, and duplication is invisible by
+construction — which is precisely why the count grew to that ratio without anyone deciding
+it should.
+
+**The graph is the artifact, and it is authored — not derived from the tests.** Deriving it
+from what the tests happen to do would make it agree with itself, which is this project's
+dominant failure family (§17i: a mechanism that cannot come back negative). The variations
+come from the use-case and its acceptance criteria; the tests are then mapped onto it, and
+the gaps and duplicates are what the mapping reveals.
+
+#### (4) The graph is ROOTED IN PERSONAS
+
+> *"to reiterate all the usecases should connect back to a persona"*
+
+The full chain, and every link is mandatory:
+
+**persona → job (JTBD) → use-case → variation → test**
+
+A test therefore traces to a **person who wanted something**. That is what makes "is this
+test worth having?" answerable instead of a matter of taste: a test attached to a variation
+of a use-case that no persona wants is testing something nobody asked for, and a use-case
+with no persona is a capability we invented.
+
+**Measured 2026-08-29, and the result locates the break precisely:** all **116 of 116** ROC
+use-cases already carry both `personas:` and `job:` in their authored frontmatter — zero
+missing — against a catalog in `product/personas.md` and `docs/personas-and-jobs.md`, with
+P1 and P2 dominant (75 and 79 references) across eight personas.
+
+**So the chain is intact from persona down to the use-case, and broken below it.** The two
+missing hops are use-case → variation (no variation graph exists) and variation → test (the
+~3,900 tests attach to nothing). That is a much narrower problem than it first appears, and
+it says where the work is: **do not re-do the persona and job modelling — it is already
+sound. Build the two hops underneath it.**
+
+Personas and jobs remain **reference artifacts, not work items** (`requirements-discovery`
+skill): use-cases reference them by id. The variation graph hangs off the same ids.
+
+**Connection to §17d, which this completes.** §17d requires every test to name its
+`AC-<ID>.<n>`. That gives each test an owner but leaves the *set* unstructured — nothing
+notices two tests naming the same criterion, or a criterion with three variations and one
+test. The variation graph is the missing structure: `AC-<ID>.<n>` names the criterion, the
+node names **which variation of it**.
+
+### What the gate does NOT do
+
+It does not replace the tester. The tester still validates in the deployed environment
+against the real system (§17c: nothing is established until observed in a state that could
+have come back negative). **This gate is about what the engineer owes BEFORE handing over** —
+so the tester is validating a change whose design cost, test placement and coverage are
+already known, instead of discovering them.
+
+### Proof-of-fire is required, per §17c.2
+
+**A gate is not a gate until it has been observed going RED.** Each limb must be demonstrated
+failing on a seeded violation, once, and the demonstration quoted. A limb wired in but never
+seen to fail is worth exactly as much as the artifact-uploading workflow this replaces.
+
+**Target metrics:** lead time (a design that resists change is the slowest thing to change)
+and CFR (an outside-in test catches what an inside-out one structurally cannot). **Guarded
+on:** the requirement gate's floor must not rise, and `dev-validating` failure rate must not
+rise — if it does, the engineering exit gate is passing work the tester then rejects, which
+means the gate is measuring the wrong thing. **Scored on `EXP-ROC-014`.**
+
+## F11.4. A GATE MUST ALSO PROVE IT SPOKE — non-execution is not a pass [v165, ROC]
+
+`DEF-ROC-153`. The §F11 exit gate stopped running. Not red — **unloadable**. A third party
+moved `CodeAnalysisTools`' floating `v1` tag onto an unreleased commit whose `action.yml`
+puts input-only keys inside its `outputs:` block, and GitHub refuses to load such an action,
+so the job died in **19 seconds during `Set up job`, before a single step ran**.
+
+Every earlier member of this project's most-registered family was **a control we wrote that
+could not fail**. This one is **a control someone else switched off** — no release, no PR
+here, no commit of ours. It was found by a human reading a run list.
+
+**1. Verify that the gate SPOKE, not only what it said.** `loop-gate` carried twenty checks
+and not one asked whether the exit gate produced a verdict for trunk head. A gate that did
+not run is indistinguishable from a gate that passed — `DEF-ROC-086`'s skipped-not-failed
+shape reached by a completely different road, which is what makes it a rule and not a
+patch. Where a gate's verdict is load-bearing, something must assert **a verdict exists for
+this commit**. Absence of a verdict is a finding; it is never a pass. Note the honest limit
+of the general form: a path-filtered workflow legitimately produces no run for some commits
+(`DEF-ROC-142`), so the assertion is *"a verdict exists or its absence is explained"*, never
+a naive "a run exists".
+
+**2. ~~Pin third-party refs immutably.~~ SUPERSEDED BY OWNER RULING (v166): TRACK LATEST.**
+The owner ruled the pin must go and that every run should take the latest release. Both
+lanes are unpinned. The reasoning that produced the original clause is not wrong — a
+floating ref is a value someone else can change without telling you, and one did, taking
+this gate dark for three commits — but the owner's call is that currency is worth more than
+determinism here, and **the trade is now defensible because the failure is detected**:
+`make exit-gate-ran` reports a missing verdict instead of letting silence read as a pass.
+Unpin only where that detection exists. `make action-current` enforces the ruling in the
+inverse direction — **a pin is the violation** — and reports SPLIT when the lanes resolve
+apart.
+
+**3. A two-lane control is pinned in BOTH lanes, TOGETHER — and a TAG IS NOT A VERSION.**
+This is the clause that cost the most, because it was created by the fix for clause 2.
+Pinning CI to the v1.5.0 action SHA left `quality/analysis-config.json` naming the local
+lane's image by the mutable tag `:v1`, which resolved to **v1.7.0** — so CI ran one binary
+and every developer's `make exit-gate` ran another. That file's own header, written three
+days earlier in good faith, promised *"same tool, same version tag, same flags"*: a tag is
+not a version, and the two lanes had been free to diverge since the day they were written.
+Where a control runs in two lanes to give one number, the two version references are ONE
+fact and must move as one.
+
+**4. ADOPT THE LATEST VERSION — AUTOMATICALLY, not as a reviewed bump (v166).** v165 wrote
+this clause as *latest-by-review*; the owner ruled *latest-by-default*, and that is the
+policy. There is no scheduled-bump step and no approval: each run resolves the ref afresh.
+
+Two things carry over from the superseded wording because they cost nothing and remain true:
+
+* **A version change can move the ratchet.** Before adopting a new major, diff the ratcheted
+  outputs (coupling, complexity, hotspot, generated) across versions on the same trunk mirror.
+  Done for v1.5.0 → v1.7.1: byte-identical. If a future version moves them, the ratchet has
+  recorded a **tool** change as a **design** change, and the baseline must be re-cut with that
+  stated — never silently absorbed.
+* **Tracking latest is not a reason to trust the tag.** `@v1` is a major line that can point
+  at unreleased, unloadable code, and did. The policy is not "the tag is fine"; it is "we take
+  the newest, and we detect it when that breaks us".
+
+**Generalisable shape, and it is the one worth carrying:** ask of every control not only
+*"can this come back negative?"* (§17i) but *"can this fail to run at all, and would anyone
+know?"* The second question has now been answered wrong twice here — once by a skipped job
+(`DEF-ROC-086`) and once by an unloadable action — and both times the run list looked
+untroubled to everything automated.
+
+## F11.5. A GUARD THAT CAN SKIP MUST RECORD THAT IT SKIPPED [v169, ROC]
+
+`DEF-ROC-157`. Three separate cases — `StatTiles` AC-112-6, `BreakdownTable` AC-113-2 and
+AC-114-2 — noticed that contrast cannot be measured against a transparent colour and handled
+it **by skipping the assertion**. Every input they ever saw was transparent. So all three
+**asserted nothing, on any host, ever**, while reading green in every run and looking like a
+complete check to anyone auditing the source.
+
+**This is not §17i restated, and the difference is the point.** §17i asks *can this come back
+negative?* — and each of these CAN: the assertion is real and would fire on an opaque
+background. The defect is that **the input never arrives**, so the negative branch is
+unreachable at runtime. The skip is also the correct local instinct, which is exactly why it
+survived review three times.
+
+**THE RULE.** A guard that may decline to assert must **record that it declined**. A declared
+assertion that never runs is a **finding**, not a pass. Two acceptable forms:
+
+* **Assert the precondition first** (what the fix used): `expect(isFullyTransparent(against))
+  .toBe(false)` before measuring the property. An unmeasurable input becomes a RED.
+* **Count the skips and ratchet them**, where skipping is legitimately expected. A skip count
+  that may only shrink turns silent opt-out into a visible, reviewable number.
+
+**What it cost to find:** the item was dispatched to fix ONE host-dependent assertion. The
+sweep found three worse ones beside it, and **the reported defect was the least harmful of the
+four** — a host-dependent check at least fails somewhere. So when you fix an instance of a
+shape, **sweep for the shape**; and when you find a guard with a conditional around its
+assertion, ask what happens when the condition is always false.
+
+## F12. In a shared tree, a cleanliness check is a SAMPLE, not evidence [v162, ROC]
+
+Measured 2026-08-29 by an engineer completing `DEF-ROC-143`, and it invalidates a habit
+every agent here has:
+
+> *"`git status --porcelain` read empty seconds before the merge failed on that file, so a
+> cleanliness check taken once is not evidence in this tree."*
+
+Up to eight agents share one working tree. **A check on the tree's state is true at the
+instant it runs and says nothing about the instant you act.** Every `test -z "$(git status
+--porcelain)"` gate in this process is therefore a *sample*, and the window between the
+sample and the act is exactly where a concurrent agent's save lands.
+
+**What follows, and what does not.**
+
+- **The gates stay.** A sample that usually holds is far better than no check, and the
+  index-emptiness gate (CLAUDE.md limit 2) has already refused a real sweep this session.
+  This does not license skipping them.
+- **But never report "the tree was clean" as evidence of anything.** It is evidence about a
+  past instant. Where the claim matters, re-establish it **after** the act — the same
+  discipline CLAUDE.md already requires for a co-owned append target: *re-read the file out
+  of HEAD and assert its invariant*.
+- **Prefer operations that cannot be invalidated by the window.** `isolated-commit.js`
+  builds a **private index from HEAD** and never consults the shared one, so its correctness
+  does not depend on a cleanliness sample at all. That is why it is the prescribed path.
+- **Wait rather than force.** The same engineer was blocked ~2 minutes by another agent's
+  dirty file, and **polled until it was clean** rather than stashing or merging over it.
+  That is the correct move: `git stash -u` steals other agents' untracked files (CLAUDE.md
+  limit 4), and merging over is silent loss.
+
+### F12.1 — a commit can be ORPHANED by a concurrent branch move
+
+Same session, same engineer: its first commit `6db6d42` was **orphaned by a concurrent
+branch move** — afterwards `git merge-base --is-ancestor 6db6d42 HEAD` returned NO and it
+was on neither `HEAD` nor `origin/main`. This is CLAUDE.md limit 3 arriving through a door
+nobody was watching: not a `checkout` the agent performed, but one that happened *around*
+it.
+
+**No content was lost, and the recovery is the part worth copying:** the working tree still
+held the change, so the engineer **re-ran every gate against the moved HEAD** — whose item
+store had itself changed — and re-committed. It did not assume the earlier green still
+applied to a different base.
+
+**So: after committing in a shared tree, assert your commit is actually reachable** —
+`git merge-base --is-ancestor <sha> HEAD` — and if it is not, re-validate against the new
+HEAD before re-committing. A green obtained against a base that no longer exists is not a
+green.
+
+**Target metric:** CFR and rework. **Anticipated effect:** fewer greens claimed against a
+base that has moved, and no silent loss from stashing or merging over a concurrent agent.
+
+## F13. A SPECIALIST ADVANCES ITS OWN ITEM'S STATE — the orchestrator is not a state-machine clerk [v163, ROC]
+
+**This is the v163 retro's exploit, and it names a constraint the orchestrator created
+itself.**
+
+### The measurement that forces it
+
+v159 asked how to go 2.2x faster and answered: raise `wip` occupancy from **1 of 8**. The
+next session took it to **8 of 8** — an eight-fold rise in concurrency. What came out:
+
+| | v159 | v163 | factor |
+|---|---|---|---|
+| `wip` occupancy | 1 of 8 | **8 of 8** | **8.0x** |
+| completions, trailing 14d | 83 | **119** | **1.43x** |
+| agent work-effort | 116,737 s | **163,837 s** | 1.40x |
+| arrival : completion | 2.16 : 1 | **1.60 : 1** | improving |
+
+**Eight times the concurrency bought 1.4 times the throughput.** That is badly sub-linear,
+and the gap is the finding: **capacity stopped being the constraint and the orchestrator
+became it.**
+
+### Why-chain
+
+1. `orchestrator`/`reported` is the #1 GLT owner at **33.90%**, median **58,718 s/item**,
+   n=114 — the **seventh** consecutive read.
+2. It is #1 because **every** item's first transition and every subsequent state event is
+   fired by **one actor**.
+3. Raising occupancy 8x moved completions only 1.4x, so the specialists were not the limit.
+4. That one actor also writes every dispatch brief, every commit message, every correction
+   and every report — all serialised.
+5. **ROOT CAUSE, and it is self-inflicted: the orchestrator instructs every dispatched
+   agent "do NOT run any `wi-*` command."** Every state event therefore queues behind one
+   actor by explicit instruction.
+
+### Why that instruction existed, and why it is now obsolete
+
+It was not arbitrary. It was written against a **measured** hazard: an engineer editing
+`work-items.py` — the sole writer every `wi-append` shells out to — **froze every item
+state change in the project for hours**, with 28 declines and six amendments staged and
+unfireable. Centralising the writes was the correct response *to that hazard*.
+
+**Two things have since changed it.**
+
+- **`OI-ROC-006` landed**: 101 per-transition agent allowlists were removed and firing
+  rights are now derived from the item's **declared owner**. An engineer firing its own
+  `built_green` is no longer a spoof — it is the rights model working as designed.
+- **The hazard is now named and bounded**: `§F2b` resource-class exclusivity covers the
+  sole-writer case, and `IMP-034` is its structural fix. The blanket instruction was a
+  *proxy* for that narrow hazard, and a proxy applied to every dispatch became the
+  constraint.
+
+### The rule
+
+**A dispatched specialist fires the state events for the transitions it owns.** The
+orchestrator fires only what it legitimately owns: `pulled`, `triaged`, `blocked`/
+`unblocked`, `made_ready`, and the CI-confirmed `deployed` under a pipeline deploy (§F5a).
+
+- **The blanket "do NOT run any `wi-*` command" instruction is RETIRED.** It may be issued
+  only when a **named, live resource-class conflict** exists — concretely, another dispatch
+  is mid-edit on `work-items.py` — and the brief must say which.
+- **`AGENT=` is still never spoofed.** The point is not to relax attribution; it is that a
+  specialist attributing its *own* work needs no intermediary. §F9a's rule — a role that
+  performs work may always record its outcome, including a negative one — is what this
+  makes routine.
+- **`TOKENS=`/`DURATION_MS=` stay the orchestrator's to attach where it owns the event.**
+  `OI-ROC-008`'s residue is unchanged: a dispatched agent cannot observe its own
+  `subagent_tokens`, so a specialist firing its own event will carry no cost figure. That is
+  a known, recorded gap — do not close it by having the agent invent a number.
+
+### Anticipated effect and how it is falsified
+
+**Target metric: lead time**, specifically the `reported` median and the `orchestrator`
+share. **Anticipated:** completions rise super-linearly relative to occupancy next cycle,
+because state transitions stop queueing behind one actor.
+
+**NEGATIVE — kill it — if any of:** (a) `dev-validating` failure rate rises (currently
+**9.2%**, the highest in the system), meaning self-recorded state is being claimed without
+the evidence an orchestrator would have demanded; (b) `wi-validate` starts failing, i.e.
+distributed writes corrupt the log; (c) attribution quality falls — a rise in events whose
+`AGENT=` is contradicted by their own note. Scored on **`EXP-ROC-015`**.
+
+## F13a. CORRECTION to F13 — the constraint is TURN-ENDING, and §F9.4 already forbade it [v164, ROC]
+
+**Owner correction, 2026-08-29, within the hour of the v163 retro:**
+
+> *"the slowdown really isnt the wi commands in orchestrator - the problem is the wait time
+> for me to answer questions whilst you do not do things in the background"*
+
+**This is correct and §F13's diagnosis was wrong.** §F13 stands as a real improvement — a
+specialist should advance its own item's state — but it **cannot be the binding
+constraint**, and one number forbids it: **agent work-effort is 0.2% of gross lead time.**
+Even if the orchestrator fired *zero* state events, **99.8% of elapsed time would still be
+wait.** A serialisation inside 0.2% cannot explain a 99.8% figure. v163 named a real
+inefficiency and mistook it for the constraint.
+
+### The actual constraint, and the rule that already forbade it
+
+**The loop stops when the orchestrator stops talking.** Every turn that ends with work
+available parks the entire system until the human re-prompts, and that dead time is
+recorded in the item log as `reported` and `queue` dwell — which is why it *looks* like
+bookkeeping latency and is not.
+
+**§F9.4 already says this, in terms, and has since it was written:**
+
+> *"ENDING THE TURN IS the stop, even with a polite report — parking the loop with 'I'll
+> resume / refresh to confirm' still forces the human to re-prompt, and every restart is
+> idle gross lead time. RULE: do not end the turn at a non-gate boundary."*
+
+**So this is not a missing rule. It is an unobeyed one — violated repeatedly in a single
+session by the role that owns it, while that same role wrote a retro naming a different
+cause.** That is this project's most-registered failure family arriving at the top of the
+process: a control that exists and is never consulted (`OI-ROC-014`, `IMP-021`,
+`DEF-ROC-140`, `DEF-ROC-146`, and now §F9.4 itself).
+
+### Why a prose rule is not the fix, and what is
+
+§F9.4 has been prose since it was written, and prose is exactly what failed. **A rule
+violated ~20 times in one session by its own author does not need restating — it needs a
+mechanism**, which is §17c.5's standing prohibition on discharging a finding of this class
+with prose.
+
+**The mechanism is a self-scheduled wake.** The loop schedules its own next tick, so that
+ending a turn does not end the loop:
+
+- **When work is in flight or available, the orchestrator does not end the turn** — it
+  dispatches the next thing in the same turn (§F9.4, unchanged).
+- **When it must yield** — context, or a genuinely awaited external result — it
+  **schedules a wake** rather than parking. The loop resumes on its own clock instead of on
+  the human's next message.
+- **The turn ends without a wake ONLY at a real gate**: §F5 requirement intake,
+  requirement-complete, or a genuinely irreversible operation (§0b). **A blocked decision is
+  NOT one of those** — §F9e already converts it into a dated default and the loop proceeds.
+
+### The mechanism, built and proven (not prose)
+
+`.claude/hooks/loop-continue.mjs`, wired as a **`Stop` hook** in `.claude/settings.json`.
+The harness runs it when the turn ends — so this is enforced by something other than the
+role that keeps breaking it.
+
+It returns `{"decision":"block"}` when the loop **could have pulled and did not**, quoting
+§F9.4 back and naming the depths. Three properties stop it being worse than the disease:
+
+1. **It does NOT block merely because work exists.** `ready` is almost never empty here, so
+   "block while any work exists" would make the session unstoppable. It blocks only on
+   **capacity to act**: `ready > 0 AND wip < wip_limit`, or any `rework` (§F2 drains rework
+   first). **Waiting on agents at cap is the loop working, not stalling.**
+2. **It FAILS OPEN** — missing project, unreadable view, bad JSON, `ACTIVE=none` all allow
+   the stop and say why on stderr. A hook that can trap a session on its own bug is worse
+   than no hook, and this one sits at the top of the process.
+3. **It is BOUNDED** — after 3 consecutive blocks it allows the stop regardless, so a fault
+   here costs a few turns and never a session.
+
+**The escape hatch is the point, not a loophole.** A legitimate stop is *declared*:
+
+```
+echo "<one line: why this is a real gate>" > work/<project>/.loop-yield
+```
+
+It is **consumed on use**, so it cannot persist into the next turn. Stopping becomes an
+explicit, recorded act instead of the default — which is the whole difference between this
+and the prose that failed.
+
+**Proof-of-fire, all five arms (§17c.2):** blocks at `ready 2, wip 1/8`; blocks on `rework`
+even at cap; allows on a declared yield and consumes the file; allows on the 4th consecutive
+attempt naming the bound; fails open on corrupt JSON and on `ACTIVE=none`.
+
+### How this is falsified
+
+**Target metric: gross lead time**, specifically the share held by `reported` + `queue`
+(currently **33.90% + 23.74% = 57.6%**), and wall-clock between an item becoming ready and
+being pulled.
+
+**NEGATIVE — kill it — if:** the loop wakes and does nothing useful (a tick that reports
+"still waiting" is the polite report §F9.4 already forbids, wearing a scheduler's clothes);
+or if unattended running produces work the tester rejects at a higher rate, i.e. speed
+bought by dropping the evidence standard. **Scored on `EXP-ROC-016`.**
+
+**Note what this does NOT license.** It is not permission to act without evidence, to skip
+a gate, or to stop reporting. The report stays — it becomes **inline and terse**, alongside
+the next dispatch, instead of being the thing that replaces it.
 
 ## F10. Fleet — isolated per-project loops, one shared process spine
 Multiple projects run CONCURRENTLY, each as its own isolated loop, feeding ONE shared,

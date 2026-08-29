@@ -4,6 +4,16 @@
 **Owner:** work-item machinery (`.claude/skills/work-items/scripts/work-items.py`) — parent-repo lane
 **Targets:** gross lead time (the `external` / `blocked` constraint — 35.40% of ROC's GLT)
 **Registry row:** `EXP-ROC-004`
+**Status:** QUEUED — **NOT BUILT** as of 2026-08-28 (v157 retro). Established by
+measurement, not by memory: `park_remedy` appears in ZERO lines of
+`.claude/skills/work-items/scripts/work-items.py` and on ZERO items, four days
+after this slice was opened. `EXP-ROC-004`'s strike clock is STOPPED at 0/3
+rather than advanced, because a row scored against a mechanism that does not
+exist gets archived as "no measurable effect" when the truth is "never built" —
+a false negative that retires the hypothesis AND records an untrue reason. The
+clock restarts at the first retro after this ships. Found by `loop-gate` check
+19 (`retro-output-unbuilt`) on its first live run, which is why that check
+exists.
 
 ## The finding, measured on the deployed host, not on item prose
 

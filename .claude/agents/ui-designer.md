@@ -197,6 +197,47 @@ candidates). Layout and templates in the skill:
   and the standard empty/loading/error/responsive patterns.
 Keep it minimal and additive — extend per slice, do not speculate ahead of need.
 
+## A screen is accepted as a SCREEN, not as a set of conformant elements
+
+An element-level accessibility gate can return zero violations on a screen a human
+finds unusable, because it evaluates elements against thresholds and never asks whether
+the LAYOUT works. Both halves of that have now been measured on real screens, so this is
+plain practice, not a precaution.
+
+**Always accept a screen at a SHORT viewport with the whole layout in scope**, and assert
+these four classes explicitly:
+
+- **space allocation** — does each cell get enough width to render its content, or is it
+  starved? A cell squeezed to 92px wrapping `History / Read-only` across four line boxes
+  at one word per line is unusable and passes every element check.
+- **inner-overflow reachability** — is every actionable control reachable? Either
+  contained, or behind a real scroll with a **real painted scrollbar** on the displaced
+  axis. A control starting 106px beyond a panel's right edge, in a panel that paints no
+  horizontal scrollbar, is unreachable and invisible to axe.
+- **clipping** — is any column or label cut off?
+- **below-the-fold actionables** — are rows 2..n of a grid's controls off the panel's
+  fold, so the FIRST row's control is the only one a user can see at all?
+
+**Judge on defects CAUGHT, never on checks ADDED.** Adding viewport permutations that
+catch nothing a human would have reported is coverage theatre.
+
+**Two mechanics that decide whether the verdict means anything:**
+
+1. **Non-vacuity is mandatory and must be enforced by the harness, not by care.** The
+   verdict must be RED when re-run against the founding pre-fix screen, at every viewport.
+   Where a falsifier spec exists (ROC: `screenVerdict.falsifier.browser.test.tsx`), it
+   requires exactly that, and it is the reason the verdict can be trusted.
+2. **Never launch the browser default-headless for a geometry measurement.** Playwright
+   headless passes `--hide-scrollbars`, so `offsetHeight - clientHeight` is **0 for every
+   horizontally-overflowing box** whatever the app does. Measured on a real deployed
+   screen: default headless 0/10 findings, `--hide-scrollbars` suppressed 10/10 — a probe
+   judging reachability under the default reports the browser, not the app.
+
+**A known gap, so you do not assume it is covered:** there is no OBSCURED limb. *"An
+actionable control whose centre hit-test returns some OTHER element"* — the literal reading
+of a human's *"overwritten by unreadable text"* — is measured by nothing. If you need it,
+add it deliberately as a sixth limb; do not assume the existing four catch it.
+
 ## Figure legibility checklist (every displayed number/reference must pass)
 A figure can be structurally present and tested green yet be unreadable to a
 human — observatory shipped FOUR such defects (DEFECT-004 unitless count,

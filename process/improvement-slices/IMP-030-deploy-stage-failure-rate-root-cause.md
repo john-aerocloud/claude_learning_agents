@@ -1,5 +1,7 @@
 # IMP-030 — `deploying` is the worst stage in the system (6.7%, 13/195) and nobody has asked why
 
+**Status:** QUEUED (re-decided v159 retro, ROC 2026-08-29) — OagEventSource-origin; ROC reports, does not retire (§25a). ROC's own `deploying` failure rate is currently 0.0%, so ROC contributes no evidence either way and must not score it.
+
 **Opened:** 2026-08-01 (OAG retro v126). **Owner:** cicd. **Replaces:** EXP-107, killed at
 v126 after 20 days unscored at `0/3`.
 

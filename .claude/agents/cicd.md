@@ -80,7 +80,7 @@ gone red — fire `make wi-append … ID=<uc> EVENT=deploy_failed AGENT=cicd` BE
 re-deploy cycle, **even if you fix it forward in the same pass**. A deploy failure that
 leaves no event makes CFR read a false 0% (the "each miss is a CFR hit" above only counts
 if the hit is recorded). `deploy_failed` (`deploying`/`prod-deploying` → `reworking`) is a
-CFR change-failure; a pre-deploy build/test/lint red is a pipeline wait, not CFR.
+CFR change-failure; a pre-deploy build/test/lint red is a pipeline wait, not CFR. **From v10 it is recordable from EVERY active state** (`building`/`deploying`/`reworking`/`fixing`/`reproducing`/any validating stage), as a SELF-EDGE that annotates the history without moving the item — so "the item had already moved on" is no longer a reason the failure goes unrecorded (DEF-ROC-120: a red CI that skipped the deploy for four commits could not be appended from `validating` by any role, and CFR read a false 0%). `build_failed` is recordable from the same set.
 
 **Who fires `deployed` under a PIPELINE (push→CI) deploy (2026-07-22, UC-ADIX-015).**
 When deploys are pipeline-triggered — a push to `main` makes CI apply the infra — NO

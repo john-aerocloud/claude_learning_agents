@@ -1,9 +1,11 @@
 ---
-process_version: 162
+process_version: 163
 effective_from: 2026-08-29
-supersedes: v161, v160, v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
+supersedes: v162, v161, v160, v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
 status: active
 ---
+
+<!-- v163 (RETRO, ROC 2026-08-29; fired on the ROUTINE arm at 6/3 after a session that closed REQ-ROC-019 end to end. FOCUS QUESTION, default. ANSWER: **the constraint changed hands, and the orchestrator now holds it.** v159 asked how to reach 2.2x and answered 'raise occupancy from 1 of 8'. This session took it to **8 of 8** -- and **8x concurrency bought 1.43x completions** (83 -> 119 trailing-14d) on 1.40x agent work-effort. Badly sub-linear, and the gap IS the finding: capacity stopped being the constraint and the orchestrator became it. WHY-CHAIN (5): (1) orchestrator/reported is #1 at **33.90%**, median **58,718s**, n=114, SEVENTH consecutive read; (2) every item's first transition and every subsequent state event is fired by ONE ACTOR; (3) 8x occupancy moved completions 1.4x, so the specialists were not the limit; (4) that actor also writes every dispatch brief, commit message, correction and report, all serialised; (5) ROOT CAUSE, SELF-INFLICTED: **the orchestrator instructs every agent 'do NOT run any wi-* command'**, so every state event queues behind it BY EXPLICIT INSTRUCTION. That instruction was not arbitrary -- it was written against a MEASURED hazard (an engineer editing work-items.py froze every state change in the project for hours, 28 declines staged and unfireable) -- but it was a PROXY for a narrow hazard, applied to every dispatch, and the proxy became the constraint. EXPLOIT: **SSF13 -- a specialist advances its own item's state.** Legitimate now because OI-ROC-006 LANDED: 101 per-transition allowlists removed, firing rights derived from the item's declared owner, so a specialist recording its own work is the rights model working rather than a spoof. The blanket prohibition is RETIRED and may be issued only against a NAMED LIVE resource-class conflict the brief must state. AGENT= still never spoofed; TOKENS=/DURATION_MS= stay the orchestrator's on events it owns, and OI-ROC-008's residue is explicitly unchanged rather than papered over. SUBORDINATE: SSF9d/SSF9d.2 hold -- **arrival:completion fell 2.16 -> 1.60**, not yet under the 1.5 kill line but moving, and completions rose 43% in one session. ELEVATE: NOT capacity -- occupancy is already at cap; the elevate move is **IMP-034** (the writer must defer the WRITE, not the LOOP), because writer contention is the hazard the retired instruction was proxying for. DELIVERED: REQ-ROC-019 complete end to end (UC-112 the ViewIntent channel + dimension registry, UC-113 the registry proven on a STORED column with both parsers made registry-driven, UC-114 proven on a DERIVED read-boundary field), plus DEF-ROC-055 and DEF-ROC-144 (two permanent-data-loss defects), DEF-ROC-142, OI-ROC-006, OI-ROC-014, and **SSF11's engineering exit gate LIVE with the project's first-ever coupling and coverage baselines** (4027 test cases, **4023 attached to no variation node**). QUALITY: CFR **8.8%** (from 7.8% -- the RISE EXP-ROC-008 predicts as its good outcome, and two build_faileds were recorded this session that a less honest cycle would have swallowed); dev-validating **9.2%** still the highest stage and now the named kill-arm for EXP-ROC-015; building 0.8%, deploying 0.0%. RECONCILE LATENCY **0** (v157: 37.4h) -- EXP-ROC-012's adopted practice holding. **THREE REJECTIONS THIS SESSION AND ALL THREE WERE RIGHT**, which is the quality story: two on DEF-ROC-143 (a table row borrowing its neighbour's marker text, then an inserted line doing the same) and one engineer that REFUSED THE ORCHESTRATOR'S SUGGESTED FIX after measuring it -- 'had I taken it on trust, this would have been rejection three'. REGISTRY: EXP-ROC-015 opened, 8/8 at cap. CONSTRAINT TO ATTACK NEXT: unchanged in identity for a seventh read but for the first time with the ORCHESTRATOR'S OWN INSTRUCTION named as the mechanism rather than the allowlist beneath it. -->
 
 <!-- v162 (ROC 2026-08-29; NOT a retro -- a measured finding from DEF-ROC-143's third round, routed immediately because it invalidates a habit every agent here has). **SSF12: in a shared tree, a cleanliness check is a SAMPLE, not evidence.** An engineer measured `git status --porcelain` reading EMPTY seconds before a merge failed on the very file it had just called clean. Up to eight agents share one working tree, so every `test -z "$(git status --porcelain)"` gate is true at the instant it runs and says NOTHING about the instant you act -- and the window between them is exactly where a concurrent save lands. The gates STAY (the index-emptiness gate refused a real sweep this session); what changes is that tree-cleanliness may never be REPORTED as evidence, and where the claim matters it is re-established AFTER the act -- the same discipline CLAUDE.md already requires for a co-owned append target. Prefer operations the window cannot invalidate: isolated-commit.js builds a PRIVATE index from HEAD and never consults the shared one, so its correctness does not depend on a sample at all. And WAIT rather than force -- the same engineer was blocked ~2 minutes by another agent's dirty file and POLLED until it was clean, rather than stashing (which steals untracked files, limit 4) or merging over (silent loss). **SSF12.1: a commit can be ORPHANED by a concurrent branch move.** That engineer's first commit 6db6d42 ended up on neither HEAD nor origin/main -- CLAUDE.md limit 3 arriving through a door nobody was watching, not a checkout the agent performed but one that happened AROUND it. No content lost, and the recovery is the copyable part: it re-ran EVERY gate against the moved HEAD, whose item store had itself changed, rather than assuming the earlier green still applied to a different base. So: after committing in a shared tree, assert reachability with `git merge-base --is-ancestor <sha> HEAD`, and re-validate before re-committing if it fails. A green obtained against a base that no longer exists is not a green. -->
 
@@ -72,7 +74,7 @@ status: active
 <!-- v111 (FOCUSED retro, ROC 2026-07-27; on main v110 via fold-forward-FIRST — clean, no collision; §F8 routine-batch gate at SLC-ROC-014 close, NO prod incident): SLC-ROC-014 delivered the COMPLETE rules-EDITING capability (edit → mandatory draft-test → publish, live no-redeploy pickup, Simulator parity, content-hash attestation gate + who/when attribution) — UC-056/057/058 all live-stack validated + pushed to origin/main + deployed to aas-test. NO global §-body change. Routed outcomes: (1) engineer.md plain-practice fold — the pre-built_green green bar must exercise the REAL artifact for UI/pipeline slices (fully-themed live axe + same-element aria-label; focus preventScroll + no scrollable ancestor; composed-consumer-against-populated-store acceptance driving consume() end-to-end), extending v110's live-caught→offline-pin; recurring root cause logged in principle-failures/2026-07-27-offline-green-ne-live-correct-ui-pipeline.md. (2) work-items.py + linear-project.py + linear-mapping.md machinery fix (human "fix the in-progress clutter"): blocked never maps to In Progress (Todo/Backlog) and an aggregate whose only non-terminal children are all blocked derives blocked — parked-on-external trees drop out of the active lane in queues/stats/board (107 wi-tests green). (3) EXP-115 POSITIVE again (ROC live catches), EXP-117 → 2/3 POSITIVE (board cadence). Constraint UNCHANGED + not-agent-squeezable (external 46.66% Azure-block + queue 41.93% backlog; agents ≈11%); dev-validation 11.1% / CFR 10.1% is HONEST dev-catch (EXP-108), not decay — the in-system lever is shifting live-defect classes LEFT (measured next on SLC-ROC-015). Registry 7 active, under cap, no rows added. -->
 <!-- v110 (FOCUSED retro, AdixOut 2026-07-24; RECONCILED onto main v109 via fold-forward-then-reapply — main advanced to v109 (ROC SLC-ROC-013 retro) while this AdixOut retro was in flight, so renumbered v109→v110; retro-debt gate — 3 routine: UC-AIDX-028 rework (TWO reject→rework cycles) + SLC-AIDX-011/CHK-AIDX-010 closes, REQ-004's dev consumer-side walking skeleton: C12 bus+grant → C13 routing → C10/C11 ingest standup → OAG handoff, built + validated LIVE end-to-end (synthetic event → C12 → C13 → C10 → C11 → read model → egress). TIGHT: two fix-derived learnings folded as PLAIN PRACTICE, no experiment rows. Constraint UNCHANGED from v105/v108 (registered/queue = artifact latency, ~70% of GLT; squeezable in-system cost = engineer/multi-tenant-eventing). Both learnings were caught by LIVE assert-real-state validation that offline synth-pins passed. (1) SCOPE-GAP → engineer.md + solution-architect.md: "reuse existing X" must be VERIFIED against the real deployed TARGET account/stack, never assumed from a sibling env — SLC-AIDX-011's "reuse the existing C10/C11 ingest" was wrong (C10/C11 were sandbox-only; the migration moved only the egress to dev-dataout), so the engineer STOPPED (§F7) rather than build against an absent dependency and a predecessor UC-030 + architect delta 007 were inserted at the real edge; the §F7 stop was correct. Extends the v97 assert-real-state family. (2) EVENTBRIDGE TARGET PAYLOAD (the double-rework) → engineer.md: for an EventBridge rule→SQS/target that must forward the event's `detail` object verbatim, use `inputPath: "$.detail"` (JSONPath extraction), NOT an `inputTransformer` with a bare `<detail>` object placeholder — the `<placeholder>` idiom quote-strips a nested OBJECT into invalid JSON (`ERROR_CODE=INVALID_JSON`), it only round-trips STRING fields (why the webhook router's flat string fields worked). Root cause found only by adding a target `DeadLetterConfig` to capture the real `ERROR_CODE`/`ERROR_MESSAGE` — so: always wire a target `DeadLetterConfig` and INSTRUMENT-FIRST before guessing at an opaque cross-service delivery failure. UC-028 rework #1 = default-rule envelope-wrap poison (C11's parseEnvelope rejected the wrapped event); rework #2 = the `<placeholder>` INVALID_JSON. Engineer left OFFLINE synth-pins behind for the inputPath/InputTransformer shape + DeadLetterConfig so the payload-shape class is now caught offline (live-caught infra-shape defect → offline pin). Kept in engineer.md not the aws-architecture skill (no clean EventBridge-target section there; narrowest owner = engineer implementation behaviour). EXP-115 (whole-journey/JTBD live validation) scored POSITIVE again (dated confirming note): the live bus-driven E2E caught the scope-gap + BOTH UC-028 delivery bugs offline pins missed. CFR HONESTY: UC-028's two reworks + UC-027's earlier deploy_failed are real DEV-caught change-failures (EXP-108 integrity) — the process working (caught in dev before OAG/prod), NOT decay; CFR ~39% reflects honest dev-stage rejection accounting. Registry unchanged: 8 active (EXP-101,106,107,112,113,115,116,117) — AT cap-8; no rows added/retired. No global-section rules changed; routed changes = engineer.md (2 folds) + solution-architect.md (reuse-verify note) + EXP-115 confirming note. -->
 <!-- v109 (FOCUSED retro, ROC 2026-07-24; RECONCILED onto main v108 via fold-forward-FIRST — main had advanced to v108 (AdixOut tight retro) while this ROC session ran, so this entry is v109; triggered by the §F8 routine-batch gate at SLC-ROC-013 close, NO incident): SLC-ROC-013 (REQ-ROC-003 living-demo foundation, UC-051..055) delivered + validated live-stack + pushed to origin/main on green (CI deploying to aas-test). NO global §-body process change this cycle — the routed outcomes are (1) EXP-116 lean-orchestration ADOPTED into orchestrator.md as plain practice (guards proven safe 2/2, no DORA harm; registry 8→7), (2) EXP-117 board-push cadence advanced to 1/3 POSITIVE. Constraint UNCHANGED and confirmed not-agent-squeezable (`registered`/backlog-aging artifact 57.76% + external-blocked DEF-004 33.55%; agents ≈8.6%); change budget deliberately NOT spent chasing it (constraint-gate). J23 demo-grows DoD + demo-egress isolation pattern kept as ROC project artifacts, not over-generalised. TIGHT retro — score + adopt + drain + fold. -->
-# Current Process — v162
+# Current Process — v163
 
 <!-- v139 (owner instruction, OagEventSource 2026-08-13, NO retro — a direct standing
 instruction from the human owner, folded immediately rather than queued): every update to
@@ -3761,6 +3763,87 @@ green.
 
 **Target metric:** CFR and rework. **Anticipated effect:** fewer greens claimed against a
 base that has moved, and no silent loss from stashing or merging over a concurrent agent.
+
+## F13. A SPECIALIST ADVANCES ITS OWN ITEM'S STATE — the orchestrator is not a state-machine clerk [v163, ROC]
+
+**This is the v163 retro's exploit, and it names a constraint the orchestrator created
+itself.**
+
+### The measurement that forces it
+
+v159 asked how to go 2.2x faster and answered: raise `wip` occupancy from **1 of 8**. The
+next session took it to **8 of 8** — an eight-fold rise in concurrency. What came out:
+
+| | v159 | v163 | factor |
+|---|---|---|---|
+| `wip` occupancy | 1 of 8 | **8 of 8** | **8.0x** |
+| completions, trailing 14d | 83 | **119** | **1.43x** |
+| agent work-effort | 116,737 s | **163,837 s** | 1.40x |
+| arrival : completion | 2.16 : 1 | **1.60 : 1** | improving |
+
+**Eight times the concurrency bought 1.4 times the throughput.** That is badly sub-linear,
+and the gap is the finding: **capacity stopped being the constraint and the orchestrator
+became it.**
+
+### Why-chain
+
+1. `orchestrator`/`reported` is the #1 GLT owner at **33.90%**, median **58,718 s/item**,
+   n=114 — the **seventh** consecutive read.
+2. It is #1 because **every** item's first transition and every subsequent state event is
+   fired by **one actor**.
+3. Raising occupancy 8x moved completions only 1.4x, so the specialists were not the limit.
+4. That one actor also writes every dispatch brief, every commit message, every correction
+   and every report — all serialised.
+5. **ROOT CAUSE, and it is self-inflicted: the orchestrator instructs every dispatched
+   agent "do NOT run any `wi-*` command."** Every state event therefore queues behind one
+   actor by explicit instruction.
+
+### Why that instruction existed, and why it is now obsolete
+
+It was not arbitrary. It was written against a **measured** hazard: an engineer editing
+`work-items.py` — the sole writer every `wi-append` shells out to — **froze every item
+state change in the project for hours**, with 28 declines and six amendments staged and
+unfireable. Centralising the writes was the correct response *to that hazard*.
+
+**Two things have since changed it.**
+
+- **`OI-ROC-006` landed**: 101 per-transition agent allowlists were removed and firing
+  rights are now derived from the item's **declared owner**. An engineer firing its own
+  `built_green` is no longer a spoof — it is the rights model working as designed.
+- **The hazard is now named and bounded**: `§F2b` resource-class exclusivity covers the
+  sole-writer case, and `IMP-034` is its structural fix. The blanket instruction was a
+  *proxy* for that narrow hazard, and a proxy applied to every dispatch became the
+  constraint.
+
+### The rule
+
+**A dispatched specialist fires the state events for the transitions it owns.** The
+orchestrator fires only what it legitimately owns: `pulled`, `triaged`, `blocked`/
+`unblocked`, `made_ready`, and the CI-confirmed `deployed` under a pipeline deploy (§F5a).
+
+- **The blanket "do NOT run any `wi-*` command" instruction is RETIRED.** It may be issued
+  only when a **named, live resource-class conflict** exists — concretely, another dispatch
+  is mid-edit on `work-items.py` — and the brief must say which.
+- **`AGENT=` is still never spoofed.** The point is not to relax attribution; it is that a
+  specialist attributing its *own* work needs no intermediary. §F9a's rule — a role that
+  performs work may always record its outcome, including a negative one — is what this
+  makes routine.
+- **`TOKENS=`/`DURATION_MS=` stay the orchestrator's to attach where it owns the event.**
+  `OI-ROC-008`'s residue is unchanged: a dispatched agent cannot observe its own
+  `subagent_tokens`, so a specialist firing its own event will carry no cost figure. That is
+  a known, recorded gap — do not close it by having the agent invent a number.
+
+### Anticipated effect and how it is falsified
+
+**Target metric: lead time**, specifically the `reported` median and the `orchestrator`
+share. **Anticipated:** completions rise super-linearly relative to occupancy next cycle,
+because state transitions stop queueing behind one actor.
+
+**NEGATIVE — kill it — if any of:** (a) `dev-validating` failure rate rises (currently
+**9.2%**, the highest in the system), meaning self-recorded state is being claimed without
+the evidence an orchestrator would have demanded; (b) `wi-validate` starts failing, i.e.
+distributed writes corrupt the log; (c) attribution quality falls — a rise in events whose
+`AGENT=` is contradicted by their own note. Scored on **`EXP-ROC-015`**.
 
 ## F10. Fleet — isolated per-project loops, one shared process spine
 Multiple projects run CONCURRENTLY, each as its own isolated loop, feeding ONE shared,

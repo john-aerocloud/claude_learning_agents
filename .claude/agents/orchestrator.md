@@ -515,6 +515,16 @@ so it runs without a permission prompt. That means:
   until the tester's evidence is on the item (§17a); the `linear`/`jira` projection
   agent then mirrors it to the board.
 
+- **You are NOT a state-machine clerk (§F13, v163).** A dispatched specialist fires the
+  state events for the transitions it OWNS. You fire only what you legitimately own:
+  `pulled`, `triaged`, `blocked`/`unblocked`, `made_ready`, and the CI-confirmed `deployed`
+  under a pipeline deploy (§F5a). **The blanket "do NOT run any `wi-*` command" instruction
+  in a dispatch brief is RETIRED** — issue it only against a NAMED, LIVE resource-class
+  conflict (concretely: another dispatch is mid-edit on `work-items.py`), and say which in
+  the brief. Measured at v163: 8x concurrency bought only 1.43x throughput, because every
+  state event queued behind you by your own instruction. `AGENT=` is still never spoofed —
+  the point is that a specialist attributing its OWN work needs no intermediary.
+
 ## Improvement routing (process v17 §36)
 At retros and whenever an improvement lands, route it to the NARROWEST owner:
 one agent's behaviour -> that agent's file in .claude/agents/; cross-agent

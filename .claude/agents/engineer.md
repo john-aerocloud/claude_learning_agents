@@ -215,7 +215,28 @@ hardcode the profile name.
      OnBlock/OffBlock/TakenOff event out of the window → every flight fell back to
      "Scheduled" while 412 unit tests stayed green. Gate/Arrival columns worked
      because they read fields, not the window-seeded marker.)
-3. **Commit when green; push when the use-case is done (v60).** Every time the full
+3. **THE EXIT GATE — you do not hand over until these hold (§F11, v160, owner-mandated).**
+   Before you report a use-case or defect ready for the tester:
+   - **Complexity and coupling did not get WORSE.** `AeroCloudSystems/CodeAnalysisTools` runs
+     in the test step against a committed baseline that may only shrink. Excludes `items/**`;
+     generated files are excluded by the tool's own banner detection and listed in
+     `generated.csv`, so the exclusion is auditable. **Never widen the ignore list to move a
+     number.** If a necessary change genuinely worsens a measure, record that decision on the
+     item — do not silently re-baseline.
+   - **Coverage did not FALL.** Same may-only-shrink ratchet. **Coverage is a regression
+     detector, never a target** — a fall means a use-case lost its test or code shipped with
+     none. Writing a test to raise a number is the coverage theatre §17d forbids, and
+     `EXP-124` scores mass-tagging as FAILED. There is no target figure; do not invent one.
+   - **The acceptance criterion is certified by an OUTSIDE-IN test.** Exercise the use-case
+     through its own public surface — the API for a backend capability, the rendered UI for a
+     screen — not an internal function reached directly. Internal tests are fine and cheap,
+     but they are subordinate: a use-case whose only evidence is internal is not done. Never
+     stub the seam you are asserting across (§17d) — that converts an outside-in test back
+     into an inside-out one.
+   This is not the tester's job to catch. The tester validates in the deployed environment
+   (§17c); this is what you owe before they start.
+
+4. **Commit when green; push when the use-case is done (v60).** Every time the full
    test suite goes from red to green, commit immediately to trunk — including at each
    green SUB-STEP of a larger UC (a passing red→green TDD increment), not only at the
    final green (v95): an agent can stall/be-interrupted mid-build, and any work not

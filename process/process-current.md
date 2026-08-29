@@ -1,9 +1,11 @@
 ---
-process_version: 159
+process_version: 160
 effective_from: 2026-08-29
-supersedes: v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
+supersedes: v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
 status: active
 ---
+
+<!-- v160 (OWNER-DIRECTED, ROC 2026-08-29; NOT a retro — retro-debt routine 2/3, no incident). Owner ruling, mandatory and quoted in full in SSF11: add the CodeAnalysisTools complexity/coupling tool INTO THE TEST STEP, constantly drive those numbers DOWN (ignoring items/), track coverage so it does not go wrong, and TEST FROM THE OUTSIDE -- use-cases, not functions -- all as EXIT CONDITIONS ON THE ENGINEERING STEP before the tester takes over. **THE FINDING THAT SHAPED THE FIX: the tool was ALREADY WIRED.** `code-analysis.yml` has been running on every push to main and weekly, already excluding `items/*`, already auto-detecting generated files -- and it uploads an artifact and GATES NOTHING, so nobody has ever read it. That is this project's most-registered family arriving again (OI-ROC-014 a declared control with no reader; IMP-021 a parser whose grammar is narrower than the declaration; DEF-ROC-140 a gate blind to every Playwright suite; DEF-ROC-146 a whole test tier no CI job runs). So the work is not integration, it is ACCOUNTABILITY: the same tool, moved into the gating path, with a may-only-shrink baseline. ROUTED: **SSF11** (three limbs) + the same three limbs written into `.claude/agents/engineer.md` as the step-3 exit gate, because a rule the engineer does not hold in its own file is one the orchestrator has to remember. **SSF11.2 REQUIRED AN EXPLICIT RECONCILIATION WITH A PRIOR OWNER RULING, and it is recorded rather than silently overwritten:** v127 states *"I do not care AT ALL about code coverage. The ONLY thing tests should be validating is the requirements."* The two are compatible and the distinction is the whole of it -- coverage as a TARGET stays forbidden (writing a test to raise a number is the theatre SS17d rejects and EXP-124 scores as FAILED), while coverage as a REGRESSION DETECTOR is now required, because a FALL means a use-case lost its test or code shipped with none, which is a statement about requirements and not about a percentage. The gate asks 'did it get worse', never 'is it high enough', and no target figure may be introduced. **SSF11.3 SHARPENS SS17d rather than replacing it:** SS17d requires every test to name its AC; this says WHERE the test must stand to make that claim honestly. The cost of getting it wrong is already in the record -- v127's founding case built its precondition by deleting the very leaf whose presence breaks the heal, and **2,171 tests were green while nine real cancellations sat unhealed in production**. An outside-in test could not have been written that way. Internal tests are subordinate, not banned. SCORED ON **EXP-ROC-014**, whose negative arms include the two ways this gate would rot: widening the ignore list or raising the baseline to pass (an automatic kill, the OI-ROC-006 anti-pattern), and introducing a coverage target figure. Proof-of-fire required per SS17c.2 -- each limb observed going RED once, quoted. **REGISTRY: EXP-ROC-009 KILLED at strike 2 on its own stated terms** -- v157 wrote 'if the reported median does not fall at v158 the row DIES with no further argument', and it rose 46,703s -> 73,588s. Killed without argument, because forbidding the argument in advance is the point. One measurement artifact recorded so the next retro does not misread it: this cycle took 28 DECLINES, and deciding an aged item moves its whole accrued dwell into the completed-item median -- so doing exactly the throughput work the owner asked for mechanically raises that number in the short run. Not a reprieve for the row, and not evidence the work was wrong; it is why SSF9d.2 is scored on the count-independent arrival:completion ratio instead. ROC back to 8/8 active rows. CONSTRAINT: orchestrator/reported 33.89%, STABLE. -->
 
 <!-- v159 (retro, ROC 2026-08-29; fired ON REQUEST by the owner mid-loop, NOT on debt — `make retro-debt` reported ok. FOCUS QUESTION, owner-set: ***"if you need the process to go 2.2x faster, what can you do to get there?"*** ANSWER — **NOTHING NEEDS TO GO FASTER. 2.2x is available inside limits this project has ALREADY DECLARED, and the only thing standing in the way is that the loop keeps stopping.** The arithmetic, from §B/§F: **87.01%** of gross lead time is WAITING states (`reported` 33.78, `blocked` 27.28, `registered` 10.68, `open` 7.26, `ready` 5.59, `awaiting_observation` 2.23, `scheduled` 0.19) against **13.00%** in working states — and measured agent work-effort is **0.20%** of elapsed (116,736s of 76,529,128s). Two independent routes to 2.2x, neither requiring anyone or anything to be quicker: the **concurrency route** takes `wip` occupancy from **1 of 8 to 2.2 of 8 — 28% of a cap that is already 8**, i.e. no ELEVATE, no model-tier change, no new agent; the **lead-time route** needs 55% of elapsed time removed, which is only **63% of the waiting** that already exists. Five consecutive retros correctly declined to ELEVATE on the 0.2% figure; this one states the corollary they stopped short of — *if capacity is 99.8% idle, throughput is bounded by STOPPING, and every stop is addressable.* **THE OWNER NAMED THE DOMINANT STOP, and it is the orchestrator, not any agent:** *"you have work you can be doing but you keep stopping to ask me questions instead of blocking items, recording the decision and giving me an async way to handle those blocks"* and *"you can hardly work for an hour without my help."* WHY-CHAIN (4 levels): (1) `blocked` 27.28% @ median 8.8d and `orchestrator`/`reported` 33.78% @ median 37h are the top two GLT owners; (2) both are the same event — the loop reaches a judgement and HALTS; (3) it halts because an escalation was delivered as a QUESTION IN A TRANSCRIPT, which requires the owner to be present to receive it; (4) ROOT CAUSE: **the process had no representation for a decision that is owed but not yet made.** A question has exactly two states, asked and answered, and no default — so the only legal behaviour while unanswered was to wait. Founding case `DEF-ROC-035`: escalated 2026-08-25 with three clean options, **unanswered four days**, item parked 11.9d. EXPLOIT: **§F9e — an owner decision is a BLOCKED ITEM WITH A DEFAULT, never a question.** Block with a checkable predicate, record the options and a RECOMMENDED DEFAULT with reasoning, publish to `work/<project>/open-decisions.md` with a DECIDE-BY date, keep working — and **when the date passes unanswered the DEFAULT IS TAKEN**, because a default that merely waits politely is the same stall with an extra file. Safe because the default must be the REVERSIBLE option, costing at most the work done before it is overturned. Four decisions that were sitting in this session's transcript were converted and shipped as `OD-ROC-001..004`, each defaulting to descope/decline on an unbounded external wait. SUBORDINATE: **§F9d + §F9d.2** (v158, same day) cap the ARRIVAL — measured 179 in / 83 out over 14 days = **2.16:1**, with the source event being sixteen requirements accepted in one sitting on 2026-08-18 and `/slice-next` correctly cascading them on 08-27. ELEVATE: **NOT capacity — the SERIALISATION POINT.** Measured in this very cycle and it is the new finding: one engineer's edit to `work-items.py`, the sole writer every `wi-append` shells out to, **froze every item state change in the project for the entire cycle** — 28 declines and ~6 amendments staged and unfireable for hours. §F2b resource-class exclusivity is correct as a safety rule and is ALSO a hard cap of 1 on concurrency for anything needing a state change. Routed as an improvement slice, not a rule: the writer needs a queued/deferred append so a lock defers a WRITE instead of stalling the LOOP. **DELIVERED THIS CYCLE:** `OI-ROC-006` firing-rights (allowlists removed, in flight at close); the `UC-ROC-112/113/114` reclassification (a three-way "collision" proved to be a mis-modelled `deps:` edge, and `UC-ROC-112` as specified shipped a **broken count** — a 24h tile routing to an all-time list, 42 records over 9.2 days, caught before a line was written); `OI-ROC-009`'s age restored; three wrong `lane:` values corrected; the ROC host allowlisted. **THE QUALITY RESULT OF THE CYCLE IS A REFUSAL:** an engineer sent to enable a maintenance-window env var in aas-test **declined and was right** — a written security control forbids it (*"no deployed environment can be made quiet by an environment variable"*), delta 019 §C1.4 had already ruled the live absence is *parity, not a gap*, and the setting would have armed a permanent nightly 02:00-04:00 suppression window on the **alert-RAISING** path. Its own report is the finding: *"nothing would have stopped me"* — typecheck green, seam pin green (it walks only `src/**` and `local/**`), drift SSOT updated — because **the control's stated policy test is an unticked checkbox that was never implemented.** Guard now being built. Both the orchestrator AND the flow-manager triage had asserted the change was safe and self-serviceable; the source said otherwise. RECONCILE LATENCY: **0.4h across 3 commits**, down from **37.4h** (v157), 23.3h (v156), 20.6h (v155) — the three-retro rise is BROKEN, by committing continuously rather than at the close. Scores `EXP-ROC-012` positive. REGISTRY: `EXP-ROC-013` opened for §F9e; 7 active ROC rows, under the per-project cap of 8. CONSTRAINT TO ATTACK NEXT: **`wip` occupancy itself.** For six reads the constraint was named as an owner (`orchestrator`/`reported`); that identification is not wrong but it is one level too shallow, because the owner is only ever the thing that stopped. The measurable target is occupancy 1 -> 2.2 of 8. -->
 
@@ -66,7 +68,7 @@ status: active
 <!-- v111 (FOCUSED retro, ROC 2026-07-27; on main v110 via fold-forward-FIRST — clean, no collision; §F8 routine-batch gate at SLC-ROC-014 close, NO prod incident): SLC-ROC-014 delivered the COMPLETE rules-EDITING capability (edit → mandatory draft-test → publish, live no-redeploy pickup, Simulator parity, content-hash attestation gate + who/when attribution) — UC-056/057/058 all live-stack validated + pushed to origin/main + deployed to aas-test. NO global §-body change. Routed outcomes: (1) engineer.md plain-practice fold — the pre-built_green green bar must exercise the REAL artifact for UI/pipeline slices (fully-themed live axe + same-element aria-label; focus preventScroll + no scrollable ancestor; composed-consumer-against-populated-store acceptance driving consume() end-to-end), extending v110's live-caught→offline-pin; recurring root cause logged in principle-failures/2026-07-27-offline-green-ne-live-correct-ui-pipeline.md. (2) work-items.py + linear-project.py + linear-mapping.md machinery fix (human "fix the in-progress clutter"): blocked never maps to In Progress (Todo/Backlog) and an aggregate whose only non-terminal children are all blocked derives blocked — parked-on-external trees drop out of the active lane in queues/stats/board (107 wi-tests green). (3) EXP-115 POSITIVE again (ROC live catches), EXP-117 → 2/3 POSITIVE (board cadence). Constraint UNCHANGED + not-agent-squeezable (external 46.66% Azure-block + queue 41.93% backlog; agents ≈11%); dev-validation 11.1% / CFR 10.1% is HONEST dev-catch (EXP-108), not decay — the in-system lever is shifting live-defect classes LEFT (measured next on SLC-ROC-015). Registry 7 active, under cap, no rows added. -->
 <!-- v110 (FOCUSED retro, AdixOut 2026-07-24; RECONCILED onto main v109 via fold-forward-then-reapply — main advanced to v109 (ROC SLC-ROC-013 retro) while this AdixOut retro was in flight, so renumbered v109→v110; retro-debt gate — 3 routine: UC-AIDX-028 rework (TWO reject→rework cycles) + SLC-AIDX-011/CHK-AIDX-010 closes, REQ-004's dev consumer-side walking skeleton: C12 bus+grant → C13 routing → C10/C11 ingest standup → OAG handoff, built + validated LIVE end-to-end (synthetic event → C12 → C13 → C10 → C11 → read model → egress). TIGHT: two fix-derived learnings folded as PLAIN PRACTICE, no experiment rows. Constraint UNCHANGED from v105/v108 (registered/queue = artifact latency, ~70% of GLT; squeezable in-system cost = engineer/multi-tenant-eventing). Both learnings were caught by LIVE assert-real-state validation that offline synth-pins passed. (1) SCOPE-GAP → engineer.md + solution-architect.md: "reuse existing X" must be VERIFIED against the real deployed TARGET account/stack, never assumed from a sibling env — SLC-AIDX-011's "reuse the existing C10/C11 ingest" was wrong (C10/C11 were sandbox-only; the migration moved only the egress to dev-dataout), so the engineer STOPPED (§F7) rather than build against an absent dependency and a predecessor UC-030 + architect delta 007 were inserted at the real edge; the §F7 stop was correct. Extends the v97 assert-real-state family. (2) EVENTBRIDGE TARGET PAYLOAD (the double-rework) → engineer.md: for an EventBridge rule→SQS/target that must forward the event's `detail` object verbatim, use `inputPath: "$.detail"` (JSONPath extraction), NOT an `inputTransformer` with a bare `<detail>` object placeholder — the `<placeholder>` idiom quote-strips a nested OBJECT into invalid JSON (`ERROR_CODE=INVALID_JSON`), it only round-trips STRING fields (why the webhook router's flat string fields worked). Root cause found only by adding a target `DeadLetterConfig` to capture the real `ERROR_CODE`/`ERROR_MESSAGE` — so: always wire a target `DeadLetterConfig` and INSTRUMENT-FIRST before guessing at an opaque cross-service delivery failure. UC-028 rework #1 = default-rule envelope-wrap poison (C11's parseEnvelope rejected the wrapped event); rework #2 = the `<placeholder>` INVALID_JSON. Engineer left OFFLINE synth-pins behind for the inputPath/InputTransformer shape + DeadLetterConfig so the payload-shape class is now caught offline (live-caught infra-shape defect → offline pin). Kept in engineer.md not the aws-architecture skill (no clean EventBridge-target section there; narrowest owner = engineer implementation behaviour). EXP-115 (whole-journey/JTBD live validation) scored POSITIVE again (dated confirming note): the live bus-driven E2E caught the scope-gap + BOTH UC-028 delivery bugs offline pins missed. CFR HONESTY: UC-028's two reworks + UC-027's earlier deploy_failed are real DEV-caught change-failures (EXP-108 integrity) — the process working (caught in dev before OAG/prod), NOT decay; CFR ~39% reflects honest dev-stage rejection accounting. Registry unchanged: 8 active (EXP-101,106,107,112,113,115,116,117) — AT cap-8; no rows added/retired. No global-section rules changed; routed changes = engineer.md (2 folds) + solution-architect.md (reuse-verify note) + EXP-115 confirming note. -->
 <!-- v109 (FOCUSED retro, ROC 2026-07-24; RECONCILED onto main v108 via fold-forward-FIRST — main had advanced to v108 (AdixOut tight retro) while this ROC session ran, so this entry is v109; triggered by the §F8 routine-batch gate at SLC-ROC-013 close, NO incident): SLC-ROC-013 (REQ-ROC-003 living-demo foundation, UC-051..055) delivered + validated live-stack + pushed to origin/main on green (CI deploying to aas-test). NO global §-body process change this cycle — the routed outcomes are (1) EXP-116 lean-orchestration ADOPTED into orchestrator.md as plain practice (guards proven safe 2/2, no DORA harm; registry 8→7), (2) EXP-117 board-push cadence advanced to 1/3 POSITIVE. Constraint UNCHANGED and confirmed not-agent-squeezable (`registered`/backlog-aging artifact 57.76% + external-blocked DEF-004 33.55%; agents ≈8.6%); change budget deliberately NOT spent chasing it (constraint-gate). J23 demo-grows DoD + demo-egress isolation pattern kept as ROC project artifacts, not over-generalised. TIGHT retro — score + adopt + drain + fold. -->
-# Current Process — v159
+# Current Process — v160
 
 <!-- v139 (owner instruction, OagEventSource 2026-08-13, NO retro — a direct standing
 instruction from the human owner, folded immediately rather than queued): every update to
@@ -3509,6 +3511,116 @@ them carries no independent weight. Say so when reporting it.
 items closed on evidence that later proves vacuous; the `dev-validating` failure rate may
 RISE first, which is the good outcome — a probe that can now fail is one that was
 previously silent.
+
+## F11. The engineering step has an EXIT GATE: design metrics, coverage, and outside-in tests [v160, ROC]
+
+**Owner ruling, 2026-08-29, verbatim and mandatory:**
+
+> *"We need to add the code complexity analysis code tool that was built in the
+> CodeAnalysisTools repository into the test step of this project. We need to constantly
+> look at the numbers here (and ignore folders to do with items etc) in order to bring the
+> measures of complexity and coupling down. We also should be tracking test coverage and
+> ensuring its not going wrong. We also need to be testing things from the outside - we do
+> not want to test functions, we want to test usecases. This is a process update and these
+> things are mandatory - should be happening as part of the engineering step before being
+> happy with being done for the tester to take over."*
+
+**These are exit conditions on the ENGINEERING step.** An engineer does not report a use-case
+or defect ready for the tester until all three limbs below hold. They are not advisory, and
+they are not the tester's job to catch.
+
+### Why an exit gate and not a report
+
+`AeroCloudSystems/CodeAnalysisTools` was already wired into ROC — `code-analysis.yml`, on
+push to `main` and weekly, already excluding `items/*` and auto-detecting generated files.
+**It uploads an artifact and gates nothing, so nobody has ever read it.** That is this
+project's most-registered failure family (`OI-ROC-014`, `IMP-021`, `DEF-ROC-140`,
+`DEF-ROC-146`): a control that exists and is never consulted. A number nobody is accountable
+to does not move.
+
+### F11.1 — Complexity and coupling RATCHET DOWN
+
+The analysis runs **in the test step**, not in a side workflow, and its headline measures are
+held against a **committed baseline that may only shrink** — the `test-requirement-gate`
+shape, which is already proven in this project.
+
+- **Scope:** exclude `items/**` (the backlog: real work, but not code anyone reasons about,
+  and it dominates the report). Generated files are excluded by the tool's own
+  `detect-generated`, which reads the "do not hand-edit" banners — so `views/**` needs no
+  hand-maintained rule. **Everything excluded is listed in `generated.csv`, so the
+  exclusion stays auditable.** Never widen the ignore list to make a number move: that is
+  the allowlist-widening anti-pattern `OI-ROC-006` retired.
+- **The ratchet direction is DOWN.** A change that worsens the measure fails the gate. A
+  change that improves it may lower the baseline. **The baseline may never be raised** — if
+  a genuinely necessary change worsens a measure, that is an explicit, reasoned decision
+  recorded on the item, not a silent re-baselining.
+- **Read the hotspot and coupling reports, not just the totals.** A pair of files that keeps
+  changing together is a design statement; the point of the tool is to act on it.
+
+### F11.2 — Coverage as a REGRESSION DETECTOR, never as a target
+
+**This limb must be reconciled with §17d, and the reconciliation is load-bearing.** v127
+records the owner's ruling: *"I do not care AT ALL about code coverage. The ONLY thing tests
+should be validating is the requirements. If we are making up tests for coverage that do not
+map onto requirements then either (a) we are wasting time, or (b) we have identified a new
+acceptance criteria."*
+
+That ruling and this one are **compatible, and the distinction is the whole of it**:
+
+- **Coverage as a TARGET is still forbidden.** Writing a test to raise a number is coverage
+  theatre, and §17d's binary still binds: an untagged test is either waste (delete it) or an
+  undiscovered acceptance criterion (register it, and the discovery gap earns a retro).
+  `EXP-124` explicitly scores mass-tagging as FAILED.
+- **Coverage as a REGRESSION DETECTOR is required.** A *fall* in coverage means something
+  real: a use-case lost its test, or code shipped with none. That is a signal about
+  requirements, not about a percentage. So the gate asks **"did it get worse?"** and never
+  **"is it high enough?"** There is no target figure, and none may be introduced.
+
+Held against a committed baseline on the same may-only-shrink ratchet. A drop is a **finding
+to explain**, not a number to top up.
+
+### F11.3 — Test the USE CASE from the outside, not the function
+
+> *"We do not want to test functions, we want to test usecases."*
+
+The unit of test is the **use-case, exercised through its own public surface** — the API for
+a backend capability, the rendered UI for a screen — not an internal function reached
+directly.
+
+- **This SHARPENS §17d rather than replacing it.** §17d requires every test to name its
+  `AC-<ID>.<n>`; this says *where the test must stand to make that claim honestly.* A test
+  that names an AC but reaches inside the implementation proves the code agrees with itself.
+- **The measured cost of getting this wrong is already in this project's record.** The
+  founding case at v127: a test built its precondition by deleting the very leaf whose
+  presence breaks the heal — **2,171 tests green while nine real cancellations sat unhealed
+  in production.** The test did not merely miss the bug; it encoded the bug's assumption as
+  its fixture. An outside-in test could not have been written that way.
+- **Internal tests are not banned; they are subordinate.** A pure domain function may carry
+  focused tests, and they are cheap and fast. What is forbidden is a use-case whose *only*
+  evidence is internal — an outside-in test must exist and must be the one that certifies the
+  acceptance criterion.
+- **The seam under test is never stubbed** (§17d, unchanged). Stubbing the boundary you are
+  asserting across converts an outside-in test back into an inside-out one.
+
+### What the gate does NOT do
+
+It does not replace the tester. The tester still validates in the deployed environment
+against the real system (§17c: nothing is established until observed in a state that could
+have come back negative). **This gate is about what the engineer owes BEFORE handing over** —
+so the tester is validating a change whose design cost, test placement and coverage are
+already known, instead of discovering them.
+
+### Proof-of-fire is required, per §17c.2
+
+**A gate is not a gate until it has been observed going RED.** Each limb must be demonstrated
+failing on a seeded violation, once, and the demonstration quoted. A limb wired in but never
+seen to fail is worth exactly as much as the artifact-uploading workflow this replaces.
+
+**Target metrics:** lead time (a design that resists change is the slowest thing to change)
+and CFR (an outside-in test catches what an inside-out one structurally cannot). **Guarded
+on:** the requirement gate's floor must not rise, and `dev-validating` failure rate must not
+rise — if it does, the engineering exit gate is passing work the tester then rejects, which
+means the gate is measuring the wrong thing. **Scored on `EXP-ROC-014`.**
 
 ## F10. Fleet — isolated per-project loops, one shared process spine
 Multiple projects run CONCURRENTLY, each as its own isolated loop, feeding ONE shared,

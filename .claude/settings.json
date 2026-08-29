@@ -393,5 +393,19 @@
       "Bash(make project-update *)",
       "Bash(make project-foldback *)"
     ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/loop-continue.mjs\"",
+            "timeout": 15,
+            "statusMessage": "Checking the loop has not stopped at a non-gate boundary (\u00a7F9.4)"
+          }
+        ]
+      }
+    ]
   }
 }

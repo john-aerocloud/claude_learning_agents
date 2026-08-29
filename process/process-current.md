@@ -1,9 +1,11 @@
 ---
-process_version: 163
+process_version: 164
 effective_from: 2026-08-29
-supersedes: v162, v161, v160, v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
+supersedes: v163, v162, v161, v160, v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
 status: active
 ---
+
+<!-- v164 (OWNER CORRECTION to the v163 retro, ROC 2026-08-29, within the hour). The owner: *"the slowdown really isnt the wi commands in orchestrator - the problem is the wait time for me to answer questions whilst you do not do things in the background"*. **CORRECT, AND v163's DIAGNOSIS WAS WRONG.** One number forbids it: agent work-effort is **0.2% of gross lead time**, so even with ZERO orchestrator state events, 99.8% of elapsed time is still wait -- a serialisation inside 0.2% cannot explain a 99.8% figure. SSF13 stands as a real but SECONDARY inefficiency and EXP-ROC-015's scope is corrected in place to say so. THE ACTUAL CONSTRAINT: the loop stops when the orchestrator stops talking, and that dead time is the human re-prompt gap recorded in the item log as `reported` + `queue` dwell (**57.6%** combined) -- which is why it READS as bookkeeping latency and is not. **SSF9.4 ALREADY FORBIDS THIS IN TERMS** -- *'ENDING THE TURN IS the stop, even with a polite report... do not end the turn at a non-gate boundary'* -- and was violated ~20 times in one session BY THE ROLE THAT OWNS IT, while that role wrote a retro naming a different cause. So this is not a missing rule, it is an unobeyed one: this project's most-registered failure family (a control that exists and is never consulted -- OI-ROC-014, IMP-021, DEF-ROC-140, DEF-ROC-146) arriving at the top of the process. ROUTED as **SSF13a**: mechanise SSF9.4 rather than restate it, per SS17c.5's prohibition on discharging this class with prose -- the loop SCHEDULES ITS OWN NEXT WAKE, so ending a turn does not end the loop, and the turn ends without a wake ONLY at SSF5 intake, requirement-complete, or a SS0b irreversible op. A blocked decision is NOT one of those, because SSF9e already converts it to a dated default. Scored on **EXP-ROC-016**, whose automatic kill is a wake that reports 'still waiting' -- the polite report SSF9.4 forbids, wearing a scheduler's clothes. Explicitly does NOT license acting without evidence, skipping a gate, or ceasing to report; the report becomes inline and terse ALONGSIDE the next dispatch. REGISTRY: **EXP-ROC-008 ADOPTED** -- CFR rose 7.4% -> 8.8% exactly as it predicted (with two build_faileds volunteered by the engineer that caused them), and control faults shifted to roughly **6 found deliberately against 2 by accident**, from a baseline where nine were found in one session and NOT ONE by anything looking for them. Qualified honestly in the archive: the two accidental finds were among the most consequential of the session, so SSF5e shifted the proportion without eliminating the class. SSF9f is its descendant and carries the mechanism forward. 8/8 at cap. -->
 
 <!-- v163 (RETRO, ROC 2026-08-29; fired on the ROUTINE arm at 6/3 after a session that closed REQ-ROC-019 end to end. FOCUS QUESTION, default. ANSWER: **the constraint changed hands, and the orchestrator now holds it.** v159 asked how to reach 2.2x and answered 'raise occupancy from 1 of 8'. This session took it to **8 of 8** -- and **8x concurrency bought 1.43x completions** (83 -> 119 trailing-14d) on 1.40x agent work-effort. Badly sub-linear, and the gap IS the finding: capacity stopped being the constraint and the orchestrator became it. WHY-CHAIN (5): (1) orchestrator/reported is #1 at **33.90%**, median **58,718s**, n=114, SEVENTH consecutive read; (2) every item's first transition and every subsequent state event is fired by ONE ACTOR; (3) 8x occupancy moved completions 1.4x, so the specialists were not the limit; (4) that actor also writes every dispatch brief, commit message, correction and report, all serialised; (5) ROOT CAUSE, SELF-INFLICTED: **the orchestrator instructs every agent 'do NOT run any wi-* command'**, so every state event queues behind it BY EXPLICIT INSTRUCTION. That instruction was not arbitrary -- it was written against a MEASURED hazard (an engineer editing work-items.py froze every state change in the project for hours, 28 declines staged and unfireable) -- but it was a PROXY for a narrow hazard, applied to every dispatch, and the proxy became the constraint. EXPLOIT: **SSF13 -- a specialist advances its own item's state.** Legitimate now because OI-ROC-006 LANDED: 101 per-transition allowlists removed, firing rights derived from the item's declared owner, so a specialist recording its own work is the rights model working rather than a spoof. The blanket prohibition is RETIRED and may be issued only against a NAMED LIVE resource-class conflict the brief must state. AGENT= still never spoofed; TOKENS=/DURATION_MS= stay the orchestrator's on events it owns, and OI-ROC-008's residue is explicitly unchanged rather than papered over. SUBORDINATE: SSF9d/SSF9d.2 hold -- **arrival:completion fell 2.16 -> 1.60**, not yet under the 1.5 kill line but moving, and completions rose 43% in one session. ELEVATE: NOT capacity -- occupancy is already at cap; the elevate move is **IMP-034** (the writer must defer the WRITE, not the LOOP), because writer contention is the hazard the retired instruction was proxying for. DELIVERED: REQ-ROC-019 complete end to end (UC-112 the ViewIntent channel + dimension registry, UC-113 the registry proven on a STORED column with both parsers made registry-driven, UC-114 proven on a DERIVED read-boundary field), plus DEF-ROC-055 and DEF-ROC-144 (two permanent-data-loss defects), DEF-ROC-142, OI-ROC-006, OI-ROC-014, and **SSF11's engineering exit gate LIVE with the project's first-ever coupling and coverage baselines** (4027 test cases, **4023 attached to no variation node**). QUALITY: CFR **8.8%** (from 7.8% -- the RISE EXP-ROC-008 predicts as its good outcome, and two build_faileds were recorded this session that a less honest cycle would have swallowed); dev-validating **9.2%** still the highest stage and now the named kill-arm for EXP-ROC-015; building 0.8%, deploying 0.0%. RECONCILE LATENCY **0** (v157: 37.4h) -- EXP-ROC-012's adopted practice holding. **THREE REJECTIONS THIS SESSION AND ALL THREE WERE RIGHT**, which is the quality story: two on DEF-ROC-143 (a table row borrowing its neighbour's marker text, then an inserted line doing the same) and one engineer that REFUSED THE ORCHESTRATOR'S SUGGESTED FIX after measuring it -- 'had I taken it on trust, this would have been rejection three'. REGISTRY: EXP-ROC-015 opened, 8/8 at cap. CONSTRAINT TO ATTACK NEXT: unchanged in identity for a seventh read but for the first time with the ORCHESTRATOR'S OWN INSTRUCTION named as the mechanism rather than the allowlist beneath it. -->
 
@@ -74,7 +76,7 @@ status: active
 <!-- v111 (FOCUSED retro, ROC 2026-07-27; on main v110 via fold-forward-FIRST — clean, no collision; §F8 routine-batch gate at SLC-ROC-014 close, NO prod incident): SLC-ROC-014 delivered the COMPLETE rules-EDITING capability (edit → mandatory draft-test → publish, live no-redeploy pickup, Simulator parity, content-hash attestation gate + who/when attribution) — UC-056/057/058 all live-stack validated + pushed to origin/main + deployed to aas-test. NO global §-body change. Routed outcomes: (1) engineer.md plain-practice fold — the pre-built_green green bar must exercise the REAL artifact for UI/pipeline slices (fully-themed live axe + same-element aria-label; focus preventScroll + no scrollable ancestor; composed-consumer-against-populated-store acceptance driving consume() end-to-end), extending v110's live-caught→offline-pin; recurring root cause logged in principle-failures/2026-07-27-offline-green-ne-live-correct-ui-pipeline.md. (2) work-items.py + linear-project.py + linear-mapping.md machinery fix (human "fix the in-progress clutter"): blocked never maps to In Progress (Todo/Backlog) and an aggregate whose only non-terminal children are all blocked derives blocked — parked-on-external trees drop out of the active lane in queues/stats/board (107 wi-tests green). (3) EXP-115 POSITIVE again (ROC live catches), EXP-117 → 2/3 POSITIVE (board cadence). Constraint UNCHANGED + not-agent-squeezable (external 46.66% Azure-block + queue 41.93% backlog; agents ≈11%); dev-validation 11.1% / CFR 10.1% is HONEST dev-catch (EXP-108), not decay — the in-system lever is shifting live-defect classes LEFT (measured next on SLC-ROC-015). Registry 7 active, under cap, no rows added. -->
 <!-- v110 (FOCUSED retro, AdixOut 2026-07-24; RECONCILED onto main v109 via fold-forward-then-reapply — main advanced to v109 (ROC SLC-ROC-013 retro) while this AdixOut retro was in flight, so renumbered v109→v110; retro-debt gate — 3 routine: UC-AIDX-028 rework (TWO reject→rework cycles) + SLC-AIDX-011/CHK-AIDX-010 closes, REQ-004's dev consumer-side walking skeleton: C12 bus+grant → C13 routing → C10/C11 ingest standup → OAG handoff, built + validated LIVE end-to-end (synthetic event → C12 → C13 → C10 → C11 → read model → egress). TIGHT: two fix-derived learnings folded as PLAIN PRACTICE, no experiment rows. Constraint UNCHANGED from v105/v108 (registered/queue = artifact latency, ~70% of GLT; squeezable in-system cost = engineer/multi-tenant-eventing). Both learnings were caught by LIVE assert-real-state validation that offline synth-pins passed. (1) SCOPE-GAP → engineer.md + solution-architect.md: "reuse existing X" must be VERIFIED against the real deployed TARGET account/stack, never assumed from a sibling env — SLC-AIDX-011's "reuse the existing C10/C11 ingest" was wrong (C10/C11 were sandbox-only; the migration moved only the egress to dev-dataout), so the engineer STOPPED (§F7) rather than build against an absent dependency and a predecessor UC-030 + architect delta 007 were inserted at the real edge; the §F7 stop was correct. Extends the v97 assert-real-state family. (2) EVENTBRIDGE TARGET PAYLOAD (the double-rework) → engineer.md: for an EventBridge rule→SQS/target that must forward the event's `detail` object verbatim, use `inputPath: "$.detail"` (JSONPath extraction), NOT an `inputTransformer` with a bare `<detail>` object placeholder — the `<placeholder>` idiom quote-strips a nested OBJECT into invalid JSON (`ERROR_CODE=INVALID_JSON`), it only round-trips STRING fields (why the webhook router's flat string fields worked). Root cause found only by adding a target `DeadLetterConfig` to capture the real `ERROR_CODE`/`ERROR_MESSAGE` — so: always wire a target `DeadLetterConfig` and INSTRUMENT-FIRST before guessing at an opaque cross-service delivery failure. UC-028 rework #1 = default-rule envelope-wrap poison (C11's parseEnvelope rejected the wrapped event); rework #2 = the `<placeholder>` INVALID_JSON. Engineer left OFFLINE synth-pins behind for the inputPath/InputTransformer shape + DeadLetterConfig so the payload-shape class is now caught offline (live-caught infra-shape defect → offline pin). Kept in engineer.md not the aws-architecture skill (no clean EventBridge-target section there; narrowest owner = engineer implementation behaviour). EXP-115 (whole-journey/JTBD live validation) scored POSITIVE again (dated confirming note): the live bus-driven E2E caught the scope-gap + BOTH UC-028 delivery bugs offline pins missed. CFR HONESTY: UC-028's two reworks + UC-027's earlier deploy_failed are real DEV-caught change-failures (EXP-108 integrity) — the process working (caught in dev before OAG/prod), NOT decay; CFR ~39% reflects honest dev-stage rejection accounting. Registry unchanged: 8 active (EXP-101,106,107,112,113,115,116,117) — AT cap-8; no rows added/retired. No global-section rules changed; routed changes = engineer.md (2 folds) + solution-architect.md (reuse-verify note) + EXP-115 confirming note. -->
 <!-- v109 (FOCUSED retro, ROC 2026-07-24; RECONCILED onto main v108 via fold-forward-FIRST — main had advanced to v108 (AdixOut tight retro) while this ROC session ran, so this entry is v109; triggered by the §F8 routine-batch gate at SLC-ROC-013 close, NO incident): SLC-ROC-013 (REQ-ROC-003 living-demo foundation, UC-051..055) delivered + validated live-stack + pushed to origin/main on green (CI deploying to aas-test). NO global §-body process change this cycle — the routed outcomes are (1) EXP-116 lean-orchestration ADOPTED into orchestrator.md as plain practice (guards proven safe 2/2, no DORA harm; registry 8→7), (2) EXP-117 board-push cadence advanced to 1/3 POSITIVE. Constraint UNCHANGED and confirmed not-agent-squeezable (`registered`/backlog-aging artifact 57.76% + external-blocked DEF-004 33.55%; agents ≈8.6%); change budget deliberately NOT spent chasing it (constraint-gate). J23 demo-grows DoD + demo-egress isolation pattern kept as ROC project artifacts, not over-generalised. TIGHT retro — score + adopt + drain + fold. -->
-# Current Process — v163
+# Current Process — v164
 
 <!-- v139 (owner instruction, OagEventSource 2026-08-13, NO retro — a direct standing
 instruction from the human owner, folded immediately rather than queued): every update to
@@ -3844,6 +3846,106 @@ because state transitions stop queueing behind one actor.
 the evidence an orchestrator would have demanded; (b) `wi-validate` starts failing, i.e.
 distributed writes corrupt the log; (c) attribution quality falls — a rise in events whose
 `AGENT=` is contradicted by their own note. Scored on **`EXP-ROC-015`**.
+
+## F13a. CORRECTION to F13 — the constraint is TURN-ENDING, and §F9.4 already forbade it [v164, ROC]
+
+**Owner correction, 2026-08-29, within the hour of the v163 retro:**
+
+> *"the slowdown really isnt the wi commands in orchestrator - the problem is the wait time
+> for me to answer questions whilst you do not do things in the background"*
+
+**This is correct and §F13's diagnosis was wrong.** §F13 stands as a real improvement — a
+specialist should advance its own item's state — but it **cannot be the binding
+constraint**, and one number forbids it: **agent work-effort is 0.2% of gross lead time.**
+Even if the orchestrator fired *zero* state events, **99.8% of elapsed time would still be
+wait.** A serialisation inside 0.2% cannot explain a 99.8% figure. v163 named a real
+inefficiency and mistook it for the constraint.
+
+### The actual constraint, and the rule that already forbade it
+
+**The loop stops when the orchestrator stops talking.** Every turn that ends with work
+available parks the entire system until the human re-prompts, and that dead time is
+recorded in the item log as `reported` and `queue` dwell — which is why it *looks* like
+bookkeeping latency and is not.
+
+**§F9.4 already says this, in terms, and has since it was written:**
+
+> *"ENDING THE TURN IS the stop, even with a polite report — parking the loop with 'I'll
+> resume / refresh to confirm' still forces the human to re-prompt, and every restart is
+> idle gross lead time. RULE: do not end the turn at a non-gate boundary."*
+
+**So this is not a missing rule. It is an unobeyed one — violated repeatedly in a single
+session by the role that owns it, while that same role wrote a retro naming a different
+cause.** That is this project's most-registered failure family arriving at the top of the
+process: a control that exists and is never consulted (`OI-ROC-014`, `IMP-021`,
+`DEF-ROC-140`, `DEF-ROC-146`, and now §F9.4 itself).
+
+### Why a prose rule is not the fix, and what is
+
+§F9.4 has been prose since it was written, and prose is exactly what failed. **A rule
+violated ~20 times in one session by its own author does not need restating — it needs a
+mechanism**, which is §17c.5's standing prohibition on discharging a finding of this class
+with prose.
+
+**The mechanism is a self-scheduled wake.** The loop schedules its own next tick, so that
+ending a turn does not end the loop:
+
+- **When work is in flight or available, the orchestrator does not end the turn** — it
+  dispatches the next thing in the same turn (§F9.4, unchanged).
+- **When it must yield** — context, or a genuinely awaited external result — it
+  **schedules a wake** rather than parking. The loop resumes on its own clock instead of on
+  the human's next message.
+- **The turn ends without a wake ONLY at a real gate**: §F5 requirement intake,
+  requirement-complete, or a genuinely irreversible operation (§0b). **A blocked decision is
+  NOT one of those** — §F9e already converts it into a dated default and the loop proceeds.
+
+### The mechanism, built and proven (not prose)
+
+`.claude/hooks/loop-continue.mjs`, wired as a **`Stop` hook** in `.claude/settings.json`.
+The harness runs it when the turn ends — so this is enforced by something other than the
+role that keeps breaking it.
+
+It returns `{"decision":"block"}` when the loop **could have pulled and did not**, quoting
+§F9.4 back and naming the depths. Three properties stop it being worse than the disease:
+
+1. **It does NOT block merely because work exists.** `ready` is almost never empty here, so
+   "block while any work exists" would make the session unstoppable. It blocks only on
+   **capacity to act**: `ready > 0 AND wip < wip_limit`, or any `rework` (§F2 drains rework
+   first). **Waiting on agents at cap is the loop working, not stalling.**
+2. **It FAILS OPEN** — missing project, unreadable view, bad JSON, `ACTIVE=none` all allow
+   the stop and say why on stderr. A hook that can trap a session on its own bug is worse
+   than no hook, and this one sits at the top of the process.
+3. **It is BOUNDED** — after 3 consecutive blocks it allows the stop regardless, so a fault
+   here costs a few turns and never a session.
+
+**The escape hatch is the point, not a loophole.** A legitimate stop is *declared*:
+
+```
+echo "<one line: why this is a real gate>" > work/<project>/.loop-yield
+```
+
+It is **consumed on use**, so it cannot persist into the next turn. Stopping becomes an
+explicit, recorded act instead of the default — which is the whole difference between this
+and the prose that failed.
+
+**Proof-of-fire, all five arms (§17c.2):** blocks at `ready 2, wip 1/8`; blocks on `rework`
+even at cap; allows on a declared yield and consumes the file; allows on the 4th consecutive
+attempt naming the bound; fails open on corrupt JSON and on `ACTIVE=none`.
+
+### How this is falsified
+
+**Target metric: gross lead time**, specifically the share held by `reported` + `queue`
+(currently **33.90% + 23.74% = 57.6%**), and wall-clock between an item becoming ready and
+being pulled.
+
+**NEGATIVE — kill it — if:** the loop wakes and does nothing useful (a tick that reports
+"still waiting" is the polite report §F9.4 already forbids, wearing a scheduler's clothes);
+or if unattended running produces work the tester rejects at a higher rate, i.e. speed
+bought by dropping the evidence standard. **Scored on `EXP-ROC-016`.**
+
+**Note what this does NOT license.** It is not permission to act without evidence, to skip
+a gate, or to stop reporting. The report stays — it becomes **inline and terse**, alongside
+the next dispatch, instead of being the thing that replaces it.
 
 ## F10. Fleet — isolated per-project loops, one shared process spine
 Multiple projects run CONCURRENTLY, each as its own isolated loop, feeding ONE shared,

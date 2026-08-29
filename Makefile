@@ -695,8 +695,23 @@ acceptance-audit:
 # same python the dora launcher resolves (the PY pattern). A line may carry an
 # inline <!-- doc-lint:allow --> escape for a legit archive/historical mention.
 #   make doc-lint
-doc-lint: process-lint
+doc-lint: process-lint model-tiers
 	$(PY) .claude/skills/work-items/scripts/doc-lint.py
+
+# --- §7a tier list vs agent frontmatter (v172) --------------------------------
+# §7a used to carry a HAND-MAINTAINED sentence naming every agent's model tier. It said
+# `documenter` was haiku; it had been opus. It omitted `linear` and `jira` entirely. Nobody
+# noticed, because nothing compared the two -- a record sitting beside the thing it describes,
+# perishing quietly (SSF9g). A WRONG tier list is worse than none: it is what a retro reads
+# when deciding what to change, and this retro nearly changed the wrong agent because of it.
+#
+# So the list is ASSERTED, not maintained. Frontmatter is the truth; SS7a's ```model-tiers
+# block must agree. Prose was the first attempt and was the wrong shape -- a checker that
+# parses English eventually parses it wrong, which is the family this assertion exists to catch.
+# Runs inside doc-lint so it fires without anyone remembering it.
+.PHONY: model-tiers
+model-tiers:
+	@node .claude/tools/model-tiers.js $(if $(JSON),--json,)
 
 # --- Process-doc STRUCTURAL gate (process §25a / §27.5) -----------------------
 # doc-lint is a DENYLIST scanner and cannot see a file that is internally

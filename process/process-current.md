@@ -1,11 +1,25 @@
 ---
-process_version: 171
+process_version: 172
 effective_from: 2026-08-29
-supersedes: v170, v169, v168, v167, v166, v165, v164, v163, v162, v161, v160, v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
+supersedes: v171, v170, v169, v168, v167, v166, v165, v164, v163, v162, v161, v160, v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
 status: active
 ---
 
 <!-- NOTE ON THE NUMBER: authored as v170 and renumbered to v171 at merge time. OagEventSource published its own v170 concurrently and reached `main` first, so both sections are real and neither is a duplicate of the other. This is the v141/v144/v151 renumbering trap, and it is recorded rather than silently fixed because the fold-forward at the start of this cycle reported `already up to date` and WAS correct at that moment — the window is exactly the time between that check and the fold-back. Nothing was dropped: ROC's v171 sits above OAG's v170, newest-first. -->
+
+<!-- v172 (RETRO, ROC 2026-08-29; fired ON THE OWNER'S REQUEST mid-loop, NOT on debt — `make retro-debt` reported ok. FOCUS QUESTION, owner-set: ***"we should look at all the skills and agents and reassess what models should be used for each of them"***.
+
+**ANSWER, and the first half is not what was asked but is what was found: THE TIER LIST HAD ALREADY DRIFTED, AND NOTHING COULD SEE IT.** §7a claimed `documenter` was **haiku**; it had been **opus**. It omitted `linear` and `jira` entirely. A retro reads that line to decide what to change, so this retro opened by nearly reasoning from a false inventory. It is §F9g's family in the process file itself — a record maintained by hand beside the thing it describes, perishing quietly — and the fix is not a correction but an ASSERTION: `make model-tiers` compares §7a to the agent frontmatter and fails on disagreement, wired into `doc-lint` so it fires without anyone remembering it. **Prose was the first attempt and was the wrong shape** — the parser mis-split parenthetical clauses and reported six false mismatches — so §7a now carries a fenced ```model-tiers``` block: a checker that parses English eventually parses it wrong, which is precisely the family it exists to catch. Proven on all three arms including the drift that really happened.
+
+**SKILLS CANNOT BE TIERED, AND SAYING SO IS PART OF THE ANSWER.** All 14 skills were checked: **none carries a `model:`**, by construction — a skill is an instruction pack loaded into whichever agent invokes it, so it inherits that agent's tier. There is no per-skill model to set and inventing one would be fiction. The real coupling is *does the agent that loads this skill sit at a tier matching the skill's judgement density* — checked, and the one worth stating is that `work-items` is loaded by the haiku `linear`/`jira` agents, which is correct: their use of it is one item read, one issue upserted, no judgement.
+
+**THE ONE EVIDENCE-BACKED TIER MOVE: `tester` sonnet → opus, and §7a had the CFR lever NAMED WRONG.** §7a called the engineer *"the CFR lever"*. The data says otherwise: `dev-validating` **9.2%** (11/120) and `validating` **7.4%** (8/108) are the two highest fail rates in the system, against `building` **0.8%** (1/127) and `reproducing` **0.9%** (1/108). **Failures are CAUGHT at the tester, not prevented at the engineer** — so the agent doing the most consequential judgement was on the cheaper tier. Qualitative support from this session, all of it work sonnet testers did WELL, which is the honest framing (this is a bet that better gets more, not a rescue): induced six distinct gate failures rather than watching a gate print PASS; **FALSIFIED the orchestrator's own hypothesis** about a second defect instance, without which a working test would have been "fixed"; caught a citation slip where a cited CI run belonged to a different sha; independently reproduced a mutation and caught a stale figure in the engineer's own note; broke six CI silent-not-run routes by hand. Affordable to test: tester **5.47M** tokens against engineer **19.54M**, so the constraint agent's tier is untouched. Scored as **`EXP-ROC-017`** with an explicit revert arm — *if the fail-catch rates FALL we paid more and caught less* — and it opens a **§7a scoring quarantine from 2026-08-29** (agent moved: tester).
+
+**NO OTHER TIER MOVED, DELIBERATELY.** `orchestrator` stays opus (the ToC constraint, twelfth read). `flow-manager` stays sonnet — its 24-item intake triage this session was sound and cheap. `linear`/`jira` stay haiku. `cicd`, `discovery`, `product`, `documenter` have produced **no evidence this cycle** and are left alone rather than churned on reputation. **`fable` is DELIBERATELY UNASSIGNED**: it is available and nothing about it has been measured here, and assigning agents on reputation is the unfalsifiable-claim pattern this process rejects everywhere else.
+
+**AND THE HONEST CAVEAT ON THE WHOLE QUESTION:** a model tier is not this cycle's constraint and this retro should not pretend otherwise. The constraint is unchanged for a twelfth read (`orchestrator`/`reported`, wait not reasoning-quality), and the day's real story is **nine defects registered against ~five closed with three tiers red for reasons unrelated to the diff being gated**. No tier change touches either. The change-set is gated on the constraint per §5b as: one **exploit** move (a stronger tester attacks CFR at the stage where failures are actually caught) and one **safety fix** (the drift assertion, which prevents a future retro reasoning from a false inventory).
+
+REGISTRY: **`EXP-ROC-006` KILLED at strike 3** — three opportunities, no measurable move; `loop-gate` check 1 did not fire once this session, which is *unscoreable* rather than positive because every tester was dispatched promptly. **Its machinery is RETAINED as plain practice, not reverted** (§25a) — check 1's scope over `deploying`/`prod-deploying` is sound and stays in `work-items.py`; what is retired is the hypothesis row. **`EXP-ROC-010` → strike 2 on USAGE, not on a metric:** ~15 dispatches this session, `make item-brief` used in **ZERO** of them, every brief hand-authored. The guarded metrics are fine (`dev-validating` 9.6% → 9.2%, CFR steady) but fine for reasons unrelated to the row — **the mechanism is not firing**, which is worse than an unmoved metric. At strike 3 it dies unless the orchestrator uses it or states why hand-authoring is better. ROC 8/8, at cap, slot reused rather than widened. CONSTRAINT TO ATTACK NEXT: unchanged — and per this session's own evidence, by fixing the gates (`DEF-ROC-158`/`161`, both in flight) rather than by widening WIP. -->
 
 <!-- v171 (RETRO, ROC 2026-08-29; INCIDENT arm, DEF-ROC-146 resolved. SHORT. Constraint unchanged, twelfth read, not re-derived. **FINDING: A GATE'S WIRING IS UNTESTED BY DEFAULT, AND THE MECHANISM UNDERNEATH IT IS THAT A SKIPPED JOB SATISFIES A DEPENDENT'S `needs:`.**
 
@@ -136,7 +150,7 @@ ROUTED as **SSF11.4** (three clauses, all plain practice -- NO experiment row, d
 <!-- v111 (FOCUSED retro, ROC 2026-07-27; on main v110 via fold-forward-FIRST — clean, no collision; §F8 routine-batch gate at SLC-ROC-014 close, NO prod incident): SLC-ROC-014 delivered the COMPLETE rules-EDITING capability (edit → mandatory draft-test → publish, live no-redeploy pickup, Simulator parity, content-hash attestation gate + who/when attribution) — UC-056/057/058 all live-stack validated + pushed to origin/main + deployed to aas-test. NO global §-body change. Routed outcomes: (1) engineer.md plain-practice fold — the pre-built_green green bar must exercise the REAL artifact for UI/pipeline slices (fully-themed live axe + same-element aria-label; focus preventScroll + no scrollable ancestor; composed-consumer-against-populated-store acceptance driving consume() end-to-end), extending v110's live-caught→offline-pin; recurring root cause logged in principle-failures/2026-07-27-offline-green-ne-live-correct-ui-pipeline.md. (2) work-items.py + linear-project.py + linear-mapping.md machinery fix (human "fix the in-progress clutter"): blocked never maps to In Progress (Todo/Backlog) and an aggregate whose only non-terminal children are all blocked derives blocked — parked-on-external trees drop out of the active lane in queues/stats/board (107 wi-tests green). (3) EXP-115 POSITIVE again (ROC live catches), EXP-117 → 2/3 POSITIVE (board cadence). Constraint UNCHANGED + not-agent-squeezable (external 46.66% Azure-block + queue 41.93% backlog; agents ≈11%); dev-validation 11.1% / CFR 10.1% is HONEST dev-catch (EXP-108), not decay — the in-system lever is shifting live-defect classes LEFT (measured next on SLC-ROC-015). Registry 7 active, under cap, no rows added. -->
 <!-- v110 (FOCUSED retro, AdixOut 2026-07-24; RECONCILED onto main v109 via fold-forward-then-reapply — main advanced to v109 (ROC SLC-ROC-013 retro) while this AdixOut retro was in flight, so renumbered v109→v110; retro-debt gate — 3 routine: UC-AIDX-028 rework (TWO reject→rework cycles) + SLC-AIDX-011/CHK-AIDX-010 closes, REQ-004's dev consumer-side walking skeleton: C12 bus+grant → C13 routing → C10/C11 ingest standup → OAG handoff, built + validated LIVE end-to-end (synthetic event → C12 → C13 → C10 → C11 → read model → egress). TIGHT: two fix-derived learnings folded as PLAIN PRACTICE, no experiment rows. Constraint UNCHANGED from v105/v108 (registered/queue = artifact latency, ~70% of GLT; squeezable in-system cost = engineer/multi-tenant-eventing). Both learnings were caught by LIVE assert-real-state validation that offline synth-pins passed. (1) SCOPE-GAP → engineer.md + solution-architect.md: "reuse existing X" must be VERIFIED against the real deployed TARGET account/stack, never assumed from a sibling env — SLC-AIDX-011's "reuse the existing C10/C11 ingest" was wrong (C10/C11 were sandbox-only; the migration moved only the egress to dev-dataout), so the engineer STOPPED (§F7) rather than build against an absent dependency and a predecessor UC-030 + architect delta 007 were inserted at the real edge; the §F7 stop was correct. Extends the v97 assert-real-state family. (2) EVENTBRIDGE TARGET PAYLOAD (the double-rework) → engineer.md: for an EventBridge rule→SQS/target that must forward the event's `detail` object verbatim, use `inputPath: "$.detail"` (JSONPath extraction), NOT an `inputTransformer` with a bare `<detail>` object placeholder — the `<placeholder>` idiom quote-strips a nested OBJECT into invalid JSON (`ERROR_CODE=INVALID_JSON`), it only round-trips STRING fields (why the webhook router's flat string fields worked). Root cause found only by adding a target `DeadLetterConfig` to capture the real `ERROR_CODE`/`ERROR_MESSAGE` — so: always wire a target `DeadLetterConfig` and INSTRUMENT-FIRST before guessing at an opaque cross-service delivery failure. UC-028 rework #1 = default-rule envelope-wrap poison (C11's parseEnvelope rejected the wrapped event); rework #2 = the `<placeholder>` INVALID_JSON. Engineer left OFFLINE synth-pins behind for the inputPath/InputTransformer shape + DeadLetterConfig so the payload-shape class is now caught offline (live-caught infra-shape defect → offline pin). Kept in engineer.md not the aws-architecture skill (no clean EventBridge-target section there; narrowest owner = engineer implementation behaviour). EXP-115 (whole-journey/JTBD live validation) scored POSITIVE again (dated confirming note): the live bus-driven E2E caught the scope-gap + BOTH UC-028 delivery bugs offline pins missed. CFR HONESTY: UC-028's two reworks + UC-027's earlier deploy_failed are real DEV-caught change-failures (EXP-108 integrity) — the process working (caught in dev before OAG/prod), NOT decay; CFR ~39% reflects honest dev-stage rejection accounting. Registry unchanged: 8 active (EXP-101,106,107,112,113,115,116,117) — AT cap-8; no rows added/retired. No global-section rules changed; routed changes = engineer.md (2 folds) + solution-architect.md (reuse-verify note) + EXP-115 confirming note. -->
 <!-- v109 (FOCUSED retro, ROC 2026-07-24; RECONCILED onto main v108 via fold-forward-FIRST — main had advanced to v108 (AdixOut tight retro) while this ROC session ran, so this entry is v109; triggered by the §F8 routine-batch gate at SLC-ROC-013 close, NO incident): SLC-ROC-013 (REQ-ROC-003 living-demo foundation, UC-051..055) delivered + validated live-stack + pushed to origin/main on green (CI deploying to aas-test). NO global §-body process change this cycle — the routed outcomes are (1) EXP-116 lean-orchestration ADOPTED into orchestrator.md as plain practice (guards proven safe 2/2, no DORA harm; registry 8→7), (2) EXP-117 board-push cadence advanced to 1/3 POSITIVE. Constraint UNCHANGED and confirmed not-agent-squeezable (`registered`/backlog-aging artifact 57.76% + external-blocked DEF-004 33.55%; agents ≈8.6%); change budget deliberately NOT spent chasing it (constraint-gate). J23 demo-grows DoD + demo-egress isolation pattern kept as ROC project artifacts, not over-generalised. TIGHT retro — score + adopt + drain + fold. -->
-# Current Process — v171
+# Current Process — v172
 
 <!-- v139 (owner instruction, OagEventSource 2026-08-13, NO retro — a direct standing
 instruction from the human owner, folded immediately rather than queued): every update to
@@ -766,11 +780,48 @@ job (make the fold's denominator mean what it says). `EXP-OAG-005` scores it.
 ### 7a. Model tiering
 Each agent's `model:` frontmatter is a tunable lever, scored like any other change:
 match the tier to the **judgment density** of the agent's task, not its prestige.
-Current: **opus** = engineer (long-horizon TDD build, the CFR lever), orchestrator
-(the ToC constraint), solution-architect, ui-designer; **sonnet** = product, cicd,
-tester, flow-manager, discovery; **haiku** = documenter. On any model release the retro
-re-assesses; every tier move is a registered experiment with a named DORA metric and
-a revert condition (cost without a metric move = revert).
+**The documented list DRIFTED from the frontmatter and nothing noticed** (found v172):
+it claimed `documenter` was haiku when it had been opus for some time, and omitted the
+`linear`/`jira` projection agents entirely. A tier list maintained by hand beside the thing
+it describes is a record that perishes (§F9g), so it is now **asserted** —
+`make model-tiers` fails if this section and the agent frontmatter disagree. Do not
+hand-edit one without the other; run the target.
+
+Current, as at v172. **This block is the one `make model-tiers` reads — it is a
+machine-readable declaration, not prose.** Prose was the first attempt and it was the wrong
+shape: a checker that has to parse English will eventually parse it wrong, which is the very
+family this assertion exists to catch. Edit the block; the rationale lives underneath it.
+
+```model-tiers
+opus     engineer
+opus     tester
+opus     orchestrator
+opus     solution-architect
+opus     ui-designer
+opus     documenter
+sonnet   product
+sonnet   cicd
+sonnet   flow-manager
+sonnet   discovery
+haiku    linear
+haiku    jira
+```
+
+**Why each sits where it does.** `engineer` — long-horizon TDD build. **`tester` moved from
+sonnet at v172**: it is the measured CFR lever, `dev-validating` **9.2%** and `validating`
+**7.4%** against `building` **0.8%**, so failures are CAUGHT at the tester rather than
+prevented at the engineer, and §7a had been naming the wrong agent as that lever for as long
+as the line existed (scored as `EXP-ROC-017`). `orchestrator` — the ToC constraint.
+`solution-architect`, `ui-designer`, `documenter` — design and user-facing judgement.
+`linear`/`jira` — pure idempotent projection, one item in and one issue upserted, no
+judgement, correctly the cheapest tier.
+
+**`fable` is DELIBERATELY UNASSIGNED.** It is available and we have measured nothing about
+it here. Assigning agents to a tier on reputation is the unfalsifiable-claim pattern this
+process rejects everywhere else; it gets a tier when a retro has evidence, not before.
+
+On any model release the retro re-assesses; every tier move is a registered experiment with
+a named DORA metric and a revert condition (cost without a metric move = revert).
 
 **Availability resilience.** An agent's `model:` must name a model the session can
 actually run — a pinned-but-unavailable model is a hard stop, not a degraded run

@@ -3337,6 +3337,56 @@ the ratio §F9d is scored on. **The two limbs are scored together, and they can 
 independently:** if arrivals fall and completions do not, we have bought a smaller queue and no
 delivery, which is not what the owner asked for.
 
+### F9d.2 — the arrivals are REQUIREMENTS, not findings, and §F9d above would not have stopped them [v158, ROC]
+
+**Written within the hour of §F9d, against §F9d.** A flow-manager sweep of all 54 intake
+items went looking for the generating mechanism behind the 2.16:1 ratio and found it, and it
+is not the one §F9d prices.
+
+- **2026-08-18 (+38 net).** Sixteen requirements — `REQ-ROC-007` … `REQ-ROC-022` — registered
+  **in one sitting**. That is the source event.
+- **2026-08-27 (+26 net).** Twenty-two arrivals, **every one `agent: product`**:
+  `CHK-ROC-014`…`018`, `SLC-ROC-030`…`037`, `UC-ROC-108`…`116`. This is `/slice-next` JIT
+  replenishment (§F3) **working exactly as designed** — decomposing the 08-18 requirements
+  ahead of Ready starvation. **It is not a defect and must not be "fixed".** It is the
+  cascade, and treating the cascade as the fault would break the replenishment that keeps
+  the loop fed.
+- **A third, quieter source:** roughly half the 43 intake defects are self-referential
+  process/machinery findings thrown off by agents doing real work against the young v82
+  substrate — every dispatch stress-testing a gate for the first time. Expected to taper.
+  A real tax on throughput, **not noise to suppress**, and not the thing to attack.
+
+**So §F9d has a hole, and it is the main one.** §F9d caps FINDINGS against the intake
+`wip_limit`. The 08-18 batch entered through `/requirement`, the human gate, as
+requirements — and would have passed §F9d untouched. **A rule aimed at the wrong producer
+is the v157 failure repeating one layer out**, and it is recorded here rather than quietly
+patched because the compliance reading of §F9d would have looked perfect through the exact
+event that caused the problem.
+
+**The rule: the requirement gate must state the downstream cost before the human accepts.**
+
+A requirement is not one item. It is a commitment to a *cascade* of chunks, slices,
+use-cases and the defects they generate, drawn down at a **measurable** finish rate. Sixteen
+requirements accepted against a whole-project rate near **6 items/day** is accepting a queue
+that cannot be drained, and nothing at the gate said so.
+
+- At `/requirement`, before sign-off, the dossier carries the **current finish rate**, the
+  **current intake depth**, and the **implied completion horizon** for what is being
+  accepted — from `views/stats.md`, not from an estimate.
+- **This does NOT refuse the human's requirements, and must never be implemented as a
+  refusal.** §F5 makes requirement intake the human's call and that is unchanged. The
+  process failure was never that too much was asked for; it is that **nothing showed the
+  owner what accepting it meant.** Priced, the same sixteen may still be the right call —
+  but then the queue depth is a chosen position rather than a surprise, and the retro stops
+  re-diagnosing it every version.
+- **Corollary for the loop:** when intake is deep, the honest report to the owner is the
+  *horizon*, not the depth. "54 items" invites "close some". "At the current finish rate the
+  bottom of this queue is nine weeks out" invites the decision that actually matters.
+
+**Scored with §F9d on the same quantity** (trailing-14-day arrival:completion ratio). This
+limb is the one expected to move it: the finding-generation limb governs the tail, the
+requirement gate governs the head.
+
 ## F10. Fleet — isolated per-project loops, one shared process spine
 Multiple projects run CONCURRENTLY, each as its own isolated loop, feeding ONE shared,
 project-agnostic process. Two layers, deliberately decoupled:

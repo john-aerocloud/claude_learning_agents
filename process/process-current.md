@@ -3700,6 +3700,23 @@ The test is mechanical and requires no judgement:
 
 This binds the closing role — engineer, tester or orchestrator — not "someone later".
 
+**A SECOND WAY THE RECORD AND THE STATE DIVERGE: the record was TRUE and PERISHED [v171].**
+Distinct from the above, and it cost a near-miss the owner caught rather than a gate. The
+orchestrator wrote *"v1.8.0 is now released"* into a dispatch brief; it was accurate when
+measured and **eight releases stale within forty minutes** (`v1.7.1 → v1.9.3`). The owner
+asked *"1.9 is out, do you think 1.8 is latest?"* The engineer had been briefed to make CI
+track the latest release — so a stale literal in the brief was one step from being pinned as
+the target, producing a mechanism that hardcodes the very thing it was built to resolve.
+
+**So: a PERISHABLE fact carries when it was measured and how to re-measure it, and is never
+handed to anyone as a TARGET.** Say *"latest was v1.9.3 at 20:55Z — resolve it yourself"*, not
+*"latest is v1.9.3"*. And a test over a perishable fact asserts the **property** (*this is the
+newest release tag*), never an equality against a literal — a test pinned to a version reds on
+the next release through nobody's fault, which is `DEF-ROC-143`'s harm.
+
+The tell is cheap: **if a number in a brief would be wrong tomorrow, it is a measurement, not
+a fact.** Measurements get a timestamp and a re-measure instruction; facts do not need one.
+
 **The generalisation, which is worth more than the rule.** Three instances landed in one
 session and they share a shape: a `lane:` correction recorded in an event whose edit had
 actually aborted; a co-owned merge whose report read green while duplicating a row; and this.

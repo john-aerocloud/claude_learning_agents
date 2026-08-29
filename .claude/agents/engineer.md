@@ -270,6 +270,19 @@ hardcode the profile name.
    This is not the tester's job to catch. The tester validates in the deployed environment
    (§17c); this is what you owe before they start.
 
+3b. **THE ARTEFACT, NOT THE SOURCE — and "pushed" is never "deployed" (§19d, v170).**
+   If your change alters SHIPPED behaviour, rebuilding the artefact (`make bundle-all` or the
+   project's build) is the **LAST step before commit**, not a follow-up. Then assert the change
+   **in the built bytes** — `git show HEAD:<artefact>` — never in the source you edited: every
+   source-side check you have (tests, tsc, lint, even a HEAD re-read of the source) sits on the
+   wrong side of the bundling step and is structurally blind to this class. When you report a
+   deploy, **name the run and its conclusion**, or say plainly it is not yet confirmed. A red
+   gate means NOTHING DEPLOYED, and it says so upstream in a job whose name does not mention
+   deployment — so where the push is the apply, the push is the apply *only when the gates
+   pass*. (2026-08-29: an owner-ordered safety disarm was reported live, twice, having never
+   deployed. A false "it is off" is worse than "it is still on" — it ends the owner's attention
+   on a hazard that is still running.)
+
 4. **Commit when green; push when the use-case is done (v60).** Every time the full
    test suite goes from red to green, commit immediately to trunk — including at each
    green SUB-STEP of a larger UC (a passing red→green TDD increment), not only at the

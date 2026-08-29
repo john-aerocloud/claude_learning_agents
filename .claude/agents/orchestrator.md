@@ -506,7 +506,12 @@ so it runs without a permission prompt. That means:
   dominant overhead.
 - **Multi-instance (§0a):** your parent-repo commits (process/agent-system) go on
   the instance branch `instance/<project>` and reconcile to `main` continuously —
-  reconcile latency stays low (§0a). Do NOT append a use-case's `validated` event
+  reconcile latency stays low (§0a). **Commit process-layer work AS YOU PRODUCE IT,
+  and run `make project-foldback` at the close — never batch to the end of a cycle.**
+  This is not hygiene, it is the measured mechanism: reconcile latency rose 20.6h →
+  23.3h → 37.4h across three retros that each recorded fold-back as done, and fell to
+  **0.4h** in the cycle that committed five times as it went instead of once at the
+  end. Latency is a gross-lead-time component, and the batch is what creates it. Do NOT append a use-case's `validated` event
   until the tester's evidence is on the item (§17a); the `linear`/`jira` projection
   agent then mirrors it to the board.
 

@@ -1,5 +1,7 @@
 # IMP-032 — local is not a faithful model of CI, and both fidelity mechanisms already exist
 
+**Status:** QUEUED — BLOCKED ON THE OWNING PROJECT (re-decided v159 retro, ROC 2026-08-29). Cited by ACTIVE OagEventSource row `EXP-OAG-004`; same standing limit as `IMP-031`. ROC hit an adjacent instance this cycle (`DEF-ROC-086`'s tsc-vs-vitest gap, where local strips types and CI checks them), which is corroborating evidence the class is real.
+
 **Opened:** 2026-08-21 (v147 retro, OagEventSource)
 **Focus question:** *why are we finding test failures on a CI pipeline and not locally?*
 **Owner:** cicd + the project Makefile (project-repo lane)

@@ -1,5 +1,7 @@
 # IMP-012 — Delivery-system optimisation (throughput + process-overhead)
 
+**Status:** SUPERSEDED (v159 retro, ROC 2026-08-29) — its three named causes have each been addressed elsewhere: single-tree commit contention by `isolated-commit.js`/`make commit-isolated` (DEFECT-OAG-058), hidden-edge collisions by the edge-ledger + `loop-gate`, and hand-orchestration latency by §F9d/§F9d.1/§F9e plus `IMP-034`. Nothing here is unbuilt AND unrepresented; keeping it open double-counts work that now has owners.
+
 **Owner:** orchestrator (+ cicd for tooling, flow-manager for the edge model). Queued with product work (process §32).
 **Decision anchor:** decision-log `DELIVERY-SYSTEM-OPTIMISATION-SCOPED` (2026-06-30, human).
 **Why:** work was building but not *shipping* (ship dammed by the gated cutover + a blocked push), and build-concurrency was capped by (a) single git-tree commit contention, (b) hidden-edge collisions (O2↔O3 on the `normalise()` dispatch seam), and (c) hand-orchestration latency + unmeasured main-thread process-tax.

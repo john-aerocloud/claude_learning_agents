@@ -1,5 +1,7 @@
 # IMP-021 — impacted-tests understands the `@covers` prefix/label vocabulary natively
 
+**Status:** QUEUED (re-decided v159 retro, ROC 2026-08-29) — real and unbuilt. Kept because change-impact selection that cannot be trusted pushes testers toward full-suite runs, which is lead time. Not scheduled this cycle: it lost the comparison against production-correctness defects and the Overview use-case chain.
+
 **Opened:** 2026-07-23 (ROC v103 retro)
 **Owner:** cicd (tooling — `.claude/tools/impacted-tests.js`)
 **Target metric:** tester lead time + CFR (change-impact selection is trustworthy without a

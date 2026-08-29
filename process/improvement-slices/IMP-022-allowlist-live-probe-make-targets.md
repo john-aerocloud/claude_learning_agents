@@ -1,5 +1,7 @@
 # IMP-022 — allowlist the AdixOut live-probe `make` targets so validation is reproducible
 
+**Status:** QUEUED (re-decided v159 retro, ROC 2026-08-29) — AdixOut-origin, not ROC's to schedule. Noted that ROC hit the identical gap this cycle and fixed its own instance (`pps-event-aggregation.aas.aegis.mobi` added to the committed allowlist), which is corroborating evidence that the class is real across projects.
+
 **Opened:** 2026-07-24 (AdixOut v105 retro)
 **Owner:** cicd / config (`.claude/settings.json` allowlist + project Makefile)
 **Target metric:** CFR + tester lead time (live validation runs reproducibly in a

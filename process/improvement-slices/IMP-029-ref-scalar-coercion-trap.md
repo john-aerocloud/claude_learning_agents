@@ -1,5 +1,7 @@
 # IMP-029 — `ref:` is silently coerced to `int` when a short sha is all-digits
 
+**Status:** QUEUED (re-decided v159 retro, ROC 2026-08-29) — OagEventSource-origin; ROC reports, does not retire (§25a v143/v145). Still real: a silent int coercion on an all-digit short sha corrupts the one field `loop-gate`'s push/ancestry checks resolve against.
+
 **Opened:** 2026-08-01 (OAG retro v126). **Owner:** work-items machinery
 (`.claude/skills/work-items/scripts/work-items.py`). **Found by:** the engineer building
 `make loop-gate` (EXP-123), who worked around it locally and correctly declined to widen

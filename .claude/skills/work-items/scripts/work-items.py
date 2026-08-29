@@ -5044,6 +5044,17 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
     #         before the next wave of dispatches adds to the pile at stake.
     findings.extend(compute_sequencer_guard())
 
+    # --- 8b. AM I WORKING FROM A CURRENT PROCESS? — DELEGATED (§19e, v170) -----
+    #         We measured reconcile latency OUTWARD for months and never INWARD, and
+    #         the cost of that is not a stale document — it is DUPLICATED WORK, which
+    #         is invisible in every delivery metric because it looks like delivery.
+    #         MEASURED 2026-08-29: this instance sat at v155 while main reached v169
+    #         and rebuilt a control (§F11) main already had, from the same owner
+    #         instruction, on the same day. It surfaced only because a human said to
+    #         pull the base in. Fold-BACK has a gate and an unattended close step;
+    #         fold-FORWARD had neither, so nothing was ever going to say this.
+    findings.extend(compute_process_currency())
+
     # --- 9. a file a committed make target RUNS must be on trunk — DELEGATED ---
     #        (OI-GITIGNORE-SWALLOWS-COMMITTED-TOOLS). This is the ONLY workflow that
     #        can run it: the analyser lives in the agent-system repo, so a project's
@@ -7309,5 +7320,102 @@ def main(argv=None):
     a.func(a)
 
 
+
+# ---------------------------------------------------------------------------
+# §19e / EXP-OAG-008 — THE PROCESS-CURRENCY LIMB
+#
+# Reports how far `main` is ahead of this worktree's merge-base AND NAMES THE
+# PROCESS SECTIONS THAT CHANGED. Naming the sections rather than counting commits
+# is the whole design: "14 commits behind" is a number people learn to scroll past,
+# while "§F11 changed and you are about to write a coupling gate" is a fact that
+# stops them. A limb that only ever prints a count is a control that cannot come
+# back negative — this project's dominant failure family — so the count is the
+# trigger and the SECTION LIST is the payload.
+#
+# SEVERITY, and why it is graded rather than blocking outright:
+#   nothing behind          -> no finding.
+#   behind, no process/     -> ADVISORY. Ordinary drift; folding forward is cheap
+#         but nothing is at stake, and blocking here would train people to waive it.
+#   process/ sections moved -> BLOCK. This is the state that cost a session: the
+#         rules you are about to work under have changed and you cannot know it.
+#   cannot establish        -> UNKNOWN. An unevaluated precondition is not a met one
+#         (DEF-ROC-046's direction) — never silently "current".
+# ---------------------------------------------------------------------------
+PROCESS_PATHS = ("process/", ".claude/agents/", "CLAUDE.md")
+
+
+def _git_out(args, timeout=30.0):
+    proc = subprocess.run(["git", "-C", ROOT] + args,
+                          capture_output=True, text=True, timeout=timeout)
+    if proc.returncode != 0:
+        raise RuntimeError((proc.stderr or "").strip()[:200] or "git failed")
+    return proc.stdout
+
+
+def compute_process_currency(trunk="main", timeout=30.0):
+    """Is this worktree's branch working from a current process layer?"""
+    common = {"check": "process-currency", "ids": []}
+    try:
+        head = _git_out(["rev-parse", "--abbrev-ref", "HEAD"], timeout).strip()
+        if head == trunk:
+            return []                       # the integration tree is current by definition
+        base = _git_out(["merge-base", "HEAD", trunk], timeout).strip()
+        trunk_head = _git_out(["rev-parse", trunk], timeout).strip()
+        if base == trunk_head:
+            return []                       # already contains trunk
+        behind = _git_out(
+            ["rev-list", "--count", "{}..{}".format(base, trunk)], timeout).strip()
+        changed = _git_out(
+            ["diff", "--name-only", "{}..{}".format(base, trunk)], timeout).splitlines()
+    except Exception as exc:                                    # noqa: BLE001
+        return [dict(common, severity="unknown", message=(
+            "[process-currency] NOT ESTABLISHED — could not compare against "
+            "'{}' ({}: {}). An unevaluated precondition is not a met one: this is "
+            "exactly the state in which an instance rebuilds a control that already "
+            "exists upstream. Remedy: `make project-update PROJECT=<project>`."
+            .format(trunk, type(exc).__name__, str(exc)[:120])))]
+
+    process_files = sorted({f for f in changed
+                            if any(f.startswith(p) or f == p for p in PROCESS_PATHS)})
+    if not process_files:
+        return [dict(common, severity="advisory", message=(
+            "[process-currency] {} commit(s) behind '{}', none of them in the process "
+            "layer. Nothing is at stake; fold forward when convenient: "
+            "`make project-update PROJECT=<project>`.".format(behind, trunk)))]
+
+    sections = _changed_process_sections(base, trunk_head, timeout)
+    detail = ", ".join(sections[:8]) if sections else ", ".join(process_files[:6])
+    return [dict(common, severity="block", message=(
+        "[process-currency] {} commit(s) behind '{}' AND THE PROCESS LAYER MOVED — {}. "
+        "You may be about to write a rule that already exists upstream: on 2026-08-29 an "
+        "instance 14 versions behind rebuilt §F11 from the same owner instruction on the "
+        "same day, and it surfaced only because a human said to pull the base in. Fold "
+        "forward BEFORE the next pull and before writing any process version: "
+        "`make project-update PROJECT=<project>`. When the two collide, MAIN'S TEXT "
+        "GOVERNS.".format(behind, trunk, detail)))]
+
+
+def _changed_process_sections(base, trunk_head, timeout=30.0):
+    """The §/## headings added on trunk since the merge-base. Best-effort and
+    deliberately so: the section NAMES are the payload, but a parse failure must
+    degrade to the file list rather than take the limb down — a currency check that
+    breaks on an unexpected heading is a currency check nobody keeps."""
+    try:
+        diff = _git_out(["diff", "-U0", "{}..{}".format(base, trunk_head),
+                         "--", "process/process-current.md"], timeout)
+    except Exception:                                           # noqa: BLE001
+        return []
+    seen, out = set(), []
+    for line in diff.splitlines():
+        if not line.startswith("+") or line.startswith("+++"):
+            continue
+        m = re.match(r"\+#{2,4}\s+(?:§)?([A-Za-z0-9]+[0-9a-z]*)\.", line)
+        if m and m.group(1) not in seen:
+            seen.add(m.group(1))
+            out.append("§" + m.group(1))
+    return out
+
+
 if __name__ == "__main__":
     main()
+

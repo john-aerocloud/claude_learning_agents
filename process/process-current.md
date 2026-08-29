@@ -2068,6 +2068,46 @@ agree.
   1 or 2, permanently removing that divergence class.
 Target: MTTR + CFR. (Per-role: `engineer.md`, `cicd.md`.) [EXP-070]
 
+## 19c. THE PUSH BOUNDARY: coverage may not go DOWN, and coupling is LOOKED AT [v156, owner instruction 2026-08-29]
+Two checks at the moment work leaves a machine. Both exist because this system keeps
+finding the same fault — **a control that exists but is not read** (`DEFECT-OAG-119`, a
+dev gate asserting nothing live; `DEFECT-OAG-108`, a governed path bypassed; the coverage
+provider *declared in config and never installed*, so coverage had never run once).
+
+**(a) COVERAGE MAY NOT GO DOWN — it is a ratchet, not a target.**
+- The floor is COMMITTED (`src/app/coverage-floor.json` shape) and read by a gate that
+  fails the push. It is set to **where the project actually is**, never to an aspiration:
+  a fixed target is either unreachable — and then it gets waived, which is how a gate
+  becomes decoration — or already met, and then it does nothing.
+- **Raising the floor after an improvement is part of FINISHING the work**, not a
+  separate chore. The gate prints the exact line to paste.
+- Lowering it is not a normal operation. It means deliberately shipping less-tested code,
+  so it needs a reason **in the commit message** that a reviewer can refuse.
+- The gate MUST distinguish *cannot measure* from *below floor* and never let the first
+  read as a pass — a caller who cannot tell a broken measurement from a real regression
+  will fix the wrong one.
+- Any jitter tolerance must be **measured and declared next to the numbers**, and an
+  absurd one must fail closed: switching a gate off has to look like switching it off.
+
+**(b) BEFORE PUSHING, LOOK AT THE COUPLING OF THE WORK YOU ARE ABOUT TO PUSH, AND ATTEMPT
+AN IMPROVING REFACTOR — then re-run the tests.**
+- *Attempt* is deliberate. **"I looked, and here is why I left it" is a valid outcome;
+  skipping the look is not.** A mandatory refactor before every push would be ignored
+  within a week; a mandatory *look* is affordable every time.
+- It is read off the **generated** coupling/dependency view, never off an impression. A
+  hand-maintained coupling map goes stale and then lies, which is worse than absent.
+- The outcome is **RECORDED on the item** — so *considered-and-declined* is
+  distinguishable from *not-done*. An unfalsifiable rule is decoration, which is the
+  exact failure this section exists to stop.
+- The tests must still pass afterwards. A refactor that is not re-verified is a change,
+  not an improvement.
+
+**Why the pair.** Coverage tells you whether the change is *tested*; coupling tells you
+whether the next change will be *possible*. Neither is visible in a diff, and both decay
+silently — so both are checked where the work leaves, and both are **published** rather
+than left in a CI log (`REQ-OAG-CODE-QUALITY-VISIBILITY`).
+Target: CFR + gross lead time. (Per-role: `engineer.md`.)
+
 ---
 
 # STAGE 5 — Validate

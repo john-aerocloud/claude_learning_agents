@@ -215,6 +215,25 @@ hardcode the profile name.
      OnBlock/OffBlock/TakenOff event out of the window → every flight fell back to
      "Scheduled" while 412 unit tests stayed green. Gate/Arrival columns worked
      because they read fields, not the window-seeded marker.)
+3a. **BEFORE EVERY PUSH — the §19c push boundary. Two checks, both cheap, both recorded.**
+   - **Coverage may not go down.** Run the project's coverage gate (`make coverage` then
+     `make coverage-gate`, or the project's equivalent). It is a RATCHET against a
+     committed floor, not a target. If coverage IMPROVED, **raise the floor in the same
+     push** — the gate prints the exact line; that is part of finishing the work, not a
+     later chore. If it FELL, cover the new code. Lowering the floor is not a normal
+     operation: it means deliberately shipping less-tested code and needs a reason in the
+     commit message that a reviewer can refuse. A gate reporting *cannot measure* is
+     never a pass — treat it as red and find out why.
+   - **Look at the coupling of what you are about to push, and ATTEMPT a refactor.** Read
+     the GENERATED coupling view (`make analysis-report` / the published quality page),
+     never your impression of the code. *Attempt* is the literal instruction: **"I looked,
+     and here is why I left it" is a valid outcome — skipping the look is not.** If you
+     refactor, re-run the tests; a refactor that is not re-verified is a change, not an
+     improvement.
+   - **Record the outcome on the item**, in the event note: what the coverage delta was,
+     and what you did or deliberately did not refactor and why. An unrecorded look is
+     indistinguishable from no look, and a rule nothing can falsify is decoration.
+
 3. **Commit when green; push when the use-case is done (v60).** Every time the full
    test suite goes from red to green, commit immediately to trunk — including at each
    green SUB-STEP of a larger UC (a passing red→green TDD increment), not only at the

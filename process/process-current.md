@@ -1,9 +1,11 @@
 ---
-process_version: 157
-effective_from: 2026-08-28
-supersedes: v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
+process_version: 158
+effective_from: 2026-08-29
+supersedes: v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
 status: active
 ---
+
+<!-- v158 (OWNER-DIRECTED, ROC 2026-08-29; NOT a retro — `make retro-debt` reported ok (routine 0/3, incidents 0). Raised by the owner mid-loop: *"the lead time on everything is going up and up"* and *"the art is finishing things."* MEASURED IMMEDIATELY, and it reframes six retros of work: over the trailing 14 days ROC registered **179** items and finished **83** — arrival:completion **2.16:1**, net **+96**; July net +49, August net +99; two batch-generation days carry most of it (2026-08-18 **+38**, 2026-08-27 **+26**). **`orchestrator`/`reported` has been the named constraint for six consecutive reads while every remedy aimed at it SUCCEEDED ON ITS OWN TERMS** — §F9b honoured 9 of 9, v157 re-decided 17 findings onto a real staggered schedule — because all three remedies (§F9b, §F9b.1, §F9c) went at the QUALITY OF THE DECISION and **not one went at the NUMBER OF ARRIVALS**. A decision is not a finish: a decided item sits in the queue accruing dwell exactly as an undecided one does. **THE ERROR CORRECTED, and it is a misreading of our own rule:** v126 made intake-over-cap advisory for the **PULL** and was right (the remedy for a deep backlog is to deliver faster, so blocking delivery inverts the constraint); v156 then wrote *"Intake gains NO cap from this rule. Little's Law governs WIP, not backlog depth (v126)"*, carrying an argument about the DRAIN across to the FEED. They are opposite interventions, and Little's Law does not merely permit capping arrival, it PRESCRIBES it — L = λW, and with λ at 2.16× the departure rate W rises without bound whatever is done downstream. **ROUTED: §F9d — admission by displacement.** At or over the intake `wip_limit`, a new finding is admitted only by declining an existing intake item, attaching itself as evidence to one, or being declined at birth; below the cap, arrival is unrestricted. The §F8a objection is answered head-on rather than finessed: an item that sits fifteen days and is never pulled IS ALREADY A DECLINE — one nobody wrote down, that cost fifteen days of lead time to not-decide, and that misreports itself as planned work in every view. §F8a forbids closing a finding AS IF FIXED or to flatter a metric; it does not forbid declining one with its reason recorded, which is the honest position when the oldest intake item is 14.7d old against a whole-project finish rate near 6/day. Three evasions are priced in advance (no self-displacement, a re-defer is not a displacement, no batch exemption — N findings at the cap need N displacements). **SCORED ON EFFECT, per v157's own generalisable lesson:** the quantity is the trailing-14-day arrival:completion ratio, target ≤1.0, baseline 2.16:1 — NOT "did every registration carry a displacement", which is the compliance reading whose perfect score coexisted with a rising metric. Dies at strike 2 if the ratio does not fall below 1.5. **§F9d.1 — THE OTHER HALF, and possibly the larger one: a cycle that runs at WIP occupancy 1 of 8.** v157 recorded occupancy **1 of 8 all cycle** with that one item inactive for 23h of it, ran **as a single session with ZERO subagent dispatches**, and §F puts agent work-effort at **0.2% of GLT** (everyone doing the work is 11.98% combined). The system is not slow, it is IDLE — which is exactly why five retros correctly declined to ELEVATE. So the loop's obligation is to FILL WIP, not to pull one item and report: a pull of K < `wip_limit` is a FINDING about the dependency model, not an outcome; look ACROSS TYPES before concluding the set is full (a three-way collision inside one React file caps the use-case set at 1 and says nothing about whether a defect can run alongside); resource-class exclusivity (§F2b) stays but must be NAMED AND RARE, not the accidental default. The two limbs are scored together and can fail independently — arrivals falling while completions do not is a smaller queue and no delivery, which is not what was asked for. **NOT MECHANISED YET, and that is the known failure mode of this exact section** (v157: *"v156's two remedies were PROSE and §F9a's implementing item was never built"*): `loop-gate` lives in `work-items.py`, which an engineer holds exclusively this cycle under §F2b for `OI-ROC-006`. The mechanisation is owed as a registered item the moment that lock clears, and this note is the standing evidence if it is not. CONSTRAINT TO ATTACK NEXT: unchanged in identity — `orchestrator`/`reported`, 33.78%, median 37h/item, n=105 — but for the first time attacked at the arrival rate rather than at the decision quality. -->
 
 <!-- v157 (retro, ROC 2026-08-28; fired MECHANICALLY on INCIDENT debt — `make retro-debt` reported **RETRO DUE [incident (immediate)]**, routine 7/3 and 2 incidents, and BLOCKED the pull.) FOCUS QUESTION, default: *"what was the largest contributor to gross lead time, and what strategies can reduce it while protecting DORA?"* ANSWER — **`orchestrator`/`reported` is now the #1 owner at 31.32% (median 13.0h/item, n=105, backfill 0.00%), overtaking `external` at 30.95%; it is the SIXTH consecutive read of the same constraint, and this retro's whole finding is WHY the previous five retros' fixes did not move it.** `queue` 23.65%, engineer 7.81%, tester 4.17%, cicd 2.10% — everyone doing the work is **11.98%** combined. GLT/item: median 36,430s, p85 300,642s, n=104. **THE HEADLINE, and it is one layer down from v156's:** v156 routed §F9b (*a finding is registered WITH its triage decision, in the same act*) at this exact constraint. **§F9b was honoured 9 of 9** — every defect registered since the v156 close carried a decision in the SAME COMMIT that created its file, verified with `git log -S defer_until` rather than from item text, which carries no timestamp for a frontmatter scalar. **And `reported` still rose, 29.78% -> 31.32%, median 31,485s -> 46,703s.** The cause: **six of the nine decisions were the identical `defer_until: 2026-08-28`, written in one batch, expiring inside 13 hours.** So this is NOT the familiar "documented obligations are skipped". It is the finding that **a mechanised rule can also fail, when the mechanism checks COMPLIANCE instead of EFFECT** — a control satisfiable without achieving its purpose, this project's most-registered failure family, appearing INSIDE the fix for that family. EXP-ROC-009's own condition (c) had foreseen reflexive FAR-dated defers and pointed the 30d total-age ceiling at them; what arrived was the mirror, reflexive NEAR-dated defers, which a 30d ceiling on a one-day-old item can never reach. The guard was aimed at the wrong end of the range. WHY-CHAIN (5 levels): (1) `orchestrator`/`reported` is #1 at 31.32%; (2) leaving `reported` needs `triaged`, orchestrator-only (v156's chain, unchanged — `DEF-ROC-128` still unbuilt); (3) v156's two remedies were PROSE, and §F9a's implementing item was never built; (4) §F9b WAS obeyed, but the cheapest legal decision is a defer with no minimum horizon, so the decision collapsed to "ask me tomorrow"; (5) ROOT CAUSE: **every producer in this system is gated except the one that writes the gates.** Item transitions are edge-checked, tests must name their criterion, parks must carry a probe, deploys must show their `needs` closure — and the retro's own outputs (a fold-back, an improvement slice, a rule) are checked by nothing, so they are the only outputs that can quietly not happen. MEASURED THREE WAYS IN ONE CYCLE: **(a)** `instance/ROC` is **12 commits / 37.4h** ahead of `main` with the integration tree CLEAN throughout — every fold-back would have exited 0 on one command — and reconcile latency rose 20.6h (v155) -> 23.3h (v156) -> 37.4h, each of those retros recording step 8a as done; **(b)** 33 improvement slices, **8 with no `**Status:**` line at all**, several QUEUED since 2026-06-06, and `IMP-033` (opened by the v150 retro four days ago) has `park_remedy` in **ZERO lines of machinery and ZERO items** while `EXP-ROC-004` sat at strike 1 of 3 **being scored against it** — which would have archived the hypothesis as "no measurable effect" when the truth is "never built", a FALSE negative that is worse than no row; **(c)** §F9b above. EXPLOIT: **`loop-gate` check 17 `undecided-arrival`** (§F9b at the CYCLE clock, where check 4's is 7 days) **+ `_defer_is_decision`, a MINIMUM DEFER HORIZON** — a defer under `DEFAULT_MAX_BACKLOG_AGE_DAYS` in the future is not a decision, because that is the window the gate already grants for free, so it decides nothing. Measured from `now`, NOT from queue entry: the first version measured from entry and therefore did nothing about an aged item snoozed daily, which is the 7d-to-30d window between check 4 and the total-age ceiling. Folded into `EXP-ROC-009` rather than opened as a new row — same hypothesis, now with teeth — with the commitment that if the `reported` median does not fall at v158 the row DIES at strike 2 with no further argument. SUBORDINATE: **checks 18 `reconcile-latency` and 19 `retro-output-unbuilt`**, registered as `EXP-ROC-012`. Check 18 blocks only when the integration tree is CLEAN (fold-back would exit 0 — one command, always available) and stays ADVISORY when it is dirty, because blocking on a remedy the loop cannot reach is the `DEF-ROC-083` unsatisfiable-gate failure. Check 19 blocks on an open slice cited by an active row THIS project owns, is ADVISORY for another project's rows (§25a v143/v145 gives a retro no standing over those, only the right to report and add a strike), and ADVISORY for the rest of the aging queue. Ownership is read from the row's ORIGIN CELL, not the whole row — two earlier attempts were wrong in instructive ways, recorded in the code: asking the FILESYSTEM which projects exist fails because a per-project worktree contains exactly one, and searching the WHOLE ROW fails because one OagEventSource row mentions ROC in its prose and a mention is not ownership. ELEVATE: **NOT taken.** Everyone doing the work is 11.98% of GLT and `wip` occupancy was **1 of 8** all cycle (and that one item, `DEF-ROC-123`, had no recorded activity for 23h of it) — adding capacity to a system that is 99% idle buys nothing. **DELIVERED:** `DEF-ROC-140` — **the test-requirement gate was blind to EVERY PLAYWRIGHT SUITE.** `test.describe(...)` matched no branch of its call regex (the lookbehind rejects `describe` after a `.`, and `test` cannot absorb `.describe`), so 16 suites in 11 files were invisible and their cases inherited no suite title. limb1 1145 -> 1138; three of the seven mis-counted cases landed yesterday and BLOCKED the loop as a ratchet REGRESSION that had not happened, while the remedy the gate printed ("delete it, or register the criterion") would have damaged a correct test. The other four had been frozen in the 2026-08-24 baseline since the first measurement, so the committed floor of 1142 was unreachable by construction. Found by asking §F5e's second question of the parser — *what do you actually measure* — which is `EXP-ROC-008`'s mechanism working. **DECIDED, not delivered, and the capacity signal is deliberate:** 17 findings whose recorded "decisions" decided nothing were re-decided onto a REAL staggered schedule, two per slot from 2026-09-05, ordered by value/cost — not a batch re-stagger, which is the `aged-backlog-defer-ceiling` pathology. `DEF-ROC-055` (value 5, an uncaught poison loop that loses events for ever) takes the EARLIEST legal slot rather than a pull, and that is the honest capacity statement of this cycle: ROC has 54 items in intake and delivered machinery this cycle. QUALITY: CFR **7.8%** all-time (up from 7.4% — the RISE `EXP-ROC-008` predicts as its good outcome, failures becoming recordable); `dev-validating` **9.4% (11/117)**, still the highest in the system; `building` and `deploying` **0.0%**; rework 4.9% (13/267). REGISTRY: 6 ROC rows -> `EXP-ROC-004` **PAUSED at 0/3 (never built, clock stopped, resume condition recorded)**, strikes recorded on 006/007/008/009/010, `EXP-ROC-012` opened. TOKEN REVIEW (§24): §E reports 1.7% plumbing / 98.3% delivery. `EXP-ROC-010` (`make item-brief`) is **UNSCORED with no sample** — this cycle ran as a single session with ZERO subagent dispatches, so median-tokens-per-dispatch has no denominator; recorded as strike 1 rather than skipped, because a row that is never scored lives for ever. No new token change routed: the measurable cut from v156 has not yet had a chance to be measured, and routing a second one would make neither attributable. RECONCILE LATENCY: **37.4h with 12 commits batched** at retro open, up from 23.3h (v156) and 20.6h (v155) — THIRD consecutive rise, now mechanised as check 18 and scored on `EXP-ROC-012`. Fold-back run at close. CONSTRAINT TO ATTACK NEXT: `orchestrator`/`reported`, **31.32%, median 13.0h/item, n=105** — unchanged in identity for six reads, but for the first time with a mechanism on its cheapest evasion. -->
 
@@ -3211,6 +3213,129 @@ were checked by nothing.
 - **When a slice is not built, PAUSE its row's clock — do not score it and do not retire
   it.** Record the resume condition, and let check 19 keep reporting the slice every run
   so the pause cannot become a silencer. `EXP-ROC-004` is the founding case.
+
+## F9d. The intake cap gates ARRIVAL, not the pull — admission by displacement [v158, ROC]
+
+**Owner ruling, 2026-08-29: _"the lead time on everything is going up and up"_ and _"the
+art is finishing things."_**
+
+**The measurement that settles it.** Over the trailing 14 days ROC registered **179** items
+and finished **83** — arrival:completion **2.16 : 1**, net **+96**. July net **+49**, August
+net **+99**. Two days carry most of it (2026-08-18 **+38**, 2026-08-27 **+26**): batch
+finding-generation, from retros and gate sweeps. A queue fed at twice its drain rate makes
+rising lead time a **mechanical certainty**, not a puzzle. This is why `orchestrator`/
+`reported` has been the named constraint for **six consecutive reads** while every remedy
+aimed at it succeeded on its own terms.
+
+**The error this corrects, and it is a real misreading of our own rule.** v126 made
+intake-over-cap **advisory** for the **pull**, and was right: the remedy for a deep backlog
+is to deliver faster, so a block that stops delivery inverts the constraint. v156 then wrote
+*"Intake gains NO cap from this rule. Little's Law governs WIP, not backlog depth (v126)"* —
+carrying an argument about the **drain** across to the **feed**. Those are opposite
+interventions. Blocking the pull suppresses the drain; capping arrival suppresses the feed.
+**Little's Law does not merely permit the second, it prescribes it:** L = λW, and with λ
+(arrivals) at 2.16× the departure rate, W rises without bound whatever we do downstream.
+For three versions every remedy went at the *quality of the decision* — §F9b (decide at
+registration), §F9b.1 (a defer under 7d is not a decision), §F9c (gate the retro's own
+output) — and **not one went at the number of arrivals.**
+
+**And the decisions did improve.** §F9b was honoured **9 of 9**; v157 re-decided 17 findings
+onto a real staggered schedule. Intake still grew. That is the finding: **a decision is not a
+finish.** A decided item still sits in the queue accumulating dwell, and it counts in `L`
+exactly as an undecided one does.
+
+### The rule
+
+**When intake is AT or OVER its `wip_limit`, a new finding is admitted only by DISPLACEMENT.**
+In the same act that registers it, the discovering role must do one of:
+
+1. **Decline an existing intake item**, with the reason — the new finding takes its slot; or
+2. **Attach the finding as evidence to an existing item** rather than creating a new one
+   (the cheapest and usually the most honest option — see the duplicate/subsumption sweep
+   below); or
+3. **Decline the new finding at birth**, recorded with its evidence so it is findable if it
+   recurs.
+
+Registration without one of these is refused. **Below the cap, arrival is unrestricted** —
+this is a cap, not a tax on discovery.
+
+### The objection this must answer, because it is the strongest one
+
+**§F8a says: never close a verified-real finding to shrink a number.** That rule stands and
+this does not repeal it. The resolution is that **the choice was never "keep it or lose it"**:
+
+> An item that sits in a queue for fifteen days and is never pulled **is already a decline**
+> — one nobody wrote down, that cost fifteen days of lead time to not-decide, and that
+> misreports itself as planned work in every view.
+
+So the distinction §F8a draws is between closing a finding **as if fixed**, or to make a
+metric look good — still forbidden, and a lie — and **declining it with its reason recorded**,
+which is an explicit, honest product decision that we accept this defect. The second is what
+this rule requires. **Say plainly what is being accepted.** The oldest ROC intake item is
+14.7 days old against a whole-project finish rate near 6 items/day; pretending 54 items are
+scheduled work is the less honest position.
+
+### Anticipating the evasion — because every rule here has been met by its cheapest legal move
+
+v157's lesson, stated generally: *ask of every control not only did the rule fire, but did the
+quantity move; where they disagree, believe the quantity.* So, in advance:
+
+- **The displaced item may not be the one just registered**, nor one created this cycle. That
+  is self-satisfaction, and it is the obvious cheap move.
+- **A displacement is not a re-defer.** Moving an item's `defer_until` is not declining it and
+  does not free a slot; §F9b.1 already governs defers.
+- **Batch registration does not get a batch exemption.** N findings at the cap need N
+  displacements. A retro that generates 40 findings in a day is exactly the event this rule
+  exists to price — and pricing it is the point, not a side effect.
+
+### Scored on EFFECT, not on compliance
+
+**The scored quantity is the trailing-14-day arrival:completion ratio, and the target is
+≤ 1.0.** Not "did every registration carry a displacement" — that is the compliance reading
+whose perfect score coexisted with a rising metric at v157. Baseline at v158: **2.16 : 1
+(179 / 83)**. Secondary: intake depth (54) and the `reported` share of gross lead time
+(33.78%, median 37h, n=105).
+
+**If the ratio does not fall below 1.5 by the next retro, this rule is wrong and should die
+at strike 2** — the same commitment `EXP-ROC-009` carries. The honest alternative it would
+lose to: that findings are not over-generated at all, and the real fault is that the system
+finishes too little (see F9d.1, which is the other half of this and may be the larger half).
+
+### F9d.1 — a cycle that runs at WIP occupancy 1 of 8 is the other half [v158, ROC]
+
+**Capping arrivals only helps if the drain is real, and ours is barely running.** The numbers
+that make this a peer of the rule above, not a footnote:
+
+- v157 recorded `wip` occupancy at **1 of 8 all cycle**, and that one item had **no recorded
+  activity for 23h** of it.
+- v157 also recorded that the cycle ran **as a single session with ZERO subagent dispatches**
+  — an orchestration loop that dispatched nobody.
+- Agent work-effort is **0.2% of gross lead time** (§F). Everyone doing the work is **11.98%**
+  of GLT combined (§B).
+
+**The system is not slow. It is idle.** Which is why five retros correctly declined to
+ELEVATE (add capacity): capacity is not the constraint when it is 99% unused.
+
+So: **the loop's obligation is to FILL WIP, not to pull one item and report.** Concretely,
+when the maximal independent set comes back smaller than `wip_limit`:
+
+- **A pull of K < `wip_limit` is a finding, not an outcome.** Record why. "The independent set
+  was 1" is a statement about the *dependency model*, not about available work — with 54 items
+  in intake, a system that can only work on one thing has a modelling problem or a seam
+  problem, and both are fixable.
+- **Look across TYPES before concluding the set is full.** Defects and machinery items are
+  usually file-disjoint from UI use-cases; a three-way collision inside one React file
+  (`OverviewPage.tsx`, this cycle) caps the *use-case* set at 1 and says nothing about whether
+  a defect could run alongside it. Ready holding only same-seam items is itself the finding.
+- **Resource-class exclusivity is real and stays** (§F2b — e.g. an edit to `work-items.py`,
+  the sole writer every `wi-append` calls, runs alone). The point is that exclusivity should be
+  *named and rare*, not the accidental default.
+
+**Target metric:** lead time. **Anticipated effect:** median `wip` occupancy per cycle rises
+from 1 toward `wip_limit`, and the completion rate rises with it — which is the denominator of
+the ratio §F9d is scored on. **The two limbs are scored together, and they can fail
+independently:** if arrivals fall and completions do not, we have bought a smaller queue and no
+delivery, which is not what the owner asked for.
 
 ## F10. Fleet — isolated per-project loops, one shared process spine
 Multiple projects run CONCURRENTLY, each as its own isolated loop, feeding ONE shared,

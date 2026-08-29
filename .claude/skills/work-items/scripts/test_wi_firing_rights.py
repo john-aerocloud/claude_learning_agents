@@ -307,6 +307,52 @@ class TestShapeOnly(_Replay):
                          ["dev_validated", "not_yet_observed", "rejected", "validated"])
 
 
+class TestTheDeclarationIsTheDispatch(_Replay):
+    """The mechanism only works if the declaration OUTLIVES the command that made
+    it — rights are derived from the ITEM, so the item is where the routing
+    decision has to be readable: by the next agent, by I1's replay of history, and
+    by anyone opening the file."""
+
+    def test_AC_006_1_a_flow_role_declares_the_owner_and_it_persists(self):
+        """End to end, exactly as a dispatch runs: the orchestrator triages a UI
+        defect and declares the routing in the SAME act (v124), and the ui-designer
+        then records its own work as itself, with no OWNER= of its own and nothing
+        else in the thread."""
+        self.defect("DEF-DISPATCH", "reported")
+        self.assertPermitted("DEF-DISPATCH", "triaged", "orchestrator",
+                             "the flow role routes the item", owner="ui-designer")
+        item = wi.load_item(self._find("DEF-DISPATCH"))
+        self.assertEqual(item.fm["owner"], ["ui-designer"],
+                         "the declaration must be ON the item, not only in the command")
+        self.assertPermitted("DEF-DISPATCH", "confirmed", "ui-designer",
+                             "the declared owner then works the item as itself")
+        self.assertPermitted("DEF-DISPATCH", "fixed", "ui-designer",
+                             "…for every non-verdict transition, not one edge")
+        self.assertPermitted("DEF-DISPATCH", "validated", "tester",
+                             "and the verdict is still independent")
+
+    def test_AC_006_3_an_owner_naming_an_unknown_role_is_refused(self):
+        """A declaration that names nobody would silently narrow the item to an
+        empty owner set and make it unworkable by anyone but a flow role — a
+        wedge introduced by a typo. Refused at the write."""
+        self.defect("DEF-TYPO", "reported")
+        err = self.assertRefused("DEF-TYPO", "triaged", "orchestrator",
+                                 "a typo must not silently narrow an item to nobody",
+                                 owner="ui-desginer")
+        self.assertIn("not a known agent role", err)
+
+    def test_AC_006_2_history_written_under_a_declaration_stays_valid(self):
+        """I1 replays history through the same derivation, so a declared-owner item
+        must still validate clean after the fact — otherwise every routing decision
+        would become drift the moment it was made."""
+        self.defect("DEF-HIST", "reported")
+        self.assertPermitted("DEF-HIST", "triaged", "orchestrator", "route it",
+                             owner="documenter")
+        self.assertPermitted("DEF-HIST", "confirmed", "documenter", "work it")
+        self.assertEqual([v for v in wi.validate_items(self.graphs, self.project)
+                          if "(I1)" in v], [])
+
+
 # --------------------------------------------------------------------------- #
 # AC-006.5 — the scoring hook: role-spoofed / blocked transitions per 20 items
 # --------------------------------------------------------------------------- #

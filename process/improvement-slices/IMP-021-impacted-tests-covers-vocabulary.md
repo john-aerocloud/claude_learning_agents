@@ -43,3 +43,29 @@ run clean without per-project alias maintenance.
 ## Note
 Queued with product/process work (§32). Until it lands, projects keep the `@alias`
 workaround (ROC's is committed in `class-deps.mmd`).
+
+
+## Measured evidence, 2026-08-29 (ROC, UC-ROC-112 build) — the failure mode is a FALSE CLEAN
+
+Found by an engineer who **ran the tool instead of trusting its own tags**, which is the
+only way this class is ever caught.
+
+`make impacted-tests` reported all **six** changed dashboard nodes as **UNCOVERED** —
+while they were, in fact, covered. Cause: **`parseCoversTags` splits on COMMAS**, so
+`@covers a b c` is parsed as a single identifier `"a b c"` that matches nothing.
+
+**Why this is worse than an ordinary parser bug:** the failure direction is a *false
+clean*. A tag the parser cannot read does not error — it silently contributes no
+coverage, and the tool then reports the node as untested. An engineer who trusts it
+either writes a duplicate test for something already covered, or (the expensive
+direction) reads "UNCOVERED" as noise and stops trusting the tool at all.
+
+**Blast radius, counted not estimated: 47 space- or `+`-separated `@covers` lists
+elsewhere in ROC are invisible the same way.** They were recorded and deliberately NOT
+swept — widening the parser is shared cross-project tooling and belongs in this slice,
+not in a use-case build that happened to trip over it.
+
+This is the third recorded instance of the family this slice exists to close, and it is
+also an instance of the wider `OI-ROC-014` shape: **a declared control with no reader** —
+here the declaration is readable but the reader's grammar is narrower than the
+declaration's, which is the same failure one layer in.

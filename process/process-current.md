@@ -1,11 +1,25 @@
 ---
-process_version: 172
+process_version: 173
 effective_from: 2026-08-29
-supersedes: v171, v170, v169, v168, v167, v166, v165, v164, v163, v162, v161, v160, v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
+supersedes: v172, v171, v170, v169, v168, v167, v166, v165, v164, v163, v162, v161, v160, v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
 status: active
 ---
 
 <!-- NOTE ON THE NUMBER: authored as v170 and renumbered to v171 at merge time. OagEventSource published its own v170 concurrently and reached `main` first, so both sections are real and neither is a duplicate of the other. This is the v141/v144/v151 renumbering trap, and it is recorded rather than silently fixed because the fold-forward at the start of this cycle reported `already up to date` and WAS correct at that moment — the window is exactly the time between that check and the fold-back. Nothing was dropped: ROC's v171 sits above OAG's v170, newest-first. -->
+
+<!-- v173 (OWNER RULING, ROC 2026-08-29; NOT a retro — `make retro-debt` reported ok. The owner, correcting the process directly: *"ensure the process has the engineer doing refactors before starting work. it might be stated that they refactor after - this is incorrect. We should refactor before something new, ensure tests pass and then start the new thing."*
+
+**THE OWNER IS RIGHT AND THE OLD POSITION WAS ALREADY FAILING VISIBLY.** §F11's exit gate said *"look at the coupling of the work you are about to HAND OVER and attempt a refactor"*; `engineer.md` taught `red -> green -> refactor`; `delivery-principles` taught the same; `loop-run.md` dispatched engineers with it. **The tell was in the process's own history: v156 had to ADD *"attempt an improvement, not only a no-worse check"* because the check alone was being satisfied while nothing improved.** A rule that needs re-strengthening within days is a rule fighting its position in the sequence, and that is what this ruling fixes. At hand-over the tree is green, the engineer is at the moment of least appetite, and the refactor is the only thing standing between them and done.
+
+ROUTED as **§F14 — an ENTRY gate**, deliberately named to mirror §F11's exit gate: **§F11 keeps the CHECK (did it get worse), §F14 owns the IMPROVEMENT.** Five steps, and the separate commit is not bookkeeping: start green (if red, that is a FIX, a different act with a different name); refactor behaviour-preservingly; re-run the SAME tests and prove still green; **commit separately**; then start the new thing. A refactor mixed into a feature diff is unreviewable and unrevertable — nobody can tell which hunk moved code and which changed behaviour, so the whole thing is trusted or reverted as one.
+
+**THE TWO GOALS ARE THE OWNER'S AND THEY MAP EXACTLY ONTO THE TWO EXIT-GATE LIMBS, which is the finding worth keeping.** (a) *Rewrite tests to be outside-in and connect them to personas and use-cases in a graph* is §F11.3's persona -> job -> use-case -> variation -> test chain — so **`DEF-ROC-152`'s 113-use-case migration stops being a project and becomes a TOLL**, paid per touched use-case by the work that touches it, instead of a campaign nobody schedules. (b) *Improve the KINDS of coupling — move things that change together closer together* is §F11.1, and note **kinds**: the goal is not less coupling but coupling that matches reality. **The work list is GENERATED, not judged** — the coupling analysis derives change-coupling from git history, i.e. which files actually change in the same commits — so the ratchet stops being only a pass/fail gate and becomes the entry step's to-do list.
+
+**THE HONEST RISK IS STATED IN THE SECTION ITSELF RATHER THAN DISCOVERED LATER: an unbounded refactor-first stalls delivery.** Bounded three ways — only what the coming change touches (the change names its own blast radius), only on a green tree, and the LOOK is mandatory while the REFACTOR is not. v156's *"I looked, and here is why I left it is a valid outcome; skipping the look is not"* carries forward unchanged, as does *read it off the GENERATED analysis, never off your impression of the code*.
+
+ROUTED TO FOUR PLACES, because a rule that lives only in the process file is one the engineer never reads: `process-current.md` §F14 + a cross-reference at §F11; `.claude/agents/engineer.md` (steps 2 and 3 inverted, the exit-gate improvement REMOVED rather than duplicated — with an instruction to RECORD anything worth refactoring found at hand-over so the next entry gate picks it up, per §F9g); `.claude/commands/loop-run.md`; `.claude/skills/delivery-principles/SKILL.md`. Scored as **`EXP-ROC-018`**, whose primary kill arm is precisely the stated risk — *lead time rises while neither `casesWithNoVariation` nor the coupling ratchet moves* — with two decay arms: *"I looked and left it" on every item across a retro* (the formality that killed the exit-gate position), and *refactor and feature in the same commit* (the separability the rule exists for, not honoured). Confounded by the open `EXP-ROC-017` tier quarantine and declared as such.
+
+REGISTRY: **`EXP-ROC-013` ADOPTED** — §F9e's owner-decision-as-dated-default moved its target metric and moved it on the mechanism: six decisions reached a verdict through `open-decisions.md` rather than a conversation, **four answered by the owner in a single message**, `UC-ROC-083` unblocked after **29.1 days** (the oldest live `blocked`), `DEF-ROC-035` closed after 12.2d in a park it could never have left, and `OD-ROC-006` cost nothing when it turned out not to matter. Adopted with two qualifications recorded rather than glossed: the owner was PRESENT, so the silent-default path is still lightly evidenced; and the orchestrator itself produced a reflexive 7-day defer that the gate refused as deciding nothing, within an hour of its own retro naming that pattern. ROC 8/8, slot reused. -->
 
 <!-- v172 (RETRO, ROC 2026-08-29; fired ON THE OWNER'S REQUEST mid-loop, NOT on debt — `make retro-debt` reported ok. FOCUS QUESTION, owner-set: ***"we should look at all the skills and agents and reassess what models should be used for each of them"***.
 
@@ -150,7 +164,7 @@ ROUTED as **SSF11.4** (three clauses, all plain practice -- NO experiment row, d
 <!-- v111 (FOCUSED retro, ROC 2026-07-27; on main v110 via fold-forward-FIRST — clean, no collision; §F8 routine-batch gate at SLC-ROC-014 close, NO prod incident): SLC-ROC-014 delivered the COMPLETE rules-EDITING capability (edit → mandatory draft-test → publish, live no-redeploy pickup, Simulator parity, content-hash attestation gate + who/when attribution) — UC-056/057/058 all live-stack validated + pushed to origin/main + deployed to aas-test. NO global §-body change. Routed outcomes: (1) engineer.md plain-practice fold — the pre-built_green green bar must exercise the REAL artifact for UI/pipeline slices (fully-themed live axe + same-element aria-label; focus preventScroll + no scrollable ancestor; composed-consumer-against-populated-store acceptance driving consume() end-to-end), extending v110's live-caught→offline-pin; recurring root cause logged in principle-failures/2026-07-27-offline-green-ne-live-correct-ui-pipeline.md. (2) work-items.py + linear-project.py + linear-mapping.md machinery fix (human "fix the in-progress clutter"): blocked never maps to In Progress (Todo/Backlog) and an aggregate whose only non-terminal children are all blocked derives blocked — parked-on-external trees drop out of the active lane in queues/stats/board (107 wi-tests green). (3) EXP-115 POSITIVE again (ROC live catches), EXP-117 → 2/3 POSITIVE (board cadence). Constraint UNCHANGED + not-agent-squeezable (external 46.66% Azure-block + queue 41.93% backlog; agents ≈11%); dev-validation 11.1% / CFR 10.1% is HONEST dev-catch (EXP-108), not decay — the in-system lever is shifting live-defect classes LEFT (measured next on SLC-ROC-015). Registry 7 active, under cap, no rows added. -->
 <!-- v110 (FOCUSED retro, AdixOut 2026-07-24; RECONCILED onto main v109 via fold-forward-then-reapply — main advanced to v109 (ROC SLC-ROC-013 retro) while this AdixOut retro was in flight, so renumbered v109→v110; retro-debt gate — 3 routine: UC-AIDX-028 rework (TWO reject→rework cycles) + SLC-AIDX-011/CHK-AIDX-010 closes, REQ-004's dev consumer-side walking skeleton: C12 bus+grant → C13 routing → C10/C11 ingest standup → OAG handoff, built + validated LIVE end-to-end (synthetic event → C12 → C13 → C10 → C11 → read model → egress). TIGHT: two fix-derived learnings folded as PLAIN PRACTICE, no experiment rows. Constraint UNCHANGED from v105/v108 (registered/queue = artifact latency, ~70% of GLT; squeezable in-system cost = engineer/multi-tenant-eventing). Both learnings were caught by LIVE assert-real-state validation that offline synth-pins passed. (1) SCOPE-GAP → engineer.md + solution-architect.md: "reuse existing X" must be VERIFIED against the real deployed TARGET account/stack, never assumed from a sibling env — SLC-AIDX-011's "reuse the existing C10/C11 ingest" was wrong (C10/C11 were sandbox-only; the migration moved only the egress to dev-dataout), so the engineer STOPPED (§F7) rather than build against an absent dependency and a predecessor UC-030 + architect delta 007 were inserted at the real edge; the §F7 stop was correct. Extends the v97 assert-real-state family. (2) EVENTBRIDGE TARGET PAYLOAD (the double-rework) → engineer.md: for an EventBridge rule→SQS/target that must forward the event's `detail` object verbatim, use `inputPath: "$.detail"` (JSONPath extraction), NOT an `inputTransformer` with a bare `<detail>` object placeholder — the `<placeholder>` idiom quote-strips a nested OBJECT into invalid JSON (`ERROR_CODE=INVALID_JSON`), it only round-trips STRING fields (why the webhook router's flat string fields worked). Root cause found only by adding a target `DeadLetterConfig` to capture the real `ERROR_CODE`/`ERROR_MESSAGE` — so: always wire a target `DeadLetterConfig` and INSTRUMENT-FIRST before guessing at an opaque cross-service delivery failure. UC-028 rework #1 = default-rule envelope-wrap poison (C11's parseEnvelope rejected the wrapped event); rework #2 = the `<placeholder>` INVALID_JSON. Engineer left OFFLINE synth-pins behind for the inputPath/InputTransformer shape + DeadLetterConfig so the payload-shape class is now caught offline (live-caught infra-shape defect → offline pin). Kept in engineer.md not the aws-architecture skill (no clean EventBridge-target section there; narrowest owner = engineer implementation behaviour). EXP-115 (whole-journey/JTBD live validation) scored POSITIVE again (dated confirming note): the live bus-driven E2E caught the scope-gap + BOTH UC-028 delivery bugs offline pins missed. CFR HONESTY: UC-028's two reworks + UC-027's earlier deploy_failed are real DEV-caught change-failures (EXP-108 integrity) — the process working (caught in dev before OAG/prod), NOT decay; CFR ~39% reflects honest dev-stage rejection accounting. Registry unchanged: 8 active (EXP-101,106,107,112,113,115,116,117) — AT cap-8; no rows added/retired. No global-section rules changed; routed changes = engineer.md (2 folds) + solution-architect.md (reuse-verify note) + EXP-115 confirming note. -->
 <!-- v109 (FOCUSED retro, ROC 2026-07-24; RECONCILED onto main v108 via fold-forward-FIRST — main had advanced to v108 (AdixOut tight retro) while this ROC session ran, so this entry is v109; triggered by the §F8 routine-batch gate at SLC-ROC-013 close, NO incident): SLC-ROC-013 (REQ-ROC-003 living-demo foundation, UC-051..055) delivered + validated live-stack + pushed to origin/main on green (CI deploying to aas-test). NO global §-body process change this cycle — the routed outcomes are (1) EXP-116 lean-orchestration ADOPTED into orchestrator.md as plain practice (guards proven safe 2/2, no DORA harm; registry 8→7), (2) EXP-117 board-push cadence advanced to 1/3 POSITIVE. Constraint UNCHANGED and confirmed not-agent-squeezable (`registered`/backlog-aging artifact 57.76% + external-blocked DEF-004 33.55%; agents ≈8.6%); change budget deliberately NOT spent chasing it (constraint-gate). J23 demo-grows DoD + demo-egress isolation pattern kept as ROC project artifacts, not over-generalised. TIGHT retro — score + adopt + drain + fold. -->
-# Current Process — v172
+# Current Process — v173
 
 <!-- v139 (owner instruction, OagEventSource 2026-08-13, NO retro — a direct standing
 instruction from the human owner, folded immediately rather than queued): every update to
@@ -3778,6 +3792,10 @@ of the action** — and that includes your own report.
 
 ## F11. The engineering step has an EXIT GATE: design metrics, coverage, and outside-in tests [v160, ROC]
 
+> **ENTRY vs EXIT (v173):** this section is the **exit** check — *did it get worse*. The
+> **improvement** moved to **§F14**, which the engineer performs BEFORE starting new work, on a
+> green tree, in its own commit. Do not attempt the refactor here; verify it here.
+
 **Owner ruling, 2026-08-29, verbatim and mandatory:**
 
 > *"We need to add the code complexity analysis code tool that was built in the
@@ -4310,6 +4328,82 @@ bought by dropping the evidence standard. **Scored on `EXP-ROC-016`.**
 **Note what this does NOT license.** It is not permission to act without evidence, to skip
 a gate, or to stop reporting. The report stays — it becomes **inline and terse**, alongside
 the next dispatch, instead of being the thing that replaces it.
+
+## F14. The engineering step has an ENTRY GATE — refactor BEFORE, never after [v173, ROC]
+
+**Owner ruling, 2026-08-29, correcting the process directly:** *"ensure the process has the
+engineer doing refactors before starting work. it might be stated that they refactor after —
+this is incorrect. We should refactor before something new, ensure tests pass and then start
+the new thing."*
+
+It was stated after. §F11's exit gate said *"look at the coupling of the work you are about to
+HAND OVER and attempt a refactor"*, and `engineer.md` step 2 taught `red → green → refactor`.
+That is now inverted. §F11 keeps the **check** (did it get worse); §F14 owns the **improvement**.
+
+### The rule
+
+Before writing any new behaviour, on the code the coming change will touch:
+
+1. **Start green.** Run the tests. If they do not pass, that is the work — you are not
+   refactoring, you are fixing, and it is a different act with a different name.
+2. **Refactor.** Behaviour-preserving, tests unchanged in what they assert.
+3. **Prove still green.** Same tests, same result. A refactor you do not re-verify is a
+   change, not an improvement.
+4. **Commit it separately**, before a line of the new thing exists.
+5. **Then start the new thing.**
+
+The separate commit is not bookkeeping. A refactor mixed into a feature diff is unreviewable
+and unrevertable — nobody can tell which hunk moved code and which changed behaviour, so the
+whole thing is trusted or reverted as one.
+
+### Why BEFORE beats AFTER, since the old order was not arbitrary
+
+* **After competes with "done".** The engineer is at the moment of least appetite, the work is
+  green, and the refactor is the only thing between them and handing over. It is the step most
+  likely to be minimised, and it was — v156 had already had to add *"attempt an improvement,
+  not only a no-worse check"* because the check alone was being satisfied and nothing improved.
+  A rule that needs re-strengthening is a rule fighting its position in the sequence.
+* **Before is safer.** The tree is green and nothing is half-built, so the refactor is
+  reversible in isolation and cannot be entangled with unfinished behaviour.
+* **Before pays immediately.** You refactor the code you are ABOUT TO CHANGE, so the benefit
+  lands in this change, not banked for a hypothetical future one. Refactoring at hand-over is
+  a gift to a next visitor who may never come.
+* **Before is scoped by construction.** The coming change names the blast radius. "Refactor
+  what you are about to touch" is bounded; "improve the codebase" is not.
+
+### The two goals, and they are the owner's words
+
+**1. Rewrite tests to be outside-in and connect them to personas and use-cases in a graph.**
+Not a separate migration — this is where §F11.3's chain (persona → job → use-case → variation
+→ test) actually gets built, one touched use-case at a time. **This turns `DEF-ROC-152` from a
+113-use-case project into a toll**: every piece of new work pays down the tests it is about to
+touch, instead of the whole debt waiting for a campaign nobody schedules.
+
+**2. Improve the KINDS of coupling — move things that change together closer together.**
+Note *kinds*: the goal is not less coupling, it is coupling that matches reality. Two files
+that always change together belong near each other; two that never do should not share a
+module. **You do not have to guess which**: the coupling analysis measures exactly this — it
+derives change-coupling from git history, i.e. which files actually change in the same
+commits. So the §F11.1 ratchet stops being only a pass/fail gate and becomes **the work list
+for this step**.
+
+### What does not change, carried forward from v156
+
+* **"I looked, and here is why I left it" is a valid outcome — skipping the look is not.** A
+  mandatory refactor every time would be ignored within a week; a mandatory look is affordable
+  every time.
+* **Read it off the GENERATED analysis, never off your impression of the code.** A
+  hand-maintained coupling map goes stale and then lies, which is worse than absent.
+* **Record the outcome on the item** — what you refactored, or deliberately did not, and why.
+  An unrecorded look is indistinguishable from no look.
+
+### The failure mode to watch, stated in advance
+
+**An unbounded refactor-first stalls delivery**, and that is the honest risk of this change. It
+is bounded three ways: only what the coming change touches; only on a green tree; and the look
+is mandatory while the refactor is not. If lead time rises without the coupling ratchet or the
+variation attachment moving, this rule is doing harm and the next retro should say so — that
+is `EXP-ROC-018`'s negative arm, not a surprise.
 
 ## F10. Fleet — isolated per-project loops, one shared process spine
 Multiple projects run CONCURRENTLY, each as its own isolated loop, feeding ONE shared,

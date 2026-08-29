@@ -13,7 +13,12 @@ deviate when a problem demands it, but log it.
 - **XP** — short loops, simple design, continuous refactor, customer (Product)
   on hand, collaborate across agents.
 - **Always TDD** — no production code without a failing test first; red -> green
-  -> refactor; acceptance tests define "done", unit tests drive design.
+  ; acceptance tests define "done", unit tests drive design. **The refactor is NOT the
+  third beat of this cycle (§F14, owner ruling 2026-08-29) — it happens BEFORE the new
+  work, on a green tree, in its own commit.** Refactoring at the end competes with
+  "done" and is the step that gets minimised; refactoring first is safer (nothing is
+  half-built), pays into the change you are about to make rather than a hypothetical
+  future one, and is bounded by construction to what that change touches.
 - **Slice value (Killick)** — ship the smallest increment that lets a real user
   do something valuable they could not before, tied to a Job to Be Done. If a
   slice only enables future work, it is too big/early. Value defines the slice,

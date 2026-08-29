@@ -22,9 +22,32 @@ hardcode the profile name.
 ## How you work
 1. Take the thin route (from `route.md`) chosen to advance the solution most per
    step. If no route exists yet, propose one as an ordered list of failing tests.
-2. Strict TDD: write a failing test (red) -> minimum code to pass (green) ->
-   refactor. No production code without a failing test first. Acceptance tests
-   define "done" for the slice; unit tests drive the design.
+2. **REFACTOR FIRST — before you write any new behaviour (§F14, owner ruling
+   2026-08-29).** On the code the coming change will touch: run the tests and START
+   GREEN (if they are red, that is a fix, not a refactor — a different act);
+   refactor behaviour-preservingly; re-run the SAME tests and prove still green;
+   **commit that separately**; only then start the new thing. A refactor mixed into a
+   feature diff is unreviewable and unrevertable — nobody can tell which hunk moved
+   code and which changed behaviour.
+   - **Two goals, and they are the owner's words.** (a) **Rewrite tests to be
+     outside-in and connect them to personas and use-cases in a graph** — this is
+     where §F11.3's persona → job → use-case → variation → test chain actually gets
+     built, one touched use-case at a time, which turns the migration from a project
+     into a toll. (b) **Improve the KINDS of coupling — move things that change
+     together closer together.** Not less coupling; coupling that matches reality.
+   - **You do not have to guess where.** The coupling analysis derives change-coupling
+     from git history — which files actually change in the same commits — so the
+     §F11.1 ratchet IS your work list. Read it off the GENERATED analysis, never off
+     your impression of the code.
+   - **"I looked, and here is why I left it" is a valid outcome. Skipping the look is
+     not.** Record what you refactored or deliberately did not, and why, on the item.
+   - **BOUNDED, deliberately: only what the coming change touches.** An unbounded
+     refactor-first stalls delivery. The coming change names the blast radius.
+3. Strict TDD for the new behaviour: write a failing test (red) -> minimum code to
+   pass (green). No production code without a failing test first. Acceptance tests
+   define "done" for the slice; unit tests drive the design. **The design cleanup you
+   would once have done at the end of this cycle now happens at step 2 of the NEXT
+   piece of work** — that is the inversion, not a deletion.
    - **Every acceptance condition is the UC's CONTRACT — a "thin/reuse" framing
      WAIVES NONE of them (2026-07-23, UC-ADIX-020).** When a use-case is framed as
      "thin" or "mostly reuse", you STILL owe EVERY acceptance condition on the UC —
@@ -215,7 +238,7 @@ hardcode the profile name.
      OnBlock/OffBlock/TakenOff event out of the window → every flight fell back to
      "Scheduled" while 412 unit tests stayed green. Gate/Arrival columns worked
      because they read fields, not the window-seeded marker.)
-3. **THE EXIT GATE — you do not hand over until these hold (§F11, v160, owner-mandated).**
+4. **THE EXIT GATE — you do not hand over until these hold (§F11, v160, owner-mandated).**
    Before you report a use-case or defect ready for the tester:
    - **Complexity and coupling did not get WORSE.** `AeroCloudSystems/CodeAnalysisTools` runs
      in the test step against a committed baseline that may only shrink. Excludes `items/**`;
@@ -246,15 +269,16 @@ hardcode the profile name.
      - **The chain is persona → job → use-case → variation → test, and every link is
        mandatory.** All 116 ROC use-cases already carry `personas:` and `job:` — that half is
        sound, do not redo it. Your test must trace to a person who wanted something.
-   - **AND YOU ATTEMPT AN IMPROVEMENT, not only a no-worse check (v156, owner instruction
-     2026-08-29).** "Did not get worse" is a floor; the owner asked for the active step. Look
-     at the coupling of the work you are about to hand over and **attempt a refactor**, then
-     re-run the tests. *Attempt* is literal: **"I looked, and here is why I left it" is a
-     valid outcome — skipping the look is not.** A mandatory refactor every time would be
-     ignored within a week; a mandatory LOOK is affordable every time. Read it off the
-     GENERATED analysis, never off your impression of the code — a hand-maintained coupling
-     map goes stale and then lies, which is worse than absent. A refactor you do not re-verify
-     is a change, not an improvement.
+   - **THE IMPROVEMENT MOVED TO THE ENTRY GATE — do not attempt it here (§F14, v173).**
+     v156 asked for an active improvement at hand-over, and the owner has since corrected the
+     POSITION rather than the intent: *"we should refactor before something new… this is
+     incorrect"*. Refactoring at hand-over competes with "done" — the engineer is at the moment
+     of least appetite and it is the step most likely to be minimised, which is exactly why
+     v156 had to strengthen it. **So here you VERIFY (did it get worse); at step 2 of your NEXT
+     piece of work you IMPROVE.** If you find something worth refactoring while finishing,
+     record it on the item so the next engineer's entry gate picks it up — do not do it now and
+     do not lose it (§F9g: a note is not a queue; if it is real work the commit does not
+     contain, it is an item).
    - **RECORD THE OUTCOME ON THE ITEM** — the coverage delta, and what you refactored or
      deliberately did not, and why. An unrecorded look is indistinguishable from no look, and
      a rule nothing can falsify is decoration, which is the failure this whole gate exists to
@@ -283,7 +307,7 @@ hardcode the profile name.
    deployed. A false "it is off" is worse than "it is still on" — it ends the owner's attention
    on a hazard that is still running.)
 
-4. **Commit when green; push when the use-case is done (v60).** Every time the full
+5. **Commit when green; push when the use-case is done (v60).** Every time the full
    test suite goes from red to green, commit immediately to trunk — including at each
    green SUB-STEP of a larger UC (a passing red→green TDD increment), not only at the
    final green (v95): an agent can stall/be-interrupted mid-build, and any work not
@@ -345,14 +369,14 @@ hardcode the profile name.
    had already moved on" is no longer a reason the failure goes unrecorded, and you never
    have to choose between a state you have not reached and losing the fact. `build_failed`
    is recordable from the same set (DEF-ROC-120).
-4. Trunk-based: keep each change sequentially independent and small enough to
+6. Trunk-based: keep each change sequentially independent and small enough to
    land on main continuously. No long-lived branches. If a change cannot be made
    independent, say so and stop — do not create hidden coupling.
-5. Honour security notes as tests: turn each "control that must hold" into a
+7. Honour security notes as tests: turn each "control that must hold" into a
    policy/assertion test and make it pass.
-6. Defects are normal work: define expected behaviour, capture current behaviour,
+8. Defects are normal work: define expected behaviour, capture current behaviour,
    write tests pinning the correct behaviour, then make them pass.
-7. **Local dev tooling gets lifecycle tests too (v78, DEFECT-OAG-039).** A support
+9. **Local dev tooling gets lifecycle tests too (v78, DEFECT-OAG-039).** A support
    process the operator runs alongside the app (a signing proxy, a mock, a local
    relay) is still code that can fail over TIME, not just at startup. If it holds a
    resource with a lifetime — captured AWS credentials, a token, a lease, a

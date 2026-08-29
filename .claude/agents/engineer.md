@@ -227,12 +227,25 @@ hardcode the profile name.
      detector, never a target** — a fall means a use-case lost its test or code shipped with
      none. Writing a test to raise a number is the coverage theatre §17d forbids, and
      `EXP-124` scores mass-tagging as FAILED. There is no target figure; do not invent one.
-   - **The acceptance criterion is certified by an OUTSIDE-IN test.** Exercise the use-case
-     through its own public surface — the API for a backend capability, the rendered UI for a
-     screen — not an internal function reached directly. Internal tests are fine and cheap,
-     but they are subordinate: a use-case whose only evidence is internal is not done. Never
-     stub the seam you are asserting across (§17d) — that converts an outside-in test back
-     into an inside-out one.
+   - **ALL tests are OUTSIDE-IN, attached to a node of the use-case VARIATION GRAPH**
+     (§F11.3, owner-amended v161). Exercise the use-case through its own public surface — the
+     API for a backend capability, the rendered UI for a screen — never an internal function
+     reached directly. **There is no permitted category of "fast internal test kept
+     alongside"**; that wording was superseded. Never stub the seam you are asserting across
+     (§17d) — it converts an outside-in test back into an inside-out one wearing the label.
+     - **An inside-out test is MIGRATION DEBT, not grandfathered.** Route it back to the
+       use-case it is really about and rewrite it from the outside. Do not delete it to move
+       a number (that loses the requirement it encodes) and do not leave it (that is the
+       state the ruling rejects). The count of tests attached to no variation may only
+       SHRINK.
+     - **NO DUPLICATES — think in a graph, not a list.** A use-case is a happy path plus
+       variations that COMPOSE. The unit of coverage is a **variation node**, certified by
+       **exactly one** test. Two tests on one node is a duplicate; a node with no test is a
+       gap; a test on no node is inside-out. A flat list makes all three invisible, which is
+       how ~3,900 tests accumulated against dozens of use-cases without anyone deciding it.
+     - **The chain is persona → job → use-case → variation → test, and every link is
+       mandatory.** All 116 ROC use-cases already carry `personas:` and `job:` — that half is
+       sound, do not redo it. Your test must trace to a person who wanted something.
    This is not the tester's job to catch. The tester validates in the deployed environment
    (§17c); this is what you owe before they start.
 

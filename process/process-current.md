@@ -1,9 +1,11 @@
 ---
-process_version: 160
+process_version: 161
 effective_from: 2026-08-29
-supersedes: v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
+supersedes: v160, v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
 status: active
 ---
+
+<!-- v161 (OWNER-DIRECTED, ROC 2026-08-29; amends v160's SSF11.3, which was TOO WEAK, within the hour of writing it). The owner's amendment, verbatim: *"1. all tests should be outside in. 2. any tests that are not need to be routed back to a usecase and rewritten as outside in - and moreover we do not want duplicate tests which means we need to approach the collection of usecases as a graph of variations not as a list of unconnected tests"* and *"to reiterate all the usecases should connect back to a persona"*. **WHAT v160 GOT WRONG:** it wrote *"internal tests are not banned; they are subordinate"*, which grandfathers the state the ruling rejects and leaves ~3,900 inside-out tests in place indefinitely. SUPERSEDED. Four clauses, and they are ONE RULE SEEN FROM FOUR SIDES. (1) ALL tests are outside-in, through the use-case's own public surface; there is no permitted category of fast-internal-test-kept-alongside. (2) An inside-out test is MIGRATION DEBT, not grandfathered -- routed back to the use-case it is really about and rewritten from the outside, never deleted to move a number (that loses the requirement it encodes) and never left alone. Ratchets on the mechanism already proven here: the count of tests attached to no variation may only SHRINK. (3) **THE SUBSTANTIVE CLAUSE, and the one that makes the other three achievable: the use-cases are a GRAPH OF VARIATIONS, not a list.** A use-case is a happy path plus variations that COMPOSE, and the unit of coverage is a VARIATION NODE certified by EXACTLY ONE test. Then all three concerns become readable facts about one structure -- a test on no node is inside-out, two tests on one node is a DUPLICATE, a node with no test is a GAP, and the shape of the subgraph is what the use-case actually does. A flat list can answer NONE of them, which is precisely how ~3,900 tests accumulated against dozens of use-cases without anyone deciding it should. The graph is AUTHORED, never derived from the tests -- deriving it would make it agree with itself, which is SS17i's cannot-come-back-negative shape and this project's dominant failure family. (4) The graph is ROOTED IN PERSONAS: persona -> job -> use-case -> variation -> test, every link mandatory, so a test traces to a PERSON WHO WANTED SOMETHING. **MEASURED, and it locates the break precisely: all 116 of 116 ROC use-cases ALREADY carry both `personas:` and `job:` -- zero missing** -- against a real catalog (product/personas.md, docs/personas-and-jobs.md), P1/P2 dominant across eight personas. So the chain is INTACT from persona down to the use-case and broken only BELOW it: use-case -> variation (no graph exists) and variation -> test (the tests attach to nothing). Much narrower than it first appears, and it says where the work is -- do NOT redo the persona/job modelling, build the two hops underneath it. **This completes SS17d rather than replacing it:** SS17d gives every test an owner (`AC-<ID>.<n>`) but leaves the SET unstructured, so nothing notices two tests naming the same criterion or a criterion with three variations and one test. The node names WHICH VARIATION. Routed to SSF11.3 + engineer.md; DEF-ROC-149's AC-149.3 materially rescoped mid-build and its engineer corrected in flight. -->
 
 <!-- v160 (OWNER-DIRECTED, ROC 2026-08-29; NOT a retro — retro-debt routine 2/3, no incident). Owner ruling, mandatory and quoted in full in SSF11: add the CodeAnalysisTools complexity/coupling tool INTO THE TEST STEP, constantly drive those numbers DOWN (ignoring items/), track coverage so it does not go wrong, and TEST FROM THE OUTSIDE -- use-cases, not functions -- all as EXIT CONDITIONS ON THE ENGINEERING STEP before the tester takes over. **THE FINDING THAT SHAPED THE FIX: the tool was ALREADY WIRED.** `code-analysis.yml` has been running on every push to main and weekly, already excluding `items/*`, already auto-detecting generated files -- and it uploads an artifact and GATES NOTHING, so nobody has ever read it. That is this project's most-registered family arriving again (OI-ROC-014 a declared control with no reader; IMP-021 a parser whose grammar is narrower than the declaration; DEF-ROC-140 a gate blind to every Playwright suite; DEF-ROC-146 a whole test tier no CI job runs). So the work is not integration, it is ACCOUNTABILITY: the same tool, moved into the gating path, with a may-only-shrink baseline. ROUTED: **SSF11** (three limbs) + the same three limbs written into `.claude/agents/engineer.md` as the step-3 exit gate, because a rule the engineer does not hold in its own file is one the orchestrator has to remember. **SSF11.2 REQUIRED AN EXPLICIT RECONCILIATION WITH A PRIOR OWNER RULING, and it is recorded rather than silently overwritten:** v127 states *"I do not care AT ALL about code coverage. The ONLY thing tests should be validating is the requirements."* The two are compatible and the distinction is the whole of it -- coverage as a TARGET stays forbidden (writing a test to raise a number is the theatre SS17d rejects and EXP-124 scores as FAILED), while coverage as a REGRESSION DETECTOR is now required, because a FALL means a use-case lost its test or code shipped with none, which is a statement about requirements and not about a percentage. The gate asks 'did it get worse', never 'is it high enough', and no target figure may be introduced. **SSF11.3 SHARPENS SS17d rather than replacing it:** SS17d requires every test to name its AC; this says WHERE the test must stand to make that claim honestly. The cost of getting it wrong is already in the record -- v127's founding case built its precondition by deleting the very leaf whose presence breaks the heal, and **2,171 tests were green while nine real cancellations sat unhealed in production**. An outside-in test could not have been written that way. Internal tests are subordinate, not banned. SCORED ON **EXP-ROC-014**, whose negative arms include the two ways this gate would rot: widening the ignore list or raising the baseline to pass (an automatic kill, the OI-ROC-006 anti-pattern), and introducing a coverage target figure. Proof-of-fire required per SS17c.2 -- each limb observed going RED once, quoted. **REGISTRY: EXP-ROC-009 KILLED at strike 2 on its own stated terms** -- v157 wrote 'if the reported median does not fall at v158 the row DIES with no further argument', and it rose 46,703s -> 73,588s. Killed without argument, because forbidding the argument in advance is the point. One measurement artifact recorded so the next retro does not misread it: this cycle took 28 DECLINES, and deciding an aged item moves its whole accrued dwell into the completed-item median -- so doing exactly the throughput work the owner asked for mechanically raises that number in the short run. Not a reprieve for the row, and not evidence the work was wrong; it is why SSF9d.2 is scored on the count-independent arrival:completion ratio instead. ROC back to 8/8 active rows. CONSTRAINT: orchestrator/reported 33.89%, STABLE. -->
 
@@ -68,7 +70,7 @@ status: active
 <!-- v111 (FOCUSED retro, ROC 2026-07-27; on main v110 via fold-forward-FIRST — clean, no collision; §F8 routine-batch gate at SLC-ROC-014 close, NO prod incident): SLC-ROC-014 delivered the COMPLETE rules-EDITING capability (edit → mandatory draft-test → publish, live no-redeploy pickup, Simulator parity, content-hash attestation gate + who/when attribution) — UC-056/057/058 all live-stack validated + pushed to origin/main + deployed to aas-test. NO global §-body change. Routed outcomes: (1) engineer.md plain-practice fold — the pre-built_green green bar must exercise the REAL artifact for UI/pipeline slices (fully-themed live axe + same-element aria-label; focus preventScroll + no scrollable ancestor; composed-consumer-against-populated-store acceptance driving consume() end-to-end), extending v110's live-caught→offline-pin; recurring root cause logged in principle-failures/2026-07-27-offline-green-ne-live-correct-ui-pipeline.md. (2) work-items.py + linear-project.py + linear-mapping.md machinery fix (human "fix the in-progress clutter"): blocked never maps to In Progress (Todo/Backlog) and an aggregate whose only non-terminal children are all blocked derives blocked — parked-on-external trees drop out of the active lane in queues/stats/board (107 wi-tests green). (3) EXP-115 POSITIVE again (ROC live catches), EXP-117 → 2/3 POSITIVE (board cadence). Constraint UNCHANGED + not-agent-squeezable (external 46.66% Azure-block + queue 41.93% backlog; agents ≈11%); dev-validation 11.1% / CFR 10.1% is HONEST dev-catch (EXP-108), not decay — the in-system lever is shifting live-defect classes LEFT (measured next on SLC-ROC-015). Registry 7 active, under cap, no rows added. -->
 <!-- v110 (FOCUSED retro, AdixOut 2026-07-24; RECONCILED onto main v109 via fold-forward-then-reapply — main advanced to v109 (ROC SLC-ROC-013 retro) while this AdixOut retro was in flight, so renumbered v109→v110; retro-debt gate — 3 routine: UC-AIDX-028 rework (TWO reject→rework cycles) + SLC-AIDX-011/CHK-AIDX-010 closes, REQ-004's dev consumer-side walking skeleton: C12 bus+grant → C13 routing → C10/C11 ingest standup → OAG handoff, built + validated LIVE end-to-end (synthetic event → C12 → C13 → C10 → C11 → read model → egress). TIGHT: two fix-derived learnings folded as PLAIN PRACTICE, no experiment rows. Constraint UNCHANGED from v105/v108 (registered/queue = artifact latency, ~70% of GLT; squeezable in-system cost = engineer/multi-tenant-eventing). Both learnings were caught by LIVE assert-real-state validation that offline synth-pins passed. (1) SCOPE-GAP → engineer.md + solution-architect.md: "reuse existing X" must be VERIFIED against the real deployed TARGET account/stack, never assumed from a sibling env — SLC-AIDX-011's "reuse the existing C10/C11 ingest" was wrong (C10/C11 were sandbox-only; the migration moved only the egress to dev-dataout), so the engineer STOPPED (§F7) rather than build against an absent dependency and a predecessor UC-030 + architect delta 007 were inserted at the real edge; the §F7 stop was correct. Extends the v97 assert-real-state family. (2) EVENTBRIDGE TARGET PAYLOAD (the double-rework) → engineer.md: for an EventBridge rule→SQS/target that must forward the event's `detail` object verbatim, use `inputPath: "$.detail"` (JSONPath extraction), NOT an `inputTransformer` with a bare `<detail>` object placeholder — the `<placeholder>` idiom quote-strips a nested OBJECT into invalid JSON (`ERROR_CODE=INVALID_JSON`), it only round-trips STRING fields (why the webhook router's flat string fields worked). Root cause found only by adding a target `DeadLetterConfig` to capture the real `ERROR_CODE`/`ERROR_MESSAGE` — so: always wire a target `DeadLetterConfig` and INSTRUMENT-FIRST before guessing at an opaque cross-service delivery failure. UC-028 rework #1 = default-rule envelope-wrap poison (C11's parseEnvelope rejected the wrapped event); rework #2 = the `<placeholder>` INVALID_JSON. Engineer left OFFLINE synth-pins behind for the inputPath/InputTransformer shape + DeadLetterConfig so the payload-shape class is now caught offline (live-caught infra-shape defect → offline pin). Kept in engineer.md not the aws-architecture skill (no clean EventBridge-target section there; narrowest owner = engineer implementation behaviour). EXP-115 (whole-journey/JTBD live validation) scored POSITIVE again (dated confirming note): the live bus-driven E2E caught the scope-gap + BOTH UC-028 delivery bugs offline pins missed. CFR HONESTY: UC-028's two reworks + UC-027's earlier deploy_failed are real DEV-caught change-failures (EXP-108 integrity) — the process working (caught in dev before OAG/prod), NOT decay; CFR ~39% reflects honest dev-stage rejection accounting. Registry unchanged: 8 active (EXP-101,106,107,112,113,115,116,117) — AT cap-8; no rows added/retired. No global-section rules changed; routed changes = engineer.md (2 folds) + solution-architect.md (reuse-verify note) + EXP-115 confirming note. -->
 <!-- v109 (FOCUSED retro, ROC 2026-07-24; RECONCILED onto main v108 via fold-forward-FIRST — main had advanced to v108 (AdixOut tight retro) while this ROC session ran, so this entry is v109; triggered by the §F8 routine-batch gate at SLC-ROC-013 close, NO incident): SLC-ROC-013 (REQ-ROC-003 living-demo foundation, UC-051..055) delivered + validated live-stack + pushed to origin/main on green (CI deploying to aas-test). NO global §-body process change this cycle — the routed outcomes are (1) EXP-116 lean-orchestration ADOPTED into orchestrator.md as plain practice (guards proven safe 2/2, no DORA harm; registry 8→7), (2) EXP-117 board-push cadence advanced to 1/3 POSITIVE. Constraint UNCHANGED and confirmed not-agent-squeezable (`registered`/backlog-aging artifact 57.76% + external-blocked DEF-004 33.55%; agents ≈8.6%); change budget deliberately NOT spent chasing it (constraint-gate). J23 demo-grows DoD + demo-egress isolation pattern kept as ROC project artifacts, not over-generalised. TIGHT retro — score + adopt + drain + fold. -->
-# Current Process — v160
+# Current Process — v161
 
 <!-- v139 (owner instruction, OagEventSource 2026-08-13, NO retro — a direct standing
 instruction from the human owner, folded immediately rather than queued): every update to
@@ -3579,28 +3581,113 @@ That ruling and this one are **compatible, and the distinction is the whole of i
 Held against a committed baseline on the same may-only-shrink ratchet. A drop is a **finding
 to explain**, not a number to top up.
 
-### F11.3 — Test the USE CASE from the outside, not the function
+### F11.3 — ALL tests are outside-in, and the use-cases form a GRAPH OF VARIATIONS [amended by owner ruling, v161]
 
-> *"We do not want to test functions, we want to test usecases."*
+**Owner ruling, 2026-08-29, amending the first draft of this limb, which was too weak:**
 
-The unit of test is the **use-case, exercised through its own public surface** — the API for
-a backend capability, the rendered UI for a screen — not an internal function reached
+> *"1. all tests should be outside in. 2. any tests that are not need to be routed back to
+> a usecase and rewritten as outside in - and moreover we do not want duplicate tests which
+> means we need to approach the collection of usecases as a graph of variations not as a
+> list of unconnected tests."*
+
+The first draft said internal tests were "subordinate, not banned". **That is superseded.**
+The three clauses below are one rule seen from three sides.
+
+#### (1) ALL tests are outside-in
+
+The unit of test is the **use-case exercised through its own public surface** — the API for
+a backend capability, the rendered UI for a screen. Not an internal function reached
 directly.
 
-- **This SHARPENS §17d rather than replacing it.** §17d requires every test to name its
-  `AC-<ID>.<n>`; this says *where the test must stand to make that claim honestly.* A test
-  that names an AC but reaches inside the implementation proves the code agrees with itself.
-- **The measured cost of getting this wrong is already in this project's record.** The
-  founding case at v127: a test built its precondition by deleting the very leaf whose
-  presence breaks the heal — **2,171 tests green while nine real cancellations sat unhealed
-  in production.** The test did not merely miss the bug; it encoded the bug's assumption as
-  its fixture. An outside-in test could not have been written that way.
-- **Internal tests are not banned; they are subordinate.** A pure domain function may carry
-  focused tests, and they are cheap and fast. What is forbidden is a use-case whose *only*
-  evidence is internal — an outside-in test must exist and must be the one that certifies the
-  acceptance criterion.
-- **The seam under test is never stubbed** (§17d, unchanged). Stubbing the boundary you are
-  asserting across converts an outside-in test back into an inside-out one.
+There is no permitted category of "fast internal test kept alongside". A test that reaches
+inside the implementation proves the code agrees with itself, and this project has the
+receipts: v127's founding case built its precondition by deleting the very leaf whose
+presence breaks the heal, and **2,171 tests were green while nine real cancellations sat
+unhealed in production.** The test did not miss the bug; it encoded the bug's assumption as
+its fixture. An outside-in test could not have been written that way.
+
+**The seam under test is never stubbed** (§17d, unchanged) — stubbing the boundary you are
+asserting across converts an outside-in test back into an inside-out one wearing the label.
+
+#### (2) An inside-out test is MIGRATION DEBT, not grandfathered
+
+Every existing test that is not outside-in must be **routed back to the use-case it is
+really about, and rewritten from the outside.** It is not deleted (that loses the
+requirement it encodes) and it is not left alone (that is the state this ruling rejects).
+
+**This is a large, real backlog and must be treated as one.** ROC currently carries ~2,566
+`src/app` + ~1,151 dashboard + ~203 injector tests against a use-case count in the dozens.
+That ratio is itself the finding.
+
+So it ratchets, on the mechanism already proven here: **the count of tests not attached to
+a use-case variation may only SHRINK.** Never raise the baseline; never delete a test merely
+to move the number — if a test genuinely asserts nothing worth naming, deleting it is
+honest, but say which and why (§17d's binary: waste, or an undiscovered acceptance
+criterion).
+
+#### (3) The use-cases are a GRAPH OF VARIATIONS, not a list of tests
+
+**This is the clause that makes the other two achievable, and it is the substantive one.**
+
+A use-case is not one behaviour. It is a **happy path plus its variations** — alternate
+flows, error branches, boundary conditions, absent-value cases — and those variations
+**compose**. "Device breakdown" × "empty window" × "unrecognised parameter" is a region of a
+space, not three unrelated files.
+
+Model that space explicitly. **The unit of coverage is a VARIATION NODE, and each node is
+certified by exactly one test.** Then all three of the owner's concerns become readable
+facts about one structure:
+
+| question | reading on the graph |
+|---|---|
+| is this test outside-in? | it is attached to a node, or it is attached to nothing |
+| is this test a DUPLICATE? | two tests on the same node |
+| is there a GAP? | a node with no test |
+| what does this use-case actually do? | the shape of its subgraph |
+
+**A flat list cannot answer any of them.** 2,566 tests tell you nothing about whether they
+cover forty distinct behaviours or four hundred, and duplication is invisible by
+construction — which is precisely why the count grew to that ratio without anyone deciding
+it should.
+
+**The graph is the artifact, and it is authored — not derived from the tests.** Deriving it
+from what the tests happen to do would make it agree with itself, which is this project's
+dominant failure family (§17i: a mechanism that cannot come back negative). The variations
+come from the use-case and its acceptance criteria; the tests are then mapped onto it, and
+the gaps and duplicates are what the mapping reveals.
+
+#### (4) The graph is ROOTED IN PERSONAS
+
+> *"to reiterate all the usecases should connect back to a persona"*
+
+The full chain, and every link is mandatory:
+
+**persona → job (JTBD) → use-case → variation → test**
+
+A test therefore traces to a **person who wanted something**. That is what makes "is this
+test worth having?" answerable instead of a matter of taste: a test attached to a variation
+of a use-case that no persona wants is testing something nobody asked for, and a use-case
+with no persona is a capability we invented.
+
+**Measured 2026-08-29, and the result locates the break precisely:** all **116 of 116** ROC
+use-cases already carry both `personas:` and `job:` in their authored frontmatter — zero
+missing — against a catalog in `product/personas.md` and `docs/personas-and-jobs.md`, with
+P1 and P2 dominant (75 and 79 references) across eight personas.
+
+**So the chain is intact from persona down to the use-case, and broken below it.** The two
+missing hops are use-case → variation (no variation graph exists) and variation → test (the
+~3,900 tests attach to nothing). That is a much narrower problem than it first appears, and
+it says where the work is: **do not re-do the persona and job modelling — it is already
+sound. Build the two hops underneath it.**
+
+Personas and jobs remain **reference artifacts, not work items** (`requirements-discovery`
+skill): use-cases reference them by id. The variation graph hangs off the same ids.
+
+**Connection to §17d, which this completes.** §17d requires every test to name its
+`AC-<ID>.<n>`. That gives each test an owner but leaves the *set* unstructured — nothing
+notices two tests naming the same criterion, or a criterion with three variations and one
+test. The variation graph is the missing structure: `AC-<ID>.<n>` names the criterion, the
+node names **which variation of it**.
 
 ### What the gate does NOT do
 

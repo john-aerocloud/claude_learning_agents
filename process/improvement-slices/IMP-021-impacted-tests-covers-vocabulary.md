@@ -69,3 +69,29 @@ This is the third recorded instance of the family this slice exists to close, an
 also an instance of the wider `OI-ROC-014` shape: **a declared control with no reader** —
 here the declaration is readable but the reader's grammar is narrower than the
 declaration's, which is the same failure one layer in.
+
+
+## Second measured instance, 2026-08-29 (UC-ROC-114) — a MISTYPED tag is indistinguishable from NO tag
+
+Found late by the UC-ROC-114 engineer, and it reports the finding as *"worth more than the
+fix"* — correctly.
+
+It tagged a new node `domain-derivedAlertStatus`, **copying the shape of
+`domain-decisionRecord`**. That prefix is a **registered alias, not a convention**. So the
+tag named a node the model does not have, and `make impacted-tests` reported the new node —
+**on the production read path** — as **UNCOVERED while seven specs covered it**.
+
+**The generalisable failure, stated by the engineer:** *a mistyped tag is indistinguishable
+from no tag.* The tool cannot tell them apart, so a new node reaches the tester marked
+"needs a new spec" when it is in fact well covered.
+
+**Why this is the more dangerous half of the family.** The first instance (comma-splitting)
+produced a **false clean** — coverage silently not counted. This one produces a **false
+alarm** that is equally corrosive, and worse in one respect: it teaches the reader that the
+tool is noisy. A tool that cries wolf about a covered node is on its way to being ignored,
+which is how `DEF-ROC-146`'s tier ended up running nowhere.
+
+**What this slice now owes, beyond the parser widening:** an unknown `@covers` identifier
+must be a **hard error naming the unknown id**, not a silent zero-match. The set of valid
+node ids is known — the model is the authority — so this is checkable, and the alias/
+convention distinction that misled the engineer should be visible at the point of use.

@@ -1,11 +1,13 @@
 ---
-process_version: 170
+process_version: 171
 effective_from: 2026-08-29
-supersedes: v169, v168, v167, v166, v165, v164, v163, v162, v161, v160, v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
+supersedes: v170, v169, v168, v167, v166, v165, v164, v163, v162, v161, v160, v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
 status: active
 ---
 
-<!-- v170 (RETRO, ROC 2026-08-29; INCIDENT arm, DEF-ROC-146 resolved. SHORT. Constraint unchanged, twelfth read, not re-derived. **FINDING: A GATE'S WIRING IS UNTESTED BY DEFAULT, AND THE MECHANISM UNDERNEATH IT IS THAT A SKIPPED JOB SATISFIES A DEPENDENT'S `needs:`.**
+<!-- NOTE ON THE NUMBER: authored as v170 and renumbered to v171 at merge time. OagEventSource published its own v170 concurrently and reached `main` first, so both sections are real and neither is a duplicate of the other. This is the v141/v144/v151 renumbering trap, and it is recorded rather than silently fixed because the fold-forward at the start of this cycle reported `already up to date` and WAS correct at that moment — the window is exactly the time between that check and the fold-back. Nothing was dropped: ROC's v171 sits above OAG's v170, newest-first. -->
+
+<!-- v171 (RETRO, ROC 2026-08-29; INCIDENT arm, DEF-ROC-146 resolved. SHORT. Constraint unchanged, twelfth read, not re-derived. **FINDING: A GATE'S WIRING IS UNTESTED BY DEFAULT, AND THE MECHANISM UNDERNEATH IT IS THAT A SKIPPED JOB SATISFIES A DEPENDENT'S `needs:`.**
 
 `DEF-ROC-146` was *"a whole test tier no CI job runs"*. Closing it exposed the layer beneath: **no test read `deploy-ROC.yml` for the tier at all.** The step could be deleted and every offline check, both lints and every other CI job would stay green — and it **had been deleted twice inside this item's own history**. The item's own defect, one level up, inside its fix. The engineer built a guard for five routes and the tester broke all six by hand and quoted each: step deleted; job dropped from the `needs:` closure (tier still runs, just outside the gate); `continue-on-error`; an `if:` on the step; an `if:` on the JOB; and the trigger path filter narrowed off the tier's own inputs, which since `DEF-ROC-150` live OUTSIDE `src/**`.
 
@@ -16,6 +18,8 @@ status: active
 **Two quality notes from the tester, both worth keeping.** It verified the guard itself fails closed — workflow missing gives a module-load crash and an unparseable workflow gives an explicit *"the reader failed closed"* finding, so §F11.5's decline-to-assert rule was applied to the new guard rather than assumed. And it caught a **citation slip**: the engineer cited run `33269944612` as being on `88b6120` when that run's headSha is `93c2059`, an ancestor. Immaterial to the verdict, and it found the correct run itself — but it is the fourth time this session that a REPORT and the STATE disagreed, which is exactly §F9g's generalisation. **Cite the sha, then check the run belongs to it.**
 
 FLOW, and it is the decision this retro exists to make: `UC-ROC-111` sat READY and was deliberately NOT pulled, recorded on the item per §F9d.1 as a finding rather than a silent hold. Not a file collision — **gate contention, measured**: three tiers red for reasons unrelated to the diff (`DEF-ROC-161` five/five-different/zero failures on an unchanged tree, `DEF-ROC-158`+`DEF-ROC-096` a shared docker stack torn down on EXIT, `DEF-ROC-160`). Two agents this session had measurements corrupted by a third, and one correctly DECLINED to commit a baseline tightening because it would have redded whoever landed `UC-ROC-115`. **So capacity is not this cycle's constraint — GATE TRUSTWORTHINESS is**, and the remedy is to pull the gate-repair items forward ahead of feature work rather than to widen WIP. Doing that now: `DEF-ROC-161` and `DEF-ROC-158` come off their 2026-09-08 defer into the two slots `DEF-ROC-146` just freed. A defer was always a ceiling, not a floor. REGISTRY: 8/8, no row. CONSTRAINT: unchanged. -->
+
+<!-- v170 (RETRO, OagEventSource 2026-08-29; fired on the owner's instruction, immediately after a fold-forward the session should have done at its start. FOCUS QUESTION, default. THE CONSTRAINT IS UNCHANGED FOR A SEVENTH READ AND IT GOT WORSE: `queue` **69.66%** of measured GLT (v155: 68.66%), median **714,470s (8.3d)** per item, n=226; state `open` **62.94%**, median **804,124s (9.3d)**, n=153, backfill 0.00%. But the cycle's real finding is not in that table, and it is a cost the table CANNOT see. **THE HEADLINE: this instance spent a session building a control that already existed on `main`, and DORA scored it as delivery.** OagEventSource sat at **v155** while main reached **v169** — fourteen versions — including **SSF11 (v160/v161)**, an engineering exit gate covering complexity, coupling, coverage and outside-in tests, built by ROC **from the same owner instruction on the same day**. Not knowing, this instance built **v156 SS19c**, substantially the same control, and wired `dependency-cruiser` where main already names `AeroCloudSystems/CodeAnalysisTools`. It surfaced only because the owner said to pull the base in; the merge conflicted in `engineer.md`, which is the only reason anyone would ever have noticed. WHY-CHAIN (4): (1) the work was duplicated because the session never folded forward; (2) it never folded forward because nothing asks — `/project-switch` runs `project-update` on resume, but a session resuming any other way is never prompted and `loop-gate` has no currency limb; (3) that gap persists because reconcile latency is measured only OUTWARD (SS0a Rule 4 makes fold-BACK a measured GLT cost and the retro runs `project-foldback` unattended as its own close step) — there is no inward equivalent; (4) ROOT CAUSE, and it generalises past worktrees: **we measure whether OUR learning reached others and never whether THEIRS reached us, so the cost of staleness is paid as DUPLICATED WORK, which is invisible in every delivery metric because it looks exactly like delivery.** EXPLOIT (waste at the constraint): **SS19e + a `loop-gate` CURRENCY limb** — report how far main is ahead of this instance's merge-base and NAME the changed process sections, so staleness is visible as content rather than a commit count; fold forward before the first pull and before writing any process version. Registered as **EXP-OAG-008**. SUBORDINATE: when the two collide, **main's text GOVERNS** and the local version is cut to what main does not already say — done here: SS19c is reduced from a full statement of the rules to three additive clauses (the gate binds at the PUSH boundary too, not only at handover; no-worse is a FLOOR and the owner also asked to ATTEMPT an improvement with the outcome recorded; and a ratchet must fail honestly — cannot-measure is a THIRD outcome, jitter tolerance is measured and declared with an absurd one failing closed, raising the floor is part of finishing, and a floor read off a RED run is not a floor). ELEVATE: not taken. **SECOND FINDING, A PRINCIPLE FAILURE AND THE MORE SERIOUS OF THE TWO: an owner-ordered safety DISARM was reported live, twice, having never deployed.** `DIVERSION_MAPPER_ENABLED` — a predicate measured **53.8% false** and publishing to two live prod consumers — was changed in source, tested green, committed and pushed, and reported as applying. `make bundle-all` was never run, so the committed artefact still read `true`; the bundle-diff gate went red; **every deploy job transitively needs that gate, so nothing ran** and the arm stayed live across the whole window. The knowledge existed, registered, in this project, BY NAME (`OI-BUNDLE-REBUILD-MUST-BE-LAST-STEP-BEFORE-PUSH`, `OI-COMMITTED-BUNDLE-MIRROR-IS-NOT-THE-RUNTIME-ARTIFACT`, `DEFECT-OAG-030`) and was not consulted. ROOT CAUSE: **the SOURCE was verified and the ARTEFACT was reported** — every check available (tests, tsc, lint, even a HEAD re-read of the source) sits on the wrong side of the bundling step and is structurally blind to the class. Sharpened by a near-miss in the same session: the `CLAUDE.md` co-owned re-read rule DID catch `isolated-commit` silently reverting that same one-line constant TWICE while reporting success (`DEFECT-OAG-146`) — so the value was checked carefully in the source, and never asked whether the source reaches production. ROUTED as **SS19d** + `engineer.md` step 3b. **A false 'it is off' is worse than 'it is still on', because it ends the owner's attention on a hazard that is still running** — that clause is the part worth keeping. QUALITY: CFR **8.4%**, MTTR median **77,954s**, deploy frequency **6.36/active-day** trailing 30d, rework **4.2%**; the worst stage is `validating`/tester at **7.6%** (7/92) and `deploying`/cicd at 5.8% — both above `building`/engineer's 0.4%, which says defects are found late rather than not found. Defect arrivals **71 in 30 days**. TOKENS: plumbing **14.6%** / delivery 85.4% over 38.4M measured; the single largest reduction available is not a token cut at all — it is EXP-OAG-008, because a duplicated session is 100% waste at full delivery price. REGISTRY: OagEventSource 7/8 -> 8/8 with EXP-OAG-008; **EXP-OAG-004's own pre-declared falsifier fired for a SECOND time and found a FIFTH divergence class** — artefact staleness, where local and CI ran the same tests and agreed, and CI additionally checked something local never did. CONSTRAINT TO ATTACK NEXT: `queue`/`open`, seventh read — but for the first time with a named mechanism that is not about pulling faster: **work that never needed doing at all.** -->
 
 <!-- v169 (RETRO, ROC 2026-08-29; INCIDENT arm, DEF-ROC-157 resolved. SHORT — the constraint is unchanged for an eleventh read and v167's reading still holds, so it is not re-derived. **THE FINDING IS A SHARPER SUB-SPECIES OF THIS PROJECT'S DOMINANT FAMILY, AND THREE INSTANCES WERE FOUND IN ONE FILE-SWEEP: A GUARD THAT SKIPS ON AN UNMEASURABLE INPUT ASSERTS NOTHING WHILE READING GREEN.**
 
@@ -132,7 +136,7 @@ ROUTED as **SSF11.4** (three clauses, all plain practice -- NO experiment row, d
 <!-- v111 (FOCUSED retro, ROC 2026-07-27; on main v110 via fold-forward-FIRST — clean, no collision; §F8 routine-batch gate at SLC-ROC-014 close, NO prod incident): SLC-ROC-014 delivered the COMPLETE rules-EDITING capability (edit → mandatory draft-test → publish, live no-redeploy pickup, Simulator parity, content-hash attestation gate + who/when attribution) — UC-056/057/058 all live-stack validated + pushed to origin/main + deployed to aas-test. NO global §-body change. Routed outcomes: (1) engineer.md plain-practice fold — the pre-built_green green bar must exercise the REAL artifact for UI/pipeline slices (fully-themed live axe + same-element aria-label; focus preventScroll + no scrollable ancestor; composed-consumer-against-populated-store acceptance driving consume() end-to-end), extending v110's live-caught→offline-pin; recurring root cause logged in principle-failures/2026-07-27-offline-green-ne-live-correct-ui-pipeline.md. (2) work-items.py + linear-project.py + linear-mapping.md machinery fix (human "fix the in-progress clutter"): blocked never maps to In Progress (Todo/Backlog) and an aggregate whose only non-terminal children are all blocked derives blocked — parked-on-external trees drop out of the active lane in queues/stats/board (107 wi-tests green). (3) EXP-115 POSITIVE again (ROC live catches), EXP-117 → 2/3 POSITIVE (board cadence). Constraint UNCHANGED + not-agent-squeezable (external 46.66% Azure-block + queue 41.93% backlog; agents ≈11%); dev-validation 11.1% / CFR 10.1% is HONEST dev-catch (EXP-108), not decay — the in-system lever is shifting live-defect classes LEFT (measured next on SLC-ROC-015). Registry 7 active, under cap, no rows added. -->
 <!-- v110 (FOCUSED retro, AdixOut 2026-07-24; RECONCILED onto main v109 via fold-forward-then-reapply — main advanced to v109 (ROC SLC-ROC-013 retro) while this AdixOut retro was in flight, so renumbered v109→v110; retro-debt gate — 3 routine: UC-AIDX-028 rework (TWO reject→rework cycles) + SLC-AIDX-011/CHK-AIDX-010 closes, REQ-004's dev consumer-side walking skeleton: C12 bus+grant → C13 routing → C10/C11 ingest standup → OAG handoff, built + validated LIVE end-to-end (synthetic event → C12 → C13 → C10 → C11 → read model → egress). TIGHT: two fix-derived learnings folded as PLAIN PRACTICE, no experiment rows. Constraint UNCHANGED from v105/v108 (registered/queue = artifact latency, ~70% of GLT; squeezable in-system cost = engineer/multi-tenant-eventing). Both learnings were caught by LIVE assert-real-state validation that offline synth-pins passed. (1) SCOPE-GAP → engineer.md + solution-architect.md: "reuse existing X" must be VERIFIED against the real deployed TARGET account/stack, never assumed from a sibling env — SLC-AIDX-011's "reuse the existing C10/C11 ingest" was wrong (C10/C11 were sandbox-only; the migration moved only the egress to dev-dataout), so the engineer STOPPED (§F7) rather than build against an absent dependency and a predecessor UC-030 + architect delta 007 were inserted at the real edge; the §F7 stop was correct. Extends the v97 assert-real-state family. (2) EVENTBRIDGE TARGET PAYLOAD (the double-rework) → engineer.md: for an EventBridge rule→SQS/target that must forward the event's `detail` object verbatim, use `inputPath: "$.detail"` (JSONPath extraction), NOT an `inputTransformer` with a bare `<detail>` object placeholder — the `<placeholder>` idiom quote-strips a nested OBJECT into invalid JSON (`ERROR_CODE=INVALID_JSON`), it only round-trips STRING fields (why the webhook router's flat string fields worked). Root cause found only by adding a target `DeadLetterConfig` to capture the real `ERROR_CODE`/`ERROR_MESSAGE` — so: always wire a target `DeadLetterConfig` and INSTRUMENT-FIRST before guessing at an opaque cross-service delivery failure. UC-028 rework #1 = default-rule envelope-wrap poison (C11's parseEnvelope rejected the wrapped event); rework #2 = the `<placeholder>` INVALID_JSON. Engineer left OFFLINE synth-pins behind for the inputPath/InputTransformer shape + DeadLetterConfig so the payload-shape class is now caught offline (live-caught infra-shape defect → offline pin). Kept in engineer.md not the aws-architecture skill (no clean EventBridge-target section there; narrowest owner = engineer implementation behaviour). EXP-115 (whole-journey/JTBD live validation) scored POSITIVE again (dated confirming note): the live bus-driven E2E caught the scope-gap + BOTH UC-028 delivery bugs offline pins missed. CFR HONESTY: UC-028's two reworks + UC-027's earlier deploy_failed are real DEV-caught change-failures (EXP-108 integrity) — the process working (caught in dev before OAG/prod), NOT decay; CFR ~39% reflects honest dev-stage rejection accounting. Registry unchanged: 8 active (EXP-101,106,107,112,113,115,116,117) — AT cap-8; no rows added/retired. No global-section rules changed; routed changes = engineer.md (2 folds) + solution-architect.md (reuse-verify note) + EXP-115 confirming note. -->
 <!-- v109 (FOCUSED retro, ROC 2026-07-24; RECONCILED onto main v108 via fold-forward-FIRST — main had advanced to v108 (AdixOut tight retro) while this ROC session ran, so this entry is v109; triggered by the §F8 routine-batch gate at SLC-ROC-013 close, NO incident): SLC-ROC-013 (REQ-ROC-003 living-demo foundation, UC-051..055) delivered + validated live-stack + pushed to origin/main on green (CI deploying to aas-test). NO global §-body process change this cycle — the routed outcomes are (1) EXP-116 lean-orchestration ADOPTED into orchestrator.md as plain practice (guards proven safe 2/2, no DORA harm; registry 8→7), (2) EXP-117 board-push cadence advanced to 1/3 POSITIVE. Constraint UNCHANGED and confirmed not-agent-squeezable (`registered`/backlog-aging artifact 57.76% + external-blocked DEF-004 33.55%; agents ≈8.6%); change budget deliberately NOT spent chasing it (constraint-gate). J23 demo-grows DoD + demo-egress isolation pattern kept as ROC project artifacts, not over-generalised. TIGHT retro — score + adopt + drain + fold. -->
-# Current Process — v170
+# Current Process — v171
 
 <!-- v139 (owner instruction, OagEventSource 2026-08-13, NO retro — a direct standing
 instruction from the human owner, folded immediately rather than queued): every update to
@@ -2141,6 +2145,102 @@ agree.
 - A red CI run is never left red and never silently abandoned: it is closed by category
   1 or 2, permanently removing that divergence class.
 Target: MTTR + CFR. (Per-role: `engineer.md`, `cicd.md`.) [EXP-070]
+
+## 19c. §F11's exit gate ALSO binds at the push boundary, and it gains one active step [v156→superseded-in-part by §F11; reconciled 2026-08-29]
+
+**READ §F11 FIRST. It is the governing text** and it is broader than this section: complexity
+AND coupling AND coverage AND outside-in tests, as EXIT CONDITIONS on the engineering step,
+with `AeroCloudSystems/CodeAnalysisTools` as the named instrument.
+
+This section was written independently on OagEventSource the same day §F11 landed from ROC,
+and **most of it was duplicate.** It is cut to the parts §F11 does not already say. That
+duplication is itself recorded — see the fold-forward note in §19d.
+
+**(a) The gate binds at the PUSH boundary too, not only at handover.** §F11 is an exit
+condition before the tester takes over. On a trunk-based, continuously-deployed project the
+push happens many times before that, and *the push is the apply*. So the ratchets are checked
+where work leaves the machine, not only where the item changes hands.
+
+**(b) NO-WORSE IS A FLOOR; YOU ALSO ATTEMPT AN IMPROVEMENT.** §F11.1 asks *did it get
+worse*. The owner also asked, verbatim, to *"look at and attempt refactors to improve
+coupling of work that is about to be pushed"*. So: read the GENERATED analysis, attempt a
+refactor, re-run the tests. **"I looked, and here is why I left it" is a valid outcome;
+skipping the look is not.** A mandatory refactor every time would be ignored within a week; a
+mandatory LOOK is affordable every time. And the outcome is **RECORDED on the item**, so
+*considered-and-declined* is distinguishable from *not-done* — an unfalsifiable rule is
+decoration, which is the family §F11 itself exists to fight.
+
+**(c) A RATCHET MUST FAIL HONESTLY, AND ITS TOLERANCE IS MEASURED.**
+- *Cannot measure* is a THIRD outcome, never folded into pass or fail. A caller who cannot
+  tell a broken measurement from a real regression will fix the wrong one.
+- Any jitter tolerance is **measured and declared next to the numbers it applies to**, and an
+  absurd one FAILS CLOSED — switching a gate off has to look like switching it off, not like
+  configuring it. (Measured, OagEventSource 2026-08-29: v8 branch attribution is not
+  bit-stable, ±0.01 across identical green runs. A gate that reds on noise is a gate someone
+  disables.)
+- **Raising the floor after an improvement is part of FINISHING the work.** A ratchet that
+  only ever holds is a ratchet nobody turns.
+- **A floor read off a RED run is not a floor.** Measured the same day: a baseline taken from
+  a run with five failing specs described a surface no green run reproduces, and the gate
+  caught it by reddening on the very next commit.
+Target: CFR + gross lead time. (Per-role: `engineer.md`.)
+
+## 19d. A CHANGE IS NOT LIVE UNTIL THE ARTEFACT CARRIES IT AND THE DEPLOY RAN [v170, OagEventSource]
+**"Pushed" is never reported as "deployed."** On 2026-08-29 an owner-ordered safety DISARM
+(`DIVERSION_MAPPER_ENABLED`, a predicate measured 53.8% false and publishing to two live prod
+consumers) was reported to the owner as live, twice, having never deployed: the source was
+changed without rebuilding the committed bundle, the bundle-diff gate went red, **and every
+deploy job transitively needs that gate — so nothing ran.** The arm stayed live in production
+across the whole window. See `principle-failures/2026-08-29-reported-a-prod-disarm-that-the-bundle-gate-had-blocked.md`.
+- **Rebuild the artefact as the LAST step before commit**, not as a follow-up. A shipped
+  behaviour change that does not rebuild its artefact is a change that did not happen.
+- **Assert the change in the BUILT BYTES** (`git show HEAD:<artefact>`), never in the source
+  you edited. Every source-side check — tests, typecheck, lint, even a HEAD re-read of the
+  source — sits on the wrong side of the bundling step and cannot see this class.
+- **Name the RUN and its conclusion when you report a deploy**, or say plainly that it is not
+  yet confirmed. "It is pushed" and "it is live" are different claims and only one was made.
+- **A RED GATE MEANS NOTHING DEPLOYED, SILENTLY.** A blocked deploy produces no red on the
+  thing you were watching — the failure is upstream, in a job whose name does not mention
+  deployment. Where the push is the apply, that inference is the trap: the push is the apply
+  **only when the gates pass.**
+- **A false "it is off" is worse than "it is still on"**, because it ends the owner's
+  attention on a hazard that is still live. Weight the claim by what it lets someone stop
+  worrying about.
+Target: CFR + MTTR. (Per-role: `engineer.md`, `cicd.md`.)
+
+## 19e. FOLD FORWARD IS A PRECONDITION OF WORK, NOT A COURTESY [v170, OagEventSource]
+**We measure reconcile latency OUT and never IN, and the cost of staleness is paid as
+DUPLICATED WORK — which is invisible in DORA because it looks like delivery.**
+
+MEASURED, 2026-08-29: this instance sat at **v155** while `main` had reached **v169** — 14
+process versions, including **§F11 (v160/v161)**, an engineering exit gate covering complexity,
+coupling, coverage and outside-in tests, built by ROC **from the same owner instruction on the
+same day.** Unaware of it, OagEventSource spent a session building **v156 §19c**, a coverage +
+coupling push gate that was largely the same control, plus a `dependency-cruiser` wiring where
+main already names `AeroCloudSystems/CodeAnalysisTools`. It surfaced only because the owner
+said to pull the base in. That is `EXP-047`'s duplicate-belief shape at the process layer, and
+it is the most expensive form: two projects paying full price for one control, then paying
+again to reconcile them.
+
+**Why it happened: fold-BACK has a gate and fold-FORWARD does not.** §0a Rule 4 makes
+reconcile latency a measured gross-lead-time cost and the retro runs `project-foldback` as its
+own close step, unattended. There is no equivalent in the other direction — `/project-switch`
+runs `project-update` on resume, but a session that resumes any other way is never asked, and
+`loop-gate` has no currency limb. **So an instance can be arbitrarily stale and nothing says
+so.**
+
+- **Fold forward BEFORE the first pull of a session, and before writing any process version.**
+  A version number chosen against a stale base is a collision waiting to be merged.
+- **`loop-gate` gains a CURRENCY limb**: report how far `main` is ahead of this instance's
+  merge-base, and **name the process sections that changed**, so staleness is visible as
+  content rather than as a commit count. Advisory below a threshold, blocking above it.
+- **Before writing a new §, check whether main already has one.** The cheapest instance of
+  this class costs a merge conflict; this one cost a session.
+- **When the two collide, MAIN'S TEXT GOVERNS** and the local version is cut to what main does
+  not already say — never merged into two coexisting statements of one rule, which is how a
+  process file acquires contradictions.
+Target: gross lead time (duplicated work is pure waste at the constraint). (Per-role:
+`orchestrator.md`, `flow-manager.md`.)
 
 ---
 

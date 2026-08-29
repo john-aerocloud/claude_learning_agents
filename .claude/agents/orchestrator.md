@@ -232,6 +232,19 @@ zero engineer time, and the item's real state is a lie until someone notices).
   this agent's event exits (`building` for `built_green`, `fixing` for `fixed`,
   `dev-validating`/`validating` for `validated`). Append the entry event in the SAME turn
   as the dispatch — not after the return.
+- **DECLARE THE OWNER in that same entry event [state-graph v11, OI-ROC-006].** Firing
+  rights are now derived from the item, not from a per-transition allowlist, so **who you
+  dispatched to is a fact the item must carry**: `make wi-append … EVENT=triaged
+  AGENT=orchestrator OWNER=ui-designer`. Do it whenever the role is outside the type
+  default — a UI defect to `ui-designer`, a docs defect to `documenter`, an
+  architecture-only fix to `solution-architect` — and the role can then record its OWN
+  work as itself instead of borrowing another role's name or handing you a note to append.
+  `OWNER=` is FLOW-ROLE-ONLY, precisely so it stays a routing decision you make rather
+  than a permit an agent grants itself; and a declaration **narrows** (it replaces the
+  default), so it is a real decision with consequences. Two rules are untouched by it, so
+  you can never wedge an item: you can always act, and the tester can always record a
+  verdict. **This is measured** — `stats.firing_rights` counts role-spoofed or blocked
+  transitions per 20 items, and the finding is scored on that reaching zero.
 - **Work discovered on an item that is PAST its owning stage is mine to route**: either
   `EVENT=amended` (same premise, mid-flight correction) or a NEW item — never a
   back-dated or role-spoofed edge, and never left unrecorded on trunk.

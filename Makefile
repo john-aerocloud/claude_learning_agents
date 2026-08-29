@@ -450,7 +450,16 @@ test-wi:
 # State lives ONLY in the per-item files (work/$(PROJECT)/items/{active,done}/<ID>.md);
 # queues, stats and the dependency tree are DERIVED here, never stored-and-hand-synced.
 # Append an edge-checked event (the ONLY way to change item state; rejects illegal transitions):
-# make wi-append PROJECT=P ID=UC-1 EVENT=made_ready AGENT=flow-manager [REF=<sha>] [NOTE="..."] [TOKENS=<n>] [DURATION_MS=<n>] [OBSERVE=make:<target>]
+# make wi-append PROJECT=P ID=UC-1 EVENT=made_ready AGENT=flow-manager [REF=<sha>] [NOTE="..."] [TOKENS=<n>] [DURATION_MS=<n>] [OBSERVE=make:<target>] [OWNER=<role>[,<role>]]
+# OWNER = declare WHO this item is routed to, in the SAME act as the dispatch [v11,
+#   OI-ROC-006]. Firing rights are DERIVED from the item: a flow role may fire anything,
+#   a validation verdict is the tester's, and everything else belongs to the item's
+#   declared owner. Use it when an item is dispatched to a role outside the type default
+#   (a UI defect to `ui-designer`, a docs defect to `documenter`, an architecture-only
+#   fix to `solution-architect`) so that role can record its OWN work as itself instead
+#   of borrowing another role's name. A declaration REPLACES the default — it narrows.
+#   FLOW ROLES ONLY: an agent that could declare itself the owner would be granting
+#   itself, in one command, the right it is exercising in that same command.
 # TOKENS = subagent_tokens the dispatched specialist spent producing this transition (optional).
 # DURATION_MS = the dispatched agent's REAL cycle time in ms for this transition (optional;
 #   the dispatch layer's reported duration_ms). Feeds §F agent-cycle-time-vs-GLT in wi-project.
@@ -499,7 +508,7 @@ wi-append:
 	  exit 1; \
 	fi
 	$(WORKITEMS) append --project $(PROJECT) --id $(ID) --event $(EVENT) --agent $(AGENT) \
-	  $(if $(REF),--ref "$(REF)",) $(if $(NOTE),--note "$(NOTE)",) $(if $(NOTE_FILE),--note-file "$(NOTE_FILE)",) $(if $(TOKENS),--tokens "$(TOKENS)",) $(if $(DURATION_MS),--duration-ms "$(DURATION_MS)",) $(if $(OBSERVE),--observe "$(OBSERVE)",) $(if $(PROBE),--probe "$(PROBE)",)
+	  $(if $(REF),--ref "$(REF)",) $(if $(NOTE),--note "$(NOTE)",) $(if $(NOTE_FILE),--note-file "$(NOTE_FILE)",) $(if $(TOKENS),--tokens "$(TOKENS)",) $(if $(DURATION_MS),--duration-ms "$(DURATION_MS)",) $(if $(OBSERVE),--observe "$(OBSERVE)",) $(if $(PROBE),--probe "$(PROBE)",) $(if $(OWNER),--owner "$(OWNER)",)
 # Recompute ALL views (queues + stats + tree + re-render each item's derived block). Run after each loop.
 # make wi-project PROJECT=OagEventSource
 wi-project:

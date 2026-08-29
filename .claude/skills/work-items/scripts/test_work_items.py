@@ -248,15 +248,19 @@ class TestAppend(Base):
         self.assertIn("not a legal transition", err.getvalue())
         self.assertIn("amendment experiment", err.getvalue())
 
-    def test_append_rejects_wrong_agent(self):
-        # made_ready IS legal from registered, but only flow-manager may do it
+    def test_append_rejects_an_agent_that_does_not_own_the_item(self):
+        """v11 (OI-ROC-006): the ENGINEER is no longer the example here, because
+        forbidding it was recorded instance 4 — an ordinary use-case and the
+        canonical role for it, told by its own role brief to fire `pulled` and
+        forbidden by the graph. The requirement that survives is that a role the
+        item does not name is still refused."""
         self.write_item("active", "UC-Z", "use-case",
                         [{"ts": "1", "event": "registered", "agent": "flow-manager"}])
         with self.assertRaises(SystemExit) as cm:
             with contextlib.redirect_stderr(io.StringIO()) as err:
-                self._run_append("UC-Z", "made_ready", "engineer")
+                self._run_append("UC-Z", "made_ready", "ui-designer")
         self.assertNotEqual(cm.exception.code, 0)
-        self.assertIn("not for agent", err.getvalue())
+        self.assertIn("does not own this item", err.getvalue())
 
     def test_append_relocates_to_done(self):
         # v3: built_green -> deploying; deploying --deployed(cicd)--> validating
@@ -314,8 +318,13 @@ class TestAppend(Base):
         item = wi.load_item(os.path.join(self._items("active"), "UC-DP.md"))
         self.assertEqual(wi.fold_state(self.graphs, "use-case", item.events), "dev-validating")
 
-    def test_append_deployed_wrong_agent_rejected(self):
-        # only cicd may fire `deployed`
+    def test_append_deployed_by_a_non_owner_rejected(self):
+        """v11 (OI-ROC-006) REPLACED this test's premise, deliberately. It used to
+        read `only cicd may fire deployed` and refuse the ENGINEER — but recorded
+        instance 5 is a TESTER that stood the stack up, checked trunk carried the
+        sha, and had to fire `deployed` under AGENT=cicd because of exactly this
+        rule. What survives is the real requirement: a role that does NOT own the
+        item cannot fire its transitions."""
         self.write_item("active", "UC-DW", "use-case",
                         [{"ts": "1", "event": "registered", "agent": "flow-manager"},
                          {"ts": "2", "event": "made_ready", "agent": "flow-manager"},
@@ -323,9 +332,9 @@ class TestAppend(Base):
                          {"ts": "4", "event": "built_green", "agent": "engineer"}])
         with self.assertRaises(SystemExit) as cm:
             with contextlib.redirect_stderr(io.StringIO()) as err:
-                self._run_append("UC-DW", "deployed", "engineer")
+                self._run_append("UC-DW", "deployed", "ui-designer")
         self.assertNotEqual(cm.exception.code, 0)
-        self.assertIn("not for agent", err.getvalue())
+        self.assertIn("does not own this item", err.getvalue())
 
     # ---- v4 dev-then-prod append legs ----
     def _at_dev_validating(self, iid):
@@ -352,13 +361,17 @@ class TestAppend(Base):
         self.assertEqual(wi.fold_state(self.graphs, "use-case", item.events), "prod-validating")
 
     def test_v4_dev_validated_wrong_agent_rejected(self):
-        # cicd may NOT fire dev_validated (tester-only)
+        """cicd may NOT fire dev_validated. UNCHANGED by v11 and load-bearing: a
+        validation verdict is the tester's on every item, which is the one safety
+        property the retired allowlists were actually carrying (EXP-139 declined to
+        widen it after DEF-ROC-013's misdiagnosis). cicd is an OWNER of this item
+        under the type default and is still refused."""
         self._at_dev_validating("UC-WA2")
         with self.assertRaises(SystemExit) as cm:
             with contextlib.redirect_stderr(io.StringIO()) as err:
                 self._run_append("UC-WA2", "dev_validated", "cicd")
         self.assertNotEqual(cm.exception.code, 0)
-        self.assertIn("not for agent", err.getvalue())
+        self.assertIn("VERIFICATION VERDICT", err.getvalue())
 
     def test_v4_full_prod_path_relocates_to_done(self):
         self._at_dev_validating("UC-FP")
@@ -405,13 +418,29 @@ class TestAmendedSelfEdge(Base):
                 self.assertIn(state, edges,
                               f"{itype}/{state} has no `amended` self-edge")
 
-    def test_amend_agents_are_uniform(self):
+    def test_amend_rights_are_uniform_across_every_state(self):
+        """v11 (OI-ROC-006) replaced the per-transition `agents` list this used to
+        read. The requirement is unchanged — `amended` must mean the same thing
+        from every state — and is now true BY CONSTRUCTION, because rights are
+        derived from the item rather than restated on each edge. Asserted both
+        ways: no edge carries a list, and every state resolves to the same set.
+
+        The set itself is WIDER than the retired `AMEND_AGENTS`, and that is the
+        point: DEF-ROC-128 instance 10 is an engineer that sharpened DEF-ROC-071's
+        stated mechanism at source and could not append it, because `amended`
+        excluded the one role most likely to disprove an unpulled item's premise."""
         for itype in [t for t in self.graphs.types
                       if self.graphs.kind(t) == "flow"]:
-            for t in self.graphs.transitions(itype):
-                if t["event"] == "amended":
-                    self.assertEqual(sorted(t["agents"]),
-                                     sorted(self.AMEND_AGENTS), f"{itype}/{t}")
+            self.assertEqual(
+                [t for t in self.graphs.transitions(itype) if "agents" in t], [],
+                f"{itype}: a per-transition allowlist survived v11")
+            sets = {tuple(self.graphs.allowed_agents(itype, "amended"))
+                    for t in self.graphs.transitions(itype)
+                    if t["event"] == "amended"}
+            self.assertEqual(len(sets), 1, f"{itype}: `amended` rights are not uniform")
+            resolved = set(sets.pop())
+            for a in self.AMEND_AGENTS:
+                self.assertIn(a, resolved, f"{itype}: `amended` lost {a}")
 
     def test_open_item_can_record_an_amendment(self):
         """The founding case, end to end through the real writer: an open item is
@@ -588,9 +617,12 @@ class TestInvariants(Base):
         self.assertTrue(any("(I1)" in x for x in v), v)
 
     def test_I1_wrong_agent_history(self):
+        """I1 replays history through the SAME derivation the writer uses, so a
+        hand-edited event by a role that does not own the item is still drift.
+        `ui-designer` is the example because v11 made `engineer` a legitimate one."""
         self.write_item("active", "UC-WA", "use-case",
                         [{"ts": "1", "event": "registered", "agent": "flow-manager"},
-                         {"ts": "2", "event": "made_ready", "agent": "engineer"}])
+                         {"ts": "2", "event": "made_ready", "agent": "ui-designer"}])
         v = wi.validate_items(self.graphs, self.project)
         self.assertTrue(any("(I1)" in x and "not permitted" in x for x in v), v)
 
@@ -4343,10 +4375,12 @@ class TestAwaitingObservationGraph(Base):
             e = self._edge("use-case", frm, "not_yet_observed")
             self.assertEqual(len(e), 1, frm)
             self.assertEqual(e[0]["to"], AWAIT)
-            self.assertEqual(e[0]["agents"], ["tester"])
         e = self._edge("defect", "validating", "not_yet_observed")
         self.assertEqual(len(e), 1)
-        self.assertEqual((e[0]["to"], e[0]["agents"]), (AWAIT, ["tester"]))
+        self.assertEqual(e[0]["to"], AWAIT)
+        # v11: the role is declared ONCE on the EVENT, not on each edge, because it
+        # is intrinsic to the event's MEANING (a verdict) rather than to the lane.
+        self.assertEqual(self.graphs.event_roles["not_yet_observed"], {"tester"})
 
     def test_exit_edges_observed_and_falsified(self):
         uc = {(t["event"], t["to"]) for t in self.graphs.transitions("use-case")
@@ -4363,11 +4397,19 @@ class TestAwaitingObservationGraph(Base):
         self.assertIn(("cancelled", "cancelled"), d)
 
     def test_exit_events_are_the_testers(self):
+        """v11: read off `firing_rights.event_roles` (declared once per event)
+        instead of a per-edge allowlist. The requirement is identical — only a
+        tester may say the observation landed or falsified the capability — and it
+        now holds from EVERY state the event appears in, not just the ones somebody
+        remembered to list."""
         for itype in ("use-case", "defect"):
             for t in self.graphs.transitions(itype):
                 if t["from"] == AWAIT and t["event"] in ("validated", "rejected",
                                                          "not_yet_observed"):
-                    self.assertEqual(t["agents"], ["tester"], t)
+                    self.assertEqual(
+                        self.graphs.allowed_agents(itype, t["event"]), ["tester"], t)
+                    self.assertEqual(self.graphs.event_roles[t["event"]],
+                                     {"tester"}, t)
 
     def test_time_is_attributed_to_external_not_to_the_tester(self):
         """A WAIT must never wear the tester's name (v126 constraint finding): the
@@ -4543,10 +4585,13 @@ class TestAwaitingObservationAppend(Base):
         self.assertIn("not a legal transition from 'building'", err)
 
     def test_only_the_tester_may_park(self):
+        """Unchanged by v11: `not_yet_observed` is a verdict — the tester's
+        statement that reality has not yet produced the record — so it is declared
+        in `firing_rights.event_roles` and an OWNER is refused."""
         iid = self._deployed_uc()
         err = self._append_fails(iid, "not_yet_observed", "engineer",
                                  observe="make:probe-x")
-        self.assertIn("not for agent 'engineer'", err)
+        self.assertIn("VERIFICATION VERDICT", err)
 
     def test_cannot_deploy_out_of_a_park(self):
         iid = self._deployed_uc()
@@ -7265,17 +7310,30 @@ class TestChangeFailureRecordable(Base):
 
     def test_AC_120_4_annotation_edges_keep_a_rightful_owner(self):
         """The graph exists so every transition has a rightful owner. Widening
-        WHERE a failure can be recorded must not widen WHO may record it."""
+        WHERE a failure can be recorded must not widen WHO may record it.
+
+        v11 (OI-ROC-006) keeps the requirement and changes where the answer lives:
+        rights derive from the item, so the recorder is the item's owner (or a flow
+        role), uniformly, from every state the annotation is legal in — there is no
+        per-edge list left to drift. What must still hold is that the producers
+        `metric_events` DECLARES for each folded event can actually fire it;
+        otherwise the declaration names an agent the machinery would refuse, and
+        the metric would have no producer at all."""
         for itype in [t for t in self.graphs.types
                       if self.graphs.kind(t) == "flow"]:
+            owners = self.graphs.default_owners(itype)
             for ev in ("deploy_failed", "build_failed"):
-                agents = {tuple(sorted(t["agents"]))
-                          for t in self.graphs.transitions(itype)
-                          if t["event"] == ev}
-                self.assertLessEqual(len(agents), 1,
-                                     f"{itype}/{ev}: agent list is not uniform")
-                for a in agents:
-                    self.assertEqual(set(a), {"cicd", "engineer"}, f"{itype}/{ev}")
+                edges = [t for t in self.graphs.transitions(itype)
+                         if t["event"] == ev]
+                for t in edges:
+                    self.assertNotIn("agents", t, f"{itype}/{ev}: stale allowlist")
+                if not edges:
+                    continue
+                declared = set(self._metric_events()[ev]["agents"])
+                for agent in declared:
+                    ok, why = self.graphs.may_fire(itype, owners, ev, agent)
+                    self.assertTrue(ok, f"{itype}/{ev}: metric_events declares "
+                                        f"'{agent}' as a producer but {why}")
 
     def test_AC_120_4_no_state_has_two_edges_for_one_event(self):
         """Every fold in the machinery takes the FIRST matching transition, so a

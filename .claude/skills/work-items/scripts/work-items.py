@@ -89,6 +89,75 @@ class Graphs:
         self.metric_events = {k: v for k, v in
                               data.get("metric_events", {}).items()
                               if not k.startswith("_")}
+        # [v11, OI-ROC-006] Firing rights are DERIVED from the item, not enumerated
+        # per transition. See the `firing_rights` block in state-graphs.json for the
+        # three rules and the evidence that retired the allowlists.
+        self.firing_rights = data.get("firing_rights", {})
+
+    @property
+    def flow_roles(self):
+        """RULE 1 — the roles that own SEQUENCING on every item of every type."""
+        return set(self.firing_rights.get("flow_roles", []))
+
+    @property
+    def event_roles(self):
+        """RULE 2 — events whose MEANING names a role (the validation verdicts).
+        Both a grant and a restriction: the named role holds this event on EVERY
+        item, and nobody else holds it — not even the item's owner."""
+        return {k: set(v) for k, v in
+                self.firing_rights.get("event_roles", {}).items()
+                if not k.startswith("_")}
+
+    @property
+    def known_roles(self):
+        return set(self.firing_rights.get("known_roles", []))
+
+    def default_owners(self, itype):
+        """RULE 3's fallback for an item that declares no `owner:`."""
+        return set(self.firing_rights.get("default_owners", {}).get(itype, []))
+
+    def owners_of(self, item):
+        """The item's DECLARED owner set, or the type default when it declares
+        none. A declaration REPLACES the default — it narrows, never adds."""
+        declared = item.fm.get("owner") if getattr(item, "fm", None) else None
+        return owner_set(declared) or self.default_owners(item.type)
+
+    def may_fire(self, itype, owners, event, agent):
+        """(ok, reason) — the whole authorisation rule, in the order the rules are
+        declared. `reason` is None when permitted, else a one-line explanation
+        naming which rule refused and what would change it."""
+        if agent and self.known_roles and agent not in self.known_roles:
+            return (False, f"'{agent}' is not a known agent role "
+                           f"(known: {'/'.join(sorted(self.known_roles))})")
+        # RULE 2 IS CHECKED FIRST, and the order is the whole point: a verdict is
+        # the ONE thing a flow role may not fire either. Rule 1 grants sequencing,
+        # not certification — a loop that could certify its own throughput is the
+        # independence loss this replacement must not introduce.
+        roles = self.event_roles.get(event)
+        if roles is not None:                        # rule 2: a verdict
+            if agent in roles:
+                return (True, None)
+            return (False, f"'{event}' is a VERIFICATION VERDICT: its meaning is an "
+                           f"independent verdict, so it is {'/'.join(sorted(roles))}'s "
+                           f"on every item — neither an owner nor a flow role may "
+                           f"issue the verdict")
+        if agent in self.flow_roles:
+            return (True, None)                      # rule 1: sequencing
+        if agent in owners:                          # rule 3: the item's owner
+            return (True, None)
+        return (False, f"'{agent}' does not own this item (owner: "
+                       f"{', '.join(sorted(owners)) or 'none'})")
+
+    def allowed_agents(self, itype, event, owners=None):
+        """The agents that could fire `event` on an item of this type — for
+        MESSAGES and for test path-synthesis, never for the decision (which is
+        may_fire, and which needs the item)."""
+        if owners is None:
+            owners = self.default_owners(itype)
+        roles = self.event_roles.get(event)
+        if roles is not None:
+            return sorted(roles)                     # rule 2 beats rule 1
+        return sorted(set(owners) | self.flow_roles)
 
     def owner_of(self, state):
         """Who is accountable for time spent in `state` — an agent name, or the
@@ -118,9 +187,10 @@ class Graphs:
         # queue_map values may be null (JSON null -> Python None): no queue.
         return self.queue_map.get(state)
 
-    def legal_from(self, itype, state):
-        """List of (event, to, agents) legal from `state` for this type."""
-        return [(t["event"], t["to"], t.get("agents", []))
+    def legal_from(self, itype, state, owners=None):
+        """List of (event, to, agents) legal from `state` for this type. The third
+        element is the DERIVED agent set (v11) — the graph no longer stores one."""
+        return [(t["event"], t["to"], self.allowed_agents(itype, t["event"], owners))
                 for t in self.transitions(itype) if t["from"] == state]
 
     def is_annotation(self, itype, state, event):
@@ -390,14 +460,31 @@ def _run_blocker_probe(project, spec, timeout=DEFAULT_OBSERVE_TIMEOUT):
                       "reversal")
 
 
-def check_transition(graphs, itype, state, event, agent):
-    """Return (ok, to_state, legal_here). ok iff `event` is a legal transition
-    from `state` for this type AND `agent` is in that transition's agents."""
-    legal_here = graphs.legal_from(itype, state)
-    for ev_name, to, agents in legal_here:
+def owner_set(declared):
+    """Normalise a declared `owner:` field (absent / scalar / list) to a set.
+    Absent or empty ⇒ empty set, which the caller reads as 'undeclared' and
+    replaces with the type default — never as 'nobody' and never as 'anybody'."""
+    if declared is None:
+        return set()
+    if isinstance(declared, str):
+        declared = declared.split(",")      # `--owner "ui-designer,engineer"`
+    return {str(x).strip() for x in declared if str(x).strip()}
+
+
+def check_transition(graphs, itype, state, event, agent, owners=None):
+    """Return (ok, to_state, legal_here, why). SHAPE comes from the graph (is this
+    event legal from this state); RIGHTS are DERIVED from the item [v11,
+    OI-ROC-006] — flow roles own sequencing, a verdict is the tester's, and
+    everything else belongs to the item's declared owner. `why` is None when
+    permitted, else the reason the rights check refused."""
+    if owners is None:
+        owners = graphs.default_owners(itype)
+    legal_here = graphs.legal_from(itype, state, owners)
+    for ev_name, to, _agents in legal_here:
         if ev_name == event:
-            return (agent in agents, to, legal_here)
-    return (False, None, legal_here)
+            ok, why = graphs.may_fire(itype, owners, event, agent)
+            return (ok, to, legal_here, why)
+    return (False, None, legal_here, None)
 
 
 # ---------------------------------------------------------------------------
@@ -1091,7 +1178,34 @@ def cmd_append(a):
         sys.exit(f"append: {a.id} is an aggregate ({item.type}); its state bubbles "
                  f"from children — you do not append flow events to it.")
 
-    ok, to, legal_here = check_transition(graphs, item.type, state, a.event, a.agent)
+    # --- ownership [v11, OI-ROC-006] -----------------------------------------
+    # `OWNER=` declares WHO the item is routed to, in the SAME act as the flow
+    # role's dispatch (v124). Only a flow role may declare it: otherwise an agent
+    # could grant itself, in one command, the right it is exercising in that same
+    # command — which is the self-serving derivation this replacement must not be.
+    declared_owner = owner_set(getattr(a, "owner", None))
+    if declared_owner and a.agent not in graphs.flow_roles:
+        print(f"append REJECTED: {a.id}: agent '{a.agent}' may not declare an "
+              f"owner.", file=sys.stderr)
+        print(f"  OWNER= is a ROUTING decision and belongs to a flow role "
+              f"({'/'.join(sorted(graphs.flow_roles))}), fired in the same act as "
+              f"the dispatch. An agent that could declare itself the owner would be "
+              f"granting itself the right it is using in the same command.",
+              file=sys.stderr)
+        sys.exit(1)
+    unknown = sorted(declared_owner - graphs.known_roles) if graphs.known_roles else []
+    if unknown:
+        print(f"append REJECTED: {a.id}: OWNER names {unknown}, which "
+              f"{'are' if len(unknown) > 1 else 'is'} not a known agent role.",
+              file=sys.stderr)
+        print(f"  known roles: {'/'.join(sorted(graphs.known_roles))}. An owner "
+              f"that names nobody would silently narrow the item to an empty set "
+              f"and make it unworkable by anyone but a flow role.", file=sys.stderr)
+        sys.exit(1)
+    owners = declared_owner or graphs.owners_of(item)
+
+    ok, to, legal_here, why = check_transition(graphs, item.type, state, a.event,
+                                               a.agent, owners)
     if not ok:
         legal_desc = ", ".join(f"{ev} (agents: {'/'.join(ags)})"
                                for ev, _to, ags in legal_here) or "(none — terminal state)"
@@ -1099,15 +1213,22 @@ def cmd_append(a):
         # distinguish wrong-agent from illegal-event for a clearer message
         ev_exists = any(ev == a.event for ev, _t, _ags in legal_here)
         if ev_exists:
-            print(f"  event '{a.event}' is legal here but not for agent '{a.agent}'.",
-                  file=sys.stderr)
+            print(f"  event '{a.event}' is legal here, but {why}.", file=sys.stderr)
+            print(f"  Firing rights are DERIVED from the item [v11], not from a "
+                  f"per-transition allowlist: a flow role may fire anything, a "
+                  f"verdict is the tester's, and everything else belongs to the "
+                  f"item's owner. If '{a.agent}' is the role doing this item's "
+                  f"work, the flow role that dispatched it declares that — "
+                  f"`make wi-append ... EVENT=<its own event> AGENT=<flow role> "
+                  f"OWNER={a.agent}` — rather than another role appending on its "
+                  f"behalf.", file=sys.stderr)
         else:
             print(f"  event '{a.event}' is not a legal transition from '{state}'.",
                   file=sys.stderr)
+            print("  If this transition SHOULD exist, open an amendment experiment "
+                  "(EXP-NNN) to add it to process/machinery/state-graphs.json — "
+                  "do not hand-edit item state.", file=sys.stderr)
         print(f"  legal events from here: {legal_desc}", file=sys.stderr)
-        print("  If this transition SHOULD exist, open an amendment experiment "
-              "(EXP-NNN) to add it to process/machinery/state-graphs.json — "
-              "do not hand-edit item state.", file=sys.stderr)
         sys.exit(1)
 
     # --- the observation predicate is REQUIRED, not optional [v9] -------------
@@ -1256,6 +1377,12 @@ def cmd_append(a):
         new_event["duration_ms"] = a.duration_ms
     if a.note:
         new_event["note"] = a.note
+    # The OWNER declaration is PERSISTED on the item, not just used for this one
+    # append: rights are derived from the item, so the item is where the routing
+    # decision has to be readable — by the next agent, by I1's replay of history,
+    # and by anyone reading the file (v11, OI-ROC-006).
+    if declared_owner:
+        item.fm["owner"] = sorted(declared_owner)
     item.fm.setdefault("events", [])
     item.fm["events"] = item.events + [new_event]
 
@@ -2196,6 +2323,86 @@ def _render_item_metrics_text(m):
     return "\n".join(L)
 
 
+# ---------------------------------------------------------------------------
+# AC-006.5 — the EXP-ROC-002 scoring hook (OI-ROC-006)
+# ---------------------------------------------------------------------------
+# Score the finding on this count reaching ZERO, NEVER on "those ten transitions
+# now work". Two limbs, and the asymmetry between them is the honest part:
+#
+#   spoof_indicators       — an event whose agent could not fire it under the
+#                            CURRENT rights model. After v11 this is unreachable
+#                            through `append`, so a non-zero reading means a
+#                            hand-edit. It can therefore only ever confirm; on its
+#                            own it would be a metric that can only return good
+#                            news, which is the DEF-ROC-120 failure.
+#   disclosed_substitutions — the limb that can actually move. A transition an
+#                            agent was BLOCKED from making leaves no event at all,
+#                            so the only trace is the DISCLOSURE the agent wrote
+#                            in the note it did land ("fired as AGENT=cicd", "read
+#                            this note, not the agent field", "the engineer role
+#                            cannot fire pulled"). Every one of the ten recorded
+#                            instances did exactly that.
+#
+# So the count is a FLOOR, not a measurement — precisely as EXP-140 said of its own
+# tally ("all self-reported, so the true rate is a floor"). It is reported as such.
+_SUBSTITUTION_DISCLOSURE = re.compile(
+    r"append REJECTED"
+    r"|is legal here but not for agent"
+    r"|not permitted \(allowed"
+    r"|(?:can|could|may) ?not fire"
+    r"|the \w+ role cannot fire"
+    r"|read (?:this note|the attribution)[, ]+not the agent field"
+    r"|fired (?:by|as) the \w+(?:-\w+)? because"
+    r"|fired (?:it|them|this) as AGENT="
+    r"|AGENT=\w+ (?:substitution|spoof)"
+    r"|spoof"
+    r"|substitut(?:ed|ion) (?:the )?agent"
+    r"|state graph offers no path"
+    r"|no (?:legal )?(?:path|edge)(?: at all)? for the role"
+    r"|mechanical attestation"
+    r"|attribution precedent",
+    re.I)
+
+FIRING_RIGHTS_WINDOW = 20
+
+
+def compute_firing_rights_hook(graphs, items, window=FIRING_RIGHTS_WINDOW):
+    """Role-spoofed or blocked transitions per `window` items, derived from the
+    event stream (AC-006.5). Pure function of the items; no state anywhere."""
+    flow = [it for it in items.values() if graphs.kind(it.type) == "flow"]
+    flow.sort(key=lambda it: (it.events[0].get("ts") if it.events else "",
+                              it.id or ""), reverse=True)
+    win = flow[:window]
+    instances = []
+    for it in win:
+        owners = graphs.owners_of(it)
+        for ev in it.events:
+            agent, name = ev.get("agent"), ev.get("event")
+            note = ev.get("note") or ""
+            if agent and not graphs.may_fire(it.type, owners, name, agent)[0]:
+                instances.append({"id": it.id, "event": name, "agent": agent,
+                                  "ts": ev.get("ts"), "kind": "spoof_indicator"})
+            elif _SUBSTITUTION_DISCLOSURE.search(note):
+                instances.append({"id": it.id, "event": name, "agent": agent,
+                                  "ts": ev.get("ts"), "kind": "disclosed_substitution"})
+    spoof = sum(1 for i in instances if i["kind"] == "spoof_indicator")
+    disclosed = len(instances) - spoof
+    n = len(win)
+    return {
+        "window_items": window,
+        "items_in_window": n,
+        "spoof_indicators": spoof,
+        "disclosed_substitutions": disclosed,
+        "total": len(instances),
+        "per_20_items": round(len(instances) * 20.0 / n, 2) if n else None,
+        "instances": instances,
+        "_floor": "A FLOOR, not a measurement: a transition an agent was BLOCKED "
+                  "from making leaves no event, so only the disclosures an agent "
+                  "chose to write are visible. Score EXP-ROC-002 on this reaching "
+                  "zero — never on 'those ten transitions now work'.",
+    }
+
+
 def compute_stats(graphs, items, states, now=None):
     """Enhanced stats: DORA + gross-lead-time decomposition (by_state / by_owner)
     + quality-by-stage + recovery-by-class, sliced overall and by item type.
@@ -2216,6 +2423,7 @@ def compute_stats(graphs, items, states, now=None):
         "overall": _stats_for_set(graphs, flow, states, now),
         "by_type": {t: _stats_for_set(graphs, its, states, now)
                     for t, its in sorted(by_type.items())},
+        "firing_rights": compute_firing_rights_hook(graphs, items),
     }
     return result
 
@@ -2403,6 +2611,27 @@ def _render_stats_md(stats):
     section("Overall", stats["overall"])
     for t, s in stats["by_type"].items():
         section(f"By type — {t}", s)
+
+    # --- G. firing rights (OI-ROC-006 AC-006.5 / EXP-ROC-002 scoring hook) ----
+    fr = stats.get("firing_rights")
+    if fr:
+        L.append("\n### G. Firing rights — role-spoofed or blocked transitions "
+                 f"per {fr['window_items']} items\n")
+        L.append("_Rights derive from the item's declared owner (state-graph v11); "
+                 "the graph constrains transition SHAPE only. Score `EXP-ROC-002` on "
+                 "this count reaching ZERO — **never** on 'those ten transitions now "
+                 "work'._\n")
+        L.append(f"- **{_fmt(fr['per_20_items'])} per {fr['window_items']} items** "
+                 f"({fr['total']} in the last {fr['items_in_window']}): "
+                 f"{fr['spoof_indicators']} spoof-indicator, "
+                 f"{fr['disclosed_substitutions']} disclosed-substitution")
+        L.append(f"- _{fr['_floor']}_\n")
+        if fr["instances"]:
+            L.append("| Item | event | agent | kind |")
+            L.append("|------|-------|-------|------|")
+            for i in fr["instances"]:
+                L.append(f"| {i['id']} | {i['event']} | {i['agent']} | {i['kind']} |")
+            L.append("")
     return "\n".join(L) + "\n"
 
 
@@ -6373,13 +6602,18 @@ def validate_items(graphs, project):
                         f"(I1) {iid}: event #{idx + 1} '{name}' is not a legal "
                         f"transition from state '{st}'")
                     break  # can't fold further; one report per item is enough
-                # also check the agent is allowed for that transition
-                agents = next((t.get("agents", []) for t in graphs.transitions(it.type)
-                               if t["from"] == st and t["event"] == name), [])
-                if ev.get("agent") and ev.get("agent") not in agents:
+                # …and the FIRING RIGHTS, through the SAME derivation the writer
+                # uses [v11]. History is replayed against the CURRENT rights model
+                # on purpose: an event that could not be written today is drift,
+                # whether it arrived by hand-edit or by a rights change nobody
+                # reconciled. `default_owners` is the closure of the retired
+                # allowlists precisely so no honest historical event fails here.
+                owners = graphs.owners_of(it)
+                ok, why = graphs.may_fire(it.type, owners, name, ev.get("agent"))
+                if ev.get("agent") and not ok:
                     violations.append(
                         f"(I1) {iid}: event #{idx + 1} '{name}' by agent "
-                        f"'{ev.get('agent')}' not permitted (allowed: {agents})")
+                        f"'{ev.get('agent')}' not permitted — {why}")
                 st = nxt
 
         # I2: no item both terminal/done AND in a non-null queue
@@ -6921,6 +7155,15 @@ def main(argv=None):
                          "newline is REJECTED, because the event is stored as a "
                          "one-line inline map and would be silently truncated.")
     ap.add_argument("--ts")
+    ap.add_argument("--owner",
+                    help="declare WHO this item is routed to (comma-separated "
+                         "roles), in the same act as the dispatch [v11, "
+                         "OI-ROC-006]. Firing rights are derived from this: the "
+                         "declared owner may fire any transition legal from the "
+                         "item's state, and a declaration REPLACES the type "
+                         "default rather than adding to it. FLOW ROLES ONLY — an "
+                         "agent that could declare itself the owner would be "
+                         "granting itself the right it is exercising.")
     ap.add_argument("--observe",
                     help="REQUIRED when entering `awaiting_observation` (event "
                          "not_yet_observed): the machine-checkable liveness "

@@ -1,6 +1,7 @@
 {
   "_comment": "Declarative per-item-type state machines. THE auditable core of the event-sourced work-item model (design-rationale/work-item-state-model.md). An item's current state is fold(events) through its type's graph. Appending an event that is not a legal transition from the current state is REJECTED at write time — a half-transition (the drift class) becomes unrepresentable. Wanting a transition that does not exist here is not something an agent may just do: it must propose an amendment to this file WITH A REASON — a process experiment (EXP-NNN) routed through the retro/version-bump gate. Edit this file only via that gate.",
-  "version": 10,
+  "version": 11,
+  "_v11": "v11 (OI-ROC-006, ROC 2026-08-29) — FIRING RIGHTS ARE DERIVED FROM THE ITEM; THE GRAPH CONSTRAINS TRANSITION SHAPE ONLY. Every transition used to carry a per-transition `agents` allowlist, which encodes an assumption that a transition has ONE rightful owner forever. That assumption is false, and it was measured false TEN times across six roles in three weeks (archived EXP-136/EXP-139/EXP-140 in process/experiments-archive.md, tabulated on OI-ROC-006, three further instances on DEF-ROC-128). Each instance was patched by widening one more list; the tenth arrived INSIDE the experiment built to stop UI defects escaping to humans, and the role it blocked — `ui-designer` — was on NO EDGE OF THE DEFECT GRAPH AT ALL, so it could not move the item one step in any direction. The cost of each was either an EXTRA AGENT DISPATCH (which lands on lead time) or a BORROWED AGENT NAME with a disclaimer nobody downstream reads (which corrupts token-cost by_owner, the plumbing/delivery split and agent_cycle_time). WHAT THE ALLOWLIST ACTUALLY PROTECTED, checked rather than assumed: exactly one thing — the independence of a VALIDATION VERDICT (EXP-139 refused to widen `validated` because 'cicd fixing its own defect and then validating it would collapse the gate that caught DEF-ROC-013's misdiagnosis'). It protected NOTHING ELSE, and it did not protect attribution: the one genuine cross-attribution in the ten (a tester firing `deployed` as AGENT=cicd) was PERMITTED by the list, because cicd was on that edge. The mechanism blocked ten honest self-attributions and waved through the one substitution. THE REPLACEMENT, three rules, all declared in `firing_rights` below rather than enumerated per edge: (1) the FLOW ROLES own sequencing on every item of every type; (2) a VALIDATION VERDICT is the tester's, on every item — the one surviving safety property, now stated once instead of twenty times, and it is checked BEFORE rule 1 so it refuses an OWNER *and* a FLOW ROLE (the engineer that built it may not validate it; neither may the orchestrator that sequenced it); (3) everything else is the ITEM'S DECLARED OWNER's to fire. Ownership is declared ON THE ITEM (`owner:` in frontmatter, set by a flow role in the same act as the dispatch — v124's 'the dispatch and the state event are ONE act'), because the routing decision is made by the role that knows the item, not by a global graph authored by nobody. An item that declares no owner falls back to `default_owners`, which is the BACKWARD-COMPATIBLE CLOSURE of the lists this version retires — chosen so that no event in any existing item's history becomes retrospectively illegal under I1. A DECLARATION NARROWS: once a defect declares `owner: [ui-designer]`, an engineer that did none of the work may not report a fix on it. That is what keeps this from being a blanket permit wearing a derivation's clothes. WHAT THIS ALSO DISCHARGES, unplanned but real: §F9a and DEF-ROC-128's AC-128-1 — an engineer that reproduces a defect and finds the premise FALSE can now fire `not_reproduced`, and one that sharpens an unpulled item's mechanism can fire `amended`. Under the allowlists its only forward event from `reproducing` was `confirmed`, i.e. the graph's sole affordance for an honest negative was a false assertion. NOT CHANGED: the shape. An event illegal from the current state is still rejected, terminal states still admit nothing, and `metric_events` still declares who is EXPECTED to produce each folded event.",
   "_v10": "v10 (process/DEF-ROC-120, ROC 2026-08-26) — A CHANGE FAILURE IS AN ANNOTATION ON THE ITEM'S HISTORY, NOT A WORKFLOW STEP. MEASURED: DEF-ROC-115's own fix reddened CI and the deploy was consequently SKIPPED for four commits, and `deploy_failed` was not a legal transition from `validating` — so NO ROLE AT ALL could record the change failure. That is what makes it distinct from OI-ROC-006, which asks WHICH role may fire a transition it holds evidence for; here there was no transition to fire, by anyone. The engineer wrote the record BEFORE fixing forward exactly as v87/EXP-108 requires, was refused by the sole writer, correctly did NOT hand-edit item state, and escalated. It was landed as an `amended` note, which preserves the PROSE and does not touch the CFR computation — the metric folds over TYPED events — so CFR read a FALSE 0% for an item that had darkened the environment for four commits. A metric that can only return good news is worse than no metric: the error is never random, always flattering, and it fires precisely when something went wrong. THE MODELLING CHOICE, deliberately: NOT a new state, and NOT a forced move to `reworking`/`fixing`. Where the failure IS the flow's own exit — `deploying`/`prod-deploying` on `deploy_failed`, `building` on `build_failed` — it stays the REAL transition to `reworking` it has always been, because there the item genuinely does go back to the engineer. Everywhere else the item has NOT made that move, so forcing it would fabricate progress (or regress) that never happened, while leaving it unrecordable loses the fact — and those were the only two shapes the graph could express. So it is a SELF-EDGE, the same device `amended` uses (v7/v8): time-preserving in walk_states, invisible to fold(state), and still counted by the fold because CFR keys on the EVENT NAME, not on whichever state the item happened to be in. This does NOT weaken the graph's philosophy: the failure is recordable only by its rightful owners (cicd/engineer, uniform on every edge), item state still cannot be hand-edited, and every transition still has an owner. SCOPE: `deploy_failed` and `build_failed` are now legal from every `active-work` state — every non-terminal state whose owner is an agent who MAKES or VERIFIES a change (engineer/cicd/tester). Deliberately NOT from `registered`/`ready`/`scheduled`/`open` (owner `queue`: nothing is being built), NOT from `blocked`/`awaiting_observation` (owner `external`: parked), and NOT from `reported` (owner orchestrator: intake/triage, no change in flight) — so the gate never demands a meaningless edge. `open-item` has no such state and therefore correctly gains nothing. AC-120-4, THE DURABLE HALF: the new top-level `metric_events` block ENUMERATES every event the metrics fold over and DECLARES the domain in which each can occur, and the gate is two-directional — every folded event must be declared AND reachable from its whole domain, and every folded event must be PRODUCIBLE by some graph. The inverse sweep immediately found three dead fold inputs (`deploy`, `done`, `resolved` — they are STATES, never events, so those folds could only ever contribute zero) and a per-item recovery metric that omitted `deploy_failed` while the aggregate counted it; both are fixed in work-items.py. It also forced the companion fix in `_compute_quality`: an annotation is NOT a stage exit, so it no longer pads the stage denominator with a non-failure — which `amended` had already been quietly doing, making a stage's failure rate go DOWN when bad news was recorded against it.",
   "_v9": "v9 (process v125 §12d obligation 3 / §17c.1, OagEventSource 2026-08-01) — adds `awaiting_observation`: NON-TERMINAL, owner `external`, queue `waiting`. v125's changelog listed this state as a COMPLETED change and it was never added; §12d carried the interim instruction 'until it lands, the tester reports `not-yet-observed` in its return and the item is held out of `done` by hand'. It is the THIRD v125 remedy that existed only as prose (with `make wire-provenance`, which did not exist, and the corpus provenance markers no gate read) — which is exactly the Layer-2 failure §17c was written against, so §17c binds this change: the acceptance is the MECHANISM FIRING, not the state appearing in this file. FOUNDING CASE: UC-ML1 was shipped, deployed and independently re-verified green AND inert (2158 offline tests, 103 against real DynamoDB Local, the deployed Lambda bytes and the ECS image pulled by digest), and the tester then correctly REFUSED to append any event, because none of `dev_validated`/`validated`/`rejected` honestly represents 'shipped, deployed, re-verified green and inert, but UNPROVABLE until armed'. ENTRY `not_yet_observed` (agent tester) from ALL THREE validation states — `prod-validating` included deliberately, since all five v125 capabilities were prod-validated and had still never fired on real data, so omitting it would leave the founding class unrepresentable. EXIT `validated` -> done/resolved when the observation lands, `rejected` -> reworking/fixing when the observation FALSIFIES the capability, plus the `amended` self-edge (v8 generic invariant) and `cancelled` so a descoped park is never stuck. The entering event MUST carry a machine-checkable `observe:` predicate (`make:<target> [VAR=V]`, scheme required, shell metacharacters refused) — `append` REFUSES the transition without one, `validate` I6 catches a hand-edit, and `loop-gate` check 5 RE-EVALUATES it every cycle exactly as `blocked` is re-checked: exit 0 = observed (BLOCKS, a tester dispatch is now actionable), exit 3 = not-yet (ADVISORY, legitimate but never satisfied), any other exit = broken predicate (BLOCKS — an unrunnable liveness predicate is the `make wire-provenance` class). NOT added to `open-item`: an open item is a finding/decision-debt note with no deployable capability and no observation surface; one whose closure needs an observation belongs registered as a use-case or defect. AGGREGATE RULE: `awaiting_observation` is not in the done set, so an awaiting child can never let its parent read `done`; an aggregate whose non-terminal children are all parked (blocked or awaiting) bubbles to `awaiting_observation` when any of them is awaiting, else `blocked` — the unproven-capability fact takes precedence because it is the one that can silently read `done` later. Owner `external` (not `tester`) so the wait is never booked as the tester's effort (v126 constraint finding: a wait wearing the tester's name).",
   "_v8": "v8 (process v126 addendum, OagEventSource 2026-08-01) — completes v7's OWN invariant on the third flow graph. CONTRACT.md §2 already asserts 'every non-terminal flow state has an `amended` self-edge', and the v7 note claims it, but v7 delivered it on use-case and defect only; `open-item` was overlooked (its note says 'both flow graphs' — there are THREE). Founding case: the flow-manager needed to record a legitimate SCOPE NARROWING on the open-item OI-CHUNKS-STALE-REF, found `amended` illegal from `open`, and correctly refused to hand-work-around the graph rather than silently editing the Definition prose — the exact behaviour v7 (2) exists to make unnecessary. Adds `open --amended--> open` and `scheduled --amended--> scheduled` with the same uniform agent list. Contained by construction: a self-edge leaves fold(state) unchanged and is time-preserving in walk_states (it closes and reopens the same state at the same instant, contributing a zero-length segment), so no derived view, metric or queue moves. The invariant is now pinned GENERICALLY across every flow type and every reachable non-terminal state (TestAmendedSelfEdge), so a future type cannot reintroduce the gap.",
@@ -23,6 +24,68 @@
     "validating": "tester",
     "open": "queue",
     "scheduled": "queue"
+  },
+  "firing_rights": {
+    "_comment": "[v11, OI-ROC-006] WHO MAY FIRE A TRANSITION. Read with `state_owners` (who is ACCOUNTABLE for the time) and the type graphs (which events are legal from which state). An append is permitted iff the event is legal from the item's current state AND one of the three rules below holds. The `agent` field on the event is then an HONEST record of who acted, which is the property the event-sourced model exists to get right and the one the retired allowlists were destroying.",
+    "flow_roles": [
+      "orchestrator",
+      "flow-manager"
+    ],
+    "_flow_roles_why": "RULE 1. These roles own SEQUENCING on every item of every type, so they may fire any transition legal from the current state — EXCEPT a validation verdict, which rule 2 reserves to the tester and which is checked FIRST. Rule 1 grants SEQUENCING, never CERTIFICATION: a loop that could certify its own throughput is exactly the independence this replacement must not lose. Consequence, recorded rather than hidden: an orchestrator that holds the evidence a fix works still cannot append `validated` (an instance recorded on OI-ROC-006, 2026-08-26). That is a DIFFERENT problem — who may record a verdict someone else has already established — and it must not be solved by quietly exempting the flow roles from the one gate that matters. The retired lists let the orchestrator PULL from Ready but not PUT into it (`pulled` was [orchestrator, flow-manager], `made_ready` was [flow-manager]) and forbade the flow-manager from scheduling a defect at all — boundary asymmetries with no safety property behind them, which cost a whole extra agent dispatch each time they fired.",
+    "event_roles": {
+      "validated": [
+        "tester"
+      ],
+      "rejected": [
+        "tester"
+      ],
+      "dev_validated": [
+        "tester"
+      ],
+      "not_yet_observed": [
+        "tester"
+      ]
+    },
+    "_event_roles_why": "RULE 2, and the reason this replacement is not a blanket permit. These four events are VERDICTS: their MEANING is an independent verification, so the role is intrinsic to the event rather than to the edge, and it is declared ONCE here instead of on every transition that carries the event. It both GRANTS and RESTRICTS: the tester holds verdict rights on every item whatever the item declares, and NOBODY ELSE holds them — not an OWNER, and not a FLOW ROLE. It is evaluated BEFORE rule 1 for that reason. The engineer that built a use-case may not validate it; the cicd that fixed a defect may not validate it, which is verbatim the gate EXP-139 declined to widen after DEF-ROC-013's misdiagnosis. If a future event belongs here, it is because its MEANING names a role, never because we want to restrict a lane.",
+    "default_owners": {
+      "use-case": [
+        "cicd",
+        "documenter",
+        "engineer",
+        "product",
+        "solution-architect",
+        "tester"
+      ],
+      "defect": [
+        "cicd",
+        "engineer",
+        "product",
+        "solution-architect",
+        "tester"
+      ],
+      "open-item": [
+        "engineer",
+        "product",
+        "solution-architect",
+        "tester"
+      ]
+    },
+    "_default_owners_why": "RULE 3's fallback. An item that declares no `owner:` is owned by these roles. THIS SET IS NOT A DESIGN CHOICE — it is the mechanical CLOSURE of the per-transition lists retired at v11 (the union of every agent that appeared on any edge of that type, less the flow roles, which rule 1 covers). It is derived that way deliberately: 351 existing items were written under the old rule and invariant I1 re-checks every historical event against the CURRENT rights model, so any narrower default would retrospectively invalidate history that was legal when it was written. The forward mechanism is the DECLARATION, not this list: an item routed to a specialist says so, and a specialist outside the closure (`ui-designer`, `documenter` on a defect, `discovery`) can ONLY be granted rights by the item declaring it.",
+    "declaration": "An item declares `owner: <role>` or `owner: [<role>, <role>]` in its frontmatter. A DECLARATION REPLACES the default — it narrows, it does not add — so declaring an owner is a real routing decision with consequences, not a free permit. It is set at registration, or by a FLOW ROLE in the same act as the dispatch (`make wi-append ... OWNER=<role>`); a non-flow agent that passes OWNER= is REFUSED, because otherwise an agent could grant itself the right it is exercising in the very same command. Rules 1 and 2 are unaffected by any declaration, so no declaration can ever wedge an item: a flow role can always act, and a tester can always record a verdict.",
+    "known_roles": [
+      "cicd",
+      "discovery",
+      "documenter",
+      "engineer",
+      "flow-manager",
+      "orchestrator",
+      "product",
+      "solution-architect",
+      "tester",
+      "ui-designer"
+    ],
+    "_known_roles_why": "The closed set of agent identities. An `--agent` outside it is refused everywhere: a typo or an invented role must not silently acquire rights through a default.",
+    "scoring_hook": "EXP-ROC-002 / OI-ROC-006 AC-006.5. `work-items project` emits `stats.firing_rights`: role-spoofed or blocked transitions per 20 items, derived from the event stream. Score the finding on that count reaching ZERO — never on 'those ten transitions now work'. The count is a FLOOR by construction, because a transition an agent was blocked from making leaves no event; what it can see is the DISCLOSURE the agent wrote in the note it did land, which is what all ten instances did."
   },
   "queue_map": {
     "_comment": "state -> the derived queue an item appears in. Queues are a VIEW computed from state, never stored. 'wip' = pulled and in flight (not pullable). null = in no queue (terminal or aggregate).",
@@ -167,142 +230,566 @@
     "use-case": {
       "kind": "flow",
       "initial": "registered",
-      "terminal": ["done", "cancelled"],
+      "terminal": [
+        "done",
+        "cancelled"
+      ],
       "transitions": [
-        {"from": "registered",     "to": "ready",           "event": "made_ready",   "agents": ["flow-manager"]},
-        {"from": "ready",          "to": "building",         "event": "pulled",       "agents": ["orchestrator", "flow-manager"]},
-        {"from": "building",       "to": "deploying",        "event": "built_green",  "agents": ["engineer", "documenter"]},
-        {"from": "deploying",      "to": "dev-validating",   "event": "deployed",     "agents": ["cicd", "documenter"]},
-        {"from": "building",       "to": "reworking",        "event": "build_failed", "agents": ["cicd", "engineer"]},
-        {"from": "deploying",      "to": "reworking",        "event": "deploy_failed","agents": ["cicd", "engineer"]},
-        {"from": "dev-validating", "to": "prod-deploying",   "event": "dev_validated","agents": ["tester"]},
-        {"from": "dev-validating", "to": "done",             "event": "validated",    "agents": ["tester"]},
-        {"from": "dev-validating", "to": "reworking",        "event": "rejected",     "agents": ["tester"]},
-        {"from": "prod-deploying", "to": "prod-validating",  "event": "promoted",     "agents": ["cicd"]},
-        {"from": "prod-deploying", "to": "reworking",        "event": "deploy_failed","agents": ["cicd", "engineer"]},
-        {"from": "prod-validating","to": "done",             "event": "validated",    "agents": ["tester"]},
-        {"from": "prod-validating","to": "reworking",        "event": "rejected",     "agents": ["tester"]},
-        {"from": "reworking",      "to": "building",         "event": "retried",      "agents": ["engineer"]},
-        {"from": "ready",          "to": "blocked",          "event": "blocked",      "agents": ["flow-manager", "orchestrator"]},
-        {"from": "building",       "to": "blocked",          "event": "blocked",      "agents": ["flow-manager", "orchestrator"]},
-        {"from": "dev-validating", "to": "blocked",          "event": "blocked",      "agents": ["flow-manager", "orchestrator"]},
-        {"from": "prod-validating","to": "blocked",          "event": "blocked",      "agents": ["flow-manager", "orchestrator"]},
-        {"from": "prod-deploying", "to": "blocked",          "event": "blocked",      "agents": ["flow-manager", "orchestrator"]},
-        {"from": "deploying",      "to": "blocked",          "event": "blocked",      "agents": ["flow-manager", "orchestrator"]},
-        {"from": "registered",     "to": "blocked",          "event": "blocked",      "agents": ["flow-manager", "orchestrator"]},
-        {"from": "blocked",        "to": "ready",            "event": "unblocked",    "agents": ["flow-manager", "orchestrator"]},
-        {"from": "ready",          "to": "validating",       "event": "pulled_for_validation", "agents": ["orchestrator", "flow-manager"]},
-        {"from": "validating",     "to": "done",             "event": "validated",    "agents": ["tester"]},
-        {"from": "validating",     "to": "reworking",        "event": "rejected",     "agents": ["tester"]},
-        {"from": "validating",     "to": "blocked",          "event": "blocked",      "agents": ["flow-manager", "orchestrator"]},
-        {"from": "validating",     "to": "cancelled",        "event": "cancelled",    "agents": ["orchestrator", "flow-manager"]},
-        {"from": "dev-validating", "to": "awaiting_observation", "event": "not_yet_observed", "agents": ["tester"]},
-        {"from": "prod-validating","to": "awaiting_observation", "event": "not_yet_observed", "agents": ["tester"]},
-        {"from": "validating",     "to": "awaiting_observation", "event": "not_yet_observed", "agents": ["tester"]},
-        {"from": "awaiting_observation", "to": "done",       "event": "validated",    "agents": ["tester"]},
-        {"from": "awaiting_observation", "to": "reworking",  "event": "rejected",     "agents": ["tester"]},
-        {"from": "awaiting_observation", "to": "cancelled",  "event": "cancelled",    "agents": ["orchestrator", "flow-manager"]},
-        {"from": "awaiting_observation", "to": "awaiting_observation", "event": "amended", "agents": ["solution-architect", "product", "flow-manager", "orchestrator"]},
-        {"from": "registered",     "to": "registered",       "event": "amended",      "agents": ["solution-architect", "product", "flow-manager", "orchestrator"]},
-        {"from": "ready",          "to": "ready",            "event": "amended",      "agents": ["solution-architect", "product", "flow-manager", "orchestrator"]},
-        {"from": "building",       "to": "building",         "event": "amended",      "agents": ["solution-architect", "product", "flow-manager", "orchestrator"]},
-        {"from": "deploying",      "to": "deploying",        "event": "amended",      "agents": ["solution-architect", "product", "flow-manager", "orchestrator"]},
-        {"from": "dev-validating", "to": "dev-validating",   "event": "amended",      "agents": ["solution-architect", "product", "flow-manager", "orchestrator"]},
-        {"from": "prod-deploying", "to": "prod-deploying",   "event": "amended",      "agents": ["solution-architect", "product", "flow-manager", "orchestrator"]},
-        {"from": "prod-validating","to": "prod-validating",  "event": "amended",      "agents": ["solution-architect", "product", "flow-manager", "orchestrator"]},
-        {"from": "validating",     "to": "validating",       "event": "amended",      "agents": ["solution-architect", "product", "flow-manager", "orchestrator"]},
-        {"from": "reworking",      "to": "reworking",        "event": "amended",      "agents": ["solution-architect", "product", "flow-manager", "orchestrator"]},
-        {"from": "blocked",        "to": "blocked",          "event": "amended",      "agents": ["solution-architect", "product", "flow-manager", "orchestrator"]},
-        {"from": "done",           "to": "building",         "event": "reopened",     "agents": ["orchestrator"]},
-        {"from": "registered",     "to": "cancelled",        "event": "cancelled",    "agents": ["orchestrator", "flow-manager"]},
-        {"from": "ready",          "to": "cancelled",        "event": "cancelled",    "agents": ["orchestrator", "flow-manager"]},
-        {"from": "building",       "to": "cancelled",        "event": "cancelled",    "agents": ["orchestrator", "flow-manager"]},
-        {"from": "reworking",      "to": "cancelled",        "event": "cancelled",    "agents": ["orchestrator", "flow-manager"]},
-        {"from": "blocked",        "to": "cancelled",        "event": "cancelled",    "agents": ["orchestrator", "flow-manager"]},
-        {"from": "dev-validating", "to": "cancelled",        "event": "cancelled",    "agents": ["orchestrator", "flow-manager"]},
-        {"from": "prod-validating","to": "cancelled",        "event": "cancelled",    "agents": ["orchestrator", "flow-manager"]},
-        {"from": "prod-deploying", "to": "cancelled",        "event": "cancelled",    "agents": ["orchestrator", "flow-manager"]},
-        {"from": "building",        "to": "building",         "event": "deploy_failed", "agents": ["cicd", "engineer"]},
-        {"from": "reworking",       "to": "reworking",        "event": "deploy_failed", "agents": ["cicd", "engineer"]},
-        {"from": "dev-validating",  "to": "dev-validating",   "event": "deploy_failed", "agents": ["cicd", "engineer"]},
-        {"from": "prod-validating", "to": "prod-validating",  "event": "deploy_failed", "agents": ["cicd", "engineer"]},
-        {"from": "validating",      "to": "validating",       "event": "deploy_failed", "agents": ["cicd", "engineer"]},
-        {"from": "deploying",       "to": "deploying",        "event": "build_failed",  "agents": ["cicd", "engineer"]},
-        {"from": "prod-deploying",  "to": "prod-deploying",   "event": "build_failed",  "agents": ["cicd", "engineer"]},
-        {"from": "reworking",       "to": "reworking",        "event": "build_failed",  "agents": ["cicd", "engineer"]},
-        {"from": "dev-validating",  "to": "dev-validating",   "event": "build_failed",  "agents": ["cicd", "engineer"]},
-        {"from": "prod-validating", "to": "prod-validating",  "event": "build_failed",  "agents": ["cicd", "engineer"]},
-        {"from": "validating",      "to": "validating",       "event": "build_failed",  "agents": ["cicd", "engineer"]}
+        {
+          "from": "registered",
+          "to": "ready",
+          "event": "made_ready"
+        },
+        {
+          "from": "ready",
+          "to": "building",
+          "event": "pulled"
+        },
+        {
+          "from": "building",
+          "to": "deploying",
+          "event": "built_green"
+        },
+        {
+          "from": "deploying",
+          "to": "dev-validating",
+          "event": "deployed"
+        },
+        {
+          "from": "building",
+          "to": "reworking",
+          "event": "build_failed"
+        },
+        {
+          "from": "deploying",
+          "to": "reworking",
+          "event": "deploy_failed"
+        },
+        {
+          "from": "dev-validating",
+          "to": "prod-deploying",
+          "event": "dev_validated"
+        },
+        {
+          "from": "dev-validating",
+          "to": "done",
+          "event": "validated"
+        },
+        {
+          "from": "dev-validating",
+          "to": "reworking",
+          "event": "rejected"
+        },
+        {
+          "from": "prod-deploying",
+          "to": "prod-validating",
+          "event": "promoted"
+        },
+        {
+          "from": "prod-deploying",
+          "to": "reworking",
+          "event": "deploy_failed"
+        },
+        {
+          "from": "prod-validating",
+          "to": "done",
+          "event": "validated"
+        },
+        {
+          "from": "prod-validating",
+          "to": "reworking",
+          "event": "rejected"
+        },
+        {
+          "from": "reworking",
+          "to": "building",
+          "event": "retried"
+        },
+        {
+          "from": "ready",
+          "to": "blocked",
+          "event": "blocked"
+        },
+        {
+          "from": "building",
+          "to": "blocked",
+          "event": "blocked"
+        },
+        {
+          "from": "dev-validating",
+          "to": "blocked",
+          "event": "blocked"
+        },
+        {
+          "from": "prod-validating",
+          "to": "blocked",
+          "event": "blocked"
+        },
+        {
+          "from": "prod-deploying",
+          "to": "blocked",
+          "event": "blocked"
+        },
+        {
+          "from": "deploying",
+          "to": "blocked",
+          "event": "blocked"
+        },
+        {
+          "from": "registered",
+          "to": "blocked",
+          "event": "blocked"
+        },
+        {
+          "from": "blocked",
+          "to": "ready",
+          "event": "unblocked"
+        },
+        {
+          "from": "ready",
+          "to": "validating",
+          "event": "pulled_for_validation"
+        },
+        {
+          "from": "validating",
+          "to": "done",
+          "event": "validated"
+        },
+        {
+          "from": "validating",
+          "to": "reworking",
+          "event": "rejected"
+        },
+        {
+          "from": "validating",
+          "to": "blocked",
+          "event": "blocked"
+        },
+        {
+          "from": "validating",
+          "to": "cancelled",
+          "event": "cancelled"
+        },
+        {
+          "from": "dev-validating",
+          "to": "awaiting_observation",
+          "event": "not_yet_observed"
+        },
+        {
+          "from": "prod-validating",
+          "to": "awaiting_observation",
+          "event": "not_yet_observed"
+        },
+        {
+          "from": "validating",
+          "to": "awaiting_observation",
+          "event": "not_yet_observed"
+        },
+        {
+          "from": "awaiting_observation",
+          "to": "done",
+          "event": "validated"
+        },
+        {
+          "from": "awaiting_observation",
+          "to": "reworking",
+          "event": "rejected"
+        },
+        {
+          "from": "awaiting_observation",
+          "to": "cancelled",
+          "event": "cancelled"
+        },
+        {
+          "from": "awaiting_observation",
+          "to": "awaiting_observation",
+          "event": "amended"
+        },
+        {
+          "from": "registered",
+          "to": "registered",
+          "event": "amended"
+        },
+        {
+          "from": "ready",
+          "to": "ready",
+          "event": "amended"
+        },
+        {
+          "from": "building",
+          "to": "building",
+          "event": "amended"
+        },
+        {
+          "from": "deploying",
+          "to": "deploying",
+          "event": "amended"
+        },
+        {
+          "from": "dev-validating",
+          "to": "dev-validating",
+          "event": "amended"
+        },
+        {
+          "from": "prod-deploying",
+          "to": "prod-deploying",
+          "event": "amended"
+        },
+        {
+          "from": "prod-validating",
+          "to": "prod-validating",
+          "event": "amended"
+        },
+        {
+          "from": "validating",
+          "to": "validating",
+          "event": "amended"
+        },
+        {
+          "from": "reworking",
+          "to": "reworking",
+          "event": "amended"
+        },
+        {
+          "from": "blocked",
+          "to": "blocked",
+          "event": "amended"
+        },
+        {
+          "from": "done",
+          "to": "building",
+          "event": "reopened"
+        },
+        {
+          "from": "registered",
+          "to": "cancelled",
+          "event": "cancelled"
+        },
+        {
+          "from": "ready",
+          "to": "cancelled",
+          "event": "cancelled"
+        },
+        {
+          "from": "building",
+          "to": "cancelled",
+          "event": "cancelled"
+        },
+        {
+          "from": "reworking",
+          "to": "cancelled",
+          "event": "cancelled"
+        },
+        {
+          "from": "blocked",
+          "to": "cancelled",
+          "event": "cancelled"
+        },
+        {
+          "from": "dev-validating",
+          "to": "cancelled",
+          "event": "cancelled"
+        },
+        {
+          "from": "prod-validating",
+          "to": "cancelled",
+          "event": "cancelled"
+        },
+        {
+          "from": "prod-deploying",
+          "to": "cancelled",
+          "event": "cancelled"
+        },
+        {
+          "from": "building",
+          "to": "building",
+          "event": "deploy_failed"
+        },
+        {
+          "from": "reworking",
+          "to": "reworking",
+          "event": "deploy_failed"
+        },
+        {
+          "from": "dev-validating",
+          "to": "dev-validating",
+          "event": "deploy_failed"
+        },
+        {
+          "from": "prod-validating",
+          "to": "prod-validating",
+          "event": "deploy_failed"
+        },
+        {
+          "from": "validating",
+          "to": "validating",
+          "event": "deploy_failed"
+        },
+        {
+          "from": "deploying",
+          "to": "deploying",
+          "event": "build_failed"
+        },
+        {
+          "from": "prod-deploying",
+          "to": "prod-deploying",
+          "event": "build_failed"
+        },
+        {
+          "from": "reworking",
+          "to": "reworking",
+          "event": "build_failed"
+        },
+        {
+          "from": "dev-validating",
+          "to": "dev-validating",
+          "event": "build_failed"
+        },
+        {
+          "from": "prod-validating",
+          "to": "prod-validating",
+          "event": "build_failed"
+        },
+        {
+          "from": "validating",
+          "to": "validating",
+          "event": "build_failed"
+        }
       ]
     },
     "defect": {
       "kind": "flow",
       "initial": "reported",
-      "terminal": ["resolved", "wontfix", "cancelled"],
+      "terminal": [
+        "resolved",
+        "wontfix",
+        "cancelled"
+      ],
       "transitions": [
-        {"from": "reported",    "to": "reproducing", "event": "triaged",       "agents": ["orchestrator"]},
-        {"from": "reproducing", "to": "fixing",      "event": "confirmed",     "agents": ["orchestrator", "engineer", "cicd"]},
-        {"from": "reproducing", "to": "wontfix",     "event": "not_reproduced","agents": ["orchestrator"]},
-        {"from": "fixing",      "to": "validating",  "event": "fixed",         "agents": ["engineer", "cicd"]},
-        {"from": "validating",  "to": "resolved",    "event": "validated",     "agents": ["tester"]},
-        {"from": "validating",  "to": "fixing",      "event": "rejected",      "agents": ["tester"]},
-        {"from": "fixing",      "to": "blocked",     "event": "blocked",       "agents": ["flow-manager", "orchestrator"]},
-        {"from": "reproducing", "to": "blocked",     "event": "blocked",       "agents": ["flow-manager", "orchestrator"]},
-        {"from": "blocked",     "to": "fixing",      "event": "unblocked",     "agents": ["flow-manager", "orchestrator"]},
-        {"from": "validating",  "to": "awaiting_observation", "event": "not_yet_observed", "agents": ["tester"]},
-        {"from": "awaiting_observation", "to": "resolved",  "event": "validated", "agents": ["tester"]},
-        {"from": "awaiting_observation", "to": "fixing",    "event": "rejected",  "agents": ["tester"]},
-        {"from": "awaiting_observation", "to": "cancelled", "event": "cancelled", "agents": ["orchestrator", "flow-manager"]},
-        {"from": "awaiting_observation", "to": "awaiting_observation", "event": "amended", "agents": ["solution-architect", "product", "flow-manager", "orchestrator"]},
-        {"from": "reported",    "to": "reported",    "event": "amended",       "agents": ["solution-architect", "product", "flow-manager", "orchestrator"]},
-        {"from": "reproducing", "to": "reproducing", "event": "amended",       "agents": ["solution-architect", "product", "flow-manager", "orchestrator"]},
-        {"from": "fixing",      "to": "fixing",      "event": "amended",       "agents": ["solution-architect", "product", "flow-manager", "orchestrator"]},
-        {"from": "validating",  "to": "validating",  "event": "amended",       "agents": ["solution-architect", "product", "flow-manager", "orchestrator"]},
-        {"from": "blocked",     "to": "blocked",     "event": "amended",       "agents": ["solution-architect", "product", "flow-manager", "orchestrator"]},
-        {"from": "reported",    "to": "cancelled",   "event": "cancelled",     "agents": ["orchestrator", "flow-manager"]},
-        {"from": "reproducing", "to": "cancelled",   "event": "cancelled",     "agents": ["orchestrator", "flow-manager"]},
-        {"from": "fixing",      "to": "cancelled",   "event": "cancelled",     "agents": ["orchestrator", "flow-manager"]},
-        {"from": "blocked",     "to": "cancelled",   "event": "cancelled",     "agents": ["orchestrator", "flow-manager"]},
-        {"from": "reproducing", "to": "reproducing",  "event": "deploy_failed",  "agents": ["cicd", "engineer"]},
-        {"from": "fixing",      "to": "fixing",       "event": "deploy_failed",  "agents": ["cicd", "engineer"]},
-        {"from": "validating",  "to": "validating",   "event": "deploy_failed",  "agents": ["cicd", "engineer"]},
-        {"from": "reproducing", "to": "reproducing",  "event": "build_failed",   "agents": ["cicd", "engineer"]},
-        {"from": "fixing",      "to": "fixing",       "event": "build_failed",   "agents": ["cicd", "engineer"]},
-        {"from": "validating",  "to": "validating",   "event": "build_failed",   "agents": ["cicd", "engineer"]}
+        {
+          "from": "reported",
+          "to": "reproducing",
+          "event": "triaged"
+        },
+        {
+          "from": "reproducing",
+          "to": "fixing",
+          "event": "confirmed"
+        },
+        {
+          "from": "reproducing",
+          "to": "wontfix",
+          "event": "not_reproduced"
+        },
+        {
+          "from": "fixing",
+          "to": "validating",
+          "event": "fixed"
+        },
+        {
+          "from": "validating",
+          "to": "resolved",
+          "event": "validated"
+        },
+        {
+          "from": "validating",
+          "to": "fixing",
+          "event": "rejected"
+        },
+        {
+          "from": "fixing",
+          "to": "blocked",
+          "event": "blocked"
+        },
+        {
+          "from": "reproducing",
+          "to": "blocked",
+          "event": "blocked"
+        },
+        {
+          "from": "blocked",
+          "to": "fixing",
+          "event": "unblocked"
+        },
+        {
+          "from": "validating",
+          "to": "awaiting_observation",
+          "event": "not_yet_observed"
+        },
+        {
+          "from": "awaiting_observation",
+          "to": "resolved",
+          "event": "validated"
+        },
+        {
+          "from": "awaiting_observation",
+          "to": "fixing",
+          "event": "rejected"
+        },
+        {
+          "from": "awaiting_observation",
+          "to": "cancelled",
+          "event": "cancelled"
+        },
+        {
+          "from": "awaiting_observation",
+          "to": "awaiting_observation",
+          "event": "amended"
+        },
+        {
+          "from": "reported",
+          "to": "reported",
+          "event": "amended"
+        },
+        {
+          "from": "reproducing",
+          "to": "reproducing",
+          "event": "amended"
+        },
+        {
+          "from": "fixing",
+          "to": "fixing",
+          "event": "amended"
+        },
+        {
+          "from": "validating",
+          "to": "validating",
+          "event": "amended"
+        },
+        {
+          "from": "blocked",
+          "to": "blocked",
+          "event": "amended"
+        },
+        {
+          "from": "reported",
+          "to": "cancelled",
+          "event": "cancelled"
+        },
+        {
+          "from": "reproducing",
+          "to": "cancelled",
+          "event": "cancelled"
+        },
+        {
+          "from": "fixing",
+          "to": "cancelled",
+          "event": "cancelled"
+        },
+        {
+          "from": "blocked",
+          "to": "cancelled",
+          "event": "cancelled"
+        },
+        {
+          "from": "reproducing",
+          "to": "reproducing",
+          "event": "deploy_failed"
+        },
+        {
+          "from": "fixing",
+          "to": "fixing",
+          "event": "deploy_failed"
+        },
+        {
+          "from": "validating",
+          "to": "validating",
+          "event": "deploy_failed"
+        },
+        {
+          "from": "reproducing",
+          "to": "reproducing",
+          "event": "build_failed"
+        },
+        {
+          "from": "fixing",
+          "to": "fixing",
+          "event": "build_failed"
+        },
+        {
+          "from": "validating",
+          "to": "validating",
+          "event": "build_failed"
+        }
       ]
     },
     "open-item": {
       "kind": "flow",
       "initial": "open",
-      "terminal": ["done", "wontfix", "cancelled"],
+      "terminal": [
+        "done",
+        "wontfix",
+        "cancelled"
+      ],
       "transitions": [
-        {"from": "open",      "to": "scheduled", "event": "scheduled", "agents": ["flow-manager", "orchestrator"]},
-        {"from": "scheduled", "to": "done",      "event": "closed",    "agents": ["orchestrator", "engineer", "tester"]},
-        {"from": "open",      "to": "done",      "event": "closed",    "agents": ["orchestrator", "engineer", "tester"]},
-        {"from": "open",      "to": "wontfix",   "event": "declined",  "agents": ["orchestrator"]},
-        {"from": "open",      "to": "cancelled", "event": "cancelled", "agents": ["orchestrator", "flow-manager"]},
-        {"from": "scheduled", "to": "cancelled", "event": "cancelled", "agents": ["orchestrator", "flow-manager"]},
-        {"from": "open",      "to": "open",      "event": "amended",   "agents": ["solution-architect", "product", "flow-manager", "orchestrator"]},
-        {"from": "scheduled", "to": "scheduled", "event": "amended",   "agents": ["solution-architect", "product", "flow-manager", "orchestrator"]}
+        {
+          "from": "open",
+          "to": "scheduled",
+          "event": "scheduled"
+        },
+        {
+          "from": "scheduled",
+          "to": "done",
+          "event": "closed"
+        },
+        {
+          "from": "open",
+          "to": "done",
+          "event": "closed"
+        },
+        {
+          "from": "open",
+          "to": "wontfix",
+          "event": "declined"
+        },
+        {
+          "from": "open",
+          "to": "cancelled",
+          "event": "cancelled"
+        },
+        {
+          "from": "scheduled",
+          "to": "cancelled",
+          "event": "cancelled"
+        },
+        {
+          "from": "open",
+          "to": "open",
+          "event": "amended"
+        },
+        {
+          "from": "scheduled",
+          "to": "scheduled",
+          "event": "amended"
+        }
       ]
     },
     "slice": {
       "kind": "aggregate",
       "initial": "planned",
-      "terminal": ["done", "cancelled"],
+      "terminal": [
+        "done",
+        "cancelled"
+      ],
       "bubble": "done_when_all_children_done",
       "_comment": "Aggregate state is DERIVED from children: done iff all children terminal AND at least one done; cancelled iff all children cancelled; in_progress iff any child past its initial state; else planned. A cancelled child does NOT block completion. Aggregates carry registered/amended events for audit but their state is a fold over children, not their own event stream."
     },
     "chunk": {
       "kind": "aggregate",
       "initial": "planned",
-      "terminal": ["done", "cancelled"],
+      "terminal": [
+        "done",
+        "cancelled"
+      ],
       "bubble": "done_when_all_children_done"
     },
     "requirement": {
       "kind": "aggregate",
       "initial": "planned",
-      "terminal": ["done", "cancelled"],
+      "terminal": [
+        "done",
+        "cancelled"
+      ],
       "bubble": "done_when_all_children_done"
     }
   }

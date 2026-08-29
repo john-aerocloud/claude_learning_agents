@@ -69,15 +69,67 @@ storing any edge twice.
 
 ## 2. Appending an event (the write path — replaces `dora record` for item state)
 
-`work-items append --project <p> --id <ID> --event <name> --agent <role> [--ref R] [--note N]`
+`work-items append --project <p> --id <ID> --event <name> --agent <role> [--ref R] [--note N] [--owner ROLE[,ROLE]]`
 
 The append is **edge-checked**: it folds the existing events to the current state, looks up the
 type graph, and:
-- **legal** transition (event allowed from current state AND `agent` in that transition's `agents`)
-  → append with a UTC timestamp; re-render `derived:`.
+- **legal** transition (event legal from the current state AND the agent holds firing rights on
+  THIS item, below) → append with a UTC timestamp; re-render `derived:`.
 - **illegal** transition → REJECT (non-zero exit) with the message: current state, the events
   that ARE legal here, and the instruction to open an amendment experiment if the transition
   should exist. This is where "wanting an undefined action" surfaces as a governed proposal.
+
+**Firing rights are DERIVED FROM THE ITEM; the graph constrains transition SHAPE only
+[state-graph v11, OI-ROC-006].** Every transition used to carry a per-transition `agents`
+allowlist, which encodes an assumption that a transition has ONE rightful owner forever. That was
+measured false **ten times across six roles in three weeks** — a documenter on docs-only work, cicd
+on an infra-owned defect, a tester on verification-only, an **engineer on an ORDINARY use-case**,
+a solution-architect on an architecture-only fix, and a `ui-designer` that appeared on **no edge of
+the defect graph at all** and so could not move a UI defect one step in any direction. Each was
+patched by widening one more list; the tenth arrived *inside* the experiment built to stop UI
+defects escaping to humans. Every instance cost either an extra agent dispatch (lead time) or a
+borrowed agent name with a disclaimer nobody downstream reads (token-cost `by_owner`, the
+plumbing/delivery split, `agent_cycle_time`). Checked rather than assumed: the allowlist protected
+exactly ONE real property — the independence of a validation verdict — and it did **not** protect
+attribution, because the one genuine cross-attribution in the ten (a tester firing `deployed` as
+`AGENT=cicd`) was *permitted* by the list. Three rules replace it, all declared in
+`firing_rights` in `state-graphs.json`:
+
+1. **Flow roles own sequencing.** `orchestrator` and `flow-manager` may fire any transition legal
+   from the item's current state, on every item of every type — **except a validation verdict**,
+   which rule 2 reserves and which is evaluated FIRST. Rule 1 grants sequencing, never
+   certification. (The retired lists let the
+   orchestrator PULL from Ready but not PUT into it, and forbade the flow-manager from scheduling a
+   defect at all — asymmetries with no safety property behind them.)
+2. **A validation verdict is the tester's.** `validated` / `rejected` / `dev_validated` /
+   `not_yet_observed` are declared once, on the EVENT, because the role is intrinsic to the event's
+   MEANING. This both grants and restricts: the tester holds them on every item, and **an owner is
+   refused** — the engineer that built a use-case may not validate it, the cicd that fixed a defect
+   may not validate it, **and neither may a flow role** — a loop that could certify its own
+   throughput is the independence this replacement must not lose. This is the gate EXP-139 declined
+   to widen after `DEF-ROC-013`'s misdiagnosis, and it is what keeps the replacement from being a
+   blanket permit. Recorded consequence, deliberately not solved here: an orchestrator that holds
+   the evidence a fix works still cannot append `validated` (an instance on `OI-ROC-006`,
+   2026-08-26). That is a different question — who may record a verdict somebody else has already
+   established — and exempting the flow roles from the one gate that matters is not its answer.
+3. **Everything else belongs to the item's declared owner.** An item declares
+   `owner: <role>` or `owner: [<role>, <role>]` in its frontmatter. A **declaration REPLACES the
+   type default — it narrows**, so once a defect declares `owner: [ui-designer]` an engineer that
+   did none of the work may not report a fix on it. It is set at registration, or by a flow role in
+   the same act as the dispatch (`make wi-append … OWNER=<role>`, v124's "the dispatch and the state
+   event are ONE act"). **A non-flow agent that passes `OWNER=` is REFUSED**: an agent that could
+   declare itself the owner would be granting itself, in one command, the right it is exercising in
+   that same command. An item that declares no owner falls back to `firing_rights.default_owners`,
+   which is the mechanical CLOSURE of the retired lists — chosen so no event in any existing item's
+   history becomes retrospectively illegal under I1, which replays history against the CURRENT
+   rights model.
+
+Rules 1 and 2 are unaffected by any declaration, so **no declaration can wedge an item**: a flow
+role can always act and a tester can always record a verdict. Two consequences worth stating,
+because they were separate open defects: an engineer that reproduces a defect and finds the premise
+FALSE can now fire `not_reproduced` (previously its only forward event from `reproducing` was
+`confirmed` — the graph's sole affordance for an honest negative was a false assertion, §F9a), and
+an engineer that sharpens an unpulled item's mechanism can fire `amended`.
 
 There is no other way to change item state. No hand-editing of `derived:`; no separate queue file.
 **A hand-edited or stale `derived:` block is now a GATE violation (I8), not merely discouraged
@@ -221,6 +273,14 @@ external condition cleared records it.
   - **(d) token cost** — `token_cost`: total, `by_owner` (event `tokens` folded through the event's
     agent), and the **plumbing-vs-delivery split** (running-the-OS vs customer-value; classification
     ported from dora.py cost-split, EXP-067). Computed from each event's optional `tokens`.
+  - **(g) firing rights** — `firing_rights`: role-spoofed or blocked transitions per 20 items,
+    derived from the event stream (OI-ROC-006 AC-006.5 / the `EXP-ROC-002` scoring hook). Two
+    limbs, deliberately asymmetric: `spoof_indicators` (an event its agent could not fire under the
+    current model — unreachable through `append`, so non-zero means a hand-edit) and
+    `disclosed_substitutions` (the limb that can move: a transition an agent was BLOCKED from
+    making leaves no event, so the only trace is the disclosure it wrote in the note it did land).
+    The count is therefore a **FLOOR**, and says so. Score the finding on it reaching zero, never on
+    "those ten transitions now work".
   - **(f) agent cycle time** — `agent_cycle_time`: the REAL per-stage work-effort each dispatched
     agent spent (`duration_ms`), `by_owner` and `by_stage` (total/median/n), plus the key derived
     figure **`cycle_time_vs_glt`** — Σ agent effort as a % of gross lead time (work-effort vs
@@ -237,7 +297,9 @@ external condition cleared records it.
 
 `work-items validate --project <p>` — the drift GATE, now by construction not after-the-fact.
 Exits non-zero if ANY invariant is violated:
-- (I1) every event in every item is a legal transition (no illegal history slipped in by hand-edit).
+- (I1) every event in every item is a legal transition AND was firable by its recorded agent —
+  replayed through the SAME derivation the writer uses [v11], so an event that could not be written
+  today is drift whether it arrived by hand-edit or by an unreconciled rights change.
 - (I2) no item is both `done`/terminal and in a non-null queue (the UC-SF3 / UC-O8 hazard — now impossible to *represent*, this catches hand-edits that try).
 - (I3) edge consistency: every `parents`/`deps` id resolves to an existing item; no cycles in `deps`.
 - (I4) exactly one file per id across active/ + done/; a `done` item lives in done/.

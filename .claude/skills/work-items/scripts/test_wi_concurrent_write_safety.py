@@ -45,6 +45,7 @@ import unittest
 import argparse
 import threading
 import contextlib
+import subprocess
 import importlib.util
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -512,6 +513,155 @@ class TestWriteLanesAreEnumerated(unittest.TestCase):
                 "store_lock(", fns[name],
                 f"{name} writes the item store but does not take the store lock, "
                 f"so it can interleave with the other writer (DEF-ROC-162)")
+
+
+class TestEventLossIsDETECTABLE(StoreFixture):
+    """DEF-ROC-162's second facet, in the item's own words: *nothing in the
+    repository can currently answer "has an event ever been dropped?", because
+    the only record that an append happened is the file it was appended to.*
+
+    There IS one other durable record, and it costs nothing to consult: git.
+    Item logs are APPEND-ONLY by contract, so an event present in HEAD and absent
+    from the working tree is a dropped event — full stop. This is the same lesson
+    this project has now paid for three times: *wherever absence is treated as
+    evidence, ask whether the thing still exists on the reference side.* HEAD is
+    the reference side, and `wi-project` never asked it anything.
+
+    WHAT THIS CANNOT SEE, stated because a detector whose blind spot is undocumented
+    is worse than none: an event appended and destroyed BEFORE the next commit was
+    never in HEAD, so nothing here will find it — which is exactly what happened to
+    DEF-ROC-161. That window is closed by the write-path guards above (impossible or
+    loud), not by this. A complete answer needs an append journal, and that is a
+    separate piece of work with its own new failure modes.
+    """
+
+    def _git(self, *args):
+        repo = os.path.join(self.tmp, "work", self.project)
+        return subprocess.run(
+            ["git", "-C", repo, "-c", "user.email=t@t", "-c", "user.name=t",
+             "-c", "commit.gpgsign=false", *args],
+            capture_output=True, text=True)
+
+    def _commit_store(self):
+        self.assertEqual(self._git("init", "-q").returncode, 0)
+        self._git("add", "-A", "--", "items")
+        r = self._git("commit", "-q", "-m", "items")
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def _drop_an_event_from_disk(self, iid, event):
+        """Exactly what DEF-ROC-162 did: an event line disappears from the file,
+        leaving a shorter log that is internally perfectly consistent."""
+        path = self.path_of(iid)
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().split("\n")
+        keep = [l for l in lines
+                if not (l.startswith("  - {ts:") and f"event: {event}" in l)]
+        self.assertEqual(len(keep), len(lines) - 1, "no event line was dropped")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\n".join(keep))
+
+    def test_a_dropped_committed_event_is_REPORTED(self):
+        self.write_item("DEF-D", "defect",
+                        [{"ts": "2026-08-01T00:00:00Z", "event": "reported",
+                          "agent": "orchestrator"},
+                         {"ts": "2026-08-01T01:00:00Z", "event": "triaged",
+                          "agent": "orchestrator"},
+                         {"ts": "2026-08-01T02:00:00Z", "event": "confirmed",
+                          "agent": "engineer"}])
+        self._commit_store()
+        self._drop_an_event_from_disk("DEF-D", "confirmed")
+
+        findings = wi.compute_event_loss(self.project)
+        self.assertTrue(findings, "a dropped event produced NO finding")
+        self.assertEqual(findings[0]["severity"], "block")
+        self.assertIn("DEF-D", findings[0]["message"])
+        self.assertIn("confirmed", findings[0]["message"])
+
+        violations = wi.validate_items(self.graphs, self.project)
+        self.assertTrue(any("I9" in v and "DEF-D" in v for v in violations),
+                        f"wi-validate still reports this store clean: {violations}")
+
+    def test_an_ordinary_append_is_not_a_loss(self):
+        """NON-VACUITY IN THE OTHER DIRECTION: the working tree is normally AHEAD
+        of HEAD. Growth is not loss, and a check that blocked on it would be
+        turned off within the hour."""
+        self.write_item("DEF-G", "defect",
+                        [{"ts": "2026-08-01T00:00:00Z", "event": "reported",
+                          "agent": "orchestrator"}])
+        self._commit_store()
+        with contextlib.redirect_stdout(io.StringIO()), \
+             contextlib.redirect_stderr(io.StringIO()):
+            wi.cmd_append(argparse.Namespace(
+                project=self.project, id="DEF-G", event="triaged",
+                agent="orchestrator", ref=None, note=None,
+                ts="2026-08-01T01:00:00Z", tokens=None, duration_ms=None))
+        self.assertEqual(wi.compute_event_loss(self.project), [])
+        self.assertEqual([v for v in wi.validate_items(self.graphs, self.project)
+                          if "I9" in v], [])
+
+    def test_a_relocated_item_is_not_a_loss(self):
+        """The likeliest false positive: a terminal item's file MOVES active/ ->
+        done/, so its committed path holds nothing. The question is never "is the
+        path still there" but "is the ITEM still there"."""
+        self.write_item("DEF-R", "defect",
+                        [{"ts": "2026-08-01T00:00:00Z", "event": "reported",
+                          "agent": "orchestrator"},
+                         {"ts": "2026-08-01T01:00:00Z", "event": "triaged",
+                          "agent": "orchestrator"},
+                         {"ts": "2026-08-01T02:00:00Z", "event": "confirmed",
+                          "agent": "engineer"},
+                         {"ts": "2026-08-01T03:00:00Z", "event": "fixed",
+                          "agent": "engineer"}])
+        self._commit_store()
+        with contextlib.redirect_stdout(io.StringIO()), \
+             contextlib.redirect_stderr(io.StringIO()):
+            wi.cmd_append(argparse.Namespace(
+                project=self.project, id="DEF-R", event="validated",
+                agent="tester", ref=None, note=None,
+                ts="2026-08-01T04:00:00Z", tokens=None, duration_ms=None))
+        self.assertTrue(os.path.exists(self.path_of("DEF-R", "done")),
+                        "fixture did not relocate — re-check the terminal event")
+        self.assertEqual(wi.compute_event_loss(self.project), [])
+
+    def test_an_UNREADABLE_check_is_neither_clean_nor_a_violation(self):
+        """CANNOT MEASURE IS NEVER A PASS AND NEVER A PLAIN FAIL. With no git
+        repo the answer is NOT ESTABLISHED: reported, not counted as a violation,
+        and never absorbed into `clean`."""
+        self.write_item("DEF-U", "defect",
+                        [{"ts": "2026-08-01T00:00:00Z", "event": "reported",
+                          "agent": "orchestrator"}])
+        findings = wi.compute_event_loss(self.project)          # no git init
+        self.assertEqual([f["severity"] for f in findings], ["unknown"])
+        self.assertIn("NOT ESTABLISHED", findings[0]["message"])
+        self.assertEqual([v for v in wi.validate_items(self.graphs, self.project)
+                          if "I9" in v], [])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+             contextlib.redirect_stderr(io.StringIO()):
+            try:
+                wi.cmd_validate(argparse.Namespace(project=self.project))
+            except SystemExit:
+                pass
+        self.assertIn("NOT ESTABLISHED", out.getvalue(),
+                      "validate reported on the store without saying that the "
+                      "event-loss invariant could not be established")
+
+    def test_the_loop_gate_runs_this_check(self):
+        """DEF-ROC-165's lesson, applied to my own deliverable: a guard nothing
+        invokes is the same failure wearing a different costume. The loop gate runs
+        before every pull, so the detector runs every cycle without anyone
+        remembering to."""
+        with io.open(os.path.join(HERE, "work-items.py"), encoding="utf-8") as fh:
+            src = fh.read()
+        import ast
+        body = None
+        for node in ast.walk(ast.parse(src)):
+            if isinstance(node, ast.FunctionDef) and node.name == "compute_loop_gate":
+                body = "\n".join(src.split("\n")[node.lineno - 1:node.end_lineno])
+        self.assertIsNotNone(body, "compute_loop_gate has been renamed")
+        self.assertIn("compute_event_loss(", body,
+                      "the event-loss detector is invoked by nothing that runs "
+                      "automatically (DEF-ROC-165)")
 
 
 if __name__ == "__main__":

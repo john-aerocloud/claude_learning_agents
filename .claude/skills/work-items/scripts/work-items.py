@@ -5351,6 +5351,17 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
     #         fold-FORWARD had neither, so nothing was ever going to say this.
     findings.extend(compute_process_currency())
 
+    # --- 15. has an event ever been DROPPED? (DEF-ROC-162) --------------------
+    #         The work-item store is the declared single source of truth and it
+    #         silently lost a state event, with both commands exiting 0 and
+    #         `wi-validate` reporting CLEAN afterwards — because its invariant is
+    #         `derived == fold(events)` and that holds just as well over a log with
+    #         an event missing from it. This asks the one question nothing asked:
+    #         is every event that reached a commit still in the file? It hangs here
+    #         rather than only in `wi-validate` for the DEF-ROC-165 reason — a
+    #         guard nothing invokes automatically is the same failure in a costume.
+    findings.extend(compute_event_loss(project))
+
     # --- 9. a file a committed make target RUNS must be on trunk — DELEGATED ---
     #        (OI-GITIGNORE-SWALLOWS-COMMITTED-TOOLS). This is the ONLY workflow that
     #        can run it: the analyser lives in the agent-system repo, so a project's
@@ -6892,24 +6903,201 @@ def cmd_loop_gate(a):
     sys.exit(2 if blocking else 0)
 
 
+# --- I9: has an event ever been DROPPED? (DEF-ROC-162) ----------------------
+# The item file was the ONLY record that an append happened, so when `project`
+# overwrote DEF-ROC-161's `confirmed` there was nothing left to disagree with:
+# `wi-validate` asks whether `derived == fold(events)`, and that holds just as
+# well over a log with an event missing from it. A validator that cannot see the
+# loss is the worst case this project recognises.
+#
+# There IS a second durable record and it costs one git call to consult. Item
+# logs are APPEND-ONLY by contract, so an event present in HEAD and absent from
+# the working tree is a dropped event — no interpretation required. This is the
+# lesson this project has now paid for three times: WHEREVER ABSENCE IS TREATED
+# AS EVIDENCE, ASK WHETHER THE THING STILL EXISTS ON THE REFERENCE SIDE. HEAD is
+# the reference side, and no writer here ever asked it anything.
+#
+# ITS BLIND SPOT, stated plainly because an undocumented blind spot is worse than
+# no check: an event appended and destroyed BEFORE the next commit was never in
+# HEAD, so this will not find it — which is precisely what happened to
+# DEF-ROC-161. That window is closed by `write_item_file`'s guards (impossible or
+# loud) rather than detected here. Answering the question for the pre-commit
+# window needs an append journal, which is separate work with its own failure
+# modes. What this DOES cover is every event that ever reached a commit,
+# including the isolated-commit merge class that has silently dropped committed
+# lines before (DEFECT-OAG-142's family).
+EVENT_LOSS_TIMEOUT = 30.0
+
+
+def _head_item_logs(project, timeout=EVENT_LOSS_TIMEOUT, unreadable=None):
+    """{id: (path_in_HEAD, [event-sig, …])} for every item file COMMITTED IN HEAD.
+    Raises RuntimeError with a why-string when it cannot be established. Blobs
+    that will not parse are appended to `unreadable` (a list the caller supplies)
+    rather than taking the whole check down with them."""
+    repo = os.path.join(ROOT, "work", project)
+    if not os.path.isdir(os.path.join(repo, ".git")):
+        raise RuntimeError(f"work/{project} is not a git repository "
+                           f"(nothing to compare the working tree against)")
+
+    def git(args, stdin=None):
+        proc = subprocess.run(["git", "-C", repo, *args], input=stdin,
+                              capture_output=True, timeout=timeout)
+        if proc.returncode != 0:
+            raise RuntimeError(f"`git {' '.join(args)}` exited "
+                               f"{proc.returncode}: "
+                               f"{proc.stderr.decode('utf-8', 'replace').strip()[:160]}")
+        return proc.stdout
+
+    listing = git(["ls-tree", "-r", "--name-only", "HEAD",
+                   "items/active/", "items/done/"])
+    paths = [l for l in listing.decode("utf-8", "replace").split("\n")
+             if l.endswith(".md")]
+    if not paths:
+        return {}
+    # ONE subprocess for every blob. Parsed as BYTES because `cat-file --batch`
+    # sizes are byte counts, not character counts.
+    raw = git(["cat-file", "--batch"],
+              stdin=("".join(f"HEAD:{p}\n" for p in paths)).encode())
+    out, i, n = {}, 0, 0
+    if unreadable is None:
+        unreadable = []
+    while i < len(raw) and n < len(paths):
+        nl = raw.find(b"\n", i)
+        if nl < 0:
+            break
+        header = raw[i:nl].decode("utf-8", "replace")
+        path = paths[n]
+        n += 1
+        parts = header.split()
+        if len(parts) != 3 or parts[1] != "blob":       # missing / not a blob
+            i = nl + 1
+            continue
+        size = int(parts[2])
+        blob = raw[nl + 1:nl + 1 + size].decode("utf-8", "replace")
+        i = nl + 1 + size + 1
+        try:
+            fm_text, _body = _split_frontmatter(blob)
+            fm = parse_frontmatter(fm_text)
+        except Exception as exc:                                # noqa: BLE001
+            # One unparseable committed blob must not blind the whole check —
+            # but it is REPORTED, not swallowed (see `unreadable` below).
+            unreadable.append((path, f"{type(exc).__name__}: {exc}"))
+            continue
+        iid = fm.get("id")
+        if not iid:
+            unreadable.append((path, "no `id:` in the committed frontmatter"))
+            continue
+        out[iid] = (path, [_event_sig(e) for e in (fm.get("events") or [])])
+    return out
+
+
+def compute_event_loss(project, timeout=EVENT_LOSS_TIMEOUT):
+    """0 or 1 finding, loop-gate shaped. `block` when an event committed in HEAD
+    is absent from the working tree; `unknown` when we could not establish it."""
+    common = {"check": "event-loss", "ids": []}
+    unreadable = []
+    try:
+        head = _head_item_logs(project, timeout=timeout, unreadable=unreadable)
+        items, _dup = load_all_items(project)
+    except Exception as exc:                                    # noqa: BLE001
+        return [dict(common, severity="unknown", dropped=None, message=(
+            f"[event-loss] NOT ESTABLISHED — the append-only invariant (I9) "
+            f"could not be checked ({type(exc).__name__}: {str(exc)[:160]}). An "
+            f"unrunnable check is not a clean one: this is the ONE record that "
+            f"can disagree with a shortened event log, and a clean answer that "
+            f"is indistinguishable from no answer is exactly the false green "
+            f"DEF-ROC-162 was. Remedy: `make wi-validate PROJECT={project}`."))]
+
+    now_sigs = {iid: [_event_sig(e) for e in it.events]
+                for iid, it in items.items()}
+    dropped, gone = [], []
+    for iid, (path, sigs) in sorted(head.items()):
+        if iid not in now_sigs:
+            # The ITEM, not the path: a terminal item's file legitimately MOVES
+            # active/ -> done/, so a vacated path proves nothing. Only an id that
+            # exists nowhere in the working tree has genuinely gone.
+            gone.append((iid, path, len(sigs)))
+            continue
+        have = list(now_sigs[iid])
+        missing = []
+        for sig in sigs:
+            if sig in have:
+                have.remove(sig)            # multiset: a removed DUPLICATE counts
+            else:
+                missing.append(sig)
+        if missing:
+            dropped.append({"id": iid, "events": missing})
+    extra = []
+    if unreadable:
+        extra = [dict(common, severity="unknown", dropped=None, message=(
+            f"[event-loss] {len(unreadable)} committed item blob(s) would not "
+            f"parse, so I9 could not be established FOR THEM (the rest were "
+            f"checked): "
+            + "; ".join(f"{pth} ({why})" for pth, why in unreadable[:4])
+            + f". Partial coverage is reported, never absorbed into clean."))]
+    if not dropped and not gone:
+        return extra
+    ids = [d["id"] for d in dropped] + [g[0] for g in gone]
+    detail = "; ".join(f"{d['id']} lost {[s[1] for s in d['events']]}"
+                       for d in dropped[:6])
+    if gone:
+        detail += ("; " if detail else "") + "; ".join(
+            f"{iid}'s item file is in HEAD ({p}) but the id exists nowhere in "
+            f"the working tree ({n} events)" for iid, p, n in gone[:6])
+    return extra + [dict(common, severity="block", ids=ids, dropped=dropped, message=(
+        f"[event-loss] {len(ids)} item(s) have LOST an event that is committed "
+        f"in HEAD, and item logs are APPEND-ONLY: {detail}. This is DEF-ROC-162's "
+        f"signature — a whole-store read-modify-write, or a co-owned-file merge, "
+        f"has overwritten an append. Do NOT re-render the store: recover the "
+        f"events from HEAD first (`git -C work/{project} show HEAD:<path>`), then "
+        f"re-run `make wi-project`."))]
+
+
 # ---------------------------------------------------------------------------
-# Subcommand: validate — the drift GATE (invariants I1–I4, I6, I7, I8)
+# Subcommand: validate — the drift GATE (invariants I1–I4, I6–I9)
 # ---------------------------------------------------------------------------
 def cmd_validate(a):
     graphs = Graphs.load()
-    violations = validate_items(graphs, a.project)
+    # I9 is computed ONCE and its verdict is always stated, including when it
+    # could not be established: "cannot measure" must never be absorbed into
+    # `clean`, because an unaskable question is how DEF-ROC-162 stayed invisible.
+    loss = compute_event_loss(a.project)
+    violations = validate_items(graphs, a.project, event_loss=loss)
+    for f in loss:
+        if f["severity"] == "unknown":
+            print(f"validate: I9 (append-only, vs git HEAD) NOT ESTABLISHED — "
+                  f"{f['message']}")
     if violations:
         print(f"validate: {len(violations)} violation(s) in {a.project}:", file=sys.stderr)
         for v in violations:
             print(f"  - {v}", file=sys.stderr)
         sys.exit(1)
-    print(f"validate: {a.project} clean — I1–I4 + I6 + I7 + I8 all hold.")
+    established = any(f["severity"] == "unknown" for f in loss)
+    print(f"validate: {a.project} clean — I1–I4 + I6 + I7 + I8 all hold"
+          + (", and I9 could NOT be established (see above)." if established
+             else ", and I9 holds: no event committed in HEAD is missing from "
+                  "the working tree."))
 
 
-def validate_items(graphs, project):
+def validate_items(graphs, project, event_loss=None):
     items, dup_ids = load_all_items(project)
     states = compute_states(graphs, items)
     violations = []
+
+    # I9: append-only, checked against the only other durable record there is.
+    # An `unknown` verdict is NOT a violation (it is reported by the caller) —
+    # but it is never a pass either.
+    for f in (compute_event_loss(project) if event_loss is None else event_loss):
+        if f["severity"] != "block":
+            continue
+        for d in (f.get("dropped") or []):
+            violations.append(
+                f"(I9) {d['id']}: {len(d['events'])} event(s) committed in HEAD "
+                f"are ABSENT from the working-tree item file "
+                f"({[s[1] for s in d['events']]}) — item logs are append-only, so "
+                f"this is a DROPPED EVENT, not drift to re-render")
+        if not (f.get("dropped") or []):
+            violations.append(f"(I9) {f['message']}")
 
     # I4a: exactly one file per id (dup ids across active/+done/)
     for d in sorted(set(dup_ids)):

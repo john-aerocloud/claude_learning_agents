@@ -883,6 +883,18 @@ def render_item(item, derived):
     return "\n".join(L) + "\n"
 
 
+# --- the ONE write primitive for an EXISTING item file ----------------------
+# Every rewrite of an item file that already exists goes through here: the
+# `append` write, its ancestor propagation, and `project`'s re-render loop. One
+# primitive because the write is where the concurrency hazards live, and a
+# control that is optional on a shared primitive is a control some lane omits
+# (EXP-121). `migrate` CREATES files and is deliberately not a caller.
+def write_item_file(item, derived):
+    """Render `item` with `derived` and write it to `item.path`."""
+    with open(item.path, "w", encoding="utf-8") as f:
+        f.write(render_item(item, derived))
+
+
 # ---------------------------------------------------------------------------
 # Item-set loading (across active/ + done/)
 # ---------------------------------------------------------------------------
@@ -1395,8 +1407,7 @@ def cmd_append(a):
 
     # if the append made it terminal, it must move to done/ (I4). We render in
     # place here; `project` performs the physical relocation authoritatively.
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(render_item(item, dv))
+    write_item_file(item, dv)
     # …and PROPAGATE to the ancestors this transition moved. An aggregate's state
     # is not folded from its own events, it BUBBLES from its children, so a child's
     # append can change every ancestor's state — and re-rendering only the appended
@@ -1412,9 +1423,8 @@ def cmd_append(a):
         # a duplicate id (I4). Skipping is correct — `project` re-renders everything.
         if anc is None or not os.path.exists(anc.path):
             continue
-        with open(anc.path, "w", encoding="utf-8") as f:
-            f.write(render_item(anc, derived_block(graphs, items, states,
-                                                   children, anc_id)))
+        write_item_file(anc, derived_block(graphs, items, states,
+                                           children, anc_id))
     new_state = states.get(a.id)
     print(f"append: {a.id} {state} --({a.event}/{a.agent})--> {new_state}")
     _maybe_relocate(a.project, a.id, item, new_state, graphs)
@@ -1518,8 +1528,7 @@ def cmd_project(a):
     # 1. re-render every item's derived block + relocate terminal items to done/
     for iid, it in list(items.items()):
         dv = derived_block(graphs, items, states, children, iid, now=now)
-        with open(it.path, "w", encoding="utf-8") as f:
-            f.write(render_item(it, dv))
+        write_item_file(it, dv)
         _maybe_relocate(a.project, iid, it, states.get(iid), graphs)
 
     vd = views_dir(a.project)

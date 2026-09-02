@@ -19,7 +19,7 @@ Subcommands:
 Stdlib only. Frontmatter is parsed by hand (the tiny YAML-ish subset the contract
 uses); JSON via stdlib json. Invoke via the launcher `sh .../work-items <cmd>`.
 """
-import argparse, csv, json, os, re, subprocess, sys, tempfile
+import argparse, contextlib, csv, json, os, re, subprocess, sys, tempfile, threading, time
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 
@@ -1038,6 +1038,128 @@ def _atomic_write(path, text):
         raise
 
 
+# --- the store lock: the two WRITERS never interleave (DEF-ROC-162) ---------
+# `write_item_file` above makes a concurrent event impossible to LOSE. That is
+# not the whole property, because `append` decides whether a transition is LEGAL
+# against the log it loaded: two appends that overlap can both pass a check only
+# one of them should have passed, and the store is then left folding through a
+# transition that does not exist in the graph. A duplicated event in an item log
+# has already manufactured exactly that and stopped the loop once
+# (DEFECT-OAG-142). So the store's writers — `append`, `project`, `migrate` —
+# hold one lock for their whole read-modify-write, load included.
+#
+# WHY AN OS FILE LOCK, and what happens when a holder DIES: `flock` (POSIX) and
+# `msvcrt.locking` (Windows) are both released by the kernel when the file
+# descriptor closes, which includes the process being killed. There is therefore
+# NO stale lock record, no pid file to reap, and no recovery path to get wrong —
+# the failure mode a lockfile-with-a-pid has, where a crashed holder wedges the
+# store until a human deletes something, does not exist here. Proven with a real
+# killed process in test_wi_concurrent_write_safety.py.
+#
+# The wait is BOUNDED and failure is LOUD: past the deadline the command EXITS
+# NON-ZERO saying the lock is held, and never proceeds unserialised. "Could not
+# establish it" is not a pass.
+#
+# The lock file lives in the machinery's machine-local `cache/` (gitignored), not
+# in the project repo: it is a handle, never a record, and nothing should ever
+# commit it.
+STORE_LOCK_TIMEOUT = float(os.environ.get("WI_STORE_LOCK_TIMEOUT", "120") or 120)
+_LOCK_DEPTH = {}          # (thread-id, project) -> re-entrancy depth
+
+try:
+    import fcntl as _fcntl
+except ImportError:                                        # pragma: no cover
+    _fcntl = None
+try:
+    import msvcrt as _msvcrt
+except ImportError:
+    _msvcrt = None
+
+
+def _store_lock_path(project):
+    d = os.path.join(ROOT, ".claude", "skills", "work-items", "scripts", "cache")
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, f"{project}.store.lock")
+
+
+def _try_take(f):
+    """One non-blocking attempt. True = we hold it; False = someone else does."""
+    if _fcntl is not None:
+        try:
+            _fcntl.flock(f.fileno(), _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+            return True
+        except OSError:
+            return False
+    if _msvcrt is not None:                                # pragma: no cover
+        try:
+            f.seek(0)
+            _msvcrt.locking(f.fileno(), _msvcrt.LK_NBLCK, 1)
+            return True
+        except OSError:
+            return False
+    return None                                            # pragma: no cover
+
+
+def _release(f):
+    if _fcntl is not None:
+        _fcntl.flock(f.fileno(), _fcntl.LOCK_UN)
+    elif _msvcrt is not None:                              # pragma: no cover
+        f.seek(0)
+        _msvcrt.locking(f.fileno(), _msvcrt.LK_UNLCK, 1)
+
+
+@contextlib.contextmanager
+def store_lock(project, timeout=None):
+    """Hold the write lock on `project`'s item store for the body. Re-entrant
+    within one THREAD (so a future caller nesting one writer inside another
+    cannot self-deadlock) and NOT across threads (so two threads still
+    serialise, exactly as two processes do)."""
+    if not project:                                        # pragma: no cover
+        yield None
+        return
+    key = (threading.get_ident(), project)
+    if _LOCK_DEPTH.get(key):
+        _LOCK_DEPTH[key] += 1
+        try:
+            yield None
+        finally:
+            _LOCK_DEPTH[key] -= 1
+        return
+    budget = STORE_LOCK_TIMEOUT if timeout is None else float(timeout)
+    path = _store_lock_path(project)
+    f = open(path, "a+", encoding="utf-8")
+    try:
+        deadline = time.monotonic() + budget
+        while True:
+            got = _try_take(f)
+            if got is None:                                # pragma: no cover
+                print(f"store-lock: WARNING — no file-locking primitive on this "
+                      f"platform (neither fcntl nor msvcrt), so the item store's "
+                      f"writers are NOT serialised. The re-read/rebase guard in "
+                      f"write_item_file still prevents a lost event; a concurrent "
+                      f"append can still be judged against a stale state.",
+                      file=sys.stderr)
+                break
+            if got:
+                break
+            if time.monotonic() >= deadline:
+                sys.exit(f"store-lock: REFUSING to write work/{project}/items — "
+                         f"another writer has held the store lock for more than "
+                         f"{budget:g}s ({_rel(path)}). Nothing has been written. "
+                         f"Re-run when it finishes; if no `wi-*` command is "
+                         f"running, the holder has wedged (the lock itself cannot "
+                         f"go stale — the kernel drops it when the holder dies).")
+            time.sleep(0.02)
+        _LOCK_DEPTH[key] = 1
+        try:
+            yield f
+        finally:
+            _LOCK_DEPTH[key] = 0
+            _release(f)
+    finally:
+        f.close()
+
+
 # ---------------------------------------------------------------------------
 # Item-set loading (across active/ + done/)
 # ---------------------------------------------------------------------------
@@ -1325,7 +1447,8 @@ def cmd_append(a):
     """Append one edge-checked event. Thin wrapper: the whole read-modify-write
     lives in `_append_locked` so a single decorator-shaped seam can serialise it
     against the other writer (`project`) — see DEF-ROC-162."""
-    return _append_locked(a)
+    with store_lock(a.project, timeout=getattr(a, "lock_timeout", None)):
+        return _append_locked(a)
 
 
 def _append_locked(a):
@@ -1664,7 +1787,8 @@ def cmd_project(a):
     """Re-render every derived block + rewrite the views. Thin wrapper for the
     same reason as `cmd_append` — one seam to serialise the store's two writers
     (DEF-ROC-162)."""
-    return _project_locked(a)
+    with store_lock(a.project, timeout=getattr(a, "lock_timeout", None)):
+        return _project_locked(a)
 
 
 def _project_locked(a):
@@ -7116,6 +7240,16 @@ def _title_for(project, row):
 
 
 def cmd_migrate(a):
+    """One-off bootstrap: CREATE item files from the legacy registry. It is the
+    third writer of the store, so it declares its lock decision like the other
+    two — it takes the lock. It does NOT go through `write_item_file`, because
+    there is no on-disk log to preserve or rebase onto: every file it writes is
+    new. (Declared in TestWriteLanesAreEnumerated.DECLARED_CREATORS.)"""
+    with store_lock(a.project, timeout=getattr(a, "lock_timeout", None)):
+        return _migrate_locked(a)
+
+
+def _migrate_locked(a):
     project = a.project
     csv_path = os.path.join(items_dir(project), "items.csv")
     if not os.path.exists(csv_path):

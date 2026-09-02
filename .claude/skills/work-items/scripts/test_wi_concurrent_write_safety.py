@@ -289,5 +289,230 @@ class TestAppendPreservesConcurrentAppend(StoreFixture):
                       "destroyed an event appended to the PARENT in between")
 
 
+class TestWritersAreSerialised(StoreFixture):
+    """The re-read/rebase guard above means a concurrent event is never LOST. It
+    does not mean two writers may interleave freely: `append` decides whether a
+    transition is LEGAL against the log it loaded, so two appends that overlap can
+    both pass a check that only one of them should have passed and leave an
+    ILLEGAL log behind — which has already stopped this loop once, when a
+    duplicated event in an item file manufactured a transition that cannot exist
+    (DEFECT-OAG-142). So the store's writers are serialised by a lock, and the
+    property under test is: an append's legality is decided against the log it
+    actually lands on.
+    """
+
+    def _append_in_thread(self, iid, event, agent, ts, results, key, gate=None):
+        def run():
+            if gate is not None:
+                gate.wait(timeout=10)
+            out, err = io.StringIO(), io.StringIO()
+            try:
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    wi.cmd_append(argparse.Namespace(
+                        project=self.project, id=iid, event=event, agent=agent,
+                        ref=None, note=None, ts=ts, tokens=None, duration_ms=None))
+                results[key] = ("ok", out.getvalue() + err.getvalue())
+            except SystemExit as e:
+                results[key] = (f"exit:{e.code}", out.getvalue() + err.getvalue())
+            except BaseException as e:                      # pragma: no cover
+                results[key] = (f"raise:{type(e).__name__}", str(e))
+        t = threading.Thread(target=run, daemon=True)
+        return t
+
+    def test_two_overlapping_appends_cannot_both_record_the_same_transition(self):
+        """FAILING-DIRECTION NOTE: this test is deterministic when it PASSES (the
+        second writer cannot enter while the first holds the lock, whatever the
+        timing) and depends on a 1s margin only to reproduce the unserialised
+        loss. It can therefore never be a false green."""
+        self.write_item("DEF-L", "defect",
+                        [{"ts": "2026-08-01T00:00:00Z", "event": "reported",
+                          "agent": "orchestrator"}])
+        results, entered = {}, threading.Event()
+        second = self._append_in_thread("DEF-L", "triaged", "orchestrator",
+                                        "2026-08-01T02:00:00Z", results, "b",
+                                        gate=entered)
+
+        real_load = wi.load_all_items
+        fired = []
+
+        def hook(project):
+            if not fired:            # inside the first append's critical section
+                fired.append(True)
+                second.start()
+                entered.set()        # let the second writer try to get in
+                time.sleep(1.0)      # …it must not succeed while we hold the lock
+            return real_load(project)
+
+        wi.load_all_items = hook
+        try:
+            first = self._append_in_thread("DEF-L", "triaged", "orchestrator",
+                                           "2026-08-01T01:00:00Z", results, "a")
+            first.start()
+            first.join(timeout=30)
+            second.join(timeout=30)
+        finally:
+            wi.load_all_items = real_load
+
+        self.assertTrue(fired, "the hook never fired — the test proves nothing")
+        names = [e[1] for e in self.events_on_disk("DEF-L")]
+        self.assertEqual(
+            names, ["reported", "triaged"],
+            f"both overlapping appends recorded `triaged`, so the log now folds "
+            f"through a transition that does not exist in the state graph. "
+            f"results={results}")
+        verdicts = sorted(v[0] for v in results.values())
+        self.assertEqual(len(results), 2, results)
+        self.assertEqual(verdicts.count("ok"), 1,
+                         f"exactly one writer may succeed: {results}")
+        self.assertTrue(any(v[0].startswith("exit:") and v[0] != "exit:0"
+                            for v in results.values()),
+                        f"the loser must FAIL LOUDLY, not silently: {results}")
+
+    def test_a_lock_that_cannot_be_taken_fails_loudly(self):
+        """CANNOT MEASURE IS NEVER A PASS. If the lock is held past the deadline
+        the command exits non-zero saying so — it never proceeds unserialised."""
+        self.write_item("DEF-T", "defect",
+                        [{"ts": "2026-08-01T00:00:00Z", "event": "reported",
+                          "agent": "orchestrator"}])
+        holder_in = threading.Event()
+        release = threading.Event()
+        held = {}
+
+        def holder():
+            with wi.store_lock(self.project):
+                holder_in.set()
+                release.wait(timeout=10)
+            held["done"] = True
+
+        t = threading.Thread(target=holder, daemon=True)
+        t.start()
+        self.assertTrue(holder_in.wait(timeout=10), "holder never took the lock")
+        try:
+            with self.assertRaises(SystemExit) as cm:
+                with contextlib.redirect_stdout(io.StringIO()), \
+                     contextlib.redirect_stderr(io.StringIO()) as err:
+                    wi.cmd_append(argparse.Namespace(
+                        project=self.project, id="DEF-T", event="triaged",
+                        agent="orchestrator", ref=None, note=None,
+                        ts="2026-08-01T01:00:00Z", tokens=None, duration_ms=None,
+                        lock_timeout=0.2))
+            self.assertNotEqual(cm.exception.code, 0)
+            said = (str(cm.exception.code) + err.getvalue()).lower()
+            self.assertIn("lock", said)
+            self.assertIn("nothing has been written", said)
+        finally:
+            release.set()
+            t.join(timeout=10)
+        # …and nothing was written while we could not hold the lock
+        self.assertEqual([e[1] for e in self.events_on_disk("DEF-T")], ["reported"])
+
+    def test_the_lock_dies_with_its_holder(self):
+        """A lock nobody can release is worse than no lock. This one is an OS
+        file lock, so a holder that is killed releases it with its file
+        descriptor — there is no stale record to clean up and no recovery path to
+        get wrong. Proven with a real process, killed."""
+        code = ("import sys,time\n"
+                "import fcntl\n"
+                "f=open(sys.argv[1],'a+')\n"
+                "fcntl.flock(f.fileno(), fcntl.LOCK_EX)\n"
+                "print('held', flush=True)\n"
+                "time.sleep(60)\n")
+        path = wi._store_lock_path(self.project)
+        import subprocess
+        proc = subprocess.Popen([sys.executable, "-c", code, path],
+                                stdout=subprocess.PIPE, text=True)
+        try:
+            self.assertEqual(proc.stdout.readline().strip(), "held")
+            with self.assertRaises(SystemExit):          # genuinely held: we wait, then fail
+                with contextlib.redirect_stderr(io.StringIO()):
+                    with wi.store_lock(self.project, timeout=0.2):
+                        pass                              # pragma: no cover
+            proc.kill()
+            proc.wait(timeout=10)
+            with wi.store_lock(self.project, timeout=5.0):
+                pass                                      # the OS released it
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+            proc.stdout.close()
+
+    def test_nesting_in_one_thread_does_not_deadlock(self):
+        """Re-entrant per THREAD (a future caller nesting append inside project
+        must not hang) and NOT per process (another thread must still block)."""
+        with wi.store_lock(self.project, timeout=1.0):
+            with wi.store_lock(self.project, timeout=1.0):
+                pass
+        blocked = {}
+
+        def other():
+            try:
+                with wi.store_lock(self.project, timeout=0.2):
+                    blocked["got"] = True
+            except SystemExit:
+                blocked["got"] = False
+
+        with wi.store_lock(self.project, timeout=1.0):
+            t = threading.Thread(target=other, daemon=True)
+            t.start()
+            t.join(timeout=10)
+        self.assertEqual(blocked.get("got"), False,
+                         "a second THREAD must not inherit the lock")
+
+
+class TestWriteLanesAreEnumerated(unittest.TestCase):
+    """EXP-121, applied to this module: a control that is optional on a shared
+    primitive is a control some lane omits. Every lane that writes an item file
+    must go through `write_item_file`, and every command that writes the store
+    must take the store lock. A new lane that declares neither fails HERE, at
+    compile-time-ish, rather than in six months in a lost event.
+    """
+
+    SOURCE = os.path.join(HERE, "work-items.py")
+
+    # The ONE declared exception, with its reason: `migrate` CREATES files that
+    # do not exist yet, so there is no on-disk log to preserve and nothing to
+    # rebase onto. It takes the store lock all the same.
+    DECLARED_CREATORS = {"_migrate_locked"}
+
+    def _functions(self):
+        with io.open(self.SOURCE, encoding="utf-8") as fh:
+            src = fh.read()
+        import ast
+        tree = ast.parse(src)
+        lines = src.split("\n")
+        out = {}
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                out[node.name] = "\n".join(
+                    lines[node.lineno - 1:node.end_lineno])
+        return out
+
+    def test_every_item_file_write_goes_through_the_primitive(self):
+        offenders = []
+        for name, body in self._functions().items():
+            if name in ("write_item_file", "_atomic_write", "render_item"):
+                continue
+            if "render_item(" not in body:
+                continue
+            if name in self.DECLARED_CREATORS:
+                continue
+            offenders.append(name)
+        self.assertEqual(
+            offenders, [],
+            f"these functions render an item file without going through "
+            f"`write_item_file`, so they carry none of its guards "
+            f"(re-read / rebase / fail-closed): {offenders}. Route them through "
+            f"the primitive, or declare them in DECLARED_CREATORS with a reason.")
+
+    def test_every_store_writer_takes_the_lock(self):
+        fns = self._functions()
+        for name in ("cmd_append", "cmd_project", "cmd_migrate"):
+            self.assertIn(name, fns, f"{name} has been renamed — re-declare the lanes")
+            self.assertIn(
+                "store_lock(", fns[name],
+                f"{name} writes the item store but does not take the store lock, "
+                f"so it can interleave with the other writer (DEF-ROC-162)")
+
+
 if __name__ == "__main__":
     unittest.main()

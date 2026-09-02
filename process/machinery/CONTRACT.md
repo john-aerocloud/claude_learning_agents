@@ -69,6 +69,46 @@ storing any edge twice.
 
 ## 2. Appending an event (the write path — replaces `dora record` for item state)
 
+**HOW A WRITE HAPPENS AT ALL — the guarantee every other clause in this contract rests on
+(DEF-ROC-162).** The store has exactly three writers (`append`, `project`, `migrate`) and every
+rewrite of an existing item file goes through ONE primitive, `write_item_file`. It did not, and
+the cost was the substrate silently losing a state event: `project` snapshotted all 373 item
+files with one `load_all_items()` and then wrote each file back from that snapshot, so
+DEF-ROC-161's `confirmed` — appended, printed, exit 0 — was gone six minutes later, absent from
+the file, from the commit made from it, and from `views/state.md`. `wi-validate` reported the
+store **clean**, because its invariant was `derived == fold(events)` and that holds just as well
+over a log with an event missing from it.
+
+Four properties now hold, and they are pinned in
+`.claude/skills/work-items/scripts/test_wi_concurrent_write_safety.py`:
+
+1. **The file on disk is the AUTHORITY for the event log, the frontmatter and the body.** A
+   writer re-reads immediately before writing and rewrites only what it is actually changing: the
+   derived block, plus its own new events, plus its own declared frontmatter updates. `project`
+   no longer needs the events in its snapshot at all.
+2. **Rebase, never overwrite.** A writer declares the log it LOADED; its own additions are rebased
+   onto whatever is on disk now, so an event it never saw is KEPT — and reported on stderr,
+   because the derived block it is writing was computed before that event arrived.
+3. **The writers do not interleave.** All three hold one bounded OS file lock for their whole
+   read-modify-write, load included, so an `append`'s legality decision is always taken against
+   the log it lands on. (Preserving an event is not sufficient on its own: two overlapping appends
+   both passed a check only one should have passed and left a log folding through a transition the
+   graph does not contain — the shape that stopped this loop once before.) Past the deadline the
+   command **exits non-zero and writes nothing**; it never proceeds unserialised. The lock is an
+   OS lock precisely so a killed holder cannot wedge the store — the kernel drops it with the file
+   descriptor, and there is no stale record to reap.
+4. **Fail closed.** After an atomic write (temp file + `os.replace`) the writer re-reads and
+   compares the ORDERED event identities, with length, against what it intended to write. A
+   mismatch restores the pre-image and raises: a writer that cannot prove what it wrote does not
+   go on to write the next 372 files. Ordered-with-length rather than a set difference, because a
+   set difference is structurally incapable of seeing a LOSS or a DUPLICATION — which is why this
+   class stayed invisible for so long.
+
+A new lane cannot quietly opt out of any of this: a source-level gate enumerates every function
+that renders an item file and every command that writes the store, and fails the build on one
+that declares neither (EXP-121).
+
+
 `work-items append --project <p> --id <ID> --event <name> --agent <role> [--ref R] [--note N] [--owner ROLE[,ROLE]]`
 
 The append is **edge-checked**: it folds the existing events to the current state, looks up the
@@ -329,6 +369,23 @@ Exits non-zero if ANY invariant is violated:
   Because an aggregate's state BUBBLES, `append` re-renders the appended item's ANCESTORS too —
   otherwise a child's transition would leave every ancestor's block stale and I8 would fire on an
   item nobody touched.
+- (I9) **no event committed in git HEAD is ABSENT from the working-tree item file** — the
+  append-only invariant, checked against the only other durable record there is (DEF-ROC-162).
+  Until this existed, *nothing in the repository could answer "has an event ever been dropped?"*,
+  because the item file was the ONLY record that an append happened; a shortened log is internally
+  perfectly consistent and I1–I8 all pass over it. Item logs are append-only by contract, so an
+  event in HEAD and not in the working tree is a **dropped event**, not drift to re-render — the
+  remedy is to recover it from HEAD (`git -C work/<p> show HEAD:<path>`) and **only then**
+  re-project. It compares by ITEM ID, never by path, so a terminal item relocating
+  `active/` → `done/` is not mistaken for a loss, and a working tree ahead of HEAD (the normal
+  case) is not either. **Its blind spot is stated rather than hidden:** an event destroyed before
+  the next commit was never in HEAD, so I9 cannot see it — that window is closed by the write-path
+  guards in §2 (impossible or loud), not detected here; answering it for the pre-commit window
+  needs an append journal, which is separate work. A verdict it could not establish is REPORTED,
+  never absorbed into `clean`. Same generalisable lesson as `isolated-commit.js`'s staleness bug:
+  **wherever absence is treated as evidence, ask whether the thing still exists on the reference
+  side.** It also runs as `loop-gate` check 15, so it is asked before every pull rather than only
+  when someone remembers to validate.
 
 ## 4. Statistics reset
 

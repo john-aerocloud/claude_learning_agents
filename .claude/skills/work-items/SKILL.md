@@ -123,8 +123,29 @@ Makefile wraps each.
    `blocked` flow item carries a valid reversal probe; **(I8) the item's own
    `derived:` block agrees with `fold(events)`** — it exists, declares a non-null
    state, that state is one its own type graph defines, it equals the computed
-   state, and `derived.queue` equals `queue_map[state]`. **I5 is
+   state, and `derived.queue` equals `queue_map[state]`; **(I9) no event committed in
+   git HEAD is absent from the working-tree item file** — append-only, checked
+   against the only other durable record there is. **I5 is
    RESERVED** for IMP-011's still-owed CORE-job invariant and is not reused.
+
+   **An I9 violation is a DROPPED EVENT, not drift — do NOT re-project.** Recover the
+   events from HEAD (`git -C work/<p> show HEAD:<path>`) and only then re-render.
+   I9 exists because the store silently lost DEF-ROC-161's `confirmed` event and this
+   gate reported *clean* afterwards: its invariant was `derived == fold(events)`,
+   which holds just as well over a log with an event missing from it (DEF-ROC-162).
+   It compares by item ID, so `active/` → `done/` relocation is not a loss, and it
+   cannot see an event destroyed before the next commit — that window is closed by
+   the write path instead (below). It also runs as `loop-gate` check 15.
+
+   **A concurrent `wi-append` during `wi-project` is now SAFE, and it was not.**
+   `project` used to rewrite every item file from a snapshot taken at the start, so
+   any append landing mid-run was silently destroyed. All three writers (`append`,
+   `project`, `migrate`) now re-read each file immediately before writing, rebase
+   their own new events onto what is on disk, hold one bounded OS file lock for the
+   whole read-modify-write, and verify the written log against what they intended —
+   restoring the pre-image and refusing to continue if it does not match. If a second
+   `wi-*` command is already writing, yours WAITS and then exits non-zero saying so;
+   it never proceeds unserialised. Contract: `process/machinery/CONTRACT.md` §2.
 
    **The remedy for an I8 violation is `make wi-project` — RE-RENDER the block, never
    correct it in place.** I8 exists because five use-case items were once registered

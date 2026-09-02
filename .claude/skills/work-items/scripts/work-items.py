@@ -19,7 +19,7 @@ Subcommands:
 Stdlib only. Frontmatter is parsed by hand (the tiny YAML-ish subset the contract
 uses); JSON via stdlib json. Invoke via the launcher `sh .../work-items <cmd>`.
 """
-import argparse, csv, json, os, re, subprocess, sys
+import argparse, csv, json, os, re, subprocess, sys, tempfile
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 
@@ -889,10 +889,153 @@ def render_item(item, derived):
 # primitive because the write is where the concurrency hazards live, and a
 # control that is optional on a shared primitive is a control some lane omits
 # (EXP-121). `migrate` CREATES files and is deliberately not a caller.
-def write_item_file(item, derived):
-    """Render `item` with `derived` and write it to `item.path`."""
-    with open(item.path, "w", encoding="utf-8") as f:
-        f.write(render_item(item, derived))
+#
+# DEF-ROC-162 — WHAT THIS PRIMITIVE EXISTS TO MAKE IMPOSSIBLE. `project` used to
+# snapshot the whole store with one `load_all_items()` and then write
+# `render_item(it, dv)` back over all 373 files from that snapshot. Any
+# `wi-append` landing between the load and the write of a given file was
+# SILENTLY AND PERMANENTLY overwritten — observed on DEF-ROC-161, whose
+# `confirmed` event printed its transition, exited 0, and was gone six minutes
+# later. `append` had the same shape twice over (its own write, and its
+# ancestor-propagation loop). Nothing noticed, because `wi-validate` asks whether
+# `derived == fold(events)` and that holds just as well over a log with an event
+# missing from it.
+#
+# THREE PROPERTIES, and the order matters:
+#   1. RE-READ. The file on disk is the AUTHORITY for the event log, the
+#      frontmatter and the body. A caller's in-memory copy is a stale hypothesis
+#      about it, so we re-read immediately before writing and rewrite only what
+#      this caller is actually changing: the derived block, plus its own new
+#      events, plus its own declared frontmatter updates. `project` therefore no
+#      longer needs the events in its snapshot at all.
+#   2. REBASE, never overwrite. A caller declares the log it LOADED
+#      (`base_events`); its own additions are rebased onto whatever is on disk
+#      now. An event we never saw is kept, not dropped — and we say so on stderr,
+#      because the derived block we are writing was computed before it arrived
+#      and is knowingly one event behind until the next projection.
+#   3. FAIL CLOSED. After the atomic write we re-read and compare the ordered
+#      event identities against what we intended to write. A mismatch restores
+#      the pre-image and RAISES: a writer that cannot prove what it wrote must
+#      not go on to write 372 more files. Note the asymmetry that made this bug
+#      invisible for so long — a "nothing novel appeared" style check is a set
+#      difference and is structurally incapable of seeing a LOSS or a
+#      DUPLICATION, so the post-condition compares ORDERED LISTS WITH LENGTH.
+#
+# The residual window is the microseconds between the re-read and the atomic
+# rename of ONE file, against a non-cooperating writer; cooperating writers
+# (every `wi-*` command) are additionally serialised by the store lock below.
+class ItemWriteError(RuntimeError):
+    """The write could not be proven correct. Never raised for a mere concurrent
+    append (that is rebased and reported) — only when the file on disk does not
+    contain what we just wrote."""
+
+
+def _event_sig(ev):
+    """The IDENTITY of an event: (ts, event, agent). Deliberately not the whole
+    dict — this guard is about events being LOST, GAINED or REORDERED, and note
+    content is a separate, already-tracked class (test_wi_durable_prose.py). A
+    signature that included prose would turn a known mangle into a hard failure
+    here and teach the next reader to weaken the guard."""
+    return (ev.get("ts"), ev.get("event"), ev.get("agent"))
+
+
+def write_item_file(item, derived, base_events=None, new_events=(),
+                    fm_updates=None):
+    """Rewrite the EXISTING item file at `item.path`, preserving every event on
+    disk. Returns True if written, False if the file has vanished (relocated by a
+    concurrent agent) — in which case we do NOT recreate it, because writing the
+    vacated path would resurrect a duplicate id (I4).
+
+    base_events — the event log this caller loaded (its pre-image). Defaults to
+                  `item.events`, which is the right default for a pure
+                  re-render: it adds nothing, so the disk log is written back.
+    new_events  — the events THIS caller is adding, rebased onto the disk log.
+    fm_updates  — authoritative frontmatter this caller is changing (e.g. the
+                  `owner:` declaration append persists). Everything else in the
+                  frontmatter comes from disk.
+    """
+    path = item.path
+    try:
+        with open(path, encoding="utf-8") as f:
+            pre_text = f.read()
+        fresh = load_item(path)                      # 1. THE RE-READ
+    except FileNotFoundError:
+        print(f"write: {item.id} has vanished from {_rel(path)} (relocated by a "
+              f"concurrent agent?) — NOT recreating it there; `project` "
+              f"re-renders it wherever it now lives.", file=sys.stderr)
+        return False
+
+    disk = list(fresh.events)
+    disk_sig = [_event_sig(e) for e in disk]
+    base_sig = [_event_sig(e) for e in
+                (item.events if base_events is None else base_events)]
+
+    # 2. REBASE. Report anything the disk holds that this caller never saw, and
+    # anything it saw that the disk no longer holds (that second case is EVIDENCE
+    # OF A LOST EVENT somewhere else and must never pass in silence).
+    if disk_sig[:len(base_sig)] != base_sig:
+        missing = [sig for sig in base_sig if sig not in disk_sig]
+        print(f"write: WARNING — {item.id}'s event log CHANGED under us and is "
+              f"not an extension of the log we loaded"
+              + (f"; events we loaded are NO LONGER on disk: {missing}"
+                 if missing else " (reordered or rewritten)")
+              + f". Keeping the DISK log (it is the source of truth) and adding "
+              f"only this command's own events. Re-run `wi-project` and "
+              f"`wi-validate` — and if an event is genuinely missing, this is "
+              f"DEF-ROC-162's signature.", file=sys.stderr)
+    elif len(disk_sig) > len(base_sig):
+        print(f"write: note — {item.id} gained "
+              f"{len(disk_sig) - len(base_sig)} event(s) concurrently "
+              f"({[s[1] for s in disk_sig[len(base_sig):]]}); they are PRESERVED, "
+              f"but the derived block written here was computed before they "
+              f"arrived, so re-run `wi-project` to bring it current.",
+              file=sys.stderr)
+
+    events = list(disk)
+    for ev in new_events:
+        if _event_sig(ev) in disk_sig:
+            print(f"write: note — {item.id} already carries "
+                  f"{_event_sig(ev)} on disk; not appending it twice.",
+                  file=sys.stderr)
+            continue
+        events.append(dict(ev))
+
+    fm = dict(fresh.fm)
+    fm.update(fm_updates or {})
+    fm["events"] = events
+    text = render_item(Item(path, fm, fresh.body), derived)
+
+    _atomic_write(path, text)
+
+    # 3. FAIL CLOSED — prove what is on disk is what we meant to write.
+    got = [_event_sig(e) for e in load_item(path).events]
+    want = [_event_sig(e) for e in events]
+    if got != want:
+        _atomic_write(path, pre_text)               # roll back to the pre-image
+        raise ItemWriteError(
+            f"{_rel(path)}: the file does not contain the event log this write "
+            f"intended (wanted {len(want)} events, read back {len(got)}). The "
+            f"PRE-IMAGE HAS BEEN RESTORED and nothing further will be written. "
+            f"wanted={want} got={got}")
+    return True
+
+
+def _atomic_write(path, text):
+    """Write `text` to `path` via a temp file in the same directory + os.replace,
+    so a reader never sees a half-written item file and a crash mid-write cannot
+    truncate one."""
+    d = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".wi-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -1393,6 +1536,11 @@ def cmd_append(a):
     # append: rights are derived from the item, so the item is where the routing
     # decision has to be readable — by the next agent, by I1's replay of history,
     # and by anyone reading the file (v11, OI-ROC-006).
+    # The log we LOADED, declared before we touch anything: `write_item_file`
+    # rebases our one new event onto whatever is on disk at write time, so a
+    # concurrent append cannot be overwritten by our snapshot (DEF-ROC-162).
+    base_events = list(item.events)
+    fm_updates = {"owner": sorted(declared_owner)} if declared_owner else None
     if declared_owner:
         item.fm["owner"] = sorted(declared_owner)
     item.fm.setdefault("events", [])
@@ -1407,7 +1555,8 @@ def cmd_append(a):
 
     # if the append made it terminal, it must move to done/ (I4). We render in
     # place here; `project` performs the physical relocation authoritatively.
-    write_item_file(item, dv)
+    write_item_file(item, dv, base_events=base_events, new_events=[new_event],
+                    fm_updates=fm_updates)
     # …and PROPAGATE to the ancestors this transition moved. An aggregate's state
     # is not folded from its own events, it BUBBLES from its children, so a child's
     # append can change every ancestor's state — and re-rendering only the appended

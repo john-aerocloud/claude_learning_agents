@@ -1322,6 +1322,13 @@ def resolve_note(a):
 
 
 def cmd_append(a):
+    """Append one edge-checked event. Thin wrapper: the whole read-modify-write
+    lives in `_append_locked` so a single decorator-shaped seam can serialise it
+    against the other writer (`project`) — see DEF-ROC-162."""
+    return _append_locked(a)
+
+
+def _append_locked(a):
     a.note = resolve_note(a)
     graphs = Graphs.load()
     path, sub = find_item_path(a.project, a.id)
@@ -1654,6 +1661,13 @@ def views_dir(project):
 
 
 def cmd_project(a):
+    """Re-render every derived block + rewrite the views. Thin wrapper for the
+    same reason as `cmd_append` — one seam to serialise the store's two writers
+    (DEF-ROC-162)."""
+    return _project_locked(a)
+
+
+def _project_locked(a):
     graphs = Graphs.load()
     items, _dup = load_all_items(a.project)
     states = compute_states(graphs, items)

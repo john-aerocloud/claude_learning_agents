@@ -979,6 +979,9 @@ def write_item_file(item, derived, base_events=None, new_events=(),
               file=sys.stderr)
         fresh = item
         pre_text = None
+        healed = True
+    else:
+        healed = False
 
     disk = list(fresh.events)
     disk_sig = [_event_sig(e) for e in disk]
@@ -988,7 +991,12 @@ def write_item_file(item, derived, base_events=None, new_events=(),
     # 2. REBASE. Report anything the disk holds that this caller never saw, and
     # anything it saw that the disk no longer holds (that second case is EVIDENCE
     # OF A LOST EVENT somewhere else and must never pass in silence).
-    if disk_sig[:len(base_sig)] != base_sig:
+    if healed:
+        # The "disk" we are comparing against IS the caller's snapshot, so the
+        # rebase notes below would describe a concurrency that did not happen.
+        # The unreadable-file warning above is the honest account of this write.
+        pass
+    elif disk_sig[:len(base_sig)] != base_sig:
         missing = [sig for sig in base_sig if sig not in disk_sig]
         print(f"write: WARNING — {item.id}'s event log CHANGED under us and is "
               f"not an extension of the log we loaded"
@@ -1009,9 +1017,10 @@ def write_item_file(item, derived, base_events=None, new_events=(),
     events = list(disk)
     for ev in new_events:
         if _event_sig(ev) in disk_sig:
-            print(f"write: note — {item.id} already carries "
-                  f"{_event_sig(ev)} on disk; not appending it twice.",
-                  file=sys.stderr)
+            if not healed:
+                print(f"write: note — {item.id} already carries "
+                      f"{_event_sig(ev)} on disk; not appending it twice.",
+                      file=sys.stderr)
             continue
         events.append(dict(ev))
 

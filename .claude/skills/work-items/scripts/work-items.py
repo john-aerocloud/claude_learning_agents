@@ -958,12 +958,27 @@ def write_item_file(item, derived, base_events=None, new_events=(),
     try:
         with open(path, encoding="utf-8") as f:
             pre_text = f.read()
-        fresh = load_item(path)                      # 1. THE RE-READ
     except FileNotFoundError:
         print(f"write: {item.id} has vanished from {_rel(path)} (relocated by a "
               f"concurrent agent?) — NOT recreating it there; `project` "
               f"re-renders it wherever it now lives.", file=sys.stderr)
         return False
+    try:
+        fresh = load_item(path)                      # 1. THE RE-READ
+    except Exception as exc:                         # noqa: BLE001
+        # A cost of trusting the disk copy, paid deliberately. Overwriting from a
+        # snapshot used to HEAL a truncated file for free; the disk is now the
+        # authority, so an unparseable file must neither take the whole
+        # projection down nor pass in silence. The caller's snapshot parsed when
+        # it was loaded, so it is a valid item — write it back, and SAY SO.
+        print(f"write: WARNING — {_rel(path)} is UNREADABLE on disk "
+              f"({type(exc).__name__}: {str(exc)[:120]}); most likely a torn "
+              f"write. Restoring {item.id} from the copy loaded at the start of "
+              f"this run — any event appended since then is NOT in it. Check "
+              f"`git -C work diff -- {_rel(path)}` before you trust the log.",
+              file=sys.stderr)
+        fresh = item
+        pre_text = None
 
     disk = list(fresh.events)
     disk_sig = [_event_sig(e) for e in disk]
@@ -1011,12 +1026,15 @@ def write_item_file(item, derived, base_events=None, new_events=(),
     got = [_event_sig(e) for e in load_item(path).events]
     want = [_event_sig(e) for e in events]
     if got != want:
-        _atomic_write(path, pre_text)               # roll back to the pre-image
+        if pre_text is not None:
+            _atomic_write(path, pre_text)           # roll back to the pre-image
         raise ItemWriteError(
             f"{_rel(path)}: the file does not contain the event log this write "
-            f"intended (wanted {len(want)} events, read back {len(got)}). The "
-            f"PRE-IMAGE HAS BEEN RESTORED and nothing further will be written. "
-            f"wanted={want} got={got}")
+            f"intended (wanted {len(want)} events, read back {len(got)}). "
+            + ("The PRE-IMAGE HAS BEEN RESTORED and nothing further will be "
+               "written. " if pre_text is not None else
+               "There was no readable pre-image to restore. ")
+            + f"wanted={want} got={got}")
     return True
 
 

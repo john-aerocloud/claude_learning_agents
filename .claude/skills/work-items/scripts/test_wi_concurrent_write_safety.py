@@ -664,5 +664,38 @@ class TestEventLossIsDETECTABLE(StoreFixture):
                       "automatically (DEF-ROC-165)")
 
 
+class TestAnUnreadableFileIsHealedLOUDLY(StoreFixture):
+    """A cost of trusting the disk copy, paid for deliberately. Before the
+    re-read, `project` overwrote every file from its snapshot, which meant a
+    TRUNCATED or corrupted item file was silently HEALED. Now the disk is the
+    authority — so an unparseable file must not take the whole projection down
+    with it, and it must not pass in silence either: the snapshot is a valid
+    item, so we write it back and SAY that we replaced an unreadable file.
+    """
+
+    def test_a_truncated_file_is_restored_from_the_snapshot_and_reported(self):
+        self.write_item("DEF-X", "defect",
+                        [{"ts": "2026-08-01T00:00:00Z", "event": "reported",
+                          "agent": "orchestrator"}])
+        self.write_item("DEF-Y", "defect",
+                        [{"ts": "2026-08-01T00:00:00Z", "event": "reported",
+                          "agent": "orchestrator"},
+                         {"ts": "2026-08-01T01:00:00Z", "event": "triaged",
+                          "agent": "orchestrator"}])
+
+        def truncate():
+            with open(self.path_of("DEF-Y"), "w", encoding="utf-8") as f:
+                f.write("---\nid: DEF-Y\n")      # a torn write: no closing fence
+
+        _out, err = self.run_project(mid_run=truncate)
+
+        self.assertIn("DEF-Y", err)
+        self.assertRegex(err.lower(), r"unreadable|could not be parsed|corrupt")
+        # …and the item is a valid item again, with its log intact
+        ev = self.events_on_disk("DEF-Y")
+        self.assertEqual([e[1] for e in ev], ["reported", "triaged"])
+        self.assertEqual(wi.validate_items(self.graphs, self.project), [])
+
+
 if __name__ == "__main__":
     unittest.main()

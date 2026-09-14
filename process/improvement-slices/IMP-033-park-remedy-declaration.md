@@ -4,7 +4,8 @@
 **Owner:** work-item machinery (`.claude/skills/work-items/scripts/work-items.py`) — parent-repo lane
 **Targets:** gross lead time (the `external` / `blocked` constraint — 35.40% of ROC's GLT)
 **Registry row:** `EXP-ROC-004`
-**Status:** QUEUED — **NOT BUILT** as of 2026-08-28 (v157 retro). Established by
+**Prior finding (v157 retro, 2026-08-28) — kept as evidence, no longer the status
+line; v176 below supersedes it.** STILL NOT BUILT as of that date, established by
 measurement, not by memory: `park_remedy` appears in ZERO lines of
 `.claude/skills/work-items/scripts/work-items.py` and on ZERO items, four days
 after this slice was opened. `EXP-ROC-004`'s strike clock is STOPPED at 0/3

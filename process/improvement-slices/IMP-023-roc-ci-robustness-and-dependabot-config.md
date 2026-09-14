@@ -1,7 +1,5 @@
 # IMP-023 — ROC CI: emulator-readiness poll + Dependabot-CI config
 
-**Status:** QUEUED (re-decided v159 retro, ROC 2026-08-29) — real, ROC-owned, and partly overtaken: `loop-gate` check 16 now reads the deploy job's own conclusion and its `needs:` closure, which covers the 'green code reads red' half. The emulator-readiness poll is still unbuilt. Not scheduled this cycle.
-
 **Status:** DECLINED (v176 retro, ROC 2026-09-14) — ROC-owned and half overtaken: `loop-gate` check 16 reads the deploy job's own conclusion and its `needs:` closure, which covered the 'green code reads red' half, and `DEF-ROC-068` removed the standing false red that made every deploy run read `failure` for weeks. The emulator-readiness poll remains unbuilt but ROC's `deploying` failure rate is **0.0%**, so there is no CFR evidence to justify spending the constraint's budget on it. REVISIT TRIGGER: the next CI-caused red on unchanged code.
 
 **Opened:** 2026-07-24 (ROC v104 retro, incident-triggered by a red GitHub CI)

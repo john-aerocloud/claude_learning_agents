@@ -1,7 +1,5 @@
 # IMP-021 — impacted-tests understands the `@covers` prefix/label vocabulary natively
 
-**Status:** QUEUED (re-decided v159 retro, ROC 2026-08-29) — real and unbuilt. Kept because change-impact selection that cannot be trusted pushes testers toward full-suite runs, which is lead time. Not scheduled this cycle: it lost the comparison against production-correctness defects and the Overview use-case chain.
-
 **Status:** DECLINED (v176 retro, ROC 2026-09-14) — third consecutive retro to leave it QUEUED, so it gets a decision instead. Same constraint arithmetic as IMP-007/009 (tester 6.43% of GLT). REVISIT TRIGGER: tester share exceeds 20% of GLT, or change-impact selection is named as the cause of a missed regression.
 
 **Opened:** 2026-07-23 (ROC v103 retro)
@@ -46,7 +44,6 @@ run clean without per-project alias maintenance.
 Queued with product/process work (§32). Until it lands, projects keep the `@alias`
 workaround (ROC's is committed in `class-deps.mmd`).
 
-
 ## Measured evidence, 2026-08-29 (ROC, UC-ROC-112 build) — the failure mode is a FALSE CLEAN
 
 Found by an engineer who **ran the tool instead of trusting its own tags**, which is the
@@ -71,7 +68,6 @@ This is the third recorded instance of the family this slice exists to close, an
 also an instance of the wider `OI-ROC-014` shape: **a declared control with no reader** —
 here the declaration is readable but the reader's grammar is narrower than the
 declaration's, which is the same failure one layer in.
-
 
 ## Second measured instance, 2026-08-29 (UC-ROC-114) — a MISTYPED tag is indistinguishable from NO tag
 

@@ -14,6 +14,9 @@ a false negative that retires the hypothesis AND records an untrue reason. The
 clock restarts at the first retro after this ships. Found by `loop-gate` check
 19 (`retro-output-unbuilt`) on its first live run, which is why that check
 exists.
+**Status:** SCHEDULED (v176 retro, ROC 2026-09-14) — **the one slice this retro schedules rather than declines, and it is DELIBERATELY LEFT VISIBLE to the `retro-output-aging` gate until it is built.** It attacks `blocked`/`external`, the #2 gross-lead-time contributor (22.64%, median **21.0 d/item**, n=17), which is the SUBORDINATE move behind this cycle's constraint. `EXP-ROC-004` stays PAUSED on purpose: an unbuilt mechanism cannot be scored, and restarting its clock would earn strikes for not building rather than for not working.
+
+**NEW LIMB, from `DEF-ROC-068` this cycle — the park-remedy declaration is necessary but NOT sufficient.** That defect sat `blocked` for **18 days** as *"not ours to patch"* with a probe that correctly ran the REAL `npm audit` every cycle and correctly reported STILL BLOCKED every time. The park's PREMISE was false — `flowbite-react` was our own direct dependency all along — and no probe that re-observes the symptom can ever discover that. `IMP-033` as specced would have made it declare a remedy item; it would NOT have caught a false attribution. So the slice gains a second requirement: **a park must state the premise that makes it external, and that premise must itself be re-checkable** — for a dependency park, *who resolves this dependency*, which is one `npm ls` away and would have ended this park on day one.
 
 ## The finding, measured on the deployed host, not on item prose
 

@@ -1,7 +1,5 @@
 # IMP-029 — `ref:` is silently coerced to `int` when a short sha is all-digits
 
-**Status:** QUEUED (re-decided v159 retro, ROC 2026-08-29) — OagEventSource-origin; ROC reports, does not retire (§25a v143/v145). Still real: a silent int coercion on an all-digit short sha corrupts the one field `loop-gate`'s push/ancestry checks resolve against.
-
 **Status:** DECLINED (v176 retro, ROC 2026-09-14) — OagEventSource-origin; ROC reports, does not retire (§25a). Still real and it touches SHARED machinery ROC depends on (a silent int coercion on an all-digit short sha corrupts the one field `loop-gate`'s push/ancestry checks resolve against). NOT scheduled here for a reason this retro established: the ancestry check it protects is itself unsound — a ref that IS an ancestor of trunk can have been reverted, as `DEF-ROC-166` proves — so hardening the field before fixing the check would harden an input to a broken test. REVISIT TRIGGER: sequenced behind the establishment-gate fix (effect, not ancestry).
 
 **Opened:** 2026-08-01 (OAG retro v126). **Owner:** work-items machinery

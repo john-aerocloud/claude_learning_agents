@@ -1,7 +1,6 @@
 # IMP-010 — Coherence-family post-mortem: one root cause behind 10 of 16 defects
 
-**Status:** evaluation complete 2026-06-17 — recommendation: **adopt a forward
-design principle (EXP-047); do NOT refactor the delivered observatory now.**
+**Status:** CLOSED (v176 retro, ROC 2026-09-14) — its own recommendation was 'adopt a forward design principle; do NOT refactor the delivered observatory now', and that was taken. Its root cause — *the state of a work item right now is recorded in three independent stores* — was then removed STRUCTURALLY by the v82 event-sourced cutover: state is `fold(events)` over one per-item log and every queue/board/metric is a derived view, so the disagreement class it describes is unrepresentable. A completed evaluation whose finding has been designed out is done, not queued.
 **Owner:** orchestrator (post-mortem) / solution-architect + engineer (future application)
 **Trigger:** retro-effectiveness analysis (2026-06-17) flagged a 10/16 defect concentration.
 

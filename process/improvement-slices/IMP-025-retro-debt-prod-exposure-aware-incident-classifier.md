@@ -1,6 +1,6 @@
 # IMP-025 — retro-debt: prod-exposure-aware incident classifier
 
-**Status:** QUEUED (owned by the work-items machinery — a change to the `retro-debt` classifier + wi-tests)
+**Status:** CLOSED (v176 retro, ROC 2026-09-14) — ROC-origin, and its premise no longer holds for ROC: the owner ruled *dev IS release* (no prod), so classifying incidents by PROD EXPOSURE has no referent here and would grade every ROC incident identically. Closed rather than declined because the mechanism is not merely unscheduled, it is meaningless under the current ruling. REVISIT TRIGGER: ROC acquires a production environment, which would reopen this on its own terms.
 **Opened:** 2026-07-29 (ROC, v120 focused retro — promoted from the v119 open-items deferral on its SECOND occurrence)
 
 ## Problem (now TWICE-confirmed)

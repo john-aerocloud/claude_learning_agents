@@ -334,6 +334,20 @@ retro-debt:
 retro-mark:
 	$(WORKITEMS) retro-mark --project $(PROJECT)
 
+# HOW MUCH OF THE MEASURED WINDOW WAS THE LOOP ACTUALLY RUNNING? (v176)
+# Gross lead time is wall-clock and /loop-run is specified as continuous (§F9);
+# those are only consistent while the loop runs, and nothing recorded whether it
+# did. So the figure every retro names its constraint from was sensitive, in BOTH
+# directions, to an input nobody measured. Written down as a principle failure on
+# 2026-08-24 and left un-mechanised; ROC then ran at 10.0% uptime for 15.7 days.
+# Needs no new recording — the item event logs already carry every timestamp.
+# READ IT BEFORE QUOTING A CONSTRAINT MOVEMENT (§5b).
+# make loop-uptime PROJECT=ROC [SINCE=2026-08-29T21:26:39Z] [GAP_HOURS=12] [JSON=1]
+loop-uptime:
+	@node .claude/tools/loop-uptime.js --project $(PROJECT) \
+	  $(if $(SINCE),--since $(SINCE),) $(if $(GAP_HOURS),--gap-hours $(GAP_HOURS),) \
+	  $(if $(TOP),--top $(TOP),) $(if $(JSON),--json,)
+
 # The CHEAP per-close constraint read (v136, EXP-132). Drains INCIDENT retro debt
 # ONLY while the constraint is provably unchanged — the machinery decides, not the
 # orchestrator. Exit 2 = the constraint SHIFTED (or cannot be read, or routine debt
@@ -1318,7 +1332,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap sequencer-guard make-refs-tracked container-reap container-orphans stack-claim stack-release stack-status sso-login retro-debt retro-mark loop-gate test-wi wi-append wi-project wi-validate wi-migrate item-brief doc-lint process-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated commit-msg-file test-requirement-gate test-requirement-gate-baseline test-requirement-gate-clean board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery deploy-lane
+.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap sequencer-guard make-refs-tracked container-reap container-orphans stack-claim stack-release stack-status sso-login retro-debt retro-mark loop-gate loop-uptime test-wi wi-append wi-project wi-validate wi-migrate item-brief doc-lint process-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated commit-msg-file test-requirement-gate test-requirement-gate-baseline test-requirement-gate-clean board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery deploy-lane
 
 # --- Viggo-fix UC-W7: Country/Nationality ID remediation (T-SQL) --------------
 # Data-driven, self-building T-SQL remediation script set + its local stand-up

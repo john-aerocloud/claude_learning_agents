@@ -1,7 +1,6 @@
 # IMP-011 — Mechanical CORE-job done-gate (a wi-validate invariant)
 
-**Status:** QUEUED (2026-07-12, ROC retro — third recurrence of the
-core-slice-false-done class across OFS/OAG/ROC)
+**Status:** DECLINED (v176 retro, ROC 2026-09-14) — real, ROC-origin and unbuilt for 64 days; declined on budget, not merit, and the reason is recorded so it is not mistaken for a judgement that it is wrong. It targets CFR, which is steady at **9.1%** and is not the constraint; this cycle's whole change budget goes to the `reported`/`queue` constraint per §5b. Partially overtaken: `awaiting_observation` + the §17c.2 observation predicates + `loop-gate` check 5 already stop a capability reading `done` while unproven. REVISIT TRIGGER: the next CORE aggregate that reads `done` with its job undelivered — that instance re-opens this with fresh evidence.
 **Owner:** work-item machinery (`wi-validate`); product/flow-manager consume the
 signal at slice-close
 

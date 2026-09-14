@@ -82,6 +82,7 @@ Backlog, mislabelling active validation work.)
 |---|---|
 | `open` | Backlog |
 | `scheduled` | Ready |
+| `building` | In Progress |
 | `done` | Done |
 | `wontfix` | Cancelled |
 | `cancelled` | Cancelled |

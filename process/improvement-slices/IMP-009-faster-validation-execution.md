@@ -1,6 +1,6 @@
 # IMP-009 — Faster validation execution (attack the tester constraint)
 
-**Status:** queued (specced 2026-06-08, OI-45, human-directed "attack OI-45")
+**Status:** DECLINED (v176 retro, ROC 2026-09-14) — same constraint arithmetic as IMP-007: it attacks the tester, which is 6.43% of GLT. Opened 2026-06-08 against 'OI-45', a register entry that no longer exists. REVISIT TRIGGER: tester share exceeds 20% of GLT.
 **Owner:** tester (selection + regression-core) / cicd (parallel config + exemption timing) / engineer (impacted-driven runner if code needed)
 
 ## Job

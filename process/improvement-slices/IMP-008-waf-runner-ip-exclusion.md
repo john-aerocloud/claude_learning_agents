@@ -1,6 +1,6 @@
 # IMP-008 — WAF runner-IP exclusion at build time (self-cleaning)
 
-**Status:** queued (raised at s006 retro, 2026-06-07, human-directed)
+**Status:** DECLINED (v176 retro, ROC 2026-09-14) — AWS WAF mechanism; ROC has no WAF and no AWS edge (Azure-native by contract). AdixOut-origin and unpulled since 2026-06-07. ROC has no standing to build it and no way to score it. REVISIT TRIGGER: the owning project re-opens it under its own id.
 **Owner:** cicd (build/deploy) / engineer (CDK IP-set resource) / tester (consumer)
 **Raised by:** tester s006 UC6 validation — WAF 100 req/5min per-IP rate rule exhausted
 by the 50-test smoke suite from a single local/CI IP, causing cascading 429 failures

@@ -1,6 +1,6 @@
 # IMP-007 — Impacted-tests lookup from the change-impact model
 
-**Status:** BUILD-NOW (re-prioritised 2026-07-11 after 4× recurrence on OFS UC-A3/A4/A5/E3)
+**Status:** DECLINED (v176 retro, ROC 2026-09-14) — marked BUILD-NOW on 2026-07-11 and still unbuilt 65 days later, which is a status that was not true. Declined on the CONSTRAINT, not on merit: `tester` is **6.43%** of gross lead time (median 1,523s/item) against `orchestrator` **35.41%** and `queue` **23.34%**, so faster test selection optimises a non-constraint and ToC calls that waste. REVISIT TRIGGER: tester share exceeds 20% of GLT, or a full-suite run is named as the binding wait on a pulled item.
 **Owner:** cicd (owns the tool + make target + allowlist, §16.3); tester consumes
 
 ## BLOCKER addendum (2026-07-11) — nested-repo git-root resolution

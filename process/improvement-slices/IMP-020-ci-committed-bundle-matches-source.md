@@ -1,6 +1,6 @@
 # IMP-020 — CI guard: committed deploy bundles must match their source (bundle-freshness)
 
-**Status:** QUEUED (2026-07-23, AdixOut v102 retro — REQ-005 Chunk B close).
+**Status:** DECLINED (v176 retro, ROC 2026-09-14) — AdixOut-origin, and the mechanism does not apply to ROC's lane: ROC does not commit deploy bundles (the Function App and Web App are built in CI from the lockfile at the deployed sha, which `DEF-ROC-068`'s validation confirmed end to end). Nothing for ROC to guard. REVISIT TRIGGER: the owning project re-opens it.
 **Owner:** cicd (a project-level `build-and-test` CI capability + a `make` target).
 **Tracks:** the recurring OI-BUNDLE-DRIFT open-item.
 

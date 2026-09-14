@@ -1,6 +1,6 @@
 # IMP-024 — Generic offline non-text-contrast check (beat the enumerative pin)
 
-**Status:** QUEUED (owned by cicd / ui-designer + engineer to build; queue with UI product work)
+**Status:** DECLINED (v176 retro, ROC 2026-09-14) — no UI slice is in flight and none is queued; building a UI gate with no UI work to exercise it produces exactly the never-fired control this retro's headline is about. REVISIT TRIGGER: the next UI-bearing slice enters `ready` — this is a genuine precondition on the slice itself, not a deferral of convenience.
 **Opened:** 2026-07-28 (ROC, SLC-ROC-018 retro, process v116)
 **Founding evidence:** principle-failure `2026-07-28-house-component-variant-contrast-recurring.md`
 — THREE live painted-pixel contrast rejects in the ROC config-authoring line, each a DIFFERENT

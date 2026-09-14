@@ -1,6 +1,6 @@
 # IMP-004 — Code↔policy synth scan
 
-**Status:** queued (specced at s005 retro, 2026-06-06)
+**Status:** DECLINED (v176 retro, ROC 2026-09-14) — AWS IAM/policy-synth shaped, opened 2026-06-06 and unpulled for 100 days. ROC is Azure-native by contract (Terraform, no IAM synth surface), so ROC cannot build or score it, and no other project has pulled it in three months. Declined rather than left QUEUED because an item no one can pull is not a queue, it is a filing cabinet. REVISIT TRIGGER: a project with an AWS policy surface adopts it and re-opens under its own id.
 **Owner:** engineer (build) / solution-architect (action-set source of truth)
 
 ## Job

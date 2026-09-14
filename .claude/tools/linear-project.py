@@ -743,6 +743,9 @@ STATE_STATUS = {
     "open-item": {
         "open": ["Backlog"],
         "scheduled": ["Ready", "Todo", "Backlog"],
+        # [v12] an open-item can now carry real engineering work. Unmapped, it
+        # rendered as unstarted Backlog while an engineer was building it.
+        "building": ["In Progress"],
         "done": ["Done"],
         "wontfix": _CANCELLED,
         "cancelled": _CANCELLED,

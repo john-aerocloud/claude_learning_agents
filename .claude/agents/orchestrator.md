@@ -24,25 +24,36 @@ write code. Your job is flow.
   needed you dispatch the responsible specialist and wait for their return.
 
 
-## Dispatch briefs: cite `make item-brief`, not the whole item file [v156]
+## `make item-brief` is a BACKLOG-TRIAGE table, not a dispatch brief [corrected v176]
 
-**First read in every dispatch brief is `make item-brief PROJECT=<p> ID=<id>`**, not
-`work/<p>/items/active/<id>.md`. Name the whole file only when the full event log is
-genuinely the subject of the dispatch (a premise audit, a rework whose spec is the
-rejection note).
+**Use it when you are deciding across MANY items** — the retro's aged-backlog sweep, a
+queue scan, sizing what to pull:
 
-Item prose here is large — a single `title:` runs to 1.5KB, and one orchestrator read of
-five item files cost **68.5KB in a single call**. `item-brief` supplies the same facts
-through a narrower read. It is a committed tool that was referenced by no agent and no
-command for its entire existence; that is the same failure shape as a gate that reads
-healthy while doing nothing.
+```
+make item-brief PROJECT=<p> QUEUE=intake          # a whole queue
+make item-brief PROJECT=<p> IDS="DEF-ROC-040 OI-ROC-002"
+```
 
-**Do NOT shorten the rest of the brief to save tokens.** Long briefs bought measurable
-quality: a tester screened a load-window green on SHAPE rather than blanket-discarding it,
-and another refused a false green and parked an item with a committed observation
-predicate. Per §26 a token increase that buys a DORA gain is accepted; a cut that costs
-one is rejected. Score `item-brief` adoption on tokens-per-dispatch with the
-`dev-validating` failure rate as the guard — if that rate rises, revert.
+It prints one line per item: `ID  STATE  VALUE  COST  DEFER  TITLE(truncated to 100 chars)`.
+That is exactly the right shape for choosing between items, and it replaces the hand-rolled
+`awk` over item files that used to cost 45KB for eight of them.
+
+**It is NOT the first read of a dispatch brief, and v156 was wrong to say it was.** A
+dispatch needs the item's PREMISE and its ACCEPTANCE; this target prints neither, and it
+cannot — there is no flag that makes it. For a dispatch, read
+`work/<p>/items/active/<id>.md`.
+
+**The flag is `IDS=`. `ID=` exits 2 with a usage error** — which is how v156's rule
+survived two full cycles and ~15 dispatches with *zero* uses: the prescribed command had
+never worked, and nobody ran it once to find out. That is the same shape as the gates this
+system keeps catching — a committed control that does nothing — arriving in an instruction
+rather than in code. **So: run a newly-prescribed command once, at the moment you prescribe
+it.** An unrun instruction is an unrun test.
+
+**Do NOT shorten a dispatch brief to save tokens.** Long briefs bought measurable quality:
+a tester screened a load-window green on SHAPE rather than blanket-discarding it, and
+another refused a false green and parked an item with a committed observation predicate.
+Per §26 a token increase that buys a DORA gain is accepted; a cut that costs one is rejected.
 
 ## What you read first
 `/process/process-current.md`, `/process/principles/`, the active project's

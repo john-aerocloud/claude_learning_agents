@@ -7356,8 +7356,180 @@ class TestChangeFailureRecordable(Base):
             self.assertNotIn(st, self._agent_worked_states("use-case"))
         # ... and `reported` is intake/triage: no change is in flight there.
         self.assertNotIn("reported", self._agent_worked_states("defect"))
-        # an open-item has no change-making state at all, so it needs no edge.
-        self.assertEqual(self._agent_worked_states("open-item"), [])
+        # [v12] An open-item now HAS one change-making state. Until v12 this
+        # asserted `== []` with the comment "an open-item has no change-making
+        # state at all" — true of the GRAPH and false of the WORK: OI-ROC-016 is
+        # a code fix to design-quality-gate.mjs, and `append EVENT=pulled` was
+        # refused on it. So the premise changed; the invariant did not. `building`
+        # must carry both failure edges like any other active-work state.
+        self.assertEqual(self._agent_worked_states("open-item"), ["building"])
+        edges = {(t["from"], t["event"]) for t in self.graphs.transitions("open-item")}
+        for ev in ("build_failed", "deploy_failed"):
+            self.assertIn(("building", ev), edges,
+                          f"open-item: '{ev}' cannot be recorded while work is live")
+            self.assertTrue(
+                self.graphs.is_annotation("open-item", "building", ev),
+                f"open-item: '{ev}' must be a SELF-EDGE — this type has no "
+                f"`reworking` state, and a non-annotation exit would pad the "
+                f"`building` denominator so recording bad news improves the "
+                f"engineer's failure rate (DEF-ROC-120)")
+
+
+class TestEveryNonTerminalStateCanBeCancelled(Base):
+    """v176 — WORK THAT LOSES ITS SUBJECT MUST BE RECORDABLE AS SUCH, FROM ANYWHERE.
+
+    FOUNDING CASE: `DEF-ROC-166` was trapped in `validating`. Its subject no longer
+    existed — `UC-ROC-117` deleted the `closed` publish-capability state outright and
+    that deletion was deployed — so `validated` would have been false and `rejected`
+    would have sent it back to `fixing` to repair a state with no referent. The defect
+    graph gave `validating` exactly three exits and none of them was true. Both the
+    tester and the flow-manager independently named it and both correctly refused to
+    fire a false event, which is the system working; the item then held a `wip` slot
+    against a cap already breached at 16/8, which is the system paying for the hole.
+
+    THE INVARIANT IS A SWEEP, NOT A SPOT-CHECK, and that is the point: the hole was
+    reported only against `defect.validating`, and asserting just that pair would have
+    left the SECOND one standing. Sweeping all six graphs found `use-case.deploying`
+    had the identical gap, unreported and unnoticed. An asymmetry this specific is
+    rarely unique, so the test asks the general question.
+    """
+
+    def test_every_non_terminal_state_has_an_exit_to_cancelled(self):
+        holes = []
+        for itype in self.graphs.types:
+            trs = self.graphs.transitions(itype)
+            if not trs:
+                continue                      # aggregate types bubble, they do not walk
+            terminal = self.graphs.terminals(itype)
+            outs = collections.defaultdict(set)
+            states = set()
+            for t in trs:
+                outs[t["from"]].add(t["to"])
+                states.add(t["from"])
+                states.add(t["to"])
+            for st in sorted(states):
+                if st in terminal:
+                    continue
+                if "cancelled" not in outs.get(st, set()):
+                    holes.append(f"{itype}.{st}")
+        self.assertEqual(
+            holes, [],
+            "these non-terminal states cannot record that their subject went away, "
+            f"so an item reaching one can only be closed by a FALSE event: {holes}")
+
+    def test_NON_VACUITY_the_two_edges_v176_added_are_the_ones_that_were_missing(self):
+        """Pins the founding cases specifically, so a future refactor that drops
+        either edge fails with the reason attached rather than as a sweep count."""
+        defect = {(t["from"], t["event"]) for t in self.graphs.transitions("defect")}
+        self.assertIn(("validating", "cancelled"), defect,
+                      "DEF-ROC-166's exact trap: a defect whose subject was deleted "
+                      "cannot leave `validating` without asserting something false")
+        uc = {(t["from"], t["event"]) for t in self.graphs.transitions("use-case")}
+        self.assertIn(("deploying", "cancelled"), uc,
+                      "found by the sweep, never reported: a use-case cancelled "
+                      "mid-deploy had no legal exit either")
+
+    def test_the_real_writer_accepts_cancelling_a_defect_in_validating(self):
+        """End to end through `append` — a graph edge nothing can fire is not a fix."""
+        self.write_item("active", "DEF-CANCEL", "defect", [
+            {"ts": "2026-06-10T00:00:00Z", "event": "reported", "agent": "orchestrator"},
+            {"ts": "2026-06-10T01:00:00Z", "event": "triaged", "agent": "orchestrator"},
+            {"ts": "2026-06-10T02:00:00Z", "event": "confirmed", "agent": "engineer"},
+            {"ts": "2026-06-10T03:00:00Z", "event": "fixed", "agent": "engineer"},
+        ])
+        ns = argparse.Namespace(
+            project=self.project, id="DEF-CANCEL", event="cancelled",
+            agent="orchestrator", ref=None,
+            note="subject deleted by a later use-case",
+            ts="2026-06-10T04:00:00Z")
+        # cmd_append signals success by returning None and raising on refusal.
+        self.assertIn(wi.cmd_append(ns), (0, None),
+                      "the sole writer refused a legal v176 transition")
+        # ...and the item must actually LEAVE the wip queue, which is the whole
+        # point: DEF-ROC-166 was holding a slot against a breached cap.
+        self.assertTrue(
+            os.path.exists(os.path.join(self._items("done"), "DEF-CANCEL.md")),
+            "a cancelled defect must relocate to items/done/, freeing its slot")
+        self.assertEqual(
+            wi.fold_state(self.graphs, "defect", [
+                {"ts": "1", "event": "reported", "agent": "orchestrator"},
+                {"ts": "2", "event": "triaged", "agent": "orchestrator"},
+                {"ts": "3", "event": "confirmed", "agent": "engineer"},
+                {"ts": "4", "event": "fixed", "agent": "engineer"},
+                {"ts": "5", "event": "cancelled", "agent": "orchestrator"},
+            ]), "cancelled", "the fold must land the item in a terminal state")
+
+class TestEveryFlowTypeCanSaySomeoneIsWorkingOnIt(Base):
+    """v12/v176 — CAN AN ITEM OF THIS TYPE BE IN A STATE THAT MEANS 'IN PROGRESS'?
+
+    The `open-item` graph answered NO. It had exactly one progress edge
+    (`open --scheduled--> scheduled`) and then went straight to `done`, so an
+    open-item carrying real engineering work contributed NOTHING to
+    `time_in_state`, NOTHING to `by_owner` and NOTHING to any stage metric — the
+    work teleported from `scheduled` to `done`.
+
+    WHY IT SURVIVED SO LONG, which is the reusable part: the metric it silently
+    zeroed is one nobody expected to be non-zero, so the zero read as a fact about
+    the world rather than as a number that COULD NOT come back non-zero. Same shape
+    as §E's plumbing cost reading 0.0% for three retros running. It was found twice
+    in one day — once as a claim in `OI-ROC-013`'s prose, once by `append
+    EVENT=pulled` being REFUSED on `OI-ROC-016` while an engineer was building it.
+
+    So the test asks the GENERAL question of every flow type rather than pinning
+    the one instance: a type whose items can be worked must have somewhere to say so.
+    """
+
+    def test_every_flow_type_has_a_wip_state(self):
+        missing = []
+        for itype in self.graphs.types:
+            if self.graphs.kind(itype) != "flow":
+                continue                      # aggregates bubble from children
+            states = set()
+            for t in self.graphs.transitions(itype):
+                states.add(t["from"])
+                states.add(t["to"])
+            if not any(self.graphs.queue_for(s) == "wip" for s in states):
+                missing.append(itype)
+        self.assertEqual(
+            missing, [],
+            "these flow types cannot express that work is in progress, so work on "
+            f"them is invisible to every stage and owner metric: {missing}")
+
+    def test_NON_VACUITY_open_item_reaches_building_and_it_lands_in_wip(self):
+        """RED before v12: `scheduled --pulled--> building` did not exist."""
+        edges = {(t["from"], t["event"]): t["to"]
+                 for t in self.graphs.transitions("open-item")}
+        self.assertEqual(edges.get(("scheduled", "pulled")), "building",
+                         "OI-ROC-016's exact refusal: an open-item cannot be pulled")
+        self.assertEqual(self.graphs.queue_for("building"), "wip")
+        self.assertEqual(edges.get(("building", "closed")), "done",
+                         "an open-item that WAS built must still be closable")
+
+    def test_the_decision_only_route_is_KEPT_not_replaced(self):
+        """The common open-item is decision debt closed by a decision, not a build.
+        v12 adds a second route; it must not have removed the first."""
+        edges = {(t["from"], t["event"]): t["to"]
+                 for t in self.graphs.transitions("open-item")}
+        self.assertEqual(edges.get(("scheduled", "closed")), "done")
+        self.assertEqual(edges.get(("open", "closed")), "done")
+
+    def test_the_real_writer_walks_an_open_item_through_building(self):
+        self.write_item("active", "OI-BUILD", "open-item", [
+            {"ts": "2026-06-10T00:00:00Z", "event": "open", "agent": "orchestrator"},
+            {"ts": "2026-06-10T01:00:00Z", "event": "scheduled", "agent": "flow-manager"},
+        ])
+        for ev, agent in (("pulled", "orchestrator"), ("closed", "engineer")):
+            ns = argparse.Namespace(
+                project=self.project, id="OI-BUILD", event=ev, agent=agent,
+                ref=None, note=None, ts="2026-06-10T0%d:00:00Z" % (2 if ev == "pulled" else 3))
+            self.assertIn(wi.cmd_append(ns), (0, None),
+                          f"the sole writer refused a legal v12 transition: {ev}")
+        # and the engineer's time in `building` is now VISIBLE, which is the point
+        evs = [{"ts": "1", "event": "open", "agent": "orchestrator"},
+               {"ts": "2", "event": "scheduled", "agent": "flow-manager"},
+               {"ts": "3", "event": "pulled", "agent": "orchestrator"}]
+        self.assertEqual(wi.fold_state(self.graphs, "open-item", evs), "building")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

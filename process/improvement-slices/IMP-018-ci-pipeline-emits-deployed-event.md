@@ -1,6 +1,6 @@
 # IMP-018 — CI pipeline emits the `deployed` wi-event itself
 
-**Status:** QUEUED (2026-07-22, AdixOut v94 retro — UC-ADIX-015 stall)
+**Status:** DECLINED (v176 retro, ROC 2026-09-14) — AdixOut-origin. ROC's `deploying` stage failure rate is **0.0%** (0/121) and `deploying` is **0.99%** of GLT, so ROC has no evidence for or against it and must not score it (§25a). REVISIT TRIGGER: the owning project re-opens it, or ROC's deploy stage starts failing.
 **Owner:** cicd (pipeline assets) + work-item machinery (a CI-callable append entry point)
 
 ## Job

@@ -1,6 +1,6 @@
 # IMP-028 — The real-data conformance census: every emittable type and every sequence branch exemplified from REAL data
 
-**Status:** QUEUED (2026-07-31, OagEventSource v125 retro — human-requested retro on the TEST PROCESS).
+**Status:** DECLINED (v176 retro, ROC 2026-09-14) — OagEventSource-origin and genuinely valuable, but it is a census of OAG's emittable types; ROC's equivalent question is the PPSM device-data contract, which is tracked on ROC's own items. ROC reports rather than retires (§25a) and has no standing to schedule another project's slice. REVISIT TRIGGER: the owning project schedules it.
 **Owners:** engineer (builds the census + harvester), cicd (wires the lane + the refresh cadence),
 tester (consumes it as the validation oracle), solution-architect (routing-key completeness).
 **Founding evidence:** five capabilities read `done`/`validated` while never once working on real

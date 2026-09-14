@@ -2,6 +2,8 @@
 
 **Status:** QUEUED (re-decided v159 retro, ROC 2026-08-29) — real and unbuilt. Kept because change-impact selection that cannot be trusted pushes testers toward full-suite runs, which is lead time. Not scheduled this cycle: it lost the comparison against production-correctness defects and the Overview use-case chain.
 
+**Status:** DECLINED (v176 retro, ROC 2026-09-14) — third consecutive retro to leave it QUEUED, so it gets a decision instead. Same constraint arithmetic as IMP-007/009 (tester 6.43% of GLT). REVISIT TRIGGER: tester share exceeds 20% of GLT, or change-impact selection is named as the cause of a missed regression.
+
 **Opened:** 2026-07-23 (ROC v103 retro)
 **Owner:** cicd (tooling — `.claude/tools/impacted-tests.js`)
 **Target metric:** tester lead time + CFR (change-impact selection is trustworthy without a

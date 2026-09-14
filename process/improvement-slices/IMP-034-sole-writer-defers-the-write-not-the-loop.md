@@ -1,6 +1,6 @@
 # IMP-034 — the sole writer must defer the WRITE, not the LOOP
 
-**Status:** QUEUED
+**Status:** DECLINED (v176 retro, ROC 2026-09-14) — and this retro is live corroborating evidence FOR the finding while declining to build it. Its hazard is real and was honoured today: two agents were live in this tree, so this retro deliberately did NOT edit `work-items.py` (the sole writer) and routed two machinery findings to the loop instead. But its framing is an ELEVATE move on v159's constraint, and the constraint has not moved — it is `reported`/`queue` at **58.75%**, whose mechanism this retro established is loop DOWNTIME (10.0% uptime), not writer contention. Exploit is nowhere near exhausted, so elevating is out of order (§5b). REVISIT TRIGGER: loop uptime rises above ~60% and writer contention then appears in the wait breakdown.
 **Opened:** v159 retro, ROC, 2026-08-29
 **Scores:** the ELEVATE limb of v159's constraint (`wip` occupancy 1 → 2.2 of 8)
 **Owner:** cicd + orchestrator

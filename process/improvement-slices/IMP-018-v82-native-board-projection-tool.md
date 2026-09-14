@@ -1,6 +1,6 @@
 # IMP-018 — v82-native board-projection tool (Linear first, Jira fast-follow)
 
-**Status:** in progress (opened OAG session 2026-07-23). Owner: engineer, driven by orchestrator.
+**Status:** DELIVERED (v176 retro, ROC 2026-09-14) — verified in the tree, not assumed: `make board-project` / `board-sweep` / `test-board-project` exist in the Makefile, and `.claude/agents/linear.md` shells out to `make board-project` rather than hand-composing a description, which was the defect this slice existed to fix. It has been done since roughly 2026-07-23 and nobody stamped it — the same 'delivered but still reads QUEUED' bookkeeping gap `IMP-027` had.
 
 ## Problem (evidenced)
 The `linear`/`jira` projection agents depend on a per-project `sync-linear.py` that was

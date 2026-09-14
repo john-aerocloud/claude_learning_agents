@@ -1,6 +1,6 @@
 # IMP-026 — fresh-account first-deploy bootstrap-parity preflight
 
-**Status:** QUEUED (owned by cicd — a committed executable preflight + its self-tests)
+**Status:** DECLINED (v176 retro, ROC 2026-09-14) — AdixOut-origin, AWS bootstrap-parity shaped; ROC deploys to one long-lived Azure subscription via the pipeline and has no fresh-account first-deploy path. No ROC evidence either way. REVISIT TRIGGER: the owning project re-opens it.
 **Opened:** 2026-07-30 (AdixOut v121 retro — founding EXP-119)
 
 ## Problem

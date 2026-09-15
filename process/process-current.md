@@ -1,7 +1,7 @@
 ---
-process_version: 179
+process_version: 180
 effective_from: 2026-09-15
-supersedes: v178, v177, v176, v175, v174, v173, v172, v171, v170, v169, v168, v167, v166, v165, v164, v163, v162, v161, v160, v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
+supersedes: v179, v178, v177, v176, v175, v174, v173, v172, v171, v170, v169, v168, v167, v166, v165, v164, v163, v162, v161, v160, v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
 status: active
 ---
 
@@ -4391,6 +4391,70 @@ allowlist refusing a production namespace may well be RIGHT — publishing simul
 the live MSP pipeline would raise real alerts and real Jira tickets. An expired precondition means
 the assumption must be RE-DECIDED, by whoever owns it. Sometimes the answer is that the shortcut was
 correct all along and only its *reporting* was wrong.
+
+## F11.8. DONE IS DEPLOYED TO PRODUCTION AND WORKING — and holding a push is not caution [v180, ROC — owner ruling]
+
+**Owner, 2026-09-15, verbatim:**
+
+> *"if you havent pushed to production it hasent been through CICD which means you also do not know
+> it works — done is deployed to production and is working as expected. We need to update for this
+> because we spent a long time without a production environment."*
+
+### The ruling
+
+**An item is DONE when it is deployed to production and observed working as expected.** Not when the
+local gate is green. Not when it is committed. Not when it is merged.
+
+### The error this corrects, which was mine on the day it was written
+
+Three agents finished, every local gate green, and the orchestrator **held the push** — reasoning
+that ~20 unpushed commits deploying at once was the risky act and waiting was the careful one.
+
+**That reasoning is backwards, and the owner's sentence says why in one line: an unpushed commit has
+not been through CI/CD, so nobody knows whether it works.** Holding does not preserve a safe state.
+It converts finished work into **unverified work that looks safe** — the most expensive kind,
+because it accrues more work on top of an unproven base while reporting progress.
+
+Local green is not evidence about production. It is evidence about one machine, on one instrument
+(§F11 already records that the same commit reads different coverage on darwin and on the Linux
+runner). **The only instrument that answers "does it work" is the one that runs it in production.**
+
+### Why the old definition existed, and why it is the §F11.7 class again
+
+ROC had **no production environment for most of its life** — `REQ-ROC-007` put the production queue
+permanently out of scope, and `prod-msp` did not exist until PR #30 on **2026-09-09**. With nowhere
+to deploy, "green locally" was the only available proxy for done, and it was the *correct* proxy.
+
+**PR #30 made it wrong and nothing re-decided it.** The definition stayed, unexamined, in the habits
+of every agent — which makes this the **fifth instance of the expiring-assumption class in a single
+day** (§F11.7: a site literal, a documented deploy guarantee, a publish allowlist, an off-by-default
+flag, and now the definition of done itself) and by far the most consequential, because the other
+four changed one behaviour each while this one shaped **when every agent decided to stop**.
+
+Evidence for `EXP-ROC-022`, and a hard test of it: an expiring-assumption register that only watches
+code and docs would never have caught this one. The assumption lived in nobody's file.
+
+### What this obliges
+
+1. **Push on green. Do not hold a green tree** to batch, to tidy, or to wait for a quieter moment.
+   Reconcile continuously — the same argument §0a Rule 4 already makes for process fold-back.
+2. **An item may not be recorded `done`/`resolved` on a local verdict.** It needs the deploy and an
+   observation. Where the operator surface cannot be observed (an auth wall, an absent session),
+   that is `awaiting_observation` with a **predicate**, never `done` — §F9f, and see `DEF-ROC-199`
+   for how a predicate that cannot return positive parks work for ever.
+3. **Report honestly at the boundary.** "Built and green locally, not deployed, not verified" is a
+   complete and acceptable status. "Done" for the same state is a false claim.
+
+### The tension this creates, stated rather than buried
+
+On this repository **a push to `main` IS the production apply**, at the pushed sha, with **no
+`needs:` on the test lane** (`DEF-ROC-194`, confirmed 2026-09-15). Combine that with "push to find
+out whether it works" and the honest reading is: **you find out by breaking production.**
+
+So this rule makes `DEF-ROC-194` more urgent, not less. **The prod deploy must be gated on the test
+lane.** The correct end state is: push immediately, CI validates, production follows automatically
+from a green run. Until that gate exists, pushing on green is still right — the alternative is not
+knowing at all — but the risk belongs on `DEF-ROC-194`, not on the pusher's judgement.
 
 ## F12. In a shared tree, a cleanliness check is a SAMPLE, not evidence [v162, ROC]
 

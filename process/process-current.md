@@ -1,11 +1,19 @@
 ---
 process_version: 176
 effective_from: 2026-09-14
-supersedes: v175, v174, v173, v172, v171, v170, v169, v168, v167, v166, v165, v164, v163, v162, v161, v160, v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
+supersedes: v177, v176, v175, v174, v173, v172, v171, v170, v169, v168, v167, v166, v165, v164, v163, v162, v161, v160, v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
 status: active
 ---
 
 <!-- NOTE ON THE NUMBER: authored as v170 and renumbered to v171 at merge time. OagEventSource published its own v170 concurrently and reached `main` first, so both sections are real and neither is a duplicate of the other. This is the v141/v144/v151 renumbering trap, and it is recorded rather than silently fixed because the fold-forward at the start of this cycle reported `already up to date` and WAS correct at that moment — the window is exactly the time between that check and the fold-back. Nothing was dropped: ROC's v171 sits above OAG's v170, newest-first. -->
+
+<!-- v177 (ROC, owner ruling 2026-09-15, mid-cycle — NOT a retro output). "It is important to
+distinguish between tests that validate the orchestration and processes by which we work vs the
+tests that are really about the product. The PRODUCT tests are what are required in cicd — the
+rest only need to run locally." Recorded as §F11.6. The evidence is the same day's measurement:
+the deploy lane was shut for most of a working day by three separate blockers, none of them a
+product defect, with 2688 of 2689 cases passing — and the first of them asserted a mechanism
+that cannot occur on the Linux runner it was gating. -->
 
 <!-- v176 (ROC retro 2026-09-14, incident-triggered: DEF-ROC-068, DEF-ROC-153, DEF-ROC-164, SLC-ROC-036. Focus question: *"what was the largest contributor to gross lead time, and what strategies can reduce it while protecting DORA?"*
 
@@ -4157,6 +4165,69 @@ sweep found three worse ones beside it, and **the reported defect was the least 
 four** — a host-dependent check at least fails somewhere. So when you fix an instance of a
 shape, **sweep for the shape**; and when you find a guard with a conditional around its
 assertion, ask what happens when the condition is always false.
+
+## F11.6. PRODUCT tests gate delivery; PROCESS tests do not [v177, ROC — owner ruling]
+
+**Two kinds of test live in this repository and they have been treated as one.**
+
+- A **PRODUCT test** asserts something about the thing we ship — a rule evaluates, a route answers,
+  a ticket is raised, a screen renders. Its failure means a user is affected.
+- A **PROCESS test** asserts something about *how we work* — that the deploy lane watches the trees
+  its specs read, that the pre-push gate holds the stack lock around the tier, that the worker
+  budget divides, that a coverage directory is per-run. Its failure means **an agent is affected**.
+
+**The ruling: only PRODUCT tests are required in CI/CD. Process tests run locally.**
+
+### Why, and the evidence is one day's measurement
+
+On 2026-09-15 the deploy lane was shut for most of a working day, and **not one of the causes was
+a product defect**:
+
+| blocker | what it asserts | product? |
+|---|---|---|
+| `AC-161.7` (DEF-ROC-186) | that a foreign process can steal a wildcard-bound port | **no** — a fact about the test tier |
+| `testWorkerBudget.test.mjs` | that a worker budget divides by concurrent runs | **no** — agent tooling |
+| `def158ConcurrentGateStack` (DEF-ROC-187) | that `pre-push-gate.sh` acquires the stack lock | **no** — the gate itself |
+
+2688 of 2689 cases passed. **One process case held the product back.** And the first of those was
+macOS-only — a mechanism that *cannot occur on the Linux runner it was gating*, so CI was
+enforcing, on the product's delivery path, a property irrelevant to the machine CI runs on.
+
+That is the shape: **process tests fail for reasons that have nothing to do with the change being
+shipped, and they fail most under exactly the conditions the loop creates for itself** — many agents,
+one tree, contended machine. Gating delivery on them couples the product's lead time to the
+orchestration's flakiness, and this project has now paid that cost repeatedly (DEF-ROC-161's 35x
+spread, 36s quiet against 1270s contended, on one unchanged spec).
+
+### What this does NOT mean
+
+- **Process tests are not optional and not second-class.** They caught every substrate defect this
+  project has found. `make exit-gate` and `pre-push-gate.sh` still run them, still red on them, and
+  an engineer still may not hand work to a tester over a red one.
+- **It is not a licence to move a failing test out of CI.** Reclassifying a test to unblock a push
+  is the DEF-ROC-184 move — making the gate agree with you rather than with the tree. The class is a
+  property of **what the test asserts**, decided when it is written, not when it is inconvenient.
+- **Coverage ratchets still count both.** A process test is real evidence about real code.
+
+### The mechanical rule
+
+1. A test's class is **declared, not inferred** — an inferred class is a guess that drifts.
+2. **CI's product lane runs product tests only.** A process test may not appear in the job that
+   `deploy-test` needs.
+3. **Local and the exit gate run everything.** `pre-push-gate.sh` is where a process regression is
+   caught, and it is run before the push, by the agent that caused it.
+4. **An undeclared test fails CLOSED as a product test.** Declaring is cheap; a silent
+   misclassification that lets a product regression skip the product lane is not.
+5. **The split is itself asserted** — something must red if a process test reaches the product lane,
+   or the separation decays the first time somebody adds a file.
+
+### The deeper principle
+
+**A gate should fail for reasons the person reading it can act on.** An engineer shipping a rule
+change cannot act on a worker-budget assertion that only reddens on a 2-core runner, and asking them
+to teaches the reflex this project keeps writing down — that a red means run it again. Keep the
+process tests, keep them strict, and stop putting them between a finished product change and its
+environment.
 
 ## F12. In a shared tree, a cleanliness check is a SAMPLE, not evidence [v162, ROC]
 

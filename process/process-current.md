@@ -1,7 +1,7 @@
 ---
-process_version: 180
+process_version: 181
 effective_from: 2026-09-15
-supersedes: v179, v178, v177, v176, v175, v174, v173, v172, v171, v170, v169, v168, v167, v166, v165, v164, v163, v162, v161, v160, v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
+supersedes: v180, v179, v178, v177, v176, v175, v174, v173, v172, v171, v170, v169, v168, v167, v166, v165, v164, v163, v162, v161, v160, v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
 status: active
 ---
 
@@ -4455,6 +4455,54 @@ So this rule makes `DEF-ROC-194` more urgent, not less. **The prod deploy must b
 lane.** The correct end state is: push immediately, CI validates, production follows automatically
 from a green run. Until that gate exists, pushing on green is still right — the alternative is not
 knowing at all — but the risk belongs on `DEF-ROC-194`, not on the pusher's judgement.
+
+## F13a. AN ITEM IS CREATED BY `make wi-mint` — never by writing the file [v181, ROC — DEF-ROC-203]
+
+**The documented registration procedure could not work, and had not been working.** It said: create
+`work/<project>/items/active/<ID>.md`, then `make wi-append EVENT=registered`. But the **genesis
+event names the type's INITIAL STATE, so it is not a transition** — there is no edge for `wi-append`
+to check and it is refused. Every agent therefore hand-wrote the file, including the orchestrator,
+every time, all of 2026-09-15.
+
+That is why two agents minted `DEF-ROC-201` seventeen minutes apart and one file overwrote the
+other: **both read the highest id and wrote max+1, a read-modify-write with a stale read**, and the
+sanctioned path that might have serialised them did not exist.
+
+### The rule
+
+**`make wi-mint PROJECT=<p> TYPE=<t> TITLE_FILE=<f> JOB=<j> VALUE=<v> COST=<c> LANE=<l> AGENT=<a>`
+allocates the id and writes the file in ONE act.** It prints the id as its last line, so a caller
+captures it with `ID=$(make wi-mint … | tail -1)`.
+
+Never hand-write an item file. Never compute `max+1` yourself.
+
+### Why it is safe, and the part worth copying elsewhere
+
+**The allocation IS the create.** There is no counter and no allocation registry, so there is
+nothing that can drift from the store (the EXP-047 shape): the set of item *files* is the set of
+allocated ids, and an id is claimed with `O_CREAT|O_EXCL` — create-or-fail, decided by the kernel.
+Two actors computing the same candidate cannot both succeed; the loser takes the next number. Same
+discipline as `isolated-commit.js`'s ref CAS.
+
+**The store lock is NOT what makes it safe**, and that distinction is the transferable lesson. A
+lock already existed and would have "fixed" this — but a lock is a *cooperating convention*: its own
+code warns it degrades where neither `fcntl` nor `msvcrt` exists, and a future caller can forget to
+take it. `wi-mint` takes the lock only to keep the sequence **dense**; the safety property survives
+the lock being removed, and a test proves exactly that by disabling it.
+
+**Proof, both arms** (`test_wi_id_allocation.py`): 23 of 25 cases fail against the old behaviour —
+four real parallel processes yield ONE id and THREE items silently lost — and 25/25 pass after, with
+eight OS processes released by a barrier producing eight distinct dense ids. Mutation-checked: drop
+`O_EXCL` and the lock-disabled test fails; drop the duplicate-id refusal and it stops raising.
+**And note which test has the power:** the LOCKED concurrency test still passes against the
+`O_EXCL`-less mutant, because the lock hides the defect. A test that only exercises the protected
+path cannot see the protection fail.
+
+### What this does NOT close
+
+Nothing prevents an agent writing an item file by hand — no Python can, since the store is a
+directory in a git repo. This is **adoption, not enforcement**, and the gap is tracked as
+`DEF-ROC-205`, whose answer is a **detector in `wi-validate`**, not a guard.
 
 ## F12. In a shared tree, a cleanliness check is a SAMPLE, not evidence [v162, ROC]
 

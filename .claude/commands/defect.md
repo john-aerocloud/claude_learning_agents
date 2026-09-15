@@ -33,11 +33,15 @@ membership is DERIVED — no manual enqueue, no ledger row.
    model growing) showed delivery already working and the report stale. assert-real-state
    (EXP-115) applies to the DIAGNOSIS, before the fix — not only to post-fix validation.
    → **HUMAN GATE: the human accepts the framed defect + its importance.** Log to
-   `decision-log.md`. Then dispatch `flow-manager` to register: create
-   `work/<project>/items/active/<ID>.md` (frontmatter: `id`, `type: defect`, `title`,
-   `job`, `value`, `cost`, `parents`, `deps`), append the birth event
-   `make wi-append PROJECT=<p> ID=<ID> EVENT=reported AGENT=flow-manager`, run
-   `make wi-project PROJECT=<p>`, and mirror with the `linear`/`jira` agent. Queue
+   `decision-log.md`. Then dispatch `flow-manager` to register with
+   **`make wi-mint PROJECT=<p> TYPE=defect TITLE="…" JOB=<J> VALUE=<v> COST=<c>
+   LANE=<lane> AGENT=flow-manager PARENTS=<REQ-…> BODY_FILE=<report.md>`** — NEVER by
+   hand-writing `items/active/<ID>.md`, and never by reading the highest id and adding
+   one: that is the read-modify-write that made two agents mint the same `DEF-ROC-201`
+   seventeen minutes apart and silently overwrite one of them (DEF-ROC-203). Mint
+   allocates the id atomically, writes the `reported` genesis event and prints the id as
+   its last line. Then run `make wi-project PROJECT=<p>` and mirror with the
+   `linear`/`jira` agent. Queue
    membership is DERIVED: a defect folds to the head of Ready and **pre-empts** (a defect
    on delivered value is a failure in something of higher value than anything merely
    queued, §F5); the displacement is logged as a time thief. The fix then flows through

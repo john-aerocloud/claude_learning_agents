@@ -205,10 +205,13 @@ JTBD-framed and costed, and pre-empt (§F5).
 
 **Registering produced work (v82):** decomposed work must never be invisible, and
 it is made visible by CREATING THE ITEM, not by staging a row. For every item you
-produce, write its item file `work/<project>/items/active/<ID>.md` (frontmatter:
-`id`, `type`, `title`, `job`, `personas`, your provisional `value`/`cost`, `parents`, `deps`;
-definition body) and append its first event with `make wi-append PROJECT=<p>
-ID=<ID> AGENT=product EVENT=registered`. **State lives ONLY in the item; there is no
+produce, run **`make wi-mint PROJECT=<p> TYPE=<type> TITLE="…" JOB=<J> VALUE=<v>
+COST=<c> LANE=<lane> AGENT=product PARENTS=<id> BODY_FILE=<definition.md>`** — the id is
+allocated atomically and the genesis event is written for you, so two agents registering
+at the same moment cannot mint the same id and silently overwrite each other
+(DEF-ROC-203). **Never hand-write `items/active/<ID>.md`**, and never mint by reading the
+highest id and adding one. Add `personas` to the minted frontmatter if the type carries
+them. **State lives ONLY in the item; there is no
 staging file and no hand-editing of any queue or registry** — the "awaiting triage"
 buffer, the queues, the board and the tree are all DERIVED by `make wi-project` from the
 registered items (hand-editing a derived view is WRONG under v82; `make wi-validate`

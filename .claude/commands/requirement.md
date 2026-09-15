@@ -33,11 +33,13 @@ gap-closing retro).
 2. **Frame the job + value & cost (product).** Dispatch `product`: express the
    requirement as jobs — reusing the signed-off JTBD map — confirm the core/secondary
    classification, and estimate `value` and `cost` (time) for the item.
-3. **Register (event-sourced write path).** Dispatch `flow-manager`: create the item
-   file `work/<project>/items/active/<ID>.md` (frontmatter: `id`, `type: requirement`,
-   `title`, `job`, `value`, `cost`, `parents`, `deps`; body carries the JTBD/acceptance
-   definition AND a link to the dossier + personas/jobs it covers), then append the birth
-   event — `make wi-append PROJECT=<p> ID=<ID> EVENT=registered AGENT=flow-manager`. That
+3. **Register (event-sourced write path).** Dispatch `flow-manager`: create the item with
+   **`make wi-mint PROJECT=<p> TYPE=requirement TITLE="…" JOB=<J> VALUE=<v> COST=<c>
+   LANE=<lane> AGENT=flow-manager BODY_FILE=<definition.md>`** — NEVER by hand-writing
+   `items/active/<ID>.md`. Mint allocates the id atomically and writes the genesis event,
+   so two agents registering at once cannot collide (DEF-ROC-203); the id is the last line
+   of stdout. The body carries the JTBD/acceptance definition AND a link to the dossier +
+   personas/jobs it covers. That
    is the whole registration: **queue membership is DERIVED** (`queue_map[state]`,
    rendered by `make wi-project`) — do NOT hand-enqueue and do NOT write any ledger row.
    A requirement folds into the Intake queue (decomposed later by just-in-time

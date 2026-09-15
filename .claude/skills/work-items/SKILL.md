@@ -54,9 +54,45 @@ Wanting a transition that is not in the graph is **not** something an agent may 
 do: propose an amendment to `state-graphs.json` WITH A REASON — a process experiment
 (`EXP-NNN`) routed through the retro/version-bump gate. Edit that file only via that gate.
 
-## The four commands (and when each runs)
+## The commands (and when each runs)
 All via the cross-platform launcher (never bare `python3` — see below); the root
 Makefile wraps each.
+
+0. **`make wi-mint PROJECT=P TYPE=<type> TITLE="…" JOB=<J> VALUE=<v> COST=<c> LANE=<lane> AGENT=<role> [PARENTS=…] [DEPS=…] [NOTE=…|NOTE_FILE=…] [BODY_FILE=…] [PREFIX=…] [ID=…]`**
+   — the SOLE way to CREATE an item. It allocates the id and writes the file in one
+   atomic act, prints the id as the LAST LINE of stdout
+   (`ID=$(make wi-mint … | tail -1)`), and leaves an item that already passes
+   `wi-validate`: genesis event, rendered `derived:` block, resolvable edges.
+   **Never hand-write `items/active/<ID>.md`.**
+   - **WHY (DEF-ROC-203, 2026-09-15).** Hand-minting is "read the highest id, write
+     max+1" — a read-modify-write with a stale read. Two agents both minted
+     `DEF-ROC-201` seventeen minutes apart and the second file landed on the first in
+     the shared working tree, with no error and no detection; it was caught only
+     because the losing agent happened to reopen its own file and found someone
+     else's defect in it. Third subsystem with that one root, after the `EXP-142`
+     experiment-id collision and the co-owned-append-target losses that produced
+     `make commit-isolated` — and it scales the wrong way, because the more agents
+     run in parallel the likelier it gets.
+   - **HOW IT CANNOT COLLIDE.** The allocation IS the create: the set of item files
+     is the set of allocated ids (no counter, no registry to drift — EXP-047), and an
+     id is claimed with `O_CREAT|O_EXCL`, create-or-fail decided by the kernel. Two
+     actors that compute the same candidate cannot both succeed; the loser takes the
+     next number. Same discipline as `isolated-commit.js`'s ref compare-and-swap, and
+     deliberately NOT the store lock — a lock is a cooperating convention a platform
+     can lack and a caller can forget.
+   - **AND IT REFUSES.** `ID=` naming an id that already exists in `active/` **or**
+     `done/` is a loud non-zero refusal with **nothing written** — never a silent
+     overwrite.
+   - **`LANE=` is REQUIRED and has no default** (`parent-repo` | `project-repo`): a
+     dispatch carrying worktree isolation fails CLOSED on an undeclared lane, and a
+     wrong lane has destroyed delivered work (`DEFECT-OAG-076`).
+   - **The genesis event is written HERE, not appended.** `registered`/`reported`/
+     `open` names the type's INITIAL state, so it is not a transition and
+     `wi-append` cannot fire it (there is no edge). That is why creation is a command
+     of its own. Everything after it is an append.
+   - `TITLE=` crosses make's expansion and a shell string exactly as `NOTE=` does, so
+     a `$`, backtick, quote or backslash is REFUSED rather than corrupted — use
+     `TITLE_FILE=`.
 
 1. **`make wi-append PROJECT=P ID=<ID> EVENT=<name> AGENT=<role> [REF=…] [NOTE=…] [OWNER=<role>[,<role>]]`**
    — the SOLE state writer, and the ONLY way to change item state (replaces
@@ -65,10 +101,9 @@ Makefile wraps each.
    a legal transition from the current state AND the agent holds firing rights on
    THIS item. An illegal transition is REJECTED (non-zero exit) with the current
    state, the events that ARE legal here, and the instruction to open an amendment
-   experiment. Re-renders `derived:` on success. To register a NEW item, create its
-   file with the frontmatter above and the initial `registered`/`reported`/`open`
-   event, then append subsequent events with this command. No hand-editing of
-   `derived:`; no separate queue file.
+   experiment. Re-renders `derived:` on success. To register a NEW item use
+   `make wi-mint` above — never a hand-written file — and append every subsequent
+   event with this command. No hand-editing of `derived:`; no separate queue file.
    - **FIRING RIGHTS COME FROM THE ITEM, not from a per-transition allowlist
      [state-graph v11, OI-ROC-006].** Three rules, declared in `firing_rights` in
      `state-graphs.json`: (1) `orchestrator`/`flow-manager` may fire anything legal

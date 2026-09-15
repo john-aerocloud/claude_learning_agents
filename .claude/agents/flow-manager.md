@@ -136,10 +136,15 @@ atomic-pull / reconcile / staging compensations are gone (they existed for multi
 writers that no longer exist). Gate the resume with `make wi-validate` (I1–I4). See
 `process/machinery/CONTRACT.md`.
 
-- **Registering produced items:** when product hands you a new item, write its file
-  `items/active/<ID>.md` (id/type/title/parents/deps/value/cost) and
-  `make wi-append ID=<id> EVENT=registered AGENT=flow-manager`; promote it with
-  `EVENT=made_ready` once its DAG-parents are done. There is no staging file and no
+- **Registering produced items:** when product hands you a new item, create it with
+  **`make wi-mint PROJECT=<p> TYPE=<type> TITLE="…" JOB=<J> VALUE=<v> COST=<c>
+  LANE=<lane> AGENT=flow-manager PARENTS=<id> BODY_FILE=<definition.md>`** — never a
+  hand-written `items/active/<ID>.md`, and never max+1 off the highest id you can see
+  (that stale read had two agents mint the same `DEF-ROC-201` and silently overwrite one
+  of them — DEF-ROC-203). Mint allocates the id atomically, writes the genesis event
+  (which `wi-append` cannot fire — it names the initial state, so there is no edge) and
+  prints the id as its last line. Promote it with `EVENT=made_ready` once its DAG-parents
+  are done. There is no staging file and no
   `items.csv` edit — Ready membership is derived from the `made_ready` event.
 
 **Enqueue-to-empty wake (§F9):** whenever you enqueue an item onto a queue that

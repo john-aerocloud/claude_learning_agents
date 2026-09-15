@@ -67,11 +67,60 @@ and the full subtree are DERIVED (who names me) — so an edge cannot disagree w
 honours "the item contains its dependency tree" (children are rendered into `derived:`) without
 storing any edge twice.
 
+## 1a. CREATING an item — `mint`, never by hand (DEF-ROC-203)
+
+**An item is created by `make wi-mint`, which allocates the id and writes the file in ONE
+ATOMIC ACT. A hand-written `items/active/<ID>.md` is not a supported write path.**
+
+Hand-minting is "read the highest existing id, write max+1" — a read-modify-write with a
+stale read. On 2026-09-15 two agents both minted `DEF-ROC-201` seventeen minutes apart and
+the second file landed on the first in the shared working tree: no error, no warning, no
+detection. It was caught only because the losing agent happened to reopen its own file and
+found someone else's defect in it. Nothing guaranteed that, and it scales the wrong way —
+the more agents run in parallel, which IS the operating model, the likelier it gets. It is
+the third subsystem with one root (the `EXP-142` experiment-id collision; the
+co-owned-append-target losses that produced `make commit-isolated`).
+
+The guarantee, and how it is obtained:
+
+1. **The allocation IS the create.** There is no counter and no allocation registry, so
+   there is no second source of truth to drift (EXP-047): the set of item FILES is the set
+   of allocated ids. An id is claimed by creating its file with `O_CREAT|O_EXCL` —
+   create-or-fail, decided by the kernel — so two actors that compute the same candidate
+   cannot both succeed; the loser takes the next number. Same "allocate atomically or fail"
+   discipline as `isolated-commit.js`'s ref compare-and-swap.
+2. **It does not depend on the store lock.** `mint` takes the lock (that is what keeps the
+   sequence DENSE rather than merely distinct), but the safety property survives without
+   it — a lock is a cooperating convention that a platform can lack and a caller can
+   forget. Pinned by a test that disables the lock in eight real parallel processes.
+3. **An existing id is REFUSED, never overwritten.** `--id` naming an id present in
+   `active/` **or** `done/` exits non-zero with nothing written.
+4. **Valid the instant it exists.** `mint` writes the genesis event, renders `derived:`,
+   and refuses an unresolvable `parents`/`deps` edge — so there is no window in which the
+   store would fail its own gate, and a refusal leaves no orphan and burns no number.
+5. **`--lane` is REQUIRED with no default** (`parent-repo` | `project-repo`). A dispatch
+   that carries worktree isolation fails CLOSED on an undeclared lane, and a wrong lane has
+   destroyed delivered work (`DEFECT-OAG-076`).
+6. **The id SHAPE is read off the store**, never assumed: projects genuinely disagree
+   (`DEF-ROC-203` vs `DEFECT-OAG-043`), so the convention is whatever that project's items
+   of that type already do. With no precedent and no `--prefix`, `mint` REFUSES rather than
+   inventing a shape every later id must live with.
+
+The id is the LAST LINE of stdout: `ID=$(make wi-mint … | tail -1)`.
+
+**Why creation cannot just be an append.** The genesis event (`registered`/`reported`/
+`open`) NAMES the type's initial state, so it is not a transition out of anything — there
+is no edge for `append` to check and it is refused there by construction (validate/I1
+skips event #1 for the same reason). Creation therefore has to be its own command; every
+event after it is an `append`.
+
 ## 2. Appending an event (the write path — replaces `dora record` for item state)
 
 **HOW A WRITE HAPPENS AT ALL — the guarantee every other clause in this contract rests on
-(DEF-ROC-162).** The store has exactly three writers (`append`, `project`, `migrate`) and every
-rewrite of an existing item file goes through ONE primitive, `write_item_file`. It did not, and
+(DEF-ROC-162).** The store has exactly four writers (`append`, `project`, `migrate`, `mint`) and every
+rewrite of an EXISTING item file goes through ONE primitive, `write_item_file` (`mint` and
+`migrate` CREATE files, so they have no on-disk log to preserve and are declared exceptions
+— both take the store lock all the same). It did not, and
 the cost was the substrate silently losing a state event: `project` snapshotted all 373 item
 files with one `load_all_items()` and then wrote each file back from that snapshot, so
 DEF-ROC-161's `confirmed` — appended, printed, exit 0 — was gone six minutes later, absent from

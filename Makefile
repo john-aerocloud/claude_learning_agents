@@ -510,6 +510,50 @@ test-wi:
 # The probe emits only `1` or nothing — never the offending character itself. Echoing
 # what it found into the guard's own shell string would reproduce the bug inside the
 # check for it (a `"` in NOTE would break the `[ -n "…" ]` quoting).
+# ---------------------------------------------------------------------------
+# make wi-mint PROJECT=P TYPE=defect TITLE="..." JOB=J21 VALUE=4 COST=2 LANE=parent-repo AGENT=orchestrator
+#              [PARENTS=REQ-ROC-001] [DEPS=...] [NOTE=...|NOTE_FILE=...] [BODY_FILE=...]
+#              [PREFIX=DEF-ROC] [ID=DEF-ROC-204] [TS=...]
+#
+# ALLOCATE an item id and REGISTER the item in ONE ATOMIC ACT. This is the only
+# supported way to create a work item — never hand-write items/active/<ID>.md.
+#
+# WHY (DEF-ROC-203, 2026-09-15): ids used to be minted by hand as "read the
+# highest, write max+1", which is a read-modify-write with a stale read. Two
+# agents both minted DEF-ROC-201 seventeen minutes apart and the second file
+# landed on the first in the shared working tree, with no error, no warning and
+# no detection; it was caught only because the losing agent happened to reopen
+# its own file. The claim is now an O_CREAT|O_EXCL create decided by the kernel,
+# so two concurrent mints CANNOT produce the same id, and an id that already
+# exists is a loud refusal with nothing written.
+#
+# The id is the LAST LINE of stdout, so a caller captures it:
+#   ID=$$(make wi-mint PROJECT=ROC TYPE=defect ... | tail -1)
+#
+# TITLE crosses make's expansion and then a shell string, exactly as NOTE does,
+# so the same hazard guard applies: a `$`, a backtick, a quote or a backslash is
+# REFUSED rather than silently corrupted. Use TITLE_FILE for those.
+TITLE_HAZARD = $(if $(strip $(findstring $$,$(value TITLE))$(findstring `,$(value TITLE))$(findstring ",$(value TITLE))$(findstring \,$(value TITLE))),1,)
+wi-mint:
+	@if [ -n "$(TITLE_HAZARD)" ]; then \
+	  echo "wi-mint REFUSED: TITLE= contains a character a shell eats or EXECUTES (\$$ \` \" \\)."; \
+	  echo "  It would be corrupted on the way into the item's permanent title, silently."; \
+	  echo "  Use the file route, which cannot be corrupted:"; \
+	  echo "    printf '%s' '<your title>' > /tmp/title.txt"; \
+	  echo "    make wi-mint PROJECT=$(PROJECT) TYPE=$(TYPE) TITLE_FILE=/tmp/title.txt ..."; \
+	  exit 1; \
+	fi
+	@if [ -n "$(NOTE_HAZARD)" ]; then \
+	  echo "wi-mint REFUSED: NOTE= contains a character a shell eats or EXECUTES (\$$ \` \" \\). Use NOTE_FILE=."; \
+	  exit 1; \
+	fi
+	@$(WORKITEMS) mint --project $(PROJECT) --type $(TYPE) --job $(JOB) --value $(VALUE) --cost $(COST) --lane $(LANE) --agent $(AGENT) \
+	  $(if $(TITLE),--title "$(TITLE)",) $(if $(TITLE_FILE),--title-file "$(TITLE_FILE)",) \
+	  $(if $(PARENTS),--parents "$(PARENTS)",) $(if $(DEPS),--deps "$(DEPS)",) \
+	  $(if $(NOTE),--note "$(NOTE)",) $(if $(NOTE_FILE),--note-file "$(NOTE_FILE)",) \
+	  $(if $(BODY_FILE),--body-file "$(BODY_FILE)",) \
+	  $(if $(PREFIX),--prefix "$(PREFIX)",) $(if $(ID),--id "$(ID)",) $(if $(TS),--ts "$(TS)",)
+
 NOTE_HAZARD = $(if $(strip $(findstring $$,$(value NOTE))$(findstring `,$(value NOTE))$(findstring ",$(value NOTE))$(findstring \,$(value NOTE))),1,)
 wi-append:
 	@if [ -n "$(NOTE_HAZARD)" ]; then \
@@ -1332,7 +1376,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap sequencer-guard make-refs-tracked container-reap container-orphans stack-claim stack-release stack-status sso-login retro-debt retro-mark loop-gate loop-uptime test-wi wi-append wi-project wi-validate wi-migrate item-brief doc-lint process-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated commit-msg-file test-requirement-gate test-requirement-gate-baseline test-requirement-gate-clean board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery deploy-lane
+.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap sequencer-guard make-refs-tracked container-reap container-orphans stack-claim stack-release stack-status sso-login retro-debt retro-mark loop-gate loop-uptime test-wi wi-append wi-mint wi-project wi-validate wi-migrate item-brief doc-lint process-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated commit-msg-file test-requirement-gate test-requirement-gate-baseline test-requirement-gate-clean board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery deploy-lane
 
 # --- Viggo-fix UC-W7: Country/Nationality ID remediation (T-SQL) --------------
 # Data-driven, self-building T-SQL remediation script set + its local stand-up

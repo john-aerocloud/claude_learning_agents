@@ -470,10 +470,13 @@ class TestWriteLanesAreEnumerated(unittest.TestCase):
 
     SOURCE = os.path.join(HERE, "work-items.py")
 
-    # The ONE declared exception, with its reason: `migrate` CREATES files that
-    # do not exist yet, so there is no on-disk log to preserve and nothing to
-    # rebase onto. It takes the store lock all the same.
-    DECLARED_CREATORS = {"_migrate_locked"}
+    # The declared exceptions, each with its reason: both CREATE files that do
+    # not exist yet, so there is no on-disk log to preserve and nothing to rebase
+    # onto. Both take the store lock all the same, and `_mint_locked` hands the
+    # file straight to `write_item_file` for its derived block the moment it
+    # exists — the raw render is the CLAIM (an O_EXCL create-or-fail, which is
+    # what makes a duplicate id impossible), not a rewrite of anyone's log.
+    DECLARED_CREATORS = {"_migrate_locked", "_mint_locked"}
 
     def _functions(self):
         with io.open(self.SOURCE, encoding="utf-8") as fh:
@@ -516,6 +519,7 @@ class TestWriteLanesAreEnumerated(unittest.TestCase):
         "cmd_append":  "appends one edge-checked event to an item file",
         "cmd_project": "re-renders every derived block + the views",
         "cmd_migrate": "creates item files from the retired CSV substrate",
+        "cmd_mint":    "allocates an id and creates the item file (DEF-ROC-203)",
     }
     STORE_READERS = {
         "cmd_validate":    "reads and reports; writes nothing",

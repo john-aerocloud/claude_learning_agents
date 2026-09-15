@@ -1470,6 +1470,296 @@ def resolve_note(a):
     return note
 
 
+# ---------------------------------------------------------------------------
+# Subcommand: mint — ALLOCATE an id and REGISTER the item, ATOMICALLY
+# ---------------------------------------------------------------------------
+# DEF-ROC-203. Item ids used to be allocated BY HAND: read the highest existing
+# id, write max+1. That is a read-modify-write with a stale read, and on
+# 2026-09-15 it did exactly what it must: two agents both minted DEF-ROC-201
+# seventeen minutes apart and the second file landed on the first in the shared
+# working tree. Nothing serialised them, nothing detected the clash at write
+# time, and nothing warned — it was caught only because the losing agent
+# happened to reopen its own file and found someone else's defect in it. It is
+# the third subsystem with this one root (the EXP-142 experiment-id collision,
+# and the co-owned-append-target losses that produced `make commit-isolated`),
+# and it scales the wrong way: the more agents run in parallel — which IS the
+# operating model — the likelier it gets.
+#
+# THE ALLOCATION IS THE CREATE. There is no counter, no registry and no second
+# source of truth to drift (EXP-047): the set of item FILES is the set of
+# allocated ids, and an id is claimed by creating its file with
+# `O_CREAT|O_EXCL` — create-or-fail, decided by the kernel. Two actors that
+# compute the same candidate cannot both succeed; the loser gets EEXIST and
+# takes the next number. This is the same "allocate atomically or fail"
+# discipline `isolated-commit.js` gets from its ref compare-and-swap, and it is
+# deliberately NOT the store lock: a lock is a cooperating convention, the
+# platform can lack the primitive (see `store_lock`'s own warning), and a future
+# caller can forget it. The lock is still taken — it keeps the candidate scan
+# and the create from interleaving, so the sequence stays DENSE rather than
+# merely distinct — but the safety property survives without it, and
+# test_wi_id_allocation.py proves that with the lock disabled.
+#
+# AND IT REFUSES. An explicit id that is already taken — in active/ OR in done/ —
+# is a loud non-zero refusal with nothing written, not a silent overwrite. That
+# is the cheap half of the fix and the one that converts the failure from "found
+# 17 minutes later, if someone happens to look" into "found at the keystroke".
+LANES = ("parent-repo", "project-repo")
+_ID_NUM_RE = re.compile(r"^(?P<stem>.+?)-(?P<num>\d+)$")
+_MINT_MAX_PROBES = 1000
+
+
+def _ids_on_disk(project):
+    """{id: subdir} for every item FILE, read from FILENAMES rather than parsed.
+    An id is taken if its file exists — even if the file is unparseable, which is
+    precisely when you must not hand the number out again."""
+    out = {}
+    d = items_dir(project)
+    for sub in ("active", "done"):
+        p = os.path.join(d, sub)
+        if not os.path.isdir(p):
+            continue
+        for fn in os.listdir(p):
+            if fn.endswith(".md"):
+                out[fn[:-3]] = sub
+    return out
+
+
+def _stem_and_width(project, itype, explicit_prefix):
+    """The id SHAPE for `itype`, READ off the store rather than assumed.
+
+    Projects genuinely disagree — ROC writes `DEF-ROC-203`, OagEventSource writes
+    `DEFECT-OAG-043` — so the convention is whatever this project's items of this
+    type already do. With no precedent and no `--prefix` there is nothing to read
+    and mint REFUSES rather than inventing a shape every later id must live with.
+    """
+    if explicit_prefix:
+        return explicit_prefix.rstrip("-"), None
+    items, _dup = load_all_items(project)
+    counts, widths = {}, {}
+    for iid, it in items.items():
+        if it.type != itype:
+            continue
+        m = _ID_NUM_RE.match(iid)
+        if not m:
+            continue
+        stem = m.group("stem")
+        counts[stem] = counts.get(stem, 0) + 1
+        widths.setdefault(stem, set()).add(len(m.group("num")))
+    if not counts:
+        return None, None
+    stem = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
+    return stem, max(widths[stem])
+
+
+def _mint_title(a):
+    """The title, by the same rule as a note: a FILE is the only transport that
+    cannot be corrupted (OI-WI-APPEND-NOTE-PATH-MANGLES-CONTENT — a `$` expanded
+    away, a backtick EXECUTED). It is a one-line quoted frontmatter field, so an
+    embedded newline is REJECTED rather than silently truncating it."""
+    tf = getattr(a, "title_file", None)
+    title = a.title
+    if tf:
+        if title:
+            sys.exit("mint REFUSED: give TITLE or TITLE_FILE, not both.")
+        try:
+            with open(tf, encoding="utf-8") as f:
+                title = f.read()
+        except OSError as e:
+            sys.exit(f"mint REFUSED: cannot read --title-file {tf}: {e}")
+        if title.endswith("\n"):
+            title = title[:-1]
+    if not title or not title.strip():
+        sys.exit("mint REFUSED: a title is required — an item nobody can read is "
+                 "not registered, it is hidden.")
+    if re.search(r"[\r\n]", title):
+        sys.exit("mint REFUSED: the title contains a newline. It is stored as a "
+                 "ONE-LINE quoted field, so a newline would silently truncate it.")
+    return title
+
+
+def cmd_mint(a):
+    """Allocate an id and register the item, in one act. Thin wrapper: the lock
+    keeps the scan and the create from interleaving (a DENSE sequence), while the
+    O_EXCL create is what makes a duplicate id impossible even without it."""
+    with store_lock(a.project, timeout=getattr(a, "lock_timeout", None)):
+        return _mint_locked(a)
+
+
+def _mint_locked(a):
+    graphs = Graphs.load()
+
+    # --- everything that can be refused WITHOUT creating anything ------------
+    itype = a.type
+    if itype not in graphs.types:
+        sys.exit(f"mint REFUSED: '{itype}' is not a known item type "
+                 f"(known: {'/'.join(sorted(graphs.types))}).")
+    lane = getattr(a, "lane", None)
+    if not lane:
+        sys.exit(f"mint REFUSED: --lane is REQUIRED (one of {'/'.join(LANES)}). "
+                 f"It is not optional and has no default: `make dispatch-check` "
+                 f"fails CLOSED on an undeclared lane, and DEFECT-OAG-076 "
+                 f"destroyed a delivered item because the lane was wrong. A "
+                 f"permissive default here would re-create exactly that.")
+    if lane not in LANES:
+        sys.exit(f"mint REFUSED: lane '{lane}' is not one of {'/'.join(LANES)}.")
+    agent = getattr(a, "agent", None)
+    if not agent:
+        sys.exit("mint REFUSED: --agent is required — the genesis event names who "
+                 "registered the item and it is a permanent audit record.")
+    if graphs.known_roles and agent not in graphs.known_roles:
+        sys.exit(f"mint REFUSED: agent '{agent}' is not a known role "
+                 f"(known: {'/'.join(sorted(graphs.known_roles))}).")
+    title = _mint_title(a)
+    note = resolve_note(a) if (getattr(a, "note", None)
+                               or getattr(a, "note_file", None)) else None
+
+    def _edges(raw):
+        if raw is None:
+            return []
+        if isinstance(raw, (list, tuple)):
+            vals = list(raw)
+        else:
+            vals = [s for s in re.split(r"[,\s]+", str(raw)) if s]
+        return vals
+
+    parents, deps = _edges(getattr(a, "parents", None)), _edges(getattr(a, "deps", None))
+    taken = _ids_on_disk(a.project)
+    for kind, vals in (("parent", parents), ("dep", deps)):
+        for v in vals:
+            if v not in taken:
+                sys.exit(f"mint REFUSED: {kind} '{v}' does not resolve to an item "
+                         f"in work/{a.project}/items/ — the edge would fail I3 the "
+                         f"moment the store is validated.")
+
+    # --- the allocation ------------------------------------------------------
+    active_dir = os.path.join(items_dir(a.project), "active")
+    os.makedirs(active_dir, exist_ok=True)
+    os.makedirs(os.path.join(items_dir(a.project), "done"), exist_ok=True)
+
+    explicit = getattr(a, "id", None)
+    if explicit:
+        where = taken.get(explicit)
+        if where:
+            sys.exit(f"mint REFUSED: {explicit} already exists at "
+                     f"items/{where}/{explicit}.md. Nothing has been written — an "
+                     f"item id is allocated once and an overwrite would destroy "
+                     f"whatever is in it (DEF-ROC-203). Mint without --id to take "
+                     f"the next free number.")
+        candidates = [explicit]
+    else:
+        stem, width = _stem_and_width(a.project, itype, getattr(a, "prefix", None))
+        if not stem:
+            sys.exit(f"mint REFUSED: work/{a.project} has no existing '{itype}' "
+                     f"item to read the id convention from, so there is nothing to "
+                     f"continue and nothing will be guessed. Pass --prefix "
+                     f"(e.g. --prefix DEF-{a.project.upper()[:3]}) or --id for the "
+                     f"first one.")
+        width = width or 3
+        nums = []
+        for iid in taken:
+            m = _ID_NUM_RE.match(iid)
+            if m and m.group("stem") == stem:
+                nums.append(int(m.group("num")))
+        start = (max(nums) if nums else 0) + 1
+        candidates = [f"{stem}-{n:0{width}d}"
+                      for n in range(start, start + _MINT_MAX_PROBES)]
+
+    fd = path = iid = None
+    for cand in candidates:
+        cand_path = os.path.join(active_dir, f"{cand}.md")
+        try:
+            # THE COMPARE-AND-SWAP. Create-or-fail, decided by the kernel: two
+            # actors that computed the same candidate cannot both get here.
+            fd = os.open(cand_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            if explicit:                                   # pragma: no cover
+                sys.exit(f"mint REFUSED: {cand} already exists at "
+                         f"items/active/{cand}.md (it appeared while we were "
+                         f"registering). Nothing has been written.")
+            continue
+        # …and the other folder, re-checked AFTER the claim: an id archived in
+        # done/ is still taken, and re-issuing it would be a duplicate id (I4).
+        if os.path.exists(os.path.join(items_dir(a.project), "done", f"{cand}.md")):
+            os.close(fd)
+            os.unlink(cand_path)
+            fd = None
+            if explicit:                                   # pragma: no cover
+                sys.exit(f"mint REFUSED: {cand} already exists at "
+                         f"items/done/{cand}.md. Nothing has been written.")
+            continue
+        path, iid = cand_path, cand
+        break
+    if fd is None:
+        sys.exit(f"mint REFUSED: could not allocate an id after "
+                 f"{_MINT_MAX_PROBES} attempts in work/{a.project}/items/. "
+                 f"Nothing has been written.")
+
+    # --- the registration, with the claim rolled back if anything fails ------
+    try:
+        ts = (getattr(a, "ts", None) or now_iso()).strip()
+        fm = {"id": iid, "type": itype, "title": title, "job": a.job,
+              "value": _num(str(a.value)), "cost": _num(str(a.cost)),
+              "parents": parents, "deps": deps, "created_ts": ts, "lane": lane}
+        events = []
+        if graphs.kind(itype) == "flow":
+            # The GENESIS event names the type's initial state. It is the one
+            # event that is NOT a transition — there is no edge to fire, so
+            # `wi-append` cannot write it (validate/I1 skips event #1 for exactly
+            # this reason). Which is why creation has to, and why creation is a
+            # command rather than a hand-written file.
+            ev = {"ts": ts, "event": graphs.initial(itype), "agent": agent}
+            if note:
+                ev["note"] = note
+            events.append(ev)
+        fm["events"] = events
+        body = "\n"
+        body_file = getattr(a, "body_file", None)
+        if body_file:
+            try:
+                with open(body_file, encoding="utf-8") as f:
+                    body = "\n" + f.read().lstrip("\n")
+            except OSError as e:
+                sys.exit(f"mint REFUSED: cannot read --body-file {body_file}: {e}")
+        item = Item(path, fm, body)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(render_item(item, {"state": None, "queue": None,
+                                       "children": [], "ancestors": []}))
+        fd = None
+        # Now render the DERIVED block through the one write primitive, so the
+        # item is valid the instant it exists: an item that needs a second
+        # command to pass I8 leaves a window in which the store does not.
+        items, _dup = load_all_items(a.project)
+        items[iid] = item
+        states = compute_states(graphs, items)
+        children = compute_children(items)
+        dv = derived_block(graphs, items, states, children, iid)
+        write_item_file(item, dv, base_events=events)
+        for anc_id in _propagation_targets(items, iid):
+            anc = items.get(anc_id)
+            if anc is None or not os.path.exists(anc.path):
+                continue                                   # pragma: no cover
+            write_item_file(anc, derived_block(graphs, items, states,
+                                               children, anc_id))
+    except BaseException:
+        # The claim is a real file. A failure after it must give the number back,
+        # or a half-written orphan holds it for ever and passes nothing.
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:                                # pragma: no cover
+                pass
+        try:
+            os.unlink(path)
+        except OSError:                                    # pragma: no cover
+            pass
+        raise
+
+    print(f"mint: {iid} registered ({_rel(path)}), state "
+          f"'{states.get(iid)}', lane '{lane}'")
+    print(iid)          # LAST LINE = the id, so a caller can capture it
+    return iid
+
+
 def cmd_append(a):
     """Append one edge-checked event. Thin wrapper: the whole read-modify-write
     lives in `_append_locked` so a single decorator-shaped seam can serialise it
@@ -7692,6 +7982,46 @@ def _first_paragraph(path):
 def main(argv=None):
     p = argparse.ArgumentParser(prog="work-items")
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    mn = sub.add_parser("mint",
+                        help="ALLOCATE an item id and register the item in one "
+                             "atomic act (DEF-ROC-203). Two concurrent mints "
+                             "cannot produce the same id, and an id that is "
+                             "already taken is REFUSED, never overwritten.")
+    mn.add_argument("--project", required=True)
+    mn.add_argument("--type", required=True,
+                    help="item type as named in process/machinery/state-graphs.json "
+                         "(defect / use-case / open-item / slice / chunk / requirement)")
+    mn.add_argument("--title", help="one line; use --title-file for prose a shell "
+                                    "would eat (`$`, a backtick, a quote)")
+    mn.add_argument("--title-file", dest="title_file",
+                    help="read the title from a FILE — the only transport that "
+                         "cannot corrupt it (same rule as --note-file)")
+    mn.add_argument("--job", required=True,
+                    help="the job-to-be-done this item serves")
+    mn.add_argument("--value", required=True)
+    mn.add_argument("--cost", required=True)
+    mn.add_argument("--parents", help="comma-separated ids; each must resolve")
+    mn.add_argument("--deps", help="comma-separated ids; each must resolve")
+    mn.add_argument("--lane", required=True,
+                    help=f"REQUIRED, no default: {'/'.join(LANES)}. A dispatch "
+                         f"that carries worktree isolation fails CLOSED on an "
+                         f"undeclared lane, and a wrong lane has destroyed "
+                         f"delivered work (DEFECT-OAG-076).")
+    mn.add_argument("--agent", required=True,
+                    help="the role registering the item; recorded on the genesis "
+                         "event, which is a permanent audit record")
+    mn.add_argument("--note", help="note for the genesis event")
+    mn.add_argument("--note-file", dest="note_file",
+                    help="read the genesis note from a FILE (see `append`)")
+    mn.add_argument("--body-file", dest="body_file",
+                    help="markdown body of the item, from a file")
+    mn.add_argument("--id", help="register THIS id instead of the next free one; "
+                                 "REFUSED if it already exists in active/ or done/")
+    mn.add_argument("--prefix", help="id stem to use when this type has no "
+                                     "precedent in the project (e.g. DEF-ROC)")
+    mn.add_argument("--ts", help="creation timestamp (ISO-8601 UTC)")
+    mn.set_defaults(func=cmd_mint)
 
     ap = sub.add_parser("append")
     ap.add_argument("--project", required=True)

@@ -527,6 +527,8 @@ class TestWriteLanesAreEnumerated(unittest.TestCase):
         "cmd_retro_mark":  "writes the RETRO log, never an item file",
         "cmd_parts_check": "reads the retro log + the constraint; writes nothing",
         "cmd_loop_gate":   "reads the store and runs probes; writes nothing",
+        "cmd_exit_gate_ran": "runs the project's DECLARED exit-gate probe and "
+                             "reports its verdict; writes nothing",
     }
 
     def test_every_subcommand_declares_which_side_of_the_store_it_is_on(self):

@@ -5728,6 +5728,26 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
     #         to pull cannot un-stale an environment.
     findings.extend(compute_deploy_staleness(project))
 
+    # --- 20. DID THE ENGINEERING EXIT GATE SPEAK? — DELEGATED (§F11.4) -------
+    #         Checks 15 and 16 ask what the DEPLOY lane did. This asks whether the
+    #         §F11 exit gate produced a VERDICT for trunk head at all, which nothing
+    #         here asked: on 2026-08-29 `code-analysis.yml` stopped running — not
+    #         red, UNLOADABLE, dead in 19s during `Set up job` because a third party
+    #         moved CodeAnalysisTools' floating `v1` tag — and three commits reached
+    #         trunk ungated. A gate that did not run is indistinguishable from a gate
+    #         that passed (DEF-ROC-086's skipped-not-failed shape by another road).
+    #
+    #         It could not hang here until now because the answer lives in the
+    #         PROJECT repo (DEF-ROC-171 built it and said so rather than smuggling
+    #         the parent half across the lane boundary), and its only caller was
+    #         `scripts/pre-push-gate.sh` — a hook DEF-ROC-191 measured as
+    #         UNINSTALLED. So the control that proves the gate spoke was reachable
+    #         only through a control nobody is required to run. OI-ROC-025 is the
+    #         item that owns closing it; see compute_exit_gate_ran for why this is a
+    #         DECLARATION rather than a hardcoded `make` call, and for the severity
+    #         map that keeps a red trunk from wedging a shared tree.
+    findings.extend(compute_exit_gate_ran(project))
+
     # --- 16. IS THE DEPLOY LANE OPEN? — DELEGATED ----------------------------
     #         (DEF-ROC-131, owner ruling 2026-08-27). Check 15 asks the HOST what
     #         it is running; this asks CI whether the DEPLOY JOB ran at all. They
@@ -7156,6 +7176,232 @@ def compute_sequencer_guard(timeout=SEQG_TIMEOUT):
         f"the revert and was an ancestor of origin/main), then {quits}."))]
 
 
+# ---------------------------------------------------------------------------
+# loop-gate check 20 — DID THE ENGINEERING EXIT GATE SPEAK? (§F11.4 clause 1)
+# OI-ROC-025, closing the parent-repo half DEF-ROC-171 deliberately left open.
+#
+# THE SUBJECT. §F11.4 clause 1 says a gate must prove it SPOKE: non-execution is
+# not a pass. `exit-gate-ran` is the thing that proves it. Until now its only
+# caller was a project-repo pre-push hook that DEF-ROC-191 measured as UNINSTALLED
+# (`core.hooksPath` unset), so the control that proves the gate spoke was reachable
+# only through a control nobody is required to run. DEF-ROC-153 was three
+# consecutive ungated pushes, found by a human reading a run list. The loop gate is
+# the only continuously-running workflow in this system; hanging the question here
+# bounds that at one cycle.
+#
+# WHY A DECLARATION, NOT A HARDCODED `make` CALL. OI-ROC-025 forbids two shapes and
+# both forbiddings are right. Binding this to one project's Makefile targets is how
+# a parent control acquires a project dependency it cannot satisfy for the next
+# project; re-implementing the query here is EXP-047's two-readers-of-one-fact,
+# which this system keeps paying for. So the PROJECT declares a command in
+# `.claude/config/exit-gate-ran/<project>.json` and this reads a documented status
+# contract from its JSON. There is ONE implementation of the question — the
+# project's — and this is a second CALLER of it, which is the distinction EXP-047
+# turns on. The parent knows nothing about `make` or about any target's name.
+#
+# THE DECLARATION IS THREE-VALUED, and that is the whole of the degradation story:
+#   a `command`                -> the question is asked
+#   `{"gate":"none","reason":…}` -> explicitly, reasonedly absent; SILENT
+#   nothing at all             -> "NOT ESTABLISHED" (`?`); never blocks, never errors
+# Absence is NOT read as "this project has no exit gate": the parent cannot tell
+# that from "somebody forgot", and absence-read-as-a-pass is the family this
+# project logs more than any other. Nor may it block — a project with no such gate
+# would be wedged for a reason that is not its fault. An advisory line cleared by a
+# three-line file is the honest middle, and it is cleared once, not nagged forever.
+#
+# THE SEVERITY MAP IS AC-025-3, AND IT IS DECIDED HERE RATHER THAN BY PASSING THE
+# PROJECT'S `NONEXEC=1` THROUGH — the property has to be testable where it is
+# claimed:
+#   NO-VERDICT       -> BLOCK.     The gate DID NOT SPEAK. §F8a: a gate blocks only
+#                                  on harm that stopping relieves, and stopping is
+#                                  exactly the remedy — every further pull lands
+#                                  more commits on an ungated trunk head. That is
+#                                  how DEF-ROC-153 reached three.
+#   FAIL             -> ADVISORY.  The gate SPOKE and said no. A different subject,
+#                                  already owned by `make exit-gate` on the commit
+#                                  in hand; blocking every agent in a shared tree on
+#                                  somebody else's regression is not what §F11.4 is
+#                                  about, and it is the property that is easiest to
+#                                  lose when moving the caller.
+#   PASS             -> silent.
+#   PENDING          -> UNKNOWN.   A run exists and is unfinished. Not a verdict.
+#   CANNOT-DETERMINE -> UNKNOWN.   We could not ask. Not a pass and not an alarm.
+#   anything else / unrunnable / unparseable -> UNKNOWN (§17i).
+#
+# THE EXIT CODE IS DELIBERATELY NOT CONSULTED. The project's probe exits 1 for FAIL
+# and for NO-VERDICT alike, so reading it would collapse the two subjects this map
+# keeps apart. The STATUS word is the verdict.
+# ---------------------------------------------------------------------------
+EGR_TIMEOUT = 90.0
+EGR_STATUSES = ("PASS", "FAIL", "PENDING", "NO-VERDICT", "CANNOT-DETERMINE")
+
+
+def _egr_config_path(project):
+    return os.path.join(ROOT, ".claude", "config", "exit-gate-ran",
+                        "%s.json" % project)
+
+
+def compute_exit_gate_ran(project, sha=None, timeout=None):
+    """Did the project's engineering exit gate produce a verdict for trunk head
+    (or for `sha`)? 0 or 1 finding. DELEGATED to the project's own declared
+    implementation — never re-implemented here (EXP-047)."""
+    common = {"check": "exit-gate-ran", "ids": []}
+    cfg_path = _egr_config_path(project)
+    undeclared = dict(common, severity="unknown", verdict="UNDECLARED", message=(
+        f"[exit-gate-ran] NOT ESTABLISHED — {project} has NO DECLARATION either way "
+        f"about its engineering exit gate, so this run establishes NOTHING about "
+        f"whether the gate SPOKE for trunk head (§F11.4 clause 1: non-execution is "
+        f"not a pass). This is deliberately not silent and deliberately not a block: "
+        f"silence would read 'no gate' when it may just as well mean 'nobody "
+        f"declared', and blocking would wedge a project that legitimately has none. "
+        f"It is the same shape check 15/16 use for an unconfigured project. Remedy — "
+        f"commit ONE of these to {cfg_path}: "
+        f'{{"command": ["make", "-C", "work/{project}", "<target>", "JSON=1"], '
+        f'"shaArg": "SHA={{sha}}"}} (the target must print JSON with a "status" of '
+        f'{"/".join(EGR_STATUSES)}; copy work/ROC/scripts/exit-gate-ran.mjs), or '
+        f'{{"gate": "none", "reason": "<why this project has no CI exit gate>"}}.'))
+    try:
+        with open(cfg_path, encoding="utf-8") as fh:
+            cfg = json.load(fh)
+        if not isinstance(cfg, dict):
+            raise ValueError("the declaration must be a JSON object")
+    except FileNotFoundError:
+        return [undeclared]
+    except Exception as exc:                                    # noqa: BLE001
+        return [dict(common, severity="unknown", verdict="UNREADABLE-DECLARATION",
+                     message=(
+            f"[exit-gate-ran] NOT ESTABLISHED — {cfg_path} could not be read "
+            f"({type(exc).__name__}: {str(exc)[:160]}). A declaration that will not "
+            f"parse is not a declaration, and it must not read as either a gate that "
+            f"spoke or a project that has none."))]
+
+    if str(cfg.get("gate", "")).strip().lower() == "none":
+        if str(cfg.get("reason", "")).strip():
+            return []           # an explicit, reasoned decision IS the answer
+        return [undeclared]     # "none" with no reason is not a decision (§F9b)
+
+    cmd = cfg.get("command")
+    if not isinstance(cmd, list) or not cmd or not all(isinstance(c, str) for c in cmd):
+        return [dict(common, severity="unknown", verdict="INCOMPLETE-DECLARATION",
+                     message=(
+            f"[exit-gate-ran] NOT ESTABLISHED — {cfg_path} declares no usable "
+            f'"command" (a non-empty list of strings is required), so nothing was '
+            f"asked. Either give it one or declare "
+            f'{{"gate": "none", "reason": …}} explicitly.'))]
+    argv = list(cmd)
+    if sha:
+        sha_arg = cfg.get("shaArg")
+        if not isinstance(sha_arg, str) or "{sha}" not in sha_arg:
+            return [dict(common, severity="unknown", verdict="INCOMPLETE-DECLARATION",
+                         message=(
+                f"[exit-gate-ran] NOT ESTABLISHED — asked about commit {sha}, but "
+                f'{cfg_path} declares no "shaArg" containing `{{sha}}`, so the '
+                f"question could not be put. Answering about trunk head instead "
+                f"would be a wrong answer wearing a right one's clothes. Remedy: add "
+                f'"shaArg": "SHA={{sha}}" (or whatever the declared command takes).'))]
+        argv.append(sha_arg.replace("{sha}", str(sha)))
+
+    secs = float(cfg.get("timeoutMs", timeout * 1000 if timeout else
+                         EGR_TIMEOUT * 1000)) / 1000.0
+    try:
+        proc = subprocess.run(argv, cwd=ROOT, capture_output=True, text=True,
+                              check=False, timeout=secs)
+    except subprocess.TimeoutExpired:
+        return [dict(common, severity="unknown", verdict="UNRUNNABLE", message=(
+            f"[exit-gate-ran] NOT ESTABLISHED — the declared probe did not finish "
+            f"within {secs:g}s (timeout). Nothing was checked, which is NOT the same "
+            f"as 'the gate spoke'. Remedy: `{' '.join(argv)}` by hand, or raise "
+            f'"timeoutMs" in {cfg_path}.'))]
+    except Exception as exc:                                    # noqa: BLE001
+        return [dict(common, severity="unknown", verdict="UNRUNNABLE", message=(
+            f"[exit-gate-ran] NOT ESTABLISHED — the declared probe would not run "
+            f"({type(exc).__name__}: {str(exc)[:160]}). An unrunnable probe is not a "
+            f"verdict (§17c.2). Remedy: `{' '.join(argv)}` from the repo root."))]
+
+    out = (proc.stdout or "").strip()
+    report = None
+    if out:
+        start, end = out.find("{"), out.rfind("}")
+        if start != -1 and end > start:
+            try:
+                report = json.loads(out[start:end + 1])
+            except Exception:                                   # noqa: BLE001
+                report = None
+    if not isinstance(report, dict):
+        tail = (out + "\n" + (proc.stderr or "")).strip()[-300:] or "(no output)"
+        return [dict(common, severity="unknown", verdict="UNREADABLE", message=(
+            f"[exit-gate-ran] NOT ESTABLISHED — the declared probe printed no "
+            f"readable JSON object (exit {proc.returncode}), so its verdict is "
+            f"unreadable and this run establishes nothing: {tail}"))]
+
+    status = str(report.get("status") or "").strip().upper()
+    head = str(report.get("head") or report.get("sha") or sha or "trunk head")[:12]
+    detail = str(report.get("detail") or "").strip()
+    url = str(report.get("runUrl") or "").strip()
+    common = dict(common, verdict=status, head=head)
+
+    if status == "PASS":
+        return []
+    if status == "NO-VERDICT":
+        return [dict(common, severity="block", message=(
+            f"[exit-gate-ran] THE ENGINEERING EXIT GATE DID NOT SPEAK for {head} — "
+            f"no verdict exists for that commit past the grace period, which is the "
+            f"DEF-ROC-153 condition exactly. §F11.4 clause 1: NON-EXECUTION IS NOT A "
+            f"PASS — a gate that did not run is indistinguishable from a gate that "
+            f"passed, and on 2026-08-29 that cost three ungated commits on trunk "
+            f"before a human noticed it in a run list. THIS BLOCKS because stopping "
+            f"is the remedy (§F8a): every further pull lands more commits on an "
+            f"ungated head. Remedy: find out WHY the gate produced nothing — it died "
+            f"in 19s during `Set up job` last time, so read the run, not the diff — "
+            f"fix it as this cycle's pull, and re-run this gate. Never silence the "
+            f"limb. {detail}{(' ' + url) if url else ''}"))]
+    if status == "FAIL":
+        return [dict(common, severity="advisory", message=(
+            f"ADVISORY (does NOT block the pull) [exit-gate-ran] the engineering "
+            f"exit gate SPOKE for {head} and said NO. Reported, never blocking: a "
+            f"red gate is a different subject from §F11.4's — it is owned by `make "
+            f"exit-gate` on the commit in hand — and blocking here would wedge every "
+            f"agent in this shared tree on somebody else's regression (AC-025-3). It "
+            f"is NOT satisfied: whoever owns that commit owes the fix, and a "
+            f"`build_failed` event on the item before fixing forward (§3/EXP-108) or "
+            f"CFR reads a false 0%. {detail}{(' ' + url) if url else ''}"))]
+    if status == "PENDING":
+        return [dict(common, severity="unknown", message=(
+            f"[exit-gate-ran] NOT ESTABLISHED — a gate run for {head} exists and is "
+            f"still going, so there is no verdict yet and nothing is broken either. "
+            f"Do NOT read an unfinished run as a pass. Re-run this gate when it "
+            f"completes. {detail}{(' ' + url) if url else ''}"))]
+    if status == "CANNOT-DETERMINE":
+        return [dict(common, severity="unknown", message=(
+            f"[exit-gate-ran] NOT ESTABLISHED — the probe could not ask whether the "
+            f"gate spoke for {head} ({detail or 'no detail'}). Not a pass and not an "
+            f"alarm (§17i); check `gh auth status` first, then run "
+            f"`{' '.join(argv)}` by hand."))]
+    return [dict(common, severity="unknown", message=(
+        f"[exit-gate-ran] NOT ESTABLISHED — the declared probe reported status "
+        f"{status!r}, which is not one of {'/'.join(EGR_STATUSES)}. A word this "
+        f"caller cannot interpret must never be read as a verdict. "
+        f"{detail}{(' ' + url) if url else ''}"))]
+
+
+def cmd_exit_gate_ran(a):
+    """Standalone: `make exit-gate-ran PROJECT=<p> [SHA=<commit>] [JSON=1]`. Exists
+    so the limb can be PROVEN TO FIRE against a real commit (§F9f) — a check only
+    ever observed printing nothing proves nothing."""
+    findings = compute_exit_gate_ran(a.project, sha=getattr(a, "sha", None))
+    if getattr(a, "json", False):
+        print(json.dumps(findings, indent=2))
+    elif not findings:
+        print(f"exit-gate-ran[{a.project}] => the exit gate SPOKE and PASSED for "
+              f"the commit asked about (or the project has declared, with a reason, "
+              f"that it has no such gate)")
+    else:
+        f = findings[0]
+        print(f"exit-gate-ran[{a.project}] => {f['severity'].upper()}")
+        print(f"  {f['message']}")
+    sys.exit(2 if any(f["severity"] == "block" for f in findings) else 0)
+
+
 def cmd_loop_gate(a):
     graphs = Graphs.load()
     now = parse_ts(getattr(a, "now", None)) if getattr(a, "now", None) else None
@@ -8166,6 +8412,19 @@ def main(argv=None):
                          "retro-debt computation this delegates to)")
     lg.add_argument("--now", help="reference 'now' (ISO-8601 UTC) for deterministic tests")
     lg.set_defaults(func=cmd_loop_gate)
+
+    # loop-gate check 20, standalone. Every delegated limb here has a standalone
+    # probe (`make deploy-lane`, `make sequencer-guard`, `make worktree-guard`)
+    # for the same reason: a limb that can only be observed inside a 20-check run
+    # cannot be PROVEN TO FIRE against a real commit (§F9f).
+    eg = sub.add_parser("exit-gate-ran",
+                        help="did the project's engineering exit gate SPEAK for "
+                             "trunk head (or --sha)? §F11.4 clause 1")
+    eg.add_argument("--project", required=True)
+    eg.add_argument("--sha", help="ask about ANY commit instead of trunk head — "
+                                  "this is how the check is proven to fire")
+    eg.add_argument("--json", action="store_true")
+    eg.set_defaults(func=cmd_exit_gate_ran)
 
     a = p.parse_args(argv)
     a.func(a)

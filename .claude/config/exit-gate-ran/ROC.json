@@ -1,0 +1,7 @@
+{
+  "_why": "OI-ROC-025. ROC's engineering exit gate (.github/workflows/code-analysis.yml) has NO `paths:` filter, deliberately, so EVERY push to main must produce a run and an absent one is a FINDING rather than an expected silence. That asymmetry is what lets this assert what `deploy-lane` structurally cannot (deploy-ROC.yml IS path-filtered -- DEF-ROC-142). The question is answered by the PROJECT's own implementation, work/ROC/scripts/exit-gate-ran.mjs; this file is only the declaration that the parent loop gate may ask it, so there is ONE implementation and two callers, never two readers of one fact (EXP-047).",
+  "_contract": "The command must print a JSON object with a `status` of PASS | FAIL | PENDING | NO-VERDICT | CANNOT-DETERMINE, plus optional `head`, `detail`, `runUrl`. Its EXIT CODE is not consulted: the project's probe exits 1 for FAIL and NO-VERDICT alike, and those are the two subjects AC-025-3 keeps apart.",
+  "command": ["make", "-C", "work/ROC", "exit-gate-ran", "JSON=1"],
+  "shaArg": "SHA={sha}",
+  "timeoutMs": 90000
+}

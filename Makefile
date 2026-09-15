@@ -185,6 +185,32 @@ make-refs-tracked:
 deploy-lane:
 	@node .claude/tools/deploy-lane.js --project $(PROJECT) --repo-root . $(if $(JSON),--json,)
 
+# --- DID THE ENGINEERING EXIT GATE SPEAK? (OI-ROC-025, process SSF11.4) ---------
+# The standalone probe behind `loop-gate` check 20, and the PARENT-repo caller of the
+# question DEF-ROC-171 built and could not wire from its own lane.
+#
+# `deploy-lane` above asks whether what we push can REACH an environment. This asks
+# whether the SSF11 engineering exit gate produced a verdict for trunk head AT ALL.
+# On 2026-08-29 it stopped running -- not red, UNLOADABLE, dead in 19s during `Set up
+# job` because a third party moved CodeAnalysisTools' floating `v1` tag -- and three
+# commits reached trunk ungated. NON-EXECUTION IS NOT A PASS: a gate that did not run
+# is indistinguishable from one that passed.
+#
+# IT DELEGATES, it does not re-implement. The project declares the command in
+# .claude/config/exit-gate-ran/<PROJECT>.json and this reads its JSON `status`
+# (PASS/FAIL/PENDING/NO-VERDICT/CANNOT-DETERMINE). One implementation, two callers --
+# never two readers of one fact (EXP-047). A project with no declaration gets an
+# ADVISORY line, never an error and never a block.
+#
+# ONLY NON-EXECUTION BLOCKS (exit 2). A gate that SPOKE and said no is advisory here:
+# that subject belongs to `make exit-gate` on the commit in hand, and blocking on it
+# would wedge every agent in this shared tree on somebody else's regression.
+#   make exit-gate-ran PROJECT=ROC              # trunk head
+#   make exit-gate-ran PROJECT=ROC SHA=<commit> # ANY commit -- this is how it is proven to fire
+#   make exit-gate-ran PROJECT=ROC JSON=1
+exit-gate-ran:
+	@$(WORKITEMS) exit-gate-ran --project $(PROJECT) $(if $(SHA),--sha $(SHA),) $(if $(JSON),--json,)
+
 # --- orphaned LOCAL CONTAINERS (DEFECT-OAG-091) ---------------------------------
 # The container equivalent of worktree-reap, and the tool EXP-133 should have
 # shipped with the container-per-engineer. `ddb-local-down` is per-dispatch and must
@@ -433,6 +459,19 @@ parts-check:
 #                         an unmapped state does not fail, it renders as unstarted
 #                         BACKLOG (twice now: `cancelled`, `awaiting_observation`).
 #                         Offline, project-free: `make board-audit`.
+#  20 exit-gate-ran       DID THE ENGINEERING EXIT GATE SPEAK for trunk head?
+#                         (OI-ROC-025, SSF11.4 clause 1.) Checks 15/16 ask what the
+#                         DEPLOY lane did; this asks whether the SSF11 exit gate
+#                         produced a VERDICT AT ALL. On 2026-08-29 it stopped
+#                         running -- not red, UNLOADABLE -- and three commits
+#                         reached trunk ungated. ONLY NON-EXECUTION BLOCKS: a gate
+#                         that SPOKE and said no is ADVISORY here, because a red
+#                         trunk must not wedge every agent in a shared tree on
+#                         somebody else's regression. DELEGATED to the command the
+#                         PROJECT declares in .claude/config/exit-gate-ran/<p>.json
+#                         -- one implementation, two callers (EXP-047). A project
+#                         with no declaration gets a NOT-ESTABLISHED line, never a
+#                         block and never an error. `make exit-gate-ran` standalone.
 #                         An analyser that would not RUN reports UNKNOWN, never clean.
 #
 # Exit 2 iff a BLOCKING check fired. An advisory-only run exits 0, says so, and
@@ -1376,7 +1415,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap sequencer-guard make-refs-tracked container-reap container-orphans stack-claim stack-release stack-status sso-login retro-debt retro-mark loop-gate loop-uptime test-wi wi-append wi-mint wi-project wi-validate wi-migrate item-brief doc-lint process-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated commit-msg-file test-requirement-gate test-requirement-gate-baseline test-requirement-gate-clean board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery deploy-lane
+.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap sequencer-guard make-refs-tracked container-reap container-orphans stack-claim stack-release stack-status sso-login retro-debt retro-mark loop-gate exit-gate-ran loop-uptime test-wi wi-append wi-mint wi-project wi-validate wi-migrate item-brief doc-lint process-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated commit-msg-file test-requirement-gate test-requirement-gate-baseline test-requirement-gate-clean board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery deploy-lane
 
 # --- Viggo-fix UC-W7: Country/Nationality ID remediation (T-SQL) --------------
 # Data-driven, self-building T-SQL remediation script set + its local stand-up

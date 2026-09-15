@@ -39,7 +39,7 @@ state and flow decisions.
 > `wip_limit`; (4) retro debt due (§F8); (5) **awaiting observation** — every item parked in
 > `awaiting_observation` (shipped, green, UNPROVEN) has its liveness predicate RE-RUN on this
 > invocation, so an observation that has now landed BLOCKS for a tester dispatch, and a
-> predicate that cannot be evaluated BLOCKS too (state-graph v9, §12d.3/§17c). It also runs DELEGATED checks: (16) the DEF-ROC-131 **deploy-lane** check (below — the only one whose remedy is a pull), (6) the §17d
+> predicate that cannot be evaluated BLOCKS too (state-graph v9, §12d.3/§17c). It also runs DELEGATED checks: (16) the DEF-ROC-131 **deploy-lane** check (below — the only one whose remedy is a pull), (20) the OI-ROC-025 **exit-gate-ran** check (below — did the §F11 exit gate SPEAK for trunk head), (6) the §17d
 > **test-requirement gate**, (7) the DEFECT-OAG-076 **worktree guard**, and (8) the
 > DEFECT-OAG-091 **container reap** — which does not merely COUNT orphaned per-dispatch
 > containers, it REMOVES them, because a reaper nobody invokes is the same class of failure
@@ -87,6 +87,23 @@ state and flow decisions.
 > 15 tells you the environment is N commits behind (the symptom, advisory); 16 tells you
 > WHICH JOB shut the lane and WHO owns the fix (the cause, blocking). Standalone probe:
 > `make deploy-lane PROJECT=<p> [JSON=1]`.
+>
+> **Check 20 — DID THE ENGINEERING EXIT GATE SPEAK? (OI-ROC-025, §F11.4 clause 1.)** Check 16
+> asks whether what we push can REACH an environment. This asks whether the §F11 exit gate
+> produced a verdict for trunk head **at all**. On 2026-08-29 it stopped running — not red,
+> **UNLOADABLE**, dead in 19s during `Set up job` because a third party moved
+> `CodeAnalysisTools`' floating `v1` tag — and three commits reached trunk ungated, found by a
+> human reading a run list. A gate that did not run is indistinguishable from a gate that
+> passed. **Only NON-EXECUTION blocks**: `NO-VERDICT` is a `-` line and exit 2, because
+> stopping is the remedy (§F8a — every further pull lands more commits on an ungated head); a
+> gate that SPOKE and said **no** is an `!` line, since a red trunk is owned by `make
+> exit-gate` on the commit in hand and blocking here would wedge every agent in a shared tree
+> on somebody else's regression. `PENDING`/`CANNOT-DETERMINE` are `?` lines — an unfinished
+> run is never a pass. It **delegates** to the command the PROJECT declares in
+> `.claude/config/exit-gate-ran/<project>.json` (one implementation, two callers — EXP-047),
+> and a project with **no declaration** gets a `?` NOT-ESTABLISHED line naming the two ways to
+> clear it, never a block and never an error. Standalone, and how it is proven to fire against a real
+> commit: `make exit-gate-ran PROJECT=<p> [SHA=<commit>] [JSON=1]`.
 >
 > **Check 3 has TWO severities (v126 addendum) — Little's Law governs WIP, not backlog depth.** A
 > **WIP-stage** queue over cap (`ready`/`wip`/`rework`) BLOCKS (`-` line, exit 2). A

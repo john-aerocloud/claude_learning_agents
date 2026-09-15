@@ -4372,9 +4372,25 @@ push to main**, at the pushed sha, overriding the manifest pin, **with no `needs
 lane**. True when written; silently false since; and a narrow `*Options` checker sails straight past
 it.
 
-**So the register is substrate-agnostic by construction.** A code constant and a documented
-guarantee are the same defect wearing different clothes, and a mechanism that only catches the first
-one has mistaken the example for the class.
+**And a third arrived the same afternoon, in a third substrate.** `DEF-ROC-196`: the Simulator is
+dead on MSP because `allowedPublishTargets.ts` holds a committed one-entry allowlist — the aas-TEST
+namespace — under a header stating *"There is no ROC production environment: `REQ-ROC-007` puts the
+production queue permanently out of scope."* True when written; reversed by PR #30 on 2026-09-09.
+
+**Three instances, one day, three substrates: a UI constant, a documented guarantee, a security
+allowlist.** No existing gate could see any of them.
+
+**So the register is substrate-agnostic by construction.** A code constant, a documented guarantee
+and an allowlist premise are the same defect wearing different clothes, and a mechanism that only
+catches the first has mistaken the example for the class.
+
+### One warning, because the third instance carries it
+
+When the predicate fires, **the fix is not automatically "widen the thing".** `DEF-ROC-196`'s
+allowlist refusing a production namespace may well be RIGHT — publishing simulated device data into
+the live MSP pipeline would raise real alerts and real Jira tickets. An expired precondition means
+the assumption must be RE-DECIDED, by whoever owns it. Sometimes the answer is that the shortcut was
+correct all along and only its *reporting* was wrong.
 
 ## F12. In a shared tree, a cleanliness check is a SAMPLE, not evidence [v162, ROC]
 

@@ -1,7 +1,7 @@
 ---
-process_version: 178
+process_version: 179
 effective_from: 2026-09-15
-supersedes: v177, v176, v175, v174, v173, v172, v171, v170, v169, v168, v167, v166, v165, v164, v163, v162, v161, v160, v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
+supersedes: v178, v177, v176, v175, v174, v173, v172, v171, v170, v169, v168, v167, v166, v165, v164, v163, v162, v161, v160, v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
 status: active
 ---
 
@@ -4306,6 +4306,75 @@ change cannot act on a worker-budget assertion that only reddens on a 2-core run
 to teaches the reflex this project keeps writing down — that a red means run it again. Keep the
 process tests, keep them strict, and stop putting them between a finished product change and its
 environment.
+
+## F11.7. A DEFERRED SHORTCUT MUST DECLARE ITS EXPIRY AS AN EXECUTABLE PREDICATE [v179, ROC — DEF-ROC-193 gap-closing retro]
+
+**The defect that founded this, and it is worth stating exactly, because everything about it looked
+like good practice.** The rules surface offered its site dropdown from a literal:
+
+```ts
+// The known configured site(s) for RULE authoring (seeded — no list-sites endpoint
+// for the rule surface this slice)
+const SITE_OPTIONS = ["UYD", "BHX"];
+```
+
+That comment is **honest, specific, and was TRUE when written**. It names the shortcut, the reason,
+and the condition under which it ends. It is the kind of comment we ask for. `/api/sites` later
+shipped; the same component began calling `useSites()` **on the line below**; and the dropdown went
+on being fed the literal for weeks, until the owner hit it as a hard block on the only production
+airport ROC has (`DEF-ROC-193`).
+
+### Three things failed, and only the third is the one to fix
+
+1. **The caveat was PROSE, and prose cannot come back negative** (§17c Layer 2). A comment is not a
+   queue. Nothing re-read it when its precondition expired, and nothing could.
+2. **Nobody owned the expiry.** The precondition died in a *different slice*, shipped by a
+   *different agent*, with no link back to the code waiting on it. Asking that agent to remember is
+   asking a human to be a cron job.
+3. **THE TEST SUITE DEFENDED THE DEFECT.** This is the part that makes the class dangerous. The
+   cases asserted the dropdown offered `UYD` and `BHX` — and it did. Coverage was not the gap;
+   coverage was *complicit*. The suite was permanently green **on the defect**, and would have
+   stayed green for ever. A shortcut encoded as an assertion is worse than an untested shortcut,
+   because it now has a guard.
+
+### The rule
+
+**Any deliberate, time-limited shortcut — in code, in config, or in a document — must record its
+retirement condition as a PREDICATE THE GATE EVALUATES, not as a sentence a reader might notice.**
+
+A conforming declaration names three things:
+
+| field | meaning |
+|---|---|
+| **site** | where the shortcut is (file + symbol, or the document claim) |
+| **predicate** | an executable check that becomes TRUE the moment the shortcut must go |
+| **owner item** | the work item that removes it once the predicate fires |
+
+The predicate is re-evaluated on **every** gate run. When it fires, the gate goes **RED and names
+the shortcut**. The declaration lives in a committed register, never in a comment — **comments are
+stripped before matching, deliberately, so that prose cannot satisfy the rule that exists because
+prose failed.**
+
+### The bar the predicate must clear (§F9f applies, without exception)
+
+A predicate that cannot fire proves nothing. Before a row is accepted it must be demonstrated
+**RED against the un-fixed tree** — as `hardcodedOptionLists.def193.test.ts` was, reading red on
+`SITE_OPTIONS` with no change to the checker. "It passes" is not evidence that it works; it is the
+one observation compatible with it doing nothing at all.
+
+### Scope — and this is the correction the same day supplied
+
+The first implementation covered dashboard `*Options` props only. Within the hour, **`DEF-ROC-194`
+turned up the identical class in a different substrate**: README.md and `docs/03-operations.md` both
+state that production `prod-msp` is *"reached only by a separate promotion lane that ships a pinned
+commit sha, not by pushing to main"* — while `deploy-roc-apps.yml` deploys production on **every
+push to main**, at the pushed sha, overriding the manifest pin, **with no `needs:` on the test
+lane**. True when written; silently false since; and a narrow `*Options` checker sails straight past
+it.
+
+**So the register is substrate-agnostic by construction.** A code constant and a documented
+guarantee are the same defect wearing different clothes, and a mechanism that only catches the first
+one has mistaken the example for the class.
 
 ## F12. In a shared tree, a cleanliness check is a SAMPLE, not evidence [v162, ROC]
 

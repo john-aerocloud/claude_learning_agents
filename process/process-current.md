@@ -1,7 +1,7 @@
 ---
-process_version: 177
+process_version: 178
 effective_from: 2026-09-15
-supersedes: v176, v175, v174, v173, v172, v171, v170, v169, v168, v167, v166, v165, v164, v163, v162, v161, v160, v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
+supersedes: v177, v176, v175, v174, v173, v172, v171, v170, v169, v168, v167, v166, v165, v164, v163, v162, v161, v160, v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
 status: active
 ---
 
@@ -4165,6 +4165,72 @@ sweep found three worse ones beside it, and **the reported defect was the least 
 four** — a host-dependent check at least fails somewhere. So when you fix an instance of a
 shape, **sweep for the shape**; and when you find a guard with a conditional around its
 assertion, ask what happens when the condition is always false.
+
+## F9i. DECIDING AN ITEM MUST NOT COST A WIP SLOT [v178, ROC — retro, attacks the constraint]
+
+**The constraint is `reported`: 630.5 days, 35.4% of all gross lead time, more than the next two
+states combined, and it is orchestrator-owned.** Not `blocked` (360.2d / 20.2%), not `reproducing`
+(153.8d / 8.6%). Items are registered and then sit undecided.
+
+### Why-chain, to root
+
+1. **Why is `reported` the top share?** Findings are registered and left undecided.
+2. **Why are they left undecided?** §F9b already says a finding is registered WITH its triage
+   decision, in the same act. Nothing enforces that at write time — registration is forced by the
+   act of finding something, deciding is not.
+3. **Why is deciding not forced?** *Because for a defect it is not free.* The only decision event
+   from `reported` is `triaged`, and `triaged` moves the item to `reproducing`, which `queue_map`
+   puts in **wip**. **So recording a decision consumes a WIP slot.**
+4. **Why does that bite?** WIP is routinely over cap — 18/8 at this cycle's peak. So §F9b (decide
+   on arrival) and loop-gate check 3 (WIP over cap is real harm) are in **direct mechanical
+   opposition** for every defect that arrives while WIP is full. An agent that honours §F9b makes
+   the cap violation worse; one that honours the cap leaves the finding undecided.
+5. **Why has it persisted?** `DEF-ROC-050` has carried this exact facet since **2026-08-18** and
+   been deferred **four times** — not for capacity, but because it edits the state graph and the
+   loop never has a quiet window, since the loop itself is what keeps agents live.
+
+**The open-item type ALREADY HAS the missing state** — `open --(scheduled)--> scheduled`, which
+`queue_map` puts in `ready`, not `wip`. Triaging four open-items cost no WIP this cycle while
+triaging one defect did. The asymmetry is an oversight, not a decision.
+
+### The rule
+
+**A decision is free; only STARTING work costs a slot.** Every type that can be decided before it
+is started gains a post-decision, pre-work state that maps to `ready`/`intake` — never to `wip`.
+For a defect that is `reported --(scheduled)--> scheduled`, with `triaged` reserved for *actually
+beginning* the reproduction.
+
+Until the state graph carries it, the honest workaround stands and must say so in the note: a
+**dated** `defer_until` for a defect you are genuinely not about to start, stating that the defer
+is standing in for a missing `scheduled` state. **Do NOT let the WIP cap become the reason findings
+go undecided** — that inverts the constraint exactly the way check 3 warns about for backlog depth.
+
+### What this does NOT license
+
+- **Not a way to park work.** `scheduled` is decided-and-queued, and the aged-backlog limb still
+  reads it: an item scheduled and never pulled is aging inventory and blocks on age as before.
+- **Not a reason to raise the WIP cap.** The cap is not what is full — this cycle proved that, with
+  11 of 18 slots holding work that was finished and waiting only on a tester dispatch.
+
+## F9j. A DISPATCH IN FLIGHT MUST BE RECORDABLE [v178, ROC — retro]
+
+**Nothing in the substrate records that an item has been dispatched.** So a dispatched item and an
+abandoned one are indistinguishable after the staleness threshold, and the §F9.4 stop hook is
+forced to describe what it sees as *"an idle FACT, not a verdict, because nothing records whether a
+dispatch is in flight"*.
+
+This is not cosmetic. This cycle lost **four agents to a 600-second watchdog** — three in one wave
+— each leaving an item that looked busy while nobody held it. The only reason the difference was
+recoverable is that the same session had done the dispatching; **a fresh session could not have told
+them apart**, and would have had to re-dispatch work already in progress or abandon work already
+dead.
+
+**The rule: a dispatch is an event on the item, fired by the dispatcher at dispatch time**, carrying
+who and when. It restarts the staleness clock honestly because something real happened, and it makes
+the three §F9.4 options decidable from the log rather than from the dispatcher's memory.
+
+**It is NOT a state transition** — a dispatched item has not changed what it *is*, only who is
+holding it. It must not consume a WIP slot on its own, or it re-creates §F9g one level up.
 
 ## F11.6. PRODUCT tests gate delivery; PROCESS tests do not [v177, ROC — owner ruling]
 

@@ -505,14 +505,58 @@ class TestWriteLanesAreEnumerated(unittest.TestCase):
             f"(re-read / rebase / fail-closed): {offenders}. Route them through "
             f"the primitive, or declare them in DECLARED_CREATORS with a reason.")
 
+    # --- the lane enumeration itself, DERIVED rather than listed -------------
+    # Every `cmd_*` subcommand is a lane into this module, and each one must
+    # DECLARE which side of the store it is on. The list used to be three
+    # hardcoded writer names, which is the EXP-121 shape this class exists to
+    # refuse: a control that a new lane can omit by simply not being named. A new
+    # subcommand that writes the store and forgets the lock now fails HERE,
+    # because it appears in neither declaration.
+    STORE_WRITERS = {
+        "cmd_append":  "appends one edge-checked event to an item file",
+        "cmd_project": "re-renders every derived block + the views",
+        "cmd_migrate": "creates item files from the retired CSV substrate",
+    }
+    STORE_READERS = {
+        "cmd_validate":    "reads and reports; writes nothing",
+        "cmd_retro_debt":  "reads the item store + the retro log; writes nothing",
+        "cmd_retro_mark":  "writes the RETRO log, never an item file",
+        "cmd_parts_check": "reads the retro log + the constraint; writes nothing",
+        "cmd_loop_gate":   "reads the store and runs probes; writes nothing",
+    }
+
+    def test_every_subcommand_declares_which_side_of_the_store_it_is_on(self):
+        undeclared = sorted(
+            name for name in self._functions()
+            if name.startswith("cmd_")
+            and name not in self.STORE_WRITERS
+            and name not in self.STORE_READERS)
+        self.assertEqual(
+            undeclared, [],
+            f"these subcommands are declared in neither STORE_WRITERS nor "
+            f"STORE_READERS: {undeclared}. Declare each one with its reason — a "
+            f"lane nobody enumerated is a lane that can omit the lock silently "
+            f"(EXP-121). If it writes item files it must take `store_lock`.")
+
     def test_every_store_writer_takes_the_lock(self):
         fns = self._functions()
-        for name in ("cmd_append", "cmd_project", "cmd_migrate"):
+        for name in sorted(self.STORE_WRITERS):
             self.assertIn(name, fns, f"{name} has been renamed — re-declare the lanes")
             self.assertIn(
                 "store_lock(", fns[name],
                 f"{name} writes the item store but does not take the store lock, "
                 f"so it can interleave with the other writer (DEF-ROC-162)")
+
+    def test_a_declared_reader_does_not_write_item_files(self):
+        fns = self._functions()
+        for name in sorted(self.STORE_READERS):
+            self.assertIn(name, fns, f"{name} has been renamed — re-declare the lanes")
+            for writer in ("write_item_file(", "_atomic_write("):
+                self.assertNotIn(
+                    writer, fns[name],
+                    f"{name} is declared a READER but calls {writer} — either it "
+                    f"is a writer (declare it, and take the store lock) or the "
+                    f"call does not belong there")
 
 
 class TestEventLossIsDETECTABLE(StoreFixture):

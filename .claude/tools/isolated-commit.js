@@ -1164,6 +1164,29 @@ blind to duplication.
   --no-coowned-merge             commit MY blob verbatim over a co-owned file
                                  (reverts a concurrent agent's committed lines)`;
 
+/**
+ * The CO-OWNED MERGE report. Extracted so every report limb is in one place and a
+ * new one cannot be added to half of them.
+ */
+function formatCoownedMerge(m) {
+  return [
+    `CO-OWNED MERGE — ${m.path}`,
+    `  a concurrent agent committed to this file since ${m.since.slice(0, 8)}; your copy predated it.`,
+    `  ${m.linesRecovered} line(s) of THEIRS were merged back in rather than reverted by your commit.`,
+    // The line count is a SET difference and is therefore blind to duplication:
+    // it said "16 line(s)" while 15 KB had been doubled into trunk. The byte
+    // delta is the number that cannot lie about that (AC-142.8).
+    `  size change vs your copy: ${m.byteDelta >= 0 ? '+' : ''}${m.byteDelta} byte(s).`,
+    ...(m.derivedExempted
+      ? ['  (the machine-regenerated DERIVED block was exempt; yours was kept verbatim)']
+      : []),
+    m.writtenBack === false
+      ? '  (the working-tree copy was NOT rewritten — it changed again while this commit ran)'
+      : '  (the working tree now holds the union, so the next agent is not stale)',
+    '',
+  ].join('\n');
+}
+
 function main(argv) {
   const opts = parseArgv(argv);
   if (opts.error) {
@@ -1182,25 +1205,7 @@ function main(argv) {
     const res = isolatedCommit(opts);
     // A merge that is not reported is a merge nobody audits — and this one changes
     // what lands relative to what the caller staged, so it is never silent.
-    for (const m of res.coownedMerges || [])
-      process.stderr.write(
-        [
-          `CO-OWNED MERGE — ${m.path}`,
-          `  a concurrent agent committed to this file since ${m.since.slice(0, 8)}; your copy predated it.`,
-          `  ${m.linesRecovered} line(s) of THEIRS were merged back in rather than reverted by your commit.`,
-          // The line count is a SET difference and is therefore blind to duplication:
-          // it said "16 line(s)" while 15 KB had been doubled into trunk. The byte
-          // delta is the number that cannot lie about that (AC-142.8).
-          `  size change vs your copy: ${m.byteDelta >= 0 ? '+' : ''}${m.byteDelta} byte(s).`,
-          ...(m.derivedExempted
-            ? ['  (the machine-regenerated DERIVED block was exempt; yours was kept verbatim)']
-            : []),
-          m.writtenBack === false
-            ? '  (the working-tree copy was NOT rewritten — it changed again while this commit ran)'
-            : '  (the working tree now holds the union, so the next agent is not stale)',
-          '',
-        ].join('\n'),
-      );
+    for (const m of res.coownedMerges || []) process.stderr.write(formatCoownedMerge(m));
     if (opts.json) process.stdout.write(`${JSON.stringify(res)}\n`);
     else
       process.stdout.write(

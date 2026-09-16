@@ -103,6 +103,11 @@ class _Replay(Base):
         evs = [{"ts": "2026-08-01T00:00:00Z", "event": "reported", "agent": "orchestrator"}]
         if upto in ("reproducing", "fixing", "validating"):
             evs.append({"ts": "2026-08-02T00:00:00Z", "event": "triaged", "agent": "orchestrator"})
+            # state-graphs v13 (OI-ROC-029): `triaged` is the DECISION and lands in
+            # `scheduled`; `pulled` is the dispatch that starts the work. A fixture
+            # that wants an item genuinely IN `reproducing` must record the dispatch,
+            # which is the whole point of the split.
+            evs.append({"ts": "2026-08-02T01:00:00Z", "event": "pulled", "agent": "orchestrator"})
         if upto in ("fixing", "validating"):
             evs.append({"ts": "2026-08-03T00:00:00Z", "event": "confirmed", "agent": "engineer"})
         if upto == "validating":

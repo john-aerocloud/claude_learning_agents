@@ -5496,8 +5496,14 @@ class TestStalledWork(Base):
                 {"ts": _dt(day, hour), "event": "confirmed", "agent": "engineer"}]
 
     def _reproducing_defect(self, day, hour=0):
+        # state-graphs v13 (OI-ROC-029): `reported, triaged` is DECIDED, NOT STARTED —
+        # it folds to `scheduled`, not `reproducing`. This fixture wants work genuinely
+        # ABANDONED IN FLIGHT, so it must record the dispatch. The old two-event shape
+        # was itself the defect in miniature: it read "an engineer is mid-reproduction"
+        # off a log in which no engineer had ever been dispatched.
         return [{"ts": _dt(day, 0), "event": "reported", "agent": "orchestrator"},
-                {"ts": _dt(day, hour), "event": "triaged", "agent": "orchestrator"}]
+                {"ts": _dt(day, hour), "event": "triaged", "agent": "orchestrator"},
+                {"ts": _dt(day, hour), "event": "pulled", "agent": "orchestrator"}]
 
     def _deploying_uc(self, day, hour=0):
         return self._building_at(day) + [

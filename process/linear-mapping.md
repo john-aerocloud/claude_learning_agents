@@ -58,6 +58,12 @@ their children per the graph's `bubble` rule.
 | `done` | Done |
 | `cancelled` | Cancelled → else Canceled (US spelling is what this workspace has) |
 
+(State-graphs v13 / OI-ROC-029 adds `scheduled` to the DEFECT table. `triaged` records
+the §F9b decision and lands there; `pulled` is the dispatch that starts the work. It maps
+to **Ready**, never In Progress — the same meaning `scheduled` has always had for an
+open-item. Rendering a triaged-but-undispatched defect as started is the board half of the
+defect this change fixes: eleven WIP slots reading as work in flight with zero agents.)
+
 (The dev-then-prod validation states `dev-validating`/`prod-deploying`/`prod-validating`
 come from the EXP-101/§11b state graph; before v100 they were unmapped and fell back to
 Backlog, mislabelling active validation work.)
@@ -67,6 +73,7 @@ Backlog, mislabelling active validation work.)
 | `derived.state` | Board status |
 |---|---|
 | `reported` | Backlog |
+| `scheduled` | Ready (decided, NOT started — never In Progress) |
 | `reproducing` | In Progress |
 | `fixing` | In Progress |
 | `validating` | In Review |

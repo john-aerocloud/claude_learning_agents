@@ -731,6 +731,13 @@ STATE_STATUS = {
     },
     "defect": {
         "reported": ["Backlog"],
+        # [state-graphs v13, OI-ROC-029] `triaged` is the DECISION and lands here;
+        # `pulled` is the dispatch that starts the work. So a triaged defect is
+        # DECIDED AND NOT STARTED — the same board meaning `open-item`'s
+        # `scheduled` has carried since v8, and deliberately NOT "In Progress":
+        # rendering it as started is precisely the false "someone is on it" that
+        # cost eleven WIP slots with zero agents running.
+        "scheduled": ["Ready", "Todo", "Backlog"],
         "reproducing": ["In Progress"],
         "fixing": ["In Progress"],
         "validating": ["In Review"],

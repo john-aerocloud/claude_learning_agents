@@ -60,9 +60,9 @@
  *      between here and the commit object); nothing was committed
  *   7  CO-OWNED CONFLICT — a concurrent agent committed an OVERLAPPING change to a
  *      file you both own and it cannot be merged automatically; nothing committed.
- *      NEVER your own previous commit to that file: exactly-one-commit's-content
- *      missing + the same work item named + the id not naming the path = a
- *      CONTINUATION, which commits and is reported (DEF-ROC-189)
+ *      NEVER your own previous commit to that file. Exactly one commit's content
+ *      missing, that commit naming the SAME work item, and the id not naming the
+ *      path, is a CONTINUATION: it commits, and the decision is printed (DEF-ROC-189)
  *
  * THE MESSAGE IS THE SECOND SHARED-MUTABLE-STATE PROBLEM, and it is not in git
  * (OI-CO-OWNED-LEDGER-FILES-CROSS-ATTRIBUTE-WORK-AND-ONE-CROSSED-A-COMMIT-MESSAGE).

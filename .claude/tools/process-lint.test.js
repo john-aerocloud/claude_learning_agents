@@ -360,12 +360,22 @@ test('AC-L.14 NON-VACUITY the queue codomain is read from state-graphs.json, not
 });
 
 test('AC-L.15 NON-VACUITY C5 scans real policy files in the real repo', () => {
+  // The floor is ONE, not two, and the reason is the DEF-ROC-213 class: every
+  // `work/<project>/` is a gitignored nested repo (v50), so a CI checkout contains
+  // NONE of them. Only `work/_TEMPLATE/queues/policy.csv` is tracked — and it is the
+  // file that matters most anyway, being what every new project is seeded from. An
+  // assertion of >= 2 passes on a developer's machine and fails in CI for a reason
+  // that has nothing to do with the code, which is a false red; >= 1 still proves the
+  // scan is real, because zero is the vacuous answer this pins against.
   const root = path.resolve(__dirname, '..', '..');
   const { info } = lint.lint(root);
   const scanned = info.find((i) => /^C5 scanned /.test(i));
   assert.ok(scanned, `no C5 scan line in info: ${info.join(' | ')}`);
   const n = Number(/^C5 scanned (\d+) /.exec(scanned)[1]);
-  assert.ok(n >= 2, `C5 scanned ${n} policy file(s) — a check with nothing to check is not clean`);
+  assert.ok(n >= 1, `C5 scanned ${n} policy file(s) — a check with nothing to check is not clean`);
+  assert.ok(fs.existsSync(path.join(root, 'work', '_TEMPLATE', 'queues', 'policy.csv')),
+    'work/_TEMPLATE/queues/policy.csv is TRACKED and must be in every checkout — it is '
+    + 'the seed every new project inherits, so an orphan there propagates');
 });
 
 test('AC-L.16 a RETIRED archive entry still declares its id — two real forms', () => {

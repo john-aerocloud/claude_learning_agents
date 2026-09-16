@@ -50,6 +50,17 @@ Every state maps to:
   or `external` (blocked on a human/third party). This is the basis for attributing
   GROSS LEAD TIME to each part of the process.
 
+**A DECISION IS FREE; ONLY STARTING WORK COSTS A SLOT** [§F9i, state-graph v13,
+OI-ROC-029]. No flow type may move from its INITIAL state straight into a `wip` state:
+every type has a post-decision, pre-work state mapping to `ready`/`intake`. So for a
+defect, `triaged` records the §F9b decision and lands in `scheduled` (queue `ready`,
+owner `queue`) — it takes no slot — and **`pulled` is the dispatch that costs the slot**,
+the same event `use-case` and `open-item` use and the one that carries `OWNER=`. Fire
+`pulled` when you brief an agent, not before; `confirmed` is also a start, since it moves
+to `fixing`. This is enforced by `process-lint` **C6**, not by remembering it: recording a
+decision used to cost a slot, which put §F9b and the WIP cap in direct opposition and
+blocked the loop at wip 11/8 with ZERO agents running.
+
 Wanting a transition that is not in the graph is **not** something an agent may just
 do: propose an amendment to `state-graphs.json` WITH A REASON — a process experiment
 (`EXP-NNN`) routed through the retro/version-bump gate. Edit that file only via that gate.

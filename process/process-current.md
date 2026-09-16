@@ -3085,6 +3085,35 @@ If a cap names a queue nothing maps to, or a knob cites an experiment that does 
 **remove the declaration or wire it** — the same cycle. Leaving it reads as governance and
 is worse than an admitted gap, because it answers the question nobody then re-asks.
 
+**MECHANISED, and the rule needed it: this exact rule had been written down and the two
+declarations it names survived anyway** [v180, `DEF-ROC-119`, 2026-09-16]. `process-lint`
+**C5** now fails the build when a `work/<project>/queues/policy.csv` names a queue outside
+`state-graphs.json`'s `queue_map` codomain, or cites an `EXP-` id present in neither the
+registry nor the archive. Both live orphans are gone: the `deploy` rows were **deleted, not
+wired**, and the template's `wip` knobs re-attributed from the non-existent `EXP-ROC-005` to
+`EXP-ROC-007`, the active experiment that actually set a WIP-stage width.
+
+**Why `deploy` was deleted rather than wired**, because "make it enforce" was the tempting
+answer and it is the wrong one. `EXP-022`, which introduced the uniform per-queue buffer
+model that gave `deploy` a queue, was **KILLED** — superseded by v82, where a queue is
+DERIVED from state, not declared; the rows were that dead model's residue. Wiring it means
+re-pointing `deploying`/`prod-deploying` at a `deploy` queue, which would **remove real
+in-flight work from the `wip` count** to buy a second cap. And the serialisation it claimed
+is already enforced where it binds — the workflow's `concurrency:` group, at the push —
+which `cicd.md` had *already said in as many words* ("enforce it in the workflow's
+`concurrency:` group, NOT via a hand-maintained `deploy.wip_limit`"). **The declaration
+contradicted its own declared owner's instructions for months, because nothing compared the
+two.** A loop-gate cap acts at PULL time: all it could ever do is refuse to START work
+because something is deploying — idling the constraint to protect a stage that self-
+serialises in minutes and, since `DEF-ROC-194`, is not a pulled unit of work at all.
+
+**The measured harms were never WIP harms.** Nine commits undeployed, and a superseded run
+leaving no verdict, are OBSERVATION failures; no cap touches either. They have their own
+mechanisms — `loop-gate` check 15 `deploy-staleness` (the host's own `buildSha` against
+trunk) and `deploy-lane.js` (a per-commit verdict). **Ask what the constraint IS before
+re-justifying a number; a number nobody has re-justified is decision debt in a config's
+clothes.**
+
 ### F5e.3 A green from a shared tree is not a green
 
 Every gate here scans the working tree, so with concurrent agents it reports the **union of

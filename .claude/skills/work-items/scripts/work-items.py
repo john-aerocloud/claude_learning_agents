@@ -4068,9 +4068,34 @@ def _defer_is_decision(item, entered, now, min_days=DEFAULT_MIN_DEFER_DAYS):
 POLICY_DEFAULTS = {
     "intake": {"min_items": 2, "wip_limit": 10},
     "ready": {"min_items": 3, "wip_limit": 4},
-    "deploy": {"min_items": 0, "wip_limit": 1},
     "rework": {"min_items": 0, "wip_limit": 2},
 }
+# NO `deploy` ROW HERE, AND THAT IS A DECISION, NOT AN OMISSION [DEF-ROC-119, 2026-09-16].
+# `deploy,wip_limit,1` was declared here and in every policy.csv, and NO state maps to a
+# `deploy` queue -- `queue_map`'s codomain is intake/ready/wip/waiting/rework/null, and
+# `deploying`/`prod-deploying` map to `wip`. Check 3 iterates the queues items are actually
+# IN, so the cap could never fire: a phantom control, and a phantom control is worse than
+# none because it reads as one (SSF5e). It was DELETED rather than wired, on four grounds:
+#   1. EXP-022, which introduced the uniform per-queue buffer model that gave `deploy` its
+#      own queue, was KILLED -- superseded by v82, where a queue is DERIVED from state and
+#      not declared. The rows are that dead model's residue; nobody swept them.
+#   2. Wiring it means re-pointing `deploying`/`prod-deploying` at a `deploy` queue, which
+#      REMOVES real in-flight work from the `wip` count to buy a second cap. That trades a
+#      measure that works for one that duplicates something else.
+#   3. Deploy serialisation is already enforced where it binds -- the WORKFLOW's
+#      `concurrency:` group, at the push. cicd.md already says so in as many words
+#      ("enforce it in the workflow's `concurrency:` group, NOT via a hand-maintained
+#      `deploy.wip_limit`"), and the rows contradicted their own owner's instructions for
+#      months because nothing compared the two. A loop-gate cap acts at PULL time: it can
+#      only refuse to START work because something is deploying, idling the constraint
+#      (engineers) to protect a stage that self-serialises in minutes.
+#   4. Since DEF-ROC-194 prod deploys automatically off a green test lane, so there is no
+#      pulled unit of work called "a deploy" for a WIP limit to cap.
+# The harms this item measured -- nine commits undeployed, a superseded run leaving no
+# verdict -- are OBSERVATION failures and a cap touches neither. They have their own
+# mechanisms: loop-gate check 15 `deploy-staleness` (deployed buildSha vs trunk) and
+# `deploy-lane.js` (a per-commit verdict). The durable guard against the CLASS is
+# process-lint C5, which fails the build on any queue no state maps to.
 # Candidate trunk refs, in order, for the push-state check.
 TRUNK_CANDIDATES = ("origin/HEAD", "origin/main", "origin/master")
 

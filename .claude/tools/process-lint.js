@@ -41,6 +41,15 @@
  *       so it stayed prose — and §25a's own text records that the 3-strikes rule it protects
  *       "has never once fired in its life".
  *
+ *   C5  every QUEUE named in a `work/<project>/queues/policy.csv` is REACHABLE from the queue
+ *       map in process/machinery/state-graphs.json, and every EXPERIMENT a knob cites
+ *       exists in the registry or the archive. `deploy,wip_limit,1` was declared in
+ *       every project and in the _TEMPLATE, and NO state maps to a `deploy` queue — the
+ *       queue can never have a member, so the declared serialisation was unenforceable
+ *       BY CONSTRUCTION and read as a control for months (DEF-ROC-119). The same day,
+ *       three live `wip.*` knobs cited `EXP-ROC-005`, which exists nowhere, so the limit
+ *       in force had never been scoreable. Two orphan declarations, one class.
+ *
  * What this tool does NOT do: score rows, or block on a row past its horizon still at 0/N.
  * That needs the item event stream and belongs in `loop-gate` (still owed, §25a).
  *
@@ -205,6 +214,152 @@ function checkExperiments(text) {
   return { violations, info };
 }
 
+
+// --- queues/policy.csv orphan declarations (C5, DEF-ROC-119) ----------------
+
+// Reserved pseudo-queues: rows read by work-items.py that are NOT item queues and so
+// have no state mapping by design. `_global` carries repo-wide knobs
+// (`max_backlog_age_days`). Keep this list SHORT and justified — it is the ignore
+// list, and widening it to move a number is how this check would be defeated.
+const RESERVED_POLICY_QUEUES = new Set(['_global']);
+
+/** Non-null values of state-graphs.json's queue_map: the queues an item can be IN. */
+function reachableQueues(graphsText) {
+  const map = (JSON.parse(graphsText) || {}).queue_map || {};
+  const out = new Set();
+  for (const [state, q] of Object.entries(map)) {
+    if (state.startsWith('_')) continue;      // `_comment`
+    if (typeof q === 'string' && q) out.add(q);
+  }
+  return out;
+}
+
+/**
+ * Every `EXP-...` id this repo has ever registered: the live registry's rows AND the
+ * archive's. An ARCHIVED experiment is a real experiment — a knob citing one is
+ * scoreable against a recorded result, and failing those would make C5 unusable on the
+ * first run, which is how a gate gets switched off instead of obeyed. The archive read
+ * accepts the three STRUCTURAL forms an archived id takes (below) and NOT a bare prose
+ * mention: the id this check exists to catch, `EXP-ROC-005`, is named inside two OTHER
+ * experiments' archived rows, so "mentioned anywhere" would pass it.
+ */
+function knownExperimentIds(registryText, archiveText) {
+  const ids = new Set();
+  if (registryText) {
+    const { rows, sections } = parseRegistry(registryText);
+    for (const e of [...rows, ...sections]) ids.add(e.id);
+  }
+  if (archiveText) {
+    for (const re of ARCHIVE_DECLARATION_FORMS) {
+      for (const m of archiveText.matchAll(re)) ids.add(m[1]);
+    }
+  }
+  return ids;
+}
+
+// The three STRUCTURAL forms an id takes in experiments-archive.md. A retired row is
+// re-quoted INDENTED under its retirement bullet, so `^|` alone misses EXP-022 — the
+// most-cited id in every policy.csv — and reports it as existing nowhere. Prose mentions
+// are deliberately NOT a form: EXP-ROC-005 appears inside EXP-ROC-007's and EXP-ROC-008's
+// archived rows, and accepting a mention would pass the exact id this check was built for.
+const ARCHIVE_DECLARATION_FORMS = [
+  /^\|\s*(EXP-[A-Za-z0-9-]+)\s*\|/gm,                          // a live-format archived row
+  /^\s*-\s*Original row:\s*\|\s*(EXP-[A-Za-z0-9-]+)\s*\|/gm,  // a re-quoted retired row
+  /^\s*-\s*\*\*(EXP-[A-Za-z0-9-]+)\s*[\u2014-]/gm,              // a retirement entry
+];
+
+/** Parse a policy.csv into [{queue, param, experiment, line}]. */
+function parsePolicy(text) {
+  const lines = text.split('\n');
+  const header = (lines[0] || '').split(',').map((c) => c.trim());
+  const col = (name) => header.indexOf(name);
+  const qi = col('queue'); const pi = col('param'); const ei = col('experiment');
+  const out = [];
+  if (qi === -1) return out;
+  for (let i = 1; i < lines.length; i++) {
+    if (!lines[i].trim()) continue;
+    const cells = lines[i].split(',').map((c) => c.trim());
+    const queue = cells[qi];
+    if (!queue) continue;
+    out.push({
+      queue, param: pi === -1 ? '' : (cells[pi] || ''),
+      experiment: ei === -1 ? '' : (cells[ei] || ''), line: i + 1,
+    });
+  }
+  return out;
+}
+
+/** `work/<project>/queues/policy.csv` for every project dir present, _TEMPLATE included. */
+function policyFiles(root) {
+  const workDir = path.join(root, 'work');
+  if (!fs.existsSync(workDir)) return [];
+  const out = [];
+  for (const name of fs.readdirSync(workDir).sort()) {
+    const p = path.join(workDir, name, 'queues', 'policy.csv');
+    if (fs.existsSync(p)) out.push({ project: name, rel: path.join('work', name, 'queues', 'policy.csv'), path: p });
+  }
+  return out;
+}
+
+function checkPolicyDeclarations(root, graphsText, registryText, archiveText) {
+  const violations = [];
+  const info = [];
+  const files = policyFiles(root);
+  if (files.length === 0) {
+    // Nothing declared anywhere: nothing can be orphaned. Reported so a zero is
+    // VISIBLE — "found nothing to check" must never read the same as "clean".
+    info.push('C5 scanned 0 policy file(s) — no work/*/queues/policy.csv exists in this root');
+    return { violations, info };
+  }
+
+  let queues = null;
+  if (graphsText === null) {
+    violations.push(
+      'C5 NOT ESTABLISHED — process/machinery/state-graphs.json is missing, so the set of '
+      + `queues an item can actually be IN cannot be read, while ${files.length} policy file(s) `
+      + 'declare caps against it. Remedy: restore the queue map; a cap checked against no map '
+      + 'is exactly the unenforceable declaration this check exists to find.');
+    return { violations, info };
+  }
+  try {
+    queues = reachableQueues(graphsText);
+  } catch (e) {
+    violations.push(`C5 NOT ESTABLISHED — process/machinery/state-graphs.json will not parse (${e.message}). Remedy: fix the JSON; nothing was checked, which is not the same as clean.`);
+    return { violations, info };
+  }
+
+  const known = knownExperimentIds(registryText, archiveText);
+  let rowCount = 0;
+  for (const f of files) {
+    const rows = parsePolicy(fs.readFileSync(f.path, 'utf8'));
+    rowCount += rows.length;
+    const seenQueue = new Set();
+    const seenExp = new Set();
+    for (const r of rows) {
+      if (!RESERVED_POLICY_QUEUES.has(r.queue) && !queues.has(r.queue) && !seenQueue.has(r.queue)) {
+        seenQueue.add(r.queue);
+        violations.push(
+          `C5 ${f.rel}: queue \`${r.queue}\` (first at line ${r.line}) is a PHANTOM — `
+          + 'no state maps to it in process/machinery/state-graphs.json, so it can never hold '
+          + 'a member and every knob declared on it is unenforceable BY CONSTRUCTION. Reachable '
+          + `queues: ${[...queues].sort().join(', ')}. Remedy: either map a state to \`${r.queue}\` `
+          + 'in the queue map so the declaration can bind, or DELETE these rows — a cap that '
+          + 'cannot bind is worse than no cap, because it reads as a control (DEF-ROC-119).');
+      }
+      if (r.experiment && /^EXP-/.test(r.experiment) && !known.has(r.experiment) && !seenExp.has(r.experiment)) {
+        seenExp.add(r.experiment);
+        violations.push(
+          `C5 ${f.rel}: knob \`${r.queue}.${r.param}\` (line ${r.line}) cites \`${r.experiment}\`, `
+          + 'which has no row in process/experiments.md OR process/experiments-archive.md — so the '
+          + 'limit in force has never been scoreable against anything. Remedy: register the '
+          + 'experiment, or re-attribute the knob to the experiment that actually set it.');
+      }
+    }
+  }
+  info.push(`C5 scanned ${files.length} policy file(s), ${rowCount} declaration(s), against ${queues.size} reachable queue(s) and ${known.size} known experiment id(s)`);
+  return { violations, info };
+}
+
 // --- driver ---------------------------------------------------------------
 
 function lint(root) {
@@ -233,6 +388,15 @@ function lint(root) {
     violations.push(...r.violations);
     info.push(...r.info);
   }
+
+  const c5 = checkPolicyDeclarations(
+    root,
+    readOptional('process/machinery/state-graphs.json'),
+    exps,
+    readOptional('process/experiments-archive.md'));
+  violations.push(...c5.violations);
+  info.push(...c5.info);
+
   return { violations, info };
 }
 
@@ -266,4 +430,6 @@ function main(argv) {
 // caught this file doing exactly that, on its first run.
 if (require.main === module) process.exitCode = main(process.argv.slice(2));
 
-module.exports = { checkHeadingVersion, parseRegistry, indexById, checkExperiments, lint, FROZEN_LEGACY_IDS, PER_PROJECT_CAP };
+module.exports = { checkHeadingVersion, parseRegistry, indexById, checkExperiments,
+  reachableQueues, knownExperimentIds, parsePolicy, policyFiles, checkPolicyDeclarations,
+  lint, FROZEN_LEGACY_IDS, PER_PROJECT_CAP, RESERVED_POLICY_QUEUES, ARCHIVE_DECLARATION_FORMS };

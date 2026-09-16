@@ -2280,7 +2280,6 @@ class TestLoopGate(Base):
         # the shipped OagEventSource defaults
         self._policy([("intake", "min_items", 2), ("intake", "wip_limit", 10),
                       ("ready", "min_items", 3), ("ready", "wip_limit", 4),
-                      ("deploy", "min_items", 0), ("deploy", "wip_limit", 1),
                       ("rework", "min_items", 0), ("rework", "wip_limit", 2)])
 
     def _ready_uc(self, iid, day=29):
@@ -2867,7 +2866,10 @@ class TestLoopGate(Base):
         kinds = {r.split(",")[0]: r.split(",")[2] for r in rows
                  if r.split(",")[1] == "kind"}
         self.assertEqual(kinds.get("intake"), "backlog", kinds)
-        for q in ("ready", "rework", "deploy"):
+        # `deploy` is deliberately ABSENT (DEF-ROC-119): no state maps to a `deploy`
+        # queue, so every knob declared on it was unenforceable by construction. `wip`
+        # is the queue `deploying`/`prod-deploying` actually land in.
+        for q in ("ready", "rework", "wip"):
             self.assertEqual(kinds.get(q), "wip", f"{q}: {kinds}")
         # and the header/column set is UNCHANGED — `kind` is a new row, not a column
         header = open(path, encoding="utf-8").readline().strip()

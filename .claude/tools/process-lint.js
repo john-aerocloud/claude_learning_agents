@@ -126,6 +126,22 @@ function parseRegistry(text) {
   return { rows, sections };
 }
 
+/**
+ * Index `entries` ({id, line}) by id, first occurrence wins, reporting every repeat
+ * through `onDuplicate(id, line, firstLine)`. C2's two duplicate checks are the same
+ * operation over two populations, and C5 needs the same notion of "an id this registry
+ * declares" — one place, so the three can never disagree about what a declaration is.
+ */
+function indexById(entries, onDuplicate) {
+  const seen = new Map();
+  for (const e of entries) {
+    if (seen.has(e.id)) {
+      if (onDuplicate) onDuplicate(e.id, e.line, seen.get(e.id));
+    } else seen.set(e.id, e.line);
+  }
+  return seen;
+}
+
 function projectOf(row) {
   const namespaced = /^EXP-([A-Za-z][A-Za-z0-9]*)-\d+$/.exec(row.id);
   if (namespaced) return canonicalProject(namespaced[1]);
@@ -146,18 +162,10 @@ function checkExperiments(text) {
   }
 
   // C2a — no id defined twice.
-  const seenRow = new Map();
-  for (const r of rows) {
-    if (seenRow.has(r.id)) {
-      violations.push(`C2 duplicate registry row \`${r.id}\` at line ${r.line} (already defined at line ${seenRow.get(r.id)})`);
-    } else seenRow.set(r.id, r.line);
-  }
-  const seenSection = new Map();
-  for (const s of sections) {
-    if (seenSection.has(s.id)) {
-      violations.push(`C2 duplicate \`## ${s.id}\` section at line ${s.line} (already defined at line ${seenSection.get(s.id)}) — a continuation belongs in the row's scoring notes, not a second section under the same id`);
-    } else seenSection.set(s.id, s.line);
-  }
+  const seenRow = indexById(rows, (id, line, firstLine) =>
+    violations.push(`C2 duplicate registry row \`${id}\` at line ${line} (already defined at line ${firstLine})`));
+  indexById(sections, (id, line, firstLine) =>
+    violations.push(`C2 duplicate \`## ${id}\` section at line ${line} (already defined at line ${firstLine}) — a continuation belongs in the row's scoring notes, not a second section under the same id`));
 
   // C2b — every section has a row.
   for (const s of sections) {
@@ -202,13 +210,18 @@ function checkExperiments(text) {
 function lint(root) {
   const violations = [];
   const info = [];
-  const read = (rel) => {
+  // OPTIONAL read: null when the file is simply absent. A file whose absence is a
+  // FINDING goes through `read` below, which says so.
+  const readOptional = (rel) => {
     const p = path.join(root, rel);
-    if (!fs.existsSync(p)) {
+    return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null;
+  };
+  const read = (rel) => {
+    const text = readOptional(rel);
+    if (text === null) {
       violations.push(`C0 missing ${rel} (nothing was checked, which is not the same as clean)`);
-      return null;
     }
-    return fs.readFileSync(p, 'utf8');
+    return text;
   };
 
   const proc = read('process/process-current.md');
@@ -253,4 +266,4 @@ function main(argv) {
 // caught this file doing exactly that, on its first run.
 if (require.main === module) process.exitCode = main(process.argv.slice(2));
 
-module.exports = { checkHeadingVersion, parseRegistry, checkExperiments, lint, FROZEN_LEGACY_IDS, PER_PROJECT_CAP };
+module.exports = { checkHeadingVersion, parseRegistry, indexById, checkExperiments, lint, FROZEN_LEGACY_IDS, PER_PROJECT_CAP };

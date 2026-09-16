@@ -223,9 +223,27 @@ function checkExperiments(text) {
 // list, and widening it to move a number is how this check would be defeated.
 const RESERVED_POLICY_QUEUES = new Set(['_global']);
 
+/**
+ * Parse state-graphs.json once, for every check that reads it.
+ *
+ * The file is read by MORE THAN ONE check (C5 reads `queue_map`, C6 reads `types`
+ * against it), and each of them owes the same two answers when it will not parse:
+ * nothing was checked, and that is NOT the same as clean. Parsing it in one place
+ * keeps that verdict single-sourced rather than re-derived per check.
+ *
+ * Returns `{ graphs, error }` — exactly one of the two is set.
+ */
+function parseGraphs(graphsText) {
+  try {
+    return { graphs: JSON.parse(graphsText) || {}, error: null };
+  } catch (e) {
+    return { graphs: null, error: e.message };
+  }
+}
+
 /** Non-null values of state-graphs.json's queue_map: the queues an item can be IN. */
-function reachableQueues(graphsText) {
-  const map = (JSON.parse(graphsText) || {}).queue_map || {};
+function reachableQueues(graphs) {
+  const map = (graphs || {}).queue_map || {};
   const out = new Set();
   for (const [state, q] of Object.entries(map)) {
     if (state.startsWith('_')) continue;      // `_comment`
@@ -321,12 +339,12 @@ function checkPolicyDeclarations(root, graphsText, registryText, archiveText) {
       + 'is exactly the unenforceable declaration this check exists to find.');
     return { violations, info };
   }
-  try {
-    queues = reachableQueues(graphsText);
-  } catch (e) {
-    violations.push(`C5 NOT ESTABLISHED — process/machinery/state-graphs.json will not parse (${e.message}). Remedy: fix the JSON; nothing was checked, which is not the same as clean.`);
+  const { graphs, error } = parseGraphs(graphsText);
+  if (error) {
+    violations.push(`C5 NOT ESTABLISHED — process/machinery/state-graphs.json will not parse (${error}). Remedy: fix the JSON; nothing was checked, which is not the same as clean.`);
     return { violations, info };
   }
+  queues = reachableQueues(graphs);
 
   const known = knownExperimentIds(registryText, archiveText);
   let rowCount = 0;

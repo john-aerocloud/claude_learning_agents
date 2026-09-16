@@ -378,6 +378,84 @@ function checkPolicyDeclarations(root, graphsText, registryText, archiveText) {
   return { violations, info };
 }
 
+// --- a decision must not cost a WIP slot (C6, OI-ROC-029 / process §F9i) ----
+//
+// THE RECORDED INSTANCE (2026-09-16). `make loop-gate PROJECT=ROC` reported BLOCKED
+// at `wip depth 11 > wip_limit 8` while `ListAgents` showed ZERO agents running.
+// Eight of the eleven occupied slots were defects whose entire event log was
+// `reported, triaged` — no engineer had ever been dispatched to one.
+//
+// THE SHAPE THIS READS, and it is the general form rather than that one bug: the
+// `defect` type had exactly ONE edge out of its initial state,
+// `reported --(triaged)--> reproducing`, and `reproducing` is in the `wip` queue. So
+// RECORDING A DECISION AND STARTING WORK WERE THE SAME ACT. Loop-gate check 17
+// (`undecided-arrival`, §F9b) BLOCKS the pull on any finding registered this cycle
+// carrying no decision and names `--event triaged` as the remedy; check 3 BLOCKS on
+// wip over cap. Two blocking gates in direct mechanical opposition, and an agent
+// that honoured either one violated the other.
+//
+// WHY A LINT AND NOT A CONVENTION. There was nothing for the orchestrator to
+// remember: it took the only edge the graph offered, on the instruction the gate
+// printed. A rule of the form "fire it later" would have to be re-remembered by
+// every agent and every future type, and §F9g is explicit that a note is not a
+// queue. The SHAPE is mechanically visible in the committed graph, so it is checked
+// there — including for types that do not exist yet.
+//
+// Deliberately narrow: only the FIRST move off the initial state, only `flow` types
+// (an aggregate has no event stream of its own; its state bubbles from children),
+// and self-edges are exempt because an annotation leaves the item exactly where it
+// was and can therefore take no slot.
+function checkDecisionIsFree(graphsText) {
+  const violations = [];
+  const info = [];
+  if (graphsText === null) {
+    // No graph in this root means no types, so no type can hold the shape. Reported
+    // as a VISIBLE ZERO rather than silently, the same way C5 reports scanning no
+    // policy files — "found nothing to check" must never read the same as "clean".
+    // A graph that is MISSING where one is REQUIRED is already C5's violation (it
+    // fires the moment any policy.csv declares a cap against it), so this is not a
+    // hole, it is the same fact reported once.
+    info.push('C6 checked 0 flow type(s) — no process/machinery/state-graphs.json in this root');
+    return { violations, info };
+  }
+  const { graphs, error } = parseGraphs(graphsText);
+  if (error) {
+    violations.push(
+      `C6 NOT ESTABLISHED — process/machinery/state-graphs.json will not parse (${error}). `
+      + 'Remedy: fix the JSON; nothing was checked, which is not the same as clean.');
+    return { violations, info };
+  }
+  const queueOf = (state) => (graphs.queue_map || {})[state];
+  const types = graphs.types || {};
+  let checked = 0;
+  for (const itype of Object.keys(types).sort()) {
+    const def = types[itype] || {};
+    if (def.kind !== 'flow') continue;          // an aggregate bubbles; it fires nothing
+    checked += 1;
+    const initial = def.initial;
+    for (const t of def.transitions || []) {
+      if (t.from !== initial) continue;
+      if (t.to === initial) continue;           // a self-edge is an annotation
+      if (queueOf(t.to) !== 'wip') continue;
+      violations.push(
+        `C6 ${itype}: \`${initial} --(${t.event})--> ${t.to}\` takes the item straight `
+        + 'from its INITIAL state into the `wip` queue, so RECORDING A DECISION COSTS A '
+        + 'WIP SLOT. That puts §F9b (a finding is registered WITH its triage decision) '
+        + 'and loop-gate check 3 (wip over cap is real harm) in direct mechanical '
+        + 'opposition: honour one and you violate the other. Measured consequence '
+        + '(OI-ROC-029, 2026-09-16): wip read 11/8 and BLOCKED the loop with ZERO agents '
+        + 'running, eight slots held by items nobody had ever been dispatched to, and '
+        + 'those items accrued `engineer` time in by_owner that no engineer ever spent. '
+        + `Remedy: give \`${itype}\` a post-decision, pre-work state that maps to `
+        + '`ready`/`intake` — never to `wip` — and let the DISPATCH event (`pulled`, '
+        + 'which already carries `OWNER=`) make the move that costs the slot. Do NOT '
+        + 'raise the cap: the cap was never what was full.');
+    }
+  }
+  info.push(`C6 checked ${checked} flow type(s) for a decision edge that lands in wip`);
+  return { violations, info };
+}
+
 // --- driver ---------------------------------------------------------------
 
 function lint(root) {
@@ -407,13 +485,16 @@ function lint(root) {
     info.push(...r.info);
   }
 
-  const c5 = checkPolicyDeclarations(
-    root,
-    readOptional('process/machinery/state-graphs.json'),
-    exps,
+  const graphsText = readOptional('process/machinery/state-graphs.json');
+
+  const c5 = checkPolicyDeclarations(root, graphsText, exps,
     readOptional('process/experiments-archive.md'));
   violations.push(...c5.violations);
   info.push(...c5.info);
+
+  const c6 = checkDecisionIsFree(graphsText);
+  violations.push(...c6.violations);
+  info.push(...c6.info);
 
   return { violations, info };
 }

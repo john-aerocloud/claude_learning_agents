@@ -418,3 +418,115 @@ test('AC-L.17 NON-VACUITY a bare PROSE MENTION does not declare an id', () => {
   assert.strictEqual(c5.length, 1, c5.join('\n'));
   assert.match(c5[0], /EXP-ROC-005/);
 });
+
+// ---------------------------------------------------------------------------
+// C6 — A DECISION MUST NOT COST A WIP SLOT (OI-ROC-029, process §F9i)
+//
+// THE RECORDED INSTANCE (2026-09-16). `make loop-gate PROJECT=ROC` reported
+// BLOCKED at `wip depth 11 > wip_limit 8` while `ListAgents` showed ZERO agents
+// running. Eight of the occupied slots were defects with an event log of exactly
+// `reported, triaged` — no engineer had ever been dispatched to one.
+//
+// THE SHAPE, which is what this check reads and why it is here rather than in a
+// note: the `defect` type had exactly ONE edge out of its initial state,
+// `reported --(triaged)--> reproducing`, and `reproducing` is in the `wip` queue.
+// Meanwhile loop-gate check 17 (`undecided-arrival`, §F9b) BLOCKS the pull on any
+// finding registered this cycle carrying no decision, and names `--event triaged`
+// as the remedy. So RECORDING A DECISION AND STARTING WORK WERE THE SAME ACT, and
+// two blocking gates were in direct mechanical opposition. The orchestrator was
+// obeying the instruction it was given, which is exactly why a convention would not
+// have held: there was nothing to remember, only one edge to take.
+//
+//   AC-L.16  the offending SHAPE is caught, naming the edge — on any type.
+//   AC-L.17  the fixed shape passes: an intermediate pre-work state is fine.
+//   AC-L.18  NON-VACUITY: the REAL committed graph passes, so C6 is a check on
+//            reality and not a rule that only ever fires on fixtures.
+//   AC-L.19  an unparseable/absent graph is NOT ESTABLISHED, never silently clean.
+//   AC-L.20  a SELF-EDGE off the initial state (an annotation) is not a start.
+
+/** A graph fixture: one flow type, plus the queue map it is read against. */
+function graphFixture(types, queueMap) {
+  return JSON.stringify({
+    queue_map: queueMap || {
+      reported: 'intake', scheduled: 'ready', reproducing: 'wip',
+      fixing: 'wip', wontfix: null,
+    },
+    types,
+  });
+}
+
+const BAD_DEFECT = {          // the graph as it actually stood on 2026-09-16
+  defect: {
+    kind: 'flow', initial: 'reported', terminal: ['wontfix'],
+    transitions: [
+      { from: 'reported', to: 'reproducing', event: 'triaged' },
+      { from: 'reproducing', to: 'fixing', event: 'confirmed' },
+    ],
+  },
+};
+
+const GOOD_DEFECT = {         // v13: the decision is free, the dispatch costs
+  defect: {
+    kind: 'flow', initial: 'reported', terminal: ['wontfix'],
+    transitions: [
+      { from: 'reported', to: 'scheduled', event: 'triaged' },
+      { from: 'scheduled', to: 'reproducing', event: 'pulled' },
+      { from: 'reproducing', to: 'fixing', event: 'confirmed' },
+    ],
+  },
+};
+
+test('AC-L.16 an edge from the initial state straight into wip is caught, naming it', () => {
+  const dir = policyFixture({ P: OK_ROWS }, { graphs: graphFixture(BAD_DEFECT) });
+  const c6 = lint.lint(dir).violations.filter((v) => v.startsWith('C6 '));
+  assert.strictEqual(c6.length, 1, `expected one C6 violation, got: ${c6.join(' | ')}`);
+  assert.match(c6[0], /reported --\(triaged\)--> reproducing/,
+    'the message must name the offending edge — a violation nobody can locate is a nag');
+});
+
+test('AC-L.17 a post-decision, pre-work state passes', () => {
+  const dir = policyFixture({ P: OK_ROWS }, { graphs: graphFixture(GOOD_DEFECT) });
+  assert.deepStrictEqual(lint.lint(dir).violations.filter((v) => v.startsWith('C6 ')), []);
+});
+
+test('AC-L.18 NON-VACUITY the REAL committed state graph is what C6 is checked against', () => {
+  const { violations, info } = lint.lint(path.join(__dirname, '..', '..'));
+  assert.deepStrictEqual(violations.filter((v) => v.startsWith('C6 ')), [],
+    'the committed graph must satisfy its own invariant');
+  const scanned = info.find((i) => /^C6 checked /.test(i));
+  assert.ok(scanned, `no C6 scan line in info: ${info.join(' | ')}`);
+  const n = Number(/^C6 checked (\d+) /.exec(scanned)[1]);
+  assert.ok(n >= 3, `C6 checked ${n} flow type(s) — a check with nothing to check is not clean`);
+});
+
+test('AC-L.19 an unparseable graph is NOT ESTABLISHED, never silently clean', () => {
+  const dir = policyFixture({ P: OK_ROWS }, { graphs: '{not json' });
+  const c6 = lint.lint(dir).violations.filter((v) => v.startsWith('C6 '));
+  assert.strictEqual(c6.length, 1);
+  assert.match(c6[0], /NOT ESTABLISHED/);
+});
+
+test('AC-L.20 a self-edge off the initial state is an annotation, not a start', () => {
+  const types = {
+    defect: {
+      kind: 'flow', initial: 'reported', terminal: ['wontfix'],
+      transitions: [
+        { from: 'reported', to: 'reported', event: 'amended' },
+        { from: 'reported', to: 'scheduled', event: 'triaged' },
+      ],
+    },
+  };
+  // an annotation leaves the item exactly where it was, so it can take no slot —
+  // and `reported` itself is not a wip state, which is the general case.
+  const dir = policyFixture({ P: OK_ROWS }, { graphs: graphFixture(types) });
+  assert.deepStrictEqual(lint.lint(dir).violations.filter((v) => v.startsWith('C6 ')), []);
+});
+
+test('AC-L.21 an AGGREGATE type has no event stream of its own and is not checked', () => {
+  const types = {
+    slice: { kind: 'aggregate', initial: 'planned', terminal: ['done'], transitions: [] },
+    ...GOOD_DEFECT,
+  };
+  const dir = policyFixture({ P: OK_ROWS }, { graphs: graphFixture(types) });
+  assert.deepStrictEqual(lint.lint(dir).violations.filter((v) => v.startsWith('C6 ')), []);
+});

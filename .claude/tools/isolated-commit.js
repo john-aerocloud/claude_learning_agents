@@ -59,7 +59,9 @@
  *      (crossed with a concurrent agent's, clobbered in its file, or corrupted
  *      between here and the commit object); nothing was committed
  *   7  CO-OWNED CONFLICT — a concurrent agent committed an OVERLAPPING change to a
- *      file you both own and it cannot be merged automatically; nothing committed
+ *      file you both own and it cannot be merged automatically; nothing committed.
+ *      NOT your own previous commit to that file under the same work item — that is
+ *      a continuation, not a conflict, and it commits (DEF-ROC-189)
  *
  * THE MESSAGE IS THE SECOND SHARED-MUTABLE-STATE PROBLEM, and it is not in git
  * (OI-CO-OWNED-LEDGER-FILES-CROSS-ATTRIBUTE-WORK-AND-ONE-CROSSED-A-COMMIT-MESSAGE).

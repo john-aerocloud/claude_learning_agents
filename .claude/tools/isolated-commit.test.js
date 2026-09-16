@@ -1467,3 +1467,331 @@ test('AC-DEFECT-OAG-058.9 CONTROL ENABLED: the tool commits a 4MB declared path,
   });
   assert.match(headCopy.slice(0, 6), /^second/);
 });
+
+// --- AC-189.* — DEF-ROC-189: the staleness question could not tell "I am
+//     REPLACING my own line" from "I am REVERTING someone else's" ---------------
+//
+// `coownedStaleAgainst` asks, of a line some commit added: "is it absent from my
+// copy?" That is ALSO TRUE of an ordinary edit to that line, so an agent that
+// COMMITS TWICE IN A ROW to one file — the commonest shape there is — presents
+// identically to a concurrent overwrite. Measured cost, one day, four agents:
+// three exit-7 refusals on one agent alone (tsconfig include list, a package.json
+// script value, a vitest exclude array); a real design change abandoned; a pure
+// code move abandoned; and ONE SILENT CORRUPTION — the merge kept BOTH sides of
+// the agent's own replaced line, leaving a DUPLICATE "test:process" key in HEAD
+// that parsed (last-wins), tested green, and read reassuring in the merge report.
+// A fourth agent then abandoned a type rename rather than take the safety bypass.
+//
+// FROM BLOBS ALONE THE TWO SITUATIONS ARE IDENTICAL — measured: "HEAD = base+L,
+// mine = base+L'" is byte-for-byte the same file pair whether L' replaces my own
+// L or overwrites a concurrent agent's. So no function of the blobs can separate
+// them and the fix MUST bring EVIDENCE. The evidence chosen is WORK-ITEM
+// CONTINUITY, because §14 already requires every commit to name its tracked item,
+// and it is admitted only under three conditions, all of which fail CLOSED:
+//   1. EXACT ACCOUNTING — the ONLY content of HEAD my copy lacks is precisely
+//      that one commit's surviving contribution. Multi-commit staleness (the
+//      four-agent founding loss) can never qualify.
+//   2. CONTINUITY — both messages carry a work-item id and the id SETS are EQUAL.
+//   3. NOT-THE-SUBJECT — the id must not appear in the path, or it names the FILE
+//      rather than its author (every agent touching items/active/UC-X.md says
+//      UC-X), and the evidence is void.
+//
+// AC-189.1  the three reported shapes: one agent, two commits in a row, replacing
+//           a line it committed itself — committed, not refused. CONTROL DISABLED
+//           reproduces the exit-7 refusal.
+// AC-189.2  the SILENT CORRUPTION shape: CONTROL DISABLED leaves a DUPLICATE JSON
+//           key in HEAD at exit 0; CONTROL ENABLED leaves exactly one.
+// AC-189.3  a GENUINE concurrent overwrite of the same line — two different work
+//           items — is STILL refused (exit 7), HEAD unmoved.
+// AC-189.4  the founding SILENT-LOSS case still caught: four agents, one co-owned
+//           file, ALL FOUR rows survive, and no continuity discount fires.
+// AC-189.5  the DEFECT-OAG-142 SILENT-DUPLICATION shape is still caught: the
+//           continuity limb cannot reach it, and it is still refused.
+// AC-189.6  FAIL CLOSED — no work-item id in the messages, no discount.
+// AC-189.7  NOT-THE-SUBJECT — an id that names the PATH is void evidence.
+// AC-189.8  EXACT ACCOUNTING — same item id but my copy is missing content from
+//           more than that one commit: no discount, their content survives.
+// AC-189.9  the discount is REPORTED through the real CLI — never silent.
+// AC-189.10 the merge report ENUMERATES the lines it restored, so the class that
+//           was "structurally incapable of being mentioned" is mentionable.
+
+const TSCONFIG = 'tsconfig.node.json';
+const PKG = 'package.json';
+const VITEST = 'vitest.config.ts';
+
+/** A project repo carrying the three files the three reported shapes hit. */
+function makeAppRepo() {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'def189-'));
+  execFileSync('git', ['init', '-q', '-b', 'main', repo]);
+  git(repo, ['config', 'user.email', 'agent@example.test']);
+  git(repo, ['config', 'user.name', 'Agent']);
+  git(repo, ['config', 'commit.gpgsign', 'false']);
+  write(repo, TSCONFIG, '{\n  "compilerOptions": { "composite": true },\n  "include": ["vite.config.ts"]\n}\n');
+  write(repo, PKG, '{\n  "name": "app",\n  "scripts": {\n    "test": "vitest run",\n    "lint": "eslint ."\n  }\n}\n');
+  write(repo, VITEST, "export default {\n  test: {\n    exclude: ['node_modules/**'],\n  },\n};\n");
+  write(repo, LEDGER, BASE_LEDGER);
+  git(repo, ['add', '-A']);
+  git(repo, ['commit', '-q', '-m', 'chore(app): base config']);
+  return repo;
+}
+
+/** Replace the one line containing `needle` with `line`. */
+function replaceLine(repo, file, needle, line) {
+  const abs = path.join(repo, file);
+  const src = fs.readFileSync(abs, 'utf-8').split('\n');
+  const i = src.findIndex((l) => l.includes(needle));
+  assert.notEqual(i, -1, `fixture: no line containing ${needle} in ${file}`);
+  src[i] = line;
+  fs.writeFileSync(abs, src.join('\n'));
+}
+
+/**
+ * The three shapes, as (file, first edit, second edit) — the second edit REPLACES
+ * the line the first one committed, which is the whole defect.
+ */
+const SHAPES = [
+  {
+    what: "tsconfig.node.json's include list",
+    file: TSCONFIG,
+    needle: '"include"',
+    first: '  "include": ["vite.config.ts", "scripts/**"]',
+    second: '  "include": ["vite.config.ts", "scripts/**", "tests/process/**"]',
+  },
+  {
+    what: "a package.json script value",
+    file: PKG,
+    needle: '"test":',
+    first: '    "test": "vitest run --reporter=dot",',
+    second: '    "test": "vitest run --reporter=dot --coverage",',
+  },
+  {
+    what: "a vitest exclude array",
+    file: VITEST,
+    needle: 'exclude:',
+    second: "    exclude: ['node_modules/**', 'dist/**', 'tests/process/**'],",
+    first: "    exclude: ['node_modules/**', 'dist/**'],",
+  },
+];
+
+for (const s of SHAPES) {
+  test(`AC-189.1 CONTROL DISABLED: replacing a line MY OWN previous commit wrote to ${s.what} is refused as a concurrent revert (exit 7) — reproduces the measured defect`, () => {
+    const repo = makeAppRepo();
+    replaceLine(repo, s.file, s.needle, s.first);
+    tool.isolatedCommit({ repo, message: `chore(app): widen ${s.what} (UC-ROC-119)`, paths: [s.file] });
+    const before = git(repo, ['rev-parse', 'HEAD']);
+
+    replaceLine(repo, s.file, s.needle, s.second);
+    const err = grab(() =>
+      tool.isolatedCommit({
+        repo,
+        message: `chore(app): add tests/process to ${s.what} (UC-ROC-119)`,
+        paths: [s.file],
+        ownItemContinuity: false,
+      }),
+    );
+    assert.equal(err.code, 7, err.message);
+    assert.equal(git(repo, ['rev-parse', 'HEAD']), before, 'and nothing lands — the change is deterred, not delayed');
+  });
+
+  test(`AC-189.1 CONTROL ENABLED: the same second commit to ${s.what} LANDS, and HEAD carries the replacement exactly once`, () => {
+    const repo = makeAppRepo();
+    replaceLine(repo, s.file, s.needle, s.first);
+    tool.isolatedCommit({ repo, message: `chore(app): widen ${s.what} (UC-ROC-119)`, paths: [s.file] });
+
+    replaceLine(repo, s.file, s.needle, s.second);
+    const res = tool.isolatedCommit({
+      repo,
+      message: `chore(app): add tests/process to ${s.what} (UC-ROC-119)`,
+      paths: [s.file],
+    });
+    const head = git(repo, ['show', `HEAD:${s.file}`]);
+    assert.equal(countOf(head, s.second), 1, 'the replacement lands exactly once');
+    assert.equal(countOf(head, s.first), 0, 'and the line it replaced is GONE, not restored alongside it');
+    assert.deepEqual(res.coownedMerges, [], 'no merge is invented — there was no concurrent writer');
+    assert.equal(res.coownedContinuations.length, 1, 'and the reason is recorded, not silent');
+    assert.deepEqual(res.coownedContinuations[0].ids, ['UC-ROC-119']);
+  });
+}
+
+test('AC-189.2 CONTROL DISABLED: replacing the value of a key MY OWN previous commit ADDED leaves a DUPLICATE JSON key in HEAD at exit 0 — the silent corruption', () => {
+  const repo = makeAppRepo();
+  // commit 1 ADDS the key (so the merge base does not carry it at all).
+  write(repo, PKG, '{\n  "name": "app",\n  "scripts": {\n    "test": "vitest run",\n    "test:process": "vitest run tests/process",\n    "lint": "eslint ."\n  }\n}\n');
+  tool.isolatedCommit({ repo, message: 'chore(pkg): add the process test script (UC-ROC-119)', paths: [PKG] });
+
+  // commit 2 edits ITS OWN value.
+  write(repo, PKG, '{\n  "name": "app",\n  "scripts": {\n    "test": "vitest run",\n    "test:process": "vitest run tests/process --reporter=dot",\n    "lint": "eslint ."\n  }\n}\n');
+  const res = tool.isolatedCommit({
+    repo,
+    message: 'chore(pkg): quieten the process test reporter (UC-ROC-119)',
+    paths: [PKG],
+    ownItemContinuity: false,
+  });
+  const head = git(repo, ['show', `HEAD:${PKG}`]);
+  assert.equal(typeof res.sha, 'string', 'it commits — the corruption is SILENT, which is why it reached trunk');
+  assert.equal(countOf(head, '"test:process"'), 2, 'CONTROL DISABLED must reproduce the DUPLICATE key');
+  assert.equal(JSON.parse(head).scripts['test:process'], 'vitest run tests/process --reporter=dot',
+    'and it PARSES (last-wins), which is why the tests stayed green');
+});
+
+test('AC-189.2 CONTROL ENABLED: the same second commit leaves the key exactly ONCE', () => {
+  const repo = makeAppRepo();
+  write(repo, PKG, '{\n  "name": "app",\n  "scripts": {\n    "test": "vitest run",\n    "test:process": "vitest run tests/process",\n    "lint": "eslint ."\n  }\n}\n');
+  tool.isolatedCommit({ repo, message: 'chore(pkg): add the process test script (UC-ROC-119)', paths: [PKG] });
+
+  write(repo, PKG, '{\n  "name": "app",\n  "scripts": {\n    "test": "vitest run",\n    "test:process": "vitest run tests/process --reporter=dot",\n    "lint": "eslint ."\n  }\n}\n');
+  const res = tool.isolatedCommit({ repo, message: 'chore(pkg): quieten the process test reporter (UC-ROC-119)', paths: [PKG] });
+  const head = git(repo, ['show', `HEAD:${PKG}`]);
+  assert.equal(countOf(head, '"test:process"'), 1, 'exactly one binding for the key');
+  assert.deepEqual(res.coownedMerges, [], 'nothing was merged, so nothing could be restored alongside my line');
+});
+
+test('AC-189.3 a GENUINE concurrent overwrite of the same line — two DIFFERENT work items — is STILL refused (exit 7), HEAD unmoved', () => {
+  const repo = makeAppRepo();
+  // Agent A, on ITEM-A, rewrites the include line and commits.
+  replaceLine(repo, TSCONFIG, '"include"', '  "include": ["vite.config.ts", "as-A-says/**"]');
+  tool.isolatedCommit({ repo, message: 'chore(app): widen include (UC-ROC-401)', paths: [TSCONFIG] });
+  const before = git(repo, ['rev-parse', 'HEAD']);
+
+  // Agent B's copy predates A; B rewrites the SAME line under ITS OWN item.
+  write(repo, TSCONFIG, '{\n  "compilerOptions": { "composite": true },\n  "include": ["vite.config.ts", "as-B-says/**"]\n}\n');
+  const err = grab(() =>
+    tool.isolatedCommit({ repo, message: 'chore(app): widen include (DEF-ROC-402)', paths: [TSCONFIG] }),
+  );
+  assert.equal(err.code, 7, err.message);
+  assert.match(err.message, /CO-OWNED CONFLICT/);
+  assert.equal(git(repo, ['rev-parse', 'HEAD']), before, "HEAD unmoved — A's line stands");
+  assert.match(git(repo, ['show', `HEAD:${TSCONFIG}`]), /as-A-says/);
+});
+
+test('AC-189.4 the founding SILENT-LOSS case is STILL caught: four agents at one co-owned file, ALL FOUR rows survive, and no continuity discount fires', () => {
+  const repo = makeLedgerRepo();
+  const { ids, results } = raceAppenders(repo, LEDGER, 4);
+  for (const r of results) assert.equal(r.status, 0, r.stderr);
+  const head = headLedger(repo);
+  for (const id of ids) assert.match(head, new RegExp(`row-from-${id}`), `${id}'s row must survive`);
+  const said = results.map((r) => r.stderr).join('\n');
+  assert.equal(
+    /WORK-ITEM CONTINUITY/.test(said),
+    false,
+    'multi-commit staleness can never qualify as "my own previous commit" — the exact-accounting condition',
+  );
+});
+
+test('AC-189.4 CONTROL DISABLED (co-owned merge off): the same four writers still lose all but the last — the loss is real, not hypothetical', () => {
+  const repo = makeLedgerRepo();
+  const { ids } = raceAppenders(repo, LEDGER, 4, ['--no-coowned-merge']);
+  const head = headLedger(repo);
+  assert.deepEqual(ids.filter((id) => head.includes(`row-from-${id}`)), ['AGENT-D']);
+});
+
+test('AC-189.5 the DEFECT-OAG-142 SILENT-DUPLICATION shape is STILL refused with the continuity limb live — it cannot reach a multi-line, multi-commit staleness', () => {
+  const { repo, mine } = makeBigConfigRepo();
+  const before = git(repo, ['rev-parse', 'HEAD']);
+  write(repo, BIG_CONFIG, mine);
+  const err = grab(() =>
+    tool.isolatedCommit({
+      repo,
+      message: 'chore(config): apply the ruling (DEF-ROC-189)',
+      paths: [BIG_CONFIG],
+      staleEvidenceMustSurviveInHead: false,
+      addAddContentRule: false,
+    }),
+  );
+  assert.equal(err.code, 7, err.message);
+  assert.match(err.message, /DUPLICATION POST-CONDITION/);
+  assert.equal(git(repo, ['rev-parse', 'HEAD']), before, 'HEAD unmoved — nothing committed');
+});
+
+test('AC-189.6 FAIL CLOSED: the same self-replacement with NO work-item id in either message is still refused', () => {
+  const repo = makeAppRepo();
+  replaceLine(repo, TSCONFIG, '"include"', '  "include": ["vite.config.ts", "scripts/**"]');
+  tool.isolatedCommit({ repo, message: 'chore(app): widen the include list', paths: [TSCONFIG] });
+  replaceLine(repo, TSCONFIG, '"include"', '  "include": ["vite.config.ts", "scripts/**", "tests/**"]');
+  const err = grab(() => tool.isolatedCommit({ repo, message: 'chore(app): add tests to it', paths: [TSCONFIG] }));
+  assert.equal(err.code, 7, 'no evidence means no discount — the guard holds');
+});
+
+/**
+ * The SAME content, the SAME two messages, the SAME staleness — differing ONLY in
+ * whether the work-item id names the PATH. On an item file every agent says UC-X
+ * because the FILE is UC-X, so the id identifies the subject, not the author.
+ */
+function driveSameItemIdRace(repo, file) {
+  const base = `id: UC-OAG-999\nevents:\n`;
+  write(repo, file, base);
+  git(repo, ['add', '--', file]);
+  git(repo, ['commit', '-q', '-m', 'state: UC-OAG-999 created']);
+  // Agent A appends its event and commits.
+  write(repo, file, `${base}  - {ts: "t", event: built_green, agent: engineer}\n`);
+  tool.isolatedCommit({ repo, message: 'state: UC-OAG-999 built_green', paths: [file] });
+  // Agent B's copy was read BEFORE A committed; B appends a different event.
+  write(repo, file, `${base}  - {ts: "u", event: validated, agent: tester}\n`);
+  const res = tool.isolatedCommit({ repo, message: 'state: UC-OAG-999 validated', paths: [file] });
+  return { res, head: git(repo, ['show', `HEAD:${file}`]) };
+}
+
+test('AC-189.7 NOT-THE-SUBJECT: when the work-item id names the PATH the evidence is VOID — the concurrent agent\'s event still survives', () => {
+  const { res, head } = driveSameItemIdRace(makeLedgerRepo(), 'items/active/UC-OAG-999.md');
+  assert.deepEqual(res.coownedContinuations, [], 'an id that names the file is no evidence about its author');
+  assert.match(head, /event: built_green/, "the other agent's committed event must survive");
+  assert.match(head, /event: validated/, 'and mine must land');
+});
+
+test('AC-189.7 NON-VACUITY: the identical race on a path the id does NOT name IS admitted as continuity', () => {
+  const { res } = driveSameItemIdRace(makeLedgerRepo(), 'src/app/lanes/state-lane.ts');
+  assert.equal(res.coownedContinuations.length, 1, 'same content, same messages — only the path differs');
+  assert.deepEqual(res.coownedContinuations[0].ids, ['UC-OAG-999']);
+});
+
+test('AC-189.8 EXACT ACCOUNTING: same work-item id, but my copy is missing content from MORE than that one commit — no discount, their content survives', () => {
+  const repo = makeLedgerRepo();
+  const base = fs.readFileSync(path.join(repo, LEDGER), 'utf-8');
+  // Two earlier commits under the SAME item id, each adding a row.
+  write(repo, LEDGER, `${base}row-first\n`);
+  tool.isolatedCommit({ repo, message: 'docs(ledger): first row (UC-ROC-119)', paths: [LEDGER] });
+  write(repo, LEDGER, `${base}row-first\nrow-second\n`);
+  tool.isolatedCommit({ repo, message: 'docs(ledger): second row (UC-ROC-119)', paths: [LEDGER] });
+
+  // My copy predates BOTH of them and adds my own row.
+  write(repo, LEDGER, `${base}row-mine\n`);
+  const res = tool.isolatedCommit({ repo, message: 'docs(ledger): my row (UC-ROC-119)', paths: [LEDGER] });
+  const head = headLedger(repo);
+  assert.equal(res.coownedContinuations.length, 0, 'staleness spanning two commits is not "my own previous commit"');
+  for (const row of ['row-first', 'row-second', 'row-mine'])
+    assert.match(head, new RegExp(row), `${row} must survive`);
+});
+
+test('AC-189.9 the discount is REPORTED through the real CLI — never silent, and it names the sha, the id and the lines', () => {
+  const repo = makeAppRepo();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'def189rep-'));
+  const mf = (n, t) => { const p = path.join(dir, n); fs.writeFileSync(p, t); return p; };
+
+  replaceLine(repo, TSCONFIG, '"include"', '  "include": ["vite.config.ts", "scripts/**"]');
+  const r1 = runCli(repo, ['--repo', repo, '--message-file', mf('msg-UC-ROC-119-a.txt', 'chore(app): widen include (UC-ROC-119)\n'), '--', TSCONFIG]);
+  assert.equal(r1.status, 0, r1.stderr);
+  const sha1 = git(repo, ['rev-parse', 'HEAD']);
+
+  replaceLine(repo, TSCONFIG, '"include"', '  "include": ["vite.config.ts", "scripts/**", "tests/process/**"]');
+  const r2 = runCli(repo, ['--repo', repo, '--message-file', mf('msg-UC-ROC-119-b.txt', 'chore(app): add tests/process (UC-ROC-119)\n'), '--', TSCONFIG]);
+  assert.equal(r2.status, 0, r2.stderr);
+  const said = r2.stderr + r2.stdout;
+  assert.match(said, /WORK-ITEM CONTINUITY/, 'a decision this consequential is never silent');
+  assert.match(said, new RegExp(sha1.slice(0, 8)), 'and it names the commit it discounted');
+  assert.match(said, /UC-ROC-119/, 'and the evidence it discounted it on');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('AC-189.10 the merge report ENUMERATES the lines it restored, not just a count — the class that was structurally unmentionable', () => {
+  const repo = makeLedgerRepo();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'def189res-'));
+  const mf = (n, t) => { const p = path.join(dir, n); fs.writeFileSync(p, t); return p; };
+  write(repo, LEDGER, A_LEDGER);
+  runCli(repo, ['--repo', repo, '--message-file', mf('msg-ITEM-A.txt', 'docs(l): A (ITEM-A)\n'), '--', LEDGER]);
+  write(repo, LEDGER, B_LEDGER);
+  const rb = runCli(repo, ['--repo', repo, '--message-file', mf('msg-ITEM-B.txt', 'docs(l): B (ITEM-B)\n'), '--', LEDGER]);
+  assert.equal(rb.status, 0, rb.stderr);
+  assert.match(rb.stderr, /restored into your copy/i, 'the report must name what it put back');
+  assert.match(rb.stderr, /row-A-agent-A-edge/, 'and the actual line, so a restoration is readable without a HEAD re-read');
+  fs.rmSync(dir, { recursive: true, force: true });
+});

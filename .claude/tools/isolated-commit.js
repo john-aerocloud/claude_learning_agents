@@ -321,6 +321,111 @@ function coownedStaleAgainst({ headText, mineText, history, evidenceMustSurviveI
   return oldest;
 }
 
+// --- WORK-ITEM CONTINUITY (DEF-ROC-189) --------------------------------------
+//
+// The staleness question above asks, of a line some commit added: "is it ABSENT
+// FROM MY COPY?" That is ALSO TRUE OF AN ORDINARY EDIT TO THAT LINE. So an agent
+// REPLACING a line IT ITSELF committed presents identically to an agent REVERTING
+// a concurrent agent's work, and the tool refused at exit 7. Generalised by the
+// DEF-ROC-206 engineer: it false-positives WHENEVER ONE AGENT COMMITS TWICE IN A
+// ROW TO ONE FILE, which is a common shape, not an edge case. Four agents hit it in
+// one day; two abandoned real changes rather than take the documented safety
+// bypass, and one shipped a DUPLICATE "test:process" key into HEAD because the
+// merge kept both sides of its own replaced line. A false-positive control does not
+// cost minutes — it silently deters improvements nobody then records.
+//
+// FROM THE BLOBS ALONE THE TWO SITUATIONS ARE THE SAME FILE PAIR. Measured: with C
+// the tip commit for the path,
+//     I replace my own line   HEAD = base+L,  mine = base+L'
+//     I revert a concurrent   HEAD = base+L,  mine = base+L'
+// are byte-for-byte identical, so NO function of headText/mineText/history can
+// separate them, and neither can "does HEAD still have it" (DEFECT-OAG-142's fix —
+// it does, in both). Authorship cannot either: every agent on this tree commits
+// under ONE git identity, so `%an` is constant and would read as "mine" for the
+// concurrent case too — convenient, and unsound. The fix must therefore bring
+// EVIDENCE FROM OUTSIDE THE BLOBS.
+//
+// THE EVIDENCE: the WORK ITEM the commit message names. §14 already requires every
+// commit here to reference its tracked item, and the process allocates PATH CLAIMS
+// PER ITEM (§F7) — two agents on one item touching one file is the collision the
+// flow-manager exists to prevent. So "the tip commit for this path names the SAME
+// work item as the commit I am making" is real evidence that the contribution is
+// MINE, continued — not a second writer's.
+//
+// It is admitted under THREE conditions, every one of which FAILS CLOSED:
+//
+//   1. EXACT ACCOUNTING — the ONLY content of HEAD my copy lacks is PRECISELY that
+//      one commit's surviving contribution. If my copy is also missing anything
+//      else, it does not derive from HEAD-minus-one-commit and the reading is
+//      wrong. This is what keeps the FOUNDING LOSS (four agents, four commits, one
+//      of four rows surviving) out of reach of the discount entirely: staleness
+//      spanning two commits can never qualify, whatever the messages say.
+//   2. CONTINUITY — both messages carry a work-item id and the id SETS ARE EQUAL.
+//      Set EQUALITY, not intersection, so an incidental hyphenated capital in prose
+//      (CO-OWNED, ADD/ADD) cannot manufacture a match; and an id on neither side is
+//      no evidence, so the guard holds exactly as before.
+//   3. NOT-THE-SUBJECT — the id must not appear in the PATH. On an item file every
+//      agent's message says UC-X because the FILE is UC-X; there the id names the
+//      subject, not the author, and the evidence is void.
+//
+// WHAT IT CANNOT DO, which is the reason it is safe: it never changes what a merge
+// EMITS. It either suppresses the merge entirely (committing my own blob, which is
+// what a sole author replacing its own line always wanted) or it stands aside. So
+// it cannot duplicate, and the only content it can drop is content attributed to my
+// own item by all three conditions at once.
+//
+// RESIDUAL, stated rather than hidden: two agents genuinely sharing ONE work item
+// id and ONE file, where the second's copy is exactly one commit stale, would be
+// discounted instead of merged. That is the concurrency the per-item path claim
+// forbids, and it was the price of making the common shape work at all — the
+// alternative measured cost was engineers abandoning changes.
+
+/** Hyphenated uppercase tokens — the work-item id family this repo uses
+ *  (UC-ROC-119, DEF-ROC-189, DEFECT-OAG-142, REQ-ROC-001, VF-003, ITEM-A). */
+const WORK_ITEM_ID_RE = /\b[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+\b/g;
+
+/** The work-item ids a commit message declares (§14 requires at least one). */
+function workItemIds(message) {
+  return new Set(String(message || '').match(WORK_ITEM_ID_RE) || []);
+}
+
+/**
+ * The ids two messages agree on, or null. EQUALITY, not intersection: an
+ * incidental hyphenated capital shared by both messages cannot then carry a match
+ * that the real ids contradict.
+ * @returns {string[]|null} the shared ids, sorted; null when they are not the same work.
+ */
+function sameWorkItem(a, b) {
+  if (a.size === 0 || b.size === 0 || a.size !== b.size) return null;
+  for (const id of a) if (!b.has(id)) return null;
+  return [...a].sort();
+}
+
+/**
+ * Is the selected staleness evidence MY OWN PREVIOUS COMMIT, continuing the same
+ * work item? All three conditions above, in cost order, each failing closed.
+ * @returns {{ids:string[], accounted:string[]}|null}
+ */
+function ownWorkItemContinuation({ file, headText, mineText, stale, myMessage, theirMessage }) {
+  // 1. EXACT ACCOUNTING. `stale.added` is, by selection, in HEAD and absent from
+  //    mine, so it is always a SUBSET of what my copy is missing; the question is
+  //    whether it is the WHOLE of it.
+  const missing = linesAdded(mineText, headText);
+  if (missing.length === 0) return null;
+  const evidence = new Set(stale.added);
+  if (missing.some((l) => !evidence.has(l))) return null;
+
+  // 2. CONTINUITY.
+  const ids = sameWorkItem(workItemIds(myMessage), workItemIds(theirMessage));
+  if (!ids) return null;
+
+  // 3. NOT-THE-SUBJECT.
+  const f = normalizeDeclared(file);
+  if (ids.some((id) => f.includes(id))) return null;
+
+  return { ids, accounted: missing };
+}
+
 // --- the DERIVED-BLOCK exemption (limb B) ------------------------------------
 //
 // `make wi-project` rewrites the machine-rendered `derived:` block of ALL items on
@@ -594,17 +699,22 @@ function indexEntry(repo, file, env) {
  * @returns {null}                        nothing to do (not stale, or not mergeable material)
  *        | {merged:string, since:string, addedBack:number}   clean three-way merge
  *        | {conflict:string, since:string}                   genuinely overlapping — refuse
+ *        | {ownItem:{ids,accounted}, since:string}           MY OWN previous commit,
+ *                                          same work item — not a concurrent writer;
+ *                                          commit my blob, merge nothing (DEF-ROC-189)
  */
 function resolveCoowned({
   repo,
   privEnv,
   oldHead,
   file,
+  message = null,
   depth = COOWNED_SCAN_DEPTH,
   derivedExempt = true,
   evidenceMustSurviveInHead = true,
   duplicationPostCondition = true,
   addAddContentRule = true,
+  ownItemContinuity = true,
 }) {
   const headBlob = blobAt(repo, oldHead, file);
   if (headBlob === null) return null; // new file — nobody to clobber
@@ -639,6 +749,21 @@ function resolveCoowned({
     evidenceMustSurviveInHead,
   });
   if (!stale) return null;
+
+  // DEF-ROC-189 — before treating this as a concurrent writer, ask whether it is MY
+  // OWN previous commit continuing the same work item. This can only ever SUPPRESS
+  // a merge; it never changes what a merge emits, so it cannot duplicate.
+  if (ownItemContinuity) {
+    const own = ownWorkItemContinuation({
+      file,
+      headText: mask(headBlob),
+      mineText: mask(mineBlob),
+      stale,
+      myMessage: message,
+      theirMessage: commitObjectMessage(repo, stale.sha),
+    });
+    if (own) return { ownItem: own, since: stale.sha };
+  }
 
   const rawBase = blobAt(repo, `${stale.sha}^`, file);
   const baseText = rawBase === null ? null : mask(rawBase);
@@ -702,10 +827,17 @@ function resolveCoowned({
       finalText = spliced.text;
     }
 
+    // AC-189-4 — the RESTORED lines, not just how many. The old report could not
+    // mention a restored NON-NOVEL line at all (`addedBack` is a set-difference
+    // COUNT), which is why the duplicate `test:process` key was caught only by a
+    // human re-reading HEAD. A control whose report cannot name its own effect is
+    // the shape this repo keeps rediscovering.
+    const restored = linesAdded(mineBlob, finalText);
     return {
       merged: finalText,
       since: stale.sha,
-      addedBack: linesAdded(mineBlob, finalText).length,
+      addedBack: restored.length,
+      restored,
       byteDelta: Buffer.byteLength(finalText) - Buffer.byteLength(mineBlob),
       derivedExempted: exempting,
       mode: mineEntry.mode,
@@ -740,6 +872,11 @@ function resolveCoowned({
  * @param {boolean} [o.duplicationPostCondition=true] CONTROL toggle for AC-142.4.
  * @param {boolean} [o.addAddContentRule=true] CONTROL toggle for AC-142.3 — false
  *                               restores the historical position-only "keep both".
+ * @param {boolean} [o.ownItemContinuity=true] DEF-ROC-189: do not read MY OWN
+ *                               previous commit to this path, under the SAME work
+ *                               item, as a concurrent writer. CONTROL toggle —
+ *                               false reproduces the false positive that deterred
+ *                               four agents' changes in one day.
  * @param {boolean} [o.syncIndex=true]  resync the shared index for MY paths
  * @param {object} [o.hooks]     test seam: { beforeUpdateRef, beforeCommitTree,
  *                               corruptMessageForCommitTree }
@@ -759,6 +896,7 @@ function isolatedCommit({
   staleEvidenceMustSurviveInHead = true,
   duplicationPostCondition = true,
   addAddContentRule = true,
+  ownItemContinuity = true,
   syncIndex = true,
   hooks = {},
 }) {
@@ -819,6 +957,8 @@ function isolatedCommit({
     let attempts = 0;
     /** Reset on every CAS attempt — a retry recomputes the merge against the new head. */
     const coownedMerges = [];
+    /** Evidence discounted as MY OWN previous commit (DEF-ROC-189) — reported, never silent. */
+    const coownedContinuations = [];
     for (;;) {
       attempts += 1;
       const headRes = gitTry(repo, ['rev-parse', '--verify', '--quiet', 'HEAD']);
@@ -868,6 +1008,7 @@ function isolatedCommit({
       //   result is committed instead of my stale blob, so the concurrent agent's
       //   committed lines survive MY commit — the loss AC-COOWNED.1 reproduces.
       coownedMerges.length = 0;
+      coownedContinuations.length = 0;
       if (coownedMerge && oldHead) {
         for (const file of changed) {
           const r = resolveCoowned({
@@ -875,13 +1016,27 @@ function isolatedCommit({
             privEnv,
             oldHead,
             file,
+            message,
             depth: coownedScanDepth,
             derivedExempt,
             evidenceMustSurviveInHead: staleEvidenceMustSurviveInHead,
             duplicationPostCondition,
             addAddContentRule,
+            ownItemContinuity,
           });
           if (!r) continue;
+          if (r.ownItem) {
+            // MY OWN previous commit, same work item: nothing to merge, my blob
+            // stands. Recorded so the decision is auditable — a control that acts
+            // silently is one nobody can challenge when it is wrong.
+            coownedContinuations.push({
+              path: file,
+              since: r.since,
+              ids: r.ownItem.ids,
+              accounted: r.ownItem.accounted,
+            });
+            continue;
+          }
           if (r.conflict)
             throw new IsolatedCommitError(
               7,
@@ -911,6 +1066,7 @@ function isolatedCommit({
             linesRecovered: r.addedBack,
             byteDelta: r.byteDelta,
             derivedExempted: r.derivedExempted,
+            restored: r.restored,
             merged: r.merged,
             mineSha: r.mineSha,
           });
@@ -1062,7 +1218,7 @@ function isolatedCommit({
         for (const p of paths) gitTry(repo, ['add', '--all', '--', normalizeDeclared(p)]);
       }
 
-      return { sha, files: changed, attempts, branch, coownedMerges };
+      return { sha, files: changed, attempts, branch, coownedMerges, coownedContinuations };
     }
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -1173,6 +1329,18 @@ function formatCoownedMerge(m) {
     `CO-OWNED MERGE — ${m.path}`,
     `  a concurrent agent committed to this file since ${m.since.slice(0, 8)}; your copy predated it.`,
     `  ${m.linesRecovered} line(s) of THEIRS were merged back in rather than reverted by your commit.`,
+    // AC-189-4 — NAME them. The count is a set difference and could not mention a
+    // restored line that was not novel, so a line the committer had deliberately
+    // REPLACED came back into HEAD with a reassuring report and a green suite.
+    ...(m.restored && m.restored.length > 0
+      ? [
+          '  restored into your copy:',
+          ...m.restored.slice(0, 12).map((l) => `    ${l}`),
+          ...(m.restored.length > 12 ? [`    … and ${m.restored.length - 12} more`] : []),
+          '  If you deliberately REPLACED any of those, re-read HEAD: your replacement and',
+          '  theirs are now BOTH in the file (this left a duplicate JSON key in trunk once).',
+        ]
+      : []),
     // The line count is a SET difference and is therefore blind to duplication:
     // it said "16 line(s)" while 15 KB had been doubled into trunk. The byte
     // delta is the number that cannot lie about that (AC-142.8).
@@ -1183,6 +1351,25 @@ function formatCoownedMerge(m) {
     m.writtenBack === false
       ? '  (the working-tree copy was NOT rewritten — it changed again while this commit ran)'
       : '  (the working tree now holds the union, so the next agent is not stale)',
+    '',
+  ].join('\n');
+}
+
+/**
+ * The WORK-ITEM CONTINUITY report (DEF-ROC-189). A guard that stands DOWN silently
+ * is as unauditable as one that acts silently: say which commit was discounted, on
+ * what evidence, and what content the decision accounts for.
+ */
+function formatCoownedContinuation(c) {
+  return [
+    `WORK-ITEM CONTINUITY — ${c.path}`,
+    `  ${c.since.slice(0, 8)} is the only commit whose content your copy lacks, and its message names`,
+    `  the SAME work item as yours (${c.ids.join(', ')}). Read as YOUR OWN previous commit, not a`,
+    '  concurrent writer, so your blob is committed as-is and nothing is merged back.',
+    `  ${c.accounted.length} line(s) of ${c.since.slice(0, 8)} are replaced by this commit:`,
+    ...c.accounted.slice(0, 8).map((l) => `    ${l}`),
+    ...(c.accounted.length > 8 ? [`    … and ${c.accounted.length - 8} more`] : []),
+    '  If that commit was NOT yours, STOP: re-read HEAD and re-apply your change on top.',
     '',
   ].join('\n');
 }
@@ -1206,6 +1393,7 @@ function main(argv) {
     // A merge that is not reported is a merge nobody audits — and this one changes
     // what lands relative to what the caller staged, so it is never silent.
     for (const m of res.coownedMerges || []) process.stderr.write(formatCoownedMerge(m));
+    for (const c of res.coownedContinuations || []) process.stderr.write(formatCoownedContinuation(c));
     if (opts.json) process.stdout.write(`${JSON.stringify(res)}\n`);
     else
       process.stdout.write(
@@ -1234,6 +1422,9 @@ module.exports = {
   contentLines,
   linesAdded,
   coownedStaleAgainst,
+  workItemIds,
+  sameWorkItem,
+  ownWorkItemContinuation,
   resolveAppendCollisions,
   duplicatedBeyondBothSides,
   splitDerived,

@@ -97,6 +97,17 @@ See `README.md` for the full system. In short:
      path, so if another agent saves the same co-owned file in the seconds between
      your save and your commit, you commit THEIR copy under YOUR message. Save
      immediately before committing, and read the merge report.
+     **And keep the work-item id in your commit message — it is EVIDENCE, not
+     decoration (`DEF-ROC-189`).** "absent from your copy" is equally true of an
+     ordinary edit to that line, so REPLACING A LINE YOU COMMITTED YOURSELF used to
+     read as reverting a concurrent agent and was refused at exit 7 — i.e. the guard
+     false-positived whenever one agent committed twice in a row to one file. Four
+     agents hit it in one day; two ABANDONED real changes rather than take the
+     bypass, and one shipped a duplicate JSON key into HEAD because the merge kept
+     both sides of its own replaced line. The guard now stands down only when the
+     only content of HEAD your copy lacks is exactly one commit's surviving
+     contribution, that commit names the SAME work item as yours, and the id does not
+     name the path. Omit the id and you get the old false positive back.
      **The merge itself then had a second, opposite failure — silent DUPLICATION —
      and it is fixed, but the lesson it teaches is permanent (`DEFECT-OAG-142`,
      four instances on 2026-08-27 alone).** `coownedStaleAgainst` asked only *"are

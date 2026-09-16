@@ -1795,3 +1795,16 @@ test('AC-189.10 the merge report ENUMERATES the lines it restored, not just a co
   assert.match(rb.stderr, /row-A-agent-A-edge/, 'and the actual line, so a restoration is readable without a HEAD re-read');
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('AC-189.11 the behaviour is DOCUMENTED where an agent meets it: the tool\'s own usage and the Makefile block both state the continuity rule', () => {
+  const src = fs.readFileSync(TOOL_PATH, 'utf-8');
+  const usage = src.slice(src.indexOf('const USAGE = `'), src.indexOf('function formatCoownedMerge'));
+  assert.match(usage, /WORK ITEM/i, 'the usage must say what evidence the guard now reads');
+  assert.match(usage, /replac/i, 'and name the shape it stopped refusing');
+
+  const mk = fs.readFileSync(path.join(__dirname, '..', '..', 'Makefile'), 'utf-8');
+  const block = mk.slice(mk.indexOf('commit-isolated:'), mk.indexOf('commit-msg-file:'));
+  const doc = mk.slice(mk.indexOf('# --- DEFECT-OAG-058 commit-isolated'), mk.indexOf('commit-msg-file:'));
+  assert.match(doc + block, /DEF-ROC-189/, 'the target that teaches the commit path must teach this too');
+  assert.match(doc + block, /work[- ]item/i);
+});

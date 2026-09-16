@@ -1312,8 +1312,18 @@ content HEAD STILL HAS; two identical sides are a no-op; and content novel to BO
 sides may not leave the merge more often than it went in, or the commit is refused.
 An item file's machine-written \`derived:\` block is a pure function of the event log
 and the clock, so it is EXEMPT — yours is kept verbatim and \`wi-project\` reconciles it.
-The report states the BYTE delta, because the line count is a set difference and is
-blind to duplication.
+The report states the BYTE delta and NAMES the lines it restored, because the line
+count is a set difference and is blind to duplication.
+
+AND REPLACING A LINE YOU COMMITTED YOURSELF IS NOT A CONCURRENT REVERT (DEF-ROC-189).
+"absent from your copy" is equally true of an ordinary edit, so committing twice in a
+row to one file used to be refused at exit 7 — four agents hit it in one day and two
+abandoned real changes rather than take the bypass. The guard now stands down when
+the ONLY content of HEAD your copy lacks is exactly one commit's surviving
+contribution AND that commit's message names the SAME WORK ITEM as yours AND the id
+does not name the path. Any of those missing, it refuses as before; the decision is
+always printed. So keep the work-item id in your message (§14) — it is evidence now,
+not decoration.
 
   --allow-duplicate-message      commit a message identical to a recent ancestor's
   --allow-shared-message-file    accept a non-unique --message-file name

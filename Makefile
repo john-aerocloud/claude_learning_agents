@@ -1220,6 +1220,20 @@ test-requirement-gate-clean:
 # three-way merged back in, the merge is REPORTED, and a genuinely OVERLAPPING edit is
 # refused (exit 7) rather than guessed at. Cost: +0.3-1.0s per commit at that file size.
 #
+# BUT "ABSENT FROM YOUR COPY" IS ALSO TRUE OF AN ORDINARY EDIT TO THAT LINE, and for a
+# while that meant REPLACING A LINE YOU COMMITTED YOURSELF read as reverting a
+# concurrent agent (DEF-ROC-189). Four agents hit it in one day; two abandoned real
+# changes rather than take COOWNED_MERGE_OFF, and one shipped a DUPLICATE JSON key into
+# HEAD because the merge kept both sides of its own replaced line. A false-positive
+# control does not cost minutes, it silently deters improvements nobody records. The
+# guard now stands down ONLY when all three hold: the ONLY content of HEAD your copy
+# lacks is exactly one commit's surviving contribution; that commit's message names the
+# SAME WORK ITEM as yours; and the id does not name the path (on items/active/UC-X.md
+# every agent says UC-X, so there the id is the subject, not the author). Any one
+# missing and it refuses exactly as before, and the decision is always printed.
+# PRACTICAL CONSEQUENCE: keep the work-item id in your commit message (§14) — it is
+# EVIDENCE now, not decoration, and without it you get the old false positive back.
+#
 #   Escape hatches, all explicit and all loud in the refusal text:
 #     MSG_DUP_OK=1          a genuine re-commit of the same intent
 #     MSG_FILE_SHARED_OK=1  a deliberately shared message-file name (single agent)

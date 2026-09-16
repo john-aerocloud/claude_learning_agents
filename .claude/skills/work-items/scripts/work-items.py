@@ -471,6 +471,25 @@ def owner_set(declared):
     return {str(x).strip() for x in declared if str(x).strip()}
 
 
+def event_rights_ok(graphs, itype, owners, idx, ev):
+    """Whether a RECORDED event may be fired by the agent it records, under
+    `owners`. Returns (ok, why) — `why` is None when permitted.
+
+    Two events carry no attribution to check. The GENESIS event (index 0 naming
+    the type's initial state) is not a transition FROM anything, so it is legal by
+    definition; and an event with no recorded agent has nobody to check. Both are
+    permitted here rather than at each call site, so the writer's declaration
+    check and validate/I1's replay cannot drift apart on what "an event whose
+    attribution is checkable" means — they are the same rule read twice."""
+    name = ev.get("event")
+    if idx == 0 and name == graphs.initial(itype):
+        return (True, None)
+    agent = ev.get("agent")
+    if not agent:
+        return (True, None)
+    return graphs.may_fire(itype, owners, name, agent)
+
+
 def check_transition(graphs, itype, state, event, agent, owners=None):
     """Return (ok, to_state, legal_here, why). SHAPE comes from the graph (is this
     event legal from this state); RIGHTS are DERIVED from the item [v11,
@@ -7694,8 +7713,8 @@ def validate_items(graphs, project, event_loss=None):
                 # reconciled. `default_owners` is the closure of the retired
                 # allowlists precisely so no honest historical event fails here.
                 owners = graphs.owners_of(it)
-                ok, why = graphs.may_fire(it.type, owners, name, ev.get("agent"))
-                if ev.get("agent") and not ok:
+                ok, why = event_rights_ok(graphs, it.type, owners, idx, ev)
+                if not ok:
                     violations.append(
                         f"(I1) {iid}: event #{idx + 1} '{name}' by agent "
                         f"'{ev.get('agent')}' not permitted — {why}")

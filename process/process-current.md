@@ -1,7 +1,7 @@
 ---
-process_version: 181
+process_version: 182
 effective_from: 2026-09-15
-supersedes: v180, v179, v178, v177, v176, v175, v174, v173, v172, v171, v170, v169, v168, v167, v166, v165, v164, v163, v162, v161, v160, v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
+supersedes: v181, v180, v179, v178, v177, v176, v175, v174, v173, v172, v171, v170, v169, v168, v167, v166, v165, v164, v163, v162, v161, v160, v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
 status: active
 ---
 
@@ -4532,6 +4532,64 @@ path cannot see the protection fail.
 Nothing prevents an agent writing an item file by hand — no Python can, since the store is a
 directory in a git repo. This is **adoption, not enforcement**, and the gap is tracked as
 `DEF-ROC-205`, whose answer is a **detector in `wi-validate`**, not a guard.
+
+## F11.2a. COVERAGE IS MEASURED ON THE CODE YOU CHANGED, NOT ON THE WHOLE TREE [v182, ROC — owner ruling]
+
+**Owner, 2026-09-16, verbatim:**
+
+> *"we shouldnt be using code coverage as a hard rule — when we are removing code that was tested
+> and coverage drops that tells us the remaining code quality is low — therefore the number changing
+> isnt a guide on low quality **when we are removing code**. When we add code we should be running
+> coverage on the code that has changed — adding should increase / remain the same usually. But the
+> message above implies we have retained code **because** it keeps coverage higher. That is inane,
+> harmful and nonsense."*
+
+### The error, and it was mine
+
+An aggregate coverage percentage is a **ratio**. Delete code that was well tested and the ratio
+**falls** — not because the change was bad, but because what REMAINS is less covered than what went.
+Treating that fall as a regression creates pressure to **keep tested code alive to hold a number
+up**, which is the exact inverse of the design improvement the deletion represents.
+
+I issued that pressure to a live engineer on 2026-09-16 — *"coverage fell, do not re-baseline,
+either add a case or justify it"* — on a commit that had deleted code. Retracted within the hour,
+but an agent had already been told to contort a change to satisfy a ratio.
+
+**A ratchet on an aggregate ratio cannot tell these three apart, and they are not alike:**
+
+| what happened | aggregate | what it actually means |
+|---|---|---|
+| added uncovered code | falls | **a real gap** — cover it |
+| deleted well-tested code | falls | **nothing bad** — the remainder was always less covered |
+| deleted untested code | rises | good, but the ratchet learns nothing |
+
+### The rule
+
+**The blocking question is: IS THE CODE THIS CHANGE ADDED OR MODIFIED COVERED?** Measure coverage of
+the **changed lines**, not of the tree.
+
+- **Added or modified lines** must be covered. That is the gate, and it can red.
+- **A fall in the aggregate caused by DELETION is never a regression.** It must not red, and it must
+  not require an accepted-growth row. Deleting tested code is frequently the best change available.
+- **The aggregate remains REPORTED**, because its trend is still informative — but it is a
+  **signal, not a gate**. A number that cannot distinguish a deletion from a gap is not fit to block.
+
+### What this does NOT license
+
+**This is not permission to ship uncovered new code.** The gate gets *sharper*, not softer: today an
+aggregate can absorb a genuinely uncovered addition inside a big enough denominator, and diff
+coverage cannot. A change that adds twenty uncovered lines to a large package barely moves the
+percentage and would pass the ratchet today.
+
+And the instrument discipline of §F11 is unchanged: a coverage number is still only comparable to a
+floor cut on the same instrument (`DEF-ROC-163`, `DEF-ROC-188`).
+
+### The deeper point, worth keeping
+
+`DEF-ROC-188` found the aggregate had been measuring **test files** as if they were shipped source —
+one package's floor sat **32 points below its own code**. An aggregate is easy to compute and hard
+to interpret; **it kept producing verdicts nobody could act on, and one verdict that was actively
+harmful.** Prefer a measure whose subject is the change in hand.
 
 ## F12. In a shared tree, a cleanliness check is a SAMPLE, not evidence [v162, ROC]
 

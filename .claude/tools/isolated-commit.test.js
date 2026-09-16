@@ -1808,5 +1808,3 @@ test('AC-189.11 the behaviour is DOCUMENTED where an agent meets it: the tool\'s
   assert.match(doc + block, /DEF-ROC-189/, 'the target that teaches the commit path must teach this too');
   assert.match(doc + block, /work[- ]item/i);
 });
-
-test('DEF-ROC-211 CI red/green demonstration (temporary, reverted in the next commit)', () => { require('node:assert/strict').equal(1, 2); });

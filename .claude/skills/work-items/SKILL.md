@@ -124,6 +124,17 @@ Makefile wraps each.
      work. A declaration **REPLACES** the default (it narrows), and a non-flow agent
      that passes `OWNER=` is REFUSED — otherwise an agent would grant itself, in one
      command, the right it is exercising in that same command.
+   - **DECLARING ON AN ITEM THAT ALREADY HAS HISTORY (DEF-ROC-217).** Because a
+     declaration narrows, declaring it on an item a DIFFERENT role has already worked
+     would make that role's past events illegal under I1 — so `append` REFUSES the
+     declaration, naming the events it would invalidate. (The v11 `default_owners`
+     closure protects the VERSION CHANGE from exactly this; it cannot protect a
+     declaration made later.) The refusal is at the moment of the mistake rather than
+     at the next `wi-validate`, which would otherwise name the HISTORICAL EVENT as the
+     fault when the fault is the declaration. Two honest routes, both offered by the
+     message: **widen** (`OWNER=cicd,engineer` — normal when an item is re-dispatched
+     after an attempt by another role, and the honest record), or **do not declare**
+     and record the dispatch in the note. Never make the history fit the declaration.
    - **CALLER HAZARD — SINGLE-QUOTE the `NOTE=` value (2026-07-22).** A `$`-sequence in
      a DOUBLE-quoted note is shell-expanded before the launcher ever sees it and is
      silently mangled — e.g. `NOTE="…SST $transform no-op…"` reached the item as

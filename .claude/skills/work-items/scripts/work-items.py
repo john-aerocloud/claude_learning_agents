@@ -1823,6 +1823,56 @@ def _append_locked(a):
               f"that names nobody would silently narrow the item to an empty set "
               f"and make it unworkable by anyone but a flow role.", file=sys.stderr)
         sys.exit(1)
+    # A declaration NARROWS, by design — and narrowing an item that ALREADY HAS
+    # HISTORY can make that history illegal [DEF-ROC-217]. v11 chose
+    # `default_owners` as the backward-compatible closure of the allowlists it
+    # retired precisely so that no event in any existing item became
+    # retrospectively illegal; that protects the VERSION CHANGE, not a LATER
+    # DECLARATION. Refuse at the moment of the mistake — the declaration — rather
+    # than at the next `wi-validate`, which may be several appends later or in
+    # another agent's run, and which names the HISTORICAL EVENT as the fault when
+    # the fault is the declaration made afterwards.
+    #
+    # Only events this declaration NEWLY breaks are reported. An item whose
+    # history is already illegal under its current owners has a real problem, but
+    # it is validate/I1's to name and it is not caused by this act — blaming the
+    # declaration for it would be the same misattribution pointing the other way.
+    if declared_owner:
+        current_owners = graphs.owners_of(item)
+        broken = []
+        for idx, ev in enumerate(item.events):
+            if not event_rights_ok(graphs, item.type, current_owners, idx, ev)[0]:
+                continue                       # already illegal — not this act's doing
+            ok_now, _why = event_rights_ok(graphs, item.type, declared_owner, idx, ev)
+            if not ok_now:
+                broken.append((idx + 1, ev.get("event"), ev.get("agent")))
+    if declared_owner and broken:
+        acted = sorted({agent for _n, _e, agent in broken})
+        widened = ",".join(sorted(declared_owner | set(acted)))
+        print(f"append REJECTED: {a.id}: declaring OWNER={','.join(sorted(declared_owner))} "
+              f"would make {len(broken)} event{'s' if len(broken) > 1 else ''} ALREADY IN "
+              f"THIS ITEM'S HISTORY illegal:", file=sys.stderr)
+        for n, name, agent in broken:
+            print(f"    #{n} '{name}' fired by '{agent}'", file=sys.stderr)
+        print(f"  Those events were fired BEFORE any declaration existed, so declaring "
+              f"now does not correct the record — it invalidates it. The fault would be "
+              f"this declaration, not those events, which is why it is refused here "
+              f"rather than reported by the next `wi-validate` as though "
+              f"{'/'.join(acted)} had done something wrong.", file=sys.stderr)
+        print(f"  Two honest routes:", file=sys.stderr)
+        print(f"    1. WIDEN the declaration — `OWNER={widened}` — if "
+              f"{' and '.join(acted)} genuinely did work this item. More than one role "
+              f"working one item across attempts is normal, and the wider set is then "
+              f"the honest record.", file=sys.stderr)
+        print(f"    2. DO NOT DECLARE — re-run this append without OWNER= and the item "
+              f"keeps the owners it has "
+              f"({', '.join(sorted(current_owners)) or 'the type default'}); record the "
+              f"dispatch in the NOTE instead.", file=sys.stderr)
+        print(f"  Do NOT rewrite the history to fit the declaration. Making the past "
+              f"agree with a routing decision taken afterwards is exactly the outcome "
+              f"this invariant exists to prevent.", file=sys.stderr)
+        sys.exit(1)
+
     owners = declared_owner or graphs.owners_of(item)
 
     ok, to, legal_here, why = check_transition(graphs, item.type, state, a.event,

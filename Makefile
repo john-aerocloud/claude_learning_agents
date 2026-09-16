@@ -513,6 +513,10 @@ test-wi:
 #   of borrowing another role's name. A declaration REPLACES the default — it narrows.
 #   FLOW ROLES ONLY: an agent that could declare itself the owner would be granting
 #   itself, in one command, the right it is exercising in that same command.
+#   REFUSED on an item a DIFFERENT role has already worked [DEF-ROC-217]: narrowing
+#   would make that role's past events illegal under I1, so the declaration is refused
+#   naming them — widen it (OWNER=cicd,engineer) or do not declare, never rewrite the
+#   history to fit it.
 # TOKENS = subagent_tokens the dispatched specialist spent producing this transition (optional).
 # DURATION_MS = the dispatched agent's REAL cycle time in ms for this transition (optional;
 #   the dispatch layer's reported duration_ms). Feeds §F agent-cycle-time-vs-GLT in wi-project.

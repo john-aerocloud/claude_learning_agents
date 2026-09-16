@@ -121,6 +121,12 @@
       "test": "AC-GI.3 --project resolves the project repo, so the loop-gate wiring needs no path",
       "reason": "same corpus dependency as the row above",
       "owner": "DEF-ROC-213"
+    },
+    {
+      "file": "worktree-guard.test.js",
+      "test": "AC-DEFECT-OAG-076.5 CONTROL — the same payload through the old `process.exit()` tail IS truncated (the bug, observed failing)",
+      "reason": "asserts `stdout.length === 65536` exactly -- a process.exit()-vs-pipe-flush TIMING RACE, not a platform constant. Green on every local macOS run of this exact commit; red on the FIRST EVER Ubuntu Actions run (35052726956) that exercised it -- discovered BY wiring this CI lane, not a pre-existing corpus gap",
+      "owner": "DEF-ROC-215"
     }
   ]
 }

@@ -1837,16 +1837,15 @@ def _append_locked(a):
     # history is already illegal under its current owners has a real problem, but
     # it is validate/I1's to name and it is not caused by this act — blaming the
     # declaration for it would be the same misattribution pointing the other way.
+    current_owners = graphs.owners_of(item)
+    broken = []
     if declared_owner:
-        current_owners = graphs.owners_of(item)
-        broken = []
         for idx, ev in enumerate(item.events):
             if not event_rights_ok(graphs, item.type, current_owners, idx, ev)[0]:
                 continue                       # already illegal — not this act's doing
-            ok_now, _why = event_rights_ok(graphs, item.type, declared_owner, idx, ev)
-            if not ok_now:
+            if not event_rights_ok(graphs, item.type, declared_owner, idx, ev)[0]:
                 broken.append((idx + 1, ev.get("event"), ev.get("agent")))
-    if declared_owner and broken:
+    if broken:
         acted = sorted({agent for _n, _e, agent in broken})
         widened = ",".join(sorted(declared_owner | set(acted)))
         print(f"append REJECTED: {a.id}: declaring OWNER={','.join(sorted(declared_owner))} "

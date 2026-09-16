@@ -4238,13 +4238,48 @@ triaging one defect did. The asymmetry is an oversight, not a decision.
 
 **A decision is free; only STARTING work costs a slot.** Every type that can be decided before it
 is started gains a post-decision, pre-work state that maps to `ready`/`intake` — never to `wip`.
-For a defect that is `reported --(scheduled)--> scheduled`, with `triaged` reserved for *actually
-beginning* the reproduction.
 
-Until the state graph carries it, the honest workaround stands and must say so in the note: a
-**dated** `defer_until` for a defect you are genuinely not about to start, stating that the defer
-is standing in for a missing `scheduled` state. **Do NOT let the WIP cap become the reason findings
+### BUILT — state-graph v13, and where it departs from the letter above [OI-ROC-029, 2026-09-16]
+
+**Delivered as `reported --(triaged)--> scheduled --(pulled)--> reproducing`**, reusing the
+`scheduled` state `open-item` has had since v8 (already `ready` in `queue_map`, already `queue` in
+`state_owners`), so no new state, queue or vocabulary was introduced.
+
+**The one departure, and it is deliberate: `triaged` KEEPS its name and its registration-time
+timing.** §F9i above proposed the opposite — a new `scheduled` event, with `triaged` reserved for
+beginning the reproduction. That gets the rule right and the ergonomics backwards. **The whole
+failure is that the event every agent doc, every gate remedy and every habit ALREADY fires at
+registration was the one that landed in `wip`.** Renaming the safe event leaves the habitual one
+still pointed at the trap, with a new escape beside it that has to be remembered. Pointing the
+HABITUAL event at the SAFE state makes the wrong act *unreachable* rather than merely discouraged,
+and it costs no documentation churn: loop-gate check 17 still prints `--event triaged` as the §F9b
+remedy and is still correct. Starting work is `pulled` — already the dispatch marker for `use-case`
+and `open-item`, already the event that carries `OWNER=` (v11) — so all three flow types now begin
+work with ONE event, and `pulled` is illegal from `reported`, so swapping the habit does not
+restore it either.
+
+**The habit is held by a machine, not by this paragraph** (§F9g: a note is not a queue).
+`process-lint` **C6** fails the build on ANY `flow` type, present or future, whose initial state
+has an edge into a `wip`-queue state. Demonstrated both ways: clean on the committed graph;
+firing, and naming the edge, on a copy of the real repo with only that one edge restored.
+
+**No history was rewritten and none was invalidated.** State is `fold(events)`; only the fold
+changed. Folding all 459 real ROC items through both graphs: **seven** items changed state, every
+one `reproducing (wip) -> scheduled (ready)` and every one on the orchestrator's own list of slots
+nobody was working; **no** item's terminal state changed; `wi-validate` is clean. So the
+mis-stated items needed **no forward correction event at all** — which is the strongest available
+argument for keeping state derived rather than stored.
+
+**The interim workaround is RETIRED.** A `defer_until` standing in for a missing `scheduled` state
+is no longer honest, because the state exists. **Do NOT let the WIP cap become the reason findings
 go undecided** — that inverts the constraint exactly the way check 3 warns about for backlog depth.
+
+**What this exposed and did NOT fix, now `OI-ROC-030`:** `ready` is declared `kind,wip` in
+`queues/policy.csv`, so its over-cap finding BLOCKS the pull. Nobody is working a `ready` item, so
+there is no concurrent-work harm to relieve, and the remedy for a full ready buffer is to PULL —
+which is what the block prevents. That is the same inversion the QUEUE KIND block already argues
+for `intake`, and it now binds harder because decided defects land there. It is a flow-manager
+policy knob, so it is raised rather than changed here.
 
 ### What this does NOT license
 

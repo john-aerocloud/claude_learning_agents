@@ -241,8 +241,16 @@ being asked to do unrecordable work. It corrupts every derived view (that work s
 zero engineer time, and the item's real state is a lie until someone notices).
 - **Precondition, checked before the brief goes out:** the item is ALREADY in the state
   this agent's event exits (`building` for `built_green`, `fixing` for `fixed`,
-  `dev-validating`/`validating` for `validated`). Append the entry event in the SAME turn
-  as the dispatch — not after the return.
+  `dev-validating`/`validating` for `validated`, `reproducing` for `confirmed`). Append the
+  entry event in the SAME turn as the dispatch — not after the return.
+- **For a DEFECT the entry event is `pulled`, not `triaged` [state-graph v13, OI-ROC-029].**
+  `triaged` is the §F9b DECISION and lands in `scheduled`, which costs no WIP slot; `pulled`
+  is the dispatch and moves it to `reproducing`. All three flow types now start work with
+  the SAME event, so there is one rule to hold, and it is the event that carries `OWNER=`.
+  A defect you have triaged but not dispatched is correctly sitting in the `ready` queue —
+  that is inventory, not a stall, and the wip depth you read in `loop-gate` should now agree
+  with `ListAgents`. If it does not, that disagreement is a finding: raise it, do not raise
+  the cap.
 - **DECLARE THE OWNER in that same entry event [state-graph v11, OI-ROC-006].** Firing
   rights are now derived from the item, not from a per-transition allowlist, so **who you
   dispatched to is a fact the item must carry**: `make wi-append … EVENT=triaged
@@ -403,9 +411,25 @@ cycles keep the plain trunk working tree. Target: commit-attribution-correctness
   wait, and unlike queue wait it is entirely yours. It is not think-time: a defect sits in
   `reported` because nobody fired `triaged`.
   **RULE:** when you register a defect from a dispatch report that ALREADY carries its
-  reproduction and its cause, fire `triaged` (and `confirmed`, where the report establishes
-  the reproduction) in the SAME turn. Do not park a defect in `reported` to "look at it
-  later" — the evidence does not improve by ageing, and the 24.1 h median is that habit.
+  reproduction and its cause, fire `triaged` in the SAME turn. Do not park a defect in
+  `reported` to "look at it later" — the evidence does not improve by ageing, and the
+  24.1 h median is that habit.
+  **AND SINCE state-graph v13 (OI-ROC-029) THE DECISION IS FREE, so there is no longer a
+  reason not to.** `triaged` lands in `scheduled` — decided, queued, owned by `queue`, in
+  the `ready` queue — and takes NO WIP slot. Before v13 it landed straight in `reproducing`,
+  which is a `wip` state, so recording a decision consumed a slot: on 2026-09-16 that put
+  `wip` at 11/8 and BLOCKED the loop with ZERO agents running, eight of the slots held by
+  items nobody had ever been dispatched to. You were obeying this very rule when it
+  happened; the substrate was wrong, not the habit. It is now fixed in the graph and pinned
+  by process-lint C6, so this rule and the WIP cap can no longer contradict each other.
+  **WHAT COSTS A SLOT IS THE DISPATCH, and it is `pulled`** — the same event `use-case` and
+  `open-item` already use, carrying `OWNER=` in the same act. Fire it when you brief an
+  agent, not before. **`confirmed` is ALSO a start, not part of triage:** it moves the item
+  to `fixing`, which is `wip`. So where the report already establishes the reproduction and
+  you are dispatching the fix in that same turn, `triaged` + `confirmed` is right and the
+  slot it takes is real (`DEFECT-OAG-138` went `reported → triaged → confirmed → fixed` in
+  one turn because an agent was on it). Where you are NOT dispatching, fire `triaged` alone
+  and leave it in `scheduled` for the next pull.
   Demonstrated the same day: `DEFECT-OAG-138` went `reported → triaged → confirmed → fixed`
   in one turn, because the finding dispatch had already reproduced it, located the cause
   (`Math.max(...)` argument-count bound) and landed the fix — so there was nothing to wait for.

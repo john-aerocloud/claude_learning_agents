@@ -1106,9 +1106,34 @@ impacted-tests:
 
 # Self-tests for the cross-project agent-ops tooling under .claude/tools/
 # (IMP-007 impacted-tests.js, test-requirement-gate.js). node's built-in runner,
-# no creds, no network.
+# no creds, no network. LOCAL/general-purpose: runs every *.test.js as-is,
+# which is red in a checkout that lacks work/OagEventSource (see test-tools-ci
+# below for the CI-safe form of this same suite).
 test-tools:
 	node --test .claude/tools/*.test.js
+
+# --- DEF-ROC-211: the CI entrypoint for .claude/tools/*.test.js -------------
+# `.claude/tools/tool-coverage.js` (declared + self-covered in
+# .claude/tools/tool-coverage.json) does THREE things and any can fail:
+#   1. every .claude/tools/*.test.js file is DECLARED in the ledger (an
+#      undeclared new suite is exactly how "nothing runs it" recurs);
+#   2. the declared CI lane (.github/workflows/tools-tests.yml) actually
+#      INVOKES this target (a carrier with no caller is not a control,
+#      DEF-ROC-165's class);
+#   3. the suite is RUN, and every failure is either absent or a pre-declared
+#      knownEnvironmentGaps row (10 cases across 2 files that assert against a
+#      nested project repo no parent-repo checkout contains, DEFECT-OAG-076 —
+#      DEF-ROC-213 owns converting those into an honest skip). A NEW failure
+#      anywhere else is red.
+# Wired as the sole step of .github/workflows/tools-tests.yml.
+#   make test-tools-ci
+#   make test-tools-ci JSON=1
+#   make tool-coverage             # steps 1+2 only, no subprocess (fast)
+test-tools-ci:
+	node .claude/tools/tool-coverage.js $(if $(JSON),--json,)
+
+tool-coverage:
+	node .claude/tools/tool-coverage.js --static-only $(if $(JSON),--json,)
 
 # --- §17d test-requirement gate — "the ONLY thing tests validate is the requirements" -
 # Human ruling, 2026-08-02. TWO LIMBS over the committed test sources:
@@ -1429,7 +1454,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap sequencer-guard make-refs-tracked container-reap container-orphans stack-claim stack-release stack-status sso-login retro-debt retro-mark loop-gate exit-gate-ran loop-uptime test-wi wi-append wi-mint wi-project wi-validate wi-migrate item-brief doc-lint process-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools commit-isolated commit-msg-file test-requirement-gate test-requirement-gate-baseline test-requirement-gate-clean board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery deploy-lane
+.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap sequencer-guard make-refs-tracked container-reap container-orphans stack-claim stack-release stack-status sso-login retro-debt retro-mark loop-gate exit-gate-ran loop-uptime test-wi wi-append wi-mint wi-project wi-validate wi-migrate item-brief doc-lint process-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools test-tools-ci tool-coverage commit-isolated commit-msg-file test-requirement-gate test-requirement-gate-baseline test-requirement-gate-clean board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery deploy-lane
 
 # --- Viggo-fix UC-W7: Country/Nationality ID remediation (T-SQL) --------------
 # Data-driven, self-building T-SQL remediation script set + its local stand-up

@@ -1,0 +1,63 @@
+###############################################################################
+# .claude/tools — parent-repo self-tests
+#
+# DEF-ROC-211. `.claude/tools/` holds the cross-project agent-ops tooling every
+# agent uses on every commit — most pointedly `isolated-commit.js`, whose
+# 78-case suite encodes the founding four-agent silent commit LOSS, DEFECT-OAG-142's
+# silent commit DUPLICATION, and DEF-ROC-189's continuity limb. Before this
+# workflow, `grep -rn "claude/tools" .github/workflows/` returned NOTHING: the
+# 352-case suite across 13 files ran only when a human or agent happened to type
+# `node --test` by hand.
+#
+# NO `paths:` filter, DELIBERATELY (same asymmetry as ROC's own
+# code-analysis.yml, OI-ROC-025): the parent repo gitignores every
+# `work/<project>/` directory (v50), so almost everything that lands HERE is
+# `.claude/`, `process/`, `Makefile`, top-level docs, or a workflow file itself
+# — there is no meaningful "unrelated" push to filter out, and an absent run
+# must read as a FINDING, never an expected silence.
+#
+# `make test-tools-ci` is the single entrypoint (`.claude/tools/tool-coverage.js`):
+# it verifies every `.claude/tools/*.test.js` is DECLARED in
+# `.claude/tools/tool-coverage.json` and that THIS file actually invokes the
+# declared command (so a future suite cannot join the unrun tier silently,
+# DEF-ROC-165's class), then runs the whole suite and tolerates ONLY the
+# pre-declared, environment-dependent `knownEnvironmentGaps` (10 cases across
+# 2 files that assert against a nested project repo — work/OagEventSource —
+# a parent-repo checkout never contains, DEFECT-OAG-076; DEF-ROC-213 owns
+# converting those from a hard FAIL into an honest node:test SKIP). Any OTHER
+# failure is red.
+###############################################################################
+
+name: tools — self-tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: tools-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test-tools:
+    name: .claude/tools coverage + suite
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: make test-tools-ci
+        run: make test-tools-ci

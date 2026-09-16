@@ -1,0 +1,126 @@
+{
+  "_why": "DEF-ROC-211. `.claude/tools/isolated-commit.js` is the tool every agent's every commit passes through, its 78-case suite encodes the founding four-agent silent LOSS + DEFECT-OAG-142's silent DUPLICATION + DEF-ROC-189's continuity limb, and `grep -rn \"claude/tools\" .github/workflows/` returned NOTHING -- the whole `.claude/tools/` tree ran only when a human or agent happened to type `node --test`. This is the PARENT-REPO half of the `guard-coverage.json` class (work/ROC/scripts/guard-coverage.json, DEF-ROC-165): that ledger's own `_not_covered_here` field records it cannot see past the project/parent lane boundary (v50 gives each project its own nested, gitignored repo), so a ledger living in a PROJECT repo can never be the thing that declares a PARENT-repo tool's coverage -- it would need one redundant copy per project and would still not run in the parent's own CI. This file is that missing parent-repo ledger, and `tool-coverage.js` is its checker: it verifies every `.claude/tools/*.test.js` is DECLARED below (an undeclared file is exactly how the class recurs -- DEF-ROC-165's carrier, DEF-ROC-202's gauge), that the declared `lane` workflow actually invokes `runBy` (a carrier with no caller is not a control), and then RUNS the suite -- tolerating only the pre-declared, environment-dependent failures in `knownEnvironmentGaps` so a NEW failure anywhere else is red, never silently absorbed.",
+  "_self_coverage": "The ledger must cover its own checker, or an unwired coverage check is the very defect it exists to detect (DEF-ROC-165's `scripts/guardCoverage.mjs` precedent) -- `tool-coverage.js` and `tool-coverage.test.js` are both declared in `guards` below, same as every other tool.",
+  "lane": ".github/workflows/tools-tests.yml",
+  "runBy": "make test-tools-ci",
+  "guards": [
+    {
+      "id": "container-reap.test.js",
+      "what": "DEFECT-OAG-091 -- the per-dispatch DynamoDB Local container reaper does not destroy a container an in-flight suite still owns (the lease/age tradeoff that replaced the shared-container collision)"
+    },
+    {
+      "id": "deploy-lane.test.js",
+      "what": "DEF-ROC-131 AC-131-5 -- the deploy-lane arming test, in both directions: fires on a real shut lane, stays silent on the repo's standing red (DEF-ROC-068) so the signal stays meaningful"
+    },
+    {
+      "id": "deploy-staleness.test.js",
+      "what": "DEF-ROC-086 -- detects a deployed environment behind trunk specifically by a commit that touches a deploy-trigger path, not merely 'behind'"
+    },
+    {
+      "id": "impacted-tests-class-stmt-recall.test.js",
+      "what": "OI-IMPACTED-TESTS-CANNOT-SEE-190-OF-192-CHANGE-MARKS -- `class ... changed` mermaid marks are read via the structural tokeniser, not a semicolon-anchored regex that missed 96% of the real corpus. Corpus-measurement cases (AC-CSR.2) are a DECLARED knownEnvironmentGaps entry below (see DEF-ROC-213)"
+    },
+    {
+      "id": "impacted-tests-junk-node-ids.test.js",
+      "what": "OI-IMPACTED-TESTS-JUNK-NODE-IDS -- node identity comes from mermaid structure, not a diff-line regex that lifted ordinary English words out of label prose as graph nodes"
+    },
+    {
+      "id": "impacted-tests.test.js",
+      "what": "IMP-007 -- changed-node -> impacted-spec mapping: covered nodes are IMPACTED, uncovered nodes WARN, and the exit-code contract (0 clean, 2 uncovered) holds"
+    },
+    {
+      "id": "isolated-commit.test.js",
+      "what": "DEFECT-OAG-058 -- the shared-working-tree commit tool every agent's every commit passes through: private-index isolation from the shared git index, the co-owned-file three-way merge and its DEFECT-OAG-142 anti-duplication guards, and DEF-ROC-189's continuity limb, each pinned DIFFERENTIALLY (naive form disagrees with the fixed form)"
+    },
+    {
+      "id": "make-refs-tracked.test.js",
+      "what": "OI-GITIGNORE-SWALLOWS-COMMITTED-TOOLS -- a blanket `.gitignore` pattern silently dropping a committed tool from `git ls-files`, cross-checked against the real OagEventSource Makefile + git index. Corpus-measurement cases (AC-GI.3 / AC-GI.3e) are a DECLARED knownEnvironmentGaps entry below (see DEF-ROC-213)"
+    },
+    {
+      "id": "process-lint.test.js",
+      "what": "v145 -- process-current.md's own internal consistency (version-line staleness, cross-references) is checked by a tool, not left to a reader noticing"
+    },
+    {
+      "id": "sequencer-guard.test.js",
+      "what": "OI-ABANDONED-SEQUENCER-STATE-ARMS-A-56-COMMIT-DESTRUCTION -- an armed `.git/sequencer` revert/rebase/cherry-pick/merge state is reported (with the commit count `--abort` would discard), invisible to `git status --porcelain` though it is"
+    },
+    {
+      "id": "stack-claim.test.js",
+      "what": "DEF-ROC-062 -- the lease-file writer side of container-reap's absolute-veto protection: claim/release/TTL-expiry contract the reaper reads"
+    },
+    {
+      "id": "test-requirement-gate.test.js",
+      "what": "process SS17d -- every test case declares the AC it validates (limb 1) and authors no precondition by mutating a real capture (limb 2), driven against REAL files in a REAL temp directory, never stubbed inputs"
+    },
+    {
+      "id": "tool-coverage.test.js",
+      "what": "this checker's own suite -- DEF-ROC-211. Drives declared/undeclared/stale/unwired findings against seeded trees, a known-gap tolerance case, an UNDECLARED-new-failure case that must come back red, and one case against the real ledger + real lane file"
+    },
+    {
+      "id": "worktree-guard.test.js",
+      "what": "DEFECT-OAG-076 -- a parent-repo worktree never contains a project's own nested (gitignored) repo; the guard refuses to destroy one whose commits exist nowhere else"
+    }
+  ],
+  "knownEnvironmentGaps": [
+    {
+      "file": "impacted-tests-class-stmt-recall.test.js",
+      "test": "AC-CSR.2: every `class …changed` statement in the REAL committed .mmd corpus is recognised on a diff line (pre-fix: 6 of 166)",
+      "reason": "asserts against work/OagEventSource/architecture/dependencies -- a nested project repo (v50/DEFECT-OAG-076) a parent-repo checkout never contains, in CI or otherwise",
+      "owner": "DEF-ROC-213"
+    },
+    {
+      "file": "impacted-tests-class-stmt-recall.test.js",
+      "test": "AC-CSR.2: every node named by a real class statement is in that diagram's structural `marked` set — nothing is swallowed by a label",
+      "reason": "same corpus dependency as the row above",
+      "owner": "DEF-ROC-213"
+    },
+    {
+      "file": "make-refs-tracked.test.js",
+      "test": "AC-GI.3e the REAL repo, unperturbed, is clean",
+      "reason": "asserts against the real work/OagEventSource git index/Makefile, absent in a parent-repo checkout (v50/DEFECT-OAG-076)",
+      "owner": "DEF-ROC-213"
+    },
+    {
+      "file": "make-refs-tracked.test.js",
+      "test": "AC-GI.3e the check reports the REAL swallowed tool seed-event-store.mjs",
+      "reason": "same corpus dependency as the row above",
+      "owner": "DEF-ROC-213"
+    },
+    {
+      "file": "make-refs-tracked.test.js",
+      "test": "AC-GI.3e the check reports the REAL swallowed tool event-store-distribution.mjs",
+      "reason": "same corpus dependency as the row above",
+      "owner": "DEF-ROC-213"
+    },
+    {
+      "file": "make-refs-tracked.test.js",
+      "test": "AC-GI.3e the check reports the REAL swallowed tool probe-transact-append.mjs",
+      "reason": "same corpus dependency as the row above",
+      "owner": "DEF-ROC-213"
+    },
+    {
+      "file": "make-refs-tracked.test.js",
+      "test": "AC-GI.3e the check reports the REAL swallowed tool capture-ddb-stream-records.mjs",
+      "reason": "same corpus dependency as the row above",
+      "owner": "DEF-ROC-213"
+    },
+    {
+      "file": "make-refs-tracked.test.js",
+      "test": "AC-GI.3e the check reports the REAL swallowed tool ddb-local-marker.mjs",
+      "reason": "same corpus dependency as the row above",
+      "owner": "DEF-ROC-213"
+    },
+    {
+      "file": "make-refs-tracked.test.js",
+      "test": "AC-GI.3e the check reports the REAL swallowed tool capture-lambda-runtime-sdk-exports.mjs",
+      "reason": "same corpus dependency as the row above",
+      "owner": "DEF-ROC-213"
+    },
+    {
+      "file": "make-refs-tracked.test.js",
+      "test": "AC-GI.3 --project resolves the project repo, so the loop-gate wiring needs no path",
+      "reason": "same corpus dependency as the row above",
+      "owner": "DEF-ROC-213"
+    }
+  ]
+}

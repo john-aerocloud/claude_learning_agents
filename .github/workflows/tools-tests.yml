@@ -61,3 +61,18 @@ jobs:
 
       - name: make test-tools-ci
         run: make test-tools-ci
+
+      # DEF-ROC-119. `process-lint` is the STRUCTURAL gate over the process files
+      # themselves (C1 stale version heading, C2-C4 the experiment registry, C5 orphan
+      # declarations in queues/policy.csv). Until now it ran only when a retro invoked
+      # `make doc-lint` — which is precisely the shape of failure C5 exists to catch: a
+      # control that is real, correct, and runs only when somebody remembers it.
+      # `deploy,wip_limit,1` survived months of retros that way.
+      #
+      # Runs AFTER the suite so a C5 hit is never confused with a broken tool. In a CI
+      # checkout `work/<project>/` is gitignored and absent, so C5 scans the tracked
+      # `work/_TEMPLATE/queues/policy.csv` — the file every NEW project is seeded from,
+      # and the one whose orphans propagate. Its own info line prints how many files it
+      # scanned, so "found nothing to check" can never read as "clean".
+      - name: make process-lint
+        run: make process-lint

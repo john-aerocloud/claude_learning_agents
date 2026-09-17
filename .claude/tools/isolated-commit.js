@@ -1420,7 +1420,54 @@ function isolatedCommit({
 
 // --- CLI ---------------------------------------------------------------------
 
-function parseArgv(argv) {
+/** Thrown inside parseArgv so a refusal can be raised from a nested helper and
+ *  still leave the function returning `{error}` like every other caller expects. */
+class ArgvError extends Error {}
+
+/** Every option that CONSUMES the token after it. Data, so "and what if the value
+ *  is missing, or is itself an option?" is answered once (DEF-ROC-248). */
+const VALUE_OPTIONS = ['--repo', '--message', '-m', '--message-file', '-F', '--supersede-file', '--supersede'];
+
+/** Options that may be given at most ONCE. `--supersede`/`--supersede-file` are
+ *  repeatable by design (a declaration is a list of lines). */
+const SINGLE_SHOT_OPTIONS = ['--repo', '--message', '-m', '--message-file', '-F'];
+
+/** Looks like an option rather than a value: a leading dash and a letter. Bare `-`
+ *  and a negative number are values. */
+function looksLikeOption(tok) {
+  return /^--?[A-Za-z]/.test(String(tok));
+}
+
+/**
+ * ARGUMENT HYGIENE (DEF-ROC-248). An argument this tool does not define, a value
+ * that is plainly another option, a value that is not there at all, and a SECOND
+ * source for a fact that can only have one are all instructions the caller meant
+ * something by. The historical parser absorbed each of them silently:
+ *
+ *   --message --json          committed with the message `--json`
+ *   --repo <end of argv>      `not a git repository: undefined`
+ *   -- src/f.ts --json        `--json` silently declared as a PATH
+ *   --message-file P --message x   the authored message read, then thrown away
+ *
+ * dd44e2f1 is what that costs: a commit on trunk, pushed, with commits on top,
+ * whose entire message is `x`, made by an agent that intended a real one. The
+ * message cannot be repaired — the amend was correctly refused as destructive — so
+ * the only place this class can be stopped is here, before the commit exists.
+ *
+ * `hygiene: false` reproduces the historical rule and exists for the tests' losing
+ * arm (AC-248.1/.3/.5). It is not reachable from the CLI: there is no legitimate
+ * reason to ask this tool to misread you.
+ */
+function parseArgv(argv, { hygiene = true } = {}) {
+  try {
+    return parseArgvOrThrow(argv, { hygiene });
+  } catch (e) {
+    if (e instanceof ArgvError) return { error: e.message };
+    throw e;
+  }
+}
+
+function parseArgvOrThrow(argv, { hygiene = true }) {
   const out = {
     repo: null,
     message: null,
@@ -1436,23 +1483,79 @@ function parseArgv(argv) {
     printCoownedMissing: false,
   };
   let i = 0;
+  const seen = new Set();
   /**
    * CONSUME THE FOLLOWING ARGV TOKEN as `name`'s value. One named place, because
    * five call sites each writing `argv[++i]` is five independent answers to
    * "and what if there is no value, or the value is itself an option?" — and the
    * answer they all gave was to take it silently (DEF-ROC-248).
+   *
+   * @param {boolean} [o.valueMayLookLikeOption] `--supersede` only: a content line
+   *        of real source or markdown can legitimately begin with `-`, and refusing
+   *        it would make the narrow DEF-ROC-173 move unusable on the very files it
+   *        exists for.
    */
-  const takeValue = (name) => {
+  const takeValue = (name, { valueMayLookLikeOption = false } = {}) => {
     i += 1;
-    return argv[i];
+    const v = argv[i];
+    if (!hygiene) return v;
+    if (v === undefined)
+      throw new ArgvError(
+        `${name} was given NO VALUE — the command line ended. Nothing was committed.`,
+      );
+    if (!valueMayLookLikeOption && looksLikeOption(v))
+      throw new ArgvError(
+        [
+          `${name} was given \`${v}\`, which is an OPTION, not a value — nothing was committed.`,
+          'This tool will not guess. If that really is your value, pass it through a file:',
+          '  P=$(make -s commit-msg-file); printf %s "<your value>" > "$P"',
+          '  make commit-isolated REPO=<dir> MSG_FILE="$P" PATHS="<paths>"',
+          'Absorbing a mistyped instruction is how dd44e2f1 reached trunk with the message `x`.',
+        ].join('\n'),
+      );
+    return v;
+  };
+  /** A fact with ONE value may be stated ONCE. Last-wins silently discarded an
+   *  authored message in favour of a stray `--message x` (DEF-ROC-248). */
+  const claim = (name) => {
+    if (!hygiene) return;
+    const family = name === '--message' || name === '-m' || name === '--message-file' || name === '-F'
+      ? 'the commit message'
+      : name;
+    for (const prior of seen) {
+      const priorFamily = prior === '--message' || prior === '-m' || prior === '--message-file' || prior === '-F'
+        ? 'the commit message'
+        : prior;
+      if (priorFamily !== family) continue;
+      throw new ArgvError(
+        [
+          `TWO SOURCES FOR ${family.toUpperCase()} — \`${prior}\` and \`${name}\` — nothing was committed.`,
+          'One of them would silently win and the other would be read and thrown away, which is',
+          'exactly how an authored message becomes a stray one (DEF-ROC-248). Say it once.',
+        ].join('\n'),
+      );
+    }
+    seen.add(name);
   };
   for (; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--') {
       out.paths = argv.slice(i + 1);
+      // EVERYTHING AFTER `--` IS A DECLARED PATH, so an option written there is not
+      // an option at all — it is a path nobody owns, and the historical parser took
+      // it without a word (AC-248.3).
+      const strayOptions = hygiene ? out.paths.filter(looksLikeOption) : [];
+      if (strayOptions.length > 0)
+        throw new ArgvError(
+          [
+            `${strayOptions.join(', ')} appears AFTER \`--\`, where every token is a declared PATH — nothing was committed.`,
+            'Options go BEFORE the `--`; after it, this tool would have declared them as files',
+            'you own, silently, and committed whatever else you passed.',
+          ].join('\n'),
+        );
       break;
-    } else if (a === '--repo') out.repo = takeValue(a);
-    else if (a === '--message' || a === '-m') out.message = takeValue(a);
+    } else if (a === '--repo') { claim(a); out.repo = takeValue(a); }
+    else if (a === '--message' || a === '-m') { claim(a); out.message = takeValue(a); }
     // --message-file / -F: the ONLY route a commit message cannot be corrupted on
     // (OI-WI-APPEND-NOTE-PATH-MANGLES-CONTENT). A message on a command line crosses
     // make's expansion and then a shell double-quoted string: `$` is expanded away, a
@@ -1461,6 +1564,7 @@ function parseArgv(argv) {
     // `unexpected EOF while looking for matching '"'`. A PATH has no metacharacters.
     // Same reason `git commit -F` exists.
     else if (a === '--message-file' || a === '-F') {
+      claim(a);
       const p = takeValue(a);
       out.messageFile = p;
       try {
@@ -1484,7 +1588,7 @@ function parseArgv(argv) {
       } catch (e) {
         return { error: `cannot read --supersede-file ${f}: ${e.message}` };
       }
-    } else if (a === '--supersede') out.superseded.push(takeValue(a));
+    } else if (a === '--supersede') out.superseded.push(takeValue(a, { valueMayLookLikeOption: true }));
     else if (a === '--print-coowned-missing') out.printCoownedMissing = true;
     else if (a === '--allow-duplicate-message') out.allowDuplicateMessage = true;
     else if (a === '--allow-shared-message-file') out.allowSharedMessageFile = true;
@@ -1492,7 +1596,16 @@ function parseArgv(argv) {
     else if (a === '--no-coowned-merge') out.coownedMerge = false;
     else if (a === '--json') out.json = true;
     else if (a === '--help' || a === '-h') out.help = true;
-    else return { error: `unknown argument: ${a}` };
+    else if (hygiene && /^--?[A-Za-z][^=]*=/.test(a) && VALUE_OPTIONS.includes(a.slice(0, a.indexOf('='))))
+      throw new ArgvError(
+        [
+          `${a.slice(0, a.indexOf('='))} does not take the \`=\` form — nothing was committed.`,
+          `Write it as two tokens:  ${a.slice(0, a.indexOf('='))} <value>`,
+          'Named rather than refused as an opaque "unknown argument", because a caller who',
+          'cannot see WHICH HALF was wrong retypes the same thing (DEF-ROC-248).',
+        ].join('\n'),
+      );
+    else throw new ArgvError(`unknown argument: ${a}`);
   }
   return out;
 }
@@ -1745,6 +1858,8 @@ function main(argv) {
 
 module.exports = {
   isolatedCommit,
+  parseArgv,
+  looksLikeOption,
   pathsOutsideDeclared,
   normalizeMessage,
   messageFileIdentityToken,

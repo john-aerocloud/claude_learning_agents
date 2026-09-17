@@ -2248,3 +2248,116 @@ test('AC-173.3 the MIXED case fails SAFE and SAYS SO: staleness beyond the decla
   assert.deepEqual(x.restoredDespiteDeclaration, ['row-i-replace']);
   assert.match(head, /row-i-replace/, 'restored — the SAFE direction: content comes back, it is never silently dropped');
 });
+
+// --- DEF-ROC-248 — THE CLI ATE A WELL-FORMED INSTRUCTION ----------------------
+//
+// dd44e2f1 sits on ROC's trunk, pushed, with commits on top, and its whole message
+// is the single character `x`. It changes `scripts/design-quality-gate.mjs` — the
+// exit gate's own logic — and it landed while that gate was red. The DIFF IS FINE
+// (coverageTrend extracted out of runCoverageLimb; `gates: false` and `ok: true`
+// unchanged on both paths); nobody weakened a gate. What is not fine is how the
+// message got there: its author invoked this tool before reading its usage, and the
+// CLI took the instruction and did something else with it WITHOUT A WORD.
+//
+// That is the class these cases close. An argument this tool does not define — or a
+// value that is plainly another option, or a second source for a fact that can only
+// have one — must be REFUSED or at minimum NAMED, never absorbed. The losing arm is
+// the production parser with `hygiene:false`, i.e. the historical `argv[++i]` rule
+// itself, so "it used to be swallowed" is measured rather than asserted.
+//
+//   AC-248.1  a value-taking option handed ANOTHER OPTION as its value is refused,
+//             naming both; the historical rule committed it as the message.
+//   AC-248.2  a value-taking option with NO value is refused, naming it.
+//   AC-248.3  an option-shaped token AFTER `--` is refused; the historical rule
+//             declared it as a PATH, silently.
+//   AC-248.4  the `--opt=value` form is refused by NAME, pointing at the form that
+//             works, rather than as an opaque "unknown argument".
+//   AC-248.5  two sources for ONE message is refused, never silently last-wins.
+
+test('AC-248.1 a value-taking option handed ANOTHER OPTION as its value is refused, naming both — the historical rule swallowed it as the message', () => {
+  const repo = makeRepo();
+  write(repo, 'src/mine.ts', 'export const mine = 2;\n');
+  const before = git(repo, ['rev-parse', 'HEAD']);
+
+  // LOSING ARM — the production parser under its historical rule.
+  const naive = tool.parseArgv(['--repo', repo, '--message', '--json', '--', 'src/mine.ts'], { hygiene: false });
+  assert.equal(naive.message, '--json', 'the pre-fix rule really did take the next token whatever it was — if this fails the defect is not being reproduced');
+
+  // WINNING ARM — the real CLI.
+  const res = runCli(repo, ['--repo', repo, '--message', '--json', '--', 'src/mine.ts']);
+  assert.equal(res.status, 2, `${res.stdout}${res.stderr}`);
+  assert.match(res.stderr, /--message/);
+  assert.match(res.stderr, /--json/, 'the refusal NAMES the value it will not swallow');
+  assert.equal(git(repo, ['rev-parse', 'HEAD']), before, 'nothing committed');
+});
+
+test('AC-248.1 a supersede LINE may legitimately start with `-`, so that one option is exempt', () => {
+  // A content line of real source or markdown can begin with `-`; refusing it would
+  // make the narrow DEF-ROC-173 move unusable on exactly the files it exists for.
+  const opts = tool.parseArgv(['--repo', 'r', '--message', 'docs: x y (ITEM-A)', '--supersede', '- a list row', '--', 'f']);
+  assert.ok(!opts.error, opts.error);
+  assert.deepEqual(opts.superseded, ['- a list row']);
+});
+
+test('AC-248.2 a value-taking option with NO value is refused BY NAME, not left undefined', () => {
+  const repo = makeRepo();
+  const res = runCli(repo, ['--repo', repo, '--message']);
+  assert.equal(res.status, 2);
+  assert.match(res.stderr, /--message/);
+  assert.match(res.stderr, /no value|requires a value|ended/i);
+
+  // and the same for --repo, where the historical rule produced `not a git repository: undefined`
+  const res2 = runCli(repo, ['--message', 'chore: a real message (ITEM-A)', '--repo']);
+  assert.equal(res2.status, 2);
+  assert.match(res2.stderr, /--repo/);
+  assert.doesNotMatch(res2.stderr, /undefined/, 'a refusal that says `undefined` tells the caller nothing about what it typed');
+});
+
+test('AC-248.3 an option-shaped token AFTER `--` is refused — the historical rule declared it as a PATH, silently', () => {
+  const repo = makeRepo();
+  write(repo, 'src/mine.ts', 'export const mine = 3;\n');
+  const before = git(repo, ['rev-parse', 'HEAD']);
+  const argv = ['--repo', repo, '--message', 'chore(src): a real message (ITEM-A)', '--', 'src/mine.ts', '--json'];
+
+  // LOSING ARM — `--json` became a declared path and nobody said anything.
+  const naive = tool.parseArgv(argv, { hygiene: false });
+  assert.deepEqual(naive.paths, ['src/mine.ts', '--json']);
+
+  const res = runCli(repo, argv);
+  assert.equal(res.status, 2, `${res.stdout}${res.stderr}`);
+  assert.match(res.stderr, /--json/);
+  assert.match(res.stderr, /after `--`|declared PATH/i, 'it says WHY: everything after `--` is a path');
+  assert.equal(git(repo, ['rev-parse', 'HEAD']), before, 'nothing committed');
+});
+
+test('AC-248.4 the `--opt=value` form is refused BY NAME and points at the form that works', () => {
+  const repo = makeRepo();
+  const res = runCli(repo, ['--repo', repo, '--message=chore(src): a real message (ITEM-A)', '--', 'src/mine.ts']);
+  assert.equal(res.status, 2);
+  assert.match(res.stderr, /--message/);
+  assert.match(res.stderr, /--message <value>/, 'an opaque "unknown argument" leaves the caller guessing which half was wrong');
+});
+
+test('AC-248.5 TWO sources for ONE message is refused, never silently last-wins', () => {
+  const repo = makeRepo();
+  write(repo, 'src/mine.ts', 'export const mine = 4;\n');
+  const f = path.join(os.tmpdir(), `msg-AC-248-5-${process.pid}.txt`);
+  fs.writeFileSync(f, 'refactor(gate): the message its author actually wrote (ITEM-A)\n');
+  const before = git(repo, ['rev-parse', 'HEAD']);
+  const argv = ['--repo', repo, '--message-file', f, '--message', 'x', '--', 'src/mine.ts'];
+
+  // LOSING ARM — the later flag silently won and the authored message vanished.
+  const naive = tool.parseArgv(argv, { hygiene: false });
+  assert.equal(naive.message, 'x', 'last-wins is what the historical rule did — the file was read and then thrown away');
+
+  const res = runCli(repo, argv);
+  assert.equal(res.status, 2, `${res.stdout}${res.stderr}`);
+  assert.match(res.stderr, /--message-file/);
+  assert.match(res.stderr, /--message/);
+  assert.equal(git(repo, ['rev-parse', 'HEAD']), before, 'nothing committed');
+
+  // …and the same option given TWICE is the same problem.
+  const twice = runCli(repo, ['--repo', repo, '--message', 'chore: one (ITEM-A)', '--message', 'chore: two (ITEM-A)', '--', 'src/mine.ts']);
+  assert.equal(twice.status, 2, `${twice.stdout}${twice.stderr}`);
+  fs.rmSync(f, { force: true });
+});

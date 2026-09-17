@@ -149,6 +149,10 @@ const AS_JSON = flag("json");
 
 const FAILED = new Set(["failure", "cancelled", "timed_out", "startup_failure",
   "action_required", "stale"]);
+/** Did this job's CONCLUSION stop the lane? Asked in ONE place, because the three
+ *  call sites below each carry a different consequence and a membership test
+ *  repeated three times is three chances to answer the same question differently. */
+const failed = (j) => FAILED.has(j && j.conclusion);
 /** Work-item ids, as this system writes them in commit subjects. */
 const ITEM_RE = /\b((?:UC|DEF|REQ|SLC|CHK|OI|IMP|EXP)-[A-Z][A-Z0-9]*-\d+)\b/g;
 
@@ -520,7 +524,7 @@ if (!NO_GIT && lastOpenRun) {
 // ---- the verdict ----------------------------------------------------------
 const nonBlockingFailures = runJobs
   .filter((j) => j.name !== deployJobName && !closureNames.includes(j.name)
-                 && FAILED.has(j.conclusion))
+                 && failed(j))
   .map((j) => j.name);
 
 const common = {
@@ -587,8 +591,7 @@ const closureJobs = closureNames
   .map((n) => byName.get(n))
   .filter(Boolean);
 const closureUnfinished = closureJobs.filter((j) => j.status !== "completed");
-const closureFailed = closureJobs.filter((j) => FAILED.has(j.conclusion)
-  || j.conclusion === "skipped");
+const closureFailed = closureJobs.filter((j) => failed(j) || j.conclusion === "skipped");
 
 // IN-FLIGHT FIRST (AC-131-3). A deploy that has not finished has not landed, and
 // is not broken either. This is the half-cutover case: the ROC health endpoint
@@ -624,7 +627,7 @@ let blockingJobs = closureFailed.map((j) => ({
 }));
 let reason = "needs-job-failed";
 if (!blockingJobs.length) {
-  if (FAILED.has(deployJob.conclusion)) {
+  if (failed(deployJob)) {
     reason = "deploy-job-failed";
     blockingJobs = [{ name: deployJobName, conclusion: deployJob.conclusion,
       status: deployJob.status, url: deployJob.url || null, needsPath: "the deploy job itself" }];

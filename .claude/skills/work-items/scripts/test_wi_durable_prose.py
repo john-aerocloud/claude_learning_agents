@@ -327,6 +327,15 @@ class TestGeneralisationSweep(unittest.TestCase):
         # declaration cannot be written from memory — and anything NOT named stays
         # guarded, which is what makes it the NARROW alternative to COOWNED_MERGE_OFF
         # below rather than another way to switch the merge off.
+        # SET/SET2/SET3 [DEF-ROC-238]: `FIELD=VALUE` where FIELD comes from the
+        # closed `ECON_FIELDS` set and VALUE is a number, a date or a job id.
+        # `parse_set_args` REFUSES any other field, and refuses any value outside
+        # `[A-Za-z0-9._:+-]` — so a value carrying a shell metacharacter is
+        # rejected on its MEANING and can never survive mangled into the
+        # permanent record. Same disposition, and the same reason, as OBSERVE and
+        # PROBE. It is not prose: the human reason for the amendment travels in
+        # NOTE/NOTE_FILE, which already has the file route.
+        "SET", "SET2", "SET3",
         "NOTE_FILE", "MSG_FILE", "SUPERSEDE_FILE",
         # the hazard guards. They expand to `1` or to nothing and NEVER echo the
         # offending character back out — emitting what they found into their own

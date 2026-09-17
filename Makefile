@@ -597,6 +597,12 @@ wi-mint:
 	  $(if $(BODY_FILE),--body-file "$(BODY_FILE)",) \
 	  $(if $(PREFIX),--prefix "$(PREFIX)",) $(if $(ID),--id "$(ID)",) $(if $(TS),--ts "$(TS)",)
 
+# SET=FIELD=VALUE changes an AUTHORED ECONOMIC field (value/cost/job/defer_until)
+# in the SAME act as the `amended` event that records it — the route that makes a
+# definition change on an aggregate an AMENDMENT rather than a FORGERY
+# (DEF-ROC-238). SET2=/SET3= carry a second and third field; three is the whole
+# authored-economics set bar one, and a repeatable make variable does not exist.
+# Empty value CLEARS the field: SET='defer_until='.
 NOTE_HAZARD = $(if $(strip $(findstring $$,$(value NOTE))$(findstring `,$(value NOTE))$(findstring ",$(value NOTE))$(findstring \,$(value NOTE))),1,)
 wi-append:
 	@if [ -n "$(NOTE_HAZARD)" ]; then \
@@ -609,6 +615,7 @@ wi-append:
 	  exit 1; \
 	fi
 	$(WORKITEMS) append --project $(PROJECT) --id $(ID) --event $(EVENT) --agent $(AGENT) \
+	  $(if $(SET),--set "$(SET)",) $(if $(SET2),--set "$(SET2)",) $(if $(SET3),--set "$(SET3)",) \
 	  $(if $(REF),--ref "$(REF)",) $(if $(NOTE),--note "$(NOTE)",) $(if $(NOTE_FILE),--note-file "$(NOTE_FILE)",) $(if $(TOKENS),--tokens "$(TOKENS)",) $(if $(DURATION_MS),--duration-ms "$(DURATION_MS)",) $(if $(OBSERVE),--observe "$(OBSERVE)",) $(if $(PROBE),--probe "$(PROBE)",) $(if $(OWNER),--owner "$(OWNER)",)
 # Recompute ALL views (queues + stats + tree + re-render each item's derived block). Run after each loop.
 # make wi-project PROJECT=OagEventSource

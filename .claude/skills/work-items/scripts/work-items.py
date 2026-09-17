@@ -647,7 +647,7 @@ def _split_top_commas(s):
 # which is luck, not a property. A field protected by the absence of a counterexample
 # is the shape §17h warns about; protect it by construction. (`title` is always
 # quoted and `defer_until` is date-shaped, so neither needs it.)
-EVENT_STRING_FIELDS = ("ref",)
+EVENT_STRING_FIELDS = ("ref", "econ")
 TOP_STRING_FIELDS = ("id", "job", "lane", "type")
 
 
@@ -824,6 +824,14 @@ def _render_event(ev):
     # does; absent ⇒ unknown, treated as 0/uncounted by the agent-cycle-time fold.
     if ev.get("duration_ms") not in (None, ""):
         parts.append(f"duration_ms: {_q(ev.get('duration_ms'))}")
+    # econ: the AUTHORED ECONOMICS as they stand AFTER this event [DEF-ROC-238].
+    # Written by exactly two acts — `mint` (the baseline) and an `amended` that
+    # carries `--set` — and by nothing else, because a stamp written by any
+    # other write would silently re-bless a hand-edit it never saw. It is what
+    # invariant I10 compares the file against, and therefore what distinguishes
+    # an AMENDMENT from a FORGERY.
+    if ev.get("econ") not in (None, ""):
+        parts.append(f"econ: {_q(ev.get('econ'))}")
     if ev.get("note") not in (None, ""):
         parts.append(f"note: {_q(ev.get('note'))}")
     return "{" + ", ".join(parts) + "}"
@@ -1044,7 +1052,14 @@ def write_item_file(item, derived, base_events=None, new_events=(),
         events.append(dict(ev))
 
     fm = dict(fresh.fm)
-    fm.update(fm_updates or {})
+    # A None DELETES the field rather than rendering `key: null` — clearing a
+    # `defer_until` is a real definition change and has to be expressible
+    # through the write path, or the hand-edit stays the only route to it.
+    for _k, _v in (fm_updates or {}).items():
+        if _v is None:
+            fm.pop(_k, None)
+        else:
+            fm[_k] = _v
     fm["events"] = events
     text = render_item(Item(path, fm, fresh.body), derived)
 
@@ -1720,7 +1735,19 @@ def _mint_locked(a):
               "value": _num(str(a.value)), "cost": _num(str(a.cost)),
               "parents": parents, "deps": deps, "created_ts": ts, "lane": lane}
         events = []
-        if graphs.kind(itype) == "flow":
+        if graphs.kind(itype) == "aggregate":
+            # An aggregate has no fold, so this event is not a state entry — it
+            # is the AUDIT BASELINE `SKILL.md` has always described ("aggregates
+            # carry only registered/amended events for audit"), and `mint` wrote
+            # none at all, so the first hand-edit of a freshly minted definition
+            # had nothing to disagree with. It carries the economics as
+            # registered, which is what makes I10 checkable FROM BIRTH.
+            ev = {"ts": ts, "event": "registered", "agent": agent,
+                  "econ": econ_of(fm)}
+            if note:
+                ev["note"] = note
+            events.append(ev)
+        elif graphs.kind(itype) == "flow":
             # The GENESIS event names the type's initial state. It is the one
             # event that is NOT a transition — there is no edge to fire, so
             # `wi-append` cannot write it (validate/I1 skips event #1 for exactly
@@ -1787,20 +1814,130 @@ def cmd_append(a):
         return _append_locked(a)
 
 
-def aggregate_flow_event_refusal(graphs, itype, iid):
+# --------------------------------------------------------------------------- #
+# DEF-ROC-238 — THE AUTHORED ECONOMICS, AND WHY THEY ARE STAMPED
+#
+# These are the frontmatter fields a DEFINITION CHANGE actually moves, and the
+# only fields `--set` will touch. They are authored, never derived: nothing
+# recomputes them, so nothing notices when they change. The founding instance is
+# `REQ-ROC-030` — `value: 2` -> `5` with `defer_until` removed, by hand, because
+# the write path that would have recorded it refused every event on an aggregate
+# — after which `wi-validate` came back clean on I1–I4 and I6–I9. The invariant
+# set could not tell an amendment from a forgery.
+#
+# `job` is in the list because re-pointing an item at a different job-to-be-done
+# is a definition change of exactly the same kind. `title`, `parents` and `deps`
+# are deliberately NOT: parents/deps are edges that I3 already checks, and a
+# title crossing a command line is the corruption class `--title-file` exists
+# for. They remain the residual, recorded on the item rather than half-built.
+ECON_FIELDS = ("value", "cost", "job", "defer_until")
+ECON_ABSENT = "-"
+# An economic value is a number, a date or a job id — never prose. Constraining
+# it at the parse is what lets `SET=` be declared NOT-PROSE in the durable-prose
+# ledger on the same grounds as OBSERVE/PROBE: it is rejected on its MEANING
+# before any shell can eat it, rather than surviving mangled into the record.
+_ECON_VALUE_RE = re.compile(r"^[A-Za-z0-9._:+-]+$")
+# The ONE event an aggregate carries. Named once so the refusal, the write and
+# the remedy message cannot drift apart on what the exception is.
+AMENDED = "amended"
+
+
+def econ_of(fm):
+    """The authored economics of an item, as ONE stable string.
+
+    Space-separated, never comma-separated: a comma inside an inline event map
+    is a field separator, and a value carrying one would be truncated by the
+    parser (the note-truncation class this machinery has already met once).
+    """
+    parts = []
+    for f in ECON_FIELDS:
+        v = fm.get(f)
+        parts.append(f"{f}={ECON_ABSENT if v in (None, '') else v}")
+    return " ".join(parts)
+
+
+def last_econ_stamp(item):
+    """The most recent economics this item RECORDED, or None if it never has."""
+    for ev in reversed(item.events):
+        stamp = ev.get("econ")
+        if stamp not in (None, ""):
+            return str(stamp)
+    return None
+
+
+def parse_set_args(raw):
+    """`['value=5', 'defer_until=']` -> {'value': 5, 'defer_until': None}.
+
+    Returns (fm_updates, error). An empty right-hand side CLEARS the field —
+    which is what the founding hand-edit did to `defer_until`, so the honest
+    route has to be able to express it.
+    """
+    updates = {}
+    for spec in (raw or []):
+        if "=" not in spec:
+            return None, (f"--set '{spec}' is not FIELD=VALUE. Nothing is "
+                          f"guessed here: a definition change is recorded "
+                          f"exactly as it was declared.")
+        field, _, value = spec.partition("=")
+        field, value = field.strip(), value.strip()
+        if field not in ECON_FIELDS:
+            return None, (f"--set may only change the AUTHORED ECONOMICS "
+                          f"({'/'.join(ECON_FIELDS)}), and '{field}' is not one "
+                          f"of them. Everything else is either DERIVED (state, "
+                          f"queue, metrics — recomputed from the log, so setting "
+                          f"it would be drift by construction), an EDGE that I3 "
+                          f"checks (parents/deps), or the item's identity.")
+        if value and not _ECON_VALUE_RE.match(value):
+            return None, (f"--set {field}={value!r} carries a character an "
+                          f"economic value never needs. These cross `make`'s "
+                          f"expansion and then a shell string on their way into "
+                          f"a permanent record, where a `$` is expanded away and "
+                          f"a backtick is EXECUTED — so the value is refused "
+                          f"rather than corrupted. Permitted: letters, digits, "
+                          f"`.`, `-`, `_`, `:` and `+`.")
+        updates[field] = None if value == "" else _num(value) if field in (
+            "value", "cost") else value
+    return updates, None
+
+
+def econ_unstamped_ids(graphs, project):
+    """Aggregates whose definition provenance is NOT ESTABLISHED — they carry no
+    economics stamp at all, so I10 has nothing to compare and says so (§17i:
+    cannot-measure is never a pass). The list shrinks by one every time such an
+    item is next written through the machinery; it never grows, because `mint`
+    stamps every aggregate it creates."""
+    items, _dup = load_all_items(project)
+    return sorted(iid for iid, it in items.items()
+                  if graphs.kind(it.type) == "aggregate"
+                  and last_econ_stamp(it) is None)
+
+
+def aggregate_flow_event_refusal(graphs, itype, iid, event):
     """Why an aggregate refuses a FLOW EVENT — the message, or None if it does not.
 
     One named predicate for one question, because the call site used to ask a
     DIFFERENT question than the one its message answered: it keyed on the type's
-    `kind` alone and therefore refused every event, while the reason it printed
+    `kind` alone and therefore refused EVERY event, while the reason it printed
     ("its state bubbles from children") is only ever true of a STATE TRANSITION.
-    An aggregate genuinely has no fold — `state-graphs.json` gives it no `events`
-    map at all — so a flow event on one is meaningless and stays refused.
+
+    THE REFUSAL IS RIGHT ABOUT STATE AND WAS WRONG ABOUT AUDIT [DEF-ROC-238].
+    `state-graphs.json` gives an aggregate no `events` map at all — it has no
+    fold, its state bubbles from its children — so a flow event on one is
+    meaningless and stays refused, every one of them. But `amended` was never a
+    state transition: it is a self-edge that changes nothing and exists purely
+    so a definition change leaves a trace, and `SKILL.md` has always said
+    aggregates *"carry only registered/amended events for audit"*. Refusing it
+    left a hand-edit as the only route, so the contract forbade the only thing
+    it permitted.
     """
-    if graphs.kind(itype) != "aggregate":
+    if graphs.kind(itype) != "aggregate" or event == AMENDED:
         return None
-    return (f"append: {iid} is an aggregate ({itype}); its state bubbles "
-            f"from children — you do not append flow events to it.")
+    return (f"append: {iid} is an aggregate ({itype}); its state bubbles from "
+            f"children — you do not append flow events like '{event}' to it. "
+            f"The ONE event it does carry is '{AMENDED}', which changes no "
+            f"state and exists so a definition change leaves a trace: "
+            f"`make wi-append … EVENT={AMENDED} … NOTE_FILE=…` (add "
+            f"`SET='value=5'` to change the authored economics in the same act).")
 
 
 def _append_locked(a):
@@ -1811,9 +1948,32 @@ def _append_locked(a):
         sys.exit(f"append: no item {a.id} in work/{a.project}/items/(active|done)/")
     item = load_item(path)
     state = fold_state(graphs, item.type, item.events)
-    refusal = aggregate_flow_event_refusal(graphs, item.type, a.id)
+    is_aggregate = graphs.kind(item.type) == "aggregate"
+    refusal = aggregate_flow_event_refusal(graphs, item.type, a.id, a.event)
     if refusal:
         sys.exit(refusal)
+
+    # --- the DEFINITION CHANGE rides the amendment [DEF-ROC-238] -------------
+    # `--set` is how the authored economics move. It is confined to an `amended`
+    # event on an aggregate because that is the class this defect closes: an
+    # aggregate has no terminal state, so the remedy for a divergence is
+    # available on it for ever, which is what keeps I10 from becoming an
+    # unsatisfiable gate (DEF-ROC-083). A flow item's economics are the same
+    # shape and are NOT covered — recorded as the residual on the item rather
+    # than half-built here.
+    econ_updates = None
+    raw_set = getattr(a, "set", None)
+    if raw_set:
+        if not (is_aggregate and a.event == AMENDED):
+            sys.exit(f"append: --set records a DEFINITION change and rides only "
+                     f"an '{AMENDED}' event on an AGGREGATE "
+                     f"(requirement/chunk/slice); got '{a.event}' on "
+                     f"{a.id} ({item.type}). A flow item's state is folded from "
+                     f"its log, so its economics are changed where they are "
+                     f"authored, not through an event.")
+        econ_updates, err = parse_set_args(raw_set)
+        if err:
+            sys.exit(f"append: {a.id}: {err}")
 
     # --- ownership [v11, OI-ROC-006] -----------------------------------------
     # `OWNER=` declares WHO the item is routed to, in the SAME act as the flow
@@ -1890,8 +2050,17 @@ def _append_locked(a):
 
     owners = declared_owner or graphs.owners_of(item)
 
-    ok, to, legal_here, why = check_transition(graphs, item.type, state, a.event,
-                                               a.agent, owners)
+    if is_aggregate:
+        # No fold, so nothing to check the shape against and no state to move:
+        # the only event that reaches here is the `amended` self-edge, which is
+        # an AUDIT RECORD. Rights are not derived for it either — there is no
+        # sequencing to protect on an item whose state nobody can change — and
+        # the event names the role that made the amendment, which is the whole
+        # point of recording it.
+        ok, to, legal_here, why = True, state, [], None
+    else:
+        ok, to, legal_here, why = check_transition(graphs, item.type, state,
+                                                   a.event, a.agent, owners)
     if not ok:
         legal_desc = ", ".join(f"{ev} (agents: {'/'.join(ags)})"
                                for ev, _to, ags in legal_here) or "(none — terminal state)"
@@ -2072,6 +2241,25 @@ def _append_locked(a):
     # concurrent append cannot be overwritten by our snapshot (DEF-ROC-162).
     base_events = list(item.events)
     fm_updates = {"owner": sorted(declared_owner)} if declared_owner else None
+    # The stamp is written from the economics AS THEY WILL STAND after this
+    # write — the declaration and the change are one act, so they cannot
+    # disagree. Only `--set` writes it: a stamp added by any other append would
+    # re-bless a hand-edit that nobody declared.
+    if econ_updates is not None:
+        merged = dict(item.fm)
+        for field, value in econ_updates.items():
+            if value is None:
+                merged.pop(field, None)
+            else:
+                merged[field] = value
+        new_event["econ"] = econ_of(merged)
+        fm_updates = dict(fm_updates or {})
+        fm_updates.update(econ_updates)
+        for field, value in econ_updates.items():
+            if value is None:
+                item.fm.pop(field, None)
+            else:
+                item.fm[field] = value
     if declared_owner:
         item.fm["owner"] = sorted(declared_owner)
     item.fm.setdefault("events", [])
@@ -7841,7 +8029,19 @@ def cmd_validate(a):
             print(f"  - {v}", file=sys.stderr)
         sys.exit(1)
     established = any(f["severity"] == "unknown" for f in loss)
-    print(f"validate: {a.project} clean — I1–I4 + I6 + I7 + I8 all hold"
+    # I10's population is stated, not assumed: an aggregate registered before
+    # the machinery could record an amendment carries no baseline to compare
+    # against, and that is NOT a pass (§17i). It establishes itself one item at
+    # a time — every `mint` stamps, and every `--set` amendment stamps — so the
+    # count only ever falls.
+    unstamped = econ_unstamped_ids(graphs, a.project)
+    if unstamped:
+        print(f"validate: I10 (definition provenance) NOT ESTABLISHED for "
+              f"{len(unstamped)} aggregate(s) — they carry no recorded "
+              f"economics, so a hand-edit of their value/cost/job/defer_until "
+              f"has nothing to disagree with. Each one establishes itself at its "
+              f"next `wi-append … EVENT={AMENDED} … SET=…`.")
+    print(f"validate: {a.project} clean — I1–I4 + I6 + I7 + I8 + I10 all hold"
           + (", and I9 could NOT be established (see above)." if established
              else ", and I9 holds: no event committed in HEAD is missing from "
                   "the working tree."))
@@ -7905,6 +8105,28 @@ def validate_items(graphs, project, event_loss=None):
                         f"(I1) {iid}: event #{idx + 1} '{name}' by agent "
                         f"'{ev.get('agent')}' not permitted — {why}")
                 st = nxt
+
+        # I10: an AGGREGATE's authored economics agree with its own last
+        # recorded amendment [DEF-ROC-238]. This is the invariant that tells an
+        # AMENDMENT from a FORGERY. `value`, `cost`, `job` and `defer_until` are
+        # authored, never derived, so nothing else in this gate can see them
+        # move: the founding hand-edit (REQ-ROC-030, value 2 -> 5 with the defer
+        # removed) passed I1–I4 and I6–I9 clean. An item with no stamp is NOT
+        # ESTABLISHED, never a pass — cmd_validate reports that count separately
+        # (§17i) — because a silent exemption would be the same failure again.
+        if graphs.kind(it.type) == "aggregate":
+            stamp = last_econ_stamp(it)
+            current = econ_of(it.fm)
+            if stamp is not None and stamp != current:
+                violations.append(
+                    f"(I10) {iid}: the file's authored economics ({current}) do "
+                    f"NOT match the last amendment this item recorded ({stamp}) "
+                    f"— a definition change reached this file without going "
+                    f"through the write path, which is a FORGERY and not an "
+                    f"amendment, whoever made it. Declare it: `make wi-append "
+                    f"PROJECT=<p> ID={iid} EVENT={AMENDED} AGENT=<role> "
+                    f"SET='value=<v>' NOTE_FILE=<why>` — or restore the field. "
+                    f"Never hand-edit an item file.")
 
         # I2: no item both terminal/done AND in a non-null queue
         state = states.get(iid)
@@ -8529,6 +8751,21 @@ def main(argv=None):
                          "time of any state, and its only detector used to be a human "
                          "deciding to re-ask — DEF-ROC-004 sat blocked for 28.8 DAYS "
                          "after both of its blockers had already gone.")
+    ap.add_argument("--set", action="append", metavar="FIELD=VALUE",
+                    help="change an AUTHORED ECONOMIC field in the SAME act as "
+                         f"the amendment that records it ({'/'.join(ECON_FIELDS)}); "
+                         "repeatable, and an empty value CLEARS the field "
+                         "(`--set defer_until=`). Accepted ONLY on an "
+                         f"'{AMENDED}' event on an aggregate "
+                         "(requirement/chunk/slice). WHY: these fields are "
+                         "authored and never derived, so nothing recomputes "
+                         "them and nothing noticed when REQ-ROC-030 was "
+                         "hand-edited from value 2 to 5 with its defer removed "
+                         "— `wi-validate` came back clean on every invariant it "
+                         "had. The change now writes an `econ:` stamp on the "
+                         "event, and invariant I10 compares the file against it: "
+                         "that is what distinguishes an amendment from a forgery "
+                         "(DEF-ROC-238).")
     ap.add_argument("--tokens", type=int,
                     help="subagent_tokens the dispatched specialist spent producing "
                          "this transition (optional; feeds the plumbing-vs-delivery "

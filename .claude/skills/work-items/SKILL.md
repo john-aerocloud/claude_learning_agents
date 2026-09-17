@@ -42,6 +42,26 @@ material changes are `amended` events, never silent edits.
 Each `type` is either a **flow** machine (use-case, defect, open-item — real event
 streams) or an **aggregate** (slice, chunk, requirement — state bubbles up from
 children via the graph `bubble` rule; they carry only registered/amended events for audit).
+
+**AMENDING AN AGGREGATE [DEF-ROC-238].** A flow event on an aggregate is refused and
+stays refused — it has no fold, so the event would be meaningless. `amended` is the one
+event it carries, and it is not a transition: it changes nothing and exists so a
+definition change leaves a trace. Change the **authored economics** in the SAME act:
+
+```
+make wi-append PROJECT=P ID=REQ-… EVENT=amended AGENT=<role> \
+     SET='value=5' SET2='defer_until=' NOTE_FILE=/tmp/why.txt
+```
+
+`SET=`/`SET2=`/`SET3=` take `FIELD=VALUE` for `value`, `cost`, `job`, `defer_until`
+(an empty value CLEARS the field). **Never hand-edit those fields.** The amendment
+stamps the resulting economics on the event it writes, and invariant **I10** compares
+the file against that stamp: a change that reached the file any other way is reported as
+a FORGERY, naming the item. An aggregate that has never been amended carries no stamp
+and is reported as **NOT ESTABLISHED** — never a pass — and establishes itself at its
+next amendment. (`wi-mint` stamps every aggregate it creates, so anything registered
+through the machinery is checkable from birth.) A flow item's economics are NOT yet
+covered by I10; that is the recorded residual, not a permission to hand-edit.
 Every state maps to:
 - a **queue** via `queue_map[state]` (`intake | ready | rework | waiting | wip`, or
   `null` for terminal/aggregate) — this is how queues are generated, derived.

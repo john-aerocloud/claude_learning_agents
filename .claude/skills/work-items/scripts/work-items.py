@@ -8350,6 +8350,48 @@ _I9_HOLDS = ("I9 holds: no event committed in HEAD is missing from the working "
 _I9_UNKNOWN = "I9 could NOT be established (see above)"
 
 
+# The verdict a check returns when it was ASKED and ANSWERED. Anything else an
+# invariant is paired with is the WORDS that say it could not be established, so
+# this is a unique object rather than a string: no message can collide with it,
+# and the collision would fail OPEN (a name claimed to hold).
+_HELD = object()
+
+
+def _invariant_verdicts(i9_unknown, unstamped):
+    """Every invariant the summary may name, each PAIRED WITH ITS OWN VERDICT.
+
+    THIS PAIRING IS THE POINT [DEF-ROC-238]. The sentence used to hold a
+    hand-written literal of the names that hold, and a later invariant was
+    appended to it without anyone asking what its own check had said — which is
+    exactly how I10 came to be asserted as holding for 88 aggregates it could
+    not be checked against. Removing that instance left the MECHANISM: a list of
+    bare names is a list you can add a name to. There is no such list here. An
+    invariant enters the sentence only as `(name, verdict, …)`, so a new one
+    cannot be named among those that hold without a verdict being supplied for
+    it, and both derivations below — what holds, and what could not be
+    established — read that same verdict.
+
+    I1–I4/I6/I7/I8 pass the literal `_HELD` because they are FAIL-CLOSED: they
+    are computed from parsed item files and an unparseable file RAISES, so they
+    have no cannot-establish path to mis-state. That is a claim, and it is
+    pinned by a test rather than left in this comment.
+
+    The third element is the clause an invariant renders as when it holds; when
+    it is None the invariant joins the `… all hold` list by name instead.
+    """
+    return [
+        ("I1–I4", _HELD, None),
+        ("I6", _HELD, None),
+        ("I7", _HELD, None),
+        ("I8", _HELD, None),
+        ("I10", _HELD if not unstamped else
+                (f"I10 could NOT be established for {unstamped} aggregate(s) "
+                 f"carrying no economics stamp, so a hand-edit of THEIR "
+                 f"definition has nothing to disagree with (see above)"), None),
+        ("I9", _HELD if not i9_unknown else _I9_UNKNOWN, _I9_HOLDS),
+    ]
+
+
 def validate_summary(project, i9_unknown, unstamped):
     """The summary sentence, given each invariant's verdict.
 
@@ -8360,20 +8402,13 @@ def validate_summary(project, i9_unknown, unstamped):
     exit code is unchanged, so the line WITHHOLDS a claim rather than making the
     opposite one.
     """
-    held = ["I1–I4", "I6", "I7", "I8"]
-    unestablished = []
-    if unstamped:
-        unestablished.append(f"I10 could NOT be established for {unstamped} "
-                             f"aggregate(s) carrying no economics stamp, so a "
-                             f"hand-edit of THEIR definition has nothing to "
-                             f"disagree with (see above)")
-    else:
-        held.append("I10")
-    if i9_unknown:
-        unestablished.append(_I9_UNKNOWN)
+    verdicts = _invariant_verdicts(i9_unknown, unstamped)
+    held = [n for n, v, clause in verdicts if v is _HELD and not clause]
+    held_clauses = [clause for _n, v, clause in verdicts if v is _HELD and clause]
+    unestablished = [v for _n, v, _c in verdicts if v is not _HELD]
     tail = " + ".join(held) + " all hold"
-    if not i9_unknown:
-        tail += f", and {_I9_HOLDS}"
+    for clause in held_clauses:
+        tail += f", and {clause}"
     if not unestablished:
         return f"validate: {project} clean — {tail}."
     n = len(unestablished)

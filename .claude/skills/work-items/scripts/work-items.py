@@ -4101,17 +4101,54 @@ TRUNK_CANDIDATES = ("origin/HEAD", "origin/main", "origin/master")
 
 # --- QUEUE KIND (v126 addendum) — what decides whether over-cap BLOCKS or merely warns --
 # Little's Law governs WORK IN PROGRESS, not backlog depth.
-#   * a WIP-STAGE queue over its cap (ready / wip / rework / any future in-flight
-#     stage) is real concurrent-work harm — aging, context-switching — and BLOCKS.
+#   * a WIP-STAGE queue over its cap (wip / rework / any future in-flight stage) is
+#     real concurrent-work harm — aging, context-switching — and BLOCKS.
 #   * a BACKLOG queue over its cap (`intake`: unstarted demand) is ADVISORY. Its
 #     depth says "more is wanted than is being delivered"; the remedy is to
 #     DELIVER FASTER — which is exactly the pull a block would prevent. Blocking
 #     on it INVERTS the constraint and creates pressure to close real findings
 #     just to shrink the number.
+#   * a BUFFER queue over its cap (`ready`: DECIDED but UNDISPATCHED) is ADVISORY
+#     FOR DEPTH and BLOCKING FOR AGE. See the third-kind block below.
 # Founding case (2026-08-01, first real run of this gate): a legitimate
 # differential sweep produced ~15 verified-real sub-cost-4 findings; the
 # flow-manager correctly refused to close any of them, and the loop halted for
 # having done good discovery work.
+#
+# --- THE THIRD KIND, and why two were not enough (OI-ROC-030, 2026-09-17) ------
+# `backlog` and `wip` each bundle TWO INDEPENDENT ANSWERS, and `ready` needs one
+# of each:
+#     kind     | depth severity | who owns its AGING
+#     backlog  | advisory       | check 4 — age WITHOUT A DECISION
+#     wip      | BLOCKS         | check 1 — stalled-work, CLAIMED limb
+#     buffer   | advisory       | check 1 — stalled-work, SCHEDULED limb
+# WHY DEPTH MUST NOT BLOCK ON `ready`. NOBODY WORKS A READY ITEM: `state_owners`
+# puts `ready`/`scheduled` on `queue`, not on an agent, so the harm the wip
+# classification blocks for — "concurrent work in flight past the cap" — has no
+# referent. And THE REMEDY FOR A FULL READY BUFFER IS TO PULL, which is the one
+# act a block forbids. That is the identical inversion this block already argues
+# for `intake`, one queue along.
+# WHY AGING MUST STILL BLOCK, AND STAY WITH CHECK 1. A ready buffer genuinely can
+# be too deep, and aging IS real harm — items sit, premises rot (three measured
+# ROC cases where an item's stated mechanism was false by the time it was worked).
+# Check 1's SCHEDULED limb already carries that: keyed on this queue
+# (STALLED_WORK_SCHEDULED_QUEUE), threshold from the MEASURED `scheduled` median
+# (48h), and its three remedies already fit an already-scheduled item — pull it,
+# de-schedule it with a dated defer, or cancel it. Re-homing this queue to
+# `backlog` would hand it instead to check 4, whose remedy reads "schedule it
+# (make it ready and pull it)" — nonsense for an item that IS scheduled — and
+# would give one item two remedies, the very thing check 1's population rule
+# excludes backlog queues to avoid.
+# SO `buffer` IS NOT A THIRD SEVERITY. block/advisory/unknown are unchanged; it is
+# the PAIRING the other two kinds cannot express.
+# MEASURED (ROC, 8bc75e8, 2026-09-17): `ready 21 > wip_limit 4` had been a BLOCKING
+# precondition on every loop-gate run for two days, while the same header line read
+# `ready 21 occupied = 21 active / 0 idle` — NOT ONE of those items was old enough
+# to trip the aging limb. The gate was stopping the loop on a number while its own
+# measurement of the harm read zero on the same line. It bound harder after
+# state-graph v13 (OI-ROC-029) correctly moved decided-but-undispatched defects out
+# of `wip` and into `ready`, which is the right place for the wait — the depth was
+# not new, only newly VISIBLE, and a newly-visible truth must not block the loop.
 #
 # DECLARE the classification in queues/policy.csv. That file is LONG-format
 # (queue,param,value,…), so `kind` is a new PARAM ROW — `intake,kind,backlog,…` —
@@ -4121,18 +4158,26 @@ TRUNK_CANDIDATES = ("origin/HEAD", "origin/main", "origin/master")
 # blocks until somebody classifies it). Keep this knowledge here, in one place.
 QUEUE_KIND_BACKLOG = "backlog"
 QUEUE_KIND_WIP = "wip"
-DEFAULT_QUEUE_KINDS = {"intake": QUEUE_KIND_BACKLOG}
+QUEUE_KIND_BUFFER = "buffer"
+QUEUE_KINDS = (QUEUE_KIND_BACKLOG, QUEUE_KIND_BUFFER, QUEUE_KIND_WIP)
+# The kinds whose DEPTH is advisory. Aging ownership is a SEPARATE axis — see the
+# third-kind block above — so this set is not the same question as "which queues
+# check 4 sweeps" (that one is `backlog` alone, and deliberately).
+ADVISORY_DEPTH_KINDS = (QUEUE_KIND_BACKLOG, QUEUE_KIND_BUFFER)
+DEFAULT_QUEUE_KINDS = {"intake": QUEUE_KIND_BACKLOG, "ready": QUEUE_KIND_BUFFER}
 # policy params whose value is a WORD, not a count (read_queue_policy would
 # otherwise drop them when int() fails).
 POLICY_STR_PARAMS = ("kind",)
 
 
 def queue_kind(policy, queue):
-    """'backlog' | 'wip' for `queue`: the policy.csv `kind` row if declared, else
-    DEFAULT_QUEUE_KINDS, else 'wip' (fail-closed). An unrecognised declared value
-    falls back rather than inventing a third severity."""
+    """'backlog' | 'buffer' | 'wip' for `queue`: the policy.csv `kind` row if
+    declared, else DEFAULT_QUEUE_KINDS, else 'wip' (fail-closed). An unrecognised
+    declared value falls back rather than inventing a fourth classification — and
+    `process-lint` C7 fails the build on one, so a typo is caught at build time
+    rather than silently taking whatever the fallback happens to be."""
     declared = str(policy.get(queue, {}).get("kind", "")).strip().lower()
-    if declared in (QUEUE_KIND_BACKLOG, QUEUE_KIND_WIP):
+    if declared in QUEUE_KINDS:
         return declared
     return DEFAULT_QUEUE_KINDS.get(queue, QUEUE_KIND_WIP)
 
@@ -4883,7 +4928,11 @@ def stalled_work_states(graphs, policy):
       * in a queue at all (an aggregate/planned state has no own stream), AND
       * that queue is NOT a BACKLOG queue — a backlog item is aging inventory,
         which check 4 owns by AGE-WITHOUT-A-DECISION; reporting it here too would
-        give one item two different remedies, AND
+        give one item two different remedies. A BUFFER queue (`ready`) IS in the
+        population, and that is the whole reason `buffer` is not `backlog`
+        (OI-ROC-030): its depth is advisory but its AGING is owned right here, by
+        the SCHEDULED limb, whose remedies already fit an item that IS scheduled,
+        AND
       * not owner-class `external` — `blocked`/`awaiting_observation` items carry a
         RECORDED reason for the wait and are re-checked by check 5. An UNRECORDED
         wait is what this check is for.
@@ -5358,27 +5407,46 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
         kind = queue_kind(policy, q)
         common = {"check": "queue-over-cap", "ids": members[q], "queue": q,
                   "depth": depths[q], "cap": cap, "over": over, "kind": kind}
-        if kind == QUEUE_KIND_BACKLOG:
+        if kind in ADVISORY_DEPTH_KINDS:
             # ADVISORY: reported prominently, never affects the exit code.
-            # DEPTH ALONE CANNOT BE ACTED ON (v132). A backlog of 60 items that
-            # each clear in an hour is healthy; a backlog of 12 that have each sat
-            # three days is the constraint. Report the count-independent AGE
-            # beside the count, and name the oldest — the retro needs to know
-            # WHICH items are aging, not merely how many exist.
+            # DEPTH ALONE CANNOT BE ACTED ON (v132). A queue of 60 items that each
+            # clear in an hour is healthy; a queue of 12 that have each sat three
+            # days is the constraint. Report the count-independent AGE beside the
+            # count, and name the oldest — the reader needs to know WHICH items are
+            # aging, not merely how many exist. ADVISORY MUST NOT MEAN INVISIBLE:
+            # the line is printed on every run, counted in the headline, and says
+            # in as many words that it is outstanding, not satisfied.
             age = _queue_in_queue_age(graphs, items, members[q], now)
             age_txt = _queue_age_phrase(age)
+            if kind == QUEUE_KIND_BACKLOG:
+                why = (
+                    f"{q} is a BACKLOG queue, and it is STILL over cap: "
+                    f"unaddressed, not satisfied. Little's Law governs WIP, not "
+                    f"backlog depth — the remedy is to DELIVER FASTER (raise "
+                    f"throughput; decline or defer what will never be pulled), "
+                    f"never to close real findings to shrink the number, and never "
+                    f"to stop pulling, which only makes it worse.")
+            else:
+                why = (
+                    f"{q} is a BUFFER queue — DECIDED work that is not yet "
+                    f"DISPATCHED — and it is STILL over cap: unaddressed, not "
+                    f"satisfied. NOBODY IS WORKING THESE ITEMS (their owner is "
+                    f"`queue`, not an agent), so the cap's wip-harm — concurrent "
+                    f"work past the limit — has no referent here, and THE REMEDY "
+                    f"FOR A FULL BUFFER IS TO PULL, which a block would forbid. "
+                    f"Read the AGE below, not the depth: depth reports, age BLOCKS "
+                    f"(the per-item [stalled-work] SCHEDULED limb, at the measured "
+                    f"threshold). If these items will never be pulled, the honest "
+                    f"move is to DE-SCHEDULE or CANCEL them, never to leave them "
+                    f"scheduled — and never to close a real finding to shrink the "
+                    f"number (§F8a).")
             findings.append(dict(common, severity="advisory",
                                  median_age_s=age["median_age_s"],
                                  oldest_id=age["oldest_id"],
                                  oldest_age_s=age["oldest_age_s"],
                                  message=(
                 f"ADVISORY (does NOT block the pull) [queue-over-cap] {q} depth "
-                f"{depths[q]} > wip_limit {cap} — over by {over}. {q} is a BACKLOG "
-                f"queue, and it is STILL over cap: unaddressed, not satisfied. "
-                f"Little's Law governs WIP, not backlog depth — the remedy is to "
-                f"DELIVER FASTER (raise throughput; decline or defer what will "
-                f"never be pulled), never to close real findings to shrink the "
-                f"number, and never to stop pulling, which only makes it worse."
+                f"{depths[q]} > wip_limit {cap} — over by {over}. " + why
                 + age_txt)))
         else:
             # THIS DEPTH COUNTS OCCUPANCY, NOT ACTIVITY, and saying so is AC-127.4.

@@ -2758,13 +2758,168 @@ class TestLoopGate(Base):
         self.assertEqual(code, 2)
         self.assertIn("wip depth 3 > wip_limit 1", out)
 
-    def test_ready_over_cap_blocks(self):
+    # ---- OI-ROC-030: `ready` is a BUFFER — depth reports, AGE blocks ---------
+    # THE THIRD KIND, and why two were not enough. The two existing kinds each
+    # bundle TWO independent answers:
+    #     backlog = depth ADVISORY + aging owned by check 4 (age-without-a-DECISION)
+    #     wip     = depth BLOCKS   + aging owned by check 1 (stalled-work, CLAIMED)
+    # `ready` needs one of each, and neither bundle supplies it:
+    #   * Depth must NOT block. NOBODY WORKS A READY ITEM — `state_owners` puts
+    #     `ready`/`scheduled` on `queue`, not on an agent — so the harm the wip
+    #     classification blocks for ("concurrent work in flight past the cap") has
+    #     no referent here, and THE REMEDY FOR A FULL READY BUFFER IS TO PULL,
+    #     which is the one act the block forbids. That is the identical inversion
+    #     the QUEUE KIND block already argues, in its own words, for `intake`.
+    #   * Aging must STILL block, per item, and stay with check 1. Its SCHEDULED
+    #     limb already exists, is already keyed on this queue
+    #     (`STALLED_WORK_SCHEDULED_QUEUE`), already carries the measured 48h
+    #     `scheduled` threshold, and already prints the right three remedies
+    #     (pull it / de-schedule with a dated defer / cancel it). Re-homing it to
+    #     check 4 would hand an already-SCHEDULED item the remedy "schedule it",
+    #     and give one item two remedies — which is the very thing check 1's
+    #     population rule excludes backlog queues to avoid.
+    # So `buffer` is not a third SEVERITY (block/advisory/unknown are unchanged);
+    # it is the pairing the other two kinds cannot express.
+    # Measured on the real ROC registry at 8bc75e8, 2026-09-17: ready 21 > cap 4
+    # was a BLOCKING precondition on every run for two days, while the same header
+    # read `ready 21 occupied = 21 active / 0 idle` — i.e. NOT ONE of those items
+    # was old enough to trip the aging limb. The gate was stopping the loop for a
+    # number, with its own measurement of the harm reading zero on the same line.
+    def test_AC_030_1_ready_over_cap_is_advisory_not_blocking(self):
+        """AC-030.1 — a full `ready` queue must STOP BLOCKING THE PULL, while the
+        condition stays visible: the advisory line is printed, names the depth and
+        the overage, and says in as many words that it is not satisfied."""
         self._policy([("ready", "min_items", 0), ("ready", "wip_limit", 2)])
         for i in range(4):
-            self.write_item("active", f"UC-R{i}", "use-case", self._ready_uc(10))
+            self.write_item("active", f"UC-R{i}", "use-case",
+                            self._ready_uc(f"UC-R{i}", 29))
+        findings = self._gate()
+        self.assertNotIn("queue-over-cap", self._checks(findings))      # NOT blocking
+        f = [x for x in findings if x["check"] == "queue-over-cap"][0]
+        self.assertEqual((f["severity"], f["queue"], f["depth"], f["cap"], f["kind"]),
+                         ("advisory", "ready", 4, 2, wi.QUEUE_KIND_BUFFER))
+        code, out = self._run()
+        self.assertEqual(code, 0)                                       # exit 0
+        self.assertIn("may pull", out)
+        # ADVISORY MUST NOT MEAN INVISIBLE (AC-030.1): the line is printed, it is
+        # marked ADVISORY, it carries the numbers, and it names the remedy.
+        self.assertIn("ADVISORY", out)
+        self.assertIn("ready depth 4 > wip_limit 2", out)
+        self.assertIn("over by 2", out)
+        self.assertIn("pull", out.lower())
+
+    def test_AC_030_1_the_advisory_reports_AGE_beside_the_depth(self):
+        """AC-030.1 — 24 fresh items and 24 three-week-old items are not the same
+        queue, and depth cannot tell them apart. The count-independent age rides on
+        the same line, so the reader is never left with only the number."""
+        self._policy([("ready", "min_items", 0), ("ready", "wip_limit", 1)])
+        self.write_item("active", "UC-OLD", "use-case",
+                        self._ready_uc("UC-OLD", 10))
+        self.write_item("active", "UC-NEW", "use-case",
+                        self._ready_uc("UC-NEW", 29))
         f = [x for x in self._gate() if x["check"] == "queue-over-cap"][0]
-        self.assertEqual((f["severity"], f["queue"], f["depth"]), ("block", "ready", 4))
-        self.assertEqual(self._run()[0], 2)
+        self.assertEqual(f["oldest_id"], "UC-OLD")
+        self.assertGreater(f["oldest_age_s"], 19 * 24 * 3600.0)
+        self.assertIn("AGE (count-independent", f["message"])
+        self.assertIn("oldest UC-OLD", f["message"])
+
+    def test_AC_030_2_the_signal_FIRES_when_the_ready_buffer_is_AGING(self):
+        """AC-030.2, direction ONE — a signal that cannot fire is worth nothing.
+        Depth is advisory, but an item SCHEDULED and not pulled past the measured
+        48h threshold still BLOCKS, by name, with its three remedies."""
+        self._policy([("ready", "min_items", 0), ("ready", "wip_limit", 2)])
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case",
+                            self._ready_uc(f"UC-R{i}", 29))
+        self.write_item("active", "UC-AGED", "use-case",
+                        self._ready_uc("UC-AGED", 20))
+        findings = self._gate()
+        blocks = [f for f in findings
+                  if f["severity"] == "block" and "UC-AGED" in f["ids"]]
+        self.assertEqual(len(blocks), 1, findings)
+        self.assertEqual((blocks[0]["check"], blocks[0]["kind"]),
+                         ("stalled-work", "scheduled-not-pulled"))
+        code, out = self._run()
+        self.assertEqual(code, 2)                       # the AGING blocks the pull
+        self.assertIn("UC-AGED", out)
+        self.assertIn("SCHEDULED", out)
+        # and the depth line is STILL only advisory in the same run
+        self.assertNotIn("queue-over-cap", self._checks(findings))
+
+    def test_AC_030_2_the_signal_does_NOT_fire_on_a_DEEP_but_FRESH_buffer(self):
+        """AC-030.2, direction TWO — a signal that always fires is worth less. The
+        condition measured on the real registry: 24 items in `ready` against a cap
+        of 4, EVERY ONE of them fresh. That must be exit 0."""
+        self._policy([("ready", "min_items", 0), ("ready", "wip_limit", 4)])
+        for i in range(24):
+            self.write_item("active", f"UC-R{i:02d}", "use-case",
+                            self._ready_uc(f"UC-R{i:02d}", 29))
+        findings = self._gate()
+        self.assertEqual(self._checks(findings), [], findings)
+        self.assertEqual([f["queue"] for f in self._advisories(findings)], ["ready"])
+        self.assertEqual(self._run()[0], 0)
+
+    def test_AC_030_3_a_BUFFER_kind_does_not_relax_the_wip_or_rework_cap(self):
+        """AC-030.3 — the new kind must not leak. `wip` and `rework` over cap still
+        BLOCK in the same run in which `ready` is merely advisory."""
+        self._policy([("ready", "min_items", 0), ("ready", "wip_limit", 1),
+                      ("wip", "wip_limit", 1), ("rework", "wip_limit", 0)])
+        for i in range(3):
+            self.write_item("active", f"UC-R{i}", "use-case",
+                            self._ready_uc(f"UC-R{i}", 29))
+        for i in range(2):
+            self.write_item("active", f"UC-B{i}", "use-case", self._building_uc(i))
+        self.write_item("active", "UC-RW", "use-case", self._reworking_uc(0))
+        by_sev = {f["queue"]: f["severity"] for f in self._gate()
+                  if f["check"] == "queue-over-cap"}
+        self.assertEqual(by_sev, {"ready": "advisory", "wip": "block",
+                                  "rework": "block"})
+        code, out = self._run()
+        self.assertEqual(code, 2)
+        self.assertIn("wip depth 2 > wip_limit 1", out)
+        self.assertIn("ready depth 3 > wip_limit 1", out)   # advisory STILL shown
+
+    def test_AC_030_3_a_BUFFER_queue_stays_in_the_stalled_work_population(self):
+        """AC-030.3 — the aging limb is the whole reason `buffer` is not `backlog`.
+        A backlog queue is EXCLUDED from check 1's population; a buffer is not."""
+        self._policy([("ready", "kind", "buffer"), ("intake", "kind", "backlog")])
+        pop = wi.stalled_work_states(self.graphs, wi.read_queue_policy(self.project))
+        self.assertIn("scheduled", pop)
+        self.assertIn("ready", pop)
+        self.assertNotIn("open", pop)          # intake: check 4 owns its aging
+        self.assertNotIn("reported", pop)
+
+    def test_AC_030_3_a_BUFFER_queue_is_NOT_swept_into_the_aged_backlog_limbs(self):
+        """AC-030.3 — no item may carry two different remedies. Check 4 would tell
+        an item that is ALREADY SCHEDULED to `schedule it (make it ready and pull
+        it)`; check 1's SCHEDULED limb is the one that fits."""
+        self._policy([("ready", "min_items", 0), ("ready", "wip_limit", 99)])
+        self.write_item("active", "UC-AGED", "use-case",
+                        self._ready_uc("UC-AGED", 1))
+        checks = {f["check"] for f in self._gate(max_backlog_age_days=7.0)
+                  if "UC-AGED" in f.get("ids", [])}
+        self.assertEqual(checks, {"stalled-work"}, checks)
+
+    def test_AC_030_3_the_buffer_kind_is_DECLARED_not_a_hardcoded_queue_name(self):
+        """AC-030.3 — like the other two kinds, `buffer` is a policy.csv row the
+        retro owns (§F2), not a name burned into the machinery."""
+        self._policy([("ready", "min_items", 0), ("rework", "wip_limit", 1),
+                      ("rework", "kind", "buffer")])
+        for i in range(2):
+            self.write_item("active", f"UC-RW{i}", "use-case", self._reworking_uc(i))
+        findings = self._gate()
+        self.assertNotIn("queue-over-cap", self._checks(findings))   # declared buffer
+        adv = self._advisories(findings)
+        self.assertEqual([f["queue"] for f in adv], ["rework"])
+        self.assertEqual(adv[0]["kind"], wi.QUEUE_KIND_BUFFER)
+        # ... and, unlike a backlog, it is STILL inside check 1's population
+        pop = wi.stalled_work_states(self.graphs, wi.read_queue_policy(self.project))
+        self.assertIn("reworking", pop)
+
+    def test_AC_030_3_the_three_kinds_are_the_whole_vocabulary(self):
+        """AC-030.3 — an unrecognised value must not invent a fourth behaviour."""
+        self.assertEqual(sorted(wi.QUEUE_KINDS),
+                         ["backlog", "buffer", "wip"])
 
     def test_rework_over_cap_blocks(self):
         self._policy([("ready", "min_items", 0), ("rework", "wip_limit", 1)])
@@ -2837,13 +2992,17 @@ class TestLoopGate(Base):
         self.assertEqual(self._run()[0], 2)
 
     def test_undeclared_queue_defaults_to_wip_fail_closed(self):
-        """A future in-flight stage nobody classified BLOCKS (fail-closed); only
-        `intake` defaults to backlog."""
+        """A future in-flight stage nobody classified BLOCKS (fail-closed). Only the
+        two queues whose meaning is FIXED BY THE STATE GRAPH are named in the
+        fallback map: `intake` (undecided demand) and, from OI-ROC-030, `ready`
+        (decided, undispatched, owner `queue` — nobody works it). Those are
+        structural facts about what the queue IS, not per-project tuning, so a
+        policy.csv predating the row must not keep the inversion."""
         self.assertEqual(wi.queue_kind({}, "wip"), wi.QUEUE_KIND_WIP)
         self.assertEqual(wi.queue_kind({}, "rework"), wi.QUEUE_KIND_WIP)
-        self.assertEqual(wi.queue_kind({}, "ready"), wi.QUEUE_KIND_WIP)
         self.assertEqual(wi.queue_kind({}, "some-future-stage"), wi.QUEUE_KIND_WIP)
         self.assertEqual(wi.queue_kind({}, "intake"), wi.QUEUE_KIND_BACKLOG)
+        self.assertEqual(wi.queue_kind({}, "ready"), wi.QUEUE_KIND_BUFFER)
 
     def test_unrecognised_kind_value_falls_back_to_default(self):
         self.assertEqual(wi.queue_kind({"wip": {"kind": "nonsense"}}, "wip"),
@@ -2852,6 +3011,10 @@ class TestLoopGate(Base):
                          wi.QUEUE_KIND_BACKLOG)
         self.assertEqual(wi.queue_kind({"intake": {"kind": " BACKLOG "}}, "intake"),
                          wi.QUEUE_KIND_BACKLOG)
+        self.assertEqual(wi.queue_kind({"ready": {"kind": "bufer"}}, "ready"),
+                         wi.QUEUE_KIND_BUFFER)
+        self.assertEqual(wi.queue_kind({"ready": {"kind": " BUFFER "}}, "ready"),
+                         wi.QUEUE_KIND_BUFFER)
 
     def test_template_seed_policy_csv_declares_the_kinds(self):
         """The `work/_TEMPLATE` seed (agent-system state, not project data) DECLARES
@@ -2866,10 +3029,12 @@ class TestLoopGate(Base):
         kinds = {r.split(",")[0]: r.split(",")[2] for r in rows
                  if r.split(",")[1] == "kind"}
         self.assertEqual(kinds.get("intake"), "backlog", kinds)
+        # AC-030.4 — `ready` is a BUFFER: decided, undispatched, owner `queue`.
+        self.assertEqual(kinds.get("ready"), "buffer", kinds)
         # `deploy` is deliberately ABSENT (DEF-ROC-119): no state maps to a `deploy`
         # queue, so every knob declared on it was unenforceable by construction. `wip`
         # is the queue `deploying`/`prod-deploying` actually land in.
-        for q in ("ready", "rework", "wip"):
+        for q in ("rework", "wip"):
             self.assertEqual(kinds.get(q), "wip", f"{q}: {kinds}")
         # and the header/column set is UNCHANGED — `kind` is a new row, not a column
         header = open(path, encoding="utf-8").readline().strip()

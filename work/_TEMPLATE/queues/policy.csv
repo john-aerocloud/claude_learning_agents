@@ -2,7 +2,7 @@ queue,param,value,unit,owner,target_metric,last_tuned,experiment
 intake,kind,backlog,kind,flow-manager,gross-lead-time,<created>,EXP-123
 intake,min_items,2,count,flow-manager,throughput,<created>,EXP-022
 intake,wip_limit,10,count,flow-manager,gross-lead-time,<created>,EXP-022
-ready,kind,wip,kind,flow-manager,gross-lead-time,<created>,EXP-123
+ready,kind,buffer,kind,flow-manager,gross-lead-time,<created>,EXP-ROC-020
 ready,min_items,2,count,flow-manager,throughput,<created>,EXP-022
 ready,wip_limit,4,count,flow-manager,gross-lead-time,<created>,EXP-022
 rework,kind,wip,kind,flow-manager,mttr,<created>,EXP-123

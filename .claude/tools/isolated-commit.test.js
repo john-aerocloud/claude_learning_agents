@@ -356,14 +356,14 @@ test('AC-DEFECT-OAG-058.8 a detached HEAD is refused, not guessed at', () => {
 test('AC-DEFECT-OAG-058.8 a path escaping the repo, an absolute path, and pathspec magic are all refused', () => {
   const repo = makeRepo();
   for (const bad of ['../elsewhere', path.join(repo, 'items'), ':/', ':(exclude)src']) {
-    const res = runCli(repo, ['--repo', repo, '--message', 'm', '--', bad]);
+    const res = runCli(repo, ['--repo', repo, '--message', 'chore(src): a real message (ITEM-A)', '--', bad]);
     assert.equal(res.status, 2, `expected refusal for ${bad}, got ${res.status}`);
   }
 });
 
 test('AC-DEFECT-OAG-058.8 no declared paths and no message are refused', () => {
   const repo = makeRepo();
-  assert.equal(runCli(repo, ['--repo', repo, '--message', 'm']).status, 2);
+  assert.equal(runCli(repo, ['--repo', repo, '--message', 'chore(src): a real message (ITEM-A)']).status, 2);
   assert.equal(runCli(repo, ['--repo', repo, '--', 'items/']).status, 2);
 });
 
@@ -2360,4 +2360,45 @@ test('AC-248.5 TWO sources for ONE message is refused, never silently last-wins'
   const twice = runCli(repo, ['--repo', repo, '--message', 'chore: one (ITEM-A)', '--message', 'chore: two (ITEM-A)', '--', 'src/mine.ts']);
   assert.equal(twice.status, 2, `${twice.stdout}${twice.stderr}`);
   fs.rmSync(f, { force: true });
+});
+
+// --- DEF-ROC-248, limb 1b — A MESSAGE THAT IS ONE TOKEN IS A SIGNAL ----------
+//
+// The argument guards above close the routes we can name. This one closes the
+// OUTCOME whatever the route was: the exact keystrokes behind dd44e2f1 are not
+// recoverable from the artefact (the reflog records only `isolated-commit: x`), so
+// the last line of defence has to be the message itself. A commit message here is
+// `type(scope): intent` plus a work-item id (§14) — several words, always. One
+// bare token is never a message anybody wrote on purpose, and it is the one
+// signal that is independent of HOW the CLI was misread.
+//
+// It is an OVERRIDE, not a bar: --allow-terse-message. A guard people can satisfy
+// with a lie is worse than one they can satisfy with an absence (DEF-ROC-173), and
+// the override is also the losing arm — it reproduces dd44e2f1 byte for byte.
+//
+//   AC-248.6  a single-token message is refused and HEAD is unmoved; with
+//             --allow-terse-message the SAME invocation lands `x`, as it did.
+
+test('AC-248.6 a one-token message is refused and HEAD is unmoved; --allow-terse-message reproduces dd44e2f1 exactly', () => {
+  const repo = makeRepo();
+  write(repo, 'src/mine.ts', 'export const mine = 5;\n');
+  const before = git(repo, ['rev-parse', 'HEAD']);
+
+  const refused = runCli(repo, ['--repo', repo, '--message', 'x', '--', 'src/mine.ts']);
+  assert.equal(refused.status, 2, `${refused.stdout}${refused.stderr}`);
+  assert.match(refused.stderr, /message/i);
+  assert.equal(git(repo, ['rev-parse', 'HEAD']), before, 'nothing committed');
+
+  // LOSING ARM — the historical behaviour, on demand, producing the real artefact.
+  const allowed = runCli(repo, ['--repo', repo, '--message', 'x', '--allow-terse-message', '--', 'src/mine.ts']);
+  assert.equal(allowed.status, 0, `${allowed.stdout}${allowed.stderr}`);
+  assert.equal(git(repo, ['log', '-1', '--pretty=%B']).trim(), 'x', 'this is dd44e2f1');
+});
+
+test('AC-248.6 an ordinary Conventional-Commit message is untouched by the terse guard', () => {
+  const repo = makeRepo();
+  write(repo, 'src/mine.ts', 'export const mine = 6;\n');
+  const res = runCli(repo, ['--repo', repo, '--message', 'refactor(gate): extract coverageTrend out of runCoverageLimb (DEF-ROC-214)', '--', 'src/mine.ts']);
+  assert.equal(res.status, 0, `${res.stdout}${res.stderr}`);
+  assert.doesNotMatch(res.stderr, /terse/i, 'a guard that fires on everything is friction, not a guard');
 });

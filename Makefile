@@ -1288,6 +1288,12 @@ test-requirement-gate-clean:
 #   Escape hatches, all explicit and all loud in the refusal text:
 #     MSG_DUP_OK=1          a genuine re-commit of the same intent
 #     MSG_FILE_SHARED_OK=1  a deliberately shared message-file name (single agent)
+#     MSG_TERSE_OK=1        commit a message that is a single bare token. DEF-ROC-248:
+#                           dd44e2f1 is on trunk, pushed, with commits on top, and its
+#                           whole message is `x` -- its author intended a real one and a
+#                           mistyped flag ate it. A bad message cannot be repaired (the
+#                           amend is correctly refused as destructive), so one token is
+#                           refused here unless you say you meant it.
 #     SUPERSEDE_FILE=<path> the NARROW one (DEF-ROC-173): these named lines of HEAD
 #                           are removals I decided on; everything else stays guarded
 #     COOWNED_MERGE_OFF=1   commit MY blob verbatim over a co-owned file — i.e.
@@ -1313,6 +1319,7 @@ commit-isolated:
 	  $(if $(MSG),--message "$(MSG)",) $(if $(MSG_FILE),--message-file "$(MSG_FILE)",) \
 	  $(if $(MSG_DUP_OK),--allow-duplicate-message,) \
 	  $(if $(MSG_FILE_SHARED_OK),--allow-shared-message-file,) \
+	  $(if $(MSG_TERSE_OK),--allow-terse-message,) \
 	  $(if $(SUPERSEDE_FILE),--supersede-file "$(SUPERSEDE_FILE)",) \
 	  $(if $(COOWNED_MERGE_OFF),--no-coowned-merge,) -- $(PATHS)
 

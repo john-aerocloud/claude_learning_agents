@@ -49,7 +49,9 @@
  *
  * EXIT CODES
  *   0  committed (sha on stdout)
- *   2  usage / precondition refused (detached HEAD, bad path, no message)
+ *   2  usage / precondition refused (detached HEAD, bad path, no message, an
+ *      argument this tool does not define or a value that is plainly another
+ *      option, a one-token message — DEF-ROC-248)
  *   3  DECLARED-SUBSET ASSERTION FIRED — the pathspec reached outside the paths
  *      you declared; nothing was committed
  *   4  nothing to commit for the declared paths (never an empty commit); names a
@@ -172,6 +174,34 @@ function validateDeclaredPath(p) {
  */
 function normalizeMessage(m) {
   return String(m).replace(/\n+$/, '');
+}
+
+/**
+ * A MESSAGE THAT IS ONE BARE TOKEN (DEF-ROC-248). Every commit here is
+ * `type(scope): intent` plus a work-item id (§14) — several words, always. One
+ * token is never a message anybody wrote on purpose; it is what is left when a
+ * CLI misread swallowed the real one, and it is the ONLY signal independent of
+ * which misread it was. dd44e2f1's entire message is `x`.
+ *
+ * Deliberately not a bar: --allow-terse-message commits it anyway. A guard people
+ * can satisfy with a lie is worse than one they can satisfy with an absence
+ * (DEF-ROC-173), and an override that is visible in the command line is evidence,
+ * where `xx yy` would be none.
+ *
+ * @returns {string|null} the refusal text, or null when the subject is a message.
+ */
+function terseMessageRefusal(message) {
+  const subject = normalizeMessage(message).split('\n').find((l) => l.trim().length > 0) || '';
+  if (/\s/.test(subject.trim())) return null;
+  return [
+    `THE COMMIT MESSAGE IS A SINGLE TOKEN (\`${subject.trim()}\`) — nothing was committed.`,
+    'A commit message here is `type(scope): intent (WORK-ITEM-ID)`, which is several words. One',
+    'token is what is left when a mistyped flag swallowed the real message: dd44e2f1 sits on',
+    'trunk, pushed, with commits on top, and its entire message is `x`. Its author intended a',
+    'real one, and the amend that would have repaired it was correctly refused as destructive —',
+    'so a bad message is PERMANENT and this is the last point it can be stopped.',
+    'Write the message, or say you meant it:  --allow-terse-message  (MSG_TERSE_OK=1)',
+  ].join('\n');
 }
 
 /**
@@ -1000,6 +1030,7 @@ function isolatedCommit({
   messageFile = null,
   allowDuplicateMessage = false,
   allowSharedMessageFile = false,
+  allowTerseMessage = false,
   dupScanDepth = DUP_SCAN_DEPTH,
   coownedMerge = true,
   coownedScanDepth = COOWNED_SCAN_DEPTH,
@@ -1014,6 +1045,12 @@ function isolatedCommit({
 }) {
   if (!repo) throw new IsolatedCommitError(2, '--repo is required');
   if (!message || !String(message).trim()) throw new IsolatedCommitError(2, '--message is required');
+
+  // DEF-ROC-248 — the outcome guard, independent of which CLI misread produced it.
+  if (!allowTerseMessage) {
+    const terse = terseMessageRefusal(message);
+    if (terse) throw new IsolatedCommitError(2, terse);
+  }
 
   // GUARD B — a message-file name that is not unique BY CONSTRUCTION is refused
   // before anything else happens, because the clobber it enables is silent and the
@@ -1477,6 +1514,7 @@ function parseArgvOrThrow(argv, { hygiene = true }) {
     json: false,
     allowDuplicateMessage: false,
     allowSharedMessageFile: false,
+    allowTerseMessage: false,
     coownedMerge: true,
     mintMessageFile: false,
     superseded: [],
@@ -1592,6 +1630,7 @@ function parseArgvOrThrow(argv, { hygiene = true }) {
     else if (a === '--print-coowned-missing') out.printCoownedMissing = true;
     else if (a === '--allow-duplicate-message') out.allowDuplicateMessage = true;
     else if (a === '--allow-shared-message-file') out.allowSharedMessageFile = true;
+    else if (a === '--allow-terse-message') out.allowTerseMessage = true;
     else if (a === '--no-sync-index') out.syncIndex = false;
     else if (a === '--no-coowned-merge') out.coownedMerge = false;
     else if (a === '--json') out.json = true;
@@ -1679,6 +1718,7 @@ duplicate. It is REPORTED on every commit that uses one.
                                  line of source can carry a shell metacharacter)
   --print-coowned-missing        print the review list and exit; commits nothing
   --allow-duplicate-message      commit a message identical to a recent ancestor's
+  --allow-terse-message          commit a message that is a single bare token
   --allow-shared-message-file    accept a non-unique --message-file name
   --no-coowned-merge             commit MY blob verbatim over a co-owned file
                                  (reverts a concurrent agent's committed lines) — the
@@ -1864,6 +1904,7 @@ module.exports = {
   normalizeMessage,
   messageFileIdentityToken,
   sharedMessageFileRefusal,
+  terseMessageRefusal,
   mintMessageFilePath,
   duplicateMessageAncestor,
   commitObjectMessage,

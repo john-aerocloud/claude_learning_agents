@@ -101,7 +101,11 @@ The guarantee, and how it is obtained:
 5. **`--lane` is REQUIRED with no default** (`parent-repo` | `project-repo`). A dispatch
    that carries worktree isolation fails CLOSED on an undeclared lane, and a wrong lane has
    destroyed delivered work (`DEFECT-OAG-076`).
-6. **The id SHAPE is read off the store**, never assumed: projects genuinely disagree
+6. **An aggregate is minted with a `registered` audit event carrying its authored
+   economics** [DEF-ROC-238]. It is not a state entry (an aggregate has no fold) — it is
+   the baseline invariant I10 compares the file against, so a hand-edited definition is
+   distinguishable from an amendment from the item's first moment.
+7. **The id SHAPE is read off the store**, never assumed: projects genuinely disagree
    (`DEF-ROC-203` vs `DEFECT-OAG-043`), so the convention is whatever that project's items
    of that type already do. With no precedent and no `--prefix`, `mint` REFUSES rather than
    inventing a shape every later id must live with.
@@ -254,6 +258,16 @@ narrows or **falsifies** an in-flight item's premise. Append `amended` with the 
 rather than silently editing the Definition prose, so the fact that the definition changed is
 visible to `fold(events)` and every derived view. The self-edge is time-preserving (it closes and
 reopens the same state at the same instant), so it never distorts gross lead time.
+
+**…and on an AGGREGATE, which has no fold at all [DEF-ROC-238].** `amended` is the ONE
+event a requirement/chunk/slice carries — every flow event on one is still refused, because
+its state bubbles from its children and a transition would be meaningless. The AUTHORED
+ECONOMICS ride that same call: `make wi-append … EVENT=amended … SET='value=5'
+SET2='defer_until='` changes `value`/`cost`/`job`/`defer_until` through the write path
+and stamps the result on the event. **Invariant I10 compares the file against that stamp**,
+so a definition change made any other way is reported as a forgery instead of passing every
+gate — which is what a hand-edit of `REQ-ROC-030` did. An aggregate with no stamp is
+reported NOT ESTABLISHED, never clean.
 
 **Recording a CHANGE FAILURE — an annotation, not a workflow step [state-graph v10].** A build
 or a deploy can go red at any moment work is live, not only while the item sits in `building` or

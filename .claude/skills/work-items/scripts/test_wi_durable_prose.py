@@ -348,6 +348,31 @@ class TestGeneralisationSweep(unittest.TestCase):
         # and neither ever echoes its own value into a shell string. Same disposition,
         # and the same reason, as NOTE_HAZARD/MSG_HAZARD.
         "MSG_DUP_OK", "MSG_FILE_SHARED_OK",
+        # MSG_TERSE_OK [DEF-ROC-248]: the same SHAPE and the same disposition as the two
+        # above -- it expands to the fixed literal flag name `--allow-terse-message` or to
+        # nothing, and never echoes its own value into a shell string.
+        #
+        # Declared here rather than left undeclared because its omission made committed
+        # trunk RED (`97288a4` added the variable to `Makefile` without a disposition, and
+        # this sweep caught it -- working as designed, and the SECOND time it has caught
+        # exactly this, after `COOWNED_MERGE_OFF` above).
+        #
+        # It is worth saying WHAT it opts out of, because an override nobody can read the
+        # purpose of is the failure `DEF-ROC-248` was raised about. `isolated-commit.js`
+        # refuses a message of a single token on its own, because the reflog records only
+        # `isolated-commit: <msg>` -- so when a one-character message reaches HEAD, the
+        # keystrokes that produced it are gone and the archaeology is undecidable. That is
+        # not hypothetical: it is `dd44e2f1`, whose message is `x`, whose repair the sandbox
+        # correctly refused as destructive, and which is therefore permanent. The override
+        # exists because a single token is occasionally the honest whole message, and it is
+        # deliberately per-invocation and must be TYPED -- an override visible in the
+        # command line is evidence, where `xx yy` would be none.
+        #
+        # ATTRIBUTION, so this is not mistaken for my own work: the variable and its guard
+        # are `DEF-ROC-248`'s, validated and resolved. Only this disposition is mine, taken
+        # because that item is terminal and its record can no longer be amended at all
+        # (`DEF-ROC-261`), so the red it left had no owner who could clear it.
+        "MSG_TERSE_OK",
         # the CO-OWNED-MERGE escape hatch. Same SHAPE and same disposition as the two
         # above: it expands to the fixed literal flag name `--no-coowned-merge` or to
         # nothing, and never echoes its own value into a shell string.

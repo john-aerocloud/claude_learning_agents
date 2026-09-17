@@ -35,12 +35,18 @@ membership is DERIVED — no manual enqueue, no ledger row.
    → **HUMAN GATE: the human accepts the framed defect + its importance.** Log to
    `decision-log.md`. Then dispatch `flow-manager` to register with
    **`make wi-mint PROJECT=<p> TYPE=defect TITLE="…" JOB=<J> VALUE=<v> COST=<c>
-   LANE=<lane> AGENT=flow-manager PARENTS=<REQ-…> BODY_FILE=<report.md>`** — NEVER by
+   LANE=<lane> AGENT=flow-manager PARENTS=<REQ-…> BODY_FILE=<report.md>
+   DECIDE=schedule|defer [DEFER_UNTIL=YYYY-MM-DD] DECIDE_NOTE="<why>"`** — NEVER by
    hand-writing `items/active/<ID>.md`, and never by reading the highest id and adding
    one: that is the read-modify-write that made two agents mint the same `DEF-ROC-201`
    seventeen minutes apart and silently overwrite one of them (DEF-ROC-203). Mint
-   allocates the id atomically, writes the `reported` genesis event and prints the id as
-   its last line. Then run `make wi-project PROJECT=<p>` and mirror with the
+   allocates the id atomically, writes the `reported` genesis event AND the triage
+   decision `DECIDE=` names — one act, because the role that found it is the only one
+   holding the context, and a decision taken an hour later costs the median 6439 s that
+   makes `reported` this project's largest single time thief (§F9b/§F9k). A decided defect
+   lands in `scheduled`/ready and costs NO wip slot; the alternative is
+   `DECIDE=defer DEFER_UNTIL=<a date at least 7 days out>`, which is always available.
+   The id is printed as the last line. Then run `make wi-project PROJECT=<p>` and mirror with the
    `linear`/`jira` agent. Queue
    membership is DERIVED: a defect folds to the head of Ready and **pre-empts** (a defect
    on delivered value is a failure in something of higher value than anything merely

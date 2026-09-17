@@ -136,7 +136,9 @@ ns = argparse.Namespace(
     project=project, type="defect", title="child %s" % idx, title_file=None,
     job="J0", value=1, cost=1, parents=None, deps=None, lane="parent-repo",
     agent="orchestrator", note=None, note_file=None, body_file=None,
-    id=None, prefix=None, ts=None)
+    id=None, prefix=None, ts=None, decide="schedule", defer_until=None,
+    decide_note="registered and decided in one act, as §F9b requires",
+    decide_note_file=None)
 barrier()
 wi.cmd_mint(ns)
 '''
@@ -349,7 +351,10 @@ class TestMintRefusesAnExistingId(StoreFixture):
         ns = dict(project=self.project, type="defect", title="a new defect",
                   title_file=None, job="J0", value=1, cost=1, parents=None,
                   deps=None, lane="parent-repo", agent="orchestrator", note=None,
-                  note_file=None, body_file=None, id=None, prefix=None, ts=None)
+                  note_file=None, body_file=None, id=None, prefix=None, ts=None,
+                  decide="schedule", defer_until=None,
+                  decide_note="it blocks a live lane, so it is worked next",
+                  decide_note_file=None)
         ns.update(kw)
         return argparse.Namespace(**ns)
 
@@ -393,7 +398,10 @@ class TestMintProducesAValidItem(StoreFixture):
         ns = dict(project=self.project, type="defect", title="a new defect",
                   title_file=None, job="J0", value=1, cost=1, parents=None,
                   deps=None, lane="parent-repo", agent="orchestrator", note=None,
-                  note_file=None, body_file=None, id=None, prefix=None, ts=None)
+                  note_file=None, body_file=None, id=None, prefix=None, ts=None,
+                  decide="schedule", defer_until=None,
+                  decide_note="it blocks a live lane, so it is worked next",
+                  decide_note_file=None)
         ns.update(kw)
         return argparse.Namespace(**ns)
 
@@ -410,19 +418,25 @@ class TestMintProducesAValidItem(StoreFixture):
         # the genesis event is the type's initial state — the one event that is
         # not a transition and therefore cannot be appended (there is no edge to
         # fire), which is exactly why creation has to write it.
-        self.assertEqual([e["event"] for e in it.events], ["reported"])
+        # …followed by the TRIAGE DECISION, fired in the same act and stamped at
+        # the same instant [OI-ROC-034]: registration and triage are no longer two
+        # acts separated by a median 6439 s of polling latency.
+        self.assertEqual([e["event"] for e in it.events], ["reported", "triaged"])
         self.assertEqual(it.events[0]["agent"], "orchestrator")
         self.assertEqual(it.events[0]["note"], "raised from a real run")
         # …and the derived block agrees with the fold (I8), with no `wi-project`
         # run in between: a registration that needs a second command to become
         # valid leaves a window in which the store is not.
         self.assertEqual(wi.validate_items(self.graphs, self.project), [])
-        self.assertEqual(it.declared["state"], "reported")
+        # …and the DECIDED state, not the initial one: the item is in the ready
+        # buffer the instant it exists, which is a `queue`-owned state and costs
+        # no wip slot (§F9i).
+        self.assertEqual(it.declared["state"], "scheduled")
 
     def test_an_aggregate_type_is_minted_without_a_flow_event(self):
         self.seed("REQ-T-001", itype="requirement", genesis="registered")
         wi.cmd_mint(self._ns(type="slice", prefix="SLC-T", title="a slice",
-                             parents="REQ-T-001"))
+                             parents="REQ-T-001", decide=None, decide_note=None))
         path, _sub = wi.find_item_path(self.project, "SLC-T-001")
         self.assertIsNotNone(path)
         self.assertEqual(wi.validate_items(self.graphs, self.project), [])
@@ -459,7 +473,10 @@ class TestIdShapeComesFromTheStore(StoreFixture):
         ns = dict(project=self.project, type="defect", title="t", title_file=None,
                   job="J0", value=1, cost=1, parents=None, deps=None,
                   lane="parent-repo", agent="orchestrator", note=None,
-                  note_file=None, body_file=None, id=None, prefix=None, ts=None)
+                  note_file=None, body_file=None, id=None, prefix=None, ts=None,
+                  decide="schedule", defer_until=None,
+                  decide_note="it blocks a live lane, so it is worked next",
+                  decide_note_file=None)
         ns.update(kw)
         return argparse.Namespace(**ns)
 
@@ -500,7 +517,10 @@ class TestMintRequiresItsControls(StoreFixture):
         ns = dict(project=self.project, type="defect", title="t", title_file=None,
                   job="J0", value=1, cost=1, parents=None, deps=None,
                   lane="parent-repo", agent="orchestrator", note=None,
-                  note_file=None, body_file=None, id=None, prefix=None, ts=None)
+                  note_file=None, body_file=None, id=None, prefix=None, ts=None,
+                  decide="schedule", defer_until=None,
+                  decide_note="it blocks a live lane, so it is worked next",
+                  decide_note_file=None)
         ns.update(kw)
         return argparse.Namespace(**ns)
 
@@ -559,6 +579,13 @@ class TestTheRealMakeTarget(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def run_make(self, target, **variables):
+        # A registration carries its triage decision [OI-ROC-034], so the real
+        # route does too — these tests are about id allocation, not about the
+        # decision, and they drive the command an agent actually runs.
+        if target == "wi-mint":
+            variables.setdefault("DECIDE", "schedule")
+            variables.setdefault(
+                "DECIDE_NOTE", "it blocks a live lane, so it is worked next")
         argv = ["make", target] + [f"{k}={v}" for k, v in variables.items()]
         return subprocess.run(argv, cwd=REAL_ROOT, capture_output=True, text=True)
 

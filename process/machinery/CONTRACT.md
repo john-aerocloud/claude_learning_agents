@@ -101,11 +101,19 @@ The guarantee, and how it is obtained:
 5. **`--lane` is REQUIRED with no default** (`parent-repo` | `project-repo`). A dispatch
    that carries worktree isolation fails CLOSED on an undeclared lane, and a wrong lane has
    destroyed delivered work (`DEFECT-OAG-076`).
-6. **An aggregate is minted with a `registered` audit event carrying its authored
+6. **`--decide` is REQUIRED on a flow type, with no default** (`schedule` | `defer`), and
+   carries a screened reason [OI-ROC-034, §F9b/§F9k]. Registration and triage are ONE act:
+   `schedule` fires the type's decision edge at the same instant as the genesis event and
+   lands the item in its `ready` BUFFER (never `wip` — the edge is DERIVED from the graph
+   by that property, so no type can re-create §F9i's trap); `defer` records a dated
+   decision at least `DEFAULT_MIN_DEFER_DAYS` out, appends no transition, and is therefore
+   available to every role — which is what keeps the requirement from suppressing
+   discovery. An AGGREGATE takes no decision and refuses one.
+7. **An aggregate is minted with a `registered` audit event carrying its authored
    economics** [DEF-ROC-238]. It is not a state entry (an aggregate has no fold) — it is
    the baseline invariant I10 compares the file against, so a hand-edited definition is
    distinguishable from an amendment from the item's first moment.
-7. **The id SHAPE is read off the store**, never assumed: projects genuinely disagree
+8. **The id SHAPE is read off the store**, never assumed: projects genuinely disagree
    (`DEF-ROC-203` vs `DEFECT-OAG-043`), so the convention is whatever that project's items
    of that type already do. With no precedent and no `--prefix`, `mint` REFUSES rather than
    inventing a shape every later id must live with.

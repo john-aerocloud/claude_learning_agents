@@ -138,12 +138,19 @@ writers that no longer exist). Gate the resume with `make wi-validate` (I1–I4)
 
 - **Registering produced items:** when product hands you a new item, create it with
   **`make wi-mint PROJECT=<p> TYPE=<type> TITLE="…" JOB=<J> VALUE=<v> COST=<c>
-  LANE=<lane> AGENT=flow-manager PARENTS=<id> BODY_FILE=<definition.md>`** — never a
+  LANE=<lane> AGENT=flow-manager PARENTS=<id> BODY_FILE=<definition.md>
+  DECIDE=schedule|defer [DEFER_UNTIL=YYYY-MM-DD] DECIDE_NOTE="<why>"`** — never a
   hand-written `items/active/<ID>.md`, and never max+1 off the highest id you can see
   (that stale read had two agents mint the same `DEF-ROC-201` and silently overwrite one
   of them — DEF-ROC-203). Mint allocates the id atomically, writes the genesis event
   (which `wi-append` cannot fire — it names the initial state, so there is no edge) and
-  prints the id as its last line. Promote it with `EVENT=made_ready` once its DAG-parents
+  prints the id as its last line. **`DECIDE=` is REQUIRED on a flow type and has no
+  default (§F9b/§F9k, OI-ROC-034):** `DECIDE=schedule` records the triage decision in the
+  SAME act and lands the item in its ready buffer (no wip slot, §F9i); `DECIDE=defer
+  DEFER_UNTIL=<a date at least 7 days out>` is the recorded alternative and needs no
+  firing rights. A placeholder reason is refused. An AGGREGATE (requirement/chunk/slice)
+  takes no decision — it sits in no queue. A use-case minted `DECIDE=schedule` is already
+  `ready`; one minted deferred is promoted with `EVENT=made_ready` once its DAG-parents
   are done. There is no staging file and no
   `items.csv` edit — Ready membership is derived from the `made_ready` event.
 

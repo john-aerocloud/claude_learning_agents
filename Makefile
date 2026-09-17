@@ -576,6 +576,13 @@ test-wi:
 # TITLE crosses make's expansion and then a shell string, exactly as NOTE does,
 # so the same hazard guard applies: a `$`, a backtick, a quote or a backslash is
 # REFUSED rather than silently corrupted. Use TITLE_FILE for those.
+# DECIDE=schedule|defer + DECIDE_NOTE= (or DECIDE_NOTE_FILE=) is the TRIAGE
+# DECISION, REQUIRED on a defect/use-case/open-item and taken in the SAME ACT as
+# the registration (§F9b/§F9k, OI-ROC-034). DECIDE=defer also takes
+# DEFER_UNTIL=YYYY-MM-DD, at least 7 days out. DECIDE_NOTE is human prose bound
+# for a permanent record, so it carries the same hazard guard and the same file
+# route as NOTE=/TITLE=.
+DECIDE_NOTE_HAZARD = $(if $(strip $(findstring $$,$(value DECIDE_NOTE))$(findstring `,$(value DECIDE_NOTE))$(findstring ",$(value DECIDE_NOTE))$(findstring \,$(value DECIDE_NOTE))),1,)
 TITLE_HAZARD = $(if $(strip $(findstring $$,$(value TITLE))$(findstring `,$(value TITLE))$(findstring ",$(value TITLE))$(findstring \,$(value TITLE))),1,)
 wi-mint:
 	@if [ -n "$(TITLE_HAZARD)" ]; then \
@@ -590,7 +597,13 @@ wi-mint:
 	  echo "wi-mint REFUSED: NOTE= contains a character a shell eats or EXECUTES (\$$ \` \" \\). Use NOTE_FILE=."; \
 	  exit 1; \
 	fi
+	@if [ -n "$(DECIDE_NOTE_HAZARD)" ]; then \
+	  echo "wi-mint REFUSED: DECIDE_NOTE= contains a character a shell eats or EXECUTES (\$$ \` \" \\). Use DECIDE_NOTE_FILE=."; \
+	  exit 1; \
+	fi
 	@$(WORKITEMS) mint --project $(PROJECT) --type $(TYPE) --job $(JOB) --value $(VALUE) --cost $(COST) --lane $(LANE) --agent $(AGENT) \
+	  $(if $(DECIDE),--decide "$(DECIDE)",) $(if $(DEFER_UNTIL),--defer-until "$(DEFER_UNTIL)",) \
+	  $(if $(DECIDE_NOTE),--decide-note "$(DECIDE_NOTE)",) $(if $(DECIDE_NOTE_FILE),--decide-note-file "$(DECIDE_NOTE_FILE)",) \
 	  $(if $(TITLE),--title "$(TITLE)",) $(if $(TITLE_FILE),--title-file "$(TITLE_FILE)",) \
 	  $(if $(PARENTS),--parents "$(PARENTS)",) $(if $(DEPS),--deps "$(DEPS)",) \
 	  $(if $(NOTE),--note "$(NOTE)",) $(if $(NOTE_FILE),--note-file "$(NOTE_FILE)",) \

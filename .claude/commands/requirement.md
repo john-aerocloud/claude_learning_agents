@@ -36,7 +36,10 @@ gap-closing retro).
 3. **Register (event-sourced write path).** Dispatch `flow-manager`: create the item with
    **`make wi-mint PROJECT=<p> TYPE=requirement TITLE="…" JOB=<J> VALUE=<v> COST=<c>
    LANE=<lane> AGENT=flow-manager BODY_FILE=<definition.md>`** — NEVER by hand-writing
-   `items/active/<ID>.md`. Mint allocates the id atomically and writes the genesis event,
+   `items/active/<ID>.md`. A requirement is an AGGREGATE, so it takes NO `DECIDE=`
+   (it sits in no queue and its state bubbles from its children); the use-cases and
+   defects beneath it each carry their own decision at mint. Mint allocates the id
+   atomically and writes the genesis event,
    so two agents registering at once cannot collide (DEF-ROC-203); the id is the last line
    of stdout. The body carries the JTBD/acceptance definition AND a link to the dossier +
    personas/jobs it covers. That

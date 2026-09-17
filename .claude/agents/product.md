@@ -206,12 +206,16 @@ JTBD-framed and costed, and pre-empt (§F5).
 **Registering produced work (v82):** decomposed work must never be invisible, and
 it is made visible by CREATING THE ITEM, not by staging a row. For every item you
 produce, run **`make wi-mint PROJECT=<p> TYPE=<type> TITLE="…" JOB=<J> VALUE=<v>
-COST=<c> LANE=<lane> AGENT=product PARENTS=<id> BODY_FILE=<definition.md>`** — the id is
+COST=<c> LANE=<lane> AGENT=product PARENTS=<id> BODY_FILE=<definition.md>
+DECIDE=schedule|defer [DEFER_UNTIL=YYYY-MM-DD] DECIDE_NOTE="<why>"`** — the id is
 allocated atomically and the genesis event is written for you, so two agents registering
 at the same moment cannot mint the same id and silently overwrite each other
 (DEF-ROC-203). **Never hand-write `items/active/<ID>.md`**, and never mint by reading the
-highest id and adding one. Add `personas` to the minted frontmatter if the type carries
-them. **State lives ONLY in the item; there is no
+highest id and adding one. **`DECIDE=` is REQUIRED on a use-case/defect/open-item and
+has no default** — registration and triage are one act (§F9b/§F9k): `DECIDE=schedule`
+lands it in the ready buffer at no wip cost, `DECIDE=defer DEFER_UNTIL=<≥7 days out>` is
+the recorded alternative. An aggregate takes none. Add `personas` to the minted
+frontmatter if the type carries them. **State lives ONLY in the item; there is no
 staging file and no hand-editing of any queue or registry** — the "awaiting triage"
 buffer, the queues, the board and the tree are all DERIVED by `make wi-project` from the
 registered items (hand-editing a derived view is WRONG under v82; `make wi-validate`

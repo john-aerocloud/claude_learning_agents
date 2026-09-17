@@ -89,7 +89,7 @@ do: propose an amendment to `state-graphs.json` WITH A REASON — a process expe
 All via the cross-platform launcher (never bare `python3` — see below); the root
 Makefile wraps each.
 
-0. **`make wi-mint PROJECT=P TYPE=<type> TITLE="…" JOB=<J> VALUE=<v> COST=<c> LANE=<lane> AGENT=<role> [PARENTS=…] [DEPS=…] [NOTE=…|NOTE_FILE=…] [BODY_FILE=…] [PREFIX=…] [ID=…]`**
+0. **`make wi-mint PROJECT=P TYPE=<type> TITLE="…" JOB=<J> VALUE=<v> COST=<c> LANE=<lane> AGENT=<role> DECIDE=schedule|defer [DEFER_UNTIL=YYYY-MM-DD] DECIDE_NOTE="…"|DECIDE_NOTE_FILE=… [PARENTS=…] [DEPS=…] [NOTE=…|NOTE_FILE=…] [BODY_FILE=…] [PREFIX=…] [ID=…]`**
    — the SOLE way to CREATE an item. It allocates the id and writes the file in one
    atomic act, prints the id as the LAST LINE of stdout
    (`ID=$(make wi-mint … | tail -1)`), and leaves an item that already passes
@@ -123,7 +123,34 @@ Makefile wraps each.
      of its own. Everything after it is an append.
    - `TITLE=` crosses make's expansion and a shell string exactly as `NOTE=` does, so
      a `$`, backtick, quote or backslash is REFUSED rather than corrupted — use
-     `TITLE_FILE=`.
+     `TITLE_FILE=`. `DECIDE_NOTE=`/`DECIDE_NOTE_FILE=` is the same prose, same rule.
+   - **`DECIDE=` IS REQUIRED ON A FLOW TYPE AND HAS NO DEFAULT [OI-ROC-034, §F9k].**
+     Registration and triage are ONE act, because the role that finds something is the
+     only one that holds the context to decide it, and the decision taken later is the
+     median **6439 s** that makes `reported` **35.23% of gross lead time** — the largest
+     single contributor, and polling latency rather than deliberation. The rule (§F9b)
+     already said this; what changed is WHERE it is asked. The gate that used to ask
+     blocks the PULL, an hour later.
+     - **`DECIDE=schedule DECIDE_NOTE="<why it is worth doing>"`** fires the type's
+       decision event (`triaged`/`scheduled`/`made_ready`, derived from the graph) at the
+       SAME timestamp as the genesis event, landing the item in its **ready buffer**.
+       **It costs NO wip slot** — a decision that consumed one would put §F9b back into
+       mechanical opposition with the wip cap, which is the failure §F9i/OI-ROC-029
+       fixed. Needs the ordinary firing rights.
+     - **`DECIDE=defer DEFER_UNTIL=YYYY-MM-DD DECIDE_NOTE="<what it is waiting for>"`**
+       is the recorded alternative: a dated decision **at least 7 days out** (a nearer
+       one decides nothing — §F9b.1's arithmetic, refused here rather than a week later).
+       It appends no transition, so it needs **no firing rights and is available to every
+       role**; the reason rides the genesis event, which — unlike a frontmatter scalar —
+       carries a timestamp. **It is always the cheaper move, and that asymmetry is what
+       stops this from suppressing discovery (§F8a).**
+     - The vocabulary is **closed**, and the reason is screened: `TODO`, `TBD`, `n/a`,
+       `-` and anything under 12 characters are REFUSED. A required field answered with a
+       placeholder is worse than an absent one, because the gate then reads a lie as
+       compliance.
+     - An **aggregate** (requirement/chunk/slice) takes no decision and refuses one: it
+       has no flow state and sits in no queue. Registering one is exactly as cheap as it
+       was.
 
 1. **`make wi-append PROJECT=P ID=<ID> EVENT=<name> AGENT=<role> [REF=…] [NOTE=…] [OWNER=<role>[,<role>]]`**
    — the SOLE state writer, and the ONLY way to change item state (replaces

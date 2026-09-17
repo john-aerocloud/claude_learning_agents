@@ -1461,7 +1461,7 @@ def find_item_path(project, iid):
     return None, None
 
 
-def resolve_note(a):
+def resolve_note(a, attr="note", file_attr="note_file", label="append"):
     """The note's ONLY safe transport is a file; validate whatever route was used.
 
     OI-WI-APPEND-NOTE-PATH-MANGLES-CONTENT. Three real corruptions of durable prose,
@@ -1477,23 +1477,31 @@ def resolve_note(a):
     note (`'a\\nb'` was stored and re-read as `'a'`, losing the tail and the character
     before it). Fail closed — a corrupted audit record must not be representable.
     """
-    note_file = getattr(a, "note_file", None)
-    if note_file and a.note:
-        sys.exit("append REJECTED: pass EITHER --note or --note-file, not both.\n"
+    # The pair of attributes is a PARAMETER because there is now more than one
+    # note on the command line (`--note` and `--decide-note`), and every one of
+    # them lands in the same permanent record and crosses the same two hostile
+    # layers. A second copy of this function would be a second place for the
+    # newline rule to be forgotten.
+    flag = "--" + attr.replace("_", "-")
+    file_flag = "--" + file_attr.replace("_", "-")
+    note_file = getattr(a, file_attr, None)
+    raw = getattr(a, attr, None)
+    if note_file and raw:
+        sys.exit(f"{label} REJECTED: pass EITHER {flag} or {file_flag}, not both.\n"
                  "  They would disagree, and there is no correct way to choose.")
-    note = a.note
+    note = raw
     if note_file:
         try:
             with open(note_file, encoding="utf-8") as f:
                 note = f.read()
         except OSError as e:
-            sys.exit(f"append REJECTED: cannot read --note-file {note_file}: {e}")
+            sys.exit(f"{label} REJECTED: cannot read {file_flag} {note_file}: {e}")
         # One trailing newline is the FILE FORMAT, not the prose — every editor and
         # `printf '%s\n'` adds it, so rejecting it would reject the safe route itself.
         if note.endswith("\n"):
             note = note[:-1]
     if note and re.search(r"[\r\n]", note):
-        print("append REJECTED: the note contains a newline.", file=sys.stderr)
+        print(f"{label} REJECTED: the note contains a newline.", file=sys.stderr)
         print("  An event is stored as a ONE-LINE inline map, so a newline would "
               "SILENTLY TRUNCATE the note at that point (and lose the character "
               "before it). It is rejected rather than altered because a corrupted "
@@ -1611,7 +1619,107 @@ def _mint_title(a):
     return title
 
 
-def genesis_events(graphs, itype, ts, agent, note, fm):
+# --------------------------------------------------------------------------- #
+# OI-ROC-034 / §F9k — THE DECISION IS TAKEN AT REGISTRATION, BY THE TOOL THAT IS
+# ALREADY RUNNING AT THAT MOMENT
+#
+# `orchestrator` is 35.23% of gross lead time and every second of it is one
+# state, `reported`: 682 days across 180 items, median 6439 s between a finding
+# existing and a decision being recorded — roughly 1.8x the orchestrator's tick
+# interval, so the dwell is POLLING LATENCY, not deliberation. §F9b already
+# required the decision in the same act; it was enforced by a limb that blocks
+# the PULL, an hour later, when the context that made deciding cheap is gone.
+#
+# WHY THIS IS NOT CHEAP TO FAKE, which is §F9k's first named failure mode (*a
+# required field answered `TODO` is worse than an absent one*): what is required
+# is not a string but a CHOICE BETWEEN TWO CONSEQUENCES, from a closed
+# vocabulary that cannot be answered with filler.
+#   * `schedule` lands the item in the `ready` buffer, where it is a real pull
+#     candidate ranked by the value and cost just supplied. Faking it means the
+#     system actually does the work.
+#   * `defer` costs a DATE at least DEFAULT_MIN_DEFER_DAYS out, which expires and
+#     brings the question back, and re-dating is bounded by the 30d total-age
+#     ceiling. Faking it means being asked again.
+# The reason is screened only for the placeholder that would make the record a
+# lie. That screen is deliberately a FLOOR, not a judgement: no string check can
+# establish that a decision was thought about, and pretending otherwise would be
+# the compliance reading v157 already caught this system taking.
+DECIDE_SCHEDULE = "schedule"
+DECIDE_DEFER = "defer"
+DECISIONS = (DECIDE_SCHEDULE, DECIDE_DEFER)
+#: Answers that assert nothing. A gate that reads one of these as compliance is
+#: worse than one with no field at all, because it converts an omission into a
+#: recorded lie that every later reader trusts.
+PLACEHOLDER_REASONS = {"todo", "tbd", "tba", "na", "n/a", "none", "nil", "null",
+                       "x", "xx", "xxx", "?", "??", "-", "--", ".", "fixme",
+                       "later", "wip", "see above", "as above", "unknown",
+                       "decide later", "to be decided", "to do"}
+#: A floor, not a standard: shorter than this cannot state a reason at all.
+MIN_REASON_CHARS = 12
+
+
+def registration_decision_edge(graphs, itype):
+    """(event, to_state) — the ONE edge out of a flow type's initial state that
+    RECORDS A DECISION, or (None, None) if the graph does not offer exactly one.
+
+    DERIVED FROM THE GRAPH, never hardcoded, and the derivation is the guarantee:
+    a decision edge is one that leaves the initial state for a state in the
+    `ready` BUFFER. That is what makes it impossible for this to re-create
+    EXP-ROC-020's trap — a decision that costs a wip slot puts §F9b back into
+    mechanical opposition with the wip cap, which is exactly the failure
+    OI-ROC-029/§F9i fixed (the loop blocked at wip 11/8 with zero agents
+    running). Anything landing in `wip`, `waiting` or a terminal state is not a
+    decision to record a finding, it is starting, parking or closing it.
+
+    FAILS CLOSED on zero or many: a type whose graph grows a second such edge
+    gets a refusal naming the ambiguity, never a guess.
+    """
+    initial = graphs.initial(itype)
+    cands = [(t["event"], t["to"]) for t in graphs.transitions(itype)
+             if t["from"] == initial and t["to"] != initial
+             and graphs.queue_for(t["to"]) == "ready"]
+    if len(cands) != 1:
+        return (None, None)
+    return cands[0]
+
+
+def reason_refusal(reason):
+    """Why this reason is not one — the message, or None if it will do."""
+    text = (reason or "").strip()
+    if not text:
+        return ("a REASON is required with the decision (--decide-note, or "
+                "--decide-note-file for prose a shell would eat). The decision "
+                "is a permanent audit record of why this item was scheduled or "
+                "deferred, and it is being asked for HERE because this is the "
+                "one moment the registering role still holds the context — an "
+                "hour later it is reconstructed, which is what the 6439 s median "
+                "in `reported` is made of.")
+    flat = " ".join(text.lower().split()).strip(" .!?-_*")
+    if flat in PLACEHOLDER_REASONS or len(text) < MIN_REASON_CHARS:
+        return (f"{text!r} is not a reason. A required field answered with a "
+                f"placeholder is WORSE than an absent one, because the gate then "
+                f"reads a lie as compliance and every later reader trusts it "
+                f"(§F9k). Say what makes this worth doing next, or what it is "
+                f"waiting for — one sentence, at least {MIN_REASON_CHARS} "
+                f"characters. If you genuinely cannot say yet, that is what "
+                f"`--decide {DECIDE_DEFER}` is for, and its date says when the "
+                f"question comes back.")
+    return None
+
+
+def parse_defer_date(raw):
+    """The defer date as an aware datetime, or None if it is not a date. Reads
+    the same way `_defer_until` reads the frontmatter scalar it writes, so the
+    value this accepts is exactly the value the gate will later honour."""
+    if raw in (None, ""):
+        return None
+    dt = parse_ts(str(raw).strip())
+    if dt is None:
+        return None
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+
+
+def genesis_events(graphs, itype, ts, agent, note, fm, decision=None):
     """The event log a NEWLY REGISTERED item starts life with.
 
     Extracted from `_mint_locked` so that what an item records at birth is one
@@ -1640,7 +1748,142 @@ def genesis_events(graphs, itype, ts, agent, note, fm):
         return []
     if note:
         ev["note"] = note
-    return [ev]
+    events = [ev]
+    if decision:
+        # THE SAME ACT, and the same INSTANT: the gap between registering and
+        # deciding is the cost this exists to remove, so there is no gap. The
+        # decision is a real transition, fired by the registering role and
+        # replayed by I1 against the rights model like any other — not a special
+        # case anything downstream has to forgive.
+        event, reason = decision
+        events.append({"ts": ts, "event": event, "agent": agent, "note": reason})
+    return events
+
+
+def _mint_decision(graphs, a, itype):
+    """((event, reason) | None, defer_date | None) — the registration-time
+    decision, fully validated BEFORE anything is created.
+
+    Everything here refuses without writing a file: a registration that is going
+    to be refused must not burn an id or leave an orphan (DEF-ROC-203). The two
+    routes are deliberately asymmetric in what they cost, and NEITHER costs a wip
+    slot.
+    """
+    decide = (getattr(a, "decide", None) or "").strip() or None
+    raw_defer = (getattr(a, "defer_until", None) or "").strip() or None
+    reason = (resolve_note(a, "decide_note", "decide_note_file")
+              if (getattr(a, "decide_note", None)
+                  or getattr(a, "decide_note_file", None)) else None)
+    agent = getattr(a, "agent", None)
+
+    if graphs.kind(itype) != "flow":
+        # An aggregate has no flow state and appears in no queue, so there is
+        # nothing to decide and nothing to defer. Refusing rather than absorbing
+        # it keeps registration of a requirement/chunk/slice exactly as cheap as
+        # it was — the change must not make discovery or slicing more expensive.
+        if decide or raw_defer:
+            sys.exit(f"mint REFUSED: '{itype}' is an aggregate — its state "
+                     f"bubbles from its children and it sits in no queue, so "
+                     f"there is no triage decision to record and --decide/"
+                     f"--defer-until do not apply. Register it without them; the "
+                     f"decisions belong on the use-cases and defects beneath it.")
+        return (None, None)
+
+    event, to = registration_decision_edge(graphs, itype)
+    if decide is None:
+        sys.exit(
+            f"mint REFUSED: --decide (DECIDE= through `make wi-mint`) is "
+            f"REQUIRED for a '{itype}' ({'/'.join(DECISIONS)}), and it has no "
+            f"default.\n"
+            f"  §F9b: a finding is registered WITH its triage decision, IN THE "
+            f"SAME ACT — the role that found it always held the context to decide "
+            f"it, and registering without deciding converts discovery into "
+            f"inventory on `{graphs.initial(itype)}`, which is this project's "
+            f"largest single contributor to gross lead time (35.23%, median "
+            f"6439 s per item). You are being asked HERE, rather than by a gate an "
+            f"hour from now, because this is the moment you still hold the "
+            f"context (§F9k).\n"
+            f"  --decide {DECIDE_SCHEDULE} --decide-note '<why it is worth doing>' "
+            f"— records `{event}`, landing it in `{to}`, which is a READY BUFFER "
+            f"and costs NO wip slot (§F9i).\n"
+            f"  --decide {DECIDE_DEFER} --defer-until YYYY-MM-DD --decide-note "
+            f"'<what it is waiting for>' — an explicit dated decision, at least "
+            f"{DEFAULT_MIN_DEFER_DAYS:.0f} days out. ALWAYS AVAILABLE, to every "
+            f"role, and it is the cheaper move: this must never be a reason not to "
+            f"register a finding (§F8a).")
+    if decide not in DECISIONS:
+        sys.exit(f"mint REFUSED: --decide '{decide}' is not a decision. It is a "
+                 f"CLOSED VOCABULARY of two — {'/'.join(DECISIONS)} — precisely "
+                 f"so that the decision cannot be answered with filler: each is a "
+                 f"CONSEQUENCE ({DECIDE_SCHEDULE} = it enters the ready buffer and "
+                 f"gets pulled; {DECIDE_DEFER} = it comes back on a date you "
+                 f"name), not a word written in a field.")
+    why = reason_refusal(reason)
+    if why:
+        sys.exit(f"mint REFUSED: {why}")
+
+    if decide == DECIDE_DEFER:
+        if not raw_defer:
+            sys.exit(f"mint REFUSED: --decide {DECIDE_DEFER} requires "
+                     f"--defer-until YYYY-MM-DD. A defer with no date is not a "
+                     f"decision, it is a silence with a note attached: nothing "
+                     f"can bring the question back.")
+        dt = parse_defer_date(raw_defer)
+        if dt is None:
+            sys.exit(f"mint REFUSED: --defer-until '{raw_defer}' is not a date "
+                     f"(YYYY-MM-DD). An unparseable defer reads as NO defer to "
+                     f"every gate downstream (`_defer_until` fails closed), so it "
+                     f"is refused here rather than silently deciding nothing.")
+        horizon_days = (dt - _mint_now(a)).total_seconds() / 86400.0
+        if horizon_days < DEFAULT_MIN_DEFER_DAYS:
+            sys.exit(
+                f"mint REFUSED: --defer-until {dt.date().isoformat()} is "
+                f"{horizon_days:.1f} days away, and a defer under "
+                f"{DEFAULT_MIN_DEFER_DAYS:.0f} days decides nothing (§F9b.1).\n"
+                f"  THE ARGUMENT IS ARITHMETIC: the backlog-age limb does not fire "
+                f"until an item has sat {DEFAULT_MIN_DEFER_DAYS:.0f} days "
+                f"undecided, so a shorter defer buys EXACTLY what the item already "
+                f"had for free — it costs one line, satisfies the gate, and "
+                f"re-poses the same question a few hours later. MEASURED: six of "
+                f"nine decisions in the v156 cycle were the same date, expiring "
+                f"inside 13 hours, while `reported` rose.\n"
+                f"  A genuine SHORT wait is a `blocked` park with a re-checkable "
+                f"probe, which the graph already supports; a genuine decision to "
+                f"do it soon is --decide {DECIDE_SCHEDULE}.")
+        return ((event, reason), dt)
+
+    if raw_defer:
+        sys.exit(f"mint REFUSED: --defer-until was passed with --decide "
+                 f"{DECIDE_SCHEDULE}, which records no defer. It is refused "
+                 f"rather than ignored: an argument a tool silently swallows is "
+                 f"how an agent comes to believe it recorded something it did not "
+                 f"(DEF-ROC-248, the same day). Choose one.")
+    if event is None:
+        sys.exit(f"mint REFUSED: the graph for '{itype}' does not offer exactly "
+                 f"ONE decision edge out of '{graphs.initial(itype)}' into a "
+                 f"`ready` buffer, so there is nothing to fire and nothing will "
+                 f"be guessed. Fix the type graph (an EXP-NNN amendment), or "
+                 f"register with --decide {DECIDE_DEFER}.")
+    ok, _to, _legal, rights_why = check_transition(
+        graphs, itype, graphs.initial(itype), event, agent,
+        graphs.default_owners(itype))
+    if not ok:
+        sys.exit(
+            f"mint REFUSED: '{agent}' may not fire '{event}' on a new "
+            f"'{itype}'"
+            + (f" — {rights_why}" if rights_why else "") + ".\n"
+            f"  NOTHING HAS BEEN WRITTEN, and this is not a reason to leave the "
+            f"finding unregistered — register it with `--decide {DECIDE_DEFER} "
+            f"--defer-until YYYY-MM-DD`, which needs no firing rights because it "
+            f"appends no transition, and say in the reason who should schedule it. "
+            f"A flow role (orchestrator/flow-manager) can also register it decided.")
+    return ((event, reason), None)
+
+
+def _mint_now(a):
+    """The instant the horizon is measured from — the registration timestamp when
+    one was given, so a back-dated mint and its defer are judged consistently."""
+    return parse_defer_date(getattr(a, "ts", None)) or datetime.now(timezone.utc)
 
 
 def cmd_mint(a):
@@ -1687,6 +1930,8 @@ def _mint_locked(a):
         else:
             vals = [s for s in re.split(r"[,\s]+", str(raw)) if s]
         return vals
+
+    decision, defer_date = _mint_decision(graphs, a, itype)
 
     parents, deps = _edges(getattr(a, "parents", None)), _edges(getattr(a, "deps", None))
     taken = _ids_on_disk(a.project)
@@ -1766,7 +2011,20 @@ def _mint_locked(a):
         fm = {"id": iid, "type": itype, "title": title, "job": a.job,
               "value": _num(str(a.value)), "cost": _num(str(a.cost)),
               "parents": parents, "deps": deps, "created_ts": ts, "lane": lane}
-        events = genesis_events(graphs, itype, ts, agent, note, fm)
+        genesis_note = note
+        if defer_date is not None:
+            # The DEFER is recorded twice, and both are load-bearing. The
+            # frontmatter scalar is what `_defer_is_decision` (loop-gate's §F9b
+            # limb) reads; the genesis note is what carries the REASON and — the
+            # part that was missing — a TIMESTAMP. v157 had to establish when the
+            # v156 cycle's defers were written with `git log -S defer_until`,
+            # because a frontmatter scalar records no time at all.
+            fm["defer_until"] = defer_date.date().isoformat()
+            genesis_note = (f"DEFERRED to {fm['defer_until']}: "
+                            f"{decision[1]}"
+                            + (f" — {note}" if note else ""))
+        events = genesis_events(graphs, itype, ts, agent, genesis_note, fm,
+                                decision=decision if defer_date is None else None)
         fm["events"] = events
         body = "\n"
         body_file = getattr(a, "body_file", None)
@@ -8694,6 +8952,39 @@ def main(argv=None):
     mn.add_argument("--agent", required=True,
                     help="the role registering the item; recorded on the genesis "
                          "event, which is a permanent audit record")
+    mn.add_argument("--decide", metavar="/".join(DECISIONS),
+                    help="THE TRIAGE DECISION, taken in the SAME ACT as the "
+                         "registration and REQUIRED on a flow type (§F9b/§F9k). "
+                         f"`{DECIDE_SCHEDULE}` records the type's decision event "
+                         "and lands the item in its READY BUFFER — a decision "
+                         "costs no wip slot (§F9i). "
+                         f"`{DECIDE_DEFER}` records an explicit dated decision "
+                         "(--defer-until, at least "
+                         f"{DEFAULT_MIN_DEFER_DAYS:.0f} days out) and needs no "
+                         "firing rights, so it is available to every role and is "
+                         "always the cheaper move — registering a finding must "
+                         "never become expensive enough to suppress (§F8a). WHY "
+                         "HERE: this is the one moment the registering role still "
+                         "holds the context; the gate that used to ask blocks the "
+                         "PULL, about an hour later, by which time the median "
+                         "item had spent 6439 s in its initial state.")
+    mn.add_argument("--defer-until", dest="defer_until", metavar="YYYY-MM-DD",
+                    help=f"REQUIRED with --decide {DECIDE_DEFER}, refused "
+                         f"otherwise: the date the question comes back. Written "
+                         f"to `defer_until:`, which is what loop-gate's §F9b limb "
+                         f"reads.")
+    mn.add_argument("--decide-note", dest="decide_note",
+                    help="the REASON for the decision — what makes it worth doing "
+                         "next, or what it is waiting for. Lands verbatim on the "
+                         "decision event (or, for a defer, on the genesis event, "
+                         "which is the only record of a defer that carries a "
+                         "TIMESTAMP). A placeholder is REFUSED: a required field "
+                         "answered `TODO` is worse than an absent one, because the "
+                         "gate then reads a lie as compliance.")
+    mn.add_argument("--decide-note-file", dest="decide_note_file",
+                    help="read the decision reason from a FILE — the only "
+                         "transport that cannot corrupt it (same rule as "
+                         "--note-file)")
     mn.add_argument("--note", help="note for the genesis event")
     mn.add_argument("--note-file", dest="note_file",
                     help="read the genesis note from a FILE (see `append`)")

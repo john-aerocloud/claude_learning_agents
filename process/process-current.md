@@ -4381,6 +4381,36 @@ the decisive moment, holding the very thing the rule needs, and saying nothing.*
 
 Routed to `OI-ROC-034` (the `wi-mint` change) and `DEF-ROC-248` (the `commit-isolated` change).
 
+### BUILT — the decision is taken at `wi-mint`, or the registration is refused [OI-ROC-034]
+
+**`DECIDE=` is REQUIRED on every flow type and has no default.** `DECIDE=schedule` fires the
+type's decision edge at the SAME TIMESTAMP as the genesis event; `DECIDE=defer
+DEFER_UNTIL=<≥7d out>` records the dated alternative. Both carry a screened reason.
+
+**What is required is a CHOICE BETWEEN TWO CONSEQUENCES, not a string** — which is the answer
+to §F9k's own first objection. A closed vocabulary of two cannot be answered `TODO`: `schedule`
+puts the item in the ready buffer where it is a real pull candidate ranked by the value and cost
+just supplied (faking it means the system does the work), and `defer` costs a date that expires
+and comes back, bounded by the 30d total-age ceiling (faking it means being asked again). The
+reason is screened only against the placeholder that would make the record a lie, and that screen
+is deliberately a FLOOR, not a judgement: no string check can establish that a decision was
+thought about, and pretending otherwise is the compliance reading v157 already caught.
+
+**The decision edge is DERIVED from the graph, by the property that keeps it safe:** the one
+edge out of the initial state into a `ready`-queue state. So `EXP-ROC-020`/§F9i's trap cannot be
+re-created by a future type — an edge into `wip` is not a decision by construction, not by
+convention — and a type offering zero or two such edges FAILS CLOSED rather than having one
+guessed for it.
+
+**Discovery is protected by the ASYMMETRY, not by a promise.** The defer route appends no
+transition, so it needs no firing rights and every role can use it; a role refused the schedule
+route is pointed at it by name, and nothing is written. `reported` can still be rested in — but
+only behind a dated decision that expires, which is the state §F9b always intended it to have.
+
+**Its own residual, recorded rather than left implicit:** the wi-mint recipe is not yet in the
+durable-prose sweep's target set, so `DECIDE_NOTE` has its file route and its hazard guard by
+construction rather than by gate — the same standing as `TITLE`/`NOTE` on that target today.
+
 ## F11.6. PRODUCT tests gate delivery; PROCESS tests do not [v177, ROC — owner ruling]
 
 **Two kinds of test live in this repository and they have been treated as one.**

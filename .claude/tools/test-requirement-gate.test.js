@@ -1162,3 +1162,45 @@ test('limb1: a variationGraph entry with no stated reason is a CONFIG ERROR', ()
   assert.strictEqual(r.verdict, 'FAIL')
   assert.match(r.configErrors.join('\n'), /variationGraph/)
 })
+
+// --------------------------------------------------------------------------
+// ...AND THE CREDIT MUST BE VISIBLE IN THE REPORT.
+//
+// The count this gate ratchets is the one a reader acts on, and a mechanism that
+// takes cases OUT of it silently is indistinguishable, on the page, from the debt
+// having been paid down. Measured on ROC at DEF-ROC-192: wiring the graph in moves
+// limb 1 from 1202 to 1128 in one step. A reader who cannot see WHY reads a
+// 74-case improvement that nobody made, which is the coverage theatre §17d forbids
+// -- committed inside the gate built to forbid it.
+//
+// So the number that moved the verdict is printed next to the verdict, always --
+// including when it is ZERO, because "this project credits nothing this way" is
+// itself the fact a reader of another project's report needs.
+// --------------------------------------------------------------------------
+
+test('the report NAMES how many cases were credited to a variation node, so a fall in limb 1 cannot read as debt paid', () => {
+  const root = scratch({
+    'tests/a.test.ts': `
+describe('DEF-ROC-226 any node name may be published', () => {
+  it('accepted @DEF-ROC-226/subject/any-node-name-is-accepted', () => {})
+  it('untagged, and stays a violation', () => {})
+})
+`,
+    [`${GRAPH_ROOT}/DEF-ROC-226.json`]: graphFile('DEF-ROC-226', [
+      { id: 'DEF-ROC-226/subject/any-node-name-is-accepted', ac: ['AC-226-1'], variation: 'the happy path' },
+    ]),
+  }, { ...graphCfg, mode: 'ratchet', baseline: { ac: 1, authored: 0 } })
+  const r = gate.runGate({ repoRoot: root, project: 'Scratch' })
+  assert.strictEqual(r.counts.ac, 1)
+  assert.strictEqual(r.counts.acCoveredByVariationNode, 1)
+  assert.match(gate.formatReport(r), /^TRG-COUNTS: .*by-variation-node=1/m)
+})
+
+test('the credit is printed even when it is ZERO — silence would read as "this gate has no such mechanism"', () => {
+  const root = scratch(
+    { 'tests/a.test.ts': `describe('s', () => { it('x', () => {}) })` },
+    { mode: 'ratchet', baseline: { ac: 1, authored: 0 } },
+  )
+  const out = gate.formatReport(gate.runGate({ repoRoot: root, project: 'Scratch' }))
+  assert.match(out, /^TRG-COUNTS: .*by-variation-node=0/m)
+})

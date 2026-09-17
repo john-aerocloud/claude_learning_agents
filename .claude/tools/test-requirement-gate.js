@@ -1115,7 +1115,11 @@ function formatReport(r, opts) {
     `limb1-untagged=${r.counts.ac} limb2-authored=${r.counts.authored} ` +
     `allowlisted=${r.counts.allowlisted} allowlist-entries=${r.counts.allowlistEntries} ` +
     `stale-allowlist=${r.counts.staleAllowlistEntries} ` +
-    `file-header-only=${r.counts.acCoveredByFileHeaderOnly}`)
+    `file-header-only=${r.counts.acCoveredByFileHeaderOnly} ` +
+    // Printed ALWAYS, including at zero. This is the one mechanism that takes cases OUT
+    // of the ratcheted count, so a reader who cannot see it reads a fall in limb 1 as debt
+    // paid down rather than as declarations the gate can now read.
+    `by-variation-node=${r.counts.acCoveredByVariationNode || 0}`)
   if (r.baseline) {
     L.push(`TRG-BASELINE: limb1=${r.baseline.ac || 0} limb2=${r.baseline.authored || 0} (ratchet floor — may only shrink)`)
   }

@@ -429,6 +429,29 @@ class TestTheSummaryLineDoesNotOverstate(_Drive):
         self.assertNotIn("clean", line, line)
 
 
+    def test_the_invariants_that_pass_a_LITERAL_held_verdict_are_FAIL_CLOSED(self):
+        """The assumption the composed sentence rests on, pinned rather than
+        commented [DEF-ROC-238]. I1–I4/I6/I7/I8 are the only invariants allowed
+        to pass a literal `HELD` verdict, and that is only honest because they
+        have NO cannot-establish path to mis-state: they are computed from
+        parsed item files, and a file that cannot be parsed RAISES. So the gate
+        dies rather than summarising — no sentence is printed at all, and there
+        is no third state for those four to be silently absorbed into.
+
+        If a future change ever swallows a parse error to keep the run going,
+        this reddens, and the four literal verdicts above it stop being true."""
+        self.requirement()
+        with io.open(os.path.join(self._items("active"), "DEF-T-009.md"), "w",
+                     encoding="utf-8") as f:
+            f.write("this file has no frontmatter fence at all\n")
+        buf = io.StringIO()
+        with self.assertRaises(ValueError):
+            with contextlib.redirect_stdout(buf):
+                wi.cmd_validate(argparse.Namespace(project=self.project))
+        self.assertNotIn("all hold", buf.getvalue(), buf.getvalue())
+        self.assertNotIn("clean", buf.getvalue(), buf.getvalue())
+
+
 class TestTheRemedyNamesTheFieldThatMoved(_Drive):
     """A remedy that names the wrong field is a remedy the reader has to
     correct before running it, and the only person who can correct it is the one

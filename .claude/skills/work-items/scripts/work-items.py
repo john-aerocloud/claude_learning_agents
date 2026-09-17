@@ -1611,6 +1611,38 @@ def _mint_title(a):
     return title
 
 
+def genesis_events(graphs, itype, ts, agent, note, fm):
+    """The event log a NEWLY REGISTERED item starts life with.
+
+    Extracted from `_mint_locked` so that what an item records at birth is one
+    readable thing rather than a branch inside a 150-line allocation routine —
+    it is the only log the machinery ever writes in more than one event, and the
+    place a registration-time decision has to land.
+    """
+    kind = graphs.kind(itype)
+    if kind == "aggregate":
+        # An aggregate has no fold, so this event is not a state entry — it is
+        # the AUDIT BASELINE `SKILL.md` has always described ("aggregates carry
+        # only registered/amended events for audit"), and `mint` wrote none at
+        # all, so the first hand-edit of a freshly minted definition had nothing
+        # to disagree with. It carries the economics as registered, which is what
+        # makes I10 checkable FROM BIRTH [DEF-ROC-238].
+        ev = {"ts": ts, "event": "registered", "agent": agent,
+              "econ": econ_of(fm)}
+    elif kind == "flow":
+        # The GENESIS event names the type's initial state. It is the one event
+        # that is NOT a transition — there is no edge to fire, so `wi-append`
+        # cannot write it (validate/I1 skips event #1 for exactly this reason).
+        # Which is why creation has to, and why creation is a command rather than
+        # a hand-written file.
+        ev = {"ts": ts, "event": graphs.initial(itype), "agent": agent}
+    else:                                                  # pragma: no cover
+        return []
+    if note:
+        ev["note"] = note
+    return [ev]
+
+
 def cmd_mint(a):
     """Allocate an id and register the item, in one act. Thin wrapper: the lock
     keeps the scan and the create from interleaving (a DENSE sequence), while the
@@ -1734,29 +1766,7 @@ def _mint_locked(a):
         fm = {"id": iid, "type": itype, "title": title, "job": a.job,
               "value": _num(str(a.value)), "cost": _num(str(a.cost)),
               "parents": parents, "deps": deps, "created_ts": ts, "lane": lane}
-        events = []
-        if graphs.kind(itype) == "aggregate":
-            # An aggregate has no fold, so this event is not a state entry — it
-            # is the AUDIT BASELINE `SKILL.md` has always described ("aggregates
-            # carry only registered/amended events for audit"), and `mint` wrote
-            # none at all, so the first hand-edit of a freshly minted definition
-            # had nothing to disagree with. It carries the economics as
-            # registered, which is what makes I10 checkable FROM BIRTH.
-            ev = {"ts": ts, "event": "registered", "agent": agent,
-                  "econ": econ_of(fm)}
-            if note:
-                ev["note"] = note
-            events.append(ev)
-        elif graphs.kind(itype) == "flow":
-            # The GENESIS event names the type's initial state. It is the one
-            # event that is NOT a transition — there is no edge to fire, so
-            # `wi-append` cannot write it (validate/I1 skips event #1 for exactly
-            # this reason). Which is why creation has to, and why creation is a
-            # command rather than a hand-written file.
-            ev = {"ts": ts, "event": graphs.initial(itype), "agent": agent}
-            if note:
-                ev["note"] = note
-            events.append(ev)
+        events = genesis_events(graphs, itype, ts, agent, note, fm)
         fm["events"] = events
         body = "\n"
         body_file = getattr(a, "body_file", None)

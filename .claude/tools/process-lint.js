@@ -286,12 +286,13 @@ const ARCHIVE_DECLARATION_FORMS = [
   /^\s*-\s*\*\*(EXP-[A-Za-z0-9-]+)\s*[\u2014-]/gm,              // a retirement entry
 ];
 
-/** Parse a policy.csv into [{queue, param, experiment, line}]. */
+/** Parse a policy.csv into [{queue, param, value, experiment, line}]. */
 function parsePolicy(text) {
   const lines = text.split('\n');
   const header = (lines[0] || '').split(',').map((c) => c.trim());
   const col = (name) => header.indexOf(name);
   const qi = col('queue'); const pi = col('param'); const ei = col('experiment');
+  const vi = col('value');
   const out = [];
   if (qi === -1) return out;
   for (let i = 1; i < lines.length; i++) {
@@ -301,6 +302,7 @@ function parsePolicy(text) {
     if (!queue) continue;
     out.push({
       queue, param: pi === -1 ? '' : (cells[pi] || ''),
+      value: vi === -1 ? '' : (cells[vi] === undefined ? '' : cells[vi]),
       experiment: ei === -1 ? '' : (cells[ei] || ''), line: i + 1,
     });
   }
@@ -458,6 +460,69 @@ function checkDecisionIsFree(graphsText) {
 
 // --- driver ---------------------------------------------------------------
 
+// --- a `kind` row must declare a KNOWN kind (C7, OI-ROC-030) -----------------
+
+/**
+ * The classification vocabulary, kept in ONE place and mirrored from
+ * `work-items.py`'s QUEUE_KINDS. The machinery reads the value with
+ * `.strip().lower()` and falls back when it does not recognise it, so this list
+ * and that comparison must stay in step; the duplication is one short tuple
+ * across a language boundary, and the last test in the C7 block runs the lint
+ * against the REAL committed policy files so a drift shows up as a violation
+ * rather than as a silent divergence.
+ */
+const KNOWN_QUEUE_KINDS = ['backlog', 'buffer', 'wip'];
+
+/**
+ * C7 — every `kind` row in every policy.csv declares one of KNOWN_QUEUE_KINDS.
+ *
+ * WHY. `queue_kind()` resolves an unrecognised value through its fallback map
+ * rather than erroring — deliberately, so a policy.csv predating the `kind` row
+ * stays valid. That makes A TYPO SILENT. With two kinds the silence was
+ * survivable, because every fallback landed on `wip`, the blocking answer: a
+ * mistyped row could only ever be stricter than intended. OI-ROC-030's third kind
+ * ends that — `ready` now falls back to `buffer`, so a mistyped `bufffer` neither
+ * fails nor blocks, and the file READS as if the retro had declared something it
+ * did not. The declaration IS the control here (§F2 puts the knob with the retro,
+ * not in the code), and a control whose misdeclaration is indistinguishable from
+ * a correct one is not a control.
+ *
+ * Deliberately CASE- and WHITESPACE-tolerant, matching `queue_kind()` exactly: a
+ * lint stricter than the runtime would fail a file that works, which is how a
+ * gate gets switched off instead of obeyed.
+ */
+function checkQueueKindValues(root) {
+  const violations = [];
+  const info = [];
+  const files = policyFiles(root);
+  if (files.length === 0) {
+    info.push('C7 scanned 0 policy file(s) — no work/*/queues/policy.csv exists in this root');
+    return { violations, info };
+  }
+  let rowCount = 0;
+  for (const f of files) {
+    for (const r of parsePolicy(fs.readFileSync(f.path, 'utf8'))) {
+      if (r.param.trim().toLowerCase() !== 'kind') continue;
+      rowCount += 1;
+      const declared = String(r.value).trim().toLowerCase();
+      if (KNOWN_QUEUE_KINDS.includes(declared)) continue;
+      const found = declared === '' ? 'an EMPTY value' : `\`${r.value.trim()}\``;
+      violations.push(
+        `C7 ${f.rel}: \`${r.queue}.kind\` (line ${r.line}) declares ${found}, which is not a `
+        + `known queue kind. The vocabulary is exactly: ${KNOWN_QUEUE_KINDS.join(', ')}. `
+        + 'This does NOT fail at runtime and that is the problem — `queue_kind()` falls back '
+        + `silently, so \`${r.queue}\` is being governed by whatever the fallback map says `
+        + 'rather than by what this file appears to declare, and the two readers of the row '
+        + '(a person and the gate) disagree and nobody is told. Remedy: correct the value to one '
+        + `of ${KNOWN_QUEUE_KINDS.join(' / ')}, or delete the row and let the fallback govern `
+        + 'it openly.');
+    }
+  }
+  info.push(`C7 checked ${rowCount} \`kind\` declaration(s) in ${files.length} policy file(s) `
+    + `against ${KNOWN_QUEUE_KINDS.length} known kind(s)`);
+  return { violations, info };
+}
+
 function lint(root) {
   const violations = [];
   const info = [];
@@ -496,6 +561,10 @@ function lint(root) {
   violations.push(...c6.violations);
   info.push(...c6.info);
 
+  const c7 = checkQueueKindValues(root);
+  violations.push(...c7.violations);
+  info.push(...c7.info);
+
   return { violations, info };
 }
 
@@ -531,4 +600,5 @@ if (require.main === module) process.exitCode = main(process.argv.slice(2));
 
 module.exports = { checkHeadingVersion, parseRegistry, indexById, checkExperiments,
   reachableQueues, knownExperimentIds, parsePolicy, policyFiles, checkPolicyDeclarations,
-  lint, FROZEN_LEGACY_IDS, PER_PROJECT_CAP, RESERVED_POLICY_QUEUES, ARCHIVE_DECLARATION_FORMS };
+  checkQueueKindValues, lint, FROZEN_LEGACY_IDS, PER_PROJECT_CAP, RESERVED_POLICY_QUEUES,
+  ARCHIVE_DECLARATION_FORMS, KNOWN_QUEUE_KINDS };

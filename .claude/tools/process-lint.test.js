@@ -530,3 +530,77 @@ test('AC-L.21 an AGGREGATE type has no event stream of its own and is not checke
   const dir = policyFixture({ P: OK_ROWS }, { graphs: graphFixture(types) });
   assert.deepStrictEqual(lint.lint(dir).violations.filter((v) => v.startsWith('C6 ')), []);
 });
+
+// --- C7: a `kind` row must declare a KNOWN kind (OI-ROC-030) -----------------
+// WHY THIS CHECK EXISTS AT ALL, AND WHY IT ARRIVED WITH THE THIRD KIND. The
+// machinery resolves an unrecognised `kind` value through the fallback map rather
+// than erroring — deliberately, so an older policy.csv stays valid — which means a
+// TYPO IS SILENT. With two kinds that silence was survivable: every fallback
+// landed on `wip`, the blocking answer, so a mistyped row could only ever be
+// stricter than intended. A third value breaks that: `ready` now falls back to
+// `buffer`, so `bufffer`, `Buffer-` or `wip ` no longer announce themselves either
+// by failing or by blocking. The declaration is the whole control here (§F2 — the
+// retro owns the knob), and a control whose misdeclaration is indistinguishable
+// from a correct one is not a control.
+
+test('AC-030.5 a `kind` row declaring an UNKNOWN value is caught, and named', () => {
+  const dir = policyFixture({
+    ROC: ['ready,kind,bufffer,kind,flow-manager,gross-lead-time,2026-09-17,EXP-123',
+          'ready,wip_limit,4,count,flow-manager,gross-lead-time,<created>,EXP-022'],
+  });
+  const { violations } = lint.lint(dir);
+  const c7 = violations.filter((v) => v.startsWith('C7 '));
+  assert.strictEqual(c7.length, 1, violations.join('\n'));
+  assert.match(c7[0], /bufffer/);            // the value it actually found
+  assert.match(c7[0], /ready/);               // the queue it is on
+  assert.match(c7[0], /backlog, buffer, wip/); // the vocabulary it may use
+  assert.match(c7[0], /Remedy/);
+  // and it must say what the silence COSTS, not merely that it is wrong
+  assert.match(c7[0], /silently|fall(s)? back/i);
+});
+
+test('AC-030.5 every KNOWN kind passes, including the third one', () => {
+  const dir = policyFixture({
+    ROC: ['intake,kind,backlog,kind,flow-manager,gross-lead-time,<created>,EXP-123',
+          'ready,kind,buffer,kind,flow-manager,gross-lead-time,<created>,EXP-123',
+          'rework,kind,wip,kind,flow-manager,mttr,<created>,EXP-123',
+          'ready,wip_limit,4,count,flow-manager,gross-lead-time,<created>,EXP-022'],
+  });
+  const { violations, info } = lint.lint(dir);
+  assert.deepStrictEqual(violations.filter((v) => v.startsWith('C7 ')), [],
+    violations.join('\n'));
+  assert.ok(info.some((i) => /^C7 /.test(i)), info.join('\n'));
+});
+
+test('AC-030.5 the kind check is CASE- and WHITESPACE-tolerant, exactly as the reader is', () => {
+  // `queue_kind` lowercases and strips before comparing, so the lint must accept
+  // precisely what the machinery accepts — a lint stricter than the runtime would
+  // fail a file that WORKS, which is how a gate gets switched off.
+  const dir = policyFixture({
+    ROC: ['ready,kind, BUFFER ,kind,flow-manager,gross-lead-time,<created>,EXP-123',
+          'ready,wip_limit,4,count,flow-manager,gross-lead-time,<created>,EXP-022'],
+  });
+  assert.deepStrictEqual(
+    lint.lint(dir).violations.filter((v) => v.startsWith('C7 ')), []);
+});
+
+test('AC-030.5 an EMPTY kind value is a violation, not a free pass', () => {
+  // An empty cell is the one shape that reads as "declared" to a human scanning the
+  // file and as "undeclared" to the machinery — the two readers disagree silently,
+  // which is the exact failure this check is for.
+  const dir = policyFixture({
+    ROC: ['ready,kind,,kind,flow-manager,gross-lead-time,<created>,EXP-123',
+          'ready,wip_limit,4,count,flow-manager,gross-lead-time,<created>,EXP-022'],
+  });
+  const c7 = lint.lint(dir).violations.filter((v) => v.startsWith('C7 '));
+  assert.strictEqual(c7.length, 1);
+  assert.match(c7[0], /EMPTY|blank/i);
+});
+
+test('AC-030.5 the REAL committed policy files declare only known kinds', () => {
+  // The check is worth nothing if it is only ever run against fixtures.
+  const root = path.resolve(__dirname, '..', '..');
+  const { violations } = lint.lint(root);
+  assert.deepStrictEqual(violations.filter((v) => v.startsWith('C7 ')), [],
+    violations.join('\n'));
+});

@@ -2402,3 +2402,94 @@ test('AC-248.6 an ordinary Conventional-Commit message is untouched by the terse
   assert.equal(res.status, 0, `${res.stdout}${res.stderr}`);
   assert.doesNotMatch(res.stderr, /terse/i, 'a guard that fires on everything is friction, not a guard');
 });
+
+// --- DEF-ROC-248, limb 2 — SAY WHAT A MISSING WORK-ITEM ID COSTS -------------
+//
+// `CLAUDE.md` is explicit that the id in a commit message is EVIDENCE, not
+// decoration (DEF-ROC-189): the co-owned staleness guard stands down only when the
+// tip commit for the path names the SAME work item as yours. `x` names none, so
+// the next agent editing `scripts/design-quality-gate.mjs` from a copy that
+// predates dd44e2f1 gets the old EXIT 7 false positive — the one that hit four
+// agents in one day, made two abandon real changes rather than take the bypass,
+// and shipped a duplicate JSON key into HEAD.
+//
+// That rule is true, documented, and was enforced by nothing. The tool that NEEDS
+// the id is the tool being run and it had the message in its hand.
+//
+// IT MUST NOT BE MANDATORY. A hard refusal buys compliance in the form of
+// MSG="chore (DEF-ROC-1)" — an id that names nothing — and the guard would then
+// stand down on a LIE, which is strictly worse than standing up on an absence. So
+// it commits, and it states the CONSEQUENCE rather than making a request: "please
+// add an id" is skimmed by exactly the agent in a hurry this is meant to catch.
+//
+//   AC-248.7   a message naming a work item says nothing — a warning that fires on
+//              everything is friction.
+//   AC-248.8   a message naming none commits, and names the PATH and the loss.
+//   AC-248.9   a CO-OWNED path — the only case where the id is load-bearing — gets
+//              the stronger form: who else writes it, exit 7, and the narrow move
+//              the next agent will need, since nothing can add the id afterwards.
+//   AC-248.10  an id that names the PATH is void as evidence (DEF-ROC-189
+//              condition 3), and the tool says so rather than reading as compliant.
+
+/** A path two DIFFERENT work items have committed to — co-owned in practice. */
+function makeCoownedPathRepo() {
+  const repo = makeRepo();
+  const file = 'scripts/design-quality-gate.mjs';
+  write(repo, file, 'export const gate = 1;\n');
+  git(repo, ['add', '--', file]);
+  git(repo, ['commit', '-q', '-m', 'feat(gate): the coverage limb (UC-ROC-119)']);
+  write(repo, file, 'export const gate = 1;\nexport const trend = 2;\n');
+  git(repo, ['add', '--', file]);
+  git(repo, ['commit', '-q', '-m', 'fix(gate): the deploy limb (DEF-ROC-231)']);
+  return { repo, file };
+}
+
+test('AC-248.7 a message that names a work item says NOTHING about attribution', () => {
+  const { repo, file } = makeCoownedPathRepo();
+  write(repo, file, 'export const gate = 1;\nexport const trend = 2;\nexport const mine = 3;\n');
+  const res = runCli(repo, ['--repo', repo, '--message', 'refactor(gate): extract coverageTrend (DEF-ROC-214)', '--', file]);
+  assert.equal(res.status, 0, `${res.stdout}${res.stderr}`);
+  assert.doesNotMatch(res.stderr, /UNATTRIBUTED/, 'a warning that fires on everything is friction, not a warning');
+});
+
+test('AC-248.8 a message naming NO work item still commits, and names the path and what is lost', () => {
+  const repo = makeRepo();
+  write(repo, 'src/mine.ts', 'export const mine = 7;\n');
+  const res = runCli(repo, ['--repo', repo, '--message', 'chore(src): tidy the import order', '--', 'src/mine.ts']);
+  assert.equal(res.status, 0, `${res.stdout}${res.stderr}`);
+  assert.equal(git(repo, ['log', '-1', '--pretty=%s']), 'chore(src): tidy the import order', 'NEVER mandatory: an id you can be forced to invent is an id that lies');
+  assert.match(res.stderr, /UNATTRIBUTED/);
+  assert.match(res.stderr, /src\/mine\.ts/, 'it names the PATH the cost lands on');
+  assert.match(res.stderr, /stand down/i, 'it states the CONSEQUENCE, not a request');
+});
+
+test('AC-248.9 on a CO-OWNED path the response is STRONGER: who else writes it, exit 7, and the move the next agent will need', () => {
+  const { repo, file } = makeCoownedPathRepo();
+  write(repo, file, 'export const gate = 1;\nexport const trend = 2;\nexport const mine = 9;\n');
+  const res = runCli(repo, ['--repo', repo, '--message', 'x y', '--', file]);
+  assert.equal(res.status, 0, `${res.stdout}${res.stderr}`);
+  assert.match(res.stderr, /CO-OWNED/);
+  assert.match(res.stderr, /UC-ROC-119/, 'it names the other work items that write this path');
+  assert.match(res.stderr, /DEF-ROC-231/);
+  assert.match(res.stderr, /exit 7/i, 'the consequence, in the words the next agent will see');
+  assert.match(res.stderr, /commit-isolated-missing|SUPERSEDE_FILE/, 'and the narrow move, since nothing can add the id afterwards');
+
+  // The same commit with an id gets none of it — both arms, one scenario.
+  write(repo, file, 'export const gate = 1;\nexport const trend = 2;\nexport const mine = 10;\n');
+  const ok = runCli(repo, ['--repo', repo, '--message', 'refactor(gate): same change, attributed (DEF-ROC-214)', '--', file]);
+  assert.equal(ok.status, 0, `${ok.stdout}${ok.stderr}`);
+  assert.doesNotMatch(ok.stderr, /UNATTRIBUTED/);
+});
+
+test('AC-248.10 an id that names the PATH is void as evidence (DEF-ROC-189 condition 3), and it says so', () => {
+  const repo = makeRepo();
+  write(repo, 'items/DEF-ROC-248.md', 'the item\n');
+  git(repo, ['add', '--', 'items/DEF-ROC-248.md']);
+  git(repo, ['commit', '-q', '-m', 'items: register the defect (DEF-ROC-248)']);
+  write(repo, 'items/DEF-ROC-248.md', 'the item\nan event\n');
+
+  const res = runCli(repo, ['--repo', repo, '--message', 'state: DEF-ROC-248 built_green', '--', 'items/DEF-ROC-248.md']);
+  assert.equal(res.status, 0, `${res.stdout}${res.stderr}`);
+  assert.match(res.stderr, /UNATTRIBUTED|VOID/i);
+  assert.match(res.stderr, /names the path|subject/i, 'an id that names the SUBJECT is not evidence about the AUTHOR');
+});

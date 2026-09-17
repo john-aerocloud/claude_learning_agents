@@ -461,6 +461,65 @@ function sameWorkItem(a, b) {
 }
 
 /**
+ * WHO ELSE WRITES THIS PATH (DEF-ROC-248). The work items named by the messages of
+ * the recent commits touching `file`. Derived from the SAME bounded history scan
+ * the co-owned guard itself uses, so the advisory and the guard cannot become two
+ * readings of one fact (EXP-047).
+ */
+function pathWorkItems({ repo, head, file, depth = COOWNED_SCAN_DEPTH }) {
+  if (!head) return [];
+  const res = gitTry(repo, ['log', `--max-count=${depth}`, `--format=${RS}%H${US}%B`, head, '--', file]);
+  if (!res.ok) return [];
+  const items = new Set();
+  for (const rec of res.out.split(RS)) {
+    const cut = rec.indexOf(US);
+    if (cut === -1) continue;
+    for (const id of workItemIds(rec.slice(cut + 1))) items.add(id);
+  }
+  return [...items].sort();
+}
+
+/**
+ * WHAT A MESSAGE NAMING NO WORK ITEM COSTS (DEF-ROC-248), per declared path.
+ *
+ * The id is EVIDENCE, not decoration: `ownWorkItemContinuation` stands the co-owned
+ * guard down only when the TIP commit for a path names the SAME work item as the
+ * one being made. A commit that names none — or whose only id names the PATH, which
+ * condition 3 voids — leaves the next agent editing that path from an older copy
+ * with the EXIT 7 false positive DEF-ROC-189 exists to remove. dd44e2f1 is the live
+ * instance, and it cannot be repaired: amending a pushed commit others have built on
+ * is refused, correctly.
+ *
+ * NEVER A REFUSAL. A mandatory id is bought with `chore (DEF-ROC-1)` — an id that
+ * names nothing — and the guard would then stand down on a LIE, which is strictly
+ * worse than standing up on an absence (DEF-ROC-173). So it commits and it states
+ * the CONSEQUENCE rather than making a request: "please add an id" is skimmed by
+ * exactly the agent in a hurry this exists to catch.
+ *
+ * STRONGER ON A CO-OWNED PATH, because that is the only place the id is
+ * load-bearing: a path more than one work item has committed to inside the guard's
+ * own scan window is co-owned in practice, whatever any document says about it.
+ *
+ * @returns {{reason:'none'|'names-the-path', ids:string[], paths:Array<{path:string,
+ *          items:string[], coowned:boolean}>}|null} null when the message carries a
+ *          usable id — the common case, computed at zero cost.
+ */
+function messageAttribution({ repo, head, message, files, depth = COOWNED_SCAN_DEPTH }) {
+  const ids = [...workItemIds(message)].sort();
+  const usable = (file) => ids.some((id) => !normalizeDeclared(file).includes(id));
+  const unusable = (files || []).filter((f) => !usable(f));
+  if (unusable.length === 0) return null;
+  return {
+    reason: ids.length === 0 ? 'none' : 'names-the-path',
+    ids,
+    paths: unusable.map((file) => {
+      const items = pathWorkItems({ repo, head, file, depth }).filter((id) => !ids.includes(id));
+      return { path: file, items, coowned: items.length >= 2 };
+    }),
+  };
+}
+
+/**
  * Is the selected staleness evidence MY OWN PREVIOUS COMMIT, continuing the same
  * work item? All three conditions above, in cost order, each failing closed.
  * @returns {{ids:string[], accounted:string[]}|null}
@@ -1448,6 +1507,16 @@ function isolatedCommit({
         coownedMerges,
         coownedContinuations,
         coownedSupersessions,
+        // DEF-ROC-248 — computed AFTER the commit lands, because it never blocks
+        // one; and only when the message carries no usable id, so the ordinary
+        // path pays nothing.
+        attribution: messageAttribution({
+          repo,
+          head: oldHead,
+          message,
+          files: changed,
+          depth: coownedScanDepth,
+        }),
       };
     }
   } finally {
@@ -1850,6 +1919,53 @@ function formatCoownedSupersession(x) {
   ].join('\n');
 }
 
+/**
+ * THE ATTRIBUTION REPORT (DEF-ROC-248). Said at the moment of the commit, because
+ * that is the moment the tool holds the message and the only moment the cost can
+ * still be avoided — `CLAUDE.md` has said this in prose for weeks and dd44e2f1
+ * landed anyway. It states what is LOST, not what is wanted.
+ */
+function formatAttribution(a, repo) {
+  const why =
+    a.reason === 'none'
+      ? 'This message names NO work item'
+      : `This message's only work-item id (${a.ids.join(', ')}) also names the path, and an id that names the SUBJECT is not evidence about the AUTHOR (DEF-ROC-189 condition 3), so it is VOID here`;
+  const coowned = a.paths.filter((p) => p.coowned);
+  const plain = a.paths.filter((p) => !p.coowned);
+  const out = [];
+  if (plain.length > 0) {
+    out.push(
+      'UNATTRIBUTED COMMIT',
+      `  ${why}, so the co-owned staleness guard cannot stand down for the next edit to:`,
+      ...plain.map((p) => `    ${p.path}`),
+      '  The commit is fine and nothing was blocked — the cost lands on the NEXT one. §14 and',
+      '  DEF-ROC-189: the id is EVIDENCE, not decoration.',
+      '',
+    );
+  }
+  for (const p of coowned) {
+    out.push(
+      `UNATTRIBUTED COMMIT ON A CO-OWNED PATH — ${p.path}`,
+      `  ${p.items.length} other work item(s) have committed to this path inside the guard's own scan`,
+      `  window (${p.items.join(', ')}), so it is co-owned in practice — the ONE case where the id is`,
+      '  load-bearing.',
+      `  ${why}. Your commit is now this path's tip, so the DEF-ROC-189 stand-down cannot apply:`,
+      '  the next agent editing it from a copy that predates you gets EXIT 7 on a change that',
+      '  reverts nothing. That false positive hit four agents in one day; two ABANDONED real',
+      '  changes rather than take the bypass, and one shipped a duplicate JSON key into HEAD.',
+      '  NOTHING CAN ADD THE ID AFTERWARDS — amending a pushed commit others have built on is',
+      '  refused, correctly (dd44e2f1 is permanent for exactly this reason). So the next agent',
+      '  will need the narrow move instead:',
+      `    make commit-isolated-missing REPO=${repo} PATHS="${p.path}" > S`,
+      '    # DELETE from S every line they did NOT decide against; what is left is the assertion',
+      `    make commit-isolated REPO=${repo} MSG_FILE=… SUPERSEDE_FILE=S PATHS="${p.path}"`,
+      '  Name the work item next time and none of that is needed.',
+      '',
+    );
+  }
+  return out.join('\n');
+}
+
 function main(argv) {
   const opts = parseArgv(argv);
   if (opts.error) {
@@ -1880,6 +1996,9 @@ function main(argv) {
     for (const x of res.coownedSupersessions || []) process.stderr.write(formatCoownedSupersession(x));
     for (const m of res.coownedMerges || []) process.stderr.write(formatCoownedMerge(m));
     for (const c of res.coownedContinuations || []) process.stderr.write(formatCoownedContinuation(c));
+    // LAST, because it is the only limb that is about the NEXT commit rather than
+    // this one — and it is never a refusal (DEF-ROC-248).
+    if (res.attribution) process.stderr.write(formatAttribution(res.attribution, opts.repo));
     if (opts.json) process.stdout.write(`${JSON.stringify(res)}\n`);
     else
       process.stdout.write(
@@ -1918,6 +2037,9 @@ module.exports = {
   workItemIds,
   sameWorkItem,
   ownWorkItemContinuation,
+  pathWorkItems,
+  messageAttribution,
+  formatAttribution,
   resolveAppendCollisions,
   duplicatedBeyondBothSides,
   splitDerived,

@@ -274,13 +274,23 @@ reported as an **ADVISORY** that does not touch the exit code (see check 3 below
        precondition violated, the loop may pull; N advisory (non-blocking, still
        outstanding)`, and still prints the `!` line — "may pull" never means the
        advisory is satisfied.
+     A **BUFFER** queue (`ready`) is the third kind [OI-ROC-030]: its DEPTH is
+     advisory, its AGE blocks. Nobody works a ready item (`state_owners` = `queue`),
+     so the wip-harm has no referent, and the remedy for a full buffer is TO PULL —
+     the act a block forbids. Its aging stays with check 1's `scheduled-not-pulled`
+     limb (48h, measured), whose remedies already fit an item that IS scheduled;
+     routing it to check 4 instead would tell an already-scheduled item to "schedule
+     it" and give one item two remedies. **Deep-and-fresh pulls; deep-and-AGING stops.**
      The classification is **DECLARED**, not a hardcoded name list: `policy.csv` is
      long-format, so it takes a `kind` **param row** — `intake,kind,backlog,…`,
-     `ready,kind,wip,…` (the `_TEMPLATE` seed ships them; no column changed, so every
-     existing reader and every older `policy.csv` stays valid). A queue with no `kind`
-     row falls back to one named map in the machinery (`DEFAULT_QUEUE_KINDS`: only
-     `intake` is a backlog) and an **undeclared queue defaults to `wip`, i.e.
-     fail-CLOSED** — a future in-flight stage blocks until somebody classifies it.
+     `ready,kind,buffer,…` (the `_TEMPLATE` seed ships them; no column changed, so every
+     existing reader and every older `policy.csv` stays valid). The vocabulary is
+     exactly `backlog | buffer | wip` and **`process-lint` C7 fails the build on any
+     other value** — `queue_kind()` falls back silently, so a typo would otherwise be
+     invisible. A queue with no `kind` row falls back to one named map in the machinery
+     (`DEFAULT_QUEUE_KINDS`: `intake` is a backlog, `ready` is a buffer — both are facts
+     about what the queue IS, not tuning) and an **undeclared queue defaults to `wip`,
+     i.e. fail-CLOSED** — a future in-flight stage blocks until somebody classifies it.
   4. **retro-debt** — DELEGATED to the `retro-debt` computation, never reimplemented.
      BLOCKING.
   5. **awaiting-observation** [v9] — every item parked in `awaiting_observation`

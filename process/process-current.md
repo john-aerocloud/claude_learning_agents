@@ -3247,8 +3247,8 @@ it manufactures pressure to close real findings to shrink a number. Founding cas
 legitimate differential sweep produced ~15 verified-real sub-cost-4 findings; the flow-manager
 correctly refused to close any of them, and the loop halted **for having done good discovery
 work**. So check 3 splits:
-- **BLOCKING (exit 2) — a WIP-STAGE queue over cap**: `ready`, `wip`, `rework`, and any
-  future in-flight stage. Concurrent work past the cap is real harm (aging,
+- **BLOCKING (exit 2) — a WIP-STAGE queue over cap**: `wip`, `rework`, and any future
+  in-flight stage. Concurrent work past the cap is real harm (aging,
   context-switching) and stopping intake genuinely relieves it.
 - **ADVISORY (exit code UNAFFECTED) — a BACKLOG queue over cap**: `intake`. Still reported
   prominently on its own `!` line with the depth, the overage and the remedy (deliver faster:
@@ -3256,9 +3256,33 @@ work**. So check 3 splits:
   advisory-and-still-outstanding so it can never be read as satisfied. An advisory-only run
   exits **0** and says `no BLOCKING precondition violated, the loop may pull; N advisory
   (non-blocking, still outstanding)` while printing the advisory.
+- **ADVISORY FOR DEPTH, BLOCKING FOR AGE — a BUFFER queue over cap**: `ready` [v179,
+  OI-ROC-030, EXP-ROC-020]. The same argument as `intake`, one queue along, and it had to be
+  made a THIRD kind rather than folded into either of the two. **Nobody works a `ready`
+  item** — `state_owners` puts `ready`/`scheduled` on `queue`, not on an agent — so the
+  wip-harm the cap blocks for has no referent; and **the remedy for a full ready buffer is to
+  PULL**, the one act the block forbids. But a ready buffer genuinely CAN be too deep, and
+  aging IS real harm (three measured ROC cases where an item's stated mechanism was false by
+  the time anyone worked it). So the depth signal is kept as a LOUD advisory that carries the
+  **count-independent AGE** beside the count, while the **per-item aging limb still BLOCKS**:
+  check 1's `scheduled-not-pulled` limb, at the measured 48h `scheduled` threshold, whose
+  three remedies (pull it / de-schedule with a dated defer / cancel it) already fit an item
+  that IS scheduled. Deep-and-fresh pulls; deep-and-AGING stops. **Why not simply `backlog`:**
+  that would move its aging to check 4, which tells an already-scheduled item to "schedule
+  it", loosen the threshold from 48h to 7d, and give one item two different remedies — which
+  is exactly what check 1's population rule excludes backlog queues to avoid. **Why it bound
+  when it did:** state-graph v13 (OI-ROC-029) correctly moved decided-but-undispatched defects
+  out of `wip` and into `ready`, so a depth that had been hiding in the wrong queue became
+  visible in the right one and immediately blocked the loop for two days at 24 against a cap
+  of 4 — while the same header line read `21 occupied = 21 active / 0 idle`. **A
+  newly-visible truth must not block the loop.**
 The classification is **DECLARED, not a hardcoded name list**: `queues/policy.csv` carries a
-`kind` param row (`intake,kind,backlog`; `ready|rework|deploy,kind,wip`) — a new ROW in the
-existing long format, so no column changed and no other reader or older `policy.csv` breaks.
+`kind` param row (`intake,kind,backlog`; `ready,kind,buffer`; `rework|wip,kind,wip`) — a new
+ROW in the existing long format, so no column changed and no other reader or older
+`policy.csv` breaks. The vocabulary is exactly `backlog | buffer | wip`, and **`process-lint`
+C7 fails the build on any other value**: `queue_kind()` falls back SILENTLY on an
+unrecognised one, which was survivable while every fallback landed on the blocking answer and
+is not now that `ready` falls back to `buffer`.
 A queue with no `kind` row falls back to ONE named map in the machinery, and an **undeclared
 queue defaults to `wip`, i.e. fail-CLOSED**: a future in-flight stage blocks until somebody
 classifies it. A deep backlog remains a real signal the retro must act on — it is simply not

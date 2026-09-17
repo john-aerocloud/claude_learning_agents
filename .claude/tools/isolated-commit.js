@@ -47,6 +47,29 @@
  *
  * Pure git + filesystem. NO credentials, NO network.
  *
+ * AND THE CLI ITSELF WAS THE THIRD SHARED-MUTABLE-STATE PROBLEM (DEF-ROC-248).
+ * Measured 2026-09-17: dd44e2f1 sits on ROC's trunk, pushed, with commits on top,
+ * and its entire message is the single character `x`. It changes the exit gate's own
+ * script, while that gate was red — the shape of a real incident, and it is not one:
+ * the diff is a clean extraction and no gate was weakened. What went wrong is that
+ * its author invoked this tool before reading its usage, and THE CLI TOOK A
+ * WELL-FORMED INSTRUCTION AND DID SOMETHING ELSE WITH IT WITHOUT A WORD — a value
+ * that was plainly another option, a flag written after `--` where every token is a
+ * path, a second `--message` silently beating an authored `--message-file`.
+ *
+ *   The message cannot be repaired. Amending a pushed commit others have built on is
+ *   refused, correctly, and its author's attempt (commit-tree + ref CAS) was refused
+ *   by the sandbox as destructive. So the guard has nothing to stand down on for that
+ *   commit FOREVER, and the next agent to edit that path from an older copy gets the
+ *   exit-7 false positive DEF-ROC-189 exists to remove.
+ *
+ *   Hence two limbs, in the order they bite: an argument this tool does not define is
+ *   REFUSED AND NAMED rather than absorbed (and a one-token message with it, since
+ *   that is the only signal independent of which misread produced it); and a message
+ *   naming no work item is told, at the moment of the commit, exactly what it costs —
+ *   never refused, because a mandatory id is bought with `chore (DEF-ROC-1)` and a
+ *   guard that stands down on a LIE is worse than one that stands up on an absence.
+ *
  * EXIT CODES
  *   0  committed (sha on stdout)
  *   2  usage / precondition refused (detached HEAD, bad path, no message, an
@@ -1781,6 +1804,25 @@ from memory. Anything you do NOT name stays guarded, which is the whole differen
 the wholesale switch: a concurrent agent's row landing meanwhile still refuses. The
 declaration only ever REMOVES evidence, never changes what a merge emits, so it cannot
 duplicate. It is REPORTED on every commit that uses one.
+
+AND AN ARGUMENT THIS TOOL DOES NOT DEFINE IS REFUSED, NEVER ABSORBED (DEF-ROC-248).
+dd44e2f1 is on trunk, pushed, with commits on top, and its whole message is \`x\`: its
+author intended a real one and the CLI ate it. So \`--message --json\` (a value that is
+plainly another option), \`--message\` with nothing after it, a flag written AFTER the
+\`--\` where every token is a declared PATH, \`--message=<text>\`, and two sources for one
+message are each refused and NAMED. A message that is a single bare token is refused
+too — it is the one signal independent of which misread produced it — and
+--allow-terse-message commits it anyway if you meant it.
+
+AND A MESSAGE NAMING NO WORK ITEM IS TOLD WHAT IT COSTS, NOT ASKED TO CHANGE. The
+DEF-ROC-189 stand-down needs the tip commit for a path to name the SAME work item as
+yours, so a commit naming none leaves the next agent editing that path from an older
+copy with the exit-7 false positive. It is NEVER refused — a mandatory id is bought
+with \`chore (DEF-ROC-1)\`, and a guard that stands down on a lie is worse than one that
+stands up on an absence — and on a CO-OWNED path (one more than one work item has
+committed to inside the guard's own scan window) the response is stronger: it names
+who else writes there, names exit 7, and says plainly that nothing can add the id
+afterwards.
 
   --supersede-file <path>        lines of HEAD this commit removes DELIBERATELY
   --supersede <line>             the same, one line at a time (prefer the file: a

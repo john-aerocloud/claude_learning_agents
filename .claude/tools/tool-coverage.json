@@ -30,7 +30,7 @@
     },
     {
       "id": "isolated-commit.test.js",
-      "what": "DEFECT-OAG-058 -- the shared-working-tree commit tool every agent's every commit passes through: private-index isolation from the shared git index, the co-owned-file three-way merge and its DEFECT-OAG-142 anti-duplication guards, and DEF-ROC-189's continuity limb, each pinned DIFFERENTIALLY (naive form disagrees with the fixed form)"
+      "what": "DEFECT-OAG-058 -- the shared-working-tree commit tool every agent's every commit passes through: private-index isolation from the shared git index, the co-owned-file three-way merge and its DEFECT-OAG-142 anti-duplication guards, DEF-ROC-189's continuity limb, and DEF-ROC-248's argument hygiene + unattributed-commit advisory (an argument the tool does not define is refused rather than absorbed as a message or a path, and a message naming no work item is told what the co-owned guard then cannot do), each pinned DIFFERENTIALLY (naive form disagrees with the fixed form)"
     },
     {
       "id": "make-refs-tracked.test.js",

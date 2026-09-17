@@ -2237,6 +2237,21 @@ def aggregate_flow_event_refusal(graphs, itype, iid, event):
             f"`SET='value=5'` to change the authored economics in the same act).")
 
 
+def is_audit_self_edge(graphs, itype, state, event):
+    """Is this event an AUDIT RECORD rather than a state transition?
+
+    THE DISTINCTION DEF-ROC-238 ESTABLISHED, given a name here so it has exactly
+    one definition. `amended` was never a transition: it is a self-edge that
+    changes nothing and exists purely so a definition change leaves a trace.
+    Refusing it because no edge carries it conflates STATE with AUDIT.
+
+    Today that is an aggregate — whose state bubbles from its children, so it has
+    no `events` map for any event to appear in. The predicate is separate from
+    the `kind` test so that the question a caller asks is the question it means.
+    """
+    return graphs.kind(itype) == "aggregate" and event == AMENDED
+
+
 def _append_locked(a):
     a.note = resolve_note(a)
     graphs = Graphs.load()
@@ -2347,13 +2362,12 @@ def _append_locked(a):
 
     owners = declared_owner or graphs.owners_of(item)
 
-    if is_aggregate:
-        # No fold, so nothing to check the shape against and no state to move:
-        # the only event that reaches here is the `amended` self-edge, which is
-        # an AUDIT RECORD. Rights are not derived for it either — there is no
-        # sequencing to protect on an item whose state nobody can change — and
-        # the event names the role that made the amendment, which is the whole
-        # point of recording it.
+    if is_audit_self_edge(graphs, item.type, state, a.event):
+        # Nothing to check the shape against and no state to move: this event is
+        # an AUDIT RECORD, not a transition. Rights are not derived for it either
+        # — there is no sequencing to protect by an event that cannot change what
+        # happens next — and the event names the role that made the amendment,
+        # which is the whole point of recording it.
         ok, to, legal_here, why = True, state, [], None
     else:
         ok, to, legal_here, why = check_transition(graphs, item.type, state,

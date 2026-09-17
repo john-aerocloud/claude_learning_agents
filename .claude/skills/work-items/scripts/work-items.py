@@ -8296,7 +8296,7 @@ def cmd_validate(a):
         for v in violations:
             print(f"  - {v}", file=sys.stderr)
         sys.exit(1)
-    established = any(f["severity"] == "unknown" for f in loss)
+    i9_unknown = any(f["severity"] == "unknown" for f in loss)
     # I10's population is stated, not assumed: an aggregate registered before
     # the machinery could record an amendment carries no baseline to compare
     # against, and that is NOT a pass (§17i). It establishes itself one item at
@@ -8309,10 +8309,29 @@ def cmd_validate(a):
               f"economics, so a hand-edit of their value/cost/job/defer_until "
               f"has nothing to disagree with. Each one establishes itself at its "
               f"next `wi-append … EVENT={AMENDED} … SET=…`.")
-    print(f"validate: {a.project} clean — I1–I4 + I6 + I7 + I8 + I10 all hold"
-          + (", and I9 could NOT be established (see above)." if established
-             else ", and I9 holds: no event committed in HEAD is missing from "
-                  "the working tree."))
+    print(validate_summary(a.project, i9_unknown=i9_unknown,
+                           unstamped=len(unstamped)))
+
+
+# The LAST LINE of `wi-validate`, composed in ONE place [DEF-ROC-238].
+#
+# It is the line a CI tail and a reader actually read, and it is quoted back as
+# assurance (v128 records the previous wording — "clean — I1–I4 + I6 all hold"
+# — being quoted all session as assurance it did not provide). So every
+# invariant's verdict is composed here from the verdict itself, never written
+# into a sentence by hand: the hazard is an invariant being APPENDED to the list
+# asserted to hold while its own check says it could not be established.
+_I9_HOLDS = ("I9 holds: no event committed in HEAD is missing from the working "
+             "tree")
+_I9_UNKNOWN = "I9 could NOT be established (see above)"
+
+
+def validate_summary(project, i9_unknown, unstamped):
+    """The summary sentence, given each invariant's verdict."""
+    held = ["I1–I4", "I6", "I7", "I8", "I10"]
+    clauses = [" + ".join(held) + " all hold"]
+    clauses.append(_I9_UNKNOWN if i9_unknown else _I9_HOLDS)
+    return f"validate: {project} clean — " + ", and ".join(clauses) + "."
 
 
 def validate_items(graphs, project, event_loss=None):

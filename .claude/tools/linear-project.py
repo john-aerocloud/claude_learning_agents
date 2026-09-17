@@ -163,6 +163,10 @@ _LIST_ITEM = re.compile(r"^(?:[-*]|\d+[.)])\s+(.*)$")
 #: `**\`AC-AP.1\`** — …`. This is the generalisation that stops the "add format five"
 #: treadmill: a criterion is anything that DECLARES an id at the start of a line.
 _AC_DECL = re.compile(r"^[*_`\s]{0,6}(AC-[A-Za-z0-9][\w.]*?)[*_`]*\s*[—:\-–]")
+#: A markdown HEADING, any level. `_SECTION_HEADING` above matches only `#{2,3}`
+#: because SECTION TERMINATION is level-bounded; a criterion may be declared on a
+#: `####` heading too, so the criterion scan needs its own, wider matcher.
+_HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
 #: A fenced code block toggles verbatim mode: prod measurements and shell snippets
 #: live inside acceptance sections and are not criteria.
 _FENCE = re.compile(r"^\s*```")
@@ -216,8 +220,8 @@ def acceptance_sections(body):
 def _criteria_from(lines):
     """Split one acceptance section's lines into complete criteria + leftover prose.
 
-    A criterion STARTS at a list item, an AC-id table row, or a prose line that
-    DECLARES an AC id; continuation lines (indented, or blank-then-indented) join
+    A criterion STARTS at a list item, an AC-id table row, a HEADING whose text
+    declares an AC id, or a prose line that DECLARES an AC id; continuation lines (indented, or blank-then-indented) join
     onto it with wrap newlines collapsed to single spaces. Anything else is prose.
     Crucially the scan does NOT stop at the first prose line — the old parser
     `break`ed there, so an intervening paragraph hid every criterion after it.
@@ -269,6 +273,23 @@ def _criteria_from(lines):
             else:
                 prose.append(line)
             continue
+        head = _HEADING.match(line)
+        if head:
+            # A markdown heading ENDS the preceding paragraph — and where the heading
+            # TEXT declares an id, it STARTS the criterion whose body is the paragraph
+            # beneath it. DEF-ROC-269/274, real: `### AC-274-1 — …` with the condition
+            # written as prose under it. `_line_start_ids()` stripped every leading
+            # marker the corpus uses EXCEPT `#`, so this was the one line shape that
+            # could declare an id and produce nothing, and a section full of real
+            # acceptance scored `unreadable` (DEF-ROC-281).
+            flush()
+            text = head.group(2).strip()
+            if _AC_DECL.match(text):
+                current = text
+                kind = "prose"
+            else:
+                prose.append(line)
+            continue
         if _AC_DECL.match(line):  # a criterion declared in prose, no list marker
             flush()
             current = line.strip()
@@ -287,7 +308,19 @@ def _criteria_from(lines):
 
 def _line_start_ids(line):
     """The AC id a line DECLARES, if any — i.e. one standing at the start of the line
-    once a list marker, table pipe and emphasis/backtick markup are stripped.
+    once a HEADING marker, list marker, table pipe and emphasis/backtick markup are
+    stripped.
+
+    The `#` was the one leading marker this list omitted, and that omission WAS
+    DEF-ROC-281: a criterion declared on `### AC-274-1 — …` started no criterion and
+    registered no declaration either, so a section of real, human-legible acceptance
+    yielded zero criteria and scored `unreadable` — which renders on the board as
+    `needs-acceptance`, a work instruction to author acceptance that already exists.
+    The strip is deliberately the ONLY widening: the id must still stand WHERE A
+    DECLARATION GOES. A heading that merely mentions one mid-sentence (`### Registered
+    acceptance criteria (the AC-053.n vocabulary …)`) declares nothing, which is what
+    keeps this from resurrecting the body-wide `AC-` heuristic that accused the parser
+    on 17 migrated stubs.
 
     This is what makes the residual self-check both HONEST and NON-VACUOUS. An id
     merely REFERENCED mid-sentence is not a dropped criterion — the real corpus is
@@ -298,6 +331,7 @@ def _line_start_ids(line):
     criterion is a genuine drop: the parse read that line and produced nothing.
     """
     s = line.strip()
+    s = re.sub(r"^#{1,6}\s+", "", s)
     s = re.sub(r"^(?:[-*]|\d+[.)])\s+", "", s)
     s = re.sub(r"^\|\s*", "", s)
     s = s.lstrip("*_`> ")

@@ -827,6 +827,112 @@ AC-Q.2 - the second condition, likewise.
           "second line" in r["criteria"][0])
 
 
+# --------------------------------------------------------------------------- #
+# DEF-ROC-281 — a criterion DECLARED ON A HEADING inside an acceptance section.
+#
+# `_line_start_ids()` stripped a leading `-`, `*`, `1.`/`1)`, `|` and then
+# `*_`> ` — every leading marker the corpus uses EXCEPT `#`. So the one line
+# shape that declares an id on a heading was the one shape neither the criterion
+# scan nor the residual self-check could read, and a section full of real,
+# human-legible acceptance yielded ZERO criteria and fell to `unreadable`.
+#
+# The discriminator is NOT "a `### AC-` heading" — three items (DEF-ROC-239,
+# DEF-ROC-188, UC-ROC-010) carry those and parse fine, because their headings sit
+# OUTSIDE the acceptance section. It is a section whose criteria are declared on a
+# heading and BODIED AS A PROSE PARAGRAPH, with no list item and no table row in
+# it. Measured population on the ROC corpus: 2 (DEF-ROC-269, DEF-ROC-274).
+# --------------------------------------------------------------------------- #
+
+# Verbatim acceptance section of DEF-ROC-274 (registered 2026-09-16), plus the
+# level-2 section that follows it, per AC-AP.5 — real text, not a paraphrase.
+FIX_HEADING_DECLARED = """\
+## Acceptance criteria
+
+### AC-274-1 — the rule is on the ticket, in the bytes Jira receives
+The create the REAL adapter puts on the wire states that it is the only ticket that will ever be
+raised for this message type; that repeats are recorded and deliberately not notified; that silence
+afterwards means undecided and **never that it stopped**. Asserted on the sent request, never on a
+constant.
+
+### AC-274-2 — naming and notifying are ONE branch
+Three events of one key are all recorded, raise exactly one ticket, and are named on exactly one
+log line on any channel.
+
+## Exit gate
+
+Not acceptance. This section must not be swallowed.
+"""
+
+
+def test_a_criterion_declared_on_a_heading_is_read_as_a_criterion():
+    # validates: AC-281.1
+    """DEF-ROC-274, real: `### AC-274-1 — …` with the condition in the paragraph
+    under it. Before the fix this scored `unreadable` — the board then stamps
+    `needs-acceptance`, a WORK INSTRUCTION to author acceptance that already exists,
+    which §12a forbids an engineer to act on."""
+    r = lp.acceptance_report(FIX_HEADING_DECLARED)
+    # Asserted on the criterion TEXT, not via `_AC_ID`: ROC's id vocabulary is
+    # hyphen-suffixed (`AC-274-1`) and `_AC_ID`'s tail is `[\w.]`, so it reads the
+    # STEM `AC-274` for both. That coarseness is pre-existing and deliberately NOT
+    # touched here — widening the tail to `-` was MEASURED on the ROC corpus and
+    # turns 180 parsed items into `truncated`, because their prose cites the stem.
+    check("both heading-declared ids reach a criterion, by their full id",
+          any(c.startswith("AC-274-1") for c in r["criteria"])
+          and any(c.startswith("AC-274-2") for c in r["criteria"]))
+    check("two criteria, one per heading", len(r["criteria"]) == 2)
+    check("status is parsed — not unreadable", r["status"] == "parsed")
+    check("nothing residual — NOT truncated, the mode that hid DEFECT-OAG-053",
+          r["residual_ids"] == [])
+    check("the criterion carries its PROSE BODY, not just the id",
+          "Asserted on the sent request" in r["criteria"][0])
+    check("the next level-2 section is still not swallowed",
+          not any("must not be swallowed" in c for c in r["criteria"]))
+
+
+def test_a_heading_declares_a_criterion_ONLY_where_a_declaration_belongs():
+    # validates: AC-281.2  (§F9f — both directions; this case FAILS if the match widens)
+    """The inverse limb, and the one that matters. A body-wide `AC-` heuristic was
+    REMOVED from this parser because it accused the parser on 17 migrated stubs that
+    cite another item's id in a `dora_ref` and have no acceptance at all. Reading an
+    id off a heading must not resurrect that: the id must stand WHERE A DECLARATION
+    GOES (start of the heading text), and the heading must be INSIDE an acceptance
+    section."""
+    outside = """## Acceptance
+
+- **AC-X.1** — the only criterion.
+
+## Notes
+
+### AC-OTHER-3 — another item's criterion, quoted in a later section
+Body text.
+"""
+    r = lp.acceptance_report(outside)
+    check("a heading OUTSIDE the acceptance section starts no criterion",
+          len(r["criteria"]) == 1)
+    check("and it is not counted as a dropped id either",
+          r["status"] == "parsed" and r["residual_ids"] == [])
+
+    stub = lp.acceptance_report(FIX_NO_ACCEPTANCE)
+    check("the 17-stub dora_ref case is still `none`", stub["status"] == "none")
+    check("the stub yields no criteria", stub["criteria"] == [])
+
+    mention = lp.acceptance_report(FIX_L3_TERMINATOR)
+    check("a heading that MENTIONS an id mid-sentence starts no criterion "
+          "(`### Registered acceptance criteria (the AC-053.n vocabulary …)`)",
+          len(mention["criteria"]) == 5)
+    check("and that mention is not a residual either",
+          mention["status"] == "parsed" and mention["residual_ids"] == [])
+
+    check("_line_start_ids reads an id DECLARED on a heading",
+          lp._line_start_ids("### AC-274-1 - the rule is on the ticket") == ["AC-274"])
+    check("it reads the heading declaration at level 2 and level 4 too",
+          lp._line_start_ids("## AC-Q.1 - x") == ["AC-Q.1"]
+          and lp._line_start_ids("#### AC-Q.2 - x") == ["AC-Q.2"])
+    check("_line_start_ids does NOT read an id merely mentioned in a heading",
+          lp._line_start_ids("### Registered acceptance criteria (the AC-053.n vocabulary)") == [])
+    check("a bare `#` with no id declares nothing",
+          lp._line_start_ids("### Exit gate") == [])
+
 
 def test_extractor_populations_are_pinned_in_both_directions():
     # validates: AC-AP.6  (§17g generalisation sweep — the LEDGER is the deliverable)

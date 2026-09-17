@@ -80,6 +80,8 @@
  *
  * FOUR VERDICTS, NEVER TWO.
  *   open            the deploy job for TRUNK HEAD's run COMPLETED SUCCESS.
+ *   NOT-ESTABLISHED a CANCELLED job left the question open (DEF-ROC-224) — see the
+ *                   NO_ANSWER set below; neither open nor shut, and never a change failure
  *   blocked         it did not, and the cause is inside its needs closure (or is
  *                   the deploy job itself). Delivery is stopped. Names the job,
  *                   the sha, the run URL and the owning item.
@@ -147,12 +149,31 @@ const HEAD_SHA_ARG = arg("head-sha");
 const NO_GIT = flag("no-git");
 const AS_JSON = flag("json");
 
-const FAILED = new Set(["failure", "cancelled", "timed_out", "startup_failure",
+const FAILED = new Set(["failure", "timed_out", "startup_failure",
   "action_required", "stale"]);
+/**
+ * CONCLUSIONS THAT ARE AN ABSENCE OF ANSWER RATHER THAN AN ANSWER OF "NO" (DEF-ROC-224).
+ *
+ * `cancelled` used to sit in FAILED, so a SUPERSEDED run read as a deploy FAILURE. The
+ * ruling, settled at DEF-ROC-156 and held identically by ROC's `scripts/exit-gate-ran.mjs`:
+ * a cancellation answers only "did we get an answer" (no). It never answers "was the answer
+ * good or bad", and GitHub's conclusion cannot tell a cancel that reflects a known-bad
+ * result from one that reflects mere displacement. So it routes to NOT-ESTABLISHED, the
+ * same verdict DEF-ROC-142 introduced for a head with no run at all.
+ *
+ * BOTH DIRECTIONS OF HARM ARE REAL. A false SHUT stops the loop for nothing, and this
+ * tool's own rationale says a limb that fires untruthfully is ignored inside a day. And a
+ * cancelled deploy must not be counted as a CHANGE FAILURE: it is an availability gap in
+ * the CI substrate, not a quality signal about the change, so counting it would put a
+ * non-event into CFR.
+ */
+const NO_ANSWER = new Set(["cancelled"]);
 /** Did this job's CONCLUSION stop the lane? Asked in ONE place, because the three
  *  call sites below each carry a different consequence and a membership test
  *  repeated three times is three chances to answer the same question differently. */
 const failed = (j) => FAILED.has(j && j.conclusion);
+/** Did this job leave the question OPEN? Never a failure, and never silence either. */
+const noAnswer = (j) => NO_ANSWER.has(j && j.conclusion);
 /** Work-item ids, as this system writes them in commit subjects. */
 const ITEM_RE = /\b((?:UC|DEF|REQ|SLC|CHK|OI|IMP|EXP)-[A-Z][A-Z0-9]*-\d+)\b/g;
 
@@ -522,10 +543,13 @@ if (!NO_GIT && lastOpenRun) {
 }
 
 // ---- the verdict ----------------------------------------------------------
-const nonBlockingFailures = runJobs
-  .filter((j) => j.name !== deployJobName && !closureNames.includes(j.name)
-                 && failed(j))
-  .map((j) => j.name);
+const outsideClosure = (j) => j.name !== deployJobName && !closureNames.includes(j.name);
+const nonBlockingFailures = runJobs.filter((j) => outsideClosure(j) && failed(j)).map((j) => j.name);
+// DEF-ROC-224. Dropping a cancelled out-of-closure job from the failure list must not
+// drop it from the REPORT: DEF-ROC-156's whole lesson is that a control built to catch a
+// silent gate was itself blind, and moving `cancelled` out of one bucket into silence
+// would be that mistake in miniature.
+const nonBlockingCancellations = runJobs.filter((j) => outsideClosure(j) && noAnswer(j)).map((j) => j.name);
 
 const common = {
   runId: Number(run.databaseId),
@@ -546,6 +570,7 @@ const common = {
   needsClosure: closure,
   needsClosureJobNames: closureNames,
   nonBlockingFailures,
+  nonBlockingCancellations,
   suspectItems,
   suspectItemsSource,
   suspectItemsEstablished,
@@ -592,6 +617,7 @@ const closureJobs = closureNames
   .filter(Boolean);
 const closureUnfinished = closureJobs.filter((j) => j.status !== "completed");
 const closureFailed = closureJobs.filter((j) => failed(j) || j.conclusion === "skipped");
+const closureCancelled = closureJobs.filter((j) => noAnswer(j));
 
 // IN-FLIGHT FIRST (AC-131-3). A deploy that has not finished has not landed, and
 // is not broken either. This is the half-cutover case: the ROC health endpoint
@@ -616,6 +642,29 @@ if (deployJob.conclusion === "success") {
         + `${nonBlockingFailures.join(", ")}. The run's own conclusion is `
         + `"${run.conclusion}" and was not consulted.`
       : "") });
+}
+
+// DEF-ROC-224 — NOTHING WAS ESTABLISHED. Deliberately placed AFTER `closureFailed` is
+// computed and consulted only when it is EMPTY: a genuine failure in the needs closure
+// SHUTS the lane whatever else was cancelled beside it, because the deploy is skipped on
+// that failure regardless. An established shut always outranks a not-established.
+if (!closureFailed.length && (closureCancelled.length || noAnswer(deployJob))) {
+  const cancelled = closureCancelled.length ? closureCancelled : [deployJob];
+  const reason = closureCancelled.length ? "needs-job-cancelled" : "deploy-job-cancelled";
+  out({ ...common, verdict: "NOT-ESTABLISHED", reason, blockingJobs: [],
+    noAnswerJobs: cancelled.map((j) => j.name),
+    detail:
+      `${cancelled.map((j) => `"${j.name}"`).join(" and ")} ${cancelled.length > 1 ? "were" : "was"} `
+      + `CANCELLED at ${String(run.headSha).slice(0, 12)}, so NOTHING IS ESTABLISHED about `
+      + `"${deployJobName}" for this commit: it is NEITHER open NOR shut. A cancelled job is `
+      + `NOT a deploy failure and NOT a change failure — it answers only "did we get an `
+      + `answer" (no), never "was the answer good or bad", and a run superseded by a newer `
+      + `push was cancelled for being out of date rather than for being wrong. Do NOT read `
+      + `this as a red and do NOT record a change failure against the commit. Counting it `
+      + `would put a non-event into CFR and a false SHUT here stops the loop for nothing. `
+      + `Re-run the run, or push the commit that actually needs to reach the environment, `
+      + `then re-read this. Jobs in this run: `
+      + `${runJobs.map((j) => `${j.name} [${j.status}/${j.conclusion || "-"}]`).join(" | ")}.` });
 }
 
 let blockingJobs = closureFailed.map((j) => ({

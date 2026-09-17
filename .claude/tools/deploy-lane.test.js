@@ -526,3 +526,199 @@ test("AC-142.2: with no way to establish trunk head, the limb says so — it doe
   assert.strictEqual(r.verdict, "NOT-ESTABLISHED", JSON.stringify(r));
   assert.strictEqual(r.reason, "trunk-head-not-established");
 });
+
+// ===========================================================================
+// DEF-ROC-224 — A CANCELLED JOB ESTABLISHES NOTHING. IT IS NOT A DEPLOY FAILURE.
+//
+// THE RULING, settled at DEF-ROC-156 and held identically by ROC's
+// `scripts/exit-gate-ran.mjs`: `cancelled` answers ONLY "did we get an answer"
+// (no). It never answers "was the answer good or bad". So it belongs with the
+// NO-ANSWER class — NOT-ESTABLISHED here, NO-VERDICT there — and never with the
+// SPOKE-AND-SAID-NO class, whether the job was killed mid-flight or while queued.
+//
+// WHY IT MATTERS. Both directions of harm are live. A false SHUT stops the loop
+// for no reason, and this tool's own rationale says a limb that fires untruthfully
+// is ignored inside a day. A cancelled deploy ALSO must not be counted as a change
+// failure: it is an availability gap in the CI substrate, not a quality signal
+// about the change, and counting it would put a non-event into CFR.
+//
+// PROVENANCE — THIS IS A REAL CAPTURE, NOT THE FIXTURE MUTATION THE ITEM EXPECTED.
+//   fixtures/deploy-lane/run-35121920918.json        REAL capture, head bffd1773,
+//        workflow `ROC / Release candidate`, taken 2026-09-17. Run conclusion
+//        `cancelled` with FIVE materialised jobs: two of the three needs-closure
+//        jobs `cancelled`, the third `success`, the `package` job itself
+//        `cancelled`, and the out-of-closure audit `cancelled`.
+//   fixtures/deploy-lane/roc-release-candidate-workflow.yml   REAL workflow at
+//        that exact sha, so the needs closure is read rather than asserted.
+//
+// This matters more than convenience. On 2026-08-29 a tester established that
+// every cancelled ROC run then in existence carried ZERO JOBS — GitHub does not
+// materialise jobs for a run cancelled while still queued — and said plainly that
+// the job-level trigger could not be observed in the wild, so the defect was
+// reproduced only by mutating a fixture. Reality has since produced it: this
+// workflow's concurrency group is `roc-release-candidate-${{ github.ref }}`,
+// ref-keyed like deploy-ROC.yml, so a newer push evicts a run that has already
+// started and its running jobs are cancelled individually.
+//
+// MEASURED BEFORE THE FIX, against that real capture:
+//   verdict "blocked", reason "needs-job-failed", citing two CANCELLED jobs as the
+//   cause, and the cancelled audit listed under `nonBlockingFailures`.
+//
+// The three variants below are DERIVED FROM THAT CAPTURE AT RUN TIME by changing
+// named job conclusions and nothing else. They are never written into the fixture
+// directory and their capture stems carry the word MUTATED, so no diff or grep can
+// mistake one for a capture. Each declares exactly what it changed.
+// ===========================================================================
+
+const CANCELLED_RUN = "35121920918";
+const RC_WORKFLOW = path.join(CAP, "roc-release-candidate-workflow.yml");
+const PACKAGE_JOB = "Package verified ROC candidate (no deployment)";
+const RC_CFG = { ...BASE_CFG, workflowFile: ".github/workflows/roc-release-candidate.yml",
+  deployJobId: "package" };
+
+/** The real capture, re-read from disk each time so a mutation cannot leak between cases. */
+function realCancelledCapture() {
+  return JSON.parse(fs.readFileSync(path.join(CAP, `run-${CANCELLED_RUN}.json`), "utf8"));
+}
+
+/**
+ * A capture dir holding ONE run derived from the real capture by setting the named
+ * jobs' conclusions. `stem` becomes the capture id, and it must carry MUTATED.
+ */
+function mutatedCaptureDir(stem, changes) {
+  assert.ok(/MUTATED/.test(stem), "a derived input must say so in its own file name");
+  const raw = realCancelledCapture();
+  for (const [name, conclusion] of Object.entries(changes)) {
+    const j = raw.jobs.find((x) => x.name === name);
+    assert.ok(j, `the real capture must contain ${name} for this mutation to mean anything`);
+    j.conclusion = conclusion;
+  }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "deploy-lane-mut-"));
+  fs.writeFileSync(path.join(dir, `run-${stem}.json`), JSON.stringify(raw));
+  fs.copyFileSync(path.join(CAP, "run-list.json"), path.join(dir, "run-list.json"));
+  return dir;
+}
+
+const rc = (opts = {}) => run({ root: repoRootWith(RC_CFG), workflow: RC_WORKFLOW,
+  noGit: true, captureRun: CANCELLED_RUN, ...opts });
+
+test("AC-224-0: the input really is a REAL capture carrying JOB-LEVEL cancellations", () => {
+  // Non-vacuity, asserted before anything is claimed from it. If this capture were
+  // ever replaced by one with no cancelled jobs, every case below would go green
+  // while proving nothing — the shape this repository has shipped twice.
+  const raw = realCancelledCapture();
+  assert.strictEqual(raw.conclusion, "cancelled");
+  assert.strictEqual(raw.status, "completed");
+  const cancelled = raw.jobs.filter((j) => j.conclusion === "cancelled").map((j) => j.name);
+  assert.ok(cancelled.length >= 3, `expected job-level cancellations, got ${JSON.stringify(cancelled)}`);
+  assert.ok(cancelled.includes(PACKAGE_JOB), "the deploy job itself must be one of them");
+  assert.ok(raw.jobs.some((j) => j.conclusion === "success"),
+    "and at least one job must have SUCCEEDED, so 'everything is cancelled' is not the only shape under test");
+});
+
+test("AC-224-1: cancelled needs jobs read NOT-ESTABLISHED, never a deploy failure", () => {
+  const r = rc();
+  assert.strictEqual(r.verdict, "NOT-ESTABLISHED", JSON.stringify(r));
+  assert.strictEqual(r.reason, "needs-job-cancelled", JSON.stringify(r));
+  assert.notStrictEqual(r.verdict, "blocked",
+    "a superseded run establishes nothing about the lane; it did not say the deploy failed");
+  assert.deepStrictEqual(r.blockingJobs || [], [],
+    "nothing is blocking, because nothing was established");
+});
+
+test("AC-224-1: BOTH DIRECTIONS — a genuinely FAILED needs job in the SAME run still reads BLOCKED", () => {
+  // The half that makes the other half worth anything, asserted against the SAME
+  // real input with ONE conclusion changed. A fix that made everything
+  // NOT-ESTABLISHED would be strictly worse than the defect.
+  const dir = mutatedCaptureDir("MUTATED-35121920918-webapp-failed",
+    { "Web App / lint, test and build": "failure" });
+  const r = run({ root: repoRootWith(RC_CFG), workflow: RC_WORKFLOW, noGit: true,
+    captureDir: dir, captureRun: "MUTATED-35121920918-webapp-failed" });
+  assert.strictEqual(r.verdict, "blocked", JSON.stringify(r));
+  assert.strictEqual(r.reason, "needs-job-failed");
+  assert.deepStrictEqual(r.blockingJobs.map((j) => j.name), [WEB_JOB],
+    "ONLY the genuinely failed job is named as the cause — a cancelled sibling is not a cause");
+  assert.strictEqual(r.blockingJobs[0].conclusion, "failure");
+});
+
+test("AC-224-2: a cancelled DEPLOY JOB whose needs all passed is NOT-ESTABLISHED, not a failure", () => {
+  // The other route into the FAILED set (deploy-lane.js's third call site). With
+  // the closure green, the only thing left to read is the deploy job's own
+  // cancellation — and it establishes nothing either.
+  const dir = mutatedCaptureDir("MUTATED-35121920918-needs-green",
+    { "Web App / lint, test and build": "success", "Function App / lint, test and build": "success" });
+  const r = run({ root: repoRootWith(RC_CFG), workflow: RC_WORKFLOW, noGit: true,
+    captureDir: dir, captureRun: "MUTATED-35121920918-needs-green" });
+  assert.strictEqual(r.verdict, "NOT-ESTABLISHED", JSON.stringify(r));
+  assert.strictEqual(r.reason, "deploy-job-cancelled", JSON.stringify(r));
+  assert.strictEqual(r.deployJobConclusion, "cancelled");
+});
+
+test("AC-224-2: BOTH DIRECTIONS — a deploy job that genuinely FAILED with its needs green still BLOCKS", () => {
+  const dir = mutatedCaptureDir("MUTATED-35121920918-deploy-failed", {
+    "Web App / lint, test and build": "success",
+    "Function App / lint, test and build": "success",
+    [PACKAGE_JOB]: "failure",
+  });
+  const r = run({ root: repoRootWith(RC_CFG), workflow: RC_WORKFLOW, noGit: true,
+    captureDir: dir, captureRun: "MUTATED-35121920918-deploy-failed" });
+  assert.strictEqual(r.verdict, "blocked", JSON.stringify(r));
+  assert.strictEqual(r.reason, "deploy-job-failed");
+  assert.deepStrictEqual(r.blockingJobs.map((j) => j.name), [PACKAGE_JOB]);
+});
+
+test("AC-224-3: NOT-ESTABLISHED here is LOUD and NAMED — never a shrug, never silence", () => {
+  // DEF-ROC-156's lesson is that a control built to catch a silent gate was itself
+  // blind. Moving `cancelled` out of the FAILED set must not move it into silence.
+  const r = rc();
+  assert.match(r.detail || "", /cancel/i, `it must name what actually happened: ${r.detail}`);
+  assert.match(r.detail || "", new RegExp(WEB_JOB.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    "and name the jobs it is talking about, so the reader can go and look");
+  assert.match(r.detail || "", /NOT a deploy failure|establishes nothing|not a change failure/i,
+    `it must actively disclaim the failure reading rather than merely omitting it: ${r.detail}`);
+  assert.ok(r.runUrl && /^https:\/\/github\.com\//.test(r.runUrl),
+    "the full context must survive — a NOT-ESTABLISHED with no run url cannot be acted on");
+  assert.ok(r.headSha, "and it must still name the sha it could not establish anything about");
+  assert.ok(Array.isArray(r.noAnswerJobs) && r.noAnswerJobs.length >= 2,
+    `the cancelled jobs must be enumerated in the payload, got ${JSON.stringify(r.noAnswerJobs)}`);
+});
+
+test("AC-224-3: the HUMAN line an operator reads says NOT ESTABLISHED and names the cancellation", () => {
+  // `make deploy-lane PROJECT=ROC` is a real surface, and its exit code is read.
+  const root = repoRootWith(RC_CFG);
+  const stdout = execFileSync("node", [TOOL, "--project", "ROC", "--repo-root", root,
+    "--capture-dir", CAP, "--capture-run", CANCELLED_RUN,
+    "--workflow", RC_WORKFLOW, "--no-git"], { encoding: "utf8" });
+  assert.match(stdout, /NOT ESTABLISHED/, stdout);
+  assert.match(stdout, /cancel/i, stdout);
+  assert.ok(!/BLOCKED/.test(stdout), `a superseded run must not print BLOCKED: ${stdout}`);
+});
+
+test("AC-224-4: a cancelled job OUTSIDE the needs closure is not a FAILURE — but is still named", () => {
+  // The third call site. The audit is deliberately outside `package`'s needs, and in
+  // this real run it was cancelled. Calling it a failure is wrong; dropping it
+  // silently is the DEF-ROC-156 mistake in miniature.
+  const dir = mutatedCaptureDir("MUTATED-35121920918-needs-green", {
+    "Web App / lint, test and build": "success", "Function App / lint, test and build": "success",
+  });
+  const r = run({ root: repoRootWith(RC_CFG), workflow: RC_WORKFLOW, noGit: true,
+    captureDir: dir, captureRun: "MUTATED-35121920918-needs-green" });
+  assert.ok(!(r.nonBlockingFailures || []).includes(AUDIT_JOB),
+    `a cancelled job is not a failure: ${JSON.stringify(r.nonBlockingFailures)}`);
+  assert.ok((r.nonBlockingCancellations || []).includes(AUDIT_JOB),
+    `...but it must still be reported: ${JSON.stringify(r.nonBlockingCancellations)}`);
+});
+
+test("AC-224-5: the three REAL fixtures this tool was built on are completely unaffected", () => {
+  // The whole existing discrimination — a shut lane on a failed needs job, an OPEN
+  // lane under a red audit — must be untouched by a change to a neighbouring class.
+  for (const id of BLOCKED_RUNS) {
+    const r = run({ captureRun: id, noGit: true });
+    assert.strictEqual(r.verdict, "blocked", `${id}: ${JSON.stringify(r)}`);
+    assert.strictEqual(r.reason, "needs-job-failed");
+  }
+  const open = run({ captureRun: OPEN_RUN, noGit: true });
+  assert.strictEqual(open.verdict, "open", JSON.stringify(open));
+  assert.deepStrictEqual(open.nonBlockingFailures, [AUDIT_JOB],
+    "a genuinely FAILED out-of-closure job is still reported as a failure");
+});

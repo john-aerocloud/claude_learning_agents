@@ -10,7 +10,7 @@
     },
     {
       "id": "deploy-lane.test.js",
-      "what": "DEF-ROC-131 AC-131-5 -- the deploy-lane arming test, in both directions: fires on a real shut lane, stays silent on the repo's standing red (DEF-ROC-068) so the signal stays meaningful"
+      "what": "DEF-ROC-131 AC-131-5 -- the deploy-lane arming test, in both directions: fires on a real shut lane, stays silent on the repo's standing red (DEF-ROC-068) so the signal stays meaningful. DEF-ROC-224 added the third class the first two could not express: a CANCELLED job establishes NOTHING, so it reads NOT-ESTABLISHED and never a deploy failure -- driven against run 35121920918, a REAL capture carrying job-level cancellations, which the 2026-08-29 tester recorded as unobservable in the wild at the time"
     },
     {
       "id": "deploy-staleness.test.js",

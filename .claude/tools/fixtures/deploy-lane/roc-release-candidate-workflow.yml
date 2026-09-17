@@ -1,0 +1,326 @@
+name: ROC / Release candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  # DEF-ROC-024: key by ref, not a hardcoded constant. A hardcoded group name
+  # meant every PR shared one queue slot with every other PR AND with `main` --
+  # a new push's pending run evicted (cancelled) whatever was already pending in
+  # that group, no matter which branch it belonged to (7/10 PR runs cancelled
+  # over the last 50). `deploy-test` (the only job needing cross-push
+  # serialisation) is gated `if: github.event_name != 'pull_request'`, so the
+  # serialisation it needs exists only AMONG pushes to `main` -- all of which
+  # share refs/heads/main and so still share one group under this ref-keyed
+  # name. Every PR now gets its own ref-scoped group: a PR's own re-pushes can
+  # still self-cancel their own stale runs, without touching any other PR's or
+  # main's runs.
+  group: roc-release-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  test-function-app:
+    name: Function App / lint, test and build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: src/app/.nvmrc
+          cache: npm
+          cache-dependency-path: src/app/package-lock.json
+      - run: npm ci --include=dev
+      - name: Verify bounded deployment access helper
+        run: python3 ../../scripts/test-roc-deploy-access.py
+      - run: npm run lint
+      - run: npm run test
+      # DEF-ROC-070 -- `npm run build` (`tsc -p tsconfig.json`, the WHOLE project graph:
+      # src + local + tests) is a DIFFERENT, WIDER check than `build:functions` below
+      # (deploy-artifact-only, excludes tests/local -- see tsconfig.functions.json).
+      # Neither vitest nor eslint type-checks a test file's imports, so a spec that
+      # imports an untyped module (e.g. a plain .mjs script with no declaration file)
+      # can be green everywhere except here -- exactly the DEF-ROC-002/006 false-green
+      # class, now closed for src/app the same way DEF-ROC-006 closed it for the
+      # dashboard (deploy-ROC.yml already ran the dashboard's full `npm run build`;
+      # src/app's equivalent had never been wired into any gate, local or CI, until
+      # this line). Runs BEFORE the slow emulator/acceptance steps so a type-check
+      # red fails fast.
+      - run: npm run build
+      # UC-ROC-093 — THIS JOB SPAWNS ANOTHER PACKAGE, SO IT MUST INSTALL IT.
+      # `tests/acceptance/uc093-practice-cycle.test.ts` drives the trainer's real
+      # command (`npm --prefix src/tools/replay-injector run local:practice`) as a
+      # CHILD PROCESS, deliberately: what a trainer runs is a command, and
+      # src/app cannot import the injector anyway (separate npm packages,
+      # tsconfig.functions.json's rootDir makes it a hard TS6059). The
+      # test-replay-injector job installs that package — on a DIFFERENT runner, so
+      # this job could not see it, and the spec failed 5/5 with
+      # ERR_MODULE_NOT_FOUND for `xlsx`, which SKIPPED deploy-test and blocked
+      # UC-ROC-105 as well (run 33074315261 on 56900d8).
+      #
+      # Note what made that failure PARTIAL and therefore confusing: `tsx` itself
+      # resolved, because the vitest process inherits a PATH containing
+      # src/app/node_modules/.bin and src/app carries tsx as a devDep — so the
+      # child launched on an ACCIDENT and died only on `xlsx`, which src/app does
+      # not have. This step removes the accident; the spec also asserts both
+      # binaries resolve from the injector's OWN node_modules and names this step
+      # if they do not, so the next occurrence is a one-line diagnosis.
+      - name: Install replay-injector (the UC-ROC-093 practice cycle spawns it)
+        run: npm ci --include=dev --prefix ../tools/replay-injector
+      - name: Start local emulator stack
+        run: npm run local:up
+      - name: Wait for local emulators
+        # Real readiness poll (IMP-023), NOT a blind sleep: the SB/EH emulator
+        # containers open their AMQP port before their topic/hub entities finish
+        # syncing, so a fixed sleep is a coin-flip. Reuses the SAME proven
+        # helpers demo.sh already gates on (scenarios/lib.sh: wait_for_port +
+        # wait_for_log on the "Emulator Service is Successfully Up!" marker) so
+        # CI and local share one readiness mechanism, never two that can drift.
+        shell: bash
+        run: |
+          set -euo pipefail
+          # shellcheck source=../../scenarios/lib.sh
+          source "$GITHUB_WORKSPACE/scenarios/lib.sh"
+          wait_for_port localhost 5672  90 "Service Bus emulator"
+          wait_for_port localhost 5673  90 "Event Hubs emulator"
+          wait_for_port localhost 10000 90 "Azurite Blob (EH checkpoints)"
+          wait_for_port localhost 10002 90 "Azurite Table (decision log)"
+          SB_READY_MARKER="Emulator Service is Successfully Up!"
+          wait_for_log roc-local-servicebus "$SB_READY_MARKER" 90 "Service Bus topic/subscription"
+          wait_for_log roc-local-eventhubs  "$SB_READY_MARKER" 90 "Event Hubs hub/consumer-group"
+      - name: Run local acceptance tests
+        run: npm run test:acceptance
+      - name: Stop local emulator stack
+        if: always()
+        run: npm run local:down
+      - run: npm run build:functions
+
+  test-web-app:
+    name: Web App / lint, test and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: src/dashboard/package-lock.json
+      - name: Validate required config
+        run: |
+          missing=""
+          [ -z "${{ secrets.DESIGN_SYSTEM_TOKEN }}" ] && missing="$missing DESIGN_SYSTEM_TOKEN"
+          if [ -n "$missing" ]; then
+            echo "Missing required config:$missing"
+            exit 1
+          fi
+      # DESIGN_SYSTEM_TOKEN needs `read:packages`, SSO-authorized for
+      # AeroCloudSystems, to resolve @aerocloudsystems/design-system from
+      # GitHub Packages (npm.pkg.github.com). Never inline the token value.
+      - name: Configure GitHub Packages registry auth for @aerocloudsystems
+        working-directory: src/dashboard
+        run: cp .npmrc.example .npmrc
+      - working-directory: src/dashboard
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.DESIGN_SYSTEM_TOKEN }}
+        run: npm ci --include=dev
+      - working-directory: src/dashboard
+        run: npm run lint
+      - working-directory: src/dashboard
+        run: NODE_ENV=test npm run test
+      # DEF-ROC-146 / DEF-ROC-150 / DEF-ROC-157 — THE GEOMETRY / PAINTED-PIXEL TIER GATES
+      # THE DEPLOY, AS OF 2026-08-29. It is in THIS job because `test-web-app` is in
+      # `deploy-test`'s `needs:` and `loop-gate` check 16 reads that closure; a browser job
+      # outside it would be invisible to the loop's own gate. AC-146.1 IS NOW MET.
+      #
+      # HISTORY, kept short but kept, because the two reasons it was NOT here are the whole
+      # reason to trust it now. `npm run test:browser` (real headless Chromium, four
+      # viewports) appeared in NO CI JOB, so 26 of its cases had been red since DEF-ROC-123
+      # with nothing able to report it. Wiring it in on run 33253594130 worked exactly as
+      # designed — 9 cases failed and `deploy-test` was correctly skipped — but 8 of the 9
+      # were the RUNNER'S FONT (`tests/browser.css` pinned no font-family and loaded no
+      # file), and the 9th was the UA FOCUS RING, a platform constant (`rgb(0,95,204)` macOS,
+      # `rgb(16,16,16)` Linux) contrasted against a row background that is transparent in
+      # this tier and was read as BLACK. Both were rendering differences, and a gate that
+      # reds on one shuts the deploy lane for the wrong reason — DEF-ROC-146's own harm with
+      # the sign flipped — so the wiring was reverted both times, correctly.
+      #
+      # BOTH CAUSES ARE FIXED AND THE TIER IS NOW MEASURED IDENTICAL ON TWO HOSTS.
+      # DEF-ROC-150 committed four font files under `src/dashboard/tests/fonts/`, `@font-face`d
+      # them in `tests/browser.css` with every generic REMOVED, and launches Chromium with
+      # `--font-render-hinting=none` so Linux stops snapping advances to whole pixels;
+      # `fontPinning.browser.test.tsx` fails closed on any unpinned family or any glyph
+      # outside those files. DEF-ROC-157 promoted `paintedBackground()` into
+      # `tests/paintedContrast.ts` so every contrast verdict is measured against the pixel
+      # that actually paints, and drives each one with BOTH hosts' ring colours so no case
+      # can pass or fail by machine. MEASURED, same commit fdaa40a: 301/301 on macOS and
+      # 301/301 on ubuntu-latest (run 33269400311). The run immediately before it, on the
+      # commit this fix was written against, read 1 failure — the ratchet's whole floor. The interim reporting lane
+      # (`geometry-tier-second-host.yml` + `scripts/geometry-tier-ratchet.mjs` +
+      # `geometry-tier-floor.json`) reached its own stated retirement condition of zero and
+      # is deleted in the same commit — it existed only because the alternative was a shut
+      # lane.
+      #
+      # `playwright install` is idempotent and a no-op once the browser is present.
+      - name: Install the Chromium the geometry tier drives
+        working-directory: src/dashboard
+        run: npx playwright install --with-deps chromium
+      - name: Geometry / painted-pixel tier (real Chromium)
+        working-directory: src/dashboard
+        run: npm run test:browser
+      - working-directory: src/dashboard
+        run: npm run build
+
+  audit:
+    # DEF-ROC-025 -- dependency-vulnerability audit gate (process v91/EXP-112,
+    # v107, DEF-ROC-007). Prod-runtime-scoped (--omit=dev) on src/app and
+    # src/dashboard is BLOCKING (a high/critical there ships to customers);
+    # src/tools/replay-injector is never deployed, so its advisories (incl.
+    # xlsx, no upstream fix) are surfaced but tracked-only, never blocking --
+    # see Makefile's `audit` target for the full reasoning. Deliberately NOT
+    # in deploy-test's `needs:` (DEF-ROC-013 class: an advisory-only red must
+    # never block an application deploy).
+    name: Dependency audit (prod-runtime, blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm --prefix src/app ci
+      - name: Validate required config
+        run: |
+          missing=""
+          [ -z "${{ secrets.DESIGN_SYSTEM_TOKEN }}" ] && missing="$missing DESIGN_SYSTEM_TOKEN"
+          if [ -n "$missing" ]; then
+            echo "Missing required config:$missing"
+            exit 1
+          fi
+      - name: Configure GitHub Packages registry auth for @aerocloudsystems
+        run: cp src/dashboard/.npmrc.example src/dashboard/.npmrc
+      - env:
+          NODE_AUTH_TOKEN: ${{ secrets.DESIGN_SYSTEM_TOKEN }}
+        run: npm --prefix src/dashboard ci
+      - run: npm --prefix src/tools/replay-injector ci
+      - run: make audit
+
+  test-replay-injector:
+    # DEF-ROC-023 — src/tools/replay-injector (102 tests across 8 files) was never
+    # built, linted or tested by any workflow because the path filter above
+    # excluded it entirely. This job closes that gap. It is DELIBERATELY NOT in
+    # deploy-test's `needs:` (see below) — the injector is a standalone,
+    # never-deployed tool (`tsx` ad hoc), so its own local `test`/`lint`/`build`
+    # scripts are the whole job; no Azure emulator or live connectivity is
+    # required (its own suite runs against a mocked Service Bus sender).
+    name: Replay Injector / lint, test and build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/tools/replay-injector
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: src/tools/replay-injector/package-lock.json
+      - run: npm ci --include=dev
+      - run: npm run lint
+      - run: npm run test
+      - run: npm run build
+
+  package:
+    name: Package verified ROC candidate (no deployment)
+    needs: [test-function-app, test-web-app, test-replay-injector]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build Function App package
+        working-directory: src/app
+        run: |
+          set -euo pipefail
+          npm ci --include=dev
+          npm run build:functions
+          stage="$RUNNER_TEMP/function-package"
+          mkdir -p "$stage"
+          cp host.json package.json package-lock.json "$stage/"
+          cp -R dist "$stage/dist"
+          # DEF-ROC-079 — the build identity travels INSIDE the artifact. The
+          # BUILD_SHA app setting is written through ARM and succeeds even when the
+          # publish that follows it fails, so an app setting can never prove which
+          # code is running. This file can: a failed publish leaves the previous one
+          # in place, so `buildSha` stays old and the post-deploy assertion FAILS.
+          printf '{"buildSha":"%s"}\n' "${{ github.sha }}" > "$stage/build-identity.json"
+          npm ci --omit=dev --ignore-scripts --prefix "$stage"
+          (cd "$stage" && zip -q -r "$RUNNER_TEMP/function-app.zip" .)
+
+      - name: Validate required config
+        run: |
+          missing=""
+          [ -z "${{ secrets.DESIGN_SYSTEM_TOKEN }}" ] && missing="$missing DESIGN_SYSTEM_TOKEN"
+          if [ -n "$missing" ]; then
+            echo "Missing required config:$missing"
+            exit 1
+          fi
+      # DESIGN_SYSTEM_TOKEN needs `read:packages`, SSO-authorized for
+      # AeroCloudSystems, to resolve @aerocloudsystems/design-system from
+      # GitHub Packages (npm.pkg.github.com). Never inline the token value.
+      - name: Configure GitHub Packages registry auth for @aerocloudsystems
+        run: cp src/dashboard/.npmrc.example src/dashboard/.npmrc
+
+      - name: Build Web App package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.DESIGN_SYSTEM_TOKEN }}
+        run: |
+          set -euo pipefail
+          npm ci --include=dev --prefix src/dashboard
+          npm run build --prefix src/dashboard
+          stage="$RUNNER_TEMP/web-package"
+          mkdir -p "$stage"
+          cp src/dashboard/server.mjs "$stage/server.mjs"
+          cp -R src/dashboard/dist "$stage/dist"
+          printf '%s\n' '{"name":"pps-event-aggregation-web","private":true,"type":"module","scripts":{"start":"node server.mjs"}}' > "$stage/package.json"
+          (cd "$stage" && zip -q -r "$RUNNER_TEMP/web-app.zip" .)
+
+      - name: Bind release packages to exact source and checksums
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          python3 - <<'PYCODE'
+          import hashlib, json, os, pathlib, shutil, zipfile
+          out = pathlib.Path(os.environ['RUNNER_TEMP']) / 'roc-candidate'
+          out.mkdir()
+          packages = {}
+          for name in ('function-app.zip', 'web-app.zip'):
+              source = out.parent / name
+              with zipfile.ZipFile(source) as archive:
+                  assert archive.testzip() is None
+                  assert not any(x.endswith('.npmrc') or '/.env' in x for x in archive.namelist())
+              shutil.copyfile(source, out / name)
+              packages[name] = hashlib.sha256(source.read_bytes()).hexdigest()
+          (out / 'manifest.json').write_text(json.dumps({
+              'sourceRepository': 'AeroCloudSystems/PpsEventAggregation',
+              'sourceSha': os.environ['SOURCE_SHA'], 'runId': os.environ['RUN_ID'],
+              'packages': packages,
+              'auditPolicy': 'Existing independent dependency audit remains visible; not suppressed by packaging.'
+          }, indent=2) + '\n')
+          PYCODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: roc-candidate-${{ github.sha }}
+          path: ${{ runner.temp }}/roc-candidate/
+          if-no-files-found: error
+          retention-days: 30

@@ -1,5 +1,5 @@
 ---
-process_version: 182
+process_version: 183
 effective_from: 2026-09-15
 supersedes: v181, v180, v179, v178, v177, v176, v175, v174, v173, v172, v171, v170, v169, v168, v167, v166, v165, v164, v163, v162, v161, v160, v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
 status: active
@@ -4331,6 +4331,55 @@ the three §F9.4 options decidable from the log rather than from the dispatcher'
 
 **It is NOT a state transition** — a dispatched item has not changed what it *is*, only who is
 holding it. It must not consume a WIP slot on its own, or it re-creates §F9g one level up.
+
+## F9k. ENFORCE A RULE IN THE TOOL THAT IS ALREADY RUNNING AT THE MOMENT IT BINDS [v183, ROC — retro, attacks the constraint]
+
+**The constraint this cycle is `orchestrator` at 35.23% of gross lead time, and every second of it
+is one state: `reported`.** 682 days of accrued dwell across 180 items, median **6439 s** between a
+finding existing and a decision being recorded. That median is roughly 1.8× the orchestrator's tick
+interval — so the dwell is not deliberation, it is **polling latency**.
+
+§F9b already requires that a finding be registered WITH its triage decision, in the same act. The
+rule is right and it is not working, and the why-chain says exactly why:
+
+1. The registering actor is often not the orchestrator — a log sweep, a peer session, an engineer
+   finding something adjacent — and only the orchestrator may decide.
+2. So the decision waits for the next orchestrator tick **by construction**.
+3. §F9b is enforced by `loop-gate`'s `undecided-arrival` limb, which blocks **the pull** — a later,
+   different act. The rule therefore fires about an hour *after* the cost has been paid.
+4. And **`wi-mint` — the one tool definitely running at registration time, at the only moment the
+   registering role still holds the context needed to decide — takes no decision argument at all.**
+
+**Measured instance:** `DEF-ROC-237`, `DEF-ROC-238`, `DEF-ROC-243` and `DEF-ROC-244` sat undecided
+1.2–3.2 hours and were decided only because `loop-gate` refused a pull. Each decision then took
+under a minute to write, because the context was still recoverable. Nothing was deliberated for
+three hours; three hours passed and then a gate asked.
+
+**THE RULE, and it generalises past this instance:** when a rule requires something *at a moment*,
+ask which tool is already running at that moment, and make **that** tool ask. Enforcement placed
+downstream of the moment is always retrospective — it discovers the omission after the context that
+would have made compliance cheap is gone, and it converts a five-second act into a cycle.
+
+**The second instance the same day, which is why this is a rule and not an anecdote
+(`DEF-ROC-248`):** `commit-isolated` holds the commit message in its hand at the moment of the
+commit; its own co-owned staleness guard stands down only on a work-item id in that message; and it
+says nothing about this. An agent passed `--message x`, the tool consumed the value positionally
+without complaint, and the guard is now permanently re-armed for that path — the repair was
+correctly refused by the sandbox as destructive, so the bad message stands for good.
+
+Two instances in one day, in two different tools, with the same shape: **the tool that is running at
+the decisive moment, holding the very thing the rule needs, and saying nothing.**
+
+**Two ways this rule goes wrong, and both must be designed against:**
+
+- **A required field answered with `TODO` is worse than an absent one**, because the gate then reads
+  a lie as compliance. What is required must be something the actor genuinely holds — which is the
+  whole argument for asking at the moment, and not merely for asking.
+- **It must not suppress the activity it governs.** If findings-registered-per-cycle falls,
+  registration has been made expensive enough that people stop registering, and the control dies
+  rather than being tuned. That asymmetry is what keeps this from becoming friction.
+
+Routed to `OI-ROC-034` (the `wi-mint` change) and `DEF-ROC-248` (the `commit-isolated` change).
 
 ## F11.6. PRODUCT tests gate delivery; PROCESS tests do not [v177, ROC — owner ruling]
 

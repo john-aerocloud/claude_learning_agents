@@ -1,5 +1,26 @@
 # IMP-033 — a park must name the item that would END it, and the gate must see when we own it
 
+**Status: CLOSED — NOT BUILT (v183 retro, ROC, 2026-09-17).** Open 24 days, never scheduled by any
+retro, reported on every `loop-gate` run by check 19 (`retro-output-aging`), built by nobody. Its
+registry row `EXP-ROC-004` has been KILLED and archived as never-validated in the same act, because
+a paused row waiting on a slice nobody builds is a permanent silencer — which that row's own v157
+note warned it must not become.
+
+**Closed as UNPROVEN, not as wrong.** The constraint it was opened against has moved substantially
+without it: `external` was 35.40% of ROC's gross lead time at v150 and had been the top owner for
+five consecutive retros; it is now **22.39%**. Something else moved that number and this slice
+cannot claim it.
+
+**What is kept as plain practice, needing no slice and no row:** `loop-gate` check 5 re-runs every
+park's recorded predicate each cycle and reports three outcomes — STILL BLOCKED, cleared, and NOT
+ESTABLISHED. That third answer is the valuable one and it works: `DEF-ROC-053` returned NOT
+ESTABLISHED this cycle, which is the probe declining to call non-observation a clearance, and is
+correct.
+
+**If the idea is wanted again it should be re-opened on fresh evidence**, not resumed on this
+record.
+
+
 **Opened:** 2026-08-24 (v150 retro, ROC)
 **Owner:** work-item machinery (`.claude/skills/work-items/scripts/work-items.py`) — parent-repo lane
 **Targets:** gross lead time (the `external` / `blocked` constraint — 35.40% of ROC's GLT)

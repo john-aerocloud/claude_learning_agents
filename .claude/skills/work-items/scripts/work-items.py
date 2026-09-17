@@ -1229,12 +1229,17 @@ def items_dir(project):
 
 
 def load_all_items(project):
-    """Return {id: Item} across items/active/ and items/done/. If a stray id
-    appears in both, both are kept (validate/I4 will flag it) — keyed by (dir,id)
-    is overkill; we key by id and record dup ids separately for I4."""
+    """Return `(items, dups)` across items/active/ and items/done/.
+
+    `items` is {id: Item}, keyed by the id in the frontmatter — so when a stray
+    id appears in BOTH directories the LAST file walked (done/) silently wins.
+    `dups` is {id: [Item, …]} in walk order for every id seen more than once:
+    the copies THEMSELVES, not merely their ids, because the only useful thing to
+    say about a duplicated id is which copy is stale, and that is a question
+    about their event logs and their paths [DEF-ROC-268]."""
     d = items_dir(project)
     items = {}
-    dup_ids = []
+    dups = {}
     for sub in ("active", "done"):
         subdir = os.path.join(d, sub)
         if not os.path.isdir(subdir):
@@ -1258,9 +1263,9 @@ def load_all_items(project):
                 continue
             it.subdir = sub  # remember which folder it lives in
             if it.id in items:
-                dup_ids.append(it.id)
+                dups.setdefault(it.id, [items[it.id]]).append(it)
             items[it.id] = it
-    return items, dup_ids
+    return items, dups
 
 
 # ---------------------------------------------------------------------------
@@ -8178,7 +8183,14 @@ EVENT_LOSS_TIMEOUT = 30.0
 
 
 def _head_item_logs(project, timeout=EVENT_LOSS_TIMEOUT, unreadable=None):
-    """{id: (path_in_HEAD, [event-sig, …])} for every item file COMMITTED IN HEAD.
+    """{id: [(path_in_HEAD, [event-sig, …]), …]} for every item file COMMITTED
+    IN HEAD, in `ls-tree` order (active/ before done/).
+
+    A LIST PER ID, not one entry: an id committed at two paths is exactly the
+    duplication DEF-ROC-268 is about, and a dict keyed by id collapses it
+    silently. Callers that want one log per id collapse it themselves and say
+    which copy they chose.
+
     Raises RuntimeError with a why-string when it cannot be established. Blobs
     that will not parse are appended to `unreadable` (a list the caller supplies)
     rather than taking the whole check down with them."""
@@ -8235,7 +8247,8 @@ def _head_item_logs(project, timeout=EVENT_LOSS_TIMEOUT, unreadable=None):
         if not iid:
             unreadable.append((path, "no `id:` in the committed frontmatter"))
             continue
-        out[iid] = (path, [_event_sig(e) for e in (fm.get("events") or [])])
+        out.setdefault(iid, []).append(
+            (path, [_event_sig(e) for e in (fm.get("events") or [])]))
     return out
 
 
@@ -8245,7 +8258,8 @@ def compute_event_loss(project, timeout=EVENT_LOSS_TIMEOUT):
     common = {"check": "event-loss", "ids": []}
     unreadable = []
     try:
-        head = _head_item_logs(project, timeout=timeout, unreadable=unreadable)
+        head_copies = _head_item_logs(project, timeout=timeout,
+                                      unreadable=unreadable)
         items, _dup = load_all_items(project)
     except Exception as exc:                                    # noqa: BLE001
         return [dict(common, severity="unknown", dropped=None, message=(
@@ -8256,6 +8270,11 @@ def compute_event_loss(project, timeout=EVENT_LOSS_TIMEOUT):
             f"is indistinguishable from no answer is exactly the false green "
             f"DEF-ROC-162 was. Remedy: `make wi-validate PROJECT={project}`."))]
 
+    # I9 compares ONE committed log per id, and the one it has always compared
+    # is the LAST path walked (done/ when an id is committed in both). That
+    # choice is now written down rather than emergent from a dict assignment;
+    # the duplication itself is a separate question, not this one.
+    head = {iid: copies[-1] for iid, copies in head_copies.items()}
     now_sigs = {iid: [_event_sig(e) for e in it.events]
                 for iid, it in items.items()}
     dropped, gone = [], []
@@ -8420,7 +8439,7 @@ def validate_summary(project, i9_unknown, unstamped):
 
 
 def validate_items(graphs, project, event_loss=None):
-    items, dup_ids = load_all_items(project)
+    items, dups = load_all_items(project)
     states = compute_states(graphs, items)
     violations = []
 
@@ -8440,7 +8459,7 @@ def validate_items(graphs, project, event_loss=None):
             violations.append(f"(I9) {f['message']}")
 
     # I4a: exactly one file per id (dup ids across active/+done/)
-    for d in sorted(set(dup_ids)):
+    for d in sorted(dups):
         violations.append(f"(I4) id {d} appears in more than one item file")
 
     for iid, it in items.items():

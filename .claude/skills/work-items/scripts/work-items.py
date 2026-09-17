@@ -21,7 +21,7 @@ uses); JSON via stdlib json. Invoke via the launcher `sh .../work-items <cmd>`.
 """
 import argparse, contextlib, csv, json, os, re, subprocess, sys, tempfile, threading, time
 from datetime import datetime, timezone, timedelta
-from collections import defaultdict
+from collections import defaultdict, Counter
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 GRAPHS_PATH = os.path.join(ROOT, "process", "machinery", "state-graphs.json")
@@ -2632,6 +2632,22 @@ def _maybe_relocate(project, iid, item, state, graphs):
         dst_dir = os.path.join(items_dir(project), want)
         os.makedirs(dst_dir, exist_ok=True)
         dst = os.path.join(dst_dir, f"{iid}.md")
+        # A RELOCATION IS A RENAME, AND A RENAME HAS NOWHERE TO GO IF THE
+        # DESTINATION ALREADY EXISTS [DEF-ROC-268]. `find_item_path` returns the
+        # items/active/ copy first, so when an id resolves to TWO files this
+        # os.replace() moved the ACTIVE copy on top of the DONE one — measured:
+        # the stale copy overwrote the resolved copy and the `validated` event
+        # that only the done copy carried was gone from the working tree, with no
+        # message and with `wi-validate` reporting clean. Refuse and be LOUD: the
+        # store is ambiguous, I11 names it, and nothing here may resolve the
+        # ambiguity by destroying one side.
+        if os.path.exists(dst):
+            print(f"  NOT relocated: {iid} resolves to TWO item files — "
+                  f"{_rel(cur_path)} and {_rel(dst)}. A relocation is a RENAME, "
+                  f"and moving one onto the other would DESTROY a log this tool "
+                  f"cannot choose between. Left as they are; `make wi-validate` "
+                  f"(I11) names which copy is stale.", file=sys.stderr)
+            return
         os.replace(cur_path, dst)
         print(f"  relocated {iid} -> items/{want}/")
         _git_stage_relocation(project, cur_path, dst)
@@ -6369,6 +6385,16 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
     #         guard nothing invokes automatically is the same failure in a costume.
     findings.extend(compute_event_loss(project))
 
+    # --- 17. does an id resolve to MORE THAN ONE item file? (DEF-ROC-268) -----
+    #         The sibling of 15, and it hangs here for the same DEF-ROC-165
+    #         reason: a guard nothing invokes automatically is the same failure in
+    #         a costume. An id committed at two paths has NO defined state — the
+    #         writer resolves to one copy and every derived view to the other — so
+    #         the pull that reads the Ready view is exactly the moment it matters,
+    #         and the real instance sat undetected through a whole session of
+    #         `wi-validate` runs precisely because nothing asked before a pull.
+    findings.extend(compute_duplicate_identity(project))
+
     # --- 9. a file a committed make target RUNS must be on trunk — DELEGATED ---
     #        (OI-GITIGNORE-SWALLOWS-COMMITTED-TOOLS). This is the ONLY workflow that
     #        can run it: the analyser lives in the agent-system repo, so a project's
@@ -8273,7 +8299,7 @@ def compute_event_loss(project, timeout=EVENT_LOSS_TIMEOUT):
     # I9 compares ONE committed log per id, and the one it has always compared
     # is the LAST path walked (done/ when an id is committed in both). That
     # choice is now written down rather than emergent from a dict assignment;
-    # the duplication itself is a separate question, not this one.
+    # the duplication itself is I11's question, not this one.
     head = {iid: copies[-1] for iid, copies in head_copies.items()}
     now_sigs = {iid: [_event_sig(e) for e in it.events]
                 for iid, it in items.items()}
@@ -8320,6 +8346,138 @@ def compute_event_loss(project, timeout=EVENT_LOSS_TIMEOUT):
         f"re-run `make wi-project`."))]
 
 
+# --- I11: does an id resolve to MORE THAN ONE item file? (DEF-ROC-268) ------
+# Every other invariant here is computed from the CONTENTS of item files — I1–I4
+# and I6–I8 from the parsed files, I9 from the events committed for one id. None
+# of them asked about the SET of files, so an id present in BOTH items/active/
+# and items/done/, with DIFFERENT LOGS, was clean by every measure this gate had.
+# It happened: DEF-ROC-231 and DEF-ROC-248, with the `active/` copies short of
+# the `validated` event that had moved them, and `wi-validate` said clean all
+# session.
+#
+# WHY IT IS A VIOLATION RATHER THAN UNTIDINESS. An item's state is fold(events)
+# over ITS log. Two files claiming one id, with divergent logs, have NO DEFINED
+# ANSWER — and the machinery's two halves do not even pick the same file:
+# `find_item_path` returns items/active/ FIRST, so every WRITER and `item-brief`
+# read the active copy, while `load_all_items` keys by id in walk order, so the
+# LAST walked (done/) wins and every DERIVED VIEW reads that one. The reported
+# instance was benign only in its direction (neither item appeared in a queue);
+# an `active/` copy AHEAD of a `done/` copy puts a resolved item back in a queue
+# or hides a live one.
+#
+# BOTH RECORDS ARE ASKED, because the reported instance was wrong in exactly the
+# one the old dup check could not see: the WORKING TREE held one copy while HEAD
+# held two. HEAD is the durable record — it is what another agent clones, what CI
+# reads, and what the next `git checkout` restores.
+#
+# WHAT IT MAY AND MAY NOT CONCLUDE. Over an append-only log a copy whose events
+# are a strict SUBSET of another's is BEHIND, and that is the only inference
+# available; where each copy holds events the other lacks the logs have DIVERGED
+# and the tool says so and names both sides rather than picking. Identical copies
+# are still a violation: agreement is not permission, because the writer and the
+# readers still resolve to different files.
+DUP_CHECK = "duplicate-identity"
+
+
+def _dup_stale_clause(copies):
+    """`copies` is [(path, [sig, …]), …] for ONE id. Returns the sentence that
+    says which copy is stale — or that nothing here can say.
+
+    Append-only is the whole warrant: a log missing events another copy has can
+    only be behind. Nothing else is inferred."""
+    counted = [(path, Counter(sigs), sigs) for path, sigs in copies]
+    biggest = max(counted, key=lambda c: sum(c[1].values()))
+    behind, diverged = [], []
+    for path, ctr, _sigs in counted:
+        if path == biggest[0]:
+            continue
+        if ctr == biggest[1]:
+            continue                                   # identical to the biggest
+        missing = biggest[1] - ctr
+        extra = ctr - biggest[1]
+        if extra:
+            diverged.append((path, missing, extra))
+        else:
+            behind.append((path, missing))
+    if diverged:
+        parts = []
+        for path, missing, extra in diverged:
+            parts.append(
+                f"{path} holds {sorted({sig[1] for sig in extra.elements()})} "
+                f"that {biggest[0]} lacks, and {biggest[0]} holds "
+                f"{sorted({sig[1] for sig in missing.elements()})} that it lacks")
+        return (f"The copies have DIVERGED — {'; '.join(parts)} — so NEITHER is "
+                f"simply behind and nothing here may pick one. Recover every "
+                f"copy from HEAD and reconcile the logs by hand before deleting "
+                f"anything.")
+    if not behind:
+        return (f"The copies AGREE ({sum(biggest[1].values())} event(s) each), so "
+                f"nothing has been lost — but an id must resolve to exactly ONE "
+                f"file, because the write path and the read path resolve to "
+                f"different ones. Delete the copy in the wrong directory (a "
+                f"terminal flow item lives in items/done/, everything else in "
+                f"items/active/).")
+    bits = []
+    for path, missing in behind:
+        bits.append(f"{path} (missing "
+                    f"{sorted({sig[1] for sig in missing.elements()})})")
+    return (f"The STALE copy is {', '.join(bits)} — its log is a strict subset of "
+            f"{biggest[0]}'s and item logs are APPEND-ONLY, so it can only be "
+            f"behind. {biggest[0]} is the one to keep.")
+
+
+def _dup_finding(iid, where, copies, remedy):
+    counts = ", ".join(f"{path} ({len(sigs)} event(s))" for path, sigs in copies)
+    return dict(check=DUP_CHECK, severity="block", id=iid, ids=[iid], where=where,
+                copies=[p for p, _s in copies], message=(
+                    f"(I11) {iid} resolves to {len(copies)} item files {where}: "
+                    f"{counts}. {_dup_stale_clause(copies)} An item's state is "
+                    f"fold(events) over ITS log, so two files claiming one id have "
+                    f"no defined answer — and `find_item_path` (every writer, "
+                    f"`item-brief`) reads items/active/ FIRST while "
+                    f"`load_all_items` (every derived view) keeps the LAST walked, "
+                    f"so the write path and the read path are on DIFFERENT FILES. "
+                    f"{remedy}"))
+
+
+def compute_duplicate_identity(project, timeout=EVENT_LOSS_TIMEOUT):
+    """0+ findings: one per duplicated id per record, plus an `unknown` finding
+    when the HEAD side could not be established (§17i — never absorbed into
+    clean, never a plain fail)."""
+    findings = []
+    items, dups = load_all_items(project)
+    for iid in sorted(dups):
+        copies = [(_rel(c.path), [_event_sig(e) for e in c.events])
+                  for c in dups[iid]]
+        findings.append(_dup_finding(
+            iid, "in the WORKING TREE", copies,
+            f"Delete the stale copy and commit the deletion."))
+    try:
+        head = _head_item_logs(project, timeout=timeout, unreadable=[])
+    except Exception as exc:                                    # noqa: BLE001
+        findings.append(dict(
+            check=DUP_CHECK, severity="unknown", id=None, ids=[], where="HEAD",
+            copies=[], message=(
+                f"[{DUP_CHECK}] NOT ESTABLISHED — whether an id is committed at "
+                f"more than one path in HEAD could not be checked "
+                f"({type(exc).__name__}: {str(exc)[:160]}). HEAD is the record "
+                f"the founding instance was wrong in — the working tree held one "
+                f"copy while HEAD held two — so an unrunnable check here is "
+                f"exactly the silence DEF-ROC-268 is about.")))
+        return findings
+    for iid, copies in sorted(head.items()):
+        if len(copies) < 2:
+            continue
+        findings.append(_dup_finding(
+            iid, "in HEAD", copies,
+            f"Committing a resolved item is a RENAME — items/active/<ID>.md -> "
+            f"items/done/<ID>.md, TWO paths — so declare both halves, or "
+            f"`git -C work/{project} rm` the stale path and commit that "
+            f"deletion. The working tree may already look right: it is HEAD that "
+            f"carries two copies, and HEAD is what another agent clones."))
+    return findings
+
+
 # ---------------------------------------------------------------------------
 # Subcommand: validate — the drift GATE (invariants I1–I4, I6–I9)
 # ---------------------------------------------------------------------------
@@ -8329,11 +8487,20 @@ def cmd_validate(a):
     # could not be established: "cannot measure" must never be absorbed into
     # `clean`, because an unaskable question is how DEF-ROC-162 stayed invisible.
     loss = compute_event_loss(a.project)
-    violations = validate_items(graphs, a.project, event_loss=loss)
+    # I11 is computed ONCE for the same reason as I9, and its cannot-establish
+    # verdict travels to the summary rather than being dropped [DEF-ROC-268].
+    dupes = compute_duplicate_identity(a.project)
+    violations = validate_items(graphs, a.project, event_loss=loss,
+                                duplicates=dupes)
     for f in loss:
         if f["severity"] == "unknown":
             print(f"validate: I9 (append-only, vs git HEAD) NOT ESTABLISHED — "
                   f"{f['message']}")
+    i11_unknown = next((f["message"] for f in dupes
+                        if f["severity"] == "unknown"), None)
+    if i11_unknown:
+        print(f"validate: I11 (one item file per id, working tree + HEAD) "
+              f"NOT ESTABLISHED — {i11_unknown}")
     if violations:
         print(f"validate: {len(violations)} violation(s) in {a.project}:", file=sys.stderr)
         for v in violations:
@@ -8353,7 +8520,8 @@ def cmd_validate(a):
               f"has nothing to disagree with. Each one establishes itself at its "
               f"next `wi-append … EVENT={AMENDED} … SET=…`.")
     print(validate_summary(a.project, i9_unknown=i9_unknown,
-                           unstamped=len(unstamped)))
+                           unstamped=len(unstamped),
+                           i11_unknown=i11_unknown))
 
 
 # The LAST LINE of `wi-validate`, composed in ONE place [DEF-ROC-238].
@@ -8367,6 +8535,9 @@ def cmd_validate(a):
 _I9_HOLDS = ("I9 holds: no event committed in HEAD is missing from the working "
              "tree")
 _I9_UNKNOWN = "I9 could NOT be established (see above)"
+_I11_UNKNOWN = ("I11 could NOT be established for HEAD — whether an id is "
+                "committed at more than one path is unknown (see above), and "
+                "HEAD is the record the founding instance was wrong in")
 
 
 # The verdict a check returns when it was ASKED and ANSWERED. Anything else an
@@ -8376,7 +8547,7 @@ _I9_UNKNOWN = "I9 could NOT be established (see above)"
 _HELD = object()
 
 
-def _invariant_verdicts(i9_unknown, unstamped):
+def _invariant_verdicts(i9_unknown, unstamped, i11_unknown=None):
     """Every invariant the summary may name, each PAIRED WITH ITS OWN VERDICT.
 
     THIS PAIRING IS THE POINT [DEF-ROC-238]. The sentence used to hold a
@@ -8408,10 +8579,11 @@ def _invariant_verdicts(i9_unknown, unstamped):
                  f"carrying no economics stamp, so a hand-edit of THEIR "
                  f"definition has nothing to disagree with (see above)"), None),
         ("I9", _HELD if not i9_unknown else _I9_UNKNOWN, _I9_HOLDS),
+        ("I11", _HELD if not i11_unknown else _I11_UNKNOWN, None),
     ]
 
 
-def validate_summary(project, i9_unknown, unstamped):
+def validate_summary(project, i9_unknown, unstamped, i11_unknown=None):
     """The summary sentence, given each invariant's verdict.
 
     THE ONE RULE, and it is why this is composed rather than written: an
@@ -8421,7 +8593,7 @@ def validate_summary(project, i9_unknown, unstamped):
     exit code is unchanged, so the line WITHHOLDS a claim rather than making the
     opposite one.
     """
-    verdicts = _invariant_verdicts(i9_unknown, unstamped)
+    verdicts = _invariant_verdicts(i9_unknown, unstamped, i11_unknown)
     held = [n for n, v, clause in verdicts if v is _HELD and not clause]
     held_clauses = [clause for _n, v, clause in verdicts if v is _HELD and clause]
     unestablished = [v for _n, v, _c in verdicts if v is not _HELD]
@@ -8438,8 +8610,8 @@ def validate_summary(project, i9_unknown, unstamped):
             f"(exit 0) — it withholds the claim. {tail}.")
 
 
-def validate_items(graphs, project, event_loss=None):
-    items, dups = load_all_items(project)
+def validate_items(graphs, project, event_loss=None, duplicates=None):
+    items, _dups = load_all_items(project)
     states = compute_states(graphs, items)
     violations = []
 
@@ -8458,9 +8630,16 @@ def validate_items(graphs, project, event_loss=None):
         if not (f.get("dropped") or []):
             violations.append(f"(I9) {f['message']}")
 
-    # I4a: exactly one file per id (dup ids across active/+done/)
-    for d in sorted(dups):
-        violations.append(f"(I4) id {d} appears in more than one item file")
+    # I11: exactly one item FILE per id — in the working tree AND in HEAD
+    # [DEF-ROC-268]. This replaces the I4a dup clause, which asked the same
+    # question of the working tree alone and answered it with the bare sentence
+    # "id X appears in more than one item file". The refusal is unchanged in
+    # direction and strictly wider in reach: it now also reads the durable
+    # record, and it says WHICH copy is stale.
+    for f in (compute_duplicate_identity(project) if duplicates is None
+              else duplicates):
+        if f["severity"] == "block":
+            violations.append(f["message"])
 
     for iid, it in items.items():
         # I1: every event is a legal transition (flow types only)

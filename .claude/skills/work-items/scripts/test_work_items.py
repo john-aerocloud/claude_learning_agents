@@ -655,11 +655,15 @@ class TestInvariants(Base):
         v = wi.validate_items(self.graphs, self.project)
         self.assertTrue(any("(I3)" in x and "cycle" in x for x in v), v)
 
-    def test_I4_duplicate_id(self):
+    def test_duplicate_id_is_refused(self):
+        """Renumbered I4a -> I11, NOT weakened [DEF-ROC-268]. The same store is
+        still refused; the invariant that refuses it now also reads HEAD (where
+        the founding instance was wrong) and names which copy is stale, so it is
+        its own number rather than a clause of the directory-placement check."""
         self._good_uc("UC-DUP", sub="active")
         self._good_uc("UC-DUP", sub="done")
         v = wi.validate_items(self.graphs, self.project)
-        self.assertTrue(any("(I4)" in x for x in v), v)
+        self.assertTrue(any("(I11)" in x and "UC-DUP" in x for x in v), v)
 
 
 # --------------------------------------------------------------------------- #

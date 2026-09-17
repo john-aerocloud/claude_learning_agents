@@ -226,16 +226,32 @@ Makefile wraps each.
 3. **`make wi-validate PROJECT=P`** — the drift GATE. Run **before pulling**. Exits
    non-zero if any invariant is violated: (I1) every event in every item is a legal
    transition; (I2) no terminal item sits in a non-null queue; (I3) every
-   `parents`/`deps` id resolves and `deps` has no cycles; (I4) exactly one file per
-   id across active/+done/, and a `done` item lives in `done/`; (I6) an
+   `parents`/`deps` id resolves and `deps` has no cycles; (I4) a `done` flow item
+   lives in `done/` and a live one in `active/`; (I6) an
    `awaiting_observation` flow item carries a valid observation predicate; (I7) a
    `blocked` flow item carries a valid reversal probe; **(I8) the item's own
    `derived:` block agrees with `fold(events)`** — it exists, declares a non-null
    state, that state is one its own type graph defines, it equals the computed
    state, and `derived.queue` equals `queue_map[state]`; **(I9) no event committed in
    git HEAD is absent from the working-tree item file** — append-only, checked
-   against the only other durable record there is. **I5 is
+   against the only other durable record there is; **(I11) an id resolves to
+   EXACTLY ONE item file, in the working tree AND in HEAD**. **I5 is
    RESERVED** for IMP-011's still-owed CORE-job invariant and is not reused.
+
+   **An I11 violation means the item has no defined state.** State is
+   `fold(events)` over ITS log, so two files claiming one id with divergent logs
+   answer differently — and the machinery's halves do not even pick the same
+   file: `find_item_path` returns `items/active/` first (every WRITER, plus
+   `item-brief`), while `load_all_items` keeps the LAST walked (every DERIVED
+   VIEW). I11 says WHICH copy is stale, by the only rule an append-only log
+   warrants: a strict subset is behind. Where each copy holds events the other
+   lacks it reports DIVERGED and names both sides rather than guessing; where
+   they are identical it is still a violation, because agreement is not
+   permission. **It reads HEAD as well as the working tree** because the founding
+   instance (DEF-ROC-268: `DEF-ROC-231` and `DEF-ROC-248`, 2026-09-17) was wrong
+   ONLY in HEAD — committing a resolved item is a RENAME, two paths, and only the
+   `done/` half was declared to `commit-isolated`, so the working tree looked
+   right and every working-tree invariant reported `clean` all session.
 
    **An I9 violation is a DROPPED EVENT, not drift — do NOT re-project.** Recover the
    events from HEAD (`git -C work/<p> show HEAD:<path>`) and only then re-render.

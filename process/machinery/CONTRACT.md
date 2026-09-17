@@ -474,6 +474,29 @@ Exits non-zero if ANY invariant is violated:
   **wherever absence is treated as evidence, ask whether the thing still exists on the reference
   side.** It also runs as `loop-gate` check 15, so it is asked before every pull rather than only
   when someone remembers to validate.
+- (I11) **an id resolves to EXACTLY ONE item file — in the working tree AND in HEAD**
+  (DEF-ROC-268). Every other invariant here is computed from the CONTENTS of item files; none of
+  them asked about the SET of them, so an id present in BOTH `items/active/` and `items/done/`
+  with DIFFERENT logs was `clean` by every measure the gate had. It happened: `DEF-ROC-231` and
+  `DEF-ROC-248`, the `active/` copies short of the `validated` event that had moved them, and
+  `wi-validate` said clean through every run of that session. **Why it is a violation rather than
+  untidiness:** state is `fold(events)` over ITS log, so two files claiming one id have no defined
+  answer — and the two halves of the machinery resolve to DIFFERENT copies (`find_item_path`
+  returns `active/` first, so every writer and `item-brief` read that one; `load_all_items` keys
+  by id in walk order, so the LAST walked wins and every derived view reads the other).
+  **It reads HEAD too**, because the founding instance was wrong only there: committing a resolved
+  item is a RENAME — two paths — and only the `done/` half was declared to `commit-isolated`, so
+  the deletion was never committed. `commit-isolated` behaved correctly and the remedy is NOT to
+  make it guess the other half of a rename; the invariant belongs in the gate. **What it may
+  conclude:** over an append-only log a copy whose events are a strict SUBSET of another's is
+  BEHIND, and it says so and names what that copy is missing; where each side holds events the
+  other lacks it reports DIVERGED and names both, rather than picking; identical copies are still
+  a violation, because agreement is not permission. A HEAD side it could not establish is
+  REPORTED, never absorbed into `clean` (§17i). The relocation in `wi-project` is guarded by the
+  same finding: `_maybe_relocate` used to `os.replace` the `active/` copy onto the `done/` one —
+  measured, the stale copy overwrote the resolved one and its terminal event was gone from the
+  working tree with no message — and it now refuses and says so, because a rename has nowhere to
+  go when the destination already exists.
 
 ## 4. Statistics reset
 

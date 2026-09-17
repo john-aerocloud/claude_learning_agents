@@ -67,6 +67,25 @@ covered by I10; that is the recorded residual, not a permission to hand-edit. I1
 consistency check, **not a signature**: an edit that rewrites the `econ:` stamp on the
 last event as well as the frontmatter agrees with itself and passes — see
 `CONTRACT.md` for what the stamp is and is not worth.
+
+**AMENDING A RESOLVED / CANCELLED / WONTFIX ITEM [DEF-ROC-261].** `amended` is legal
+from **every terminal state of every flow type**, for the same reason it is legal on an
+aggregate: it was never a transition. A terminal state correctly admits no *flow* event
+— the work is done and nothing may restart it silently — but it does not follow that the
+**record** is sealed, and it was: `resolved` offered no legal event at all, while
+`SKILL.md` requires material changes to be `amended` events and never silent edits. That
+left only leave-it-wrong or break-the-contract, and two established corrections to
+`DEF-ROC-248` sat unrecordable.
+
+**It is not a route back into flow, and that is structural rather than promised.** No
+edge is added to `state-graphs.json`: the amendment is recognised by one predicate in
+the writer (`is_audit_self_edge`), and every derivation reads the graph — `fold_state`
+and `walk_states` both SKIP an event no transition carries. So the state cannot move,
+the queue stays null, the file stays in `items/done/`, and the DORA derivation is
+unchanged: measured across an amendment landing days after the terminal event, the whole
+`dora` block is byte-identical and the only figure that moves anywhere in the projection
+is the raw count of events. `--set` is unchanged — it still rides an AGGREGATE's
+amendment only.
 Every state maps to:
 - a **queue** via `queue_map[state]` (`intake | ready | rework | waiting | wip`, or
   `null` for terminal/aggregate) — this is how queues are generated, derived.

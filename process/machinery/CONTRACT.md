@@ -294,6 +294,33 @@ record is git. Closing it would need a keyed signature, which is not what this i
 limit is pinned by a test (`TestWhatI10DoesNotCover`), so if a later change closes it the
 test fails and this paragraph is corrected in the same act.
 
+**…and from a TERMINAL STATE, for the same reason [DEF-ROC-261].** `amended` is legal from
+every terminal state of every flow type — `resolved`, `wontfix`, `cancelled`, `done`. A
+terminal state correctly admits no *flow* event: the work is done and nothing may restart it
+silently. It does not follow that the **record** is sealed, and it was — `resolved` offered
+`(none — terminal state)`, while the rule one paragraph up requires material changes to be
+`amended` events and never silent edits. The only two options left were leave-it-wrong and
+break-the-contract, and two established corrections to `DEF-ROC-248` (a headline claim its
+own validation had closed the other way, and a `lane:` value that `make dispatch-check`
+fails CLOSED on — `DEFECT-OAG-076`, the class that destroyed a delivered item's commits)
+sat unrecordable. **It is not a back door to un-resolving work, structurally rather than by
+promise:** NO edge is added to `state-graphs.json`. The amendment is recognised by one
+predicate in the writer, `is_audit_self_edge`, and every derivation reads the graph —
+`fold_state` and `walk_states` both SKIP an event no transition carries, `_maybe_relocate`
+reads the folded state, and the metric fold is over named events. So the state cannot move,
+the queue stays null, the file stays in `items/done/`, and I1 replays history through the
+SAME predicate the writer used, so an event legal to write is legal to re-read. **The DORA
+derivation is shown unchanged rather than assumed to be:** across an amendment landing days
+after the terminal event, on every terminal state of every flow type, the whole `dora`
+block is byte-identical and the only figure that moves anywhere in the projection is
+`token_cost.n_events`, the raw count of events, which rises by exactly the number of
+amendments recorded. The one pre-existing edge out of a terminal state — a `use-case`
+`reopened` from `done` — is a deliberate flow edge, untouched, and now pinned by value so a
+later addition has to come past that test. `--set` is unchanged: it rides an AGGREGATE's
+amendment only, because a flow item's economics are not covered by I10 (extending I10 to
+flow items would be the `DEF-ROC-083` unsatisfiable gate — an argument about a GATE that
+demands a write, not about whether a write is possible).
+
 **Recording a CHANGE FAILURE — an annotation, not a workflow step [state-graph v10].** A build
 or a deploy can go red at any moment work is live, not only while the item sits in `building` or
 `deploying`. Until v10 it could only be recorded there, so when `DEF-ROC-115`'s own fix reddened

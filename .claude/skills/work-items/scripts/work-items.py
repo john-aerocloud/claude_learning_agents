@@ -2245,11 +2245,38 @@ def is_audit_self_edge(graphs, itype, state, event):
     changes nothing and exists purely so a definition change leaves a trace.
     Refusing it because no edge carries it conflates STATE with AUDIT.
 
-    Today that is an aggregate — whose state bubbles from its children, so it has
-    no `events` map for any event to appear in. The predicate is separate from
-    the `kind` test so that the question a caller asks is the question it means.
+    TWO CASES, and they are the same case:
+
+      * an AGGREGATE — whose state bubbles from its children, so it has no
+        `events` map for any event to appear in [DEF-ROC-238];
+      * a FLOW item in a TERMINAL state [DEF-ROC-261]. `resolved` correctly
+        admits no FLOW event — the work is done and nothing may restart it
+        silently — but it does not follow that the RECORD is sealed. It did:
+        `resolved` offered NO legal events at all, `SKILL.md` requires material
+        changes to be `amended` events and never silent edits, and so a resolved
+        item's record could only be left wrong or corrected by breaking the
+        contract. Two established corrections to DEF-ROC-248 sat unrecordable.
+
+    WHAT KEEPS THIS FROM BEING A BACK DOOR TO UN-RESOLVING WORK, which is the
+    constraint the item set: NO EDGE IS ADDED TO THE GRAPH. This predicate lives
+    in the writer, and every derivation reads `state-graphs.json` — `fold_state`
+    and `walk_states` both SKIP an event no transition carries, `_maybe_relocate`
+    reads the folded state, and the metrics fold over named events. So the state
+    cannot move, the file cannot leave `done/`, and the DORA derivation (lead
+    time, cycle time, MTTR, time-in-state) is unchanged BY CONSTRUCTION rather
+    than by care. The one pre-existing way out of a terminal state — a `use-case`
+    `reopened` from `done` — is a deliberate flow edge and is untouched.
+
+    Rights are not derived for an audit self-edge, exactly as for an aggregate:
+    there is no sequencing to protect by an event that cannot change what happens
+    next, and the event names the role that made the correction, which is the
+    whole point of recording it.
     """
-    return graphs.kind(itype) == "aggregate" and event == AMENDED
+    if event != AMENDED:
+        return False
+    if graphs.kind(itype) == "aggregate":
+        return True
+    return state in graphs.terminals(itype)
 
 
 def _append_locked(a):
@@ -8665,6 +8692,14 @@ def validate_items(graphs, project, event_loss=None, duplicates=None):
                 # establishes state, e.g. `registered`/`reported`/`open`). It is not
                 # itself a transition FROM anything, so it is legal by definition.
                 if idx == 0 and name == graphs.initial(it.type):
+                    continue
+                # An AUDIT SELF-EDGE is not a transition and never was: it is
+                # legal to WRITE from a terminal state, so it must be legal to
+                # RE-READ [DEF-ROC-261]. Read through the SAME predicate the
+                # writer used — a writer and a validator that disagreed would
+                # leave the store permanently dirty the moment anyone used the
+                # route the writer permits.
+                if is_audit_self_edge(graphs, it.type, st, name):
                     continue
                 nxt = None
                 for t in graphs.transitions(it.type):

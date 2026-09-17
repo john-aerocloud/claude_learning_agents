@@ -92,7 +92,29 @@ See `README.md` for the full system. In short:
      assertion because the path IS declared. So use **`make commit-isolated`** for a
      co-owned append-target: it three-way merges the other agent's committed lines
      back in (the same run leaves 4/4), REPORTS every merge, and refuses a genuinely
-     overlapping edit with exit 7 rather than guessing. **Its residue, which nothing
+     overlapping edit with exit 7 rather than guessing.
+     **WHEN THAT EXIT 7 IS WRONG — the narrow move, and use it instead of reaching for
+     `COOWNED_MERGE_OFF=1` (`DEF-ROC-173`).** A line-level diff cannot carry intent, so
+     DELIBERATELY SUPERSEDING a committed line is indistinguishable from never having
+     seen it: replacing a wrong line with a right one refuses exactly like a stale
+     overwrite. The old way past it was all-or-nothing — `COOWNED_MERGE_OFF=1` excuses
+     EVERY line in the file, including ones you have never seen — which made the one
+     move available to an engineer who is RIGHT the one that disables the protection.
+     Now: run **`make commit-isolated-missing REPO=… PATHS=… > S`** to print the review
+     list (the lines of HEAD your saved copy lacks, one per line, nothing else), **delete
+     from `S` every line you did not decide against**, then commit with
+     **`SUPERSEDE_FILE=S`**. Reading the list answers *"did you see this line?"*; deleting
+     from it answers *"and did you decide against it?"* Each named line stops being
+     evidence of staleness AND NOTHING ELSE DOES. It fails closed three ways: a declared
+     line that HEAD does not actually carry is exit 2 (so a declaration cannot be written
+     from memory), the check re-runs on every CAS attempt (so a declaration HEAD has moved
+     past cannot let a stale overwrite through), and `SUPERSEDE_FILE` with
+     `COOWNED_MERGE_OFF` together is refused as contradictory. **Know the blade's edge:
+     naming another agent's committed line DOES remove it — the declaration is an
+     assertion checked against reality, not a proof of authorship.** Where a declaration
+     does not account for all the staleness the merge still runs and can restore a line
+     you declared; the report says so (`AND n LINE(S) YOU DECLARED SUPERSEDED CAME BACK…`)
+     rather than leaving you to find it by re-reading HEAD. **Its residue, which nothing
      fixes at file granularity:** it commits whatever is SAVED under your declared
      path, so if another agent saves the same co-owned file in the seconds between
      your save and your commit, you commit THEIR copy under YOUR message. Save

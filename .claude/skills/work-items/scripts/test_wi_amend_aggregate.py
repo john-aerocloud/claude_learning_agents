@@ -406,14 +406,27 @@ class TestTheSummaryLineDoesNotOverstate(_Drive):
     def test_I9_is_not_claimed_to_hold_when_IT_could_not_be_established_either(self):
         """The generalisation, because one instance was found by accident and
         that says nothing about the rest: NO invariant may appear in the holds
-        list while its own check reports NOT ESTABLISHED. The test store is not
-        a git repository, so I9 — which compares the working tree against HEAD —
-        genuinely cannot be answered here."""
+        list while its own check reports NOT ESTABLISHED, AND NO UNESTABLISHED
+        INVARIANT MAY SIT UNDER THE WORD `clean`. The test store is not a git
+        repository, so I9 — which compares the working tree against HEAD —
+        genuinely cannot be answered here.
+
+        THE SECOND ASSERTION IS THE ONE WITH TEETH, and it is here because
+        without it this case pinned nothing [DEF-ROC-238, second rejection].
+        Carving I9 out of the HOLDS clause was ALREADY the behaviour before the
+        fix — this case passes verbatim against the pre-fix interpreter. The
+        half that actually changed is the word `clean`, which the old sentence
+        printed one line under its own "I9 could NOT be established". Every
+        aggregate in this store is stamped, so I10 holds and I9 is the SOLE
+        unestablished invariant: this arm, and nothing else in the suite, is
+        what withholds the word here."""
         self.requirement()
         self._append("REQ-T-001", "amended", note="x", set=["value=5"])
         line = self.summary()
         self.assertNotIn("I9", self.holds_clause(line), line)
         self.assertIn("I9 could NOT be established", line)
+        self.assertIn("I10", self.holds_clause(line), line)   # I9 is the only one
+        self.assertNotIn("clean", line, line)
 
 
 class TestTheRemedyNamesTheFieldThatMoved(_Drive):

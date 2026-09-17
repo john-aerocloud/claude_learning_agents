@@ -2168,6 +2168,30 @@ def parse_set_args(raw):
     return updates, None
 
 
+def econ_declare_sets(stamp, current):
+    """The `SET=` arguments that would DECLARE a divergence — naming the fields
+    that ACTUALLY MOVED [DEF-ROC-238].
+
+    The remedy used to read `SET='value=<v>'` whatever had diverged, so a reader
+    whose `cost` or `defer_until` had moved was handed a command they had to
+    correct before running — and the only person who can correct it is the one
+    who already knows the answer. The two tuples are printed either side of this
+    for a human to diff; this is the part they run.
+    """
+    def parsed(blob):
+        return dict(kv.split("=", 1) for kv in (blob or "").split() if "=" in kv)
+
+    was, now = parsed(stamp), parsed(current)
+    sets = []
+    for f in ECON_FIELDS:
+        v = now.get(f, ECON_ABSENT)
+        if v != was.get(f, ECON_ABSENT):
+            sets.append(f"{f}=" + ("" if v == ECON_ABSENT else v))
+    if not sets:                      # unreachable while stamp != current
+        sets = ["value=<v>"]
+    return " ".join(f"SET{i + 1 if i else ''}='{sp}'" for i, sp in enumerate(sets))
+
+
 def econ_unstamped_ids(graphs, project):
     """Aggregates whose definition provenance is NOT ESTABLISHED — they carry no
     economics stamp at all, so I10 has nothing to compare and says so (§17i:
@@ -8327,11 +8351,37 @@ _I9_UNKNOWN = "I9 could NOT be established (see above)"
 
 
 def validate_summary(project, i9_unknown, unstamped):
-    """The summary sentence, given each invariant's verdict."""
-    held = ["I1–I4", "I6", "I7", "I8", "I10"]
-    clauses = [" + ".join(held) + " all hold"]
-    clauses.append(_I9_UNKNOWN if i9_unknown else _I9_HOLDS)
-    return f"validate: {project} clean — " + ", and ".join(clauses) + "."
+    """The summary sentence, given each invariant's verdict.
+
+    THE ONE RULE, and it is why this is composed rather than written: an
+    invariant that could not be ESTABLISHED is never named among the ones that
+    HOLD, and while any invariant is unestablished the store is not `clean`
+    (§17i — cannot-measure is never a pass). It is not a plain fail either: the
+    exit code is unchanged, so the line WITHHOLDS a claim rather than making the
+    opposite one.
+    """
+    held = ["I1–I4", "I6", "I7", "I8"]
+    unestablished = []
+    if unstamped:
+        unestablished.append(f"I10 could NOT be established for {unstamped} "
+                             f"aggregate(s) carrying no economics stamp, so a "
+                             f"hand-edit of THEIR definition has nothing to "
+                             f"disagree with (see above)")
+    else:
+        held.append("I10")
+    if i9_unknown:
+        unestablished.append(_I9_UNKNOWN)
+    tail = " + ".join(held) + " all hold"
+    if not i9_unknown:
+        tail += f", and {_I9_HOLDS}"
+    if not unestablished:
+        return f"validate: {project} clean — {tail}."
+    n = len(unestablished)
+    return (f"validate: {project} NOT CLEAN — no violation was found, but "
+            f"{n} invariant{'s' if n > 1 else ''} could NOT be established, and "
+            f"an unaskable question is never a pass (§17i): "
+            + "; ".join(unestablished) + ". This does NOT block the pull "
+            f"(exit 0) — it withholds the claim. {tail}.")
 
 
 def validate_items(graphs, project, event_loss=None):
@@ -8412,8 +8462,8 @@ def validate_items(graphs, project, event_loss=None):
                     f"through the write path, which is a FORGERY and not an "
                     f"amendment, whoever made it. Declare it: `make wi-append "
                     f"PROJECT=<p> ID={iid} EVENT={AMENDED} AGENT=<role> "
-                    f"SET='value=<v>' NOTE_FILE=<why>` — or restore the field. "
-                    f"Never hand-edit an item file.")
+                    f"{econ_declare_sets(stamp, current)} NOTE_FILE=<why>` — or "
+                    f"restore the field. Never hand-edit an item file.")
 
         # I2: no item both terminal/done AND in a non-null queue
         state = states.get(iid)

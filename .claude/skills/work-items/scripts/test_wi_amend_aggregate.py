@@ -332,6 +332,152 @@ class TestMintStampsTheBaseline(_Drive):
 
 
 # --------------------------------------------------------------------------- #
+# Limb 4 — THE LINE THE READER ACTUALLY READS
+#
+# The mechanism above is only worth what the tool SAYS about it. On the real ROC
+# store the run printed, in this order:
+#
+#   validate: I10 (definition provenance) NOT ESTABLISHED for 88 aggregate(s) …
+#   validate: ROC clean — I1–I4 + I6 + I7 + I8 + I10 all hold …        (exit 0)
+#
+# 100% of the population unestablished, and the LAST line — the one a CI tail
+# and a reader take away — asserts the invariant holds. Both live documents this
+# change added say the opposite (`SKILL.md`: "never a pass"; `CONTRACT.md`:
+# "never clean"), and v128 records that this very sentence has been quoted all
+# session as assurance it does not provide. §17i: cannot-measure is never a pass
+# and never a plain fail. I9 was already carved out of that sentence BY NAME;
+# I10 had been appended to the list asserted to hold instead.
+# --------------------------------------------------------------------------- #
+class TestTheSummaryLineDoesNotOverstate(_Drive):
+
+    def summary(self):
+        """The LAST line `wi-validate` prints — driven through the real
+        subcommand, not through the composer, because the charge was about what
+        the tool says rather than about what a helper returns."""
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            wi.cmd_validate(argparse.Namespace(project=self.project))
+        lines = [l for l in buf.getvalue().strip().split("\n") if l.strip()]
+        return lines[-1]
+
+    def holds_clause(self, line):
+        """The part of the sentence that asserts invariants HOLD — the list
+        immediately before `all hold`, wherever in the sentence it sits."""
+        return line.split(" all hold")[0].split(". ")[-1]
+
+    def test_the_summary_does_NOT_claim_I10_holds_when_an_aggregate_is_unstamped(self):
+        """The rejection, in one assertion. The store's only item is an
+        aggregate with no stamp, so I10 has nothing to compare — and the
+        sentence must not name it among the invariants that hold."""
+        self.requirement()
+        line = self.summary()
+        self.assertNotIn("I10", self.holds_clause(line), line)
+        self.assertIn("I10 could NOT be established", line)
+        self.assertIn("1 aggregate", line)
+
+    def test_the_summary_DOES_claim_I10_holds_once_every_aggregate_is_stamped(self):
+        """Both directions (§F9f): a carve-out that never closes is just a
+        permanent disclaimer, and would say nothing about the store either."""
+        self.requirement()
+        self._append("REQ-T-001", "amended", note="the owner raised it",
+                     set=["value=5"])
+        line = self.summary()
+        self.assertIn("I10", self.holds_clause(line), line)
+        self.assertNotIn("I10 could NOT be established", line)
+
+    def test_the_headline_withholds_CLEAN_while_any_invariant_is_unestablished(self):
+        """`clean` is the word that gets quoted back. It may only describe a
+        store where every invariant was ASKED and answered."""
+        self.requirement()
+        line = self.summary()
+        self.assertNotIn("clean", line, line)
+        # …and it is not a plain fail either (§17i): it says what it found.
+        self.assertIn("no violation", line)
+
+    def test_an_unestablished_invariant_does_not_turn_the_gate_RED(self):
+        """§17i's other half: NOT ESTABLISHED is not a failure. The pull is not
+        blocked by a question that could not be asked — it is un-blessed."""
+        self.requirement()
+        try:
+            self.summary()
+        except SystemExit as e:                      # pragma: no cover - the bug
+            self.fail(f"an unstamped aggregate exited the gate ({e})")
+
+    def test_I9_is_not_claimed_to_hold_when_IT_could_not_be_established_either(self):
+        """The generalisation, because one instance was found by accident and
+        that says nothing about the rest: NO invariant may appear in the holds
+        list while its own check reports NOT ESTABLISHED. The test store is not
+        a git repository, so I9 — which compares the working tree against HEAD —
+        genuinely cannot be answered here."""
+        self.requirement()
+        self._append("REQ-T-001", "amended", note="x", set=["value=5"])
+        line = self.summary()
+        self.assertNotIn("I9", self.holds_clause(line), line)
+        self.assertIn("I9 could NOT be established", line)
+
+
+class TestTheRemedyNamesTheFieldThatMoved(_Drive):
+    """A remedy that names the wrong field is a remedy the reader has to
+    correct before running it, and the only person who can correct it is the one
+    who already knows the answer."""
+
+    def remedy(self, **hand_edit):
+        self.requirement()
+        self._append("REQ-T-001", "amended", note="x",
+                     set=["value=5", "cost=1", "defer_until=2026-09-29"])
+        self.edit_frontmatter_by_hand("REQ-T-001", **hand_edit)
+        return "\n".join(v for v in wi.validate_items(self.graphs, self.project)
+                          if v.startswith("(I10)"))
+
+    def test_a_moved_cost_is_named_in_the_remedy_not_value(self):
+        msg = self.remedy(cost=3)
+        self.assertIn("SET='cost=3'", msg)
+        self.assertNotIn("value=", msg.split("wi-append")[1])
+
+    def test_a_CLEARED_field_is_declared_as_an_empty_value(self):
+        msg = self.remedy(defer_until=None)
+        self.assertIn("SET='defer_until='", msg)
+
+    def test_two_moved_fields_are_both_named_in_the_order_SET_takes_them(self):
+        msg = self.remedy(value=9, job="J4")
+        self.assertIn("SET='value=9'", msg)
+        self.assertIn("SET2='job=J4'", msg)
+
+
+class TestWhatI10DoesNotCover(_Drive):
+    """THE LIMIT OF AN UNSIGNED STAMP, pinned rather than left for a reader to
+    discover. I10 compares the file against the stamp on its own last event, so
+    an edit that rewrites BOTH agrees with itself. I9 does not see it either:
+    an event's identity is `(ts, event, agent)` deliberately, so a value changed
+    INSIDE an already-committed event line is not a dropped event. Git history
+    is what remains. This test exists so the contract's statement of the limit
+    is executable — if a later change closes the hole, this test fails and the
+    contract gets corrected in the same act."""
+
+    def rewrite_the_stamp_too(self, iid, econ):
+        path, _sub = wi.find_item_path(self.project, iid)
+        it = wi.load_item(path)
+        events = [dict(e) for e in it.events]
+        events[-1]["econ"] = econ
+        fm = dict(it.fm)
+        fm["events"] = events
+        text = wi.render_item(wi.Item(path, fm, it.body), it.declared or {})
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+
+    def test_a_hand_edit_that_also_rewrites_the_stamp_passes_I10(self):
+        self.requirement()
+        self._append("REQ-T-001", "amended", note="x", set=["value=5"])
+        self.edit_frontmatter_by_hand("REQ-T-001", value=9)
+        self.assertNotEqual(wi.validate_items(self.graphs, self.project), [])
+        self.rewrite_the_stamp_too("REQ-T-001", "value=9 cost=0.5 job=J0 defer_until=-")
+        self.assertEqual(wi.validate_items(self.graphs, self.project), [],
+                         "I10 is a consistency check against the item's own "
+                         "record, not a signature — if this now fails, the "
+                         "guarantee grew and CONTRACT.md must say so")
+
+
+# --------------------------------------------------------------------------- #
 # The AGENT-FACING route, end to end
 # --------------------------------------------------------------------------- #
 class TestTheRealMakeRoute(unittest.TestCase):
@@ -387,6 +533,29 @@ class TestTheRealMakeRoute(unittest.TestCase):
         self.assertNotEqual(v.returncode, 0,
                             "the gate passed a forged definition change")
         self.assertIn("(I10)", v.stdout + v.stderr)
+
+    def test_the_gate_does_not_report_a_store_CLEAN_with_an_unstamped_aggregate(self):
+        """THE TESTER'S MINIMAL REPRO, driven through the route a CI tail reads.
+
+        A store whose only item is one aggregate with no stamp: the gate printed
+        the NOT-ESTABLISHED line and then, unconditionally, `clean — … I10 all
+        hold`, exit 0. 100% of the population unestablished, and the last line
+        asserting the invariant holds."""
+        path = self.mint_requirement()
+        # …as every aggregate registered before this machinery existed looks:
+        it = wi.load_item(path)
+        events = [{k: v for k, v in e.items() if k != "econ"} for e in it.events]
+        fm = dict(it.fm, events=events)
+        with io.open(path, "w", encoding="utf-8") as f:
+            f.write(wi.render_item(wi.Item(path, fm, it.body), it.declared or {}))
+
+        v = self.run_make("wi-validate", PROJECT=self.project)
+        # §17i — never a plain fail: an unaskable question does not block.
+        self.assertEqual(v.returncode, 0, v.stdout + v.stderr)
+        self.assertIn("NOT ESTABLISHED", v.stdout)
+        last = [l for l in v.stdout.strip().split("\n") if l.strip()][-1]
+        self.assertNotIn("I10", last.split(" all hold")[0].split(". ")[-1], last)
+        self.assertNotIn("clean", last, last)
 
     def test_a_flow_event_on_an_aggregate_is_still_refused_through_make(self):
         self.mint_requirement()

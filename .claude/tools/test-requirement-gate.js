@@ -94,6 +94,20 @@ const { execFileSync } = require('node:child_process')
 // error this gate exists to catch.
 const AC_TAG = /\bAC-[A-Za-z0-9]+[.-][A-Za-z0-9]+/g
 
+// ---------------------------------------------------------------------------
+// The VARIATION-NODE vocabulary (§F11.3). A test may declare the criterion it
+// validates by naming a node of the AUTHORED variation graph
+// (`product/variations/<ITEM>.json`) instead of pasting the `AC-nnn-n` token —
+// because that graph ALREADY records, per node, which criterion the node
+// certifies. Writing the token as well would be a second hand-maintained copy
+// of a fact the graph holds, which is EXP-047's two-writers failure.
+//
+// Deliberately IDENTICAL to the design-quality gate's own `NODE_REF`, so one
+// declaration satisfies both gates and neither can drift into accepting a
+// spelling the other rejects.
+// ---------------------------------------------------------------------------
+const NODE_REF = /@([A-Z]{2,4}-[A-Z]+-\d+(?:\/[a-z0-9][a-z0-9-]*)+)/g
+
 const DEFAULT_CORPUS = {
   // Modules whose exports return bytes reality authored (manifest-gated).
   readerModules: ['fixture-corpus-reader', 'capture-provenance'],
@@ -508,10 +522,20 @@ function extractCases(src, scan) {
     for (const s of strings) if (s.start >= call.start && s.end <= call.end) texts.push(s.text)
     const tags = new Set()
     for (const t of texts) for (const hit of String(t).match(AC_TAG) || []) tags.add(hit)
+    // A variation-node declaration is read from the TITLES ONLY — this case's title and
+    // its enclosing suites'. That is exactly where the design-quality gate reads it
+    // (`fullName`), and the narrowness is the point: a node id that happens to appear in
+    // a comment or inside a string in the body is a MENTION, not a declaration, and
+    // crediting one would let a test claim a criterion by quoting it.
+    const nodeRefs = new Set()
+    for (const t of [...ancestors.map((a) => a.title), call.title]) {
+      for (const hit of String(t).matchAll(NODE_REF)) nodeRefs.add(hit[1])
+    }
     cases.push({
       title: call.title,
       line: lineOf(src, call.start),
       tags: [...tags],
+      nodeRefs: [...nodeRefs],
       suite: ancestors.map((a) => a.title).join(' > '),
     })
   }
@@ -841,7 +865,60 @@ function materialiseHeadTree(repoRoot, project) {
     // config error, which would be an artefact of the materialisation rather than a finding.
     if (!listed.length) fs.mkdirSync(path.join(dest, root.path), { recursive: true })
   }
+  // The variation graph is an INPUT to limb 1, so `--clean-tree` must measure HEAD's copy of
+  // it too. Leaving it out would make the diagnostic report every node-declared case as a
+  // violation — a difference manufactured by the materialisation, which is precisely the
+  // false signal this mode exists to remove.
+  const gdir = cfg.variationGraph && cfg.variationGraph.dir
+  if (gdir && fs.existsSync(path.join(repoRoot, gdir))) {
+    const gabs = path.join(repoRoot, gdir)
+    const listed = git(gabs, ['ls-files']).split('\n').filter((f) => f && f.endsWith('.json'))
+    for (const f of listed) put(path.join(gdir, f), git(gabs, ['show', `HEAD:./${f}`]))
+    if (!listed.length) fs.mkdirSync(path.join(dest, gdir), { recursive: true })
+  }
   return dest
+}
+
+/**
+ * Load the AUTHORED variation graph as `node id -> [acceptance criterion ids]`.
+ *
+ * The graph is a product artefact, not a test artefact: each record names a use-case that
+ * must exist in the item store, and each node carries the criterion it certifies. This gate
+ * only ever READS it — the design-quality gate owns its invariants (`unknownNodeRefs`,
+ * duplicate nodes, nodes rooted at their use-case). Here a node is credit-worthy only if it
+ * EXISTS and declares at least one criterion; anything else falls through to a violation, so
+ * the mechanism cannot become an escape hatch by being pointed at an empty or absent graph.
+ */
+function loadVariationGraph(repoRoot, cfg, configErrors) {
+  const spec = cfg.variationGraph
+  const acByNode = new Map()
+  if (!spec) return acByNode
+  if (!spec.why || String(spec.why).trim().length < MIN_WHY) {
+    configErrors.push(
+      `variationGraph (${spec.dir}): 'why' must state a REASON of at least ${MIN_WHY} ` +
+      'characters. A second vocabulary for "what does this test validate" is exactly the ' +
+      'kind of thing that must justify itself in writing.')
+  }
+  const dir = path.join(repoRoot, spec.dir || '')
+  if (!spec.dir || !fs.existsSync(dir)) {
+    configErrors.push(
+      `variationGraph dir '${spec.dir}' does not exist under ${repoRoot} — a graph that is ` +
+      'not there resolves nothing and would silently turn every node-declared case back ' +
+      'into a violation, which reads as debt rather than as a broken instrument.')
+    return acByNode
+  }
+  for (const f of fs.readdirSync(dir)) {
+    if (!f.endsWith('.json')) continue
+    let rec
+    try { rec = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) } catch (e) {
+      configErrors.push(`variationGraph record ${f} is not valid JSON: ${e.message}`)
+      continue
+    }
+    for (const n of rec.nodes || []) {
+      if (n && n.id) acByNode.set(n.id, Array.isArray(n.ac) ? n.ac.filter(Boolean) : [])
+    }
+  }
+  return acByNode
 }
 
 function loadConfig(repoRoot, project) {
@@ -851,6 +928,25 @@ function loadConfig(repoRoot, project) {
 }
 
 const MIN_WHY = 30
+
+/**
+ * Why a node reference did NOT buy this case out of limb 1. Stated per case, because
+ * "your node is not in the graph" and "your node certifies no criterion" are different
+ * mistakes with different fixes, and a gate that says only "untagged" sends the engineer
+ * to add a tag they already wrote.
+ */
+function variationDetail(nodeRefs, acByNode) {
+  if (!nodeRefs.length || !acByNode.size) return null
+  const unknown = nodeRefs.filter((n) => !acByNode.has(n))
+  if (unknown.length) {
+    return `names variation node ${unknown.join(', ')}, which is not in the variation graph — ` +
+      'so nothing records which criterion it certifies. Author the node (with its `ac`), or ' +
+      'correct the id; a node that exists nowhere is a claim, not a declaration.'
+  }
+  return `names variation node ${nodeRefs.join(', ')}, which declares no acceptance criterion ` +
+    '(`ac` is empty). The graph is where that link lives, so fill it in there rather than ' +
+    'pasting the token into the title — one writer of the fact, not two.'
+}
 
 // ===========================================================================
 // runGate — the whole analysis, as data. No process.exit, no printing.
@@ -886,6 +982,9 @@ function runGate(opts) {
     return { ...a, re: globToRe(a.path || ''), hits: 0 }
   })
 
+  const acByNode = loadVariationGraph(repoRoot, cfg, configErrors)
+  const resolvedByVariation = []
+
   const files = []
   for (const root of cfg.roots || []) {
     const abs = path.join(repoRoot, root.path)
@@ -904,6 +1003,7 @@ function runGate(opts) {
   const raw = []
   let cases = 0
   let headerOnly = 0
+  let byVariation = 0
   for (const f of files) {
     const src = fs.readFileSync(path.join(repoRoot, f.file), 'utf8')
     const lang = /\.py$/.test(f.file) ? 'py' : 'js'
@@ -914,6 +1014,20 @@ function runGate(opts) {
       cases += cs.length
       for (const c of cs) {
         if (c.tags.length) continue
+        // A node declaration is credited only when the graph HOLDS that node AND the node
+        // names a criterion. An unknown node, or a node that certifies nothing, falls
+        // through to the violation below with the reason said out loud — so the mechanism
+        // fails CLOSED, and a made-up node id can never buy a case out of limb 1.
+        if ((c.nodeRefs || []).length && acByNode.size) {
+          const credited = (c.nodeRefs || []).filter((n) => (acByNode.get(n) || []).length)
+          if (credited.length) {
+            byVariation++
+            for (const n of credited) {
+              resolvedByVariation.push({ file: f.file, line: c.line, node: n, ac: acByNode.get(n) })
+            }
+            continue
+          }
+        }
         if (headerTags.length) {
           headerOnly++
           if (cfg.fileHeaderCoversCounts) continue
@@ -926,7 +1040,8 @@ function runGate(opts) {
               'which is a file-level coverage claim, not this case\'s requirement. Either it ' +
               'validates a criterion (name it) or it validates none (delete it, or register ' +
               'the criterion it found and retro why it was missed).'
-            : 'no AC reference in the case title, its suite, or its comments. Per the ruling ' +
+            : variationDetail(c.nodeRefs || [], acByNode) ||
+              'no AC reference in the case title, its suite, or its comments. Per the ruling ' +
               'this is either waste (delete it) or an undiscovered acceptance criterion ' +
               '(register it — and the discovery gap earns a retro).',
         })
@@ -961,6 +1076,7 @@ function runGate(opts) {
     allowlistEntries: allowlist.length,
     staleAllowlistEntries: allowlist.filter((a) => a.hits === 0).length,
     acCoveredByFileHeaderOnly: headerOnly,
+    acCoveredByVariationNode: byVariation,
   }
 
   const baseline = cfg.baseline || { ac: 0, authored: 0 }
@@ -980,7 +1096,7 @@ function runGate(opts) {
 
   return {
     verdict, exitCode: verdict === 'FAIL' ? 2 : 0, project, mode,
-    violations, configErrors, counts, baseline, regressions, slack,
+    violations, configErrors, counts, baseline, regressions, slack, resolvedByVariation,
     allowlist: allowlist.map((a) => ({ path: a.path, limb: a.limb, rule: a.rule, why: a.why, hits: a.hits })),
   }
 }

@@ -1021,3 +1021,144 @@ test('AC-106.7-ledger: EVERY guard modifier behaves both ways — directive with
     assert.strictEqual(lines(titled, 'ac').length, 1, `test.${mod}('title', fn) must still be counted`)
   }
 })
+
+// ==========================================================================
+// LIMB 1 — A VARIATION-NODE REFERENCE IS AN AC REFERENCE, WHEN THE GRAPH SAYS
+// WHICH CRITERION THE NODE CERTIFIES (DEF-ROC-192).
+//
+// WHY THIS IS NOT A WIDENING. ROC's requirement decomposition lives in an
+// AUTHORED variation graph (`product/variations/<ITEM>.json`, §F11.3): every
+// node carries `variation` (the requirement, in words), `why`, and `ac` (the
+// criterion it certifies). The test declares the node in its TITLE, which the
+// design-quality gate already checks against that graph. So an engineer who
+// follows §F11.3 has ALREADY declared the criterion — through a CHECKED
+// derivation — and demanding the `AC-nnn-n` token as well is asking for a
+// second, hand-maintained copy of a fact the graph holds. That is EXP-047's
+// two-writers failure, which this file's own header warns against.
+//
+// IT FAILS CLOSED, which is what keeps it from being an escape hatch:
+//   * no graph configured                -> nothing changes for that project
+//   * node not in the graph              -> STILL a violation
+//   * node in the graph with no `ac`     -> STILL a violation
+//   * ref only in a comment or a string  -> STILL a violation (title/suite only,
+//                                           exactly the DQG's own rule)
+// ==========================================================================
+
+const GRAPH_ROOT = 'product/variations'
+const graphCfg = {
+  variationGraph: {
+    dir: GRAPH_ROOT,
+    why: 'the authored variation graph — a node names the criterion it certifies',
+  },
+}
+const graphFile = (useCase, nodes) => JSON.stringify({ useCase, nodes }, null, 1)
+
+test('limb1: a case naming a graph node that declares an AC is NOT a violation', () => {
+  const r = run({
+    'tests/a.test.ts': `
+describe('DEF-ROC-226 any node name may be published', () => {
+  it('an arbitrary node name is ACCEPTED @DEF-ROC-226/subject/any-node-name-is-accepted', () => {})
+})
+`,
+    [`${GRAPH_ROOT}/DEF-ROC-226.json`]: graphFile('DEF-ROC-226', [
+      { id: 'DEF-ROC-226/subject/any-node-name-is-accepted', ac: ['AC-226-1'], variation: 'the happy path' },
+    ]),
+  }, graphCfg)
+  assert.deepStrictEqual(rules(r, 'ac'), [])
+  assert.strictEqual(r.counts.acCoveredByVariationNode, 1)
+})
+
+test('limb1: the resolved criterion is REPORTED, so the credit is auditable', () => {
+  const r = run({
+    'tests/a.test.ts': `
+describe('s', () => { it('x @DEF-ROC-226/subject/n', () => {}) })
+`,
+    [`${GRAPH_ROOT}/DEF-ROC-226.json`]: graphFile('DEF-ROC-226', [
+      { id: 'DEF-ROC-226/subject/n', ac: ['AC-226-1', 'AC-226-4'], variation: 'v' },
+    ]),
+  }, graphCfg)
+  assert.deepStrictEqual(r.resolvedByVariation, [
+    { file: 'tests/a.test.ts', line: 2, node: 'DEF-ROC-226/subject/n', ac: ['AC-226-1', 'AC-226-4'] },
+  ])
+})
+
+test('limb1: a node the graph does NOT hold is still a violation, and says which node', () => {
+  const r = run({
+    'tests/a.test.ts': `
+describe('s', () => { it('x @DEF-ROC-226/subject/invented-by-the-engineer', () => {}) })
+`,
+    [`${GRAPH_ROOT}/DEF-ROC-226.json`]: graphFile('DEF-ROC-226', [
+      { id: 'DEF-ROC-226/subject/a-real-one', ac: ['AC-226-1'], variation: 'v' },
+    ]),
+  }, graphCfg)
+  assert.deepStrictEqual(rules(r, 'ac'), ['no-ac-reference'])
+  assert.match(lines(r, 'ac')[0].detail, /DEF-ROC-226\/subject\/invented-by-the-engineer/)
+  assert.match(lines(r, 'ac')[0].detail, /not in the variation graph/)
+})
+
+test('limb1: a graph node that declares NO ac certifies nothing — still a violation', () => {
+  const r = run({
+    'tests/a.test.ts': `
+describe('s', () => { it('x @DEF-ROC-226/subject/n', () => {}) })
+`,
+    [`${GRAPH_ROOT}/DEF-ROC-226.json`]: graphFile('DEF-ROC-226', [
+      { id: 'DEF-ROC-226/subject/n', ac: [], variation: 'v' },
+    ]),
+  }, graphCfg)
+  assert.deepStrictEqual(rules(r, 'ac'), ['no-ac-reference'])
+  assert.match(lines(r, 'ac')[0].detail, /declares no acceptance criterion/)
+})
+
+test('limb1: with no variationGraph configured, a node ref credits nothing', () => {
+  const r = run({
+    'tests/a.test.ts': `
+describe('s', () => { it('x @DEF-ROC-226/subject/n', () => {}) })
+`,
+  })
+  assert.deepStrictEqual(rules(r, 'ac'), ['no-ac-reference'])
+  assert.strictEqual(r.counts.acCoveredByVariationNode, 0)
+})
+
+test('limb1: a node ref in a COMMENT or a body string does not count — title and suite only', () => {
+  const r = run({
+    'tests/a.test.ts': `
+describe('s', () => {
+  // @DEF-ROC-226/subject/n
+  it('x', () => { const s = '@DEF-ROC-226/subject/n' })
+})
+`,
+    [`${GRAPH_ROOT}/DEF-ROC-226.json`]: graphFile('DEF-ROC-226', [
+      { id: 'DEF-ROC-226/subject/n', ac: ['AC-226-1'], variation: 'v' },
+    ]),
+  }, graphCfg)
+  assert.deepStrictEqual(rules(r, 'ac'), ['no-ac-reference'])
+})
+
+test('limb1: the node ref may be declared on the SUITE, which is where a whole group shares one', () => {
+  const r = run({
+    'tests/a.test.ts': `
+describe('the group @DEF-ROC-226/subject/n', () => { it('x', () => {}) })
+`,
+    [`${GRAPH_ROOT}/DEF-ROC-226.json`]: graphFile('DEF-ROC-226', [
+      { id: 'DEF-ROC-226/subject/n', ac: ['AC-226-1'], variation: 'v' },
+    ]),
+  }, graphCfg)
+  assert.deepStrictEqual(rules(r, 'ac'), [])
+})
+
+test('limb1: a variationGraph pointing at a directory that does not exist is a CONFIG ERROR', () => {
+  const r = run({ 'tests/a.test.ts': `describe('s', () => { it('x', () => {}) })` }, {
+    variationGraph: { dir: 'product/nope', why: 'a graph that is not there scans nothing and reports clean' },
+  })
+  assert.strictEqual(r.verdict, 'FAIL')
+  assert.match(r.configErrors.join('\n'), /product\/nope/)
+})
+
+test('limb1: a variationGraph entry with no stated reason is a CONFIG ERROR', () => {
+  const r = run({
+    'tests/a.test.ts': `describe('s', () => { it('x', () => {}) })`,
+    [`${GRAPH_ROOT}/X.json`]: graphFile('X', []),
+  }, { variationGraph: { dir: GRAPH_ROOT } })
+  assert.strictEqual(r.verdict, 'FAIL')
+  assert.match(r.configErrors.join('\n'), /variationGraph/)
+})

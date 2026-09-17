@@ -1787,6 +1787,22 @@ def cmd_append(a):
         return _append_locked(a)
 
 
+def aggregate_flow_event_refusal(graphs, itype, iid):
+    """Why an aggregate refuses a FLOW EVENT — the message, or None if it does not.
+
+    One named predicate for one question, because the call site used to ask a
+    DIFFERENT question than the one its message answered: it keyed on the type's
+    `kind` alone and therefore refused every event, while the reason it printed
+    ("its state bubbles from children") is only ever true of a STATE TRANSITION.
+    An aggregate genuinely has no fold — `state-graphs.json` gives it no `events`
+    map at all — so a flow event on one is meaningless and stays refused.
+    """
+    if graphs.kind(itype) != "aggregate":
+        return None
+    return (f"append: {iid} is an aggregate ({itype}); its state bubbles "
+            f"from children — you do not append flow events to it.")
+
+
 def _append_locked(a):
     a.note = resolve_note(a)
     graphs = Graphs.load()
@@ -1795,9 +1811,9 @@ def _append_locked(a):
         sys.exit(f"append: no item {a.id} in work/{a.project}/items/(active|done)/")
     item = load_item(path)
     state = fold_state(graphs, item.type, item.events)
-    if graphs.kind(item.type) == "aggregate":
-        sys.exit(f"append: {a.id} is an aggregate ({item.type}); its state bubbles "
-                 f"from children — you do not append flow events to it.")
+    refusal = aggregate_flow_event_refusal(graphs, item.type, a.id)
+    if refusal:
+        sys.exit(refusal)
 
     # --- ownership [v11, OI-ROC-006] -----------------------------------------
     # `OWNER=` declares WHO the item is routed to, in the SAME act as the flow

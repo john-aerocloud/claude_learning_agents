@@ -706,19 +706,17 @@ function indexEntry(repo, file, env) {
  *                                          same work item — not a concurrent writer;
  *                                          commit my blob, merge nothing (DEF-ROC-189)
  */
-function resolveCoowned({
-  repo,
-  privEnv,
-  oldHead,
-  file,
-  message = null,
-  depth = COOWNED_SCAN_DEPTH,
-  derivedExempt = true,
-  evidenceMustSurviveInHead = true,
-  duplicationPostCondition = true,
-  addAddContentRule = true,
-  ownItemContinuity = true,
-}) {
+/**
+ * THE TWO SIDES OF ONE CO-OWNED PATH, and the mask that makes them comparable.
+ * Extracted so every reader of "what does HEAD have that my copy does not" answers
+ * it from the SAME texts the merge operates on — a second derivation of the same
+ * fact is how two readers come to disagree (EXP-047).
+ *
+ * @returns {null} when the path is not mergeable material at all (new here, deleted
+ *          by me, not a regular file, binary) — the cases the guard never governs
+ *        | {headBlob, mineBlob, mineEntry, mineSplit, exempting, mask}
+ */
+function coownedTexts({ repo, privEnv, oldHead, file, derivedExempt = true }) {
   const headBlob = blobAt(repo, oldHead, file);
   if (headBlob === null) return null; // new file — nobody to clobber
   const mineEntry = indexEntry(repo, file, privEnv);
@@ -734,6 +732,25 @@ function resolveCoowned({
   const headSplit = derivedExempt ? splitDerived(headBlob) : null;
   const exempting = mineSplit !== null && headSplit !== null;
   const mask = exempting ? maskDerived : (t) => t;
+  return { headBlob, mineBlob, mineEntry, mineSplit, exempting, mask };
+}
+
+function resolveCoowned({
+  repo,
+  privEnv,
+  oldHead,
+  file,
+  message = null,
+  depth = COOWNED_SCAN_DEPTH,
+  derivedExempt = true,
+  evidenceMustSurviveInHead = true,
+  duplicationPostCondition = true,
+  addAddContentRule = true,
+  ownItemContinuity = true,
+}) {
+  const sides = coownedTexts({ repo, privEnv, oldHead, file, derivedExempt });
+  if (sides === null) return null;
+  const { headBlob, mineBlob, mineEntry, mineSplit, exempting, mask } = sides;
 
   const log = gitTry(repo, ['log', `--max-count=${depth}`, '--format=%H', oldHead, '--', file]);
   if (!log.ok) return null;
@@ -1434,6 +1451,7 @@ module.exports = {
   commitObjectMessage,
   contentLines,
   linesAdded,
+  coownedTexts,
   coownedStaleAgainst,
   workItemIds,
   sameWorkItem,

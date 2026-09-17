@@ -1436,13 +1436,23 @@ function parseArgv(argv) {
     printCoownedMissing: false,
   };
   let i = 0;
+  /**
+   * CONSUME THE FOLLOWING ARGV TOKEN as `name`'s value. One named place, because
+   * five call sites each writing `argv[++i]` is five independent answers to
+   * "and what if there is no value, or the value is itself an option?" — and the
+   * answer they all gave was to take it silently (DEF-ROC-248).
+   */
+  const takeValue = (name) => {
+    i += 1;
+    return argv[i];
+  };
   for (; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--') {
       out.paths = argv.slice(i + 1);
       break;
-    } else if (a === '--repo') out.repo = argv[++i];
-    else if (a === '--message' || a === '-m') out.message = argv[++i];
+    } else if (a === '--repo') out.repo = takeValue(a);
+    else if (a === '--message' || a === '-m') out.message = takeValue(a);
     // --message-file / -F: the ONLY route a commit message cannot be corrupted on
     // (OI-WI-APPEND-NOTE-PATH-MANGLES-CONTENT). A message on a command line crosses
     // make's expansion and then a shell double-quoted string: `$` is expanded away, a
@@ -1451,7 +1461,7 @@ function parseArgv(argv) {
     // `unexpected EOF while looking for matching '"'`. A PATH has no metacharacters.
     // Same reason `git commit -F` exists.
     else if (a === '--message-file' || a === '-F') {
-      const p = argv[++i];
+      const p = takeValue(a);
       out.messageFile = p;
       try {
         out.message = require('fs').readFileSync(p, 'utf-8');
@@ -1468,13 +1478,13 @@ function parseArgv(argv) {
     // primary form for the same reason --message-file is: a line of real source can
     // carry `$`, a backtick or a quote, and a shell would eat or EXECUTE it.
     else if (a === '--supersede-file') {
-      const f = argv[++i];
+      const f = takeValue(a);
       try {
         out.superseded.push(...require('fs').readFileSync(f, 'utf-8').split('\n'));
       } catch (e) {
         return { error: `cannot read --supersede-file ${f}: ${e.message}` };
       }
-    } else if (a === '--supersede') out.superseded.push(argv[++i]);
+    } else if (a === '--supersede') out.superseded.push(takeValue(a));
     else if (a === '--print-coowned-missing') out.printCoownedMissing = true;
     else if (a === '--allow-duplicate-message') out.allowDuplicateMessage = true;
     else if (a === '--allow-shared-message-file') out.allowSharedMessageFile = true;

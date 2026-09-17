@@ -4998,6 +4998,49 @@ def _wip_activity(graphs, items, states, policy, now):
     return out
 
 
+def _queue_in_queue_age(graphs, items, member_ids, now):
+    """How long the members of ONE queue have SAT there: {median_age_s, oldest_id,
+    oldest_age_s, n}, with `n` counting only the members whose age could be read.
+
+    DEPTH ALONE CANNOT BE ACTED ON (v132), and this is the quantity that can be. A
+    queue of 60 items that each clear in an hour is healthy; a queue of 12 that have
+    each sat three days is the constraint.
+
+    EXTRACTED from check 3's advisory branch (OI-ROC-030) and deliberately so: how a
+    queue's aging is MEASURED and which SEVERITY its depth carries change for
+    different reasons and at different times, and welding the two together is what
+    made the measure unavailable to any queue class that arrived later. Members whose
+    segment cannot be replayed are simply absent from `n` — this is a REPORT beside a
+    number, never a gate, so it owes no §17i could-not-look verdict of its own (the
+    gates that DO block on age — checks 1 and 4 — each carry their own)."""
+    ages = []
+    for mid in member_ids:
+        _st, ent = _current_segment(graphs, items[mid], now)
+        if ent is not None:
+            ages.append(((now - ent).total_seconds(), mid))
+    ages.sort(reverse=True)
+    return {
+        "median_age_s": (_median([a for a, _ in ages]) if ages else None),
+        "oldest_id": (ages[0][1] if ages else None),
+        "oldest_age_s": (ages[0][0] if ages else None),
+        "n": len(ages),
+    }
+
+
+def _queue_age_phrase(age):
+    """The count-independent age summary as one readable clause, or '' when no
+    member's age could be read."""
+    if not age or not age["n"]:
+        return ""
+    return (
+        f" AGE (count-independent — read this, not the depth): median "
+        f"{age['median_age_s'] / 86400.0:.1f}d in-queue across {age['n']} items, "
+        f"oldest {age['oldest_id']} at {age['oldest_age_s'] / 86400.0:.1f}d."
+        f" Aging inventory is the single largest measured contributor "
+        f"to gross lead time; every item here is either scheduled for a"
+        f" pull or owes an explicit decline/defer-with-date.")
+
+
 def _activity_phrase(row):
     """The occupancy/activity split as one readable clause. Used in the gate header
     and in check 3's WIP line so `depth` can never again be read as activity."""
@@ -5322,27 +5365,12 @@ def compute_loop_gate(graphs, project, stale_hours=DEFAULT_STALE_HOURS,
             # three days is the constraint. Report the count-independent AGE
             # beside the count, and name the oldest — the retro needs to know
             # WHICH items are aging, not merely how many exist.
-            ages = []
-            for mid in members[q]:
-                _st, ent = _current_segment(graphs, items[mid], now)
-                if ent is not None:
-                    ages.append(((now - ent).total_seconds(), mid))
-            ages.sort(reverse=True)
-            age_txt = ""
-            if ages:
-                med = _median([a for a, _ in ages])
-                oldest_s, oldest_id = ages[0]
-                age_txt = (
-                    f" AGE (count-independent — read this, not the depth): median "
-                    f"{med / 86400.0:.1f}d in-queue across {len(ages)} items, "
-                    f"oldest {oldest_id} at {oldest_s / 86400.0:.1f}d."
-                    f" Aging inventory is the single largest measured contributor "
-                    f"to gross lead time; every item here is either scheduled for a"
-                    f" pull or owes an explicit decline/defer-with-date.")
+            age = _queue_in_queue_age(graphs, items, members[q], now)
+            age_txt = _queue_age_phrase(age)
             findings.append(dict(common, severity="advisory",
-                                 median_age_s=(_median([a for a, _ in ages]) if ages else None),
-                                 oldest_id=(ages[0][1] if ages else None),
-                                 oldest_age_s=(ages[0][0] if ages else None),
+                                 median_age_s=age["median_age_s"],
+                                 oldest_id=age["oldest_id"],
+                                 oldest_age_s=age["oldest_age_s"],
                                  message=(
                 f"ADVISORY (does NOT block the pull) [queue-over-cap] {q} depth "
                 f"{depths[q]} > wip_limit {cap} — over by {over}. {q} is a BACKLOG "

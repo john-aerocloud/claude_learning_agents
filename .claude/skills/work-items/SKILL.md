@@ -59,9 +59,14 @@ stamps the resulting economics on the event it writes, and invariant **I10** com
 the file against that stamp: a change that reached the file any other way is reported as
 a FORGERY, naming the item. An aggregate that has never been amended carries no stamp
 and is reported as **NOT ESTABLISHED** — never a pass — and establishes itself at its
-next amendment. (`wi-mint` stamps every aggregate it creates, so anything registered
+next amendment. While any invariant is unestablished the summary line reports the store
+**`NOT CLEAN`** and does not name that invariant among the ones that hold; the exit code
+is unchanged, so it withholds a claim rather than blocking the pull (§17i). (`wi-mint` stamps every aggregate it creates, so anything registered
 through the machinery is checkable from birth.) A flow item's economics are NOT yet
-covered by I10; that is the recorded residual, not a permission to hand-edit.
+covered by I10; that is the recorded residual, not a permission to hand-edit. I10 is a
+consistency check, **not a signature**: an edit that rewrites the `econ:` stamp on the
+last event as well as the frontmatter agrees with itself and passes — see
+`CONTRACT.md` for what the stamp is and is not worth.
 Every state maps to:
 - a **queue** via `queue_map[state]` (`intake | ready | rework | waiting | wip`, or
   `null` for terminal/aggregate) — this is how queues are generated, derived.

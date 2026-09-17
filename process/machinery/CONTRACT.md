@@ -275,7 +275,24 @@ SET2='defer_until='` changes `value`/`cost`/`job`/`defer_until` through the writ
 and stamps the result on the event. **Invariant I10 compares the file against that stamp**,
 so a definition change made any other way is reported as a forgery instead of passing every
 gate — which is what a hand-edit of `REQ-ROC-030` did. An aggregate with no stamp is
-reported NOT ESTABLISHED, never clean.
+reported NOT ESTABLISHED, never clean: `wi-validate`'s **summary line names an invariant
+among those that HOLD only when it was established**, and while any invariant is
+unestablished the store is reported `NOT CLEAN` rather than `clean` — with the exit code
+unchanged, because §17i's "cannot measure" is never a pass AND never a plain fail. The
+sentence is composed from the verdicts in one place (`validate_summary`) so an invariant
+cannot be appended to the list asserted to hold while its own check says otherwise, which
+is exactly what happened when I10 was added.
+
+**WHAT THE STAMP IS WORTH, and what it is not.** It is a CONSISTENCY CHECK against the
+item's own record, not a signature. An edit that changes the frontmatter **and** rewrites
+the `econ:` value on the last event agrees with itself and passes I10 — and I9 does not
+see it either, because an event's identity is deliberately `(ts, event, agent)`, so a
+value changed INSIDE an already-committed event line is not a dropped event. What I10
+does buy is that a definition change must now be **made in two places consistently, in a
+file whose history is committed**, instead of being invisible in one; the remaining
+record is git. Closing it would need a keyed signature, which is not what this is. The
+limit is pinned by a test (`TestWhatI10DoesNotCover`), so if a later change closes it the
+test fails and this paragraph is corrected in the same act.
 
 **Recording a CHANGE FAILURE — an annotation, not a workflow step [state-graph v10].** A build
 or a deploy can go red at any moment work is live, not only while the item sits in `building` or

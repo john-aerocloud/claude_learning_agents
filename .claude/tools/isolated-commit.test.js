@@ -1808,3 +1808,443 @@ test('AC-189.11 the behaviour is DOCUMENTED where an agent meets it: the tool\'s
   assert.match(doc + block, /DEF-ROC-189/, 'the target that teaches the commit path must teach this too');
   assert.match(doc + block, /work[- ]item/i);
 });
+
+// --- AC-173.* — DEF-ROC-173: SUPERSEDING a committed line and being STALE
+//     against it are the same file pair, so the guard refused a correct commit
+// ---------------------------------------------------------------------------
+//
+// DEF-ROC-189 fixed the case where the tip commit for the path was MINE, under the
+// SAME work item. That covers an agent committing twice in a row to one file — the
+// NARROW case. The BROAD case is the one that keeps happening: the tip commit for a
+// co-owned file is almost always a DIFFERENT item's, and replacing a line it added
+// presents to a line-level diff exactly as never having seen it. Three parties were
+// blocked by this in ONE day (a UC-ROC-117 engineer, a DEF-ROC-161 engineer, and the
+// retro on its required row retirements), and the only documented way past was
+// COOWNED_MERGE_OFF=1 — which switches off the protection WHOLESALE, on the exact
+// file with a measured history of silent permanent loss. A guard people learn to
+// disable is worth less than its running cost.
+//
+// THE AFFORDANCE: the engineer names the LINES. "I have read HEAD and decided
+// against these specific lines" is an assertion a line-level diff cannot make for
+// itself, and it is narrower than the switch by construction: anything NOT named is
+// still guarded, so a concurrent agent's row landing in the meantime still fires.
+//
+// AC-173.1  REPRODUCTION, on the two REAL cases: undeclared, both still refuse (7).
+// AC-173.2  CONTROL ENABLED: declaring exactly the superseded lines LANDS the real
+//           commit, and HEAD is byte-identical to the engineer's own blob.
+// AC-173.3  NARROW: a declaration excuses ONLY the lines it names — staleness for
+//           anything else still fires. This is the property COOWNED_MERGE_OFF lacks.
+// AC-173.4  FAIL CLOSED on a bogus declaration: a line HEAD does not have, or one I
+//           still carry, is refused (exit 2). You cannot supersede what you did not
+//           remove, so the declaration cannot be written from memory.
+// AC-173.5  the founding SILENT-LOSS case is untouched, and the blade's edge is
+//           pinned: undeclared, all four rows survive; a declaration naming another
+//           agent's row DOES remove it, and SAYS SO.
+// AC-173.6  DUPLICATION STAYS IMPOSSIBLE — the DEFECT-OAG-142 arms re-run with a
+//           supersession declared: identical sides are still a no-op, staleness
+//           evidence must still survive in HEAD, the post-condition still refuses.
+// AC-173.7  INERT WITHOUT A DECLARATION — no declaration, no behaviour change.
+// AC-173.8  the decision is REPORTED through the real CLI, never silent.
+// AC-173.9  the refusal TEACHES the narrow move rather than the wholesale switch.
+// AC-173.10 --print-coowned-missing prints the exact review list, so the declaration
+//           is made from HEAD rather than from memory.
+// AC-173.11 the Makefile and the tool's own usage document it.
+
+const crypto = require('node:crypto');
+
+const FIXTURES = path.join(__dirname, 'fixtures', 'def-roc-173');
+const PROVENANCE = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'provenance.json'), 'utf-8'));
+
+/**
+ * A REAL blob, byte-exact, with its recorded sha256 re-checked on every run — a
+ * fixture that can be hand-edited is a fixture that stops being real (v125).
+ */
+function realBlob(caseName, role) {
+  const r = PROVENANCE.cases[caseName].revs[role];
+  const buf = fs.readFileSync(path.join(FIXTURES, r.blob));
+  assert.equal(
+    crypto.createHash('sha256').update(buf).digest('hex'),
+    r.sha256,
+    `fixture ${r.blob} no longer matches the blob captured from ${r.sha} — it is no longer real`,
+  );
+  return buf.toString('utf-8');
+}
+
+/**
+ * Replay the REAL two-commit history of the path (real blobs, real commit messages)
+ * and leave the engineer's REAL blob saved in the working tree, as the agent had it.
+ */
+function makeRealCaseRepo(caseName) {
+  const c = PROVENANCE.cases[caseName];
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'def173-'));
+  execFileSync('git', ['init', '-q', '-b', 'main', repo]);
+  git(repo, ['config', 'user.email', 'agent@example.test']);
+  git(repo, ['config', 'user.name', 'Agent']);
+  git(repo, ['config', 'commit.gpgsign', 'false']);
+  for (const role of ['parent', 'head']) {
+    write(repo, c.path, realBlob(caseName, role));
+    git(repo, ['add', '--', c.path]);
+    const f = path.join(repo, '.git', 'REAL_MSG');
+    fs.writeFileSync(f, c.revs[role].message);
+    git(repo, ['commit', '-q', '-F', f]);
+  }
+  write(repo, c.path, realBlob(caseName, 'mine'));
+  return {
+    repo,
+    file: c.path,
+    message: c.revs.mine.message,
+    mineBlob: realBlob(caseName, 'mine'),
+    headBlob: realBlob(caseName, 'head'),
+  };
+}
+
+/** The lines of HEAD this copy no longer carries — the review list, from the blobs. */
+function reviewList(caseName) {
+  return tool.linesAdded(realBlob(caseName, 'mine'), realBlob(caseName, 'head'));
+}
+
+test('AC-173.1 the two REAL cases carry real, DIFFERENT work items — so DEF-ROC-189 continuity cannot reach either', () => {
+  const cd = PROVENANCE.cases['class-deps'].revs;
+  assert.match(cd.mine.message, /UC-ROC-117/);
+  const uc = PROVENANCE.cases.uc086.revs;
+  assert.match(uc.head.message, /UC-ROC-120/, "the tip commit is another item's work");
+  assert.match(uc.mine.message, /DEF-ROC-231/, 'and mine is a different item again');
+  assert.equal(
+    /DEF-ROC-231/.test(uc.head.message),
+    false,
+    'the escape DEF-ROC-189 added is unavailable here, which is why it did not cover the common case',
+  );
+});
+
+test('AC-173.1 REPRODUCTION (real class-deps.mmd, 5cc917a5 -> 78e6febf): the deliberate supersession is REFUSED at exit 7', () => {
+  const { repo, file, message } = makeRealCaseRepo('class-deps');
+  const before = git(repo, ['rev-parse', 'HEAD']);
+  const err = grab(() => tool.isolatedCommit({ repo, message, paths: [file] }));
+  assert.equal(err.code, 7, err.message);
+  assert.equal(git(repo, ['rev-parse', 'HEAD']), before, 'HEAD unmoved — the correct commit is deterred');
+});
+
+test('AC-173.1 REPRODUCTION (real uc086RuleReadsFailSafe.test.ts, ONE line, cross-item): also REFUSED at exit 7', () => {
+  const { repo, file, message } = makeRealCaseRepo('uc086');
+  const before = git(repo, ['rev-parse', 'HEAD']);
+  const err = grab(() => tool.isolatedCommit({ repo, message, paths: [file] }));
+  assert.equal(err.code, 7, err.message);
+  assert.equal(git(repo, ['rev-parse', 'HEAD']), before);
+});
+
+test('AC-173.1 the review list is exactly what the item recorded by hand: five real lines, and one', () => {
+  const cd = reviewList('class-deps');
+  assert.equal(cd.length, 5, 'the UC-ROC-117 engineer established the removed set was exactly five lines');
+  assert.equal(cd.filter((l) => l.startsWith('class ')).length, 1, 'four node labels and one classDef line');
+  const uc = reviewList('uc086');
+  assert.deepEqual(uc, [
+    '["drafts", "editable", "publishDisabled", "retired", "rules", "selfManaged", "site"].sort(),',
+  ]);
+});
+
+test('AC-173.2 CONTROL ENABLED (real class-deps.mmd): declaring the five superseded lines LANDS the commit, byte-identical to the engineer\'s own blob', () => {
+  const { repo, file, message, mineBlob } = makeRealCaseRepo('class-deps');
+  const r = tool.isolatedCommit({ repo, message, paths: [file], superseded: reviewList('class-deps') });
+  assert.equal(typeof r.sha, 'string');
+  assert.equal(git(repo, ['show', `HEAD:${file}`]) + '\n', mineBlob, 'HEAD carries MY blob, byte for byte');
+  for (const l of reviewList('class-deps'))
+    assert.equal(git(repo, ['show', `HEAD:${file}`]).includes(l), false, 'no superseded line is resurrected');
+  assert.equal(r.coownedSupersessions.length, 1);
+  assert.deepEqual(r.coownedSupersessions[0].lines.sort(), reviewList('class-deps').sort());
+});
+
+test('AC-173.2 CONTROL ENABLED (real uc086 one-liner, cross-item): declaring the one line LANDS the commit', () => {
+  const { repo, file, message, mineBlob } = makeRealCaseRepo('uc086');
+  const r = tool.isolatedCommit({ repo, message, paths: [file], superseded: reviewList('uc086') });
+  assert.equal(git(repo, ['show', `HEAD:${file}`]) + '\n', mineBlob);
+  assert.equal(
+    git(repo, ['show', `HEAD:${file}`]).includes('"publishDisabled"'),
+    false,
+    'the whole point of the commit: the key is gone, not merged back',
+  );
+  assert.equal(r.coownedSupersessions[0].lines.length, 1);
+});
+
+test('AC-173.3 NARROW: a declaration excuses ONLY the lines it names — a concurrent agent\'s row landing meanwhile STILL fires', () => {
+  const { repo, file, message } = makeRealCaseRepo('uc086');
+  // A concurrent agent commits an unrelated line to the same file after my copy was read.
+  const head = git(repo, ['show', `HEAD:${file}`]);
+  write(repo, file, `${head}\n// a concurrent agent's line (UC-ROC-999)\n`);
+  git(repo, ['add', '--', file]);
+  git(repo, ['commit', '-q', '-m', 'test(config-api): a concurrent agent appends (UC-ROC-999)']);
+  // My copy — which predates that — with my own supersession declared.
+  write(repo, file, realBlob('uc086', 'mine'));
+  const before = git(repo, ['rev-parse', 'HEAD']);
+  const r = tool.isolatedCommit({ repo, message, paths: [file], superseded: reviewList('uc086') });
+  assert.notEqual(git(repo, ['rev-parse', 'HEAD']), before);
+  const landed = git(repo, ['show', `HEAD:${file}`]);
+  assert.match(landed, /a concurrent agent's line/, "the UNDECLARED line is still protected — that is the whole difference from COOWNED_MERGE_OFF");
+  assert.equal(landed.includes('"publishDisabled"'), false, 'while the DECLARED line stays superseded');
+});
+
+test('AC-173.3 CONTROL: the same case with COOWNED_MERGE_OFF LOSES the concurrent agent\'s line — the wholesale switch is not narrow', () => {
+  const { repo, file, message } = makeRealCaseRepo('uc086');
+  const head = git(repo, ['show', `HEAD:${file}`]);
+  write(repo, file, `${head}\n// a concurrent agent's line (UC-ROC-999)\n`);
+  git(repo, ['add', '--', file]);
+  git(repo, ['commit', '-q', '-m', 'test(config-api): a concurrent agent appends (UC-ROC-999)']);
+  write(repo, file, realBlob('uc086', 'mine'));
+  tool.isolatedCommit({ repo, message, paths: [file], coownedMerge: false });
+  assert.equal(
+    /a concurrent agent's line/.test(git(repo, ['show', `HEAD:${file}`])),
+    false,
+    'the documented escape reverts a committed line nobody decided against',
+  );
+});
+
+test('AC-173.4 FAIL CLOSED: a declared line HEAD does not have is REFUSED (exit 2) — you cannot supersede what was never there', () => {
+  const { repo, file, message } = makeRealCaseRepo('uc086');
+  const before = git(repo, ['rev-parse', 'HEAD']);
+  const err = grab(() =>
+    tool.isolatedCommit({
+      repo,
+      message,
+      paths: [file],
+      superseded: [...reviewList('uc086'), 'a line nobody ever committed'],
+    }),
+  );
+  assert.equal(err.code, 2, err.message);
+  assert.match(err.message, /a line nobody ever committed/);
+  assert.equal(git(repo, ['rev-parse', 'HEAD']), before);
+});
+
+test('AC-173.4 FAIL CLOSED: a declared line I STILL CARRY is REFUSED (exit 2) — a declaration is about a removal, not a wish', () => {
+  const { repo, file, message } = makeRealCaseRepo('uc086');
+  const stillMine = tool.contentLines(realBlob('uc086', 'mine')).find((l) => l.includes('import {'));
+  const err = grab(() =>
+    tool.isolatedCommit({ repo, message, paths: [file], superseded: [...reviewList('uc086'), stillMine] }),
+  );
+  assert.equal(err.code, 2, err.message);
+  assert.match(err.message, /import \{/);
+});
+
+test('AC-173.4 FAIL CLOSED: declaring a supersession while the co-owned merge is OFF is contradictory and REFUSED', () => {
+  const { repo, file, message } = makeRealCaseRepo('uc086');
+  const err = grab(() =>
+    tool.isolatedCommit({ repo, message, paths: [file], superseded: reviewList('uc086'), coownedMerge: false }),
+  );
+  assert.equal(err.code, 2, err.message);
+});
+
+test('AC-173.5 the founding SILENT-LOSS case is UNTOUCHED: four writers, no declaration, ALL FOUR rows survive', () => {
+  const repo = makeLedgerRepo();
+  const { ids, results } = raceAppenders(repo, LEDGER, 4);
+  for (const r of results) assert.equal(r.status, 0, r.stderr);
+  for (const id of ids) assert.match(headLedger(repo), new RegExp(`row-from-${id}`));
+});
+
+test("AC-173.5 THE BLADE'S EDGE, pinned rather than hidden: a declaration naming ANOTHER agent's committed row DOES remove it — and says so", () => {
+  const repo = makeLedgerRepo();
+  write(repo, LEDGER, A_LEDGER);
+  tool.isolatedCommit({ repo, message: 'docs(ledger): A appends its edge (ITEM-A)', paths: [LEDGER] });
+  write(repo, LEDGER, B_LEDGER);
+  const r = tool.isolatedCommit({
+    repo,
+    message: 'docs(ledger): B supersedes A deliberately (ITEM-B)',
+    paths: [LEDGER],
+    superseded: ['row-A-agent-A-edge'],
+  });
+  assert.equal(/row-A-agent-A-edge/.test(headLedger(repo)), false, 'a named line is a line you have decided against');
+  assert.deepEqual(r.coownedSupersessions[0].lines, ['row-A-agent-A-edge']);
+});
+
+test('AC-173.6 DUPLICATION STAYS IMPOSSIBLE: the DEFECT-OAG-142 shape with a supersession declared is STILL refused, and names duplication', () => {
+  const { repo, mine, legacySha } = makeBigConfigRepo();
+  const before = git(repo, ['rev-parse', 'HEAD']);
+  write(repo, BIG_CONFIG, mine);
+  // The historical (defective) base selection AND the historical hunk rule, plus a
+  // declaration — a declaration must not be able to buy a duplication.
+  const err = grab(() =>
+    tool.isolatedCommit({
+      repo,
+      message: 'chore(config): apply the ruling (DEF-ROC-173)',
+      paths: [BIG_CONFIG],
+      staleEvidenceMustSurviveInHead: false,
+      addAddContentRule: false,
+      superseded: OAG142_SUPERSEDED,
+    }),
+  );
+  assert.equal(err.code, 7, err.message);
+  assert.match(err.message, /DUPLICATION POST-CONDITION/);
+  assert.equal(git(repo, ['rev-parse', 'HEAD']), before);
+  assert.equal(typeof legacySha, 'string');
+});
+
+/** The three registry lines MY copy really replaced — the only lines it may declare. */
+const OAG142_SUPERSEDED = [
+  'sourcePrefixes: ["ids.producer.7", "ids.alt.7"],',
+  'bidirectional: "ids-bidi-7",',
+  'bidirectional: "ids-bidi-8",',
+];
+
+test('AC-173.6 the DEFECT-OAG-142 shape with a declaration and the CORRECT guards: commits, and the blob is BYTE-IDENTICAL to mine — nothing duplicated', () => {
+  const { repo, mine } = makeBigConfigRepo();
+  write(repo, BIG_CONFIG, mine);
+  tool.isolatedCommit({
+    repo,
+    message: 'chore(config): apply the ruling (DEF-ROC-173)',
+    paths: [BIG_CONFIG],
+    superseded: OAG142_SUPERSEDED,
+  });
+  const landed = headBlobOf(repo, BIG_CONFIG);
+  assert.equal(landed, mine, 'a declaration must not be able to change what lands');
+  assert.equal(countOf(landed, 'const AEROBUS_PRODUCER_REGISTRY'), 1, 'exactly one registry, as before');
+});
+
+test('AC-173.6 a declaration cannot buy a stale base: the historical selection alone, and the ADD/ADD content rule STILL refuses it', () => {
+  const { repo, mine } = makeBigConfigRepo();
+  const before = git(repo, ['rev-parse', 'HEAD']);
+  write(repo, BIG_CONFIG, mine);
+  const err = grab(() =>
+    tool.isolatedCommit({
+      repo,
+      message: 'chore(config): apply the ruling again (DEF-ROC-173)',
+      paths: [BIG_CONFIG],
+      staleEvidenceMustSurviveInHead: false,
+      superseded: OAG142_SUPERSEDED,
+    }),
+  );
+  assert.equal(err.code, 7, err.message);
+  assert.equal(git(repo, ['rev-parse', 'HEAD']), before);
+});
+
+test('AC-173.6 an ADD/ADD hunk whose sides are IDENTICAL is still a NO-OP with a declaration in play', () => {
+  const declared = new Set(['row-A']);
+  assert.deepEqual(
+    tool.resolveAppendCollisions('a\n<<<<<<< MINE\nrow-A\n||||||| base\n=======\nrow-A\n>>>>>>> HEAD\nb\n'),
+    { text: 'a\nrow-A\nb\n' },
+  );
+  assert.equal(declared.size, 1, 'the hunk resolver is content-only and knows nothing of declarations');
+});
+
+test('AC-173.6 the surviving-evidence rule is unaffected: a declaration cannot make a non-surviving contribution evidence', () => {
+  const history = [
+    { sha: 'c2', parentText: 'a\nb\n', text: 'a\nb\n' },
+    { sha: 'c1', parentText: 'a\n', text: 'a\ngone\n' },
+  ];
+  assert.equal(
+    tool.coownedStaleAgainst({
+      headText: 'a\nb\n',
+      mineText: 'a\nmine\n',
+      history,
+      superseded: new Set(['gone']),
+    }),
+    null,
+  );
+});
+
+test('AC-173.7 INERT WITHOUT A DECLARATION: with no superseded lines the selection is byte-identical to before', () => {
+  const history = [{ sha: 'c1', parentText: 'a\n', text: 'a\ntheirs\n' }];
+  const withNone = tool.coownedStaleAgainst({ headText: 'a\ntheirs\n', mineText: 'a\nmine\n', history });
+  const withEmpty = tool.coownedStaleAgainst({
+    headText: 'a\ntheirs\n',
+    mineText: 'a\nmine\n',
+    history,
+    superseded: new Set(),
+  });
+  assert.deepEqual(withNone, withEmpty);
+  assert.equal(withNone.sha, 'c1', 'and it still selects — the guard is not weakened by the parameter existing');
+});
+
+test('AC-173.8 the decision is REPORTED through the real CLI, and the real case exits 0', () => {
+  const { repo, file, message } = makeRealCaseRepo('uc086');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'def173cli-'));
+  const msgFile = path.join(dir, 'msg-DEF-ROC-173.txt');
+  fs.writeFileSync(msgFile, message);
+  const supFile = path.join(dir, 'superseded.txt');
+  fs.writeFileSync(supFile, `${reviewList('uc086').join('\n')}\n`);
+
+  const refused = runCli(repo, ['--repo', repo, '--message-file', msgFile, '--', file]);
+  assert.equal(refused.status, 7);
+
+  const ok = runCli(repo, ['--repo', repo, '--message-file', msgFile, '--supersede-file', supFile, '--', file]);
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.match(ok.stderr, /SUPERSESSION DECLARED/);
+  assert.match(ok.stderr, /publishDisabled/, 'the report NAMES what the declaration let through');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('AC-173.9 the exit-7 refusal TEACHES the narrow move, names the lines, and no longer leaves the wholesale switch as the only way past', () => {
+  const { repo, file, message } = makeRealCaseRepo('uc086');
+  const err = grab(() => tool.isolatedCommit({ repo, message, paths: [file] }));
+  assert.equal(err.code, 7);
+  assert.match(err.message, /publishDisabled/, 'the lines your copy lacks are NAMED, so the review list is in the refusal');
+  assert.match(err.message, /supersede/i);
+  assert.match(err.message, /DEF-ROC-173/);
+});
+
+test('AC-173.10 --print-coowned-missing prints exactly the review list, so a declaration is made from HEAD and not from memory', () => {
+  const { repo, file } = makeRealCaseRepo('class-deps');
+  const res = runCli(repo, ['--repo', repo, '--print-coowned-missing', '--', file]);
+  assert.equal(res.status, 0, res.stderr);
+  const printed = res.stdout.split('\n').filter((l) => l.length > 0);
+  assert.deepEqual(printed.sort(), reviewList('class-deps').sort());
+});
+
+test('AC-173.10 --print-coowned-missing exits 4 when nothing of HEAD is missing — "nothing to declare" is not a pass', () => {
+  const { repo, file } = makeRealCaseRepo('uc086');
+  write(repo, file, `${realBlob('uc086', 'head')}// an ordinary additive edit\n`);
+  const res = runCli(repo, ['--repo', repo, '--print-coowned-missing', '--', file]);
+  assert.equal(res.status, 4, res.stdout + res.stderr);
+});
+
+test('AC-173.11 the Makefile and the tool usage both document the narrow declaration', () => {
+  const mk = fs.readFileSync(path.join(__dirname, '..', '..', 'Makefile'), 'utf-8');
+  const doc = mk.slice(mk.indexOf('# --- DEFECT-OAG-058 commit-isolated'), mk.indexOf('commit-msg-file:'));
+  assert.match(doc, /SUPERSEDE_FILE/, 'the block that teaches the commit path must teach the narrow move');
+  assert.match(doc, /DEF-ROC-173/);
+  const usage = runCli(process.cwd(), ['--help']).stdout;
+  assert.match(usage, /--supersede-file/);
+  assert.match(usage, /--print-coowned-missing/);
+});
+
+test('AC-173.3 a declaration that reality has MOVED ON FROM cannot let a stale overwrite through: the same line changed again in HEAD is REFUSED (exit 2)', () => {
+  const { repo, file, message } = makeRealCaseRepo('uc086');
+  const stale = reviewList('uc086'); // read from HEAD as it was when my copy was taken
+  // A concurrent agent, on a DIFFERENT item, rewrites that very line before I commit.
+  const head = git(repo, ['show', `HEAD:${file}`]).replace(
+    '"publishDisabled", "retired"',
+    '"publishDisabled", "retired", "archived"',
+  );
+  write(repo, file, `${head}\n`);
+  git(repo, ['add', '--', file]);
+  git(repo, ['commit', '-q', '-m', 'feat(rules): a third key lands on that assertion (UC-ROC-121)']);
+
+  write(repo, file, realBlob('uc086', 'mine'));
+  const before = git(repo, ['rev-parse', 'HEAD']);
+  const err = grab(() => tool.isolatedCommit({ repo, message, paths: [file], superseded: stale }));
+  assert.equal(err.code, 2, err.message);
+  assert.equal(git(repo, ['rev-parse', 'HEAD']), before, 'HEAD unmoved — a declaration is re-checked against HEAD AS IT IS NOW');
+});
+
+test('AC-173.3 the MIXED case fails SAFE and SAYS SO: staleness beyond the declaration merges, a declared line comes back, and the report names it', () => {
+  const repo = makeLedgerRepo();
+  const bump = (text, msg) => {
+    write(repo, LEDGER, text);
+    git(repo, ['add', '--', LEDGER]);
+    git(repo, ['commit', '-q', '-m', msg]);
+  };
+  // An OLDER commit adds a line I never saw; a NEWER one adds the line I decide against.
+  bump(`${BASE_LEDGER}row-never-seen\n`, 'docs(ledger): another agent appends (ITEM-Y)');
+  bump(`${BASE_LEDGER}row-never-seen\nrow-i-replace\n`, 'docs(ledger): and then this one (ITEM-X)');
+  // My copy predates BOTH, and I declare only the line I actually decided against.
+  write(repo, LEDGER, `${BASE_LEDGER}row-mine\n`);
+  const r = tool.isolatedCommit({
+    repo,
+    message: 'docs(ledger): my row, superseding one of theirs (ITEM-Z)',
+    paths: [LEDGER],
+    superseded: ['row-i-replace'],
+  });
+  const head = headLedger(repo);
+  assert.match(head, /row-never-seen/, 'the UNDECLARED line is merged back — nothing is lost');
+  assert.match(head, /row-mine/);
+  const x = r.coownedSupersessions[0];
+  assert.equal(x.stoodDown, false, 'the declaration did not account for all of it, and the report says so');
+  assert.deepEqual(x.restoredDespiteDeclaration, ['row-i-replace']);
+  assert.match(head, /row-i-replace/, 'restored — the SAFE direction: content comes back, it is never silently dropped');
+});

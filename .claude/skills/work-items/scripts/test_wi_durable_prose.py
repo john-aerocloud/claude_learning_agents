@@ -315,7 +315,19 @@ class TestGeneralisationSweep(unittest.TestCase):
         "PATHS", "REPO", "NOW", "TS",
         # the file routes themselves: a PATH, which is the whole point — it has no
         # metacharacters, so nothing downstream can eat it.
-        "NOTE_FILE", "MSG_FILE",
+        #
+        # SUPERSEDE_FILE [DEF-ROC-173] is a third one, and it is a PATH for exactly the
+        # reason the other two are: its CONTENT is lines of real source, which carry `$`,
+        # backticks and quotes as a matter of course, so it must never cross a shell.
+        # It is not prose — nothing it carries is written to a permanent record — but
+        # what it asserts IS load-bearing: each line names content of HEAD this commit
+        # removes DELIBERATELY, so the co-owned guard may stop reading that line's
+        # absence as a stale copy. Every declared line is checked against HEAD and
+        # against my own blob, and an unmatched one refuses the commit (exit 2), so the
+        # declaration cannot be written from memory — and anything NOT named stays
+        # guarded, which is what makes it the NARROW alternative to COOWNED_MERGE_OFF
+        # below rather than another way to switch the merge off.
+        "NOTE_FILE", "MSG_FILE", "SUPERSEDE_FILE",
         # the hazard guards. They expand to `1` or to nothing and NEVER echo the
         # offending character back out — emitting what they found into their own
         # `[ -n "…" ]` string would reproduce the bug inside the check for it.

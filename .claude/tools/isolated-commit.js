@@ -303,12 +303,36 @@ function linesAdded(before, after) {
  * commits and ~48 KB behind both copies and the "merge" duplicated a 22 KB region
  * into trunk at exit 0. Measured: with the filter, both instances select NOTHING.
  *
+ * A DECLARED SUPERSESSION IS NOT STALENESS (DEF-ROC-173). Everything above asks of
+ * a line "is it ABSENT FROM MY COPY?", and the answer is the same whether I never saw
+ * it or saw it and REPLACED it. DEF-ROC-189 could separate those only when the tip
+ * commit was MINE under the SAME work item — the narrow case. On a co-owned file the
+ * tip is usually ANOTHER item's, so the broad case was refused at exit 7 and the only
+ * documented way past disabled the guard wholesale, on the very files with a measured
+ * silent-loss history. The evidence a line-level diff cannot hold has to come from the
+ * engineer: NAMING the lines is an assertion that HEAD was read and decided against,
+ * and it is narrow BY CONSTRUCTION — a line not named is still evidence, so a
+ * concurrent agent's row landing meanwhile still fires. `superseded` therefore only
+ * ever REMOVES evidence, line by line; it can never add any, and it never touches
+ * what a merge EMITS, which is why it cannot duplicate (the same argument that makes
+ * DEF-ROC-189's discount safe).
+ *
  * @param {boolean} [o.evidenceMustSurviveInHead=true] CONTROL toggle — false
  *        reproduces the historical (defective) selection, for the test's losing arm.
+ * @param {Set<string>} [o.superseded] content lines the committer has DECLARED it
+ *        removed deliberately. Validated against reality by the caller: a line that
+ *        is not actually present in HEAD and absent from my copy is refused (exit 2),
+ *        so the declaration cannot be written from memory.
  * @returns {{sha:string, added:string[]}|null} the OLDEST commit missing from my
  *          copy — its parent's blob is the merge base I actually started from.
  */
-function coownedStaleAgainst({ headText, mineText, history, evidenceMustSurviveInHead = true }) {
+function coownedStaleAgainst({
+  headText,
+  mineText,
+  history,
+  evidenceMustSurviveInHead = true,
+  superseded = new Set(),
+}) {
   if (linesAdded(headText, mineText).length === 0) return null; // no novel content
   const mine = new Set(contentLines(mineText));
   const head = new Set(contentLines(headText));
@@ -316,8 +340,10 @@ function coownedStaleAgainst({ headText, mineText, history, evidenceMustSurviveI
   for (const h of history) {
     if (h.parentText === null) continue; // created the path — see above
     const contributed = linesAdded(h.parentText, h.text);
-    const added = evidenceMustSurviveInHead ? contributed.filter((l) => head.has(l)) : contributed;
-    if (added.length === 0) continue; // nothing of it survives in HEAD — proves nothing
+    const surviving = evidenceMustSurviveInHead ? contributed.filter((l) => head.has(l)) : contributed;
+    // DEF-ROC-173 — a line I DECLARED superseded is a decision, not an absence.
+    const added = superseded.size === 0 ? surviving : surviving.filter((l) => !superseded.has(l));
+    if (added.length === 0) continue; // nothing of it survives in HEAD, or all of it was decided against
     if (added.some((l) => mine.has(l))) continue; // I have some of it; not cleanly stale
     oldest = { sha: h.sha, added };
   }
@@ -747,6 +773,7 @@ function resolveCoowned({
   duplicationPostCondition = true,
   addAddContentRule = true,
   ownItemContinuity = true,
+  superseded = new Set(),
 }) {
   const sides = coownedTexts({ repo, privEnv, oldHead, file, derivedExempt });
   if (sides === null) return null;
@@ -762,11 +789,14 @@ function resolveCoowned({
     history.push({ sha, text: mask(text), parentText: parentText === null ? null : mask(parentText) });
   }
 
+  const missing = linesAdded(mask(mineBlob), mask(headBlob));
+
   const stale = coownedStaleAgainst({
     headText: mask(headBlob),
     mineText: mask(mineBlob),
     history,
     evidenceMustSurviveInHead,
+    superseded,
   });
   if (!stale) return null;
 
@@ -806,12 +836,12 @@ function resolveCoowned({
       { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 },
     );
     if (res.status !== 0 && res.stdout === '')
-      return { conflict: res.stderr || '(git merge-file gave no output)', since: stale.sha };
+      return { conflict: res.stderr || '(git merge-file gave no output)', since: stale.sha, missing };
     const resolved =
       res.status === 0
         ? { text: res.stdout }
         : resolveAppendCollisions(res.stdout, { contentRule: addAddContentRule });
-    if (resolved.conflict) return { conflict: resolved.conflict, since: stale.sha };
+    if (resolved.conflict) return { conflict: resolved.conflict, since: stale.sha, missing };
 
     // THE DUPLICATION POST-CONDITION (AC-142.4) — checked on the MASKED texts the
     // merge actually operated on, and BEFORE anything is written. `merge-file` can
@@ -835,6 +865,7 @@ function resolveCoowned({
           ].join('\n'),
           since: stale.sha,
           duplicated: dup,
+          missing,
         };
     }
 
@@ -843,7 +874,7 @@ function resolveCoowned({
     if (exempting) {
       const spliced = spliceDerived(finalText, mineSplit.derived);
       if (spliced.error)
-        return { conflict: `DERIVED-BLOCK SPLICE: ${spliced.error}`, since: stale.sha };
+        return { conflict: `DERIVED-BLOCK SPLICE: ${spliced.error}`, since: stale.sha, missing };
       finalText = spliced.text;
     }
 
@@ -858,6 +889,12 @@ function resolveCoowned({
       since: stale.sha,
       addedBack: restored.length,
       restored,
+      missing,
+      // DEF-ROC-173 — evidence remained beyond what was declared, so the merge ran
+      // anyway and may have put a DECLARED-superseded line back. That is the safe
+      // direction (content restored, never lost) but it un-does a decision, so it is
+      // named rather than left for a human to find by re-reading HEAD.
+      restoredDespiteDeclaration: restored.filter((l) => superseded.has(l)),
       byteDelta: Buffer.byteLength(finalText) - Buffer.byteLength(mineBlob),
       derivedExempted: exempting,
       mode: mineEntry.mode,
@@ -866,6 +903,54 @@ function resolveCoowned({
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/**
+ * THE REVIEW LIST (DEF-ROC-173): what HEAD carries that MY staged copy does not,
+ * per path. It is the exact set a supersession declaration may draw from, and the
+ * reason the declaration cannot be written from memory — the tool prints it
+ * (`--print-coowned-missing`), the engineer DELETES from it every line it did not
+ * decide against, and what is left is the assertion.
+ *
+ * Derived from `coownedTexts`, i.e. from the same masked texts the merge itself
+ * operates on, so the list an engineer reviews and the evidence the guard weighs
+ * cannot be two different derivations of one fact (EXP-047).
+ *
+ * @returns {Map<string, string[]>} path -> the content lines of HEAD my copy lacks.
+ */
+function coownedMissingByPath({ repo, privEnv, oldHead, files, derivedExempt = true }) {
+  const out = new Map();
+  for (const file of files) {
+    const sides = coownedTexts({ repo, privEnv, oldHead, file, derivedExempt });
+    if (sides === null) continue;
+    const missing = linesAdded(sides.mask(sides.mineBlob), sides.mask(sides.headBlob));
+    if (missing.length > 0) out.set(file, missing);
+  }
+  return out;
+}
+
+/**
+ * Check a supersession declaration against reality, and scope it per path.
+ *
+ * FAILS CLOSED, and this is the limb that keeps the affordance honest: a declared
+ * line must ACTUALLY be one HEAD carries and my copy does not. So a declaration can
+ * only ever be written from a real, current removal — not from memory, not
+ * speculatively, and not as a standing "ignore this file" incantation. A line is
+ * honoured only for the paths where it genuinely went missing, so declaring a line
+ * for one file cannot quietly excuse an identical line in another.
+ *
+ * @returns {{honoured: Map<string, Set<string>>, unmatched: string[]}}
+ */
+function scopeSupersession({ declared, missingByPath }) {
+  const honoured = new Map();
+  const unmatched = new Set(declared);
+  for (const [file, missing] of missingByPath) {
+    const hit = declared.filter((l) => missing.includes(l));
+    if (hit.length === 0) continue;
+    honoured.set(file, new Set(hit));
+    for (const l of hit) unmatched.delete(l);
+  }
+  return { honoured, unmatched: [...unmatched] };
 }
 
 // --- the operation -----------------------------------------------------------
@@ -892,6 +977,12 @@ function resolveCoowned({
  * @param {boolean} [o.duplicationPostCondition=true] CONTROL toggle for AC-142.4.
  * @param {boolean} [o.addAddContentRule=true] CONTROL toggle for AC-142.3 — false
  *                               restores the historical position-only "keep both".
+ * @param {string[]|Set<string>} [o.superseded] DEF-ROC-173: content lines of HEAD
+ *                               this commit removes DELIBERATELY. A narrow, checked
+ *                               assertion — "I read HEAD and decided against exactly
+ *                               these" — where the only previous move was to disable
+ *                               the co-owned merge wholesale. Everything NOT named
+ *                               stays guarded.
  * @param {boolean} [o.ownItemContinuity=true] DEF-ROC-189: do not read MY OWN
  *                               previous commit to this path, under the SAME work
  *                               item, as a concurrent writer. CONTROL toggle —
@@ -917,6 +1008,7 @@ function isolatedCommit({
   duplicationPostCondition = true,
   addAddContentRule = true,
   ownItemContinuity = true,
+  superseded = [],
   syncIndex = true,
   hooks = {},
 }) {
@@ -932,6 +1024,21 @@ function isolatedCommit({
   }
   if (!paths || paths.length === 0)
     throw new IsolatedCommitError(2, 'at least one declared path is required (after `--`)');
+
+  // DEF-ROC-173 — one line per entry, trimmed, blanks dropped: exactly the unit the
+  // staleness question is asked in, so a declaration means the same thing the guard means.
+  const declaredSuperseded = contentLines([...superseded].join('\n'));
+  if (declaredSuperseded.length > 0 && !coownedMerge)
+    throw new IsolatedCommitError(
+      2,
+      [
+        'A SUPERSESSION DECLARATION AND --no-coowned-merge ARE CONTRADICTORY — nothing committed.',
+        'The declaration is the NARROW move: it excuses the lines you name and leaves everything',
+        'else guarded. --no-coowned-merge is the WHOLESALE one: it excuses everything, including a',
+        'concurrent agent\'s row you have never seen. Asking for both says you do not know which',
+        'you meant. Drop one.',
+      ].join('\n'),
+    );
 
   for (const p of paths) {
     const bad = validateDeclaredPath(p);
@@ -979,6 +1086,8 @@ function isolatedCommit({
     const coownedMerges = [];
     /** Evidence discounted as MY OWN previous commit (DEF-ROC-189) — reported, never silent. */
     const coownedContinuations = [];
+    /** Evidence the committer DECLARED superseded (DEF-ROC-173) — reported, never silent. */
+    const coownedSupersessions = [];
     for (;;) {
       attempts += 1;
       const headRes = gitTry(repo, ['rev-parse', '--verify', '--quiet', 'HEAD']);
@@ -1029,8 +1138,36 @@ function isolatedCommit({
       //   committed lines survive MY commit — the loss AC-COOWNED.1 reproduces.
       coownedMerges.length = 0;
       coownedContinuations.length = 0;
+      coownedSupersessions.length = 0;
+      // DEF-ROC-173 — CHECK THE DECLARATION AGAINST REALITY FIRST. Recomputed on every
+      // CAS attempt, because a line that was genuinely missing a moment ago may have
+      // been superseded in HEAD by the commit that just beat us.
+      let honouredSupersessions = new Map();
+      if (declaredSuperseded.length > 0) {
+        const missingByPath = oldHead
+          ? coownedMissingByPath({ repo, privEnv, oldHead, files: changed, derivedExempt })
+          : new Map();
+        const scoped = scopeSupersession({ declared: declaredSuperseded, missingByPath });
+        if (scoped.unmatched.length > 0)
+          throw new IsolatedCommitError(
+            2,
+            [
+              'SUPERSESSION DECLARATION REFUSED — nothing committed.',
+              'You declared these lines superseded, but HEAD does not carry them where your copy',
+              'lacks them, so they are not removals you are making:',
+              ...scoped.unmatched.slice(0, 12).map((l) => `  ${l.slice(0, 200)}`),
+              ...(scoped.unmatched.length > 12 ? [`  … and ${scoped.unmatched.length - 12} more`] : []),
+              'A declaration is an assertion about a REAL, CURRENT removal — it is checked so it',
+              'cannot be written from memory. Take the review list from the tool and delete from it',
+              'every line you did NOT decide against:',
+              `  node .claude/tools/isolated-commit.js --repo ${repo} --print-coowned-missing -- ${paths.join(' ')}`,
+            ].join('\n'),
+          );
+        honouredSupersessions = scoped.honoured;
+      }
       if (coownedMerge && oldHead) {
         for (const file of changed) {
+          const declaredHere = honouredSupersessions.get(file) || new Set();
           const r = resolveCoowned({
             repo,
             privEnv,
@@ -1043,7 +1180,15 @@ function isolatedCommit({
             duplicationPostCondition,
             addAddContentRule,
             ownItemContinuity,
+            superseded: declaredHere,
           });
+          if (declaredHere.size > 0)
+            coownedSupersessions.push({
+              path: file,
+              lines: [...declaredHere],
+              stoodDown: r === null,
+              restoredDespiteDeclaration: (r && r.restoredDespiteDeclaration) || [],
+            });
           if (!r) continue;
           if (r.ownItem) {
             // MY OWN previous commit, same work item: nothing to merge, my blob
@@ -1066,7 +1211,27 @@ function isolatedCommit({
                 `  a concurrent agent committed an OVERLAPPING change (since ${r.since.slice(0, 8)}) and your`,
                 '  copy predates it, so committing yours would REVERT theirs. It cannot be merged',
                 '  automatically. Take THEIR committed version, re-apply your block on top, and',
-                '  commit again. The conflict:',
+                '  commit again.',
+                // DEF-ROC-173 — NAME THE LINES. The refusal is right about the FACTS and may
+                // be wrong about their MEANING, and a reader cannot tell which without seeing
+                // what is actually at stake. Three parties were blocked by this refusal in one
+                // day and the only move it offered any of them was the wholesale switch.
+                ...(r.missing && r.missing.length > 0
+                  ? [
+                      `  THE ${r.missing.length} LINE(S) OF HEAD YOUR COPY DOES NOT CARRY:`,
+                      ...r.missing.slice(0, 12).map((l) => `    ${l.slice(0, 200)}${l.length > 200 ? ' …' : ''}`),
+                      ...(r.missing.length > 12 ? [`    … and ${r.missing.length - 12} more`] : []),
+                      '  IF — AND ONLY IF — YOU READ HEAD AND DELIBERATELY REPLACED OR REMOVED THEM, say so',
+                      '  about THOSE LINES rather than switching the guard off (DEF-ROC-173):',
+                      `    node .claude/tools/isolated-commit.js --repo ${repo} --print-coowned-missing -- ${paths.join(' ')} > S`,
+                      '    # DELETE from S every line you did NOT decide against — what is left is your assertion',
+                      '    make commit-isolated REPO=… MSG_FILE=… SUPERSEDE_FILE=S PATHS=…',
+                      '  Anything you leave out of S stays guarded, which is the whole difference from',
+                      '  COOWNED_MERGE_OFF=1 — that one excuses every line in the file, including one you',
+                      '  have never seen.',
+                    ]
+                  : []),
+                '  The conflict:',
                 r.conflict
                   .split('\n')
                   .slice(0, 40)
@@ -1238,7 +1403,15 @@ function isolatedCommit({
         for (const p of paths) gitTry(repo, ['add', '--all', '--', normalizeDeclared(p)]);
       }
 
-      return { sha, files: changed, attempts, branch, coownedMerges, coownedContinuations };
+      return {
+        sha,
+        files: changed,
+        attempts,
+        branch,
+        coownedMerges,
+        coownedContinuations,
+        coownedSupersessions,
+      };
     }
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -1259,6 +1432,8 @@ function parseArgv(argv) {
     allowSharedMessageFile: false,
     coownedMerge: true,
     mintMessageFile: false,
+    superseded: [],
+    printCoownedMissing: false,
   };
   let i = 0;
   for (; i < argv.length; i += 1) {
@@ -1289,6 +1464,18 @@ function parseArgv(argv) {
     // unique name") is the class of control this project keeps finding does not fire,
     // so the TOOL owns the name instead of every caller's discipline.
     else if (a === '--mint-message-file') out.mintMessageFile = true;
+    // DEF-ROC-173 — the NARROW alternative to --no-coowned-merge. A FILE is the
+    // primary form for the same reason --message-file is: a line of real source can
+    // carry `$`, a backtick or a quote, and a shell would eat or EXECUTE it.
+    else if (a === '--supersede-file') {
+      const f = argv[++i];
+      try {
+        out.superseded.push(...require('fs').readFileSync(f, 'utf-8').split('\n'));
+      } catch (e) {
+        return { error: `cannot read --supersede-file ${f}: ${e.message}` };
+      }
+    } else if (a === '--supersede') out.superseded.push(argv[++i]);
+    else if (a === '--print-coowned-missing') out.printCoownedMissing = true;
     else if (a === '--allow-duplicate-message') out.allowDuplicateMessage = true;
     else if (a === '--allow-shared-message-file') out.allowSharedMessageFile = true;
     else if (a === '--no-sync-index') out.syncIndex = false;
@@ -1300,8 +1487,9 @@ function parseArgv(argv) {
   return out;
 }
 
-const USAGE = `usage: node .claude/tools/isolated-commit.js --repo <dir> (--message <msg> | --message-file <path>) [--no-sync-index] [--json] -- <path>...
+const USAGE = `usage: node .claude/tools/isolated-commit.js --repo <dir> (--message <msg> | --message-file <path>) [--supersede-file <path>] [--no-sync-index] [--json] -- <path>...
        node .claude/tools/isolated-commit.js --mint-message-file [-- <path>...]
+       node .claude/tools/isolated-commit.js --repo <dir> --print-coowned-missing -- <path>...
 
 Commits ONLY the declared paths, taking content from a PRIVATE index, so a
 concurrent agent's staged or mid-edit work on a shared tree cannot ride along.
@@ -1345,10 +1533,74 @@ does not name the path. Any of those missing, it refuses as before; the decision
 always printed. So keep the work-item id in your message (§14) — it is evidence now,
 not decoration.
 
+AND SUPERSEDING A COMMITTED LINE IS NOT BEING STALE AGAINST IT (DEF-ROC-173). The two
+are the same file pair, so replacing a line ANOTHER item's commit added was refused at
+exit 7 — three parties hit it in one day and the only documented way past,
+COOWNED_MERGE_OFF=1, disables the guard WHOLESALE on the exact files with a measured
+silent-loss history. A guard people learn to switch off is worth less than its running
+cost. So NAME THE LINES instead:
+
+  node .claude/tools/isolated-commit.js --repo R --print-coowned-missing -- <paths> > S
+  # DELETE from S every line you did NOT decide against; what is left is your assertion
+  make commit-isolated REPO=R MSG_FILE="$P" SUPERSEDE_FILE=S PATHS="<paths>"
+
+Every declared line is CHECKED against reality — it must be one HEAD carries that your
+copy does not, or the commit is refused (exit 2) — so a declaration cannot be written
+from memory. Anything you do NOT name stays guarded, which is the whole difference from
+the wholesale switch: a concurrent agent's row landing meanwhile still refuses. The
+declaration only ever REMOVES evidence, never changes what a merge emits, so it cannot
+duplicate. It is REPORTED on every commit that uses one.
+
+  --supersede-file <path>        lines of HEAD this commit removes DELIBERATELY
+  --supersede <line>             the same, one line at a time (prefer the file: a
+                                 line of source can carry a shell metacharacter)
+  --print-coowned-missing        print the review list and exit; commits nothing
   --allow-duplicate-message      commit a message identical to a recent ancestor's
   --allow-shared-message-file    accept a non-unique --message-file name
   --no-coowned-merge             commit MY blob verbatim over a co-owned file
-                                 (reverts a concurrent agent's committed lines)`;
+                                 (reverts a concurrent agent's committed lines) — the
+                                 BLUNT last resort; --supersede-file is the narrow one`;
+
+/**
+ * THE REVIEW-LIST MODE (DEF-ROC-173, `--print-coowned-missing`). Builds the same
+ * private index a commit would, and prints the lines of HEAD your staged copy does
+ * not carry — one per line, nothing else, so it can be redirected straight to a file
+ * and EDITED DOWN. Reading it is how "did you see this line?" gets an answer; deleting
+ * from it is how "and did you decide against it?" gets one.
+ *
+ * Commits nothing and moves nothing. Exit 4 when there is nothing missing, because
+ * "no review list" is a different answer from "an empty declaration is fine".
+ */
+function printCoownedMissing({ repo, paths, derivedExempt = true }) {
+  if (!repo) throw new IsolatedCommitError(2, '--repo is required');
+  if (!paths || paths.length === 0)
+    throw new IsolatedCommitError(2, 'at least one declared path is required (after `--`)');
+  for (const q of paths) {
+    const bad = validateDeclaredPath(q);
+    if (bad) throw new IsolatedCommitError(2, bad);
+  }
+  const headRes = gitTry(repo, ['rev-parse', '--verify', '--quiet', 'HEAD']);
+  if (!headRes.ok || !headRes.out) throw new IsolatedCommitError(4, 'no HEAD — nothing can be missing from it');
+  const oldHead = headRes.out;
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'isolated-review-'));
+  const privEnv = { GIT_INDEX_FILE: path.join(tmpDir, 'index') };
+  try {
+    gitOut(repo, ['read-tree', oldHead], privEnv);
+    for (const q of paths) gitOut(repo, ['add', '--all', '--', normalizeDeclared(q)], privEnv);
+    const tree = gitOut(repo, ['write-tree'], privEnv);
+    const changed = lines(
+      gitOut(repo, ['diff-tree', '-r', '--no-commit-id', '--name-only', oldHead, tree]),
+    );
+    const byPath = coownedMissingByPath({ repo, privEnv, oldHead, files: changed, derivedExempt });
+    const out = [];
+    for (const [, missing] of byPath) for (const l of missing) if (!out.includes(l)) out.push(l);
+    if (out.length === 0)
+      throw new IsolatedCommitError(4, 'nothing of HEAD is missing from your copy of the declared paths — there is nothing to declare.');
+    return out;
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
 
 /**
  * The CO-OWNED MERGE report. Extracted so every report limb is in one place and a
@@ -1404,6 +1656,37 @@ function formatCoownedContinuation(c) {
   ].join('\n');
 }
 
+/**
+ * THE SUPERSESSION report (DEF-ROC-173). The declaration changes what the guard is
+ * allowed to conclude, so it is stated on every commit that uses one — including the
+ * case where it did NOT settle the matter, which is the one a committer is least
+ * likely to expect.
+ */
+function formatCoownedSupersession(x) {
+  return [
+    `SUPERSESSION DECLARED — ${x.path}`,
+    `  you asserted that ${x.lines.length} line(s) of HEAD are ones you READ AND DECIDED AGAINST, so`,
+    '  their absence from your copy is a decision and not a stale copy:',
+    ...x.lines.slice(0, 8).map((l) => `    ${l.slice(0, 200)}${l.length > 200 ? ' …' : ''}`),
+    ...(x.lines.length > 8 ? [`    … and ${x.lines.length - 8} more`] : []),
+    x.stoodDown
+      ? '  That accounted for ALL of it: the co-owned guard stood down and your blob is committed as-is.'
+      : '  IT DID NOT ACCOUNT FOR ALL OF IT — your copy lacks content beyond what you declared, so the',
+    ...(x.stoodDown ? [] : ['  three-way merge still ran. Everything you did NOT name is still guarded.']),
+    ...(x.restoredDespiteDeclaration && x.restoredDespiteDeclaration.length > 0
+      ? [
+          `  AND ${x.restoredDespiteDeclaration.length} LINE(S) YOU DECLARED SUPERSEDED CAME BACK, because the merge that`,
+          '  ran for the rest of the staleness restored them. That is the SAFE direction — content is',
+          '  restored, never lost — but it un-does your decision, so RE-READ HEAD and re-apply it:',
+          ...x.restoredDespiteDeclaration.slice(0, 5).map((l) => `    ${l.slice(0, 200)}`),
+        ]
+      : []),
+    '  Anything you did not name was NOT excused. If a line here was another agent\'s work rather',
+    '  than yours to replace, that commit has removed it — re-read HEAD.',
+    '',
+  ].join('\n');
+}
+
 function main(argv) {
   const opts = parseArgv(argv);
   if (opts.error) {
@@ -1418,10 +1701,20 @@ function main(argv) {
     process.stdout.write(`${mintMessageFilePath(opts.paths)}\n`);
     return 0;
   }
+  if (opts.printCoownedMissing) {
+    try {
+      process.stdout.write(`${printCoownedMissing(opts).join('\n')}\n`);
+      return 0;
+    } catch (e) {
+      process.stderr.write(`${e.message}\n`);
+      return e instanceof IsolatedCommitError ? e.code : 1;
+    }
+  }
   try {
     const res = isolatedCommit(opts);
     // A merge that is not reported is a merge nobody audits — and this one changes
     // what lands relative to what the caller staged, so it is never silent.
+    for (const x of res.coownedSupersessions || []) process.stderr.write(formatCoownedSupersession(x));
     for (const m of res.coownedMerges || []) process.stderr.write(formatCoownedMerge(m));
     for (const c of res.coownedContinuations || []) process.stderr.write(formatCoownedContinuation(c));
     if (opts.json) process.stdout.write(`${JSON.stringify(res)}\n`);
@@ -1452,6 +1745,9 @@ module.exports = {
   contentLines,
   linesAdded,
   coownedTexts,
+  coownedMissingByPath,
+  scopeSupersession,
+  printCoownedMissing,
   coownedStaleAgainst,
   workItemIds,
   sameWorkItem,

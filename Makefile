@@ -1263,12 +1263,37 @@ test-requirement-gate-clean:
 # PRACTICAL CONSEQUENCE: keep the work-item id in your commit message (§14) — it is
 # EVIDENCE now, not decoration, and without it you get the old false positive back.
 #
+# AND SUPERSEDING A COMMITTED LINE IS NOT BEING STALE AGAINST IT (DEF-ROC-173). The
+# two are the SAME FILE PAIR, so replacing a line that ANOTHER item's commit added was
+# refused at exit 7. DEF-ROC-189's continuity escape covers only the narrow case where
+# the tip commit is yours under the same item; on a co-owned file the tip is usually
+# someone else's, so three parties hit the refusal in ONE DAY (a UC-ROC-117 engineer, a
+# DEF-ROC-161 engineer, and the retro on its required row retirements) and the only
+# move any of them was offered was COOWNED_MERGE_OFF=1 — which switches the protection
+# off WHOLESALE, on the exact files with a measured history of silent permanent loss.
+# A guard people learn to disable is worth less than its running cost.
+#
+#   SO NAME THE LINES. Read the review list, DELETE from it everything you did not
+#   decide against, and declare what is left:
+#
+#     make commit-isolated-missing REPO=work/OagEventSource PATHS="a b" > S
+#     $$EDITOR S        # keep ONLY the lines you read and deliberately replaced/removed
+#     make commit-isolated REPO=work/OagEventSource MSG_FILE="$$P" SUPERSEDE_FILE=S PATHS="a b"
+#
+#   Every declared line is CHECKED — it must be one HEAD carries that your copy does
+#   not, or the commit is refused (exit 2), so the declaration cannot be written from
+#   memory. Anything you do NOT name stays guarded: a concurrent agent's row landing
+#   meanwhile still refuses. That is the whole difference from the wholesale switch.
+#
 #   Escape hatches, all explicit and all loud in the refusal text:
 #     MSG_DUP_OK=1          a genuine re-commit of the same intent
 #     MSG_FILE_SHARED_OK=1  a deliberately shared message-file name (single agent)
+#     SUPERSEDE_FILE=<path> the NARROW one (DEF-ROC-173): these named lines of HEAD
+#                           are removals I decided on; everything else stays guarded
 #     COOWNED_MERGE_OFF=1   commit MY blob verbatim over a co-owned file — i.e.
-#                           REVERT a concurrent agent's committed lines. Deliberate
-#                           only; this is the losing arm of the measurement above.
+#                           REVERT a concurrent agent's committed lines. The BLUNT
+#                           last resort, and the losing arm of the measurement above;
+#                           reach for SUPERSEDE_FILE first.
 MSG_HAZARD = $(if $(strip $(findstring $$,$(value MSG))$(findstring `,$(value MSG))$(findstring ",$(value MSG))$(findstring \,$(value MSG))),1,)
 commit-isolated:
 	@if [ -n "$(MSG_HAZARD)" ]; then \
@@ -1288,7 +1313,17 @@ commit-isolated:
 	  $(if $(MSG),--message "$(MSG)",) $(if $(MSG_FILE),--message-file "$(MSG_FILE)",) \
 	  $(if $(MSG_DUP_OK),--allow-duplicate-message,) \
 	  $(if $(MSG_FILE_SHARED_OK),--allow-shared-message-file,) \
+	  $(if $(SUPERSEDE_FILE),--supersede-file "$(SUPERSEDE_FILE)",) \
 	  $(if $(COOWNED_MERGE_OFF),--no-coowned-merge,) -- $(PATHS)
+
+# THE REVIEW LIST (DEF-ROC-173): the lines of HEAD your saved copy does not carry, one
+# per line and nothing else, so it redirects straight into a file you then EDIT DOWN.
+# Reading it answers "did you see this line?"; deleting from it answers "and did you
+# decide against it?" — which is the evidence a line-level diff cannot hold. Commits
+# nothing, moves nothing; exit 4 when there is nothing to declare.
+#   make commit-isolated-missing REPO=work/<p> PATHS="a b" > S
+commit-isolated-missing:
+	@node .claude/tools/isolated-commit.js --repo "$(REPO)" --print-coowned-missing -- $(PATHS)
 
 # Print a message-file path that CANNOT collide (pid + randomness + a digest of the
 # declared paths), so a caller does not get to choose a colliding name. A convention
@@ -1458,7 +1493,7 @@ browser-observatory-ephemeral:
 browser-observatory-real-data:
 	OBSERVATORY_E2E_PORT=5203 REUSE_SERVER=1 npm --prefix work/observatory/src/app run test:browser -- e2e/s005-real-data.spec.js
 
-.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap sequencer-guard make-refs-tracked container-reap container-orphans stack-claim stack-release stack-status sso-login retro-debt retro-mark loop-gate exit-gate-ran loop-uptime test-wi wi-append wi-mint wi-project wi-validate wi-migrate item-brief doc-lint process-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools test-tools-ci tool-coverage commit-isolated commit-msg-file test-requirement-gate test-requirement-gate-baseline test-requirement-gate-clean board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery deploy-lane
+.PHONY: project-worktree project-worktree-path project-worktrees project-foldback project-update project-worktree-remove dispatch-check worktree-guard worktree-reap sequencer-guard make-refs-tracked container-reap container-orphans stack-claim stack-release stack-status sso-login retro-debt retro-mark loop-gate exit-gate-ran loop-uptime test-wi wi-append wi-mint wi-project wi-validate wi-migrate item-brief doc-lint process-lint validate smoke waf-probe waf-sustained ws-skeleton test-app test-rest-integration test-dash0-integration lint-app build-app run-local test-local move-skeleton test-infra synth-infra waf-runner-ip-add waf-runner-ip-remove smoke-ci validate-impacted validate-impacted-ci test-scripts disconnect-skeleton join-skeleton uniqueness-probe impacted-tests test-tools test-tools-ci tool-coverage commit-isolated commit-isolated-missing commit-msg-file test-requirement-gate test-requirement-gate-baseline test-requirement-gate-clean board-stream-skeleton test-observatory browser-observatory browser-observatory-ephemeral browser-observatory-real-data a11y-observatory test-fids test-fids-integration lint-fids run-fids e2e-fids e2e-fids-uc-es3 roc-acceptance roc-local-up roc-local-down roc-e2e-battery deploy-lane
 
 # --- Viggo-fix UC-W7: Country/Nationality ID remediation (T-SQL) --------------
 # Data-driven, self-building T-SQL remediation script set + its local stand-up

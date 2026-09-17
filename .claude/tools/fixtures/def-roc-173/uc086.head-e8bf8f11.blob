@@ -1,0 +1,325 @@
+import { describe, it, expect, vi, afterEach } from "vitest";
+import {
+  getRules,
+  getRuleHistory,
+  getTemplateRules,
+  saveDraft,
+  createRuleDraft,
+  restoreVersion,
+  discardDraft,
+  type RulesApiDeps,
+} from "../../src/api/rulesApi.js";
+import { effectiveRuleSet, type Rule } from "../../src/domain/rulesEngine.js";
+import {
+  SEEDED_RULES,
+  UYD_DEVICE_FAULTS,
+  STANDARD_AIRPORT_TEMPLATE,
+  SELF_MANAGED_SITE,
+} from "../../src/domain/rules.js";
+import type { RuleDraft } from "../../src/domain/ruleDraft.js";
+import type { RuleConfigStorePort, RuleVersionRow } from "../../src/ports/RuleConfigStorePort.js";
+
+// @covers src-api-rules-api (UC-ROC-086 — the ADMIN rule-READ fail-safe)
+// @covers domain-loadEffectiveRules (loadEffectiveRulesResult)
+//
+// UC-ROC-086: `getRules` and `getRuleHistory` called the `RuleConfig` store
+// UNGUARDED, and `read-api.ts` maps ANY throw from them to a flat 503 — so the
+// Config -> Rules screen was DEAD (not degraded) whenever the table could not be
+// read. That is the deployed host's CURRENT condition: its managed identity is
+// granted `AlertDecisions` only, so `RuleConfig` reads are refused with
+// AuthorizationPermissionMismatch until platform Ask A lands.
+//
+// The fix is DEF-ROC-017's pattern, not a second one: degrade to the seeded
+// baseline, log the categorised `external-availability` line, and report the
+// degrade IN BAND so a support engineer can NEVER mistake a seeded answer for a
+// published one (the DEF-ROC-013 lesson — a failure reporting as benign hid 22h).
+//
+// AND the write-path guard DEF-ROC-017 found the hard way: NO write/attestation
+// path is made lenient. `restoreVersion` in particular READS `listVersions` inside
+// a WRITE path — a lenient read there would turn "the store is unreachable" into
+// "no such version" (a 404 an author would believe), which is exactly the class of
+// hazard the STRICT/safe split exists to prevent.
+
+const REFUSED =
+  "Forbidden: the client does not have permission to perform action " +
+  "'Microsoft.Storage/storageAccounts/tableServices/tables/entities/read' " +
+  "(AuthorizationPermissionMismatch)";
+
+const RID = UYD_DEVICE_FAULTS.id;
+
+interface FaultSpec {
+  /** reject `listVersions` (the published/version read). */
+  versions?: boolean;
+  /** reject `listDrafts` (the draft partition read). */
+  drafts?: boolean;
+}
+
+/** A `RuleConfigStorePort` whose two READ methods are independently faultable, and
+ * whose WRITE methods reject so a read path that mutated anything fails loud. */
+function faultStore(fault: FaultSpec, seeded: { versions?: RuleVersionRow[]; drafts?: RuleDraft[] } = {}): RuleConfigStorePort {
+  const forbid = (op: string) => async () => {
+    throw new Error(`a rule READ must not call ${op}`);
+  };
+  return {
+    allocateRuleId: forbid("allocateRuleId") as never,
+    listVersions: async (): Promise<RuleVersionRow[]> => {
+      if (fault.versions) throw new Error(REFUSED);
+      return seeded.versions ?? [];
+    },
+    appendVersion: forbid("appendVersion") as never,
+    saveDraft: async () => {
+      throw new Error(REFUSED);
+    },
+    getDraft: async () => null,
+    listDrafts: async (): Promise<RuleDraft[]> => {
+      if (fault.drafts) throw new Error(REFUSED);
+      return seeded.drafts ?? [];
+    },
+    discardDraft: async () => {
+      throw new Error(REFUSED);
+    },
+    putTestAttestation: forbid("putTestAttestation") as never,
+    readTestAttestation: async () => null,
+  };
+}
+
+function deps(store: RuleConfigStorePort, siteTemplateOf: (iata: string) => string | null = () => null): RulesApiDeps {
+  return { store, baseline: SEEDED_RULES, siteTemplateOf };
+}
+
+function versionRow(rule: Rule, version = 1): RuleVersionRow {
+  return {
+    rule,
+    version,
+    publishedTicks: String(version).padStart(19, "0"),
+    publishedBy: "p2@aero",
+    publishedTs: "2026-08-01T10:00:00.000Z",
+  };
+}
+
+function captureLogs(): { lines: () => Record<string, unknown>[] } {
+  const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+  return { lines: () => spy.mock.calls.map((c) => JSON.parse(String(c[0])) as Record<string, unknown>) };
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+const SITE = SELF_MANAGED_SITE;
+
+describe("AC-086-1: GET /api/rules degrades to the seeded baseline when the RuleConfig read is REFUSED", () => {
+  it("is 200 with the baseline's effective rule set for the site — never a throw", async () => {
+    captureLogs();
+    const r = await getRules(deps(faultStore({ versions: true, drafts: true })), SITE);
+    expect(r.status).toBe(200);
+    const body = r.body as { rules: Rule[]; drafts: unknown[]; site: string; editable: boolean };
+    expect(body.site).toBe(SITE);
+    expect(body.rules).toEqual(effectiveRuleSet(SITE, { rules: SEEDED_RULES, siteTemplateOf: () => null }));
+    expect(body.rules.length).toBeGreaterThan(0);
+    // the editable/selfManaged flags are resolved from the link resolver, NOT the
+    // store, so they stay correct while degraded.
+    expect(body.editable).toBe(true);
+  });
+
+  it("carries an explicit in-band `rulesDegraded` notice mirroring /api/evaluate's shape (a plain 200 would be the DEF-ROC-013 failure mode)", async () => {
+    captureLogs();
+    const r = await getRules(deps(faultStore({ versions: true, drafts: true })), SITE);
+    const body = r.body as { rulesDegraded?: Record<string, unknown> };
+    expect(body.rulesDegraded).toMatchObject({
+      degradedToBaseline: true,
+      category: "external-availability",
+    });
+    // human-readable enough for the SPA to render verbatim, and it says BASELINE
+    expect(String(body.rulesDegraded!.message)).toMatch(/baseline/i);
+    expect(String(body.rulesDegraded!.detail)).toContain("AuthorizationPermissionMismatch");
+  });
+
+  it("logs the categorised external-availability line naming the site partition + degradedTo baseline", async () => {
+    const logs = captureLogs();
+    await getRules(deps(faultStore({ versions: true })), SITE);
+    const line = logs.lines().find((l) => l.category === "external-availability");
+    expect(line).toMatchObject({
+      level: "error",
+      category: "external-availability",
+      scopeId: SITE,
+      degradedTo: "baseline",
+    });
+  });
+
+  it("a DRAFT-read failure alone narrows to `drafts: []` + a draftsUnavailable notice — the published rules are still the REAL folded ones", async () => {
+    const logs = captureLogs();
+    const published: Rule = { ...UYD_DEVICE_FAULTS, name: "PUBLISHED override" };
+    const r = await getRules(
+      deps(faultStore({ drafts: true }, { versions: [versionRow(published)] })),
+      SITE,
+    );
+    expect(r.status).toBe(200);
+    const body = r.body as { rules: Rule[]; drafts: unknown[]; rulesDegraded?: unknown; draftsUnavailable?: Record<string, unknown> };
+    expect(body.rules.find((x) => x.id === RID)?.name).toBe("PUBLISHED override");
+    // the published half is honest, so it must NOT claim to be degraded to baseline
+    expect(body.rulesDegraded).toBeUndefined();
+    expect(body.drafts).toEqual([]);
+    expect(body.draftsUnavailable).toMatchObject({ unavailable: true, category: "external-availability" });
+    expect(String(body.draftsUnavailable!.message)).toMatch(/draft/i);
+    expect(logs.lines().some((l) => l.op === "rules.get.drafts" && l.category === "external-availability")).toBe(true);
+  });
+
+  it("BOTH reads failing reports BOTH notices (each failure is separately attributable)", async () => {
+    captureLogs();
+    const r = await getRules(deps(faultStore({ versions: true, drafts: true })), SITE);
+    const body = r.body as { rulesDegraded?: unknown; draftsUnavailable?: unknown; drafts: unknown[] };
+    expect(body.rulesDegraded).toBeDefined();
+    expect(body.draftsUnavailable).toBeDefined();
+    expect(body.drafts).toEqual([]);
+  });
+
+  it("a TEMPLATE-LINKED site degrades too, and stays read-only while degraded", async () => {
+    captureLogs();
+    const r = await getRules(
+      deps(faultStore({ versions: true, drafts: true }), () => STANDARD_AIRPORT_TEMPLATE),
+      "BHX",
+    );
+    expect(r.status).toBe(200);
+    const body = r.body as { editable: boolean; selfManaged: boolean; rules: Rule[]; rulesDegraded?: unknown };
+    expect(body.editable).toBe(false);
+    expect(body.selfManaged).toBe(false);
+    expect(body.rulesDegraded).toBeDefined();
+    expect(body.rules.length).toBeGreaterThan(0);
+  });
+});
+
+describe("AC-086-2: GET /api/rules/history degrades to an EMPTY list that is distinguishable from 'no history yet'", () => {
+  it("is 200 with `versions: []` plus an explicit historyUnavailable notice — never 503", async () => {
+    captureLogs();
+    const r = await getRuleHistory(deps(faultStore({ versions: true })), SITE, RID);
+    expect(r.status).toBe(200);
+    const body = r.body as { site: string; ruleId: number; versions: unknown[]; historyUnavailable?: Record<string, unknown> };
+    expect(body.site).toBe(SITE);
+    expect(body.ruleId).toBe(RID);
+    expect(body.versions).toEqual([]);
+    expect(body.historyUnavailable).toMatchObject({ unavailable: true, category: "external-availability" });
+    expect(String(body.historyUnavailable!.message)).toMatch(/could not be read|unavailable/i);
+    expect(String(body.historyUnavailable!.detail)).toContain("AuthorizationPermissionMismatch");
+  });
+
+  it("a rule that genuinely has NO published history is NOT flagged unavailable (the notice cannot cry wolf)", async () => {
+    const logs = captureLogs();
+    const r = await getRuleHistory(deps(faultStore({}, { versions: [] })), SITE, RID);
+    expect(r.status).toBe(200);
+    const body = r.body as { versions: unknown[]; historyUnavailable?: unknown };
+    expect(body.versions).toEqual([]);
+    expect(body.historyUnavailable).toBeUndefined();
+    expect(logs.lines()).toEqual([]);
+  });
+
+  it("logs the categorised external-availability line for the history read", async () => {
+    const logs = captureLogs();
+    await getRuleHistory(deps(faultStore({ versions: true })), SITE, RID);
+    expect(logs.lines()).toContainEqual(
+      expect.objectContaining({ level: "error", category: "external-availability", op: "rules.history", site: SITE, ruleId: RID }),
+    );
+  });
+
+  it("a 400 (missing site / ruleId) is still a 400 — the degrade does not swallow caller-data validation", async () => {
+    captureLogs();
+    expect((await getRuleHistory(deps(faultStore({ versions: true })), null, RID)).status).toBe(400);
+    expect((await getRuleHistory(deps(faultStore({ versions: true })), SITE, "nope")).status).toBe(400);
+  });
+});
+
+describe("AC-086-3 (regression): a HEALTHY store behaves EXACTLY as before — no notice, no log", () => {
+  it("GET rules on a healthy store carries neither notice field and logs nothing", async () => {
+    const logs = captureLogs();
+    const published: Rule = { ...UYD_DEVICE_FAULTS, name: "PUBLISHED override", priority: 5 };
+    const draft: RuleDraft = { ...UYD_DEVICE_FAULTS, name: "a draft" } as unknown as RuleDraft;
+    const r = await getRules(deps(faultStore({}, { versions: [versionRow(published)], drafts: [draft] })), SITE);
+    const body = r.body as Record<string, unknown>;
+    expect(Object.keys(body).sort()).toEqual(
+      ["drafts", "editable", "publishDisabled", "retired", "rules", "selfManaged", "site"].sort(),
+    );
+    expect("rulesDegraded" in body).toBe(false);
+    expect("draftsUnavailable" in body).toBe(false);
+    expect((body.drafts as unknown[])).toHaveLength(1);
+    expect(logs.lines()).toEqual([]);
+  });
+
+  it("GET history on a healthy store carries no notice field and logs nothing", async () => {
+    const logs = captureLogs();
+    const r = await getRuleHistory(deps(faultStore({}, { versions: [versionRow(UYD_DEVICE_FAULTS)] })), SITE, RID);
+    const body = r.body as Record<string, unknown>;
+    expect(Object.keys(body).sort()).toEqual(["ruleId", "site", "versions"].sort());
+    expect("historyUnavailable" in body).toBe(false);
+    expect((body.versions as unknown[])).toHaveLength(1);
+    expect(logs.lines()).toEqual([]);
+  });
+});
+
+describe("AC-086-5 (regression): `getTemplateRules` is UNCHANGED — no claim made about its degrade posture", () => {
+  it("still propagates a store-read failure (this UC did not touch it)", async () => {
+    captureLogs();
+    await expect(
+      getTemplateRules(deps(faultStore({ versions: true })), STANDARD_AIRPORT_TEMPLATE),
+    ).rejects.toThrow(/AuthorizationPermissionMismatch/);
+  });
+
+  it("still serves the template's rules + drafts on a healthy store", async () => {
+    captureLogs();
+    const r = await getTemplateRules(deps(faultStore({}, { versions: [] })), STANDARD_AIRPORT_TEMPLATE);
+    expect(r.status).toBe(200);
+    const body = r.body as { templateId: string; editable: boolean; rules: Rule[] };
+    expect(body.templateId).toBe(STANDARD_AIRPORT_TEMPLATE);
+    expect(body.editable).toBe(true);
+    expect(body.rules.length).toBeGreaterThan(0);
+  });
+});
+
+describe("NO WRITE PATH IS MADE LENIENT (the DEF-ROC-017 hazard, pinned)", () => {
+  const badBody = {
+    id: RID,
+    scope: "site",
+    site: SITE,
+    name: "UYD device faults",
+    node: `${SITE}*`,
+    devices: ["DCP"],
+    statuses: ["ERROR"],
+    priority: 10,
+    enabled: true,
+    action: "alert",
+    delay: 0,
+  };
+
+  it("saveDraft still fails LOUDLY on a store failure (never a silent 200)", async () => {
+    captureLogs();
+    await expect(saveDraft(deps(faultStore({})), badBody, "p2@aero")).rejects.toThrow(/AuthorizationPermissionMismatch/);
+  });
+
+  it("createRuleDraft still fails LOUDLY on a store failure", async () => {
+    captureLogs();
+    const store = faultStore({});
+    // allocateRuleId is the first store touch on the create path — make it the real
+    // refusal so the failure classification is the store's, not the fixture's.
+    const refusing: RuleConfigStorePort = {
+      ...store,
+      allocateRuleId: async () => {
+        throw new Error(REFUSED);
+      },
+    };
+    await expect(createRuleDraft(deps(refusing), { site: SITE }, "p2@aero")).rejects.toThrow(
+      /AuthorizationPermissionMismatch/,
+    );
+  });
+
+  it("restoreVersion's READ stays STRICT: an unreadable store REJECTS — it must never look like 'no such version' (404)", async () => {
+    captureLogs();
+    const result = restoreVersion(deps(faultStore({ versions: true })), { site: SITE, ruleId: RID, version: 1 }, "p2@aero");
+    await expect(result).rejects.toThrow(/AuthorizationPermissionMismatch/);
+  });
+
+  it("discardDraft still fails LOUDLY on a store failure", async () => {
+    captureLogs();
+    await expect(discardDraft(deps(faultStore({})), { site: SITE, ruleId: RID })).rejects.toThrow(
+      /AuthorizationPermissionMismatch/,
+    );
+  });
+});

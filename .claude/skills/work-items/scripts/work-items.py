@@ -2279,6 +2279,18 @@ def is_audit_self_edge(graphs, itype, state, event):
     return state in graphs.terminals(itype)
 
 
+def legal_events_listing(legal_here):
+    """The `legal events from here:` line of a refusal — the sentence a refused
+    caller acts on, and acts on ALONE: it is read as the tool's own account of
+    what it will accept next.
+
+    It lives HERE, beside `is_audit_self_edge`, because that is the coupling
+    that matters. What the writer PERMITS and what a refusal REPORTS are one
+    fact stated twice, and the two statements were ~150 lines apart."""
+    return ", ".join(f"{ev} (agents: {'/'.join(ags)})"
+                     for ev, _to, ags in legal_here) or "(none — terminal state)"
+
+
 def _append_locked(a):
     a.note = resolve_note(a)
     graphs = Graphs.load()
@@ -2400,8 +2412,7 @@ def _append_locked(a):
         ok, to, legal_here, why = check_transition(graphs, item.type, state,
                                                    a.event, a.agent, owners)
     if not ok:
-        legal_desc = ", ".join(f"{ev} (agents: {'/'.join(ags)})"
-                               for ev, _to, ags in legal_here) or "(none — terminal state)"
+        legal_desc = legal_events_listing(legal_here)
         print(f"append REJECTED: {a.id} is in state '{state}'.", file=sys.stderr)
         # distinguish wrong-agent from illegal-event for a clearer message
         ev_exists = any(ev == a.event for ev, _t, _ags in legal_here)

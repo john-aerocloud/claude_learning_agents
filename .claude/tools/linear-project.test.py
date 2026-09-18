@@ -1085,9 +1085,18 @@ def test_no_residual_on_the_REAL_corpus_is_the_stem_of_an_id_that_WAS_read():
     false accusation had the same fingerprint: the residual id was a STEM of an id
     that reached a criterion perfectly well. If the two sides of the check ever drift
     apart again, this goes red on real items rather than on a fixture."""
-    require_corpus()
-    projects = [CORPUS_PROJECT] + [p for p in ("ROC",)
-                                   if (HERE.parents[1] / "work" / p / "items").is_dir()]
+    # Keyed to ANY corpus this worktree holds, not to `CORPUS_PROJECT` alone. The
+    # defect is ROC's id vocabulary, and a check that skips in the ROC worktree —
+    # the one tree certain to hold the ids in question — would be exercised
+    # everywhere except where it matters. Under the worktree-per-project topology
+    # that is most of the time.
+    projects = [p for p in ("OagEventSource", "ROC")
+                if (HERE.parents[1] / "work" / p / "items").is_dir()
+                and any((HERE.parents[1] / "work" / p / "items").glob("*/*.md"))]
+    if not projects:
+        raise CorpusUnavailable(
+            "no project corpus in this worktree — this check needs real items, and "
+            "a synthesised one would prove only that the fixture agrees with itself")
     seen = 0
     hyphen_siblings = 0
     offenders = []
@@ -1106,6 +1115,10 @@ def test_no_residual_on_the_REAL_corpus_is_the_stem_of_an_id_that_WAS_read():
     check(f"non-vacuous for THIS defect: {hyphen_siblings} hyphen-suffixed sibling "
           f"ids are actually read out of real criteria",
           hyphen_siblings > 100)
+    check("and the ROC corpus in particular is covered wherever it is present "
+          "(it is the vocabulary this defect is about)",
+          "ROC" in projects
+          or not (HERE.parents[1] / "work" / "ROC" / "items").is_dir())
     check(f"no item is accused over an id a SIBLING criterion already carried "
           f"(the 188-false-positive class): {offenders[:5]}", not offenders)
 

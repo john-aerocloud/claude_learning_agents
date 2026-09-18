@@ -145,15 +145,25 @@ _ACCEPTANCE_HEADING = re.compile(r"^(#{2,3})\s+Acceptance\b")
 #: Any level-2 or level-3 heading, with its level captured.
 _SECTION_HEADING = re.compile(r"^(#{2,3})\s+")
 
-#: An `AC-…` id. Deliberately cannot end in `.` — `[\w.]*` greedily ate the sentence
+#: THE ID VOCABULARY, WRITTEN ONCE. Every place in this file that reads an `AC-…`
+#: id — the residual self-check’s two sides, the table-row and prose-declaration
+#: matchers, the orphan scan — is built from this ONE pattern. It used to be written
+#: out five times with three different tails, so the two sides of the self-check
+#: (`declared` and `got_ids`) were INDEPENDENT WRITERS of the same fact and could
+#: disagree by construction. Deriving them from one source is the EXP-047 move: the
+#: disagreement is not reconciled, it is made unrepresentable.
+#:
+#: Deliberately cannot end in `.` — an unconstrained tail greedily ate the sentence
 #: period, minting phantom ids `AC-061.` / `AC-C11.2.` / `AC-RLNC.` that no criterion
 #: could ever match, which would make the residual self-check below cry wolf.
-_AC_ID = re.compile(r"\bAC-[A-Za-z0-9](?:[\w.]*[A-Za-z0-9])?")
+_AC_ID_TAIL = r"[\w.]"
+_AC_ID_PAT = r"AC-[A-Za-z0-9](?:%s*[A-Za-z0-9])?" % _AC_ID_TAIL
+_AC_ID = re.compile(r"\b" + _AC_ID_PAT)
 
 #: A markdown TABLE row whose FIRST cell is an AC id — `| **AC-OB1.1** | criterion … |`.
 #: UC-OB1 transcribes nine criteria that way and DEFECT-OAG-053 registers fifteen.
 #: Requiring an AC-shaped first cell skips the header/separator rows.
-_TABLE_ROW = re.compile(r"^\|\s*[*_`\s]*(AC-[A-Za-z0-9][\w.]*?)[*_`\s]*\|(.*)$")
+_TABLE_ROW = re.compile(r"^\|\s*[*_`\s]*(%s)[*_`\s]*\|(.*)$" % _AC_ID_PAT)
 #: A list item — BOTH bullet styles the corpus actually uses, measured 2026-08-10:
 #: `- **AC-x**` (SLC-042/045/046, the UC-DP* family …) and NUMBERED `1. **AC-x**`
 #: (DEFECT-OAG-080/081/082/084/086, the SLC-CSP* family …). Matching only `[-*]`
@@ -162,7 +172,7 @@ _LIST_ITEM = re.compile(r"^(?:[-*]|\d+[.)])\s+(.*)$")
 #: A criterion declared in PROSE, with no list marker at all: `AC-053.4 — …` or
 #: `**\`AC-AP.1\`** — …`. This is the generalisation that stops the "add format five"
 #: treadmill: a criterion is anything that DECLARES an id at the start of a line.
-_AC_DECL = re.compile(r"^[*_`\s]{0,6}(AC-[A-Za-z0-9][\w.]*?)[*_`]*\s*[—:\-–]")
+_AC_DECL = re.compile(r"^[*_`\s]{0,6}(%s)[*_`]*\s*[—:\-–]" % _AC_ID_PAT)
 #: A markdown HEADING, any level. `_SECTION_HEADING` above matches only `#{2,3}`
 #: because SECTION TERMINATION is level-bounded; a criterion may be declared on a
 #: `####` heading too, so the criterion scan needs its own, wider matcher.
@@ -335,7 +345,7 @@ def _line_start_ids(line):
     s = re.sub(r"^(?:[-*]|\d+[.)])\s+", "", s)
     s = re.sub(r"^\|\s*", "", s)
     s = s.lstrip("*_`> ")
-    m = re.match(r"(AC-[A-Za-z0-9](?:[\w.]*[A-Za-z0-9])?)", s)
+    m = re.match(r"(%s)" % _AC_ID_PAT, s)
     return [m.group(1)] if m else []
 
 
@@ -406,7 +416,7 @@ def acceptance_report(body):
             if not m:
                 continue
             tail = m.group(1) if _TABLE_ROW.match(line) else m.group(1)
-            d = _AC_DECL.match(tail) or re.match(r"^[*_`\s]{0,6}(AC-[A-Za-z0-9][\w.]*)", tail)
+            d = _AC_DECL.match(tail) or re.match(r"^[*_`\s]{0,6}(%s)" % _AC_ID_PAT, tail)
             if d:
                 orphan.add(d.group(1))
         orphan = sorted(orphan)

@@ -1,9 +1,23 @@
 ---
-process_version: 184
-effective_from: 2026-09-15
-supersedes: v181, v180, v179, v178, v177, v176, v175, v174, v173, v172, v171, v170, v169, v168, v167, v166, v165, v164, v163, v162, v161, v160, v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
+process_version: 187
+effective_from: 2026-09-18
+supersedes: v186, v185, v184, v183, v182, v181, v180, v179, v178, v177, v176, v175, v174, v173, v172, v171, v170, v169, v168, v167, v166, v165, v164, v163, v162, v161, v160, v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
 status: active
 ---
+
+<!-- v187 (ROC retro 2026-09-18, OWNER-DIRECTED, two questions in one cycle). Q1: *"deliver
+all future work in a few simpler pieces at once."* Q2: *"we have spent GBP 500 today - on what, has
+it delivered value, how should we adjust priorities to understand what pays off, and what process
+change brings spending back into control?"* CONSTRAINT unchanged for a FOURTH retro: `orchestrator`
+34.49% of GLT, all `reported` dwell, n=191 - 35.4 -> 35.23 -> 34.64 -> 34.49 across v178/v183/v184/v185.
+ANSWER: v184 and v185 were both SELECTION rules and the problem is CARDINALITY - 33 items registered
+against 16 resolved in one day, 69 in ready of which 65 are machinery, and item bookkeeping churning
+7962 insertions against 6577 for the whole source tree. Routed: SS-F5.2 (the unit of pull is a THEMED
+SLICE, folding v185's product floor and v184's reserved slot into one rule) and SS-F5.3 (cost is
+attached to the item it was spent on; report cost per operator-visible change, not tokens).
+EXP-ROC-026 and EXP-ROC-027, each with a negative arm that kills it. EXP-ROC-024 scored STRIKE 1
+POSITIVE: product-facing share of resolved items 16% -> 43% (6 of 14). Reconcile latency 35 min
+(one commit behind main), so SS-0a Rule 4 is honoured and is not the constraint. -->
 
 <!-- NOTE ON THE NUMBER: authored as v170 and renumbered to v171 at merge time. OagEventSource published its own v170 concurrently and reached `main` first, so both sections are real and neither is a duplicate of the other. This is the v141/v144/v151 renumbering trap, and it is recorded rather than silently fixed because the fold-forward at the start of this cycle reported `already up to date` and WAS correct at that moment — the window is exactly the time between that check and the fold-back. Nothing was dropped: ROC's v171 sits above OAG's v170, newest-first. -->
 
@@ -245,7 +259,7 @@ ROUTED as **SSF11.4** (three clauses, all plain practice -- NO experiment row, d
 <!-- v111 (FOCUSED retro, ROC 2026-07-27; on main v110 via fold-forward-FIRST — clean, no collision; §F8 routine-batch gate at SLC-ROC-014 close, NO prod incident): SLC-ROC-014 delivered the COMPLETE rules-EDITING capability (edit → mandatory draft-test → publish, live no-redeploy pickup, Simulator parity, content-hash attestation gate + who/when attribution) — UC-056/057/058 all live-stack validated + pushed to origin/main + deployed to aas-test. NO global §-body change. Routed outcomes: (1) engineer.md plain-practice fold — the pre-built_green green bar must exercise the REAL artifact for UI/pipeline slices (fully-themed live axe + same-element aria-label; focus preventScroll + no scrollable ancestor; composed-consumer-against-populated-store acceptance driving consume() end-to-end), extending v110's live-caught→offline-pin; recurring root cause logged in principle-failures/2026-07-27-offline-green-ne-live-correct-ui-pipeline.md. (2) work-items.py + linear-project.py + linear-mapping.md machinery fix (human "fix the in-progress clutter"): blocked never maps to In Progress (Todo/Backlog) and an aggregate whose only non-terminal children are all blocked derives blocked — parked-on-external trees drop out of the active lane in queues/stats/board (107 wi-tests green). (3) EXP-115 POSITIVE again (ROC live catches), EXP-117 → 2/3 POSITIVE (board cadence). Constraint UNCHANGED + not-agent-squeezable (external 46.66% Azure-block + queue 41.93% backlog; agents ≈11%); dev-validation 11.1% / CFR 10.1% is HONEST dev-catch (EXP-108), not decay — the in-system lever is shifting live-defect classes LEFT (measured next on SLC-ROC-015). Registry 7 active, under cap, no rows added. -->
 <!-- v110 (FOCUSED retro, AdixOut 2026-07-24; RECONCILED onto main v109 via fold-forward-then-reapply — main advanced to v109 (ROC SLC-ROC-013 retro) while this AdixOut retro was in flight, so renumbered v109→v110; retro-debt gate — 3 routine: UC-AIDX-028 rework (TWO reject→rework cycles) + SLC-AIDX-011/CHK-AIDX-010 closes, REQ-004's dev consumer-side walking skeleton: C12 bus+grant → C13 routing → C10/C11 ingest standup → OAG handoff, built + validated LIVE end-to-end (synthetic event → C12 → C13 → C10 → C11 → read model → egress). TIGHT: two fix-derived learnings folded as PLAIN PRACTICE, no experiment rows. Constraint UNCHANGED from v105/v108 (registered/queue = artifact latency, ~70% of GLT; squeezable in-system cost = engineer/multi-tenant-eventing). Both learnings were caught by LIVE assert-real-state validation that offline synth-pins passed. (1) SCOPE-GAP → engineer.md + solution-architect.md: "reuse existing X" must be VERIFIED against the real deployed TARGET account/stack, never assumed from a sibling env — SLC-AIDX-011's "reuse the existing C10/C11 ingest" was wrong (C10/C11 were sandbox-only; the migration moved only the egress to dev-dataout), so the engineer STOPPED (§F7) rather than build against an absent dependency and a predecessor UC-030 + architect delta 007 were inserted at the real edge; the §F7 stop was correct. Extends the v97 assert-real-state family. (2) EVENTBRIDGE TARGET PAYLOAD (the double-rework) → engineer.md: for an EventBridge rule→SQS/target that must forward the event's `detail` object verbatim, use `inputPath: "$.detail"` (JSONPath extraction), NOT an `inputTransformer` with a bare `<detail>` object placeholder — the `<placeholder>` idiom quote-strips a nested OBJECT into invalid JSON (`ERROR_CODE=INVALID_JSON`), it only round-trips STRING fields (why the webhook router's flat string fields worked). Root cause found only by adding a target `DeadLetterConfig` to capture the real `ERROR_CODE`/`ERROR_MESSAGE` — so: always wire a target `DeadLetterConfig` and INSTRUMENT-FIRST before guessing at an opaque cross-service delivery failure. UC-028 rework #1 = default-rule envelope-wrap poison (C11's parseEnvelope rejected the wrapped event); rework #2 = the `<placeholder>` INVALID_JSON. Engineer left OFFLINE synth-pins behind for the inputPath/InputTransformer shape + DeadLetterConfig so the payload-shape class is now caught offline (live-caught infra-shape defect → offline pin). Kept in engineer.md not the aws-architecture skill (no clean EventBridge-target section there; narrowest owner = engineer implementation behaviour). EXP-115 (whole-journey/JTBD live validation) scored POSITIVE again (dated confirming note): the live bus-driven E2E caught the scope-gap + BOTH UC-028 delivery bugs offline pins missed. CFR HONESTY: UC-028's two reworks + UC-027's earlier deploy_failed are real DEV-caught change-failures (EXP-108 integrity) — the process working (caught in dev before OAG/prod), NOT decay; CFR ~39% reflects honest dev-stage rejection accounting. Registry unchanged: 8 active (EXP-101,106,107,112,113,115,116,117) — AT cap-8; no rows added/retired. No global-section rules changed; routed changes = engineer.md (2 folds) + solution-architect.md (reuse-verify note) + EXP-115 confirming note. -->
 <!-- v109 (FOCUSED retro, ROC 2026-07-24; RECONCILED onto main v108 via fold-forward-FIRST — main had advanced to v108 (AdixOut tight retro) while this ROC session ran, so this entry is v109; triggered by the §F8 routine-batch gate at SLC-ROC-013 close, NO incident): SLC-ROC-013 (REQ-ROC-003 living-demo foundation, UC-051..055) delivered + validated live-stack + pushed to origin/main on green (CI deploying to aas-test). NO global §-body process change this cycle — the routed outcomes are (1) EXP-116 lean-orchestration ADOPTED into orchestrator.md as plain practice (guards proven safe 2/2, no DORA harm; registry 8→7), (2) EXP-117 board-push cadence advanced to 1/3 POSITIVE. Constraint UNCHANGED and confirmed not-agent-squeezable (`registered`/backlog-aging artifact 57.76% + external-blocked DEF-004 33.55%; agents ≈8.6%); change budget deliberately NOT spent chasing it (constraint-gate). J23 demo-grows DoD + demo-egress isolation pattern kept as ROC project artifacts, not over-generalised. TIGHT retro — score + adopt + drain + fold. -->
-# Current Process — v178
+# Current Process — v187
 
 <!-- v139 (owner instruction, OagEventSource 2026-08-13, NO retro — a direct standing
 instruction from the human owner, folded immediately rather than queued): every update to
@@ -2868,6 +2882,94 @@ the obligation.
 
 Target metric: `orchestrator`/`reported` share of gross lead time, and intake
 median in-queue age. [EXP-ROC-025]
+
+**F5.2 — THE UNIT OF PULL IS A THEMED SLICE, NOT A FINDING (v187, ROC, owner-directed
+2026-09-18).** v184 reserved a slot; v185 put a product floor on the pull. Both changed
+*which* item is pulled. Neither changed **how many separate decisions a cycle costs**, and
+the constraint did not move: `orchestrator`/`reported` was 35.4% at v178, 35.23% at v183,
+34.64% at v184 and **34.49%** today. Four retros, 0.9pp.
+
+THE MEASUREMENT THAT NAMES THE REAL MECHANISM, 2026-09-18: **33 items registered and 16
+resolved in one day** — 2.06 registered per resolved, so the day's work ended with 17 more
+open items than it started with. The ready queue holds **69 items**, 65 of them machinery
+findings and 4 product use-cases. Defect arrivals are **125 in the trailing 30 days**. And
+the churn is where the cost shows: `items/` + `views/` bookkeeping moved **7962 insertions
+across 150 files**, against **6577 across 121** for the entire source tree including tests.
+**The ledger of the work was bigger than the work.**
+
+WHY-CHAIN, and level 4 is the one the two prior changes missed:
+1. `orchestrator` tops GLT because 191 items have dwelt in `reported`.
+2. There are 191 because every finding becomes its own item — 125 arrivals in 30 days.
+3. Every finding becomes its own item because **the registration unit IS the finding**:
+   `wi-mint` mints one item per finding and there is no unit above it except a slice,
+   which in practice only product work ever gets.
+4. Each item then carries the FULL ceremony independently — a triage decision, a pull, an
+   engineer dispatch, a tester dispatch, a board push, a retro-debt increment. Per-item
+   overhead is roughly constant, so **total overhead scales linearly with finding count**,
+   and finding count is set by gates that audit gates.
+5. ROOT CAUSE: **the system has exactly one granularity of work, and no way to make one
+   decision that disposes of many related findings.** Selection rules cannot fix a
+   cardinality problem. v184 and v185 were both selection rules.
+
+THE RULE, and the three parts are ONE rule, not three:
+- **Pull THEMES, not items.** A cycle pulls a small number (default **3**) of themed
+  slices. A theme is a set of ready items sharing a *mechanism or a surface* — something
+  one engineer dispatch can hold in its head at once — and it takes ONE triage decision,
+  ONE dispatch and ONE validation for the whole theme.
+- **At least one pulled theme must be PRODUCT-FACING** — its acceptance changes an
+  operator-visible surface (§F5's v185 floor, restated at theme granularity).
+- **At least one slot is reserved for NON-DEFECT work** and no defect may pre-empt it
+  (§F5.1, unchanged; it now names a theme rather than an item).
+
+WHAT A THEME IS NOT, because this is the way it fails: a theme is not a bag. If a group
+needs two unrelated mental models it is two themes, and **6 real themes with 15 loose
+items is a better answer than 10 fake ones**. An item that cannot be themed is pulled
+alone, and that is ordinary — not a defeat.
+
+THE HONEST COST, stated here so the next retro scores it rather than rediscovers it: a
+themed validation has an ambiguous verdict when one member fails and the rest pass. The
+theme's state follows its WEAKEST member (any member rejected ⇒ the theme is rejected and
+returns to the engineer with only the failing members open), because the alternative —
+letting a theme go green over a red member — is the silent-partial-delivery failure §12d
+exists to forbid. And grouping must never be the reason a finding that should have been
+DECLINED outright gets carried along inside a theme; §F8a is untouched.
+
+Target metrics: **lead time** (registered→done) and **registered-per-resolved**, which must
+fall below 1.0 — guarded by CFR and by findings-registered-per-cycle, which must NOT fall
+(if it does, theming is suppressing discovery rather than cheapening disposal). [EXP-ROC-026]
+
+**F5.3 — WE CANNOT PRICE WHAT WE DO NOT MEASURE, AND TODAY WE CANNOT PRICE ANYTHING
+(v187, ROC, owner question 2026-09-18: *"we have spent £500 today — on what, and has it
+delivered value?"*).** The honest answer required hand-assembling git and item-log queries
+for twenty minutes, and the £500 itself came from the owner because **nothing in this
+system knows it**. §E token coverage is **12.2% of 2744 events**; §F duration coverage is
+**4.4%**. So the two questions a spender actually asks — *what did this item cost* and
+*what did that buy* — are both unanswerable from the record, while the DORA block beside
+them is precise to four decimal places.
+
+THE RULE: **every dispatch's cost is attached to the item it was spent on.** The
+orchestrator attaches `TOKENS=` and `DURATION_MS=` from the dispatch result to **every
+event it fires** — including the flow events (`created`, `registered`, `made_ready`,
+`pulled`, `blocked`, `unblocked`, `collision`), not only the stage events. This is not new
+(v150 said it), and it is restated because v150's own limb `OI-ROC-008` records why it is
+still 12% covered: **the numbers are visible only to the orchestrator, and the stage events
+that carry most of the cost are fired under `AGENT=engineer`/`tester`.** Attaching them
+there would mean spoofing `AGENT=`, which corrupts the `by_owner` table the constraint is
+named from. So the residue is real and it is NOT closed by trying harder — it needs either
+a dispatch-cost annotation the orchestrator can attach WITHOUT owning the event, or a
+harness that exposes usage to the subagent. **Until then, read a 0.0% plumbing share as
+MISSING, never as ZERO** (§17i: a metric that cannot come back non-zero is not evidence).
+
+AND THE ONE FIGURE TO PUT IN FRONT OF A SPENDER, every cycle: not tokens — **cost per
+operator-visible change.** Today: £500 / **6** validated defects that touched product
+source = **~£83**, against £500 / 16 resolved items = £31, against a day that ended
+**17 items further behind**. The first number is the one that means anything, the third is
+the one that decides whether to keep going, and neither was derivable before this retro.
+
+Target metric: **token/duration coverage of events** (proxy for cost attributability —
+justified as a DORA proxy because without it no DORA figure can be priced), baseline
+**12.2% tokens / 4.4% duration**; and **cost per product-facing resolution**, baseline
+**~£83 (6 of 14 validated defects, 43% product-facing)**. [EXP-ROC-027]
 
 ## F5a. Prod promotion is continuous — no review gate; the tester validates in prod
 Once an established CD promotion pipeline exists, **code flows to prod automatically on

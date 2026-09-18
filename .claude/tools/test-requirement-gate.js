@@ -59,6 +59,26 @@
  *                                               [--write-baseline]
  *                                               [--clean-tree] [--repo-root <dir>]
  *
+ * A CHECK NEVER WRITES (DEF-ROC-322). Every invocation above except `--write-baseline`
+ * is a pure READ of the working tree, and says so on stdout as `TRG-WROTE: no`. Until
+ * this was fixed, ANY passing run auto-tightened the committed floor as a side effect —
+ * `--mode report`, the mode whose entire purpose is to look without enforcing, moved
+ * ROC's floor 1128 -> 1121, and two agents restored the file by hand within one hour.
+ * The floor was also cut from whatever happened to be ON DISK in a tree four agents are
+ * mid-edit in, so it could be written from work that never reached trunk and trunk could
+ * then not meet it (that is the mechanism behind DEF-ROC-300).
+ *
+ * THE TIGHTEN SURVIVES — a ratchet nobody turns is a high-water mark — but it moved to
+ * the asked-for path. `--write-baseline`:
+ *   - measures the COMMITTED (HEAD) copy of every input, never the working tree, because
+ *     a floor is a claim about TRUNK (`--clean-tree` is therefore IMPLIED, not refused);
+ *   - REFUSES if any measured input is uncommitted, naming each one — including an
+ *     untracked spec under a scanned root, which is a co-worker's mid-build file;
+ *   - still refuses to RAISE (--allow-baseline-growth is the deliberate, reviewed door);
+ *   - records `baselineCutFrom` — the shas it was cut from, and when — so a later reader
+ *     can ask whether the tree still meets it. DEF-ROC-300 could not be answered because
+ *     the orphaned tighten had no author, no item id and no sha: a check run produced it.
+ *
  * TRIAGING A RATCHET REGRESSION — "the gate reads 1757 against its 1755 floor and nobody
  * knows whose +2 that is". The method that answered it (DEFECT-OAG-106, `AC-106.5`), after
  * two earlier passes had failed to:
@@ -66,7 +86,7 @@
  *   1. `--clean-tree` measures the COMMITTED (HEAD) copy of every scanned file, materialised
  *      into a temp root, instead of the working tree. Each root is resolved in ITS OWN repo
  *      (the parent repo and each project's nested repo are separate — CLAUDE.md's two lanes),
- *      so this works across both. Auto-tighten is forced OFF: a diagnostic never moves a floor.
+ *      so this works across both. It writes nothing — as no check does (DEF-ROC-322).
  *   2. If `--clean-tree` scores the floor EXACTLY, the regression is in the unpushed/uncommitted
  *      range and is YOURS (or a co-worker's untracked file — an untracked `*.scratch.test.ts`
  *      another agent is mid-build on counts in the working tree and not at HEAD).
@@ -1110,6 +1130,9 @@ function formatReport(r, opts) {
   L.push(`test-requirement-gate[${r.project}] — the ONLY thing tests validate is the requirements`)
   L.push(`TRG-VERDICT: ${r.verdict}`)
   L.push(`TRG-MODE: ${r.mode}`)
+  // A check states, mechanically, that it mutated nothing. Silence about a write is how
+  // an auto-tighten came to sit in the config with no author (DEF-ROC-300/322).
+  L.push('TRG-WROTE: no (a check never writes; the floor moves only via --write-baseline)')
   L.push(
     `TRG-COUNTS: files=${r.counts.files} cases=${r.counts.cases} ` +
     `limb1-untagged=${r.counts.ac} limb2-authored=${r.counts.authored} ` +
@@ -1130,8 +1153,13 @@ function formatReport(r, opts) {
            'violation landed. Fix it, or move the baseline DOWN — never up.')
   }
   for (const x of r.slack) {
-    L.push(`  RATCHET SLACK [${x.limb}]: ${x.count} < baseline ${x.baseline} — lower the ` +
-           `baseline to ${x.count} in the config so it cannot drift back (--write-baseline).`)
+    L.push(`  RATCHET SLACK [${x.limb}]: ${x.count} < baseline ${x.baseline} — a gain is ` +
+           'available. This run did NOT take it: a floor is a decision, with an author and ' +
+           'an item id, not a side effect of somebody running a check (DEF-ROC-322). To ' +
+           'take it, commit your work and then ask for it:\n' +
+           `      make test-requirement-gate-baseline PROJECT=${r.project}\n` +
+           '    It cuts the floor from the COMMITTED tree, refuses if any measured input ' +
+           'is uncommitted, and records the sha.')
   }
   const byRule = {}
   for (const v of r.violations) byRule[v.rule] = (byRule[v.rule] || 0) + 1
@@ -1194,10 +1222,82 @@ function tightenPlan(old, counts) {
   return { next, moved }
 }
 
-/** The ONLY place in this tool that writes the committed config. */
-function writeFloor(p, cfg, baseline) {
+/**
+ * The ONLY place in this tool that writes the committed config, and it is reachable
+ * ONLY from `--write-baseline` (DEF-ROC-322). `cutFrom` is written beside the floor so
+ * a later reader can ask the one question DEF-ROC-300 could not answer — *what tree is
+ * this number about?* — instead of inferring an author from a commit that has none.
+ */
+function writeFloor(p, cfg, baseline, cutFrom) {
+  const out = {}
+  for (const [k, v] of Object.entries(cfg)) {
+    if (k === 'baselineCutFrom') continue
+    out[k] = k === 'baseline' ? baseline : v
+    if (k === 'baseline' && cutFrom) out.baselineCutFrom = cutFrom
+  }
+  if (!('baseline' in out)) out.baseline = baseline
+  if (cutFrom && !('baselineCutFrom' in out)) out.baselineCutFrom = cutFrom
+  fs.writeFileSync(p, JSON.stringify(out, null, 2) + '\n', 'utf8')
   cfg.baseline = baseline
-  fs.writeFileSync(p, JSON.stringify(cfg, null, 2) + '\n', 'utf8')
+  return out
+}
+
+/**
+ * Every UNCOMMITTED path that is an INPUT to the measurement — a spec under a scanned
+ * root, a record of the variation graph, or the config itself.
+ *
+ * WHY THIS IS A REFUSAL AND NOT A WARNING (DEF-ROC-322). A floor is a claim about
+ * TRUNK. Up to four agents are mid-edit in this working tree, so a number taken from
+ * what happened to be on disk can include work that never lands — and then trunk
+ * cannot meet its own floor. That is not hypothetical: it is the mechanism behind
+ * DEF-ROC-300 (tree 3875 against floor 3873).
+ *
+ * SCOPED, deliberately, to what is actually measured: an unrelated dirty file cannot
+ * change the number, and a whole-repo refusal in a four-agent tree would refuse almost
+ * always — which teaches people to route around the control (the OI-ROC-014 shape).
+ * An UNTRACKED spec under a scanned root DOES count: it is the co-worker's mid-build
+ * file that would otherwise be measured into a floor they never committed.
+ */
+function uncommittedInputs(repoRoot, project, cfg) {
+  const status = (cwd, pathspec) => execFileSync(
+    'git', ['status', '--porcelain', '--untracked-files=all', '--', pathspec],
+    { cwd, encoding: 'utf8', maxBuffer: 1 << 26 })
+  const parse = (out) => out.split('\n').filter(Boolean).map((l) => {
+    const rel = l.slice(3).replace(/^"|"$/g, '')
+    const arrow = rel.indexOf(' -> ')
+    return arrow === -1 ? rel : rel.slice(arrow + 4)
+  })
+  const found = []
+  for (const f of parse(status(repoRoot, `${CONFIG_DIR_REL}/${project}.json`))) found.push(f)
+  for (const root of (cfg && cfg.roots) || []) {
+    const abs = path.join(repoRoot, root.path)
+    if (!fs.existsSync(abs)) continue
+    for (const f of parse(status(abs, '.'))) if (SCANNED.test(f)) found.push(`${root.path} :: ${f}`)
+  }
+  const gdir = cfg && cfg.variationGraph && cfg.variationGraph.dir
+  if (gdir && fs.existsSync(path.join(repoRoot, gdir))) {
+    for (const f of parse(status(path.join(repoRoot, gdir), '.'))) {
+      if (f.endsWith('.json')) found.push(`${gdir} :: ${f}`)
+    }
+  }
+  return found
+}
+
+/**
+ * The HEAD sha of every repo an input lives in. There is more than one: `.claude/tools`
+ * is the parent repo and `work/<project>/src` is the project's own nested repo
+ * (CLAUDE.md's two lanes), so a single sha would name only half the input.
+ */
+function inputShas(repoRoot, cfg) {
+  const rev = (cwd) => execFileSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8' }).trim()
+  const shas = { '.': rev(repoRoot) }
+  for (const root of (cfg && cfg.roots) || []) {
+    const abs = path.join(repoRoot, root.path)
+    if (fs.existsSync(abs)) shas[root.path] = rev(abs)
+  }
+  const gdir = cfg && cfg.variationGraph && cfg.variationGraph.dir
+  if (gdir && fs.existsSync(path.join(repoRoot, gdir))) shas[gdir] = rev(path.join(repoRoot, gdir))
+  return shas
 }
 
 // ===========================================================================
@@ -1220,7 +1320,11 @@ function main(argv) {
   // `--clean-tree` is a DIAGNOSTIC: it measures HEAD, never the working tree, and it may
   // never move a floor (a temp root's count is not this tree's count).
   const cleanTree = has('--clean-tree')
-  const scanRoot = cleanTree ? materialiseHeadTree(repoRoot, project) : repoRoot
+  // `--write-baseline` measures HEAD ALWAYS, so `--clean-tree` is IMPLIED by it rather
+  // than refused as it once was. The old refusal had the reasoning backwards: it is the
+  // WORKING-tree measurement that must never be written (DEF-ROC-322).
+  const writeBaseline = has('--write-baseline')
+  const scanRoot = cleanTree && !writeBaseline ? materialiseHeadTree(repoRoot, project) : repoRoot
   const r = runGate({ repoRoot: scanRoot, project, mode: arg('--mode', undefined) })
   if (cleanTree) r.note = (r.note ? r.note + ' ' : '') +
     `--clean-tree: measured the COMMITTED (HEAD) copy of every scanned file in ${scanRoot}, ` +
@@ -1228,26 +1332,80 @@ function main(argv) {
 
   // NEVER process.exit() after writing to a pipe: node exits before stdout flushes and
   // the consumer gets TRUNCATED JSON. Set exitCode and let the runtime drain.
-  if (has('--json')) { console.log(JSON.stringify(r, null, 2)); process.exitCode = r.exitCode; return }
+  if (has('--json') && !writeBaseline) {
+    console.log(JSON.stringify(r, null, 2)); process.exitCode = r.exitCode; return
+  }
 
-  if (has('--write-baseline')) {
-    if (cleanTree) {
-      console.error('--clean-tree is a DIAGNOSTIC over a temp root; it may not write a baseline.')
+  // ==========================================================================
+  // THE ONE WRITING PATH (DEF-ROC-322). Everything else in this tool is a READ.
+  //
+  //   asked for   — only `--write-baseline` reaches here; no check can, by construction
+  //   from HEAD   — the floor is a claim about TRUNK, so it is measured on the COMMITTED
+  //                 copy of every input, never on what is on disk in a shared tree
+  //   clean       — and it refuses outright if any measured input is uncommitted, so the
+  //                 number is about a tree that exists and can be named
+  //   stamped     — it records the shas it was cut from
+  // ==========================================================================
+  if (writeBaseline) {
+    const { p, cfg } = loadConfigFile(repoRoot, project)
+    let dirty
+    let shas
+    let headRoot
+    try {
+      dirty = uncommittedInputs(repoRoot, project, cfg)
+      shas = inputShas(repoRoot, cfg)
+      headRoot = materialiseHeadTree(repoRoot, project)
+    } catch (e) {
+      // CANNOT MEASURE IS NEVER A PASS, and never a silent fall back to the working
+      // tree: a caller who cannot tell a broken instrument from a real number fixes
+      // the wrong thing.
+      console.error(
+        `--write-baseline cannot establish the COMMITTED tree under ${repoRoot}: ${e.message}\n` +
+        '  A floor is a claim about trunk, so it is cut from HEAD and from nowhere else. ' +
+        'Nothing was written.')
       process.exit(2)
     }
-    const { p, cfg } = loadConfigFile(repoRoot, project)
+    if (dirty.length) {
+      console.error(
+        'refusing to cut a floor from a DIRTY tree — these MEASURED inputs are uncommitted:\n' +
+        dirty.map((f) => `    ${f}`).join('\n') + '\n' +
+        '  A floor cut here would be about work that may never reach trunk, and trunk ' +
+        'would then be unable to meet it (DEF-ROC-300). Commit the work first, then cut ' +
+        'the floor at that sha. Nothing was written.')
+      process.exit(2)
+    }
+    const w = runGate({ repoRoot: headRoot, project, mode: arg('--mode', undefined) })
     const old = cfg.baseline || { ac: 0, authored: 0 }
     for (const limb of ['ac', 'authored']) {
-      if (r.counts[limb] > (old[limb] || 0) && !has('--allow-baseline-growth')) {
+      if (w.counts[limb] > (old[limb] || 0) && !has('--allow-baseline-growth')) {
         console.error(
-          `refusing to RAISE the ${limb} baseline ${old[limb] || 0} -> ${r.counts[limb]}. ` +
+          `refusing to RAISE the ${limb} baseline ${old[limb] || 0} -> ${w.counts[limb]}. ` +
           'The ratchet may only shrink; fix the new violation instead ' +
           '(--allow-baseline-growth exists for a deliberate, reviewed re-baseline).')
         process.exit(2)
       }
     }
-    writeFloor(p, cfg, { ac: r.counts.ac, authored: r.counts.authored })
-    console.log(`baseline written: limb1=${cfg.baseline.ac} limb2=${cfg.baseline.authored}`)
+    const cutFrom = {
+      at: new Date().toISOString(),
+      shas,
+      measured: 'the COMMITTED (HEAD) copy of every scanned input, with every measured ' +
+        'input asserted uncommitted-free first (DEF-ROC-322)',
+      command: `test-requirement-gate --project ${project} --write-baseline`,
+    }
+    const written = writeFloor(p, cfg, { ac: w.counts.ac, authored: w.counts.authored }, cutFrom)
+    if (has('--json')) {
+      console.log(JSON.stringify(
+        { project, wrote: true, baseline: written.baseline, baselineCutFrom: cutFrom,
+          counts: w.counts }, null, 2))
+      return
+    }
+    console.log(
+      `TRG-WROTE: yes — baseline written: limb1=${written.baseline.ac} ` +
+      `limb2=${written.baseline.authored}\n` +
+      `  cut from the COMMITTED tree: ${Object.entries(shas)
+        .map(([k, v]) => `${k}@${v.slice(0, 8)}`).join(' ')}\n` +
+      '  This is HEAD\'s number, which is what the floor is a claim about — it need not ' +
+      'equal what your working tree reports. COMMIT this config change with your work.')
     return
   }
 
@@ -1256,28 +1414,20 @@ function main(argv) {
     limit: has('--verbose') ? 0 : Number(arg('--limit', 40)),
   }))
 
-  // AUTO-TIGHTEN (v142). A ratchet that only moves when a human remembers to move it is not
-  // a ratchet — it is a high-water mark that drifts. Evidence: the floor was lowered to 1749
-  // by hand at the moment someone noticed a gain, and 106 minutes later two commits took the
-  // true count to 1811. Nobody saw it for THREE DAYS, because the only observer is the next
-  // gate run. So on every PASSING run, if the observed count is strictly BELOW the committed
-  // floor, tighten the floor now, mechanically, and say so.
-  // It can only ever LOWER: the raise path stays manual and reviewed (--write-baseline
-  // --allow-baseline-growth). A failing run tightens nothing.
-  if (r.exitCode === 0 && !has('--no-auto-tighten') && !cleanTree) {
-    try {
-      const { p, cfg } = loadConfigFile(repoRoot, project)
-      const { next, moved } = tightenPlan(cfg.baseline || {}, r.counts)
-      if (moved.length) {
-        writeFloor(p, cfg, next)
-        console.log(
-          `\n  RATCHET TIGHTENED AUTOMATICALLY: ${moved.join(', ')}.\n` +
-          '  The gain is now locked in and cannot silently drift back. ' +
-          'COMMIT this config change with your work.')
-      }
-    } catch (e) {
-      console.log(`\n  (auto-tighten skipped: ${e.message})`)
-    }
+  // NO WRITE HAPPENS HERE, AND THAT IS THE POINT (DEF-ROC-322, superseding v142).
+  //
+  // v142 auto-tightened on every passing run, which made MEASURING a MUTATION of shared
+  // committed config: `--mode report` moved ROC's floor 1128 -> 1121 and two agents
+  // restored the file by hand within an hour. The v142 value is real — a ratchet nobody
+  // turns is just a high-water mark — so the tighten survives, on the asked-for path
+  // (`--write-baseline`), cut from a COMMITTED tree, stamped with the sha. What a check
+  // does instead is SAY SO: the gain is printed as a RATCHET SLACK line naming the
+  // command, so the decision has an author and an item id rather than being an incidental
+  // property of whichever tree was on disk when somebody looked.
+  if (has('--no-auto-tighten')) {
+    console.log(
+      '\n  (--no-auto-tighten is now the DEFAULT and the flag is a no-op: a check never ' +
+      'writes — DEF-ROC-322. You can drop it.)')
   }
 
   process.exitCode = r.exitCode

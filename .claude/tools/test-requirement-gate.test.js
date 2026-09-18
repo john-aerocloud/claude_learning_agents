@@ -651,17 +651,27 @@ test('proof-of-fire: the CORRECTED shapes are clean — the gate distinguishes t
 })
 
 // ==========================================================================
-// AUTO-TIGHTEN (v142) — the ratchet must move itself.
+// THE FLOOR IS WRITTEN ONLY WHEN A CALLER ASKS, AND ONLY FROM A COMMITTED TREE
+// (DEF-ROC-322 — supersedes the v142 auto-tighten side effect).
+//
+// v142 made every PASSING run rewrite the committed floor. That made MEASURING a
+// MUTATION of shared committed config: `--mode report`, the mode whose entire
+// purpose is to look without enforcing, moved ROC's floor 1128 -> 1121, and two
+// agents restored the file by hand within one hour of each other. Worse, the floor
+// was cut from whatever was ON DISK at that instant in a tree four agents are
+// mid-edit in — so a floor could be written from work that never reaches trunk, and
+// trunk then could not meet it. That is the mechanism behind DEF-ROC-300, whose
+// orphaned tighten had no author because no human authored it: a check run did.
+//
+// The v142 VALUE is kept — a ratchet nobody turns is a high-water mark — but it is
+// moved to the asked-for path: `--write-baseline` tightens, refuses to loosen,
+// refuses to cut from a dirty tree, measures HEAD, and records the sha it was cut
+// from. A check only OFFERS.
 //
 // These drive the REAL CLI through child_process, not runGate(), because the
 // behaviour under test lives in main() and writes a file. Asserting it against a
 // stubbed writer would be exactly the exec-boundary fault this gate exists to
 // catch: the stub would be written by whoever was wrong about the CLI.
-//
-// Founding evidence: the limb-1 floor was lowered to 1749 by hand at the moment
-// someone noticed a gain; 106 minutes later two commits took the true count to
-// 1811, and nobody saw it for THREE DAYS because the only observer of the drift
-// is the next gate run.
 // ==========================================================================
 
 const { execFileSync } = require('node:child_process')
@@ -690,43 +700,227 @@ const CLEAN = { 'tests/a.test.ts': "it('AC-X.1 does a thing', () => { expect(1).
 // One dirty case (no AC reference) => real count is ac:1.
 const DIRTY = { 'tests/a.test.ts': "it('does a thing', () => { expect(1).toBe(1) })\n" }
 
-test('auto-tighten: a PASSING run whose count is BELOW the floor lowers the floor', () => {
-  const root = scratch(CLEAN, { mode: 'ratchet', baseline: { ac: 5, authored: 3 } })
-  const { stdout, status } = runCli(root)
+/** The committed config's BYTES — not its parsed baseline. A write that happens to
+ *  land the same integers still rewrites the file (the tool re-serialises and adds a
+ *  trailing newline), and "did this run touch shared committed config at all" is the
+ *  question DEF-ROC-322 is about. */
+const configBytes = (root) =>
+  fs.readFileSync(path.join(root, '.claude/config/test-requirement-gate/Scratch.json'))
+
+/** Every way a caller CHECKS. None of them may write. The bare invocation is first
+ *  because `make test-requirement-gate` and loop-gate check 6 pass no flags at all. */
+const CHECK_INVOCATIONS = [
+  [],
+  ['--mode', 'report'],
+  ['--mode', 'ratchet'],
+  ['--mode', 'enforce'],
+  ['--verbose'],
+  ['--json'],
+  ['--clean-tree'],
+  ['--no-auto-tighten'],
+]
+
+test('AC-322.1: `--mode report` — the mode whose whole purpose is to LOOK — leaves the committed config byte-identical', () => {
+  const root = gitScratch(CLEAN, null, { mode: 'ratchet', baseline: { ac: 5, authored: 3 } })
+  const before = configBytes(root)
+  const { stdout, status } = runCli(root, ['--mode', 'report'])
   assert.strictEqual(status, 0, stdout)
-  assert.match(stdout, /RATCHET TIGHTENED AUTOMATICALLY/, stdout)
-  assert.deepStrictEqual(floorOf(root), { ac: 0, authored: 0 })
+  assert.deepStrictEqual(floorOf(root), { ac: 5, authored: 3 }, stdout)
+  assert.ok(before.equals(configBytes(root)),
+    'report rewrote shared committed config: ' + stdout)
 })
 
-test('auto-tighten: NON-VACUITY — it must NOT fire when the count already equals the floor', () => {
-  const root = scratch(CLEAN, { mode: 'ratchet', baseline: { ac: 0, authored: 0 } })
-  const { stdout, status } = runCli(root)
-  assert.strictEqual(status, 0, stdout)
-  assert.doesNotMatch(stdout, /RATCHET TIGHTENED/, stdout)
-  assert.deepStrictEqual(floorOf(root), { ac: 0, authored: 0 })
+test('AC-322.1: NO check invocation writes — the default is safe, with no flag to remember', () => {
+  for (const args of CHECK_INVOCATIONS) {
+    const root = gitScratch(CLEAN, null, { mode: 'ratchet', baseline: { ac: 5, authored: 3 } })
+    const before = configBytes(root)
+    const { stdout } = runCli(root, args)
+    assert.ok(before.equals(configBytes(root)),
+      `\`${args.join(' ') || '<no flags>'}\` mutated the committed config: ` + stdout)
+    assert.deepStrictEqual(floorOf(root), { ac: 5, authored: 3 }, args.join(' '))
+  }
 })
 
-test('auto-tighten: a FAILING run tightens NOTHING and never RAISES the floor', () => {
-  const root = scratch(DIRTY, { mode: 'ratchet', baseline: { ac: 0, authored: 0 } })
+test('AC-322.7: a check with slack OFFERS the tighten by name instead of performing it', () => {
+  const root = gitScratch(CLEAN, null, { mode: 'ratchet', baseline: { ac: 5, authored: 3 } })
   const { stdout, status } = runCli(root)
-  assert.strictEqual(status, 2, stdout)
-  assert.doesNotMatch(stdout, /RATCHET TIGHTENED/, stdout)
-  // The floor is the thing that must survive a red run untouched.
-  assert.deepStrictEqual(floorOf(root), { ac: 0, authored: 0 })
-})
-
-test('auto-tighten: --no-auto-tighten suppresses the write (for scratch/diff runs)', () => {
-  const root = scratch(CLEAN, { mode: 'ratchet', baseline: { ac: 5, authored: 3 } })
-  const { stdout, status } = runCli(root, ['--no-auto-tighten'])
   assert.strictEqual(status, 0, stdout)
-  assert.doesNotMatch(stdout, /RATCHET TIGHTENED/, stdout)
+  // The run says out loud that it wrote nothing — silence about a mutation is how
+  // an orphaned tighten came to have no author (DEF-ROC-300).
+  assert.match(stdout, /TRG-WROTE: no/, stdout)
+  assert.match(stdout, /test-requirement-gate-baseline|--write-baseline/, stdout)
   assert.deepStrictEqual(floorOf(root), { ac: 5, authored: 3 })
 })
 
-test('auto-tighten: --json is a pure read and must never move the floor', () => {
+test('AC-322.7: NON-VACUITY — the sentinel says `yes` when a write really did happen', () => {
+  const root = gitScratch(CLEAN, null, { mode: 'ratchet', baseline: { ac: 5, authored: 3 } })
+  const { stdout, status } = runCli(root, ['--write-baseline'])
+  assert.strictEqual(status, 0, stdout)
+  assert.match(stdout, /TRG-WROTE: yes/, stdout)
+})
+
+test('AC-322.3: an asked-for `--write-baseline` still TIGHTENS, and records the sha it was cut from', () => {
+  const root = gitScratch(CLEAN, null, { mode: 'ratchet', baseline: { ac: 5, authored: 3 } })
+  const { stdout, status } = runCli(root, ['--write-baseline'])
+  assert.strictEqual(status, 0, stdout)
+  assert.deepStrictEqual(floorOf(root), { ac: 0, authored: 0 }, stdout)
+
+  const cfg = JSON.parse(fs.readFileSync(
+    path.join(root, '.claude/config/test-requirement-gate/Scratch.json'), 'utf8'))
+  const head = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+  assert.ok(cfg.baselineCutFrom, 'the floor must name the tree it was cut from: ' + stdout)
+  assert.strictEqual(cfg.baselineCutFrom.shas['.'], head,
+    'the recorded sha must be the sha the measurement was taken at')
+  assert.ok(/^\d{4}-\d{2}-\d{2}T/.test(cfg.baselineCutFrom.at || ''), 'and when')
+})
+
+test('AC-322.4: `--write-baseline` still REFUSES to LOOSEN the ratchet', () => {
+  const root = gitScratch(DIRTY, null, { mode: 'ratchet', baseline: { ac: 0, authored: 0 } })
+  const before = configBytes(root)
+  const { stdout, status } = runCli(root, ['--write-baseline'])
+  assert.strictEqual(status, 2, stdout)
+  assert.match(stdout, /refusing to RAISE/, stdout)
+  assert.ok(before.equals(configBytes(root)), 'a refused write must not touch the file')
+})
+
+test('AC-322.5: `--write-baseline` REFUSES to cut a floor from a MODIFIED working tree', () => {
+  const root = gitScratch(
+    CLEAN, { 'tests/a.test.ts': "it('AC-X.1 mid-edit, uncommitted', () => {})\n" },
+    { mode: 'ratchet', baseline: { ac: 5, authored: 3 } },
+  )
+  const before = configBytes(root)
+  const { stdout, status } = runCli(root, ['--write-baseline'])
+  assert.strictEqual(status, 2, stdout)
+  assert.match(stdout, /tests\/a\.test\.ts/, 'it must NAME what is uncommitted: ' + stdout)
+  assert.ok(before.equals(configBytes(root)), 'a refused write must not touch the file')
+})
+
+test('AC-322.5: `--write-baseline` REFUSES when an UNTRACKED spec sits under a scanned root', () => {
+  const root = gitScratch(
+    CLEAN, { 'tests/zz-scratch.test.ts': "it('a co-worker is mid-build on this', () => {})\n" },
+    { mode: 'ratchet', baseline: { ac: 5, authored: 3 } },
+  )
+  const before = configBytes(root)
+  const { stdout, status } = runCli(root, ['--write-baseline'])
+  assert.strictEqual(status, 2, stdout)
+  assert.match(stdout, /zz-scratch\.test\.ts/, stdout)
+  assert.ok(before.equals(configBytes(root)))
+})
+
+test('AC-322.5: `--write-baseline` REFUSES when the CONFIG ITSELF is uncommitted', () => {
+  const root = gitScratch(CLEAN, null, { mode: 'ratchet', baseline: { ac: 5, authored: 3 } })
+  const p = path.join(root, '.claude/config/test-requirement-gate/Scratch.json')
+  // A BYTE edit, not a parse-mutate-reserialise: the config must stay valid JSON (the
+  // refusal path still has to load it to find the roots), and limb 2 of this very gate
+  // treats writing into a value that reached the test through readFileSync as an
+  // authored precondition — which it would be right to, so the test does not do it.
+  fs.appendFileSync(p, '\n')
+  const before = configBytes(root)
+  const { stdout, status } = runCli(root, ['--write-baseline'])
+  assert.strictEqual(status, 2, stdout)
+  assert.match(stdout, /Scratch\.json/, stdout)
+  assert.ok(before.equals(configBytes(root)),
+    'the measurement reads HEAD\'s config, so writing onto an uncommitted one is a lie')
+})
+
+test('AC-322.5: `--write-baseline` REFUSES when an uncommitted VARIATION RECORD is a measured input', () => {
+  // The variation graph is measured: a node it holds CREDITS a case that would otherwise
+  // count as untagged (ROC's 1202 -> 1128 was exactly this). So an uncommitted record moves
+  // the floor just as surely as an uncommitted spec does, and it is a PRODUCT artefact another
+  // agent authors — the co-worker's mid-build file the refusal exists for.
+  const graph = JSON.stringify({ nodes: [{ id: 'VN-1', ac: ['AC-X.1'] }] })
+  const root = gitScratch(
+    { 'tests/a.test.ts': "it('AC-X.1 does a thing', () => {})\n", 'variations/committed.json': graph },
+    { 'variations/mid-edit.json': graph },
+    { mode: 'ratchet',
+      baseline: { ac: 5, authored: 3 },
+      variationGraph: { dir: 'variations', why: 'the authored variation graph credits a case that names one of its nodes' } },
+  )
+  const before = configBytes(root)
+  const { stdout, status } = runCli(root, ['--write-baseline'])
+  assert.strictEqual(status, 2, stdout)
+  assert.match(stdout, /mid-edit\.json/, 'it must NAME the uncommitted record: ' + stdout)
+  assert.ok(before.equals(configBytes(root)), 'a refused write must not touch the file')
+})
+
+test('AC-322.4: NON-VACUITY — the refusal is a GUARD, not a tool that cannot raise: --allow-baseline-growth still opens the reviewed door', () => {
+  // Without this, "refuses to RAISE" would be satisfied by a --write-baseline that can
+  // never raise anything, and the deliberate re-baseline the ratchet documents would have
+  // been silently deleted along with the auto-tighten.
+  const root = gitScratch(DIRTY, null, { mode: 'ratchet', baseline: { ac: 0, authored: 0 } })
+  const { stdout, status } = runCli(root, ['--write-baseline', '--allow-baseline-growth'])
+  assert.strictEqual(status, 0, stdout)
+  assert.match(stdout, /TRG-WROTE: yes/, stdout)
+  assert.deepStrictEqual(floorOf(root), { ac: 1, authored: 0 },
+    'the reviewed door must still open, or the guard above proves nothing: ' + stdout)
+})
+
+test('AC-322.3: `--write-baseline --json` tells a MACHINE reader that it wrote, and what it cut from', () => {
+  // `make test-requirement-gate-baseline JSON=1` exposes this path, so it is a caller
+  // contract, not an internal. A machine reader that cannot see `wrote` and the sha is
+  // back where DEF-ROC-300 started: a floor in the file with nothing saying what it is about.
+  const root = gitScratch(CLEAN, null, { mode: 'ratchet', baseline: { ac: 5, authored: 3 } })
+  const { stdout, status } = runCli(root, ['--write-baseline', '--json'])
+  assert.strictEqual(status, 0, stdout)
+  const out = JSON.parse(stdout) // must be JSON, not the human report
+  assert.strictEqual(out.wrote, true, stdout)
+  assert.deepStrictEqual(out.baseline, { ac: 0, authored: 0 }, stdout)
+  const head = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+  assert.strictEqual(out.baselineCutFrom.shas['.'], head, stdout)
+  assert.deepStrictEqual(floorOf(root), { ac: 0, authored: 0 })
+})
+
+test('AC-322.6: the floor is cut from the COMMITTED tree — a GITIGNORED spec cannot enter it', () => {
+  // git status cannot see an ignored file, so the dirty-tree guard alone would let it
+  // through. Only measuring HEAD keeps it out — which is the difference between "the
+  // tree happened to be clean" and "the number is about trunk".
+  const root = gitScratch(
+    { 'tests/a.test.ts': "it('AC-X.1 committed and tagged', () => {})\n",
+      '.gitignore': 'tests/ignored/\n' },
+    { 'tests/ignored/x.test.ts': "it('generated, never committed', () => {})\n" },
+    { mode: 'ratchet', baseline: { ac: 5, authored: 3 } },
+  )
+  const seen = JSON.parse(runCli(root, ['--json']).stdout)
+  assert.strictEqual(seen.counts.ac, 1, 'the WORKING tree really does carry the extra case')
+
+  const { stdout, status } = runCli(root, ['--write-baseline'])
+  assert.strictEqual(status, 0, stdout)
+  assert.deepStrictEqual(floorOf(root), { ac: 0, authored: 0 },
+    'a floor cut from the working tree would have written ac:1, which trunk cannot meet')
+})
+
+test('AC-322.8: `--write-baseline` outside a git repo REFUSES rather than falling back to the working tree', () => {
   const root = scratch(CLEAN, { mode: 'ratchet', baseline: { ac: 5, authored: 3 } })
+  const before = configBytes(root)
+  const { stdout, status } = runCli(root, ['--write-baseline'])
+  assert.strictEqual(status, 2, stdout)
+  // NAME the reason: an exit 2 that happens to be the raise refusal, or a crash, would
+  // otherwise satisfy this case while the instrument was broken. Cannot-measure must be
+  // distinguishable from a real refusal, or a caller fixes the wrong thing.
+  assert.match(stdout, /cannot establish the COMMITTED tree/, stdout)
+  assert.ok(before.equals(configBytes(root)),
+    'cannot-measure is never a pass and never a silent fallback')
+})
+
+test('AC-322.2: a FAILING check writes NOTHING — a red run must leave the floor exactly where it was', () => {
+  // Scoped to a CHECK on purpose, and the title says so. An ASKED-for write on a red run
+  // is a different question with a different answer: in RATCHET mode a red run is red
+  // BECAUSE it exceeds the floor, so the raise refusal already stops it (AC-322.4); in
+  // enforce mode the count can be below the floor while some other rule fails, and
+  // tightening to a committed, lower, sha-stamped number there is a legitimate ask.
+  const root = gitScratch(DIRTY, null, { mode: 'enforce', baseline: { ac: 5, authored: 3 } })
+  const before = configBytes(root)
+  const check = runCli(root)
+  assert.strictEqual(check.status, 2, check.stdout)
+  assert.ok(before.equals(configBytes(root)), check.stdout)
+})
+
+test('AC-322.2: `--json` is a pure read and must never move the floor', () => {
+  const root = scratch(CLEAN, { mode: 'ratchet', baseline: { ac: 5, authored: 3 } })
+  const before = configBytes(root)
   const { stdout } = runCli(root, ['--json'])
   JSON.parse(stdout) // must still be valid, untruncated JSON
+  assert.ok(before.equals(configBytes(root)))
   assert.deepStrictEqual(floorOf(root), { ac: 5, authored: 3 })
 })
 
@@ -941,7 +1135,7 @@ test('AC-106.5: `--clean-tree` measures HEAD, so an UNTRACKED violating spec is 
   assert.match(r.note, /COMMITTED \(HEAD\)/)
 })
 
-test('AC-106.5: `--clean-tree` is a DIAGNOSTIC — it can neither auto-tighten nor write a baseline', () => {
+test('AC-106.5 / AC-322.3: `--clean-tree` is a DIAGNOSTIC that writes nothing, and `--write-baseline` measures the same HEAD it does', () => {
   const root = gitScratch(
     { 'tests/a.test.ts': "it('AC-X.1 committed and tagged', () => {})\n" },
     null,
@@ -949,19 +1143,26 @@ test('AC-106.5: `--clean-tree` is a DIAGNOSTIC — it can neither auto-tighten n
   )
   const diag = runCli(root, ['--clean-tree'])
   assert.strictEqual(diag.status, 0, diag.stdout)
-  assert.doesNotMatch(diag.stdout, /RATCHET TIGHTENED/, 'a temp root\'s count is not this tree\'s count')
   assert.deepStrictEqual(floorOf(root), { ac: 5, authored: 3 })
 
+  // DEF-ROC-322 SUPERSEDES the old refusal here. `--clean-tree --write-baseline` used to
+  // exit 2 on the grounds that "a temp root's count is not this tree's count" — but that
+  // reasoning had it backwards: a floor is a claim about TRUNK, so HEAD's count is the
+  // only honest one, and the working-tree measurement is what must never be written. So
+  // --write-baseline now measures HEAD always and --clean-tree is implied, not refused.
   const write = runCli(root, ['--clean-tree', '--write-baseline'])
-  assert.strictEqual(write.status, 2, write.stdout)
-  assert.match(write.stdout, /may not write a baseline/)
-  assert.deepStrictEqual(floorOf(root), { ac: 5, authored: 3 })
-
-  // NON-VACUITY: the same run WITHOUT --clean-tree does tighten, so the guard above is
-  // suppressing a real write rather than describing a tool that never writes.
-  const plain = runCli(root, ['--no-auto-tighten', '--write-baseline'])
-  assert.strictEqual(plain.status, 0, plain.stdout)
+  assert.strictEqual(write.status, 0, write.stdout)
   assert.deepStrictEqual(floorOf(root), { ac: 0, authored: 0 })
+
+  // NON-VACUITY: the plain form writes the same number, so the two agree by construction.
+  const root2 = gitScratch(
+    { 'tests/a.test.ts': "it('AC-X.1 committed and tagged', () => {})\n" },
+    null,
+    { mode: 'ratchet', baseline: { ac: 5, authored: 3 } },
+  )
+  const plain = runCli(root2, ['--write-baseline'])
+  assert.strictEqual(plain.status, 0, plain.stdout)
+  assert.deepStrictEqual(floorOf(root2), { ac: 0, authored: 0 })
 })
 
 // ==========================================================================

@@ -1204,6 +1204,16 @@ tool-coverage:
 #   make test-requirement-gate-baseline       # re-cut the ratchet floor (SHRINK only)
 #   make test-requirement-gate-clean          # measure HEAD, not the working tree
 #
+# A CHECK NEVER WRITES (DEF-ROC-322). `make test-requirement-gate` in ANY mode is a
+# pure read and says so (`TRG-WROTE: no`). It used to auto-tighten the committed floor
+# as a SIDE EFFECT of being run -- `MODE=report` moved ROC's floor 1128 -> 1121 -- so an
+# agent could not measure without mutating shared committed config, and the floor was
+# cut from a dirty shared tree (the mechanism behind DEF-ROC-300). The tighten is still
+# valuable and still here, but only where somebody ASKS for it:
+#   make test-requirement-gate-baseline       # cuts from the COMMITTED tree, refuses if
+#                                             # any measured input is uncommitted, refuses
+#                                             # to loosen, and stamps the sha it cut from
+#
 # TRIAGING A RATCHET REGRESSION — "it reads 1757 against its 1755 floor and nobody
 # knows whose +2 that is" (DEFECT-OAG-106 AC-106.5; two earlier passes failed to
 # answer it, this method answered it in one):
@@ -1221,11 +1231,15 @@ test-requirement-gate:
 	node .claude/tools/test-requirement-gate.js --project $(PROJECT) \
 	  $(if $(MODE),--mode $(MODE),) $(if $(VERBOSE),--verbose,) $(if $(JSON),--json,)
 
+# The ONE writing path. Cuts the floor from the COMMITTED (HEAD) copy of every scanned
+# input, refuses on a dirty measured input, refuses to raise, and records the sha.
 test-requirement-gate-baseline:
-	node .claude/tools/test-requirement-gate.js --project $(PROJECT) --write-baseline
+	node .claude/tools/test-requirement-gate.js --project $(PROJECT) --write-baseline \
+	  $(if $(ALLOW_GROWTH),--allow-baseline-growth,) $(if $(JSON),--json,)
 
-# Measure the COMMITTED tree, never the working tree. A pure diagnostic: it cannot
-# write a baseline and it cannot auto-tighten (see DEFECT-OAG-106, AC-106.5).
+# Measure the COMMITTED tree, never the working tree. A pure diagnostic -- as every
+# check is since DEF-ROC-322 (see DEFECT-OAG-106 AC-106.5 for the triage method it
+# exists for). Note `-baseline` above now measures HEAD too, so the two agree.
 test-requirement-gate-clean:
 	node .claude/tools/test-requirement-gate.js --project $(PROJECT) --clean-tree \
 	  $(if $(VERBOSE),--verbose,) $(if $(JSON),--json,)

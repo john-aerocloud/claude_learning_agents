@@ -1162,6 +1162,45 @@ function formatReport(r, opts) {
 }
 
 // ===========================================================================
+// THE FLOOR — read, plan, write. ONE writer of the fact (EXP-047).
+//
+// The floor was previously read-compared-written in two places (`--write-baseline`
+// and the auto-tighten). Two writers of one fact drift; they are one here so that
+// WHO may write, and FROM WHAT, is a single decision rather than a property of
+// whichever branch you happen to be in.
+// ===========================================================================
+const CONFIG_DIR_REL = '.claude/config/test-requirement-gate'
+
+function configPath(repoRoot, project) {
+  return path.join(repoRoot, CONFIG_DIR_REL, `${project}.json`)
+}
+
+function loadConfigFile(repoRoot, project) {
+  const p = configPath(repoRoot, project)
+  return { p, cfg: JSON.parse(fs.readFileSync(p, 'utf8')) }
+}
+
+/** What a tighten WOULD move, without moving it. A ratchet may only ever shrink. */
+function tightenPlan(old, counts) {
+  const next = { ...old }
+  const moved = []
+  for (const limb of ['ac', 'authored']) {
+    const seen = counts[limb]
+    if (typeof old[limb] === 'number' && seen < old[limb]) {
+      next[limb] = seen
+      moved.push(`${limb} ${old[limb]} -> ${seen}`)
+    }
+  }
+  return { next, moved }
+}
+
+/** The ONLY place in this tool that writes the committed config. */
+function writeFloor(p, cfg, baseline) {
+  cfg.baseline = baseline
+  fs.writeFileSync(p, JSON.stringify(cfg, null, 2) + '\n', 'utf8')
+}
+
+// ===========================================================================
 // CLI
 // ===========================================================================
 function main(argv) {
@@ -1196,8 +1235,7 @@ function main(argv) {
       console.error('--clean-tree is a DIAGNOSTIC over a temp root; it may not write a baseline.')
       process.exit(2)
     }
-    const p = path.join(repoRoot, '.claude/config/test-requirement-gate', `${project}.json`)
-    const cfg = JSON.parse(fs.readFileSync(p, 'utf8'))
+    const { p, cfg } = loadConfigFile(repoRoot, project)
     const old = cfg.baseline || { ac: 0, authored: 0 }
     for (const limb of ['ac', 'authored']) {
       if (r.counts[limb] > (old[limb] || 0) && !has('--allow-baseline-growth')) {
@@ -1208,8 +1246,7 @@ function main(argv) {
         process.exit(2)
       }
     }
-    cfg.baseline = { ac: r.counts.ac, authored: r.counts.authored }
-    fs.writeFileSync(p, JSON.stringify(cfg, null, 2) + '\n', 'utf8')
+    writeFloor(p, cfg, { ac: r.counts.ac, authored: r.counts.authored })
     console.log(`baseline written: limb1=${cfg.baseline.ac} limb2=${cfg.baseline.authored}`)
     return
   }
@@ -1228,22 +1265,11 @@ function main(argv) {
   // It can only ever LOWER: the raise path stays manual and reviewed (--write-baseline
   // --allow-baseline-growth). A failing run tightens nothing.
   if (r.exitCode === 0 && !has('--no-auto-tighten') && !cleanTree) {
-    const p = path.join(repoRoot, '.claude/config/test-requirement-gate', `${project}.json`)
     try {
-      const cfg = JSON.parse(fs.readFileSync(p, 'utf8'))
-      const old = cfg.baseline || {}
-      const next = { ...old }
-      const moved = []
-      for (const limb of ['ac', 'authored']) {
-        const seen = r.counts[limb]
-        if (typeof old[limb] === 'number' && seen < old[limb]) {
-          next[limb] = seen
-          moved.push(`${limb} ${old[limb]} -> ${seen}`)
-        }
-      }
+      const { p, cfg } = loadConfigFile(repoRoot, project)
+      const { next, moved } = tightenPlan(cfg.baseline || {}, r.counts)
       if (moved.length) {
-        cfg.baseline = next
-        fs.writeFileSync(p, JSON.stringify(cfg, null, 2) + '\n', 'utf8')
+        writeFloor(p, cfg, next)
         console.log(
           `\n  RATCHET TIGHTENED AUTOMATICALLY: ${moved.join(', ')}.\n` +
           '  The gain is now locked in and cannot silently drift back. ' +
@@ -1259,7 +1285,7 @@ function main(argv) {
 
 module.exports = {
   runGate, formatReport, scanJs, scanPy, extractCases, computeTaint, globToRe,
-  MODIFIER_LEDGER, RE_CALL,
+  MODIFIER_LEDGER, RE_CALL, configPath, tightenPlan,
 }
 
 if (require.main === module) main(process.argv.slice(2))

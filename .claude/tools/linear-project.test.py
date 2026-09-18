@@ -871,11 +871,12 @@ def test_a_criterion_declared_on_a_heading_is_read_as_a_criterion():
     `needs-acceptance`, a WORK INSTRUCTION to author acceptance that already exists,
     which §12a forbids an engineer to act on."""
     r = lp.acceptance_report(FIX_HEADING_DECLARED)
-    # Asserted on the criterion TEXT, not via `_AC_ID`: ROC's id vocabulary is
-    # hyphen-suffixed (`AC-274-1`) and `_AC_ID`'s tail is `[\w.]`, so it reads the
-    # STEM `AC-274` for both. That coarseness is pre-existing and deliberately NOT
-    # touched here — widening the tail to `-` was MEASURED on the ROC corpus and
-    # turns 180 parsed items into `truncated`, because their prose cites the stem.
+    # The ids are now read WHOLE (`AC-274-1`, not the stem `AC-274`) — DEF-ROC-286.
+    # The 180-item measurement that stayed this hand in DEF-ROC-281 was real but was
+    # a measurement of HALF the change: widening the id matcher alone, leaving the
+    # declaration reader on stems, makes every sibling set self-accuse. Widened on
+    # both sides it is 0 flips over 1110 real items, and the residual check can
+    # finally tell `AC-274-1` from `AC-274-2` — see the DEF-ROC-286 block below.
     check("both heading-declared ids reach a criterion, by their full id",
           any(c.startswith("AC-274-1") for c in r["criteria"])
           and any(c.startswith("AC-274-2") for c in r["criteria"]))
@@ -923,8 +924,9 @@ Body text.
     check("and that mention is not a residual either",
           mention["status"] == "parsed" and mention["residual_ids"] == [])
 
-    check("_line_start_ids reads an id DECLARED on a heading",
-          lp._line_start_ids("### AC-274-1 - the rule is on the ticket") == ["AC-274"])
+    check("_line_start_ids reads an id DECLARED on a heading — WHOLE, not the stem "
+          "(DEF-ROC-286: the stem is why a dropped sibling could not be seen)",
+          lp._line_start_ids("### AC-274-1 - the rule is on the ticket") == ["AC-274-1"])
     check("it reads the heading declaration at level 2 and level 4 too",
           lp._line_start_ids("## AC-Q.1 - x") == ["AC-Q.1"]
           and lp._line_start_ids("#### AC-Q.2 - x") == ["AC-Q.2"])
@@ -932,6 +934,180 @@ Body text.
           lp._line_start_ids("### Registered acceptance criteria (the AC-053.n vocabulary)") == [])
     check("a bare `#` with no id declares nothing",
           lp._line_start_ids("### Exit gate") == [])
+
+
+# --------------------------------------------------------------------------- #
+# DEF-ROC-286 — the residual self-check could not tell one criterion of an item
+# from another, on the id vocabulary this project actually writes.
+#
+# `AC-274-1` and `AC-274-2` both read as the STEM `AC-274`, so an item that
+# DROPPED one of two siblings still saw its stem reached by the survivor: residual
+# empty, verdict `parsed`. The guard that exists to stop a silent under-count —
+# the class that hid `DEFECT-OAG-053` (4 of 20) and `DEFECT-OAG-110` (8 of 22) —
+# could not fire here at all, while the parser's docstring said it could.
+#
+# The cases below drive BOTH directions (§F9f). Under the stem vocabulary the
+# first FAILS; under a HALF-widening (the id matcher alone, leaving the
+# declaration reader on stems) the second and third FAIL on 183 real ROC items.
+# Only one vocabulary, read identically on both sides, passes all of them.
+# --------------------------------------------------------------------------- #
+
+#: THREE sibling criteria, of which the middle one is written as a block quote — a
+#: line shape `_line_start_ids` reads as a DECLARATION and `_criteria_from` produces
+#: NOTHING for. So the parse genuinely under-counts: 3 declared, 2 read. Verified
+#: against both parsers — on the stem vocabulary this scores `parsed` with an empty
+#: residual, which is the silent under-count this guard exists to make impossible.
+FIX_SIBLING_DROPPED = """## Acceptance
+
+- **AC-286-1** — the first criterion, read fine.
+
+> **AC-286-2** — the second, written as a block quote.
+
+- **AC-286-3** — the third criterion, read fine.
+"""
+
+#: The same three, none of them dropped — the limb that must stay quiet.
+FIX_SIBLINGS_BOTH_READ = """## Acceptance
+
+- **AC-286-1** — the first criterion, read fine.
+- **AC-286-2** — the second criterion, read fine.
+- **AC-286-3** — the third criterion, read fine.
+"""
+
+#: One criterion, legitimately. An item is allowed to have exactly one.
+FIX_SINGLE_CRITERION = """## Acceptance
+
+- **AC-286-9** — the only criterion this item has, and it is complete.
+"""
+
+
+def test_a_dropped_SIBLING_criterion_is_reported_as_truncated():
+    # validates: AC-286-1  (§F9f, the direction that must go RED)
+    """The reported defect, stated as a case. Three siblings declared, two read: the
+    parse under-counted, and must SAY SO. On the stem vocabulary this is `parsed`
+    with an empty residual, because `AC-286-2`'s stem was reached by `AC-286-1`."""
+    r = lp.acceptance_report(FIX_SIBLING_DROPPED)
+    check("one of three sibling criteria was dropped => truncated, not parsed",
+          r["status"] == "truncated")
+    check("and the DROPPED SIBLING is named, by its full id, not its stem",
+          r["residual_ids"] == ["AC-286-2"])
+    check("the two criteria that WERE read are still returned",
+          len(r["criteria"]) == 2)
+
+
+def test_sibling_criteria_that_are_ALL_read_are_NOT_accused():
+    # validates: AC-286-2  (§F9f, the direction that must stay QUIET)
+    """The other half, and the one that decided this item's route. Widening the id
+    matcher WITHOUT widening the declaration reader turns 183 real ROC items and 5
+    real OagEventSource items `truncated` — every single one of them a FALSE
+    ACCUSATION, because the residual is the stem of a sibling that was read fine.
+    A guard that cries wolf on 188 items is not a guard (§17e)."""
+    r = lp.acceptance_report(FIX_SIBLINGS_BOTH_READ)
+    check("three siblings, all read => parsed, nothing residual",
+          r["status"] == "parsed" and r["residual_ids"] == [])
+    check("each criterion is returned under its OWN id, not merged into a stem",
+          [c.split("**")[1] for c in r["criteria"]]
+          == ["AC-286-1", "AC-286-2", "AC-286-3"])
+    one = lp.acceptance_report(FIX_SINGLE_CRITERION)
+    check("an item legitimately declaring ONE criterion is not accused either",
+          one["status"] == "parsed" and one["residual_ids"] == []
+          and len(one["criteria"]) == 1)
+
+
+def test_the_id_vocabulary_is_read_IDENTICALLY_on_both_sides_of_the_check():
+    # validates: AC-286-3  (the structural pin — a half-widening cannot recur)
+    """The residual check subtracts one side from the other, so the two sides must
+    read the SAME id out of the SAME text or the subtraction is meaningless. They
+    were five separately-written regexes; a change to one of them was a change to
+    half a comparison, which is how the 188-false-positive measurement arose.
+
+    Driven over the id shapes the two real corpora actually contain — hyphen-
+    suffixed (`AC-274-1`, ROC), dot-suffixed (`AC-053.4`, OAG), both (`AC-DEF-XA2.1`),
+    alpha families (`AC-DIM-2`, `AC-110.A6`) and unsuffixed (`AC-RLNC`)."""
+    vocabulary = ["AC-274-1", "AC-053.4", "AC-DEF-XA2.1", "AC-DIM-2",
+                  "AC-110.A6", "AC-RLNC", "AC-Q.1", "AC-114-10"]
+    for iid in vocabulary:
+        declared_list = lp._line_start_ids("- **%s** — a criterion." % iid)
+        declared_head = lp._line_start_ids("### %s — a criterion." % iid)
+        declared_table = lp._line_start_ids("| **%s** | a criterion |" % iid)
+        reached = lp._AC_ID.findall("%s — a criterion." % iid)
+        check("%s reads whole on BOTH sides (declared=%r/%r/%r reached=%r)"
+              % (iid, declared_list, declared_head, declared_table, reached),
+              declared_list == [iid] and declared_head == [iid]
+              and declared_table == [iid] and reached == [iid])
+    check("and the trailing sentence period is still never eaten "
+          "(the phantom `AC-061.` that made the check cry wolf)",
+          lp._AC_ID.findall("as required by AC-061.") == ["AC-061"]
+          and lp._AC_ID.findall("as required by AC-114-1.") == ["AC-114-1"])
+    check("a trailing hyphen is not eaten either",
+          lp._AC_ID.findall("AC-114-1-") == ["AC-114-1"])
+
+
+def test_a_QUOTED_sibling_set_is_not_mistaken_for_orphan_acceptance():
+    # validates: AC-286-4  (§F9f — the widening must not resurrect the false accusation)
+    """DEF-ROC-166, REAL and verbatim in shape: a defect with no acceptance section of
+    its own, whose body lists ANOTHER item's three sibling criteria as the evidence it
+    is reporting. Reading full ids makes that three distinct ids where it used to be
+    one stem, which trips the orphan heuristic's ">= 2 ids listed under a heading we do
+    not know" — and `orphan` is a FINDING that goes red in the audit.
+
+    That is the 17-migrated-stub accusation in a new costume: the parser blaming
+    itself for an item that simply has no acceptance. The orphan question is "are
+    there several FAMILIES of criteria listed here" — it always was, by the accident
+    of the stem collapse; now it says so."""
+    quoted = """## The four fields
+
+`DEF-ROC-118` required the closed state to:
+
+- **AC-118-1** — tell the reader what to do next, in their own terms;
+- **AC-118-2** — link the operator documentation;
+- **AC-118-3** — be honest that opening a window needs Azure rights.
+"""
+    r = lp.acceptance_report(quoted)
+    check("one family's siblings, quoted as evidence, is NOT orphan acceptance",
+          r["status"] == "none")
+    two_families = """## Conditions
+
+- **AC-118-1** — the first family's criterion.
+- **AC-286-1** — a second family's criterion.
+"""
+    r2 = lp.acceptance_report(two_families)
+    check("two DIFFERENT families under an unrecognised heading is still orphan "
+          "(the heuristic did not just get switched off)",
+          r2["status"] == "orphan")
+    check("and the orphan report names the FULL ids, not the families",
+          r2["orphan_ids"] == ["AC-118-1", "AC-286-1"])
+
+
+def test_no_residual_on_the_REAL_corpus_is_the_stem_of_an_id_that_WAS_read():
+    # validates: AC-286-5  (the false-positive class, measured on real items)
+    """The 188-item measurement, as a standing check rather than a one-off. Every
+    false accusation had the same fingerprint: the residual id was a STEM of an id
+    that reached a criterion perfectly well. If the two sides of the check ever drift
+    apart again, this goes red on real items rather than on a fixture."""
+    require_corpus()
+    projects = [CORPUS_PROJECT] + [p for p in ("ROC",)
+                                   if (HERE.parents[1] / "work" / p / "items").is_dir()]
+    seen = 0
+    hyphen_siblings = 0
+    offenders = []
+    for proj in projects:
+        for r in lp.sweep_acceptance(proj):
+            seen += 1
+            got = set()
+            for c in r["criteria"]:
+                got |= set(lp._AC_ID.findall(c))
+            hyphen_siblings += sum(1 for g in got if g.count("-") >= 2)
+            for res in r["residual_ids"]:
+                if any(g != res and g.startswith(res + "-") for g in got):
+                    offenders.append((r["id"], res))
+    check(f"the check is non-vacuous: {seen} real items swept across {projects}",
+          seen > 400)
+    check(f"non-vacuous for THIS defect: {hyphen_siblings} hyphen-suffixed sibling "
+          f"ids are actually read out of real criteria",
+          hyphen_siblings > 100)
+    check(f"no item is accused over an id a SIBLING criterion already carried "
+          f"(the 188-false-positive class): {offenders[:5]}", not offenders)
 
 
 def test_extractor_populations_are_pinned_in_both_directions():

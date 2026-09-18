@@ -153,10 +153,37 @@ _SECTION_HEADING = re.compile(r"^(#{2,3})\s+")
 #: disagree by construction. Deriving them from one source is the EXP-047 move: the
 #: disagreement is not reconciled, it is made unrepresentable.
 #:
-#: Deliberately cannot end in `.` — an unconstrained tail greedily ate the sentence
-#: period, minting phantom ids `AC-061.` / `AC-C11.2.` / `AC-RLNC.` that no criterion
-#: could ever match, which would make the residual self-check below cry wolf.
-_AC_ID_TAIL = r"[\w.]"
+#: The tail admits `-` (DEF-ROC-286). It did not, and ROC writes `AC-274-1`/`AC-274-2`,
+#: so EVERY sibling collapsed to the stem `AC-274`: an item that DROPPED one of two
+#: siblings still had its stem reached by the survivor, so the residual was empty and
+#: the verdict was `parsed`. The self-check that exists to stop a silent under-count —
+#: the class that hid `DEFECT-OAG-053` and `DEFECT-OAG-110` — could not fire on this
+#: project's ids at all, while the docstring below said it could.
+#:
+#: The 180-item flip that stayed DEF-ROC-281's hand was real, and it was a measurement
+#: of HALF this change. Widening THIS matcher alone leaves `_line_start_ids` reading
+#: stems, so `declared` holds `AC-274` while `got_ids` holds `AC-274-1` and the stem is
+#: residual FOREVER: 183 ROC + 5 OagEventSource items turn `truncated`, and all 188 are
+#: false — in every one, the residual is the stem of a sibling that parsed perfectly.
+#: Read on BOTH sides (which is what the single pattern above guarantees) the same
+#: widening is 0 verdict flips and 0 criteria changed over the same 1110 real items.
+#:
+#: Deliberately still cannot end in `.` or `-` — an unconstrained tail greedily ate the
+#: sentence period, minting phantom ids `AC-061.` / `AC-C11.2.` / `AC-RLNC.` that no
+#: criterion could ever match, which would make the residual self-check cry wolf.
+#: §17g SWEEP — "where ELSE is the AC id vocabulary written a second time?" Asked of
+#: the whole agent system, the answer is two readers, and both are declared:
+#:   * THIS FILE — was five regexes with three tails, all five sides of one
+#:     comparison. FIXED: one `_AC_ID_PAT`, derived everywhere.
+#:   * `.claude/tools/test-requirement-gate.js` `AC_TAG` — NOT APPLICABLE, with a
+#:     reason rather than a shrug: it answers a different question (which criterion a
+#:     TEST declares it validates), it is never compared against anything this file
+#:     produces, and it already reads a hyphen-suffixed id WHOLE (`AC-14-5`, named in
+#:     its own comment), so it never had this defect. It deliberately REQUIRES a
+#:     suffix, which this file must not — `AC-RLNC` is a real unsuffixed id here.
+#:   * `work-items.py` / `board-sweep.py` — no AC-id matcher at all; they only cite
+#:     ids in prose. Nothing to fix.
+_AC_ID_TAIL = r"[\w.-]"
 _AC_ID_PAT = r"AC-[A-Za-z0-9](?:%s*[A-Za-z0-9])?" % _AC_ID_TAIL
 _AC_ID = re.compile(r"\b" + _AC_ID_PAT)
 
@@ -349,6 +376,17 @@ def _line_start_ids(line):
     return [m.group(1)] if m else []
 
 
+def _ac_family(ac_id):
+    """The criterion FAMILY an id belongs to — `AC-274-1` -> `AC-274`, `AC-053.4` ->
+    `AC-053`, `AC-DEF-XA2.1` -> `AC-DEF-XA2`, `AC-RLNC` -> `AC-RLNC`.
+
+    Used ONLY where the question is "how many distinct sets of criteria are listed
+    here", never where the question is "which criterion is this" — conflating those
+    two questions is the whole of DEF-ROC-286.
+    """
+    return re.sub(r"[-.][A-Za-z0-9]+$", "", ac_id) or ac_id
+
+
 def acceptance_report(body):
     """THE LOUD PARSE. Returns a verdict, never a bare count.
 
@@ -420,7 +458,16 @@ def acceptance_report(body):
             if d:
                 orphan.add(d.group(1))
         orphan = sorted(orphan)
-        status = "orphan" if len(orphan) >= 2 else "none"
+        # The threshold counts FAMILIES, not ids. `orphan` claims acceptance was
+        # authored under a heading this parser does not know — and one family's
+        # sibling set is at least as likely to be ANOTHER item's criteria quoted as
+        # evidence. DEF-ROC-166 is exactly that, real: no acceptance of its own, and
+        # a list of `AC-118-1/2/3` under `## The four fields`. Before ids were read
+        # whole this said families by ACCIDENT, because the siblings collapsed to one
+        # stem; it now says so on purpose, holding the measured orphan population at
+        # 0/1110 instead of minting one false accusation of the class the body-wide
+        # `AC-` heuristic was removed for. The REPORT still names the full ids.
+        status = "orphan" if len({_ac_family(i) for i in orphan}) >= 2 else "none"
         return {"status": status, "criteria": [], "residual_ids": [], "sections": [],
                 "text": "", "orphan_ids": orphan}
 

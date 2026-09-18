@@ -61,9 +61,35 @@ WHAT IS PINNED:
      re-read;
   7. the two `DEF-ROC-248` corrections this item was blocked on can actually be
      recorded, with their notes landing verbatim.
+
+DEF-ROC-291 — AND THE REFUSAL MESSAGE HAD TO FOLLOW.
+
+The fix above made `amended` legal from every terminal state; the refusal that a
+terminal state prints did not change, so it still said
+
+    legal events from here: (none — terminal state)
+
+**which is false about the tool that prints it.** It is the EXACT SENTENCE that
+caused this item to be registered: the orchestrator hit a refusal on a `resolved`
+item, read it, concluded the record was sealed, and raised a defect. It was right
+then; the same reading is now wrong in the OPPOSITE direction, so an agent that
+needs to correct a terminal item's record reads that it cannot, and will register
+a defect or abandon the correction.
+
+The listing is computed FROM THE STATE GRAPH, which by design cannot see
+`is_audit_self_edge` — and that separation is precisely what keeps this change
+from being a back door. So the refusal builder consults the same predicate the
+writer consults; NO edge is added to the graph, which is asserted here from the
+graph itself rather than promised.
+
+  8. a refusal from a terminal state NAMES `amended` and says what it is FOR —
+     correcting the record, not advancing it — while the flow listing still
+     offers only the edges the GRAPH carries (both directions), a refusal from a
+     LIVE state is unchanged, and amending the record does not reopen the flow.
 """
 import io
 import os
+import re
 import copy
 import json
 import shutil
@@ -487,6 +513,182 @@ class TestValidateAcceptsWhatAppendWrote(Store):
             f.write(wi.render_item(wi.Item(path, fm, it.body), it.declared or {}))
         v = wi.validate_items(self.graphs, self.project)
         self.assertTrue(any("(I1)" in x and "reopened" in x for x in v), v)
+
+
+# --------------------------------------------------------------------------- #
+# Limb 5 — the refusal LISTING is true of the tool that prints it [DEF-ROC-291]
+# --------------------------------------------------------------------------- #
+class TestTheRefusalListingIsTrueOfItsOwnTool(Store):
+    """The listing is read ALONE, as the tool's own account of what it accepts
+    next — which is why a false one costs a whole defect cycle each way."""
+
+    def _graph_events_of(self, itype):
+        """Every event the GRAPH carries for this type, derived rather than
+        listed, so an event added later is probed without anyone remembering."""
+        return {t["event"] for t in self.graphs.transitions(itype)}
+
+    def _graph_events_from(self, itype, state):
+        return {t["event"] for t in self.graphs.transitions(itype)
+                if t["from"] == state}
+
+    def _refuse_from(self, itype, term, prefix, event="pulled"):
+        iid = f"{prefix}-{itype}-{term}".upper()
+        self.terminal_item(iid, itype, term)
+        return iid, self.append_expecting_refusal(iid, event)
+
+    def _listing(self, msg):
+        """The `legal events from here:` line and nothing else — the sentence
+        under test, read as its own line so a claim made elsewhere in the
+        refusal cannot be mistaken for one made here."""
+        lines = [l for l in msg.splitlines() if "legal events from here:" in l]
+        self.assertEqual(len(lines), 1, msg)
+        return lines[0]
+
+    def live_item(self, iid="DEF-LIVE"):
+        """An item in a LIVE state, for the other direction. `scheduled` is
+        chosen because `amended` is an ORDINARY GRAPH EDGE from there, so the
+        terminal-state sentence would be redundant and misleading."""
+        events = [{"ts": "2026-09-01T00:00:00Z", "event": "reported",
+                   "agent": "orchestrator"},
+                  {"ts": "2026-09-01T01:00:00Z", "event": "triaged",
+                   "agent": "orchestrator"}]
+        fm = {"id": iid, "type": "defect", "title": iid, "job": "J0",
+              "value": 1, "cost": 0.5, "parents": [], "deps": [],
+              "created_ts": events[0]["ts"], "events": events}
+        item = wi.Item(os.path.join(self._items("active"), f"{iid}.md"), fm,
+                       "\n## Definition\nstub\n")
+        with open(item.path, "w", encoding="utf-8") as f:
+            f.write(wi.render_item(item, {"state": None, "queue": None,
+                                          "children": [], "ancestors": []}))
+        items, _d = wi.load_all_items(self.project)
+        states = wi.compute_states(self.graphs, items)
+        children = wi.compute_children(items)
+        with open(item.path, "w", encoding="utf-8") as f:
+            f.write(wi.render_item(items[iid], wi.derived_block(
+                self.graphs, items, states, children, iid)))
+        self.assertEqual(states[iid], "scheduled")
+        return iid
+
+    def test_the_false_sentence_is_GONE_from_every_terminal_state(self):
+        """The measured symptom, and the reason this was registered rather than
+        noted: this literal sentence caused DEF-ROC-261 to be raised."""
+        for itype, term in self.terminal_pairs():
+            with self.subTest(type=itype, state=term):
+                _iid, msg = self._refuse_from(itype, term, "F")
+                self.assertNotIn("(none — terminal state)", msg,
+                                 "the refusal still claims NOTHING is legal "
+                                 "from here, which is false about its own tool")
+
+    def test_a_terminal_refusal_NAMES_amended_and_says_what_it_is_FOR(self):
+        for itype, term in self.terminal_pairs():
+            with self.subTest(type=itype, state=term):
+                _iid, msg = self._refuse_from(itype, term, "N")
+                self.assertIn(wi.AMENDED, msg,
+                              "the one event that IS legal here is unnamed")
+                self.assertIn("record", msg,
+                              "it names the event without saying what it is "
+                              "for — correcting the record, not advancing it")
+                self.assertRegex(msg, r"EVENT=" + wi.AMENDED,
+                                 "a refusal that names a remedy gives the "
+                                 "command that applies it")
+
+    def test_amended_is_NOT_offered_as_an_ordinary_next_STEP(self):
+        """It is an audit self-edge, not progress. A listing that offers it
+        alongside flow events invites it to be used as one, so it carries its
+        own sentence and stays out of the flow list."""
+        for itype, term in self.terminal_pairs():
+            with self.subTest(type=itype, state=term):
+                _iid, msg = self._refuse_from(itype, term, "O")
+                self.assertNotIn(wi.AMENDED, self._listing(msg))
+
+    def test_the_listing_offers_EXACTLY_the_edges_the_GRAPH_carries(self):
+        """BOTH DIRECTIONS (§F9f), and the constraint the item set: the message
+        changing must not change what is offered. Every event the graph carries
+        for the type is probed — the one real edge out of a terminal state
+        (`use-case` `done` -> `reopened`) must still be offered, and every other
+        flow event must still be absent."""
+        for itype, term in self.terminal_pairs():
+            legal = self._graph_events_from(itype, term)
+            _iid, msg = self._refuse_from(itype, term, "G")
+            listing = self._listing(msg)
+            for event in sorted(self._graph_events_of(itype)):
+                if event == wi.AMENDED:
+                    continue                    # its own sentence, above
+                with self.subTest(type=itype, state=term, event=event):
+                    pattern = r"\b" + re.escape(event) + r"\b"
+                    if event in legal:
+                        self.assertRegex(listing, pattern,
+                                         "a real edge stopped being offered")
+                    else:
+                        self.assertNotRegex(listing, pattern,
+                                            "an illegal event is offered")
+
+    def test_a_refusal_from_a_LIVE_state_is_UNCHANGED(self):
+        """The other direction. From `scheduled`, `amended` is an ordinary graph
+        edge and is ALREADY in the listing, so the terminal-state sentence must
+        not be printed: a message that says the same thing everywhere says
+        nothing, and the value of the listing is being short and true."""
+        iid = self.live_item()
+        msg = self.append_expecting_refusal(iid, "triaged")
+        listing = self._listing(msg)
+        self.assertRegex(listing, r"\b" + wi.AMENDED + r"\b",
+                         "the ordinary graph edge stopped being offered")
+        self.assertNotIn("terminal state", msg)
+        self.assertNotIn("record", msg)
+
+    def test_amending_the_record_does_NOT_reopen_the_flow(self):
+        """The attempt the new wording might tempt: `amended` is available, so
+        perhaps the item carries on from there. It does not — the fold cannot see
+        the audit self-edge, so the state after an amendment is the SAME terminal
+        state and every flow event is still refused at exit 1."""
+        for itype, term in self.terminal_pairs():
+            with self.subTest(type=itype, state=term):
+                iid = f"T-{itype}-{term}".upper()
+                self.terminal_item(iid, itype, term)
+                self.append(iid, wi.AMENDED, note="a correction to the record")
+                msg = self.append_expecting_refusal(iid, "pulled")
+                self.assertIn("not a legal transition", msg)
+                self.assertIn(f"state '{term}'", msg)
+
+    def test_the_listings_honesty_is_NOT_bought_with_a_GRAPH_EDGE(self):
+        """The constraint that shaped DEF-ROC-261, re-asserted for the message:
+        the graph must STILL refuse `amended` from every terminal state, read
+        through the same graph-reading function the listing is built from. If
+        the listing became true by adding an edge, the state could move — and
+        `wi-validate`, `fold_state`, `walk_states`, `_maybe_relocate` and the
+        metrics would all follow it out of the terminal state."""
+        for itype, term in self.terminal_pairs():
+            with self.subTest(type=itype, state=term):
+                owners = self.graphs.default_owners(itype) \
+                    if hasattr(self.graphs, "default_owners") else None
+                offered = {ev for ev, _to, _ags
+                           in self.graphs.legal_from(itype, term, owners or set())}
+                self.assertNotIn(wi.AMENDED, offered,
+                                 "an edge was added to state-graphs.json")
+
+    def test_the_four_SMUGGLES_still_fail(self):
+        """Driven by DEF-ROC-261's tester and pinned here, because they are what
+        makes the amendment an AUDIT record rather than a route: `--set` on a
+        flow item's economics, on its derived STATE, on its TYPE, and a flow
+        event after an amendment. All four exit 1 and leave the record as it
+        was."""
+        iid = "DEF-SMUGGLE"
+        self.terminal_item(iid)
+        before = self.load(iid)
+        for spec in ("value=9", "state=building", "type=use-case"):
+            with self.subTest(set=spec):
+                msg = self.append_expecting_refusal(iid, wi.AMENDED,
+                                                    set=[spec], note="n")
+                self.assertTrue("AGGREGATE" in msg or "may only change" in msg,
+                                msg)
+        self.append(iid, wi.AMENDED, note="a correction to the record")
+        msg = self.append_expecting_refusal(iid, "reopened")
+        self.assertIn("not a legal transition", msg)
+        after = self.load(iid)
+        self.assertEqual(after.fm.get("value"), before.fm.get("value"))
+        self.assertEqual(after.fm.get("type"), before.fm.get("type"))
+        self.assertEqual([e["event"] for e in after.events],
+                         [e["event"] for e in before.events] + [wi.AMENDED])
 
 
 if __name__ == "__main__":

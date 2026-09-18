@@ -2279,16 +2279,51 @@ def is_audit_self_edge(graphs, itype, state, event):
     return state in graphs.terminals(itype)
 
 
-def legal_events_listing(legal_here):
+def legal_events_listing(graphs, itype, state, legal_here):
     """The `legal events from here:` line of a refusal — the sentence a refused
     caller acts on, and acts on ALONE: it is read as the tool's own account of
     what it will accept next.
 
     It lives HERE, beside `is_audit_self_edge`, because that is the coupling
     that matters. What the writer PERMITS and what a refusal REPORTS are one
-    fact stated twice, and the two statements were ~150 lines apart."""
-    return ", ".join(f"{ev} (agents: {'/'.join(ags)})"
-                     for ev, _to, ags in legal_here) or "(none — terminal state)"
+    fact stated twice, and the two statements were ~150 lines apart — which is
+    how the listing came to contradict its own tool [DEF-ROC-291]. It printed
+    `(none — terminal state)` after `amended` became legal from every terminal
+    state, and that is the EXACT SENTENCE that caused DEF-ROC-261 to be
+    registered: an agent read it, concluded the record was sealed, and raised a
+    defect. It was right then and the same reading is now wrong the other way.
+
+    The FLOW listing is still built from the GRAPH alone, because an audit
+    self-edge is not a next step and a listing that offered it alongside flow
+    events would invite it to be used as one. What changes is that the empty
+    case no longer claims NOTHING is legal — `record_correction_remedy` states
+    the one thing that is, in its own sentence."""
+    if legal_here:
+        return ", ".join(f"{ev} (agents: {'/'.join(ags)})"
+                         for ev, _to, ags in legal_here)
+    if is_audit_self_edge(graphs, itype, state, AMENDED):
+        return "(no flow event — terminal state)"
+    return "(none — terminal state)"
+
+
+def record_correction_remedy(graphs, itype, state, iid):
+    """The sentence naming the one event a terminal state DOES admit, or None.
+
+    Read through the SAME predicate the writer reads [DEF-ROC-291]. It is
+    deliberately NOT an entry in the listing above: `amended` changes no state,
+    moves no file and appears in no metric, so presenting it among the flow
+    events would sell an audit entry as progress. The distinction the sentence
+    has to carry is the whole of DEF-ROC-261 — the WORK is done, the RECORD is
+    not sealed."""
+    if not is_audit_self_edge(graphs, itype, state, AMENDED):
+        return None
+    return (f"  the WORK is done here, but the RECORD is not sealed: "
+            f"'{AMENDED}' IS legal from '{state}' — it CORRECTS the record "
+            f"rather than advancing the item, and it changes no state, no "
+            f"queue, no location and no metric. If what you need is a "
+            f"correction: `make wi-append PROJECT=<p> ID={iid} "
+            f"EVENT={AMENDED} AGENT=<your role> NOTE_FILE=<file>`. Nothing "
+            f"restarts the work.")
 
 
 def _append_locked(a):
@@ -2412,7 +2447,7 @@ def _append_locked(a):
         ok, to, legal_here, why = check_transition(graphs, item.type, state,
                                                    a.event, a.agent, owners)
     if not ok:
-        legal_desc = legal_events_listing(legal_here)
+        legal_desc = legal_events_listing(graphs, item.type, state, legal_here)
         print(f"append REJECTED: {a.id} is in state '{state}'.", file=sys.stderr)
         # distinguish wrong-agent from illegal-event for a clearer message
         ev_exists = any(ev == a.event for ev, _t, _ags in legal_here)
@@ -2433,6 +2468,9 @@ def _append_locked(a):
                   "(EXP-NNN) to add it to process/machinery/state-graphs.json — "
                   "do not hand-edit item state.", file=sys.stderr)
         print(f"  legal events from here: {legal_desc}", file=sys.stderr)
+        remedy = record_correction_remedy(graphs, item.type, state, a.id)
+        if remedy:
+            print(remedy, file=sys.stderr)
         sys.exit(1)
 
     # --- the observation predicate is REQUIRED, not optional [v9] -------------

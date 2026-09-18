@@ -316,7 +316,17 @@ block is byte-identical and the only figure that moves anywhere in the projectio
 `token_cost.n_events`, the raw count of events, which rises by exactly the number of
 amendments recorded. The one pre-existing edge out of a terminal state — a `use-case`
 `reopened` from `done` — is a deliberate flow edge, untouched, and now pinned by value so a
-later addition has to come past that test. `--set` is unchanged: it rides an AGGREGATE's
+later addition has to come past that test. **The REFUSAL MESSAGE follows the writer [DEF-ROC-291],** which it did not at first: a
+terminal-state refusal went on printing `legal events from here: (none — terminal state)`
+— false about the tool printing it, and the exact sentence that got DEF-ROC-261 registered,
+so the same reading was then available in the opposite direction. The listing is built from
+the state GRAPH, which by design cannot see `is_audit_self_edge`, and that separation is
+what keeps the change from being a back door — so the refusal builder consults the same
+predicate rather than an edge being added: the flow listing reads `(no flow event —
+terminal state)` and `record_correction_remedy` states, in its own sentence, that the WORK
+is done while the RECORD is not sealed, names `amended`, and gives the command. It is
+deliberately NOT an entry in the listing: an audit self-edge offered among flow events
+would be sold as progress. `--set` is unchanged: it rides an AGGREGATE's
 amendment only, because a flow item's economics are not covered by I10 (extending I10 to
 flow items would be the `DEF-ROC-083` unsatisfiable gate — an argument about a GATE that
 demands a write, not about whether a write is possible).

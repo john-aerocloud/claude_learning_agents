@@ -77,6 +77,17 @@ aggregate: it was never a transition. A terminal state correctly admits no *flow
 left only leave-it-wrong or break-the-contract, and two established corrections to
 `DEF-ROC-248` sat unrecordable.
 
+**And the REFUSAL MESSAGE says so [DEF-ROC-291].** A refusal from a terminal state used
+to print `legal events from here: (none — terminal state)`, which was the exact sentence
+that got `DEF-ROC-261` registered — an agent read it, concluded the record was sealed, and
+raised a defect. It was right then and the same reading was wrong the other way once the
+fix landed, because the listing is built from the state GRAPH, which by design cannot see
+`is_audit_self_edge`. The refusal builder now consults the same predicate the writer does:
+the flow listing reads `(no flow event — terminal state)` and a separate sentence names
+`amended`, says it CORRECTS the record rather than advancing the item, and gives the
+command. It is deliberately NOT an entry in the listing — an audit self-edge offered
+among flow events would be sold as progress.
+
 **It is not a route back into flow, and that is structural rather than promised.** No
 edge is added to `state-graphs.json`: the amendment is recognised by one predicate in
 the writer (`is_audit_self_edge`), and every derivation reads the graph — `fold_state`

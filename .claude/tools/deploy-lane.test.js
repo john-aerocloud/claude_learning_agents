@@ -844,7 +844,7 @@ function liveRun(opts) {
   fs.writeFileSync(logPath, "");
   const root = repoRootWith({ ...BASE_CFG, ...(opts.cfg || {}) });
   const argv = ["--project", "ROC", "--repo-root", root, "--json", "--workflow", WORKFLOW,
-    "--no-git", "--head-sha", opts.sha, ...(opts.argv || [])];
+    ...(opts.git ? [] : ["--no-git"]), "--head-sha", opts.sha, ...(opts.argv || [])];
   const started = Date.now();
   const stdout = execFileSync("node", [TOOL, ...argv], {
     encoding: "utf8",
@@ -1002,4 +1002,165 @@ test("AC-220-4: the agent files name the bounded waiter, and carry no unbounded 
         `${f}:${i + 1} carries a hand-rolled gh polling loop; agents copy these verbatim`);
     });
   }
+});
+
+// ===========================================================================
+// DEF-ROC-220, SECOND ROUND — THE FIX REINTRODUCED ITS OWN DEFECT CLASS ONE
+// LAYER DOWN, AND ASSERTED IT MORE CONFIDENTLY THAN THE CODE IT REPLACED.
+//
+// MEASURED BY THE TESTER ON THE LIVE WIRE, 2026-09-18. `gh run list --commit`
+// returns an EMPTY ARRAY for an ABBREVIATED sha — the server matches on the full
+// 40-hex object name and nothing else:
+//   --commit edaa74f635153c70f972f3c9fb2c0354b7647cae -> [{"conclusion":"success",…}]
+//   --commit edaa74f63515                             -> []
+// The tool took `--sha` VERBATIM, so that empty answer arrived with
+// `runPopulation: "by-commit"`, which made `windowed` false, which printed:
+//   "The population was DECLARED BY THE COMMIT … so this is an ESTABLISHED
+//    absence rather than a failure to see (DEF-ROC-220)."
+// That sentence is FALSE for an abbreviation — the server never understood the
+// question — and it cites THIS ITEM as its authority. It is absence-read-as-
+// evidence again, one layer down and stated with more confidence.
+//
+// IT WAS A REGRESSION, NOT A PRE-EXISTING LIMIT. Measured on the NEWEST run, so
+// window position cannot be the confound: pre-fix `444f1ddf` answered OPEN for
+// the 12-char `c5a7b13cd6f2`; post-fix HEAD answered NOT-ESTABLISHED for the same
+// abbreviation and OPEN only for the 40-hex.
+//
+// AND THE TOOL DISAGREED WITH ITSELF. `shaEq` DELIBERATELY accepts abbreviations
+// (`if (n < 7) return false; // too short to identify a commit`), so the matcher
+// accepted short shas that the new server query did not, and nothing bridged or
+// rejected. Reachability is not theoretical: the tool's own human output prints
+// 12-char shas, `git log --oneline` and every item record here use 8-char shas,
+// and the SIBLING tool (`make exit-gate-ran SHA=1656e581`) resolves them fine.
+//
+// THE REMEDY, BOTH HALVES, EACH PINNED BELOW.
+//   (a) EXPAND with `git rev-parse` before asking the server, so identity
+//       resolution accepts what `shaEq` already accepts and the sibling tool
+//       already accepts.
+//   (b) WHEN EXPANSION IS IMPOSSIBLE, REFUSE TO CLAIM `by-commit`. A
+//       failure-to-look is reported as one. The invariant, which outranks both:
+//       THE TOOL MUST NEVER SAY "ESTABLISHED ABSENCE" ABOUT A QUESTION THE
+//       SERVER DID NOT UNDERSTAND.
+//
+// PROVENANCE OF THE INPUT. The run payload is the committed REAL capture
+// `run-33076365108.json` (Deploy job SUCCEEDED) with ONE field substituted:
+// `headSha`, set to the real sha of a real commit in a throwaway local git repo,
+// because the case turns on a sha `git rev-parse` can actually expand and no
+// capture can supply that. The substitution is declared in the copy's own
+// `_provenance`. Nothing about the VERDICT is authored: it is read from the real
+// capture's untouched `jobs`. The `git` here is REAL — a genuine repo and a
+// genuine `rev-parse` — not a stub; only the sha's identity is arranged.
+// ===========================================================================
+
+/** A throwaway git repo with one real commit, so `git rev-parse <abbrev>` has
+ *  something real to expand. Returns the repo path and its real 40-hex sha. */
+function tempGitRepoWithCommit(subject) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "deploy-lane-repo-"));
+  const g = (...a) => execFileSync("git",
+    ["-C", dir, "-c", "user.email=deploy-lane@example.invalid",
+      "-c", "user.name=deploy-lane test", "-c", "commit.gpgsign=false", ...a],
+    { encoding: "utf8" }).trim();
+  g("init", "-q");
+  fs.writeFileSync(path.join(dir, "README"), "deploy-lane abbreviated-sha case\n");
+  g("add", "README");
+  g("commit", "-q", "-m", subject);
+  return { dir, sha: g("rev-parse", "HEAD") };
+}
+
+/** The REAL green capture, addressed at a locally-resolvable sha. Declared. */
+function greenRunAt(sha) {
+  return { ...JSON.parse(JSON.stringify(REAL_OPEN_RUN)),
+    headSha: sha,
+    _provenance: "REAL capture run-33076365108.json (Deploy job SUCCEEDED), with `headSha` "
+      + "substituted for the sha of a real commit in a throwaway git repo, because this case "
+      + "turns on a sha `git rev-parse` can expand. `jobs` — which is what the verdict is read "
+      + "from — is untouched." };
+}
+
+const commitValues = (calls) =>
+  listCalls(calls).filter((a) => a.includes("--commit")).map((a) => a[a.indexOf("--commit") + 1]);
+
+test("AC-220-5: an ABBREVIATED sha of a KNOWN-GREEN commit must not read as an established absence", () => {
+  // THE TESTER'S MEASUREMENT, hermetically. The fake `gh` matches `--commit` on the
+  // full sha exactly as the real server does, so a verbatim 12-char argument gets an
+  // empty array back — and before this fix that empty array was published as an
+  // ESTABLISHED absence about a commit whose deploy had SUCCEEDED.
+  const repo = tempGitRepoWithCommit("feat(x): a real commit to abbreviate (DEF-ROC-220)");
+  const { r } = liveRun({
+    git: true,
+    sha: repo.sha.slice(0, 12),
+    runs: [greenRunAt(repo.sha)],
+    cfg: { repoPath: repo.dir },
+  });
+  assert.notStrictEqual(r.reason, "no-run-for-sha",
+    `an abbreviation the server cannot match is NOT an established absence: ${JSON.stringify(r)}`);
+  assert.ok(!/ESTABLISHED absence/.test(String(r.detail || "")),
+    `the tool must never claim an established absence about a question the server did not `
+    + `understand: ${r.detail}`);
+  // (a), in full: expanded, asked, and answered with the truth.
+  assert.strictEqual(r.verdict, "open", JSON.stringify(r));
+  assert.strictEqual(r.runId, Number(OPEN_RUN));
+  assert.strictEqual(r.headSha, repo.sha);
+  assert.strictEqual(r.shaResolution, "git-rev-parse");
+});
+
+test("AC-220-5: the SERVER is asked a question it can understand — `--commit` carries 40 hex", () => {
+  // The property, not the symptom. Asserting only the verdict above would pass just
+  // as well if the tool had started matching client-side again, which is the window
+  // defect returning. What makes this gone is that the identity handed to the server
+  // is a full object name, every time.
+  const repo = tempGitRepoWithCommit("feat(x): a real commit to abbreviate (DEF-ROC-220)");
+  const { calls } = liveRun({
+    git: true,
+    sha: repo.sha.slice(0, 8),                    // as `git log --oneline` and every item record write it
+    runs: [greenRunAt(repo.sha)],
+    cfg: { repoPath: repo.dir },
+  });
+  const commits = commitValues(calls);
+  assert.ok(commits.length >= 1, `the run must still be addressed by identity: ${JSON.stringify(calls)}`);
+  for (const c of commits) {
+    assert.match(c, /^[0-9a-f]{40}$/, `--commit must be a full object name, not "${c}"`);
+    assert.strictEqual(c, repo.sha);
+  }
+});
+
+test("AC-220-5: a FULL sha is passed through untouched — no rev-parse, and git is not required", () => {
+  // The control, and the no-regression guard: expansion must be reached only when it
+  // is needed. The live gate (`loop-gate` check 16) hands over a full sha from
+  // `git rev-parse origin/main`, and that path must keep working with no repo at all.
+  const { r } = liveRun({ sha: TARGET_SHA, runs: [REAL_OPEN_RUN], cfg: { runLimit: 12 } });
+  assert.strictEqual(r.verdict, "open", JSON.stringify(r));
+  assert.strictEqual(r.shaResolution, "as-given-40-hex");
+});
+
+test("AC-220-6: when the abbreviation CANNOT be expanded, the answer is a failure to LOOK", () => {
+  // (b), the floor. `--no-git` makes expansion impossible, and the commit could be
+  // green, red or nonexistent — we do not know, because we never managed to ask. The
+  // one thing the tool may not do is what it did: report the server's empty answer to
+  // a question it could not parse as a fact about the commit.
+  const { r } = liveRun({ sha: TARGET_SHA.slice(0, 12), runs: [REAL_OPEN_RUN] });
+  assert.strictEqual(r.verdict, "NOT-ESTABLISHED", JSON.stringify(r));
+  assert.strictEqual(r.reason, "sha-not-resolved");
+  assert.notStrictEqual(r.runPopulation, "by-commit",
+    `a population may not be claimed for a query that was never made: ${JSON.stringify(r)}`);
+  assert.ok(!/ESTABLISHED absence/.test(String(r.detail || "")), r.detail);
+  assert.ok(/abbrevi/i.test(String(r.detail || "")),
+    `the detail must name the actual cause so the caller can fix it: ${r.detail}`);
+});
+
+test("AC-220-6: an unresolvable sha is NOT waited for — it is settled, and waiting cannot change it", () => {
+  // Rule 3 of the bounded waiter: only genuinely transient states are waited for. An
+  // abbreviation this process cannot expand is a settled fact about the ARGUMENT, not
+  // a run that has not been created yet. Waiting on it would be the unreachable
+  // condition this whole item is about — and under the 1800000ms default it would
+  // burn half an hour polling for a run that is green and visible.
+  const { r, elapsedMs } = liveRun({
+    sha: TARGET_SHA.slice(0, 12),
+    runs: [REAL_OPEN_RUN],
+    argv: ["--wait", "--wait-timeout-ms", "10000", "--poll-interval-ms", "1000"],
+    killAfterMs: 30000,
+  });
+  assert.strictEqual(r.reason, "sha-not-resolved", JSON.stringify(r));
+  assert.notStrictEqual(r.reason, "wait-timeout");
+  assert.ok(elapsedMs < 5000, `it must refuse immediately, not poll a settled fact: ${elapsedMs}ms`);
 });

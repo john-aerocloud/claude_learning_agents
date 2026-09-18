@@ -100,6 +100,25 @@
  * "what was the last successful deploy" history scan, which is genuinely a
  * question about recency.
  *
+ * ...AND THAT FIX REINTRODUCED THE SAME SHAPE ONE LAYER DOWN, MORE CONFIDENTLY
+ * (DEF-ROC-220, round 2 — rejected at validation 2026-09-18). `gh run list
+ * --commit` matches on the FULL 40-hex object name and nothing else: handed an
+ * ABBREVIATION it returns an EMPTY ARRAY. `--sha` was taken verbatim, so that
+ * empty array arrived as `runPopulation: "by-commit"` and was published as an
+ * "ESTABLISHED absence rather than a failure to see" — a false sentence citing
+ * THIS ITEM as its authority, about a commit whose deploy had SUCCEEDED. And the
+ * tool disagreed with itself: `shaEq` deliberately accepts abbreviations, so the
+ * MATCHER accepted what the QUERY could not, and nothing bridged or rejected.
+ * Abbreviations are this project's ordinary spelling — the human line below prints
+ * 12 chars, `git log --oneline` and every item record write 8, and the sibling
+ * `exit-gate-ran` resolves them. So the sha is now RESOLVED BEFORE IT IS ASKED
+ * ABOUT (`resolveFullSha`): expanded with `git rev-parse`, or, when that is
+ * impossible, refused outright as `sha-not-resolved` — a FAILURE TO LOOK, which is
+ * neither open nor shut nor an absence. The payload says which route was taken
+ * (`shaResolution`). THE INVARIANT, which outranks both halves: this tool must
+ * never report an ESTABLISHED ABSENCE about a question the server did not
+ * understand.
+ *
  * `--wait` IS THE ONE BOUNDED WAITER. It exists so that nobody writes the loop
  * again: two independent bounds (deadline + poll cap), only genuinely transient
  * states waited for, jittered polling, and a timeout that reports UNKNOWN and
@@ -133,7 +152,10 @@
  *     make deploy-lane PROJECT=ROC WAIT=1 SHA=$(git -C work/ROC rev-parse HEAD)
  *     make deploy-lane PROJECT=ROC WAIT=1 SHA=<sha> TIMEOUT=1800000 INTERVAL=20000 JSON=1
  *   `--sha` names the commit to ask about (the one you just pushed); with no
- *   `--sha` the question is about trunk head, resolved by git. `--wait` polls that
+ *   `--sha` the question is about trunk head, resolved by git. An ABBREVIATED sha
+ *   is accepted and expanded with `git rev-parse` before the server is asked
+ *   (DEF-ROC-220); if it cannot be expanded — `--no-git`, or a commit absent from
+ *   `repoPath` — the answer is `sha-not-resolved`, never an absence. `--wait` polls that
  *   ONE run until it reaches a verdict, the deadline passes, or the poll cap is
  *   hit. Exit codes without `--json`: 0 answered, 2 BLOCKED, 3 wait-timeout.
  *   Defaults: --wait-timeout-ms 1800000, --poll-interval-ms 20000; both
@@ -429,6 +451,56 @@ function git(...args) {
     { encoding: "utf8", timeout: timeoutMs }).trim();
 }
 
+const FULL_SHA_RE = /^[0-9a-f]{40}$/i;
+/**
+ * THE SERVER MATCHES ON THE FULL OBJECT NAME AND ONLY ON IT (DEF-ROC-220, round 2).
+ *
+ * Addressing the run by identity fixed the window defect and immediately
+ * reintroduced its own shape one layer down. Measured on the live wire 2026-09-18:
+ *   gh run list --commit edaa74f635153c70f972f3c9fb2c0354b7647cae -> [ {…success…} ]
+ *   gh run list --commit edaa74f63515                             -> []
+ * `--sha` was taken VERBATIM, so that empty array arrived carrying
+ * `runPopulation: "by-commit"` and was published as an ESTABLISHED absence about a
+ * commit whose deploy had SUCCEEDED — citing THIS ITEM as its authority. A
+ * regression, not a pre-existing limit: measured on the NEWEST run so window
+ * position could not be the confound, the pre-fix tool answered OPEN for the
+ * 12-char `c5a7b13cd6f2` and this one answered NOT-ESTABLISHED.
+ *
+ * AND THE TOOL DISAGREED WITH ITSELF: `shaEq` above deliberately accepts
+ * abbreviations (`n < 7` is the only rejection), so the matcher accepted what the
+ * query could not, and nothing bridged or rejected. Abbreviations are the SPELLING
+ * THIS PROJECT USES — the human line below prints 12 chars, `git log --oneline` and
+ * every item record write 8, and the sibling tool (`scripts/exit-gate-ran.mjs`,
+ * `make exit-gate-ran SHA=1656e581`) resolves them — so an agent will reasonably
+ * expect both to.
+ *
+ * TWO ANSWERS, NEVER A THIRD. Expand it (`git rev-parse`), or REFUSE to claim a
+ * population for a question that was never asked. The invariant that outranks both:
+ * THE TOOL MUST NEVER REPORT AN ESTABLISHED ABSENCE ABOUT A QUESTION THE SERVER DID
+ * NOT UNDERSTAND. Returns { sha, how } or { error }.
+ */
+function resolveFullSha(sha) {
+  const s = String(sha || "").trim();
+  if (FULL_SHA_RE.test(s)) return { sha: s.toLowerCase(), how: "as-given-40-hex" };
+  if (!s) return { error: "it is empty" };
+  if (NO_GIT) {
+    return { error: `--no-git was given, so there is no repository to expand it against` };
+  }
+  let full;
+  try {
+    full = git("rev-parse", "--verify", `${s}^{commit}`);
+  } catch (e) {
+    return { error: `\`git -C ${repoDir} rev-parse --verify ${s}^{commit}\` failed `
+      + `(${String(e.message).slice(0, 160)}) — the commit is not in that repository, or the `
+      + `abbreviation is ambiguous` };
+  }
+  if (!FULL_SHA_RE.test(full)) {
+    return { error: `git rev-parse returned "${String(full).slice(0, 60)}", which is not a `
+      + `40-hex object name` };
+  }
+  return { sha: full.toLowerCase(), how: "git-rev-parse" };
+}
+
 function readRunList() {
   if (CAPTURE_DIR) {
     return JSON.parse(fs.readFileSync(path.join(CAPTURE_DIR, "run-list.json"), "utf8"));
@@ -517,9 +589,25 @@ function evaluate(opts) {
   let trunkHeadSha = null;
   let trunkHeadSource = null;
   let runSelection = null;
+  let shaResolution = null;
   if (HEAD_SHA_ARG) {
-    trunkHeadSha = HEAD_SHA_ARG;
+    // DEF-ROC-220 round 2 — RESOLVE BEFORE ASKING, OR DO NOT CLAIM TO HAVE ASKED.
+    const resolved = resolveFullSha(HEAD_SHA_ARG);
+    if (resolved.error) {
+      return ne("sha-not-resolved",
+        `${HEAD_SHA_FLAG} was given "${String(HEAD_SHA_ARG).slice(0, 64)}", which is not a full `
+        + `40-hex object name, and it could not be expanded into one: ${resolved.error}. `
+        + `NOTHING WAS ASKED, SO NOTHING IS KNOWN — this is a FAILURE TO LOOK, and it is NEITHER `
+        + `open NOR shut NOR an absence. \`gh run list --commit\` matches on the FULL object name `
+        + `only: handed an abbreviation it returns an EMPTY ARRAY, and publishing that emptiness `
+        + `as a fact about the commit is exactly the absence-read-as-evidence shape this item `
+        + `exists to end (DEF-ROC-220: a 12-char sha of a commit whose deploy had SUCCEEDED read `
+        + `as \`no-run-for-sha\`). Pass the full sha — \`git -C ${repoDir} rev-parse <ref>\` — or `
+        + `drop --no-git so it can be expanded here.`);
+    }
+    trunkHeadSha = resolved.sha;
     trunkHeadSource = HEAD_SHA_FLAG;
+    shaResolution = resolved.how;
   } else if (CAPTURE_RUN) {
     // REPLAY: the caller asserts the named run IS trunk head's run. Test-only —
     // the live path passes neither flag. Recorded in the payload so a reading can
@@ -529,6 +617,7 @@ function evaluate(opts) {
     try {
       trunkHeadSha = git("rev-parse", trunkRef);
       trunkHeadSource = `git rev-parse ${trunkRef}`;
+      shaResolution = "git-rev-parse";
     } catch (e) {
       return ne("trunk-head-unresolved",
         `\`git -C ${repoDir} rev-parse ${trunkRef}\` failed (${String(e.message).slice(0, 200)}), `
@@ -572,7 +661,7 @@ function evaluate(opts) {
       const windowed = runPopulation !== "by-commit";
       // The population is part of the ANSWER here, not a footnote: it is what
       // separates "the server says there is no such run" from "we did not see one".
-      return { runPopulation, trunkHeadSha, trunkHeadSource,
+      return { runPopulation, shaResolution, trunkHeadSha, trunkHeadSource,
         ...ne(windowed ? "no-run-for-trunk-head" : "no-run-for-sha",
         `no run of ${path.basename(cfg.workflowFile)} on ${branch} has head `
         + `${String(trunkHeadSha).slice(0, 12)} (per ${trunkHeadSource})`
@@ -744,6 +833,7 @@ function evaluate(opts) {
     trunkHeadSource,
     runSelection,
     runPopulation,
+    shaResolution,
     // Stated in the payload, not merely in a comment: the caller can assert that
     // the run's overall conclusion was NOT the input to the decision, and (since
     // DEF-ROC-142) that the run it decided about really is trunk head's.

@@ -192,6 +192,11 @@ make-refs-tracked:
 #   make deploy-lane PROJECT=ROC WAIT=1 SHA=$$(git -C work/ROC rev-parse HEAD)
 #   make deploy-lane PROJECT=ROC WAIT=1 SHA=<sha> TIMEOUT=1800000 INTERVAL=20000 JSON=1
 # SHA defaults to trunk head (resolved by git); TIMEOUT/INTERVAL are milliseconds.
+# SHA may be ABBREVIATED (`git log --oneline` spelling): it is expanded with
+# `git rev-parse` before the server is asked, because `gh run list --commit`
+# matches full 40-hex only and answers an abbreviation with an EMPTY ARRAY. If it
+# cannot be expanded the verdict is `sha-not-resolved` -- a failure to LOOK, never
+# an established absence (DEF-ROC-220, round 2).
 deploy-lane:
 	@node .claude/tools/deploy-lane.js --project $(PROJECT) --repo-root . $(if $(JSON),--json,) \
 	   $(if $(WAIT),--wait,) $(if $(SHA),--sha $(SHA),) \

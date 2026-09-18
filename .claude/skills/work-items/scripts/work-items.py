@@ -8420,14 +8420,24 @@ def compute_event_loss(project, timeout=EVENT_LOSS_TIMEOUT):
 DUP_CHECK = "duplicate-identity"
 
 
-def _dup_event_names(ctr):
+def _dup_event_names(ctr, qualify=()):
     """The event NAMES in a Counter of `(ts, event, agent)` signatures.
 
     Named because it is the reporting rule, used at every point I11 describes a
     log: a reader acts on the NAME of the event that is missing, so the internal
     signature is never printed. Rendering lives in one place so the rule can be
-    changed once."""
-    return sorted({sig[1] for sig in ctr.elements()})
+    changed once.
+
+    A name in `qualify` is rendered WITH ITS TIMESTAMP [DEF-ROC-290]. An event's
+    identity is `(ts, event, agent)`, so two copies can each hold `fixed` and
+    still differ — and a bare name printed the two sides of a divergence
+    IDENTICALLY, in the sentence that says they differ. The timestamp is a
+    disambiguator and not a new default: qualifying every name would trade a
+    misleading listing for an unreadable one."""
+    out = set()
+    for ts, name, _agent in ctr.elements():
+        out.add(f"{name} at {ts}" if name in qualify else name)
+    return sorted(out)
 
 
 def _dup_stale_clause(copies):
@@ -8453,10 +8463,14 @@ def _dup_stale_clause(copies):
     if diverged:
         parts = []
         for path, missing, extra in diverged:
+            # A name held on BOTH sides is the SAME NAME AT DIFFERENT TIMES,
+            # and only those names are qualified [DEF-ROC-290].
+            both = ({sig[1] for sig in missing.elements()}
+                    & {sig[1] for sig in extra.elements()})
             parts.append(
-                f"{path} holds {_dup_event_names(extra)} "
+                f"{path} holds {_dup_event_names(extra, both)} "
                 f"that {biggest[0]} lacks, and {biggest[0]} holds "
-                f"{_dup_event_names(missing)} that it lacks")
+                f"{_dup_event_names(missing, both)} that it lacks")
         return (f"The copies have DIVERGED — {'; '.join(parts)} — so NEITHER is "
                 f"simply behind and nothing here may pick one. Recover every "
                 f"copy from HEAD and reconcile the logs by hand before deleting "
@@ -8504,7 +8518,19 @@ def _dup_unknown(message):
 def compute_duplicate_identity(project, timeout=EVENT_LOSS_TIMEOUT):
     """0+ findings: one per duplicated id per record, plus an `unknown` finding
     when the HEAD side could not be established (§17i — never absorbed into
-    clean, never a plain fail)."""
+    clean, never a plain fail).
+
+    THE POPULATION IS PART OF THE CLAIM [DEF-ROC-290]. This asked
+    `_head_item_logs` for the committed copies and passed `unreadable=[]`,
+    DISCARDING the list — so a committed blob that would not parse left the
+    population silently, `len(copies) < 2` was true of a genuine duplication,
+    and I11 then named itself among the invariants that HOLD. It was measured:
+    a store with one id committed at BOTH paths and the `active/` blob garbage
+    printed `… + I11 all hold`. Only I9's separate honesty about the same list
+    kept the run from reading clean, and the two verdicts are separately
+    readable, so a caller reading I11's got a false one. An invariant whose
+    POSITIVE is reachable without its population being complete is the §F9f
+    mirror — here, in the invariant written to stop that class."""
     findings = []
     items, dups = load_all_items(project)
     for iid in sorted(dups):
@@ -8513,8 +8539,9 @@ def compute_duplicate_identity(project, timeout=EVENT_LOSS_TIMEOUT):
         findings.append(_dup_finding(
             iid, "in the WORKING TREE", copies,
             f"Delete the stale copy and commit the deletion."))
+    unreadable = []
     try:
-        head = _head_item_logs(project, timeout=timeout, unreadable=[])
+        head = _head_item_logs(project, timeout=timeout, unreadable=unreadable)
     except Exception as exc:                                    # noqa: BLE001
         findings.append(_dup_unknown(
             f"[{DUP_CHECK}] NOT ESTABLISHED — whether an id is committed at "
@@ -8534,6 +8561,23 @@ def compute_duplicate_identity(project, timeout=EVENT_LOSS_TIMEOUT):
             f"`git -C work/{project} rm` the stale path and commit that "
             f"deletion. The working tree may already look right: it is HEAD that "
             f"carries two copies, and HEAD is what another agent clones."))
+    if unreadable:
+        # PARTIAL COVERAGE, reported and never absorbed into the claim — the I9
+        # rule applied to I11. It is an UNKNOWN and NOT an accusation (§17i): a
+        # blob that cannot be read carries an id nobody can name, so it may not
+        # be called a duplicate. It withholds; it does not accuse.
+        findings.append(_dup_unknown(
+            f"[{DUP_CHECK}] NOT ESTABLISHED for {len(unreadable)} committed "
+            f"item blob(s) that would not parse, so whether THEIR id is "
+            f"committed at more than one path is unknown (the rest were "
+            f"checked): "
+            + "; ".join(f"{pth} ({why})" for pth, why in unreadable[:4])
+            + (f"; and {len(unreadable) - 4} more not listed"
+               if len(unreadable) > 4 else "")
+            + f". I11 may only report over the population it could READ, and an "
+              f"unreadable blob leaves that population without being a "
+              f"violation. Recover it from HEAD "
+              f"(`git -C work/{project} show HEAD:<path>`) and re-run."))
     return findings
 
 

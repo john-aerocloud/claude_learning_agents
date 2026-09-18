@@ -59,11 +59,37 @@ WHAT IS PINNED HERE (I11):
      relocation moved the stale `active/` copy on top of the resolved `done/`
      one, which is measured here rather than argued.
 
+DEF-ROC-290 — I11 REPORTED ITSELF HOLDING OVER A POPULATION IT COULD NOT READ.
+
+`compute_duplicate_identity` passed `unreadable=[]` to `_head_item_logs` and
+DISCARDED the list, so a committed blob that would not parse left the population
+SILENTLY and I11 then named itself among the invariants that hold. Measured by
+this module's own tester on the store below: `DEF-D` committed at BOTH paths with
+the `active/` blob garbage printed
+
+    I1–I4 + I6 + I7 + I8 + I10 + I11 all hold
+
+while HEAD carried two copies of that id — precisely the violation I11 exists to
+find. It was not exploitable, because I9 DOES carry the same list and the run
+still read `NOT CLEAN`; the sub-claim was manufactured all the same, and the two
+invariants are separately readable, so a caller reading I11's verdict got a false
+one. An invariant whose POSITIVE is reachable without the population being
+complete is the §F9f mirror — in the invariant written to stop that class.
+
+  8. an unreadable committed blob makes I11 NOT ESTABLISHED and keeps it OUT of
+     the holders list, while a clean fully-readable store still puts it IN
+     (both directions); it is an UNKNOWN and never an accusation (§17i), and what
+     WAS established is still reported alongside it;
+  9. a DIVERGENCE where both copies hold the same event NAMES at different
+     timestamps is not printed as two identical lists — the second, separate
+     reporting fault in the same family.
+
 Nothing is stubbed: every test drives the real `validate_items`, `cmd_validate`,
 `cmd_project` and a real git repo.
 """
 import io
 import os
+import re
 import shutil
 import argparse
 import tempfile
@@ -89,6 +115,11 @@ PULLED = {"ts": "2026-09-01T02:00:00Z", "event": "pulled", "agent": "orchestrato
 CONFIRMED = {"ts": "2026-09-01T03:00:00Z", "event": "confirmed", "agent": "engineer"}
 FIXED = {"ts": "2026-09-01T04:00:00Z", "event": "fixed", "agent": "engineer"}
 VALIDATED = {"ts": "2026-09-01T05:00:00Z", "event": "validated", "agent": "tester"}
+
+# The SAME event name at a DIFFERENT timestamp. An event's identity is
+# (ts, event, agent), so these two are different events that render to the same
+# name — the shape DEF-ROC-290's second fault printed identically on both sides.
+FIXED_LATER = {"ts": "2026-09-01T04:30:00Z", "event": "fixed", "agent": "engineer"}
 
 RESOLVED_LOG = [REPORTED, TRIAGED, PULLED, CONFIRMED, FIXED, VALIDATED]
 STALE_LOG = [REPORTED, TRIAGED, PULLED, CONFIRMED, FIXED]
@@ -187,6 +218,24 @@ class Store(unittest.TestCase):
     # --- drive ------------------------------------------------------------- #
     def validate(self):
         return wi.validate_items(self.graphs, self.project)
+
+    def holders(self, out):
+        """The invariant names the summary asserts HOLD — the `X + Y all hold`
+        list and nothing else.
+
+        Read as a LIST rather than by substring on purpose: I11 appears in the
+        NOT-CLEAN sentence EITHER as a holder or as a name that could not be
+        established, and a substring test cannot tell those apart — which is the
+        very confusion DEF-ROC-290 is about."""
+        lines = [l for l in out.splitlines() if l.startswith("validate: ")
+                 and ("clean" in l or "NOT CLEAN" in l)]
+        self.assertTrue(lines, out)
+        seg = lines[-1].split(" all hold")[0]
+        for sep in ("withholds the claim. ", " — "):
+            if sep in seg:
+                seg = seg.rsplit(sep, 1)[1]
+                break
+        return [n.strip() for n in seg.split(" + ")]
 
     def validate_output(self):
         out, err = io.StringIO(), io.StringIO()
@@ -311,6 +360,46 @@ class TestADuplicateInTheWorkingTree(Store):
         self.assertIn("confirmed", v)       # what only active/ holds
         self.assertIn("fixed", v)           # what only done/ holds
 
+    def test_a_divergence_at_the_SAME_event_NAME_is_not_two_identical_lists(self):
+        """DEF-ROC-290's second fault, measured. An event's identity carries its
+        TIMESTAMP and the rendering drops it, so two copies that each hold
+        `fixed` — at different times, by the same agent — printed the SAME list
+        on both sides of the sentence that says they differ. A report that shows
+        two things as identical while telling you they are not is worse than
+        silence: a reader acts on it.
+
+        The fix must DISAMBIGUATE, not dump the internal form — the name is what
+        a reader can act on."""
+        iid = self._two_copies(
+            active=[REPORTED, TRIAGED, PULLED, CONFIRMED, FIXED],
+            done=[REPORTED, TRIAGED, PULLED, CONFIRMED, FIXED_LATER])
+        v = " ".join(x for x in self.validate() if "I11" in x)
+        self.assertIn("DIVERGED", v)
+        sides = re.findall(r"\[([^\]]*)\]", v)
+        self.assertEqual(len(sides), 2, f"expected one list per side: {v}")
+        self.assertNotEqual(
+            sides[0], sides[1],
+            "both sides of the divergence rendered IDENTICALLY — the report "
+            f"shows two things as the same while saying they differ: {v}")
+        self.assertIn(FIXED["ts"], v, "the disambiguator is the timestamp")
+        self.assertIn(FIXED_LATER["ts"], v)
+        self.assertIn("fixed", v, "the NAME is still what the reader acts on")
+        self.assertNotIn("engineer'", v, "the internal signature was dumped")
+
+    def test_a_divergence_at_DIFFERENT_names_stays_as_SHORT_as_it_was(self):
+        """Both directions. The timestamp is a DISAMBIGUATOR, not a new default:
+        a divergence the names already distinguish must not be cluttered, or the
+        listing loses the brevity that makes it readable."""
+        iid = self._two_copies(
+            active=[REPORTED, TRIAGED, PULLED, CONFIRMED],
+            done=[REPORTED, TRIAGED, PULLED, FIXED, VALIDATED])
+        v = " ".join(x for x in self.validate() if "I11" in x)
+        self.assertIn("DIVERGED", v)
+        self.assertIn("confirmed", v)
+        self.assertIn("fixed", v)
+        self.assertNotIn(CONFIRMED["ts"], v)
+        self.assertNotIn(FIXED["ts"], v)
+
     def test_copies_that_AGREE_are_still_a_violation(self):
         """Agreement is not permission: an id must resolve to exactly ONE file,
         because the writer and the readers resolve to different ones."""
@@ -430,6 +519,122 @@ class TestTheVerdictIsComposedNotWritten(Store):
         self.assertIn("I11", names)
         for entry in verdicts:
             self.assertEqual(len(entry), 3, entry)
+
+
+# --------------------------------------------------------------------------- #
+# Limb 5 — I11 may only report over the population it could READ [DEF-ROC-290]
+# --------------------------------------------------------------------------- #
+class TestAnUnreadableCommittedBlobWithholdsI11(Store):
+    """The fail-open this module's own tester found while PASSING DEF-ROC-268."""
+
+    GARBAGE = "this is not an item file: no frontmatter fence at all\n"
+
+    def _the_store_that_printed_I11_ALL_HOLD(self, iid="DEF-D"):
+        """HEAD carries TWO copies of one id and the `active/` one is GARBAGE.
+
+        Built the way the real instance was built — the item is committed while
+        live, resolved through the real writer (which relocates it), and only the
+        `done/` half of the rename is declared — and then the committed
+        `active/` blob is replaced with something `_head_item_logs` cannot parse.
+        That blob's id never reaches the population, so the duplication is
+        invisible to anything that reads the population alone.
+        """
+        self.write_item(iid, STALE_LOG, sub="active")
+        self.git_init()
+        self.git_commit_all("the item while it was live")
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            wi.cmd_append(argparse.Namespace(
+                project=self.project, id=iid, event="validated", agent="tester",
+                ref=None, note=None, ts=VALIDATED["ts"], tokens=None,
+                duration_ms=None))
+        self._git("reset", "-q")
+        self.git_commit_paths("declare only the done/ half of the rename",
+                              f"items/done/{iid}.md")
+        with open(self.path_of(iid, "active"), "w", encoding="utf-8") as f:
+            f.write(self.GARBAGE)
+        self.git_commit_paths("the committed active/ copy is now unparseable",
+                              f"items/active/{iid}.md")
+        os.remove(self.path_of(iid, "active"))   # the working tree holds ONE
+        return iid
+
+    def test_the_fixture_really_is_the_store_that_manufactured_the_pass(self):
+        """NON-VACUITY, and it is the whole mechanism: HEAD holds two paths for
+        one id, the blob will not parse, and the POPULATION therefore holds one
+        copy — so `len(copies) < 2` is true of a genuine duplication."""
+        iid = self._the_store_that_printed_I11_ALL_HOLD()
+        committed = self._git("ls-tree", "-r", "--name-only", "HEAD", "items/").stdout
+        self.assertIn(f"items/active/{iid}.md", committed)
+        self.assertIn(f"items/done/{iid}.md", committed)
+        unreadable = []
+        head = wi._head_item_logs(self.project, unreadable=unreadable)
+        self.assertEqual(len(head.get(iid, [])), 1,
+                         "the fixture's blob parsed after all")
+        self.assertEqual([pth for pth, _why in unreadable],
+                         [f"items/active/{iid}.md"])
+
+    def test_I11_is_NOT_ESTABLISHED_and_names_the_blob_it_could_not_read(self):
+        iid = self._the_store_that_printed_I11_ALL_HOLD()
+        unknown = [f for f in wi.compute_duplicate_identity(self.project)
+                   if f["severity"] == "unknown"]
+        self.assertTrue(unknown, "I11 reported over a population it could not "
+                                 "read and said nothing about the shortfall")
+        msg = " ".join(f["message"] for f in unknown)
+        self.assertIn("NOT ESTABLISHED", msg)
+        self.assertIn(f"items/active/{iid}.md", msg,
+                      "the message does not say WHICH blob it could not read")
+
+    def test_an_unreadable_blob_WITHHOLDS_and_never_ACCUSES(self):
+        """§17i. An unparseable blob is an UNKNOWN, not a duplicate: it must not
+        become a violation, and it must not fail the gate."""
+        self._the_store_that_printed_I11_ALL_HOLD()
+        self.assertEqual(
+            [f for f in wi.compute_duplicate_identity(self.project)
+             if f["severity"] == "block"], [])
+        self.assertEqual([x for x in self.validate() if "I11" in x], [])
+        code, _out, _err = self.validate_output()
+        self.assertEqual(code, 0, "withholding a claim is not a plain fail")
+
+    def test_the_summary_does_NOT_name_I11_among_the_HOLDERS(self):
+        """The measured symptom, read as a list rather than a substring: the
+        tester's run printed `… + I11 all hold` over two copies of one id."""
+        self._the_store_that_printed_I11_ALL_HOLD()
+        code, out, _err = self.validate_output()
+        self.assertEqual(code, 0)
+        self.assertIn("NOT CLEAN", out)
+        self.assertNotIn("I11", self.holders(out),
+                         f"I11 named itself among the holders: {out}")
+        self.assertIn("I11", out, "and its verdict is still stated")
+
+    def test_a_clean_fully_readable_store_STILL_names_I11_among_the_holders(self):
+        """BOTH DIRECTIONS (§F9f). An invariant that never claims to hold is as
+        useless as one that always does — which is why this sits next to the
+        test above and reads the same list."""
+        self.write_item("DEF-OK", RESOLVED_LOG, sub="done")
+        self.git_init()
+        self.git_commit_all()
+        code, out, _err = self.validate_output()
+        self.assertEqual(code, 0, out)
+        self.assertIn("clean", out)
+        self.assertIn("I11", self.holders(out), out)
+
+    def test_what_WAS_established_is_still_reported_alongside_the_unknown(self):
+        """Partial coverage, the I9 rule applied to I11: an unreadable blob must
+        not swallow a duplication the run DID see."""
+        iid = self._the_store_that_printed_I11_ALL_HOLD()
+        other = "DEF-E"
+        self.write_item(other, STALE_LOG, sub="active")
+        self.write_item(other, RESOLVED_LOG, sub="done")
+        self.render_own_derived(self.path_of(other, "active"))
+        self.render_own_derived(self.path_of(other, "done"))
+        self.git_commit_paths("a second id committed at BOTH paths",
+                             f"items/active/{other}.md", f"items/done/{other}.md")
+        findings = wi.compute_duplicate_identity(self.project)
+        in_head = [f for f in findings if f["severity"] == "block"
+                   and f.get("where") == "in HEAD" and f.get("id") == other]
+        self.assertTrue(in_head, f"the established duplication was lost: {findings}")
+        self.assertTrue([f for f in findings if f["severity"] == "unknown"])
+        self.assertNotIn(iid, " ".join(f["message"] for f in in_head))
 
 
 class TestTheLoopGateAsksThisBeforeEveryPull(Store):

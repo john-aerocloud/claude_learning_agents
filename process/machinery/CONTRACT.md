@@ -519,7 +519,18 @@ Exits non-zero if ANY invariant is violated:
   BEHIND, and it says so and names what that copy is missing; where each side holds events the
   other lacks it reports DIVERGED and names both, rather than picking; identical copies are still
   a violation, because agreement is not permission. A HEAD side it could not establish is
-  REPORTED, never absorbed into `clean` (§17i). The relocation in `wi-project` is guarded by the
+  REPORTED, never absorbed into `clean` (§17i) — **including a PARTIAL shortfall, which it
+  originally discarded (DEF-ROC-290)**. It asked `_head_item_logs` for the committed copies and
+  threw away the list of blobs that would not parse, so an unreadable blob left the population
+  SILENTLY, `len(copies) < 2` was true of a genuine duplication, and I11 named itself among the
+  invariants that HOLD: a store with one id committed at BOTH paths and the `active/` blob garbage
+  printed `… + I11 all hold`. Only I9's separate honesty about the same list kept that run from
+  reading `clean`, and the two verdicts are separately readable, so a caller reading I11's got a
+  false one. An unreadable blob is an UNKNOWN and never an accusation — it carries an id nobody can
+  name, so it may not be called a duplicate — and what WAS established is still reported beside it.
+  The DIVERGED clause renders event NAMES, and a name held on both sides is qualified with its
+  TIMESTAMP, because an event's identity is `(ts, event, agent)`: two copies each holding `fixed`
+  at different times printed the two sides IDENTICALLY, in the sentence that says they differ. The relocation in `wi-project` is guarded by the
   same finding: `_maybe_relocate` used to `os.replace` the `active/` copy onto the `done/` one —
   measured, the stale copy overwrote the resolved one and its terminal event was gone from the
   working tree with no message — and it now refuses and says so, because a rename has nowhere to

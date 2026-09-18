@@ -8047,6 +8047,46 @@ def _egr_config_path(project):
                         "%s.json" % project)
 
 
+def _egr_ask(argv, secs, common, cfg_path):
+    """Run the declared probe ONCE. Returns `(report, failure_finding)` — exactly one
+    of which is None.
+
+    Extracted so the probe can be asked MORE THAN ONCE in a single call without
+    duplicating any of the §17i degradation wording: every way of failing to get an
+    answer stays in one place, and the answer itself is just a dict."""
+    try:
+        proc = subprocess.run(argv, cwd=ROOT, capture_output=True, text=True,
+                              check=False, timeout=secs)
+    except subprocess.TimeoutExpired:
+        return None, dict(common, severity="unknown", verdict="UNRUNNABLE", message=(
+            f"[exit-gate-ran] NOT ESTABLISHED — the declared probe did not finish "
+            f"within {secs:g}s (timeout). Nothing was checked, which is NOT the same "
+            f"as 'the gate spoke'. Remedy: `{' '.join(argv)}` by hand, or raise "
+            f'"timeoutMs" in {cfg_path}.'))
+    except Exception as exc:                                    # noqa: BLE001
+        return None, dict(common, severity="unknown", verdict="UNRUNNABLE", message=(
+            f"[exit-gate-ran] NOT ESTABLISHED — the declared probe would not run "
+            f"({type(exc).__name__}: {str(exc)[:160]}). An unrunnable probe is not a "
+            f"verdict (§17c.2). Remedy: `{' '.join(argv)}` from the repo root."))
+
+    out = (proc.stdout or "").strip()
+    report = None
+    if out:
+        start, end = out.find("{"), out.rfind("}")
+        if start != -1 and end > start:
+            try:
+                report = json.loads(out[start:end + 1])
+            except Exception:                                   # noqa: BLE001
+                report = None
+    if not isinstance(report, dict):
+        tail = (out + "\n" + (proc.stderr or "")).strip()[-300:] or "(no output)"
+        return None, dict(common, severity="unknown", verdict="UNREADABLE", message=(
+            f"[exit-gate-ran] NOT ESTABLISHED — the declared probe printed no "
+            f"readable JSON object (exit {proc.returncode}), so its verdict is "
+            f"unreadable and this run establishes nothing: {tail}"))
+    return report, None
+
+
 def compute_exit_gate_ran(project, sha=None, timeout=None):
     """Did the project's engineering exit gate produce a verdict for trunk head
     (or for `sha`)? 0 or 1 finding. DELEGATED to the project's own declared
@@ -8109,49 +8149,40 @@ def compute_exit_gate_ran(project, sha=None, timeout=None):
 
     secs = float(cfg.get("timeoutMs", timeout * 1000 if timeout else
                          EGR_TIMEOUT * 1000)) / 1000.0
-    try:
-        proc = subprocess.run(argv, cwd=ROOT, capture_output=True, text=True,
-                              check=False, timeout=secs)
-    except subprocess.TimeoutExpired:
-        return [dict(common, severity="unknown", verdict="UNRUNNABLE", message=(
-            f"[exit-gate-ran] NOT ESTABLISHED — the declared probe did not finish "
-            f"within {secs:g}s (timeout). Nothing was checked, which is NOT the same "
-            f"as 'the gate spoke'. Remedy: `{' '.join(argv)}` by hand, or raise "
-            f'"timeoutMs" in {cfg_path}.'))]
-    except Exception as exc:                                    # noqa: BLE001
-        return [dict(common, severity="unknown", verdict="UNRUNNABLE", message=(
-            f"[exit-gate-ran] NOT ESTABLISHED — the declared probe would not run "
-            f"({type(exc).__name__}: {str(exc)[:160]}). An unrunnable probe is not a "
-            f"verdict (§17c.2). Remedy: `{' '.join(argv)}` from the repo root."))]
+    report, failure = _egr_ask(argv, secs, common, cfg_path)
+    if failure is not None:
+        return [failure]
 
-    out = (proc.stdout or "").strip()
-    report = None
-    if out:
-        start, end = out.find("{"), out.rfind("}")
-        if start != -1 and end > start:
-            try:
-                report = json.loads(out[start:end + 1])
-            except Exception:                                   # noqa: BLE001
-                report = None
-    if not isinstance(report, dict):
-        tail = (out + "\n" + (proc.stderr or "")).strip()[-300:] or "(no output)"
-        return [dict(common, severity="unknown", verdict="UNREADABLE", message=(
-            f"[exit-gate-ran] NOT ESTABLISHED — the declared probe printed no "
-            f"readable JSON object (exit {proc.returncode}), so its verdict is "
-            f"unreadable and this run establishes nothing: {tail}"))]
+    return _egr_map(common, report, sha, argv)
 
+
+def _egr_map(common, report, sha, argv, carried=None):
+    """The AC-025-3 severity map for ONE probe report. 0 or 1 finding.
+
+    `carried` is the DEF-ROC-221 case: this report is not about the commit the
+    caller asked about, it is about the PUSH HEAD that carried that commit into
+    origin. The verdict is the same verdict — a push-triggered gate runs once per
+    push, and the run for the push head IS the run the carried commit went through
+    — but the sentence has to say whose run it is reading, or the reader cannot
+    audit it."""
     status = str(report.get("status") or "").strip().upper()
     head = str(report.get("head") or report.get("sha") or sha or "trunk head")[:12]
     detail = str(report.get("detail") or "").strip()
     url = str(report.get("runUrl") or "").strip()
     common = dict(common, verdict=status, head=head)
+    via = ""
+    if carried:
+        common = dict(common, carriedInto=head, asked=carried)
+        via = (f" (asked about {carried}, which has no run of its own because the "
+               f"gate runs per PUSH not per COMMIT; {head} is the push head that "
+               f"carried it into origin, so {head}'s run IS its run)")
 
     if status == "PASS":
         return []
     if status == "NO-VERDICT":
         return [dict(common, severity="block", message=(
-            f"[exit-gate-ran] THE ENGINEERING EXIT GATE DID NOT SPEAK for {head} — "
-            f"no verdict exists for that commit past the grace period, which is the "
+            f"[exit-gate-ran] THE ENGINEERING EXIT GATE DID NOT SPEAK for {head}{via} "
+            f"— no verdict exists for that commit past the grace period, which is the "
             f"DEF-ROC-153 condition exactly. §F11.4 clause 1: NON-EXECUTION IS NOT A "
             f"PASS — a gate that did not run is indistinguishable from a gate that "
             f"passed, and on 2026-08-29 that cost three ungated commits on trunk "
@@ -8164,7 +8195,7 @@ def compute_exit_gate_ran(project, sha=None, timeout=None):
     if status == "FAIL":
         return [dict(common, severity="advisory", message=(
             f"ADVISORY (does NOT block the pull) [exit-gate-ran] the engineering "
-            f"exit gate SPOKE for {head} and said NO. Reported, never blocking: a "
+            f"exit gate SPOKE for {head}{via} and said NO. Reported, never blocking: a "
             f"red gate is a different subject from §F11.4's — it is owned by `make "
             f"exit-gate` on the commit in hand — and blocking here would wedge every "
             f"agent in this shared tree on somebody else's regression (AC-025-3). It "
@@ -8173,14 +8204,14 @@ def compute_exit_gate_ran(project, sha=None, timeout=None):
             f"CFR reads a false 0%. {detail}{(' ' + url) if url else ''}"))]
     if status == "PENDING":
         return [dict(common, severity="unknown", message=(
-            f"[exit-gate-ran] NOT ESTABLISHED — a gate run for {head} exists and is "
+            f"[exit-gate-ran] NOT ESTABLISHED — a gate run for {head}{via} exists and is "
             f"still going, so there is no verdict yet and nothing is broken either. "
             f"Do NOT read an unfinished run as a pass. Re-run this gate when it "
             f"completes. {detail}{(' ' + url) if url else ''}"))]
     if status == "CANNOT-DETERMINE":
         return [dict(common, severity="unknown", message=(
             f"[exit-gate-ran] NOT ESTABLISHED — the probe could not ask whether the "
-            f"gate spoke for {head} ({detail or 'no detail'}). Not a pass and not an "
+            f"gate spoke for {head}{via} ({detail or 'no detail'}). Not a pass and not an "
             f"alarm (§17i); check `gh auth status` first, then run "
             f"`{' '.join(argv)}` by hand."))]
     return [dict(common, severity="unknown", message=(

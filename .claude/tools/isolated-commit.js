@@ -503,6 +503,28 @@ function pathWorkItems({ repo, head, file, depth = COOWNED_SCAN_DEPTH }) {
 }
 
 /**
+ * CONDITION 3, NOT-THE-SUBJECT, AS ONE PREDICATE. Which of a message's ids say
+ * anything about the AUTHOR of a commit to `file`? An id that appears in the PATH
+ * names the SUBJECT — every agent touching `items/active/UC-X.md` says UC-X because
+ * the FILE is UC-X — so it is void as evidence about who wrote the tip.
+ *
+ * ONE function because the guard (`ownWorkItemContinuation` condition 3) and the
+ * advisory (`messageAttribution`, which tells an agent what its message costs the
+ * NEXT one) are two readers of ONE rule, and two derivations of one fact is how two
+ * readers come to disagree (EXP-047). They consume it differently, and that
+ * asymmetry is deliberate and now visible in one place: the guard stands down only
+ * if EVERY id attributes; the advisory is satisfied if ANY id does.
+ *
+ * @param {Iterable<string>} ids the work-item ids a message declares
+ * @param {string} file the declared path being committed
+ * @returns {string[]} the subset of `ids` that is evidence about the author.
+ */
+function attributingIds(ids, file) {
+  const f = normalizeDeclared(file);
+  return [...ids].filter((id) => !f.includes(id));
+}
+
+/**
  * WHAT A MESSAGE NAMING NO WORK ITEM COSTS (DEF-ROC-248), per declared path.
  *
  * The id is EVIDENCE, not decoration: `ownWorkItemContinuation` stands the co-owned
@@ -529,7 +551,7 @@ function pathWorkItems({ repo, head, file, depth = COOWNED_SCAN_DEPTH }) {
  */
 function messageAttribution({ repo, head, message, files, depth = COOWNED_SCAN_DEPTH }) {
   const ids = [...workItemIds(message)].sort();
-  const usable = (file) => ids.some((id) => !normalizeDeclared(file).includes(id));
+  const usable = (file) => attributingIds(ids, file).length > 0;
   const unusable = (files || []).filter((f) => !usable(f));
   if (unusable.length === 0) return null;
   return {
@@ -560,9 +582,8 @@ function ownWorkItemContinuation({ file, headText, mineText, stale, myMessage, t
   const ids = sameWorkItem(workItemIds(myMessage), workItemIds(theirMessage));
   if (!ids) return null;
 
-  // 3. NOT-THE-SUBJECT.
-  const f = normalizeDeclared(file);
-  if (ids.some((id) => f.includes(id))) return null;
+  // 3. NOT-THE-SUBJECT — EVERY id must attribute, or the evidence is void.
+  if (attributingIds(ids, file).length !== ids.length) return null;
 
   return { ids, accounted: missing };
 }
@@ -2077,6 +2098,7 @@ module.exports = {
   printCoownedMissing,
   coownedStaleAgainst,
   workItemIds,
+  attributingIds,
   sameWorkItem,
   ownWorkItemContinuation,
   pathWorkItems,

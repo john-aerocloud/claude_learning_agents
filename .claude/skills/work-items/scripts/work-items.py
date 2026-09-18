@@ -8420,6 +8420,16 @@ def compute_event_loss(project, timeout=EVENT_LOSS_TIMEOUT):
 DUP_CHECK = "duplicate-identity"
 
 
+def _dup_event_names(ctr):
+    """The event NAMES in a Counter of `(ts, event, agent)` signatures.
+
+    Named because it is the reporting rule, used at every point I11 describes a
+    log: a reader acts on the NAME of the event that is missing, so the internal
+    signature is never printed. Rendering lives in one place so the rule can be
+    changed once."""
+    return sorted({sig[1] for sig in ctr.elements()})
+
+
 def _dup_stale_clause(copies):
     """`copies` is [(path, [sig, …]), …] for ONE id. Returns the sentence that
     says which copy is stale — or that nothing here can say.
@@ -8444,9 +8454,9 @@ def _dup_stale_clause(copies):
         parts = []
         for path, missing, extra in diverged:
             parts.append(
-                f"{path} holds {sorted({sig[1] for sig in extra.elements()})} "
+                f"{path} holds {_dup_event_names(extra)} "
                 f"that {biggest[0]} lacks, and {biggest[0]} holds "
-                f"{sorted({sig[1] for sig in missing.elements()})} that it lacks")
+                f"{_dup_event_names(missing)} that it lacks")
         return (f"The copies have DIVERGED — {'; '.join(parts)} — so NEITHER is "
                 f"simply behind and nothing here may pick one. Recover every "
                 f"copy from HEAD and reconcile the logs by hand before deleting "
@@ -8460,8 +8470,7 @@ def _dup_stale_clause(copies):
                 f"items/active/).")
     bits = []
     for path, missing in behind:
-        bits.append(f"{path} (missing "
-                    f"{sorted({sig[1] for sig in missing.elements()})})")
+        bits.append(f"{path} (missing {_dup_event_names(missing)})")
     return (f"The STALE copy is {', '.join(bits)} — its log is a strict subset of "
             f"{biggest[0]}'s and item logs are APPEND-ONLY, so it can only be "
             f"behind. {biggest[0]} is the one to keep.")
@@ -8481,6 +8490,17 @@ def _dup_finding(iid, where, copies, remedy):
                     f"{remedy}"))
 
 
+def _dup_unknown(message):
+    """I11's §17i verdict: the question was ASKED and NOT ANSWERED.
+
+    `severity="unknown"` is what `cmd_validate` reads to WITHHOLD I11 from the
+    invariants it names as holding, and what keeps the loop gate from reading
+    silence as clean. Composed here rather than inline so every way I11 can fail
+    to establish itself renders the same shape."""
+    return dict(check=DUP_CHECK, severity="unknown", id=None, ids=[],
+                where="HEAD", copies=[], message=message)
+
+
 def compute_duplicate_identity(project, timeout=EVENT_LOSS_TIMEOUT):
     """0+ findings: one per duplicated id per record, plus an `unknown` finding
     when the HEAD side could not be established (§17i — never absorbed into
@@ -8496,15 +8516,13 @@ def compute_duplicate_identity(project, timeout=EVENT_LOSS_TIMEOUT):
     try:
         head = _head_item_logs(project, timeout=timeout, unreadable=[])
     except Exception as exc:                                    # noqa: BLE001
-        findings.append(dict(
-            check=DUP_CHECK, severity="unknown", id=None, ids=[], where="HEAD",
-            copies=[], message=(
-                f"[{DUP_CHECK}] NOT ESTABLISHED — whether an id is committed at "
-                f"more than one path in HEAD could not be checked "
-                f"({type(exc).__name__}: {str(exc)[:160]}). HEAD is the record "
-                f"the founding instance was wrong in — the working tree held one "
-                f"copy while HEAD held two — so an unrunnable check here is "
-                f"exactly the silence DEF-ROC-268 is about.")))
+        findings.append(_dup_unknown(
+            f"[{DUP_CHECK}] NOT ESTABLISHED — whether an id is committed at "
+            f"more than one path in HEAD could not be checked "
+            f"({type(exc).__name__}: {str(exc)[:160]}). HEAD is the record "
+            f"the founding instance was wrong in — the working tree held one "
+            f"copy while HEAD held two — so an unrunnable check here is "
+            f"exactly the silence DEF-ROC-268 is about."))
         return findings
     for iid, copies in sorted(head.items()):
         if len(copies) < 2:

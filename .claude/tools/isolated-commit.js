@@ -515,13 +515,27 @@ function pathWorkItems({ repo, head, file, depth = COOWNED_SCAN_DEPTH }) {
  * asymmetry is deliberate and now visible in one place: the guard stands down only
  * if EVERY id attributes; the advisory is satisfied if ANY id does.
  *
+ * THE ONE EXCEPTION, AND IT IS A DECLARATION RATHER THAN A PATH SHAPE (DEF-ROC-311).
+ * A RENDERED ITEM RECORD — a file that declares, in the machinery's own words, that
+ * it IS the record of item X (`itemRecord`) — is the case where "the id names the
+ * path" stops being a signal at all: the ONLY id a commit to X's record can
+ * legitimately carry is X, so condition 3 could NEVER arm there and every commit to
+ * every item record left the next agent a false exit 7. Measured at the time of the
+ * fix: 157 of the last 500 commits in work/ROC carried the advisory, all of them
+ * unfixable by the advice it gave. So the record's OWN declared identity attributes
+ * — and ONLY that id; any other id in the path is void exactly as before, which is
+ * what stops an agent laundering a stale overwrite by naming whatever sits in the
+ * path. What the record's identity may then be used FOR is bounded by NOT-THE-LOG
+ * (`ownWorkItemContinuation` limb 3'), which is where the events are protected.
+ *
  * @param {Iterable<string>} ids the work-item ids a message declares
  * @param {string} file the declared path being committed
+ * @param {{id:string}|null} [record] the record this file declares itself to be
  * @returns {string[]} the subset of `ids` that is evidence about the author.
  */
-function attributingIds(ids, file) {
+function attributingIds(ids, file, record = null) {
   const f = normalizeDeclared(file);
-  return [...ids].filter((id) => !f.includes(id));
+  return [...ids].filter((id) => !f.includes(id) || (record !== null && id === record.id));
 }
 
 /**
@@ -549,9 +563,27 @@ function attributingIds(ids, file) {
  *          items:string[], coowned:boolean}>}|null} null when the message carries a
  *          usable id — the common case, computed at zero cost.
  */
-function messageAttribution({ repo, head, message, files, depth = COOWNED_SCAN_DEPTH }) {
+function messageAttribution({
+  repo,
+  head,
+  commit = null,
+  message,
+  files,
+  depth = COOWNED_SCAN_DEPTH,
+  recordSelfAttribution = true,
+}) {
   const ids = [...workItemIds(message)].sort();
-  const usable = (file) => attributingIds(ids, file).length > 0;
+  // DEF-ROC-311 — read the DECLARATION out of the file AS COMMITTED, so a record
+  // created by this very commit counts (`head` predates it and would not see it).
+  const recordAt = (file) => {
+    const ref = commit || head;
+    if (!recordSelfAttribution || !ref) return null;
+    const blob = blobAt(repo, ref, file);
+    return blob === null ? null : itemRecord(blob);
+  };
+  const usable = (file) =>
+    attributingIds(ids, file).length > 0 || // the common case, still at zero cost
+    attributingIds(ids, file, recordAt(file)).length > 0; // reads the file only when it matters
   const unusable = (files || []).filter((f) => !usable(f));
   if (unusable.length === 0) return null;
   return {
@@ -565,11 +597,37 @@ function messageAttribution({ repo, head, message, files, depth = COOWNED_SCAN_D
 }
 
 /**
+ * THE RECORD'S OWN LOG, AND WHY IT IS THE OTHER HALF OF THE DECLARATION
+ * (DEF-ROC-311). Both sides must declare themselves the record of the SAME item, or
+ * there is no declaration to read and condition 3 stands unchanged. The union of the
+ * two logs is what limb 3' protects: rows come from every agent that ever touched the
+ * item, so a "continuation" may never discount one.
+ * @returns {{id:string, log:Set<string>}|null}
+ */
+function recordDeclaredBySides(headText, mineText) {
+  const h = itemRecord(headText);
+  if (h === null) return null;
+  const m = itemRecord(mineText);
+  if (m === null || m.id !== h.id) return null; // half a declaration is none
+  return { id: h.id, log: new Set([...h.log, ...m.log]) };
+}
+
+/**
  * Is the selected staleness evidence MY OWN PREVIOUS COMMIT, continuing the same
  * work item? All three conditions above, in cost order, each failing closed.
- * @returns {{ids:string[], accounted:string[]}|null}
+ * @param {boolean} [o.recordSelfAttribution=true] DEF-ROC-311 CONTROL toggle — false
+ *        reproduces the state in which an item record could never attribute itself.
+ * @returns {{ids:string[], accounted:string[], record:string|null}|null}
  */
-function ownWorkItemContinuation({ file, headText, mineText, stale, myMessage, theirMessage }) {
+function ownWorkItemContinuation({
+  file,
+  headText,
+  mineText,
+  stale,
+  myMessage,
+  theirMessage,
+  recordSelfAttribution = true,
+}) {
   // 1. EXACT ACCOUNTING. `stale.added` is, by selection, in HEAD and absent from
   //    mine, so it is always a SUBSET of what my copy is missing; the question is
   //    whether it is the WHOLE of it.
@@ -582,10 +640,21 @@ function ownWorkItemContinuation({ file, headText, mineText, stale, myMessage, t
   const ids = sameWorkItem(workItemIds(myMessage), workItemIds(theirMessage));
   if (!ids) return null;
 
-  // 3. NOT-THE-SUBJECT — EVERY id must attribute, or the evidence is void.
-  if (attributingIds(ids, file).length !== ids.length) return null;
+  // 3. NOT-THE-SUBJECT — EVERY id must attribute, or the evidence is void. On a
+  //    RENDERED ITEM RECORD the record's own declared identity attributes: it is the
+  //    one id such a commit can legitimately carry, so voiding it voided the rule.
+  const record = recordSelfAttribution ? recordDeclaredBySides(headText, mineText) : null;
+  if (attributingIds(ids, file, record).length !== ids.length) return null;
 
-  return { ids, accounted: missing };
+  // 3'. NOT-THE-LOG (DEF-ROC-311) — what the record's identity may be used for. A row
+  //     of the append-only event log is NEVER "my own line, replaced": the log is
+  //     append-only by the machinery's contract and its rows come from every agent
+  //     that ever touched the item, so discounting one would DROP an event rather
+  //     than continue a thought. Only content OUTSIDE the log can be a continuation,
+  //     which is what keeps AC-189.7's race merging on a real record.
+  if (record !== null && missing.some((l) => record.log.has(l))) return null;
+
+  return { ids, accounted: missing, record: record === null ? null : record.id };
 }
 
 // --- the DERIVED-BLOCK exemption (limb B) ------------------------------------
@@ -622,6 +691,43 @@ function splitDerived(text) {
   }
   if (j === -1) return null; // no frontmatter terminator — do not guess
   return { before: src.slice(0, i + 1), derived: src.slice(i + 1, j), after: src.slice(j) };
+}
+
+/**
+ * WHAT THIS FILE DECLARES ITSELF TO BE (DEF-ROC-311). A RENDERED ITEM RECORD, read
+ * from the file's own content — never from its path.
+ *
+ * A path shape (`items/**`) would be a population decided by a regex, and a regex
+ * rots: it admits anything an agent parks under that directory and silently stops
+ * admitting a record the machinery later writes elsewhere. So the population is the
+ * one the MACHINERY declares, and all three parts are written by
+ * .claude/skills/work-items/scripts/work-items.py on every render:
+ *   - the DERIVED sentinel, already the lifecycle-stable anchor of limb B;
+ *   - `id:`, the record's own identity — the thing that makes "this commit names the
+ *     path" mean "this commit is an entry in its own record";
+ *   - `events:` with at least one row, the append-only log limb 3' protects.
+ * Any one of them missing and this returns null, so condition 3 stands exactly as
+ * DEF-ROC-189 built it. A file is never PARTLY a record.
+ *
+ * @returns {{id:string, log:Set<string>}|null} identity and the trimmed log rows.
+ */
+function itemRecord(text) {
+  const src = String(text === null || text === undefined ? '' : text).split('\n');
+  const end = src.findIndex((l) => l.startsWith(DERIVED_SENTINEL_PREFIX));
+  if (end === -1) return null; // not machine-rendered — nothing has declared anything
+  const head = src.slice(0, end);
+  const idLine = head.find((l) => /^id:[ \t]*\S/.test(l));
+  if (!idLine) return null;
+  const id = idLine.slice(3).trim().replace(/^['"]|['"]$/g, '');
+  if (!/^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+$/.test(id)) return null; // not a work-item id
+  const at = head.findIndex((l) => /^events:[ \t]*$/.test(l));
+  if (at === -1) return null;
+  const log = new Set();
+  for (let k = at + 1; k < head.length; k += 1) {
+    if (!/^[ \t]/.test(head[k])) break; // the log ends where the indentation does
+    if (head[k].trim().length > 0) log.add(head[k].trim());
+  }
+  return log.size === 0 ? null : { id, log };
 }
 
 /** The text with its derived block removed; unchanged text when there is none. */
@@ -906,6 +1012,7 @@ function resolveCoowned({
   duplicationPostCondition = true,
   addAddContentRule = true,
   ownItemContinuity = true,
+  recordSelfAttribution = true,
   superseded = new Set(),
 }) {
   const sides = coownedTexts({ repo, privEnv, oldHead, file, derivedExempt });
@@ -944,6 +1051,7 @@ function resolveCoowned({
       stale,
       myMessage: message,
       theirMessage: commitObjectMessage(repo, stale.sha),
+      recordSelfAttribution,
     });
     if (own) return { ownItem: own, since: stale.sha };
   }
@@ -1142,6 +1250,7 @@ function isolatedCommit({
   duplicationPostCondition = true,
   addAddContentRule = true,
   ownItemContinuity = true,
+  recordSelfAttribution = true,
   superseded = [],
   syncIndex = true,
   hooks = {},
@@ -1320,6 +1429,7 @@ function isolatedCommit({
             duplicationPostCondition,
             addAddContentRule,
             ownItemContinuity,
+            recordSelfAttribution,
             superseded: declaredHere,
           });
           if (declaredHere.size > 0)
@@ -1557,9 +1667,11 @@ function isolatedCommit({
         attribution: messageAttribution({
           repo,
           head: oldHead,
+          commit: sha,
           message,
           files: changed,
           depth: coownedScanDepth,
+          recordSelfAttribution,
         }),
       };
     }
@@ -1807,6 +1919,16 @@ contribution AND that commit's message names the SAME WORK ITEM as yours AND the
 does not name the path. Any of those missing, it refuses as before; the decision is
 always printed. So keep the work-item id in your message (§14) — it is evidence now,
 not decoration.
+
+AN ITEM RECORD ATTRIBUTES ITSELF (DEF-ROC-311). The "id does not name the path" limb
+could NEVER be satisfied for a rendered item record — the only id such a commit can
+legitimately carry is the record's own — so every commit to one left the next agent a
+false exit 7 (157 of the last 500 in work/ROC). A file that DECLARES itself a record
+(the machinery's DERIVED sentinel, an 'id:' line, and a non-empty 'events:' log, both sides)
+may therefore attribute itself with its OWN declared id. Only that id: any other id
+that merely appears in the path is void as before. And its LOG is never discountable
+— an event row comes from whichever agent recorded it, so a stand-down may only ever
+account for content OUTSIDE the events list. Concurrent event appends still merge.
 
 AND SUPERSEDING A COMMITTED LINE IS NOT BEING STALE AGAINST IT (DEF-ROC-173). The two
 are the same file pair, so replacing a line ANOTHER item's commit added was refused at
@@ -2101,6 +2223,8 @@ module.exports = {
   attributingIds,
   sameWorkItem,
   ownWorkItemContinuation,
+  itemRecord,
+  recordDeclaredBySides,
   pathWorkItems,
   messageAttribution,
   formatAttribution,

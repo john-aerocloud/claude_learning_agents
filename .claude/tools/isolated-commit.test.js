@@ -2493,3 +2493,243 @@ test('AC-248.10 an id that names the PATH is void as evidence (DEF-ROC-189 condi
   assert.match(res.stderr, /UNATTRIBUTED|VOID/i);
   assert.match(res.stderr, /names the path|subject/i, 'an id that names the SUBJECT is not evidence about the AUTHOR');
 });
+
+// --- AC-311.* — DEF-ROC-311: an item record could never attribute itself, because
+//     its only legitimate id always names its own path ----------------------------
+//
+// DEF-ROC-189 condition 3 (NOT-THE-SUBJECT) voids an id that appears in the PATH: on
+// `items/active/UC-X.md` every agent says UC-X because the FILE is UC-X, so the id
+// identifies the subject and not the author. For an item record that is not an edge
+// case, it is EVERY case — the only id such a commit can legitimately carry is the
+// record's own — so the stand-down can NEVER arm there and the next agent editing the
+// record from an older copy meets the exit-7 false positive DEF-ROC-189 exists to
+// remove. Two testers reported it independently in one session; neither could satisfy
+// the rule and neither reached for COOWNED_MERGE_OFF, which is why it surfaced at all.
+// MEASURED at the time of the fix: of the last 500 commits in work/ROC, 261 touched an
+// item record and 157 of those carried the UNATTRIBUTED advisory — 60%, every one of
+// them unfixable by the advice the advisory gives.
+//
+// The fix is a NARROWING of when condition 3 applies, never a relaxation of what it
+// catches, and the population is decided by a DECLARATION rather than by a path shape:
+// a file is a RENDERED ITEM RECORD when it carries the machinery's own sentinel AND
+// declares `id:` AND declares the append-only `events:` log — all three written by
+// work-items.py, on BOTH sides. There, and only there, the record's OWN declared
+// identity attributes, and a second limb replaces condition 3:
+//
+//   3'. NOT-THE-LOG — the content being discounted may not be a row of the record's
+//       append-only event log. A log row is never "my own line, replaced": the log is
+//       append-only by the machinery's contract and its rows come from every agent, so
+//       discounting one would DROP another agent's event. That limb is what keeps
+//       AC-189.7's race safe on a REAL record (AC-311.3).
+//
+// AC-311.1 the reported shape: two sequential item-record commits, the second
+//          replacing a line the first wrote. CONTROL DISABLED reproduces exit 7.
+// AC-311.2 the path is not the declaration — a record's OWN id attributes; an id that
+//          merely appears in the path does not, on a record or anywhere else.
+// AC-311.3 THE LOG IS NEVER DISCOUNTED: the AC-189.7 race on a real rendered record
+//          still merges, and the concurrent agent's event survives.
+// AC-311.4 FAIL CLOSED on a half-declaration (no sentinel, no `events:`, one side only).
+// AC-311.5 the ADVISORY stops asking for the impossible: a record commit naming its
+//          own id carries no UNATTRIBUTED warning; the merely-named path still does.
+
+const RECORD = 'items/active/DEF-ROC-311.md';
+
+/** A RENDERED item record, in the shape `work-items.py` writes one. */
+function itemRecordText({ id = 'DEF-ROC-311', events = [], prose = [], derived = ['  state: building'] } = {}) {
+  return [
+    '---',
+    `id: ${id}`,
+    'type: defect',
+    'title: "the record"',
+    'owner: [engineer]',
+    'events:',
+    ...events.map((e) => `  - ${e}`),
+    '# --- everything below this line is DERIVED (rendered by the machinery). do not hand-edit. ---',
+    'derived:',
+    ...derived,
+    '---',
+    '',
+    ...prose,
+    '',
+  ].join('\n');
+}
+
+const EVENT_0 = '{ts: "t0", event: reported, agent: orchestrator}';
+const EVENT_A = '{ts: "t1", event: built_green, agent: engineer}';
+const EVENT_B = '{ts: "t2", event: validated, agent: tester}';
+
+function makeRecordRepo(file = RECORD, opts = {}) {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'def311-'));
+  execFileSync('git', ['init', '-q', '-b', 'main', repo]);
+  git(repo, ['config', 'user.email', 'agent@example.test']);
+  git(repo, ['config', 'user.name', 'Agent']);
+  git(repo, ['config', 'commit.gpgsign', 'false']);
+  write(repo, file, itemRecordText({ events: [EVENT_0], prose: ['## Actual', 'it fails sometimes'], ...opts }));
+  git(repo, ['add', '-A']);
+  git(repo, ['commit', '-q', '-m', 'items: register the defect (DEF-ROC-311)']);
+  return repo;
+}
+
+/**
+ * TWO SEQUENTIAL ITEM-RECORD COMMITS — the real sequence that produced this. One
+ * agent, one work item, two commits in a row to the record, the second REPLACING the
+ * prose line the first one wrote. Nothing concurrent is happening at all.
+ */
+function driveTwoSequentialRecordCommits(repo, { file = RECORD, id = 'DEF-ROC-311', recordSelfAttribution = true, opts = {} } = {}) {
+  const first = itemRecordText({ ...opts, events: [EVENT_0], prose: ['## Actual', 'it fails when the id names the path'] });
+  write(repo, file, first);
+  tool.isolatedCommit({ repo, message: `items(${id}): record what fails (${id})`, paths: [file], recordSelfAttribution });
+  const second = itemRecordText({ ...opts, events: [EVENT_0], prose: ['## Actual', 'it fails whenever the id names the path, which on a record is always'] });
+  write(repo, file, second);
+  const res = tool.isolatedCommit({ repo, message: `items(${id}): sharpen what fails (${id})`, paths: [file], recordSelfAttribution });
+  return { res, head: git(repo, ['show', `HEAD:${file}`]) };
+}
+
+test('AC-311.1 CONTROL DISABLED: two sequential item-record commits — the second is refused at exit 7, the false positive both testers hit', () => {
+  const repo = makeRecordRepo();
+  const err = grab(() => driveTwoSequentialRecordCommits(repo, { recordSelfAttribution: false }));
+  assert.equal(err.code, 7, err.message);
+  assert.match(err.message, /overlap|conflict|CONCURRENT/i);
+});
+
+test('AC-311.1 CONTROL ENABLED: the same second commit LANDS, attributed to the record\'s own declared id, and HEAD carries the replacement exactly once', () => {
+  const repo = makeRecordRepo();
+  const { res, head } = driveTwoSequentialRecordCommits(repo);
+  assert.equal(res.coownedContinuations.length, 1, 'the record\'s own id is evidence about the author of its own record');
+  assert.deepEqual(res.coownedContinuations[0].ids, ['DEF-ROC-311']);
+  assert.match(head, /it fails whenever the id names the path/, 'my replacement must land');
+  assert.doesNotMatch(head, /it fails when the id names the path\n/, 'and the line it replaced must not come back');
+  assert.equal(head.split('## Actual').length - 1, 1, 'exactly once — no duplicate section');
+});
+
+test('AC-311.2 THE DECLARATION, NOT THE PATH: an id that merely APPEARS in the path still cannot attribute — a record declaring a DIFFERENT identity is refused', () => {
+  // The record declares `id: DEF-ROC-311` but is stored at a path naming DEF-ROC-999,
+  // and the message names DEF-ROC-999. The id names the path; it is not the record's
+  // declared identity; condition 3 stands exactly as DEF-ROC-189 built it.
+  const file = 'items/active/DEF-ROC-999.md';
+  const repo = makeRecordRepo(file);
+  const err = grab(() => driveTwoSequentialRecordCommits(repo, { file, id: 'DEF-ROC-999' }));
+  assert.equal(err.code, 7, 'only the record\'s OWN declared identity attributes');
+});
+
+test('AC-311.2 THE DECLARATION, NOT THE PATH: an ordinary source file whose path contains the id is unchanged — condition 3 as DEF-ROC-189 built it', () => {
+  const repo = makeRepo();
+  const file = 'src/lanes/DEF-ROC-311-lane.ts';
+  write(repo, file, 'export const lane = "a";\n');
+  git(repo, ['add', '--', file]);
+  git(repo, ['commit', '-q', '-m', 'feat(lane): add it (DEF-ROC-311)']);
+  write(repo, file, 'export const lane = "b";\n');
+  tool.isolatedCommit({ repo, message: 'feat(lane): b (DEF-ROC-311)', paths: [file] });
+  write(repo, file, 'export const lane = "c";\n');
+  const err = grab(() => tool.isolatedCommit({ repo, message: 'feat(lane): c (DEF-ROC-311)', paths: [file] }));
+  assert.equal(err.code, 7, 'a source file is not a record, whatever its name');
+});
+
+test('AC-311.2 NOT A REGEX ON items/: a rendered record ANYWHERE self-attributes, because the declaration is the machinery\'s, not the path\'s', () => {
+  const file = 'docs/records/DEF-ROC-311.md';
+  const repo = makeRecordRepo(file);
+  const { res } = driveTwoSequentialRecordCommits(repo, { file });
+  assert.equal(res.coownedContinuations.length, 1, 'the population is declared by the file, not by where it sits');
+});
+
+/** AC-189.7's race, on a REAL rendered record: two agents, two events, one item id. */
+function driveRecordEventRace(repo, file = RECORD) {
+  write(repo, file, itemRecordText({ events: [EVENT_0, EVENT_A], prose: ['## Actual', 'it fails sometimes'] }));
+  tool.isolatedCommit({ repo, message: 'items(DEF-ROC-311): built_green (DEF-ROC-311)', paths: [file] });
+  // Agent B's copy was read BEFORE A committed; B appends its own event.
+  write(repo, file, itemRecordText({ events: [EVENT_0, EVENT_B], prose: ['## Actual', 'it fails sometimes'] }));
+  const res = tool.isolatedCommit({ repo, message: 'items(DEF-ROC-311): validated (DEF-ROC-311)', paths: [file] });
+  return { res, head: git(repo, ['show', `HEAD:${file}`]) };
+}
+
+test('AC-311.3 THE LOG IS NEVER DISCOUNTED: on a real rendered record the AC-189.7 race still MERGES — the concurrent agent\'s event survives', () => {
+  const { res, head } = driveRecordEventRace(makeRecordRepo());
+  assert.deepEqual(res.coownedContinuations, [], 'an append-only log row is never "my own line, replaced"');
+  assert.match(head, /event: built_green/, "the other agent's committed event must survive");
+  assert.match(head, /event: validated/, 'and mine must land');
+});
+
+test('AC-311.4 FAIL CLOSED: a file with no DERIVED sentinel is not a record, so condition 3 is unchanged', () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'def311nc-'));
+  execFileSync('git', ['init', '-q', '-b', 'main', repo]);
+  git(repo, ['config', 'user.email', 'agent@example.test']);
+  git(repo, ['config', 'user.name', 'Agent']);
+  git(repo, ['config', 'commit.gpgsign', 'false']);
+  write(repo, RECORD, 'id: DEF-ROC-311\nevents:\n  - {ts: "t0", event: reported}\n\n## Actual\nit fails sometimes\n');
+  git(repo, ['add', '-A']);
+  git(repo, ['commit', '-q', '-m', 'items: register (DEF-ROC-311)']);
+  const body = (l) => `id: DEF-ROC-311\nevents:\n  - {ts: "t0", event: reported}\n\n## Actual\n${l}\n`;
+  write(repo, RECORD, body('it fails when the id names the path'));
+  tool.isolatedCommit({ repo, message: 'items(DEF-ROC-311): record it (DEF-ROC-311)', paths: [RECORD] });
+  write(repo, RECORD, body('it fails whenever the id names the path'));
+  const err = grab(() => tool.isolatedCommit({ repo, message: 'items(DEF-ROC-311): sharpen it (DEF-ROC-311)', paths: [RECORD] }));
+  assert.equal(err.code, 7, 'no machine declaration, no exemption — an unrendered file is not a record');
+});
+
+test('AC-311.4 FAIL CLOSED: a rendered file that declares no `events:` log is not a record', () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'def311nl-'));
+  execFileSync('git', ['init', '-q', '-b', 'main', repo]);
+  git(repo, ['config', 'user.email', 'agent@example.test']);
+  git(repo, ['config', 'user.name', 'Agent']);
+  git(repo, ['config', 'commit.gpgsign', 'false']);
+  const body = (l) => [
+    '---', 'id: DEF-ROC-311', 'type: defect',
+    '# --- everything below this line is DERIVED (rendered by the machinery). do not hand-edit. ---',
+    'derived:', '  state: building', '---', '', '## Actual', l, '',
+  ].join('\n');
+  write(repo, RECORD, body('it fails sometimes'));
+  git(repo, ['add', '-A']);
+  git(repo, ['commit', '-q', '-m', 'items: register (DEF-ROC-311)']);
+  write(repo, RECORD, body('it fails when the id names the path'));
+  tool.isolatedCommit({ repo, message: 'items(DEF-ROC-311): record it (DEF-ROC-311)', paths: [RECORD] });
+  write(repo, RECORD, body('it fails whenever the id names the path'));
+  const err = grab(() => tool.isolatedCommit({ repo, message: 'items(DEF-ROC-311): sharpen it (DEF-ROC-311)', paths: [RECORD] }));
+  assert.equal(err.code, 7, 'the append-only log is half the declaration; without it there is nothing to protect');
+});
+
+test('AC-311.5 THE ADVISORY stops asking for the impossible: a record commit naming its own id carries NO unattributed warning', () => {
+  const repo = makeRecordRepo();
+  write(repo, RECORD, itemRecordText({ events: [EVENT_0, EVENT_A], prose: ['## Actual', 'it fails sometimes'] }));
+  const res = runCli(repo, ['--repo', repo, '--message', 'items(DEF-ROC-311): built_green (DEF-ROC-311)', '--', RECORD]);
+  assert.equal(res.status, 0, `${res.stdout}${res.stderr}`);
+  assert.doesNotMatch(res.stderr, /UNATTRIBUTED/, 'the advice it used to give — "name the work item next time" — could never be taken');
+});
+
+test('AC-311.5 the same commit on a path that merely CONTAINS the id still warns (AC-248.10 is unchanged)', () => {
+  const repo = makeRepo();
+  write(repo, 'items/DEF-ROC-311.md', 'the item\nan event\n');
+  const res = runCli(repo, ['--repo', repo, '--message', 'items: DEF-ROC-311 built_green', '--', 'items/DEF-ROC-311.md']);
+  assert.equal(res.status, 0, `${res.stdout}${res.stderr}`);
+  assert.match(res.stderr, /UNATTRIBUTED/, 'an unrendered file named for an item is still just a path with an id in it');
+});
+
+test('AC-311.6 the pure predicate discriminates: the record\'s own id attributes, another id in the path does not', () => {
+  const record = { id: 'DEF-ROC-311', log: new Set() };
+  assert.deepEqual(tool.attributingIds(['DEF-ROC-311'], 'items/active/DEF-ROC-311.md'), []);
+  assert.deepEqual(tool.attributingIds(['DEF-ROC-311'], 'items/active/DEF-ROC-311.md', record), ['DEF-ROC-311']);
+  assert.deepEqual(tool.attributingIds(['DEF-ROC-999'], 'items/active/DEF-ROC-999.md', record), []);
+  assert.deepEqual(tool.attributingIds(['UC-ROC-119'], 'items/active/DEF-ROC-311.md', record), ['UC-ROC-119']);
+});
+
+test('AC-311.6 the record declaration is read from the rendered file, and refuses every half-declaration', () => {
+  assert.equal(tool.itemRecord(itemRecordText({ events: [EVENT_0] })).id, 'DEF-ROC-311');
+  assert.ok(tool.itemRecord(itemRecordText({ events: [EVENT_0] })).log.has(`- ${EVENT_0}`));
+  assert.equal(tool.itemRecord('id: DEF-ROC-311\nevents:\n  - {a: 1}\n'), null, 'no sentinel');
+  assert.equal(tool.itemRecord(itemRecordText({ events: [] })), null, 'no log rows');
+  assert.equal(
+    tool.itemRecord(['---', 'type: defect', 'events:', '  - {a: 1}',
+      '# --- everything below this line is DERIVED (rendered by the machinery). do not hand-edit. ---',
+      'derived:', '  state: building', '---', ''].join('\n')),
+    null,
+    'no declared identity',
+  );
+});
+
+test('AC-311.7 the behaviour is DOCUMENTED where an agent meets it: the USAGE states the record limb and what still refuses', () => {
+  const src = fs.readFileSync(TOOL_PATH, 'utf-8');
+  const usage = src.slice(src.indexOf('const USAGE = `'), src.indexOf('function formatCoownedMerge'));
+  assert.match(usage, /DEF-ROC-311/, 'the item it answers');
+  assert.match(usage, /record/i, 'the population, by its declaration');
+  assert.match(usage, /event/i, 'and that the log is never discounted');
+  assert.match(src, /NOT-THE-LOG/, 'the limb that keeps an event from ever being discounted');
+});

@@ -412,10 +412,21 @@ const displayName = (id) => (jobGraph[id] && jobGraph[id].name) || id;
 const deployJobName = displayName(DEPLOY_ID);
 const closureNames = closure.map(displayName);
 
-// ---- which run, and its jobs ----------------------------------------------
+// ---- the two external readers ----------------------------------------------
+// Both live at module scope, beside each other, because both are read BEFORE the
+// verdict is formed: `gh` answers which runs exist for a commit, and `git` answers
+// what that commit IS. `git` used to be declared inside `evaluate()` a hundred
+// lines below its first use and was reachable there only by function hoisting —
+// which worked, and told the reader the opposite of the truth about when it is
+// needed. Identical behaviour: it closes over `repoDir` and `timeoutMs`, both of
+// which are module scope already.
 function gh(args) {
   return execFileSync("gh", args, { encoding: "utf8", timeout: timeoutMs,
     maxBuffer: 32 * 1024 * 1024 });
+}
+function git(...args) {
+  return execFileSync("git", ["-C", repoDir, ...args],
+    { encoding: "utf8", timeout: timeoutMs }).trim();
 }
 
 function readRunList() {
@@ -631,10 +642,6 @@ function evaluate(opts) {
   // readable. Where neither yields an id we say so rather than reporting an empty
   // list: a blocked lane with no named owner cannot be dispatched, and "no ids
   // found" must not read as "no item involved".
-  function git(...args) {
-    return execFileSync("git", ["-C", repoDir, ...args],
-      { encoding: "utf8", timeout: timeoutMs }).trim();
-  }
   function idsIn(text) {
     return [...new Set(String(text || "").match(ITEM_RE) || [])];
   }

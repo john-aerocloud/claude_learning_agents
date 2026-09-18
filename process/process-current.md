@@ -1,9 +1,19 @@
 ---
-process_version: 187
+process_version: 188
 effective_from: 2026-09-18
-supersedes: v186, v185, v184, v183, v182, v181, v180, v179, v178, v177, v176, v175, v174, v173, v172, v171, v170, v169, v168, v167, v166, v165, v164, v163, v162, v161, v160, v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
+supersedes: v187, v186, v185, v184, v183, v182, v181, v180, v179, v178, v177, v176, v175, v174, v173, v172, v171, v170, v169, v168, v167, v166, v165, v164, v163, v162, v161, v160, v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
 status: active
 ---
+
+<!-- v188 (ROC, OWNER RULING 2026-09-18, mid-cycle - NOT a retro output). "dont worry about
+linear - strip that out of your workflow." Recorded as SS-F5.2's sibling SS-F5.4: no agent dispatches
+the linear/jira projection agent as part of the loop, the per-item meaningful-transition push and
+the full-sweep reconcile step are both retired from /loop-run, and board lag is no longer a process
+failure. The item files ARE the record (state = fold(events)), so this loses a VIEW and not a FACT.
+Evidence the same day: a full board-sweep returned "usage limit exceeded" for EVERY item - a plan
+cap, not a rate limit, so retrying can never clear it. No tooling deleted: board-sweep, the agent
+definitions and linear-mapping.md are intact, so the board is one command away if the ruling is
+reversed. The documenter step is untouched. -->
 
 <!-- v187 (ROC retro 2026-09-18, OWNER-DIRECTED, two questions in one cycle). Q1: *"deliver
 all future work in a few simpler pieces at once."* Q2: *"we have spent GBP 500 today - on what, has
@@ -259,7 +269,7 @@ ROUTED as **SSF11.4** (three clauses, all plain practice -- NO experiment row, d
 <!-- v111 (FOCUSED retro, ROC 2026-07-27; on main v110 via fold-forward-FIRST — clean, no collision; §F8 routine-batch gate at SLC-ROC-014 close, NO prod incident): SLC-ROC-014 delivered the COMPLETE rules-EDITING capability (edit → mandatory draft-test → publish, live no-redeploy pickup, Simulator parity, content-hash attestation gate + who/when attribution) — UC-056/057/058 all live-stack validated + pushed to origin/main + deployed to aas-test. NO global §-body change. Routed outcomes: (1) engineer.md plain-practice fold — the pre-built_green green bar must exercise the REAL artifact for UI/pipeline slices (fully-themed live axe + same-element aria-label; focus preventScroll + no scrollable ancestor; composed-consumer-against-populated-store acceptance driving consume() end-to-end), extending v110's live-caught→offline-pin; recurring root cause logged in principle-failures/2026-07-27-offline-green-ne-live-correct-ui-pipeline.md. (2) work-items.py + linear-project.py + linear-mapping.md machinery fix (human "fix the in-progress clutter"): blocked never maps to In Progress (Todo/Backlog) and an aggregate whose only non-terminal children are all blocked derives blocked — parked-on-external trees drop out of the active lane in queues/stats/board (107 wi-tests green). (3) EXP-115 POSITIVE again (ROC live catches), EXP-117 → 2/3 POSITIVE (board cadence). Constraint UNCHANGED + not-agent-squeezable (external 46.66% Azure-block + queue 41.93% backlog; agents ≈11%); dev-validation 11.1% / CFR 10.1% is HONEST dev-catch (EXP-108), not decay — the in-system lever is shifting live-defect classes LEFT (measured next on SLC-ROC-015). Registry 7 active, under cap, no rows added. -->
 <!-- v110 (FOCUSED retro, AdixOut 2026-07-24; RECONCILED onto main v109 via fold-forward-then-reapply — main advanced to v109 (ROC SLC-ROC-013 retro) while this AdixOut retro was in flight, so renumbered v109→v110; retro-debt gate — 3 routine: UC-AIDX-028 rework (TWO reject→rework cycles) + SLC-AIDX-011/CHK-AIDX-010 closes, REQ-004's dev consumer-side walking skeleton: C12 bus+grant → C13 routing → C10/C11 ingest standup → OAG handoff, built + validated LIVE end-to-end (synthetic event → C12 → C13 → C10 → C11 → read model → egress). TIGHT: two fix-derived learnings folded as PLAIN PRACTICE, no experiment rows. Constraint UNCHANGED from v105/v108 (registered/queue = artifact latency, ~70% of GLT; squeezable in-system cost = engineer/multi-tenant-eventing). Both learnings were caught by LIVE assert-real-state validation that offline synth-pins passed. (1) SCOPE-GAP → engineer.md + solution-architect.md: "reuse existing X" must be VERIFIED against the real deployed TARGET account/stack, never assumed from a sibling env — SLC-AIDX-011's "reuse the existing C10/C11 ingest" was wrong (C10/C11 were sandbox-only; the migration moved only the egress to dev-dataout), so the engineer STOPPED (§F7) rather than build against an absent dependency and a predecessor UC-030 + architect delta 007 were inserted at the real edge; the §F7 stop was correct. Extends the v97 assert-real-state family. (2) EVENTBRIDGE TARGET PAYLOAD (the double-rework) → engineer.md: for an EventBridge rule→SQS/target that must forward the event's `detail` object verbatim, use `inputPath: "$.detail"` (JSONPath extraction), NOT an `inputTransformer` with a bare `<detail>` object placeholder — the `<placeholder>` idiom quote-strips a nested OBJECT into invalid JSON (`ERROR_CODE=INVALID_JSON`), it only round-trips STRING fields (why the webhook router's flat string fields worked). Root cause found only by adding a target `DeadLetterConfig` to capture the real `ERROR_CODE`/`ERROR_MESSAGE` — so: always wire a target `DeadLetterConfig` and INSTRUMENT-FIRST before guessing at an opaque cross-service delivery failure. UC-028 rework #1 = default-rule envelope-wrap poison (C11's parseEnvelope rejected the wrapped event); rework #2 = the `<placeholder>` INVALID_JSON. Engineer left OFFLINE synth-pins behind for the inputPath/InputTransformer shape + DeadLetterConfig so the payload-shape class is now caught offline (live-caught infra-shape defect → offline pin). Kept in engineer.md not the aws-architecture skill (no clean EventBridge-target section there; narrowest owner = engineer implementation behaviour). EXP-115 (whole-journey/JTBD live validation) scored POSITIVE again (dated confirming note): the live bus-driven E2E caught the scope-gap + BOTH UC-028 delivery bugs offline pins missed. CFR HONESTY: UC-028's two reworks + UC-027's earlier deploy_failed are real DEV-caught change-failures (EXP-108 integrity) — the process working (caught in dev before OAG/prod), NOT decay; CFR ~39% reflects honest dev-stage rejection accounting. Registry unchanged: 8 active (EXP-101,106,107,112,113,115,116,117) — AT cap-8; no rows added/retired. No global-section rules changed; routed changes = engineer.md (2 folds) + solution-architect.md (reuse-verify note) + EXP-115 confirming note. -->
 <!-- v109 (FOCUSED retro, ROC 2026-07-24; RECONCILED onto main v108 via fold-forward-FIRST — main had advanced to v108 (AdixOut tight retro) while this ROC session ran, so this entry is v109; triggered by the §F8 routine-batch gate at SLC-ROC-013 close, NO incident): SLC-ROC-013 (REQ-ROC-003 living-demo foundation, UC-051..055) delivered + validated live-stack + pushed to origin/main on green (CI deploying to aas-test). NO global §-body process change this cycle — the routed outcomes are (1) EXP-116 lean-orchestration ADOPTED into orchestrator.md as plain practice (guards proven safe 2/2, no DORA harm; registry 8→7), (2) EXP-117 board-push cadence advanced to 1/3 POSITIVE. Constraint UNCHANGED and confirmed not-agent-squeezable (`registered`/backlog-aging artifact 57.76% + external-blocked DEF-004 33.55%; agents ≈8.6%); change budget deliberately NOT spent chasing it (constraint-gate). J23 demo-grows DoD + demo-egress isolation pattern kept as ROC project artifacts, not over-generalised. TIGHT retro — score + adopt + drain + fold. -->
-# Current Process — v187
+# Current Process — v188
 
 <!-- v139 (owner instruction, OagEventSource 2026-08-13, NO retro — a direct standing
 instruction from the human owner, folded immediately rather than queued): every update to
@@ -2970,6 +2980,39 @@ Target metric: **token/duration coverage of events** (proxy for cost attributabi
 justified as a DORA proxy because without it no DORA figure can be priced), baseline
 **12.2% tokens / 4.4% duration**; and **cost per product-facing resolution**, baseline
 **~£83 (6 of 14 validated defects, 43% product-facing)**. [EXP-ROC-027]
+
+**F5.4 — THE BOARD IS OUT OF THE LOOP (v188, OWNER RULING 2026-09-18, mid-cycle — NOT a
+retro output).** The owner's words: *"dont worry about linear - strip that out of your
+workflow."* So: **no agent dispatches the `linear` or `jira` projection agent as part of the
+loop, at any transition, and board lag is no longer a process failure.** The per-item
+meaningful-transition push (the EXP-117/v103 cadence) and the full-sweep reconcile step are
+both retired from `/loop-run`.
+
+WHY THIS COSTS NOTHING THAT MATTERS: **the item files ARE the record.** State is
+`fold(events)` over `work/<project>/items/**` and every queue, metric, dependency tree and
+DORA figure is DERIVED from them (§F0). The board was always a read-only projection for
+human eyes, never a source of truth, so removing it loses a view and not a fact.
+
+WHAT MADE IT THE RIGHT CALL RATHER THAN A SHORTCUT, measured the same day: a full
+`make board-sweep` on ROC returned `usage limit exceeded` from Linear for **every single
+item**. That is a **plan cap, not a rate limit** — so retrying can never clear it, and the
+remedy belongs to the account owner (raise the plan, or archive), not to the loop. Against
+that, the standing obligation was a dispatch per meaningful transition at an arrival rate of
+125 defects / 30 days — a large, permanent plumbing cost buying a projection nobody could
+read. A loop that keeps paying for a write it has proven cannot land is the same shape as a
+gate that is always red (`DEF-ROC-326`): the mechanism survives, its meaning does not.
+
+WHAT THIS DOES NOT DO — and the distinction matters if the ruling is ever reversed. **No
+tooling is deleted.** `make board-sweep` / `board-sweep-resume` / `board-audit`, the
+`linear`/`jira` agent definitions and `process/linear-mapping.md` are all intact and
+unchanged, so a one-off reconcile is one command away if the owner asks for the board back.
+This removes an OBLIGATION, not a CAPABILITY. It also does not touch the **documenter** step
+(§6 of the loop): user-facing docs must still track shipped state, because those are read by
+people who have no access to the item files.
+
+Target metric: **token cost per cycle** (the §E plumbing share), with **lead time** guarded —
+if removing the projection makes any item harder to find or slower to decide, that is the
+signal the board was load-bearing after all and the ruling should be revisited.
 
 ## F5a. Prod promotion is continuous — no review gate; the tester validates in prod
 Once an established CD promotion pipeline exists, **code flows to prod automatically on

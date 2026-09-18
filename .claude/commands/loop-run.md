@@ -255,22 +255,23 @@ Each cycle:
      `make wi-append ID=<uc> EVENT=blocked AGENT=flow-manager NOTE="<reason>"`; clear it with
      `EVENT=unblocked`. The blocked reason rides on the event note, so the board banner is
      DERIVED — there is no separate blocked-reason file to keep in step.
-   - **Per-item board push — at MEANINGFUL transitions, in-cycle (EXP-117 cadence, v103):**
-     dispatch the `linear` (and/or `jira`) projection agent for an id, in the SAME cycle, after a
-     `wi-append` that reaches a **meaningful** state — **`pulled`** (work started), **`blocked`/
-     `unblocked`**, and any **TERMINAL** state (**`validated`/`done`, `rejected`, `resolved`**).
-     **SKIP** the transient intermediate pushes (`created`/`made_ready`/`built_green`/`deployed`/
-     `dev-validating`) — they collapse to the same "In Progress" band a human cannot distinguish,
-     and pushing each one was the largest plumbing-token cost with no fidelity gain (EXP-117).
-     It reads the item file and upserts the one issue idempotently.
-     **Invariant: a TERMINAL or `blocked` board status must never lag its item-file state by more
-     than the current cycle** (the states humans act on). Intermediate in-progress detail may lag
-     until the next meaningful push or the step-5b sweep. Only the external API *call* is
-     best-effort (a network failure is logged; the next push/sweep reconciles) — the DISPATCH at a
-     meaningful transition is NOT skippable. The step-5b full sweep is the periodic reconciling
-     backstop for structure/prune AND for any intermediate drift; it is not the primary path for
-     terminal/blocked fidelity. An item in `blocked` state shows Blocked on the board regardless of
-     its queue.
+   - **NO BOARD PROJECTION — the board is OUT of the loop (v188, owner ruling 2026-09-18:
+     *"dont worry about linear - strip that out of your workflow"*).** Do NOT dispatch the
+     `linear` or `jira` projection agent at any transition, and do not treat board lag as a
+     process failure. **The item files ARE the record** — state is `fold(events)` over
+     `work/<project>/items/**` and every queue, metric and tree is derived from them, so
+     nothing is lost by not mirroring. The board was always a read-only projection for
+     humans, never a source of truth.
+     Context that makes this the right call rather than a shortcut: ROC's Linear returned
+     `usage limit exceeded` on EVERY item of a full sweep. That is a PLAN CAP, not a rate
+     limit, so retrying can never clear it and the remedy is the owner's (raise the plan or
+     archive), not the loop's. Before this ruling the loop owed a dispatch per meaningful
+     transition; at the measured arrival rate that was a large standing plumbing cost buying
+     a projection nobody could read.
+     **If the owner asks for the board back**, the tooling is intact and unchanged —
+     `make board-sweep PROJECT=<p>` reconciles the whole board from the item files in one
+     act, and `process/linear-mapping.md` still holds the mapping. Nothing here deletes that
+     capability; it only stops the loop owing it every cycle.
 5. **Done & bubble up.** `make wi-append ID=<uc> EVENT=validated AGENT=tester REF=<sha>`
    (same turn as the green push), then `make wi-project PROJECT=$1` — the item moves to
    `items/done/`, releases its claims, and slice→chunk→requirement done bubbles automatically
@@ -293,23 +294,10 @@ Each cycle:
    markers: the drain clears incidents only, and routine closes accumulate across
    however many bubbles it takes. Expect the OK line to report a climbing routine
    count and then, at the threshold, an exit 2 on the routine arm.
-5b. **Full-sweep board reconcile — periodic BACKSTOP only (the primary path is the
-   step-4 per-item push).** After a slice/chunk close, run
-   `make board-sweep PROJECT=<project>` (the `linear`/`jira` projection agent uses the same
-   target) to reconcile from the item files — mapping in `process/linear-mapping.md`.
-   State-only mirror. Skip silently if the project has no board binding. Never block the loop
-   on the API. This does NOT replace the per-item push — if you find the sweep is doing real
-   work every time, the per-item push (step 4) is being skipped, which is the board/doc-lag
-   failure.
-   **Do NOT reconcile by looping `board-project` over every id (DEFECT-OAG-099).** That
-   rewrote 269 already-correct items and then ran out of rate budget with 5 DONE items still
-   showing Blocked; the same shape later left two TERMINAL items lagging for seven days.
-   `board-sweep` skips items that already match, writes terminal/blocked lag FIRST, and on a
-   rate limit names every id that did not land. **A failure here is logged, not fatal — but it
-   is only "logged" if you QUOTE THE IDS.** Exit 3 means a shortfall: run
-   `make board-sweep-resume PROJECT=<project>` in the same cycle, or carry the named ids
-   forward explicitly. Exit 5 means the mapping drifted from `state-graphs.json` — run
-   `make board-audit`; that is a defect, not a skip.
+5b. **RETIRED (v188, owner ruling) — there is no board reconcile step.** See step 4: the
+   board is out of the loop entirely. Do not run `make board-sweep`, do not dispatch the
+   `linear`/`jira` agents, and do not report board lag as a finding. The targets still exist
+   and still work if the owner asks for a one-off reconcile; the loop simply does not owe one.
 6. **Document — REQUIRED at each slice/UC close (docs must not drift).** Dispatch `documenter`
    to update the project README (and GitBook where bound) to match what just shipped — at
    every slice close, and for any UC that changes user-facing behaviour. Runs in the

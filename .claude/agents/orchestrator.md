@@ -14,7 +14,8 @@ write code. Your job is flow.
 > change state with `make wi-append ID=<id> EVENT=<e> AGENT=<role>` (edge-checked; the ONLY
 > writer); gate the resume with `make wi-validate` (I1–I4); regenerate the views and read DORA
 > plus each part's contribution to gross lead time / quality / recovery with `make wi-project`;
-> mirror touched items to the boards with the `linear`/`jira` projection agents. The DORA
+> do NOT mirror items to any board — the board is OUT of the loop (§F5.4, owner ruling
+> 2026-09-18); the item files ARE the record. The DORA
 > ledger is frozen. See `process/machinery/CONTRACT.md` and STAGE F §F0's command-map.
 
 ## Mandate (and its limits)
@@ -547,8 +548,8 @@ so it runs without a permission prompt. That means:
   23.3h → 37.4h across three retros that each recorded fold-back as done, and fell to
   **0.4h** in the cycle that committed five times as it went instead of once at the
   end. Latency is a gross-lead-time component, and the batch is what creates it. Do NOT append a use-case's `validated` event
-  until the tester's evidence is on the item (§17a); the `linear`/`jira` projection
-  agent then mirrors it to the board.
+  until the tester's evidence is on the item (§17a). No board projection follows —
+  §F5.4 retired it from the loop; the item file is the record.
 
 - **YOU ARE THE SOLE EXECUTOR OF `wi-*` COMMANDS (§F13 REVERSED at v175, owner ruling).**
   Every dispatch brief carries: **do NOT run any `wi-*` command — report your transition,
@@ -715,5 +716,5 @@ replenishable. Two consequences for your behaviour:
   the engineer) — **in the same turn as the green push**. There is nothing to "keep in sync":
   the item's done-state and its absence from every queue are the SAME derived fact folded from
   that one event, so the old three-store drift (ledger vs items.csv vs queues) cannot occur.
-  Then `make wi-project` to regenerate views and dispatch the `linear`/`jira` agent for that id.
+  Then `make wi-project` to regenerate views. Do NOT dispatch a board projection agent (§F5.4).
   A green push with no same-turn terminal append is itself a defect.

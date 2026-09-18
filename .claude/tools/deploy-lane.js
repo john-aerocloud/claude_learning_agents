@@ -189,8 +189,14 @@ function out(obj) {
   process.stdout.write(render(full) + "\n");
   process.exit(full.verdict === "blocked" ? 2 : 0);
 }
+/** NOT-ESTABLISHED as a VALUE. `notEstablished()` below is the same thing wired
+ *  straight to the exit, kept for the permanent conditions read before any
+ *  polling begins. */
+function ne(reason, detail) {
+  return { verdict: "NOT-ESTABLISHED", reason, detail: detail || null };
+}
 function notEstablished(reason, detail) {
-  out({ verdict: "NOT-ESTABLISHED", reason, detail: detail || null });
+  out(ne(reason, detail));
 }
 
 function render(r) {
@@ -353,349 +359,368 @@ function readRun(id) {
     "databaseId,headSha,conclusion,status,createdAt,displayTitle,url,jobs"]));
 }
 
-let runList;
-try {
-  runList = readRunList();
-} catch (e) {
-  notEstablished("gh-run-list-failed",
-    `could not list runs of ${path.basename(cfg.workflowFile)} on ${branch} in ${cfg.repo} `
-    + `(${String(e.message).slice(0, 240)}). Check \`gh auth status\`. Nothing was read, `
-    + `which is not the same as the lane being open.`);
-}
-if (!Array.isArray(runList) || !runList.length) {
-  notEstablished("no-runs",
-    `no runs of ${path.basename(cfg.workflowFile)} on ${branch} in ${cfg.repo}. A workflow `
-    + `that has never run has never deployed.`);
-}
-runList.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
-
-// ---- WHICH COMMIT ARE WE ANSWERING ABOUT? (DEF-ROC-142) -------------------
-// The run is chosen by TRUNK HEAD'S SHA, never by recency. `runList[0]` is the
-// newest run of this workflow on the branch, which is a DIFFERENT question: on a
-// path-filtered workflow the newest run routinely belongs to an older commit,
-// because every items-only / process / docs commit produces no run at all. The
-// old code published that run's verdict as head's — a false SHUT on 2026-08-29,
-// and a false OPEN just as readily.
-function shaEq(a, b) {
-  const x = String(a || "").toLowerCase();
-  const y = String(b || "").toLowerCase();
-  if (!x || !y) return false;
-  const n = Math.min(x.length, y.length);
-  if (n < 7) return false;              // too short to identify a commit
-  return x.slice(0, n) === y.slice(0, n);
-}
-
-let trunkHeadSha = null;
-let trunkHeadSource = null;
-let runSelection = null;
-if (HEAD_SHA_ARG) {
-  trunkHeadSha = HEAD_SHA_ARG;
-  trunkHeadSource = "--head-sha";
-} else if (CAPTURE_RUN) {
-  // REPLAY: the caller asserts the named run IS trunk head's run. Test-only —
-  // the live path passes neither flag. Recorded in the payload so a reading can
-  // never be mistaken for one taken against a resolved head.
-  trunkHeadSource = "capture-run-assertion";
-} else if (!NO_GIT) {
+/**
+ * THE READING, AS A VALUE RATHER THAN AN EXIT (DEF-ROC-220).
+ *
+ * Everything from here down used to run at top level and END THE PROCESS through
+ * `out()`/`notEstablished()`. That shape can be read exactly ONCE, which is why a
+ * caller who needed the answer REPEATEDLY had no choice but to hand-roll its own
+ * polling loop around `gh` — and five of the six stalled waiters found on
+ * 2026-09-16 were exactly that hand-rolled loop. Returning the verdict instead of
+ * exiting on it is what lets the bounded waiter below be ONE implementation.
+ *
+ * Config and workflow parsing stay ABOVE this line on purpose: a missing config or
+ * an unparseable workflow is a PERMANENT condition, and re-reading it on a timer
+ * would be waiting for something that cannot arrive.
+ */
+function evaluate() {
+  let runList;
   try {
-    trunkHeadSha = git("rev-parse", trunkRef);
-    trunkHeadSource = `git rev-parse ${trunkRef}`;
+    runList = readRunList();
   } catch (e) {
-    notEstablished("trunk-head-unresolved",
-      `\`git -C ${repoDir} rev-parse ${trunkRef}\` failed (${String(e.message).slice(0, 200)}), `
-      + `so the commit this question is ABOUT is unknown. A verdict read off whatever run `
-      + `happens to be newest would be a statement about a DIFFERENT commit (DEF-ROC-142). `
-      + `Fetch ${trunkRef} in ${repoDir}, or pass --head-sha.`);
+    return ne("gh-run-list-failed",
+      `could not list runs of ${path.basename(cfg.workflowFile)} on ${branch} in ${cfg.repo} `
+      + `(${String(e.message).slice(0, 240)}). Check \`gh auth status\`. Nothing was read, `
+      + `which is not the same as the lane being open.`);
   }
-} else {
-  notEstablished("trunk-head-not-established",
-    `--no-git was given with no --head-sha and no --capture-run, so trunk head cannot be `
-    + `established. Nothing is known about the deploy lane, which is NOT the same as it `
-    + `being open (DEF-ROC-142).`);
-}
-
-let targetId;
-if (CAPTURE_RUN) {
-  targetId = CAPTURE_RUN;
-  runSelection = trunkHeadSha ? "capture-run-at-declared-head" : "capture-run-replay";
-} else {
-  const candidates = runList.filter((r) => shaEq(r.headSha, trunkHeadSha));
-  if (!candidates.length) {
-    const newest = runList[0];
-    notEstablished("no-run-for-trunk-head",
-      `no run of ${path.basename(cfg.workflowFile)} on ${branch} has head `
-      + `${String(trunkHeadSha).slice(0, 12)} (trunk head, per ${trunkHeadSource}), within the `
-      + `newest ${runList.length} run(s). THIS IS ORDINARY, NOT A FAULT: the workflow is `
-      + `PATH-FILTERED, so a commit touching none of its trigger paths — every items-only, `
-      + `process, or docs commit — produces no run at all. Nothing is therefore established `
-      + `about this commit: it is NEITHER open NOR shut, and the verdict of a different `
-      + `commit's run is not evidence about it (DEF-ROC-142: reading one BLOCKED a real cycle `
-      + `on 2026-08-29, and the same fallback returns a false OPEN just as readily). For `
-      + `reference only, NOT used: the newest run is ${newest.databaseId} at `
-      + `${String(newest.headSha).slice(0, 12)} (${newest.createdAt}), a DIFFERENT commit.`);
+  if (!Array.isArray(runList) || !runList.length) {
+    return ne("no-runs",
+      `no runs of ${path.basename(cfg.workflowFile)} on ${branch} in ${cfg.repo}. A workflow `
+      + `that has never run has never deployed.`);
   }
-  // Deterministic even if several runs share the head sha (a re-run, a manual
-  // dispatch): newest first, databaseId as the tie-break so ordering can never
-  // depend on how the API happened to return the list.
-  candidates.sort((a, b) => (String(b.createdAt).localeCompare(String(a.createdAt))
-    || Number(b.databaseId) - Number(a.databaseId)));
-  targetId = candidates[0].databaseId;
-  runSelection = "trunk-head";
-}
+  runList.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
 
-let run;
-try {
-  run = readRun(targetId);
-} catch (e) {
-  notEstablished("gh-run-view-failed",
-    `could not read run ${targetId} in ${cfg.repo} (${String(e.message).slice(0, 240)})`);
-}
-// The invariant restated where the verdict is actually formed: whatever route
-// chose this run, it must be TRUNK HEAD's. A mismatch here means the list and the
-// run disagree, or a replay was pointed at the wrong commit — never a verdict.
-if (trunkHeadSha === null) {
-  trunkHeadSha = run.headSha;           // the replay's asserted head
-} else if (!shaEq(run.headSha, trunkHeadSha)) {
-  notEstablished("run-not-for-trunk-head",
-    `run ${targetId} has head ${String(run.headSha).slice(0, 12)}, which is NOT trunk head `
-    + `${String(trunkHeadSha).slice(0, 12)} (per ${trunkHeadSource}). A verdict about another `
-    + `commit's run is not a verdict about trunk (DEF-ROC-142).`);
-}
-const runJobs = Array.isArray(run.jobs) ? run.jobs : [];
-if (!runJobs.length) {
-  notEstablished("run-has-no-jobs",
-    `run ${targetId} reported no jobs, so the deploy job's state cannot be read`);
-}
+  // ---- WHICH COMMIT ARE WE ANSWERING ABOUT? (DEF-ROC-142) -------------------
+  // The run is chosen by TRUNK HEAD'S SHA, never by recency. `runList[0]` is the
+  // newest run of this workflow on the branch, which is a DIFFERENT question: on a
+  // path-filtered workflow the newest run routinely belongs to an older commit,
+  // because every items-only / process / docs commit produces no run at all. The
+  // old code published that run's verdict as head's — a false SHUT on 2026-08-29,
+  // and a false OPEN just as readily.
+  function shaEq(a, b) {
+    const x = String(a || "").toLowerCase();
+    const y = String(b || "").toLowerCase();
+    if (!x || !y) return false;
+    const n = Math.min(x.length, y.length);
+    if (n < 7) return false;              // too short to identify a commit
+    return x.slice(0, n) === y.slice(0, n);
+  }
 
-const byName = new Map();
-for (const j of runJobs) if (!byName.has(j.name)) byName.set(j.name, j);
-// ABSENT IS TWO DIFFERENT THINGS, and conflating them was a real bug caught live
-// on 2026-08-27 at 18:33Z (real capture run-33098785042.json). GitHub does not
-// materialise a downstream job in the jobs list until it is queued or skipped, so
-// on a run that is STILL GOING the deploy job is absent ALTOGETHER. The first
-// version of this tool answered `deploy-job-not-in-run` and told the operator the
-// job had probably been RENAMED — an honest NOT-ESTABLISHED carrying a WRONG
-// diagnosis, which would have sent someone to edit the config on every push. The
-// run's own status is what separates the two: not-completed => in-flight;
-// completed => the job really is missing, so the config or the workflow moved.
-const deployJob = byName.get(deployJobName) || null;
+  let trunkHeadSha = null;
+  let trunkHeadSource = null;
+  let runSelection = null;
+  if (HEAD_SHA_ARG) {
+    trunkHeadSha = HEAD_SHA_ARG;
+    trunkHeadSource = "--head-sha";
+  } else if (CAPTURE_RUN) {
+    // REPLAY: the caller asserts the named run IS trunk head's run. Test-only —
+    // the live path passes neither flag. Recorded in the payload so a reading can
+    // never be mistaken for one taken against a resolved head.
+    trunkHeadSource = "capture-run-assertion";
+  } else if (!NO_GIT) {
+    try {
+      trunkHeadSha = git("rev-parse", trunkRef);
+      trunkHeadSource = `git rev-parse ${trunkRef}`;
+    } catch (e) {
+      return ne("trunk-head-unresolved",
+        `\`git -C ${repoDir} rev-parse ${trunkRef}\` failed (${String(e.message).slice(0, 200)}), `
+        + `so the commit this question is ABOUT is unknown. A verdict read off whatever run `
+        + `happens to be newest would be a statement about a DIFFERENT commit (DEF-ROC-142). `
+        + `Fetch ${trunkRef} in ${repoDir}, or pass --head-sha.`);
+    }
+  } else {
+    return ne("trunk-head-not-established",
+      `--no-git was given with no --head-sha and no --capture-run, so trunk head cannot be `
+      + `established. Nothing is known about the deploy lane, which is NOT the same as it `
+      + `being open (DEF-ROC-142).`);
+  }
 
-// ---- who owns the fix -----------------------------------------------------
-// The truncated `displayTitle` gh returns (…, ~68 chars) frequently cuts the
-// trailing item id off, so the FULL commit message is preferred when the repo is
-// readable. Where neither yields an id we say so rather than reporting an empty
-// list: a blocked lane with no named owner cannot be dispatched, and "no ids
-// found" must not read as "no item involved".
-function git(...args) {
-  return execFileSync("git", ["-C", repoDir, ...args],
-    { encoding: "utf8", timeout: timeoutMs }).trim();
-}
-function idsIn(text) {
-  return [...new Set(String(text || "").match(ITEM_RE) || [])];
-}
-let suspectItems = [];
-let suspectItemsSource = null;
-let suspectItemsEstablished = false;
-if (!NO_GIT) {
+  let targetId;
+  if (CAPTURE_RUN) {
+    targetId = CAPTURE_RUN;
+    runSelection = trunkHeadSha ? "capture-run-at-declared-head" : "capture-run-replay";
+  } else {
+    const candidates = runList.filter((r) => shaEq(r.headSha, trunkHeadSha));
+    if (!candidates.length) {
+      const newest = runList[0];
+      return ne("no-run-for-trunk-head",
+        `no run of ${path.basename(cfg.workflowFile)} on ${branch} has head `
+        + `${String(trunkHeadSha).slice(0, 12)} (trunk head, per ${trunkHeadSource}), within the `
+        + `newest ${runList.length} run(s). THIS IS ORDINARY, NOT A FAULT: the workflow is `
+        + `PATH-FILTERED, so a commit touching none of its trigger paths — every items-only, `
+        + `process, or docs commit — produces no run at all. Nothing is therefore established `
+        + `about this commit: it is NEITHER open NOR shut, and the verdict of a different `
+        + `commit's run is not evidence about it (DEF-ROC-142: reading one BLOCKED a real cycle `
+        + `on 2026-08-29, and the same fallback returns a false OPEN just as readily). For `
+        + `reference only, NOT used: the newest run is ${newest.databaseId} at `
+        + `${String(newest.headSha).slice(0, 12)} (${newest.createdAt}), a DIFFERENT commit.`);
+    }
+    // Deterministic even if several runs share the head sha (a re-run, a manual
+    // dispatch): newest first, databaseId as the tie-break so ordering can never
+    // depend on how the API happened to return the list.
+    candidates.sort((a, b) => (String(b.createdAt).localeCompare(String(a.createdAt))
+      || Number(b.databaseId) - Number(a.databaseId)));
+    targetId = candidates[0].databaseId;
+    runSelection = "trunk-head";
+  }
+
+  let run;
   try {
-    suspectItems = idsIn(git("log", "-1", "--format=%s%n%b", String(run.headSha)));
-    suspectItemsSource = "commit-message";
-    suspectItemsEstablished = true;
-  } catch { /* fall through to the title */ }
-}
-if (!suspectItemsEstablished) {
-  const title = String(run.displayTitle || "");
-  suspectItems = idsIn(title);
-  suspectItemsSource = "run-displayTitle";
-  // gh truncates the title with an ellipsis; a truncated title that yielded
-  // nothing has NOT established that no item is involved.
-  suspectItemsEstablished = suspectItems.length > 0 || !/[…]|\.\.\.$/.test(title);
-}
+    run = readRun(targetId);
+  } catch (e) {
+    return ne("gh-run-view-failed",
+      `could not read run ${targetId} in ${cfg.repo} (${String(e.message).slice(0, 240)})`);
+  }
+  // The invariant restated where the verdict is actually formed: whatever route
+  // chose this run, it must be TRUNK HEAD's. A mismatch here means the list and the
+  // run disagree, or a replay was pointed at the wrong commit — never a verdict.
+  if (trunkHeadSha === null) {
+    trunkHeadSha = run.headSha;           // the replay's asserted head
+  } else if (!shaEq(run.headSha, trunkHeadSha)) {
+    return ne("run-not-for-trunk-head",
+      `run ${targetId} has head ${String(run.headSha).slice(0, 12)}, which is NOT trunk head `
+      + `${String(trunkHeadSha).slice(0, 12)} (per ${trunkHeadSource}). A verdict about another `
+      + `commit's run is not a verdict about trunk (DEF-ROC-142).`);
+  }
+  const runJobs = Array.isArray(run.jobs) ? run.jobs : [];
+  if (!runJobs.length) {
+    return ne("run-has-no-jobs",
+      `run ${targetId} reported no jobs, so the deploy job's state cannot be read`);
+  }
 
-// ---- how much is stuck behind a shut lane --------------------------------
-// Bounded scan backwards for the newest run whose deploy job actually succeeded:
-// that sha is the last thing the environment can have received.
-let lastOpenRun = null;
-let lastOpenEstablished = false;
-{
-  let fetched = 0;
-  for (const r of runList) {
-    if (String(r.databaseId) === String(targetId)) continue;
-    if (fetched >= maxJobFetches) break;
-    let full;
-    try { full = readRun(r.databaseId); } catch { continue; } finally { fetched += 1; }
-    const dj = (full.jobs || []).find((j) => j.name === deployJobName);
-    if (dj && dj.status === "completed" && dj.conclusion === "success") {
-      lastOpenRun = { runId: full.databaseId, headSha: full.headSha, at: full.createdAt };
-      lastOpenEstablished = true;
-      break;
+  const byName = new Map();
+  for (const j of runJobs) if (!byName.has(j.name)) byName.set(j.name, j);
+  // ABSENT IS TWO DIFFERENT THINGS, and conflating them was a real bug caught live
+  // on 2026-08-27 at 18:33Z (real capture run-33098785042.json). GitHub does not
+  // materialise a downstream job in the jobs list until it is queued or skipped, so
+  // on a run that is STILL GOING the deploy job is absent ALTOGETHER. The first
+  // version of this tool answered `deploy-job-not-in-run` and told the operator the
+  // job had probably been RENAMED — an honest NOT-ESTABLISHED carrying a WRONG
+  // diagnosis, which would have sent someone to edit the config on every push. The
+  // run's own status is what separates the two: not-completed => in-flight;
+  // completed => the job really is missing, so the config or the workflow moved.
+  const deployJob = byName.get(deployJobName) || null;
+
+  // ---- who owns the fix -----------------------------------------------------
+  // The truncated `displayTitle` gh returns (…, ~68 chars) frequently cuts the
+  // trailing item id off, so the FULL commit message is preferred when the repo is
+  // readable. Where neither yields an id we say so rather than reporting an empty
+  // list: a blocked lane with no named owner cannot be dispatched, and "no ids
+  // found" must not read as "no item involved".
+  function git(...args) {
+    return execFileSync("git", ["-C", repoDir, ...args],
+      { encoding: "utf8", timeout: timeoutMs }).trim();
+  }
+  function idsIn(text) {
+    return [...new Set(String(text || "").match(ITEM_RE) || [])];
+  }
+  let suspectItems = [];
+  let suspectItemsSource = null;
+  let suspectItemsEstablished = false;
+  if (!NO_GIT) {
+    try {
+      suspectItems = idsIn(git("log", "-1", "--format=%s%n%b", String(run.headSha)));
+      suspectItemsSource = "commit-message";
+      suspectItemsEstablished = true;
+    } catch { /* fall through to the title */ }
+  }
+  if (!suspectItemsEstablished) {
+    const title = String(run.displayTitle || "");
+    suspectItems = idsIn(title);
+    suspectItemsSource = "run-displayTitle";
+    // gh truncates the title with an ellipsis; a truncated title that yielded
+    // nothing has NOT established that no item is involved.
+    suspectItemsEstablished = suspectItems.length > 0 || !/[…]|\.\.\.$/.test(title);
+  }
+
+  // ---- how much is stuck behind a shut lane --------------------------------
+  // Bounded scan backwards for the newest run whose deploy job actually succeeded:
+  // that sha is the last thing the environment can have received.
+  let lastOpenRun = null;
+  let lastOpenEstablished = false;
+  {
+    let fetched = 0;
+    for (const r of runList) {
+      if (String(r.databaseId) === String(targetId)) continue;
+      if (fetched >= maxJobFetches) break;
+      let full;
+      try { full = readRun(r.databaseId); } catch { continue; } finally { fetched += 1; }
+      const dj = (full.jobs || []).find((j) => j.name === deployJobName);
+      if (dj && dj.status === "completed" && dj.conclusion === "success") {
+        lastOpenRun = { runId: full.databaseId, headSha: full.headSha, at: full.createdAt };
+        lastOpenEstablished = true;
+        break;
+      }
     }
   }
-}
-let undeliveredCommits = null;
-let undeliveredItems = [];
-if (!NO_GIT && lastOpenRun) {
-  try {
-    const range = `${lastOpenRun.headSha}..${trunkRef}`;
-    undeliveredCommits = Number(git("rev-list", "--count", range));
-    undeliveredItems = idsIn(git("log", "--format=%s%n%b", range));
-  } catch { undeliveredCommits = null; }
-}
-
-// ---- the verdict ----------------------------------------------------------
-const outsideClosure = (j) => j.name !== deployJobName && !closureNames.includes(j.name);
-const nonBlockingFailures = runJobs.filter((j) => outsideClosure(j) && failed(j)).map((j) => j.name);
-// DEF-ROC-224. Dropping a cancelled out-of-closure job from the failure list must not
-// drop it from the REPORT: DEF-ROC-156's whole lesson is that a control built to catch a
-// silent gate was itself blind, and moving `cancelled` out of one bucket into silence
-// would be that mistake in miniature.
-const nonBlockingCancellations = runJobs.filter((j) => outsideClosure(j) && noAnswer(j)).map((j) => j.name);
-
-const common = {
-  runId: Number(run.databaseId),
-  runUrl: run.url,
-  runConclusion: run.conclusion,
-  runStatus: run.status,
-  runTitle: run.displayTitle,
-  headSha: run.headSha,
-  repo: cfg.repo,
-  branch,
-  workflow: cfg.workflowFile,
-  deployJobId: DEPLOY_ID,
-  deployJobName,
-  deployJobStatus: deployJob ? deployJob.status : null,
-  deployJobConclusion: deployJob && deployJob.conclusion !== undefined
-    ? deployJob.conclusion : null,
-  deployJobUrl: (deployJob && deployJob.url) || null,
-  needsClosure: closure,
-  needsClosureJobNames: closureNames,
-  nonBlockingFailures,
-  nonBlockingCancellations,
-  suspectItems,
-  suspectItemsSource,
-  suspectItemsEstablished,
-  lastOpenRun,
-  lastOpenRunEstablished: lastOpenEstablished,
-  undeliveredCommits,
-  undeliveredItems,
-  trunkHeadSha,
-  trunkHeadSource,
-  runSelection,
-  // Stated in the payload, not merely in a comment: the caller can assert that
-  // the run's overall conclusion was NOT the input to the decision, and (since
-  // DEF-ROC-142) that the run it decided about really is trunk head's.
-  decidedBy: "deploy-job-and-needs-closure",
-};
-
-if (!deployJob) {
-  if (String(run.status) !== "completed") {
-    // STATED RESIDUAL, not a hidden one: if a job in the needs closure has ALREADY
-    // failed while the deploy job is not yet created, the skip is a foregone
-    // conclusion and this under-calls it as in-flight for the few minutes until the
-    // run completes. That is deliberate — asserting `blocked` about a job GitHub has
-    // not created yet would be claiming to know an outcome we have not observed, and
-    // the gate runs before every pull, so it self-corrects on the next invocation.
-    out({ ...common, verdict: "in-flight", reason: "deploy-job-not-yet-created",
-      blockingJobs: [], detail:
-        `run ${targetId} is ${run.status} and "${deployJobName}" has not been created `
-        + `yet — GitHub does not list a downstream job until it is queued or skipped. `
-        + `NOTHING HAS LANDED and nothing is broken: this is a run still running, NOT a `
-        + `renamed job and NOT a shut lane. Jobs so far: `
-        + `${runJobs.map((j) => `${j.name} [${j.status}/${j.conclusion || "-"}]`).join(" | ")}. `
-        + `Re-read after the run completes.` });
+  let undeliveredCommits = null;
+  let undeliveredItems = [];
+  if (!NO_GIT && lastOpenRun) {
+    try {
+      const range = `${lastOpenRun.headSha}..${trunkRef}`;
+      undeliveredCommits = Number(git("rev-list", "--count", range));
+      undeliveredItems = idsIn(git("log", "--format=%s%n%b", range));
+    } catch { undeliveredCommits = null; }
   }
-  notEstablished("deploy-job-not-in-run",
-    `run ${targetId} is COMPLETED and carries no job named "${deployJobName}" (jobs `
-    + `present: ${runJobs.map((j) => j.name).join(" | ")}). The run is over, so the job `
-    + `is genuinely missing: either the workflow's deploy job was renamed without `
-    + `updating ${cfgPath}, or deployJobId points at a workflow this config no longer `
-    + `describes. Nothing about the lane is established until that is fixed.`);
-}
 
-const closureJobs = closureNames
-  .map((n) => byName.get(n))
-  .filter(Boolean);
-const closureUnfinished = closureJobs.filter((j) => j.status !== "completed");
-const closureFailed = closureJobs.filter((j) => failed(j) || j.conclusion === "skipped");
-const closureCancelled = closureJobs.filter((j) => noAnswer(j));
+  // ---- the verdict ----------------------------------------------------------
+  const outsideClosure = (j) => j.name !== deployJobName && !closureNames.includes(j.name);
+  const nonBlockingFailures = runJobs.filter((j) => outsideClosure(j) && failed(j)).map((j) => j.name);
+  // DEF-ROC-224. Dropping a cancelled out-of-closure job from the failure list must not
+  // drop it from the REPORT: DEF-ROC-156's whole lesson is that a control built to catch a
+  // silent gate was itself blind, and moving `cancelled` out of one bucket into silence
+  // would be that mistake in miniature.
+  const nonBlockingCancellations = runJobs.filter((j) => outsideClosure(j) && noAnswer(j)).map((j) => j.name);
 
-// IN-FLIGHT FIRST (AC-131-3). A deploy that has not finished has not landed, and
-// is not broken either. This is the half-cutover case: the ROC health endpoint
-// served the new buildSha with the Deploy job still in_progress — Function App
-// swapped, Web App not — so reading this as `open` dispatches a tester at a
-// half-completed cutover.
-if (deployJob.status !== "completed" || closureUnfinished.length) {
-  out({ ...common, verdict: "in-flight", reason: "deploy-not-finished", blockingJobs: [], detail:
-    `"${deployJobName}" is ${deployJob.status} (conclusion ${String(deployJob.conclusion)}) `
-    + `at ${String(run.headSha).slice(0, 12)}: NOT LANDED and not broken. Do not read this `
-    + `as a deploy and do not dispatch validation against the host yet — a mid-cutover host `
-    + `can already be serving the new build from one app while another has not swapped `
-    + `(measured on ROC 2026-08-27). Re-read after the run completes.` });
-}
+  const common = {
+    runId: Number(run.databaseId),
+    runUrl: run.url,
+    runConclusion: run.conclusion,
+    runStatus: run.status,
+    runTitle: run.displayTitle,
+    headSha: run.headSha,
+    repo: cfg.repo,
+    branch,
+    workflow: cfg.workflowFile,
+    deployJobId: DEPLOY_ID,
+    deployJobName,
+    deployJobStatus: deployJob ? deployJob.status : null,
+    deployJobConclusion: deployJob && deployJob.conclusion !== undefined
+      ? deployJob.conclusion : null,
+    deployJobUrl: (deployJob && deployJob.url) || null,
+    needsClosure: closure,
+    needsClosureJobNames: closureNames,
+    nonBlockingFailures,
+    nonBlockingCancellations,
+    suspectItems,
+    suspectItemsSource,
+    suspectItemsEstablished,
+    lastOpenRun,
+    lastOpenRunEstablished: lastOpenEstablished,
+    undeliveredCommits,
+    undeliveredItems,
+    trunkHeadSha,
+    trunkHeadSource,
+    runSelection,
+    // Stated in the payload, not merely in a comment: the caller can assert that
+    // the run's overall conclusion was NOT the input to the decision, and (since
+    // DEF-ROC-142) that the run it decided about really is trunk head's.
+    decidedBy: "deploy-job-and-needs-closure",
+  };
 
-if (deployJob.conclusion === "success") {
-  out({ ...common, verdict: "open", reason: null, blockingJobs: [], detail:
-    `"${deployJobName}" succeeded at ${String(run.headSha).slice(0, 12)}.`
-    + (nonBlockingFailures.length
-      ? ` ${nonBlockingFailures.length} job(s) in this run FAILED and are outside the `
-        + `deploy job's needs closure, so they did not and cannot stop delivery: `
-        + `${nonBlockingFailures.join(", ")}. The run's own conclusion is `
-        + `"${run.conclusion}" and was not consulted.`
-      : "") });
-}
-
-// DEF-ROC-224 — NOTHING WAS ESTABLISHED. Deliberately placed AFTER `closureFailed` is
-// computed and consulted only when it is EMPTY: a genuine failure in the needs closure
-// SHUTS the lane whatever else was cancelled beside it, because the deploy is skipped on
-// that failure regardless. An established shut always outranks a not-established.
-if (!closureFailed.length && (closureCancelled.length || noAnswer(deployJob))) {
-  const cancelled = closureCancelled.length ? closureCancelled : [deployJob];
-  const reason = closureCancelled.length ? "needs-job-cancelled" : "deploy-job-cancelled";
-  out({ ...common, verdict: "NOT-ESTABLISHED", reason, blockingJobs: [],
-    noAnswerJobs: cancelled.map((j) => j.name),
-    detail:
-      `${cancelled.map((j) => `"${j.name}"`).join(" and ")} ${cancelled.length > 1 ? "were" : "was"} `
-      + `CANCELLED at ${String(run.headSha).slice(0, 12)}, so NOTHING IS ESTABLISHED about `
-      + `"${deployJobName}" for this commit: it is NEITHER open NOR shut. A cancelled job is `
-      + `NOT a deploy failure and NOT a change failure — it answers only "did we get an `
-      + `answer" (no), never "was the answer good or bad", and a run superseded by a newer `
-      + `push was cancelled for being out of date rather than for being wrong. Do NOT read `
-      + `this as a red and do NOT record a change failure against the commit. Counting it `
-      + `would put a non-event into CFR and a false SHUT here stops the loop for nothing. `
-      + `Re-run the run, or push the commit that actually needs to reach the environment, `
-      + `then re-read this. Jobs in this run: `
-      + `${runJobs.map((j) => `${j.name} [${j.status}/${j.conclusion || "-"}]`).join(" | ")}.` });
-}
-
-let blockingJobs = closureFailed.map((j) => ({
-  name: j.name,
-  conclusion: j.conclusion,
-  status: j.status,
-  url: j.url || null,
-  needsPath: `${DEPLOY_ID} needs ${closure.find((id) => displayName(id) === j.name) || "?"}`,
-}));
-let reason = "needs-job-failed";
-if (!blockingJobs.length) {
-  if (failed(deployJob)) {
-    reason = "deploy-job-failed";
-    blockingJobs = [{ name: deployJobName, conclusion: deployJob.conclusion,
-      status: deployJob.status, url: deployJob.url || null, needsPath: "the deploy job itself" }];
-  } else {
-    // Every needs job passed and the deploy STILL did not run. We do not know
-    // why (an `if:` guard, a path filter, a required-reviewer wait). The lane is
-    // shut all the same, and "we cannot see why" is precisely the dark-deploy
-    // condition this tool exists for — so it blocks, and says it cannot see why.
-    reason = "deploy-skipped-needs-satisfied";
+  if (!deployJob) {
+    if (String(run.status) !== "completed") {
+      // STATED RESIDUAL, not a hidden one: if a job in the needs closure has ALREADY
+      // failed while the deploy job is not yet created, the skip is a foregone
+      // conclusion and this under-calls it as in-flight for the few minutes until the
+      // run completes. That is deliberate — asserting `blocked` about a job GitHub has
+      // not created yet would be claiming to know an outcome we have not observed, and
+      // the gate runs before every pull, so it self-corrects on the next invocation.
+      return ({ ...common, verdict: "in-flight", reason: "deploy-job-not-yet-created",
+        blockingJobs: [], detail:
+          `run ${targetId} is ${run.status} and "${deployJobName}" has not been created `
+          + `yet — GitHub does not list a downstream job until it is queued or skipped. `
+          + `NOTHING HAS LANDED and nothing is broken: this is a run still running, NOT a `
+          + `renamed job and NOT a shut lane. Jobs so far: `
+          + `${runJobs.map((j) => `${j.name} [${j.status}/${j.conclusion || "-"}]`).join(" | ")}. `
+          + `Re-read after the run completes.` });
+    }
+    return ne("deploy-job-not-in-run",
+      `run ${targetId} is COMPLETED and carries no job named "${deployJobName}" (jobs `
+      + `present: ${runJobs.map((j) => j.name).join(" | ")}). The run is over, so the job `
+      + `is genuinely missing: either the workflow's deploy job was renamed without `
+      + `updating ${cfgPath}, or deployJobId points at a workflow this config no longer `
+      + `describes. Nothing about the lane is established until that is fixed.`);
   }
+
+  const closureJobs = closureNames
+    .map((n) => byName.get(n))
+    .filter(Boolean);
+  const closureUnfinished = closureJobs.filter((j) => j.status !== "completed");
+  const closureFailed = closureJobs.filter((j) => failed(j) || j.conclusion === "skipped");
+  const closureCancelled = closureJobs.filter((j) => noAnswer(j));
+
+  // IN-FLIGHT FIRST (AC-131-3). A deploy that has not finished has not landed, and
+  // is not broken either. This is the half-cutover case: the ROC health endpoint
+  // served the new buildSha with the Deploy job still in_progress — Function App
+  // swapped, Web App not — so reading this as `open` dispatches a tester at a
+  // half-completed cutover.
+  if (deployJob.status !== "completed" || closureUnfinished.length) {
+    return ({ ...common, verdict: "in-flight", reason: "deploy-not-finished", blockingJobs: [], detail:
+      `"${deployJobName}" is ${deployJob.status} (conclusion ${String(deployJob.conclusion)}) `
+      + `at ${String(run.headSha).slice(0, 12)}: NOT LANDED and not broken. Do not read this `
+      + `as a deploy and do not dispatch validation against the host yet — a mid-cutover host `
+      + `can already be serving the new build from one app while another has not swapped `
+      + `(measured on ROC 2026-08-27). Re-read after the run completes.` });
+  }
+
+  if (deployJob.conclusion === "success") {
+    return ({ ...common, verdict: "open", reason: null, blockingJobs: [], detail:
+      `"${deployJobName}" succeeded at ${String(run.headSha).slice(0, 12)}.`
+      + (nonBlockingFailures.length
+        ? ` ${nonBlockingFailures.length} job(s) in this run FAILED and are outside the `
+          + `deploy job's needs closure, so they did not and cannot stop delivery: `
+          + `${nonBlockingFailures.join(", ")}. The run's own conclusion is `
+          + `"${run.conclusion}" and was not consulted.`
+        : "") });
+  }
+
+  // DEF-ROC-224 — NOTHING WAS ESTABLISHED. Deliberately placed AFTER `closureFailed` is
+  // computed and consulted only when it is EMPTY: a genuine failure in the needs closure
+  // SHUTS the lane whatever else was cancelled beside it, because the deploy is skipped on
+  // that failure regardless. An established shut always outranks a not-established.
+  if (!closureFailed.length && (closureCancelled.length || noAnswer(deployJob))) {
+    const cancelled = closureCancelled.length ? closureCancelled : [deployJob];
+    const reason = closureCancelled.length ? "needs-job-cancelled" : "deploy-job-cancelled";
+    return ({ ...common, verdict: "NOT-ESTABLISHED", reason, blockingJobs: [],
+      noAnswerJobs: cancelled.map((j) => j.name),
+      detail:
+        `${cancelled.map((j) => `"${j.name}"`).join(" and ")} ${cancelled.length > 1 ? "were" : "was"} `
+        + `CANCELLED at ${String(run.headSha).slice(0, 12)}, so NOTHING IS ESTABLISHED about `
+        + `"${deployJobName}" for this commit: it is NEITHER open NOR shut. A cancelled job is `
+        + `NOT a deploy failure and NOT a change failure — it answers only "did we get an `
+        + `answer" (no), never "was the answer good or bad", and a run superseded by a newer `
+        + `push was cancelled for being out of date rather than for being wrong. Do NOT read `
+        + `this as a red and do NOT record a change failure against the commit. Counting it `
+        + `would put a non-event into CFR and a false SHUT here stops the loop for nothing. `
+        + `Re-run the run, or push the commit that actually needs to reach the environment, `
+        + `then re-read this. Jobs in this run: `
+        + `${runJobs.map((j) => `${j.name} [${j.status}/${j.conclusion || "-"}]`).join(" | ")}.` });
+  }
+
+  let blockingJobs = closureFailed.map((j) => ({
+    name: j.name,
+    conclusion: j.conclusion,
+    status: j.status,
+    url: j.url || null,
+    needsPath: `${DEPLOY_ID} needs ${closure.find((id) => displayName(id) === j.name) || "?"}`,
+  }));
+  let reason = "needs-job-failed";
+  if (!blockingJobs.length) {
+    if (failed(deployJob)) {
+      reason = "deploy-job-failed";
+      blockingJobs = [{ name: deployJobName, conclusion: deployJob.conclusion,
+        status: deployJob.status, url: deployJob.url || null, needsPath: "the deploy job itself" }];
+    } else {
+      // Every needs job passed and the deploy STILL did not run. We do not know
+      // why (an `if:` guard, a path filter, a required-reviewer wait). The lane is
+      // shut all the same, and "we cannot see why" is precisely the dark-deploy
+      // condition this tool exists for — so it blocks, and says it cannot see why.
+      reason = "deploy-skipped-needs-satisfied";
+    }
+  }
+
+  return ({ ...common, verdict: "blocked", reason, blockingJobs, detail:
+    reason === "deploy-skipped-needs-satisfied"
+      ? `"${deployJobName}" is ${deployJob.conclusion} at ${String(run.headSha).slice(0, 12)} `
+        + `even though every job in its needs closure (${closureNames.join(", ") || "none"}) `
+        + `passed. The lane did not run and this tool CANNOT SEE WHY — read the job's \`if:\` `
+        + `guard, any path filter, and any environment approval. Nothing reached the `
+        + `environment for this sha.`
+      : `"${deployJobName}" is ${deployJob.conclusion} at ${String(run.headSha).slice(0, 12)} `
+        + `because ${blockingJobs.map((j) => `"${j.name}" is ${j.conclusion}`).join(" and ")}. `
+        + `Everything pushed since is undeployable and therefore un-validatable.` });
+
 }
 
-out({ ...common, verdict: "blocked", reason, blockingJobs, detail:
-  reason === "deploy-skipped-needs-satisfied"
-    ? `"${deployJobName}" is ${deployJob.conclusion} at ${String(run.headSha).slice(0, 12)} `
-      + `even though every job in its needs closure (${closureNames.join(", ") || "none"}) `
-      + `passed. The lane did not run and this tool CANNOT SEE WHY — read the job's \`if:\` `
-      + `guard, any path filter, and any environment approval. Nothing reached the `
-      + `environment for this sha.`
-    : `"${deployJobName}" is ${deployJob.conclusion} at ${String(run.headSha).slice(0, 12)} `
-      + `because ${blockingJobs.map((j) => `"${j.name}" is ${j.conclusion}`).join(" and ")}. `
-      + `Everything pushed since is undeployable and therefore un-validatable.` });
+out(evaluate());

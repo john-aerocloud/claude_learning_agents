@@ -8298,7 +8298,7 @@ def cmd_loop_gate(a):
 EVENT_LOSS_TIMEOUT = 30.0
 
 
-def _head_item_logs(project, timeout=EVENT_LOSS_TIMEOUT, unreadable=None):
+def _head_item_logs(project, *, unreadable, timeout=EVENT_LOSS_TIMEOUT):
     """{id: [(path_in_HEAD, [event-sig, …]), …]} for every item file COMMITTED
     IN HEAD, in `ls-tree` order (active/ before done/).
 
@@ -8309,7 +8309,22 @@ def _head_item_logs(project, timeout=EVENT_LOSS_TIMEOUT, unreadable=None):
 
     Raises RuntimeError with a why-string when it cannot be established. Blobs
     that will not parse are appended to `unreadable` (a list the caller supplies)
-    rather than taking the whole check down with them."""
+    rather than taking the whole check down with them.
+
+    `unreadable` IS REQUIRED, AND THAT IS THE WHOLE OF DEF-ROC-310. It used to
+    default to `None` and this function then made its own list and DISCARDED it on
+    return, so a caller that forgot it got a complete-looking population with no
+    indication that it was short — which is precisely what `compute_duplicate_identity`
+    did (DEF-ROC-290: I11 named itself among the invariants that hold over a store
+    carrying two copies of one id, hidden only by I9's separate honesty about the
+    same list). Curing the one caller left the mechanism, so the channel by which a
+    caller is TOLD is now something a caller cannot fail to open. A caller that does
+    not want the list must pass one and drop it, which is a DECLARATION; the default
+    was silence.
+
+    It does not refuse a non-empty list: reading a partial population and REPORTING
+    it is legitimate and is I9's whole job. The fence is on the caller RECEIVING the
+    list, never on what the caller does with it."""
     repo = os.path.join(ROOT, "work", project)
     if not os.path.isdir(os.path.join(repo, ".git")):
         raise RuntimeError(f"work/{project} is not a git repository "
@@ -8335,8 +8350,6 @@ def _head_item_logs(project, timeout=EVENT_LOSS_TIMEOUT, unreadable=None):
     raw = git(["cat-file", "--batch"],
               stdin=("".join(f"HEAD:{p}\n" for p in paths)).encode())
     out, i, n = {}, 0, 0
-    if unreadable is None:
-        unreadable = []
     while i < len(raw) and n < len(paths):
         nl = raw.find(b"\n", i)
         if nl < 0:

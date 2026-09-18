@@ -90,7 +90,9 @@ Nothing is stubbed: every test drives the real `validate_items`, `cmd_validate`,
 import io
 import os
 import re
+import ast
 import shutil
+import inspect
 import argparse
 import tempfile
 import unittest
@@ -722,6 +724,89 @@ class TestTheLoopGateAsksThisBeforeEveryPull(Store):
         self.assertTrue(findings)
         self.assertEqual(findings[0]["ids"], [iid],
                          "loop-gate findings are keyed by `ids`")
+
+
+# --------------------------------------------------------------------------- #
+# Limb 6 — the MECHANISM, not the instance [DEF-ROC-310]
+# --------------------------------------------------------------------------- #
+class TestThePopulationChannelCannotBeDefaultedAway(unittest.TestCase):
+    """DEF-ROC-290 cured ONE caller. The mechanism survived it.
+
+    `_head_item_logs(project, timeout=…, unreadable=None)` CREATED A LOCAL LIST
+    WHEN THE PARAMETER WAS OMITTED AND DISCARDED IT ON RETURN, so any caller that
+    forgot it received a complete-looking population and no indication that it
+    was short. That is exactly what `compute_duplicate_identity` did, and DEF-ROC-290's
+    tester wrote the finding down while passing it: *a third caller can re-make
+    this exact fail-open undetected.*
+
+    It was not theoretical. With `compute_event_loss` stubbed clean — I9 silenced,
+    so the sibling's cover removed — the pre-fix build read
+
+        clean — I1–I4 + I6 + I7 + I8 + I10 + I11 all hold
+
+    over a store holding TWO COPIES OF ONE ID. The only thing hiding it was a
+    different invariant's honesty.
+
+    THE FENCE IS ABOUT THE CALLER *RECEIVING* THE LIST, NOT ABOUT WHAT IT DOES
+    WITH IT. Reading a partial population and reporting it is legitimate — it is
+    I9's whole job — so this does not raise on a non-empty list. It removes the
+    one way a caller can fail to be told.
+    """
+
+    def test_omitting_the_unreadable_list_fails_at_call_time(self):
+        """The fence itself. A caller that does not want the list must say so,
+        which is a DECLARATION; the old default was silence."""
+        with self.assertRaises(TypeError) as ctx:
+            wi._head_item_logs("TestProj")
+        self.assertIn("unreadable", str(ctx.exception),
+                      "the refusal does not name the parameter that was omitted")
+
+    def test_the_parameter_carries_no_default_at_all(self):
+        """A SENTINEL DEFAULT IS THE SAME DEFECT WEARING A NAME. `unreadable=DISCARD`
+        would satisfy a caller-side grep and discard the list just the same, so what
+        is pinned is the ABSENCE of a default, not the absence of `None`."""
+        sig = inspect.signature(wi._head_item_logs)
+        self.assertIs(sig.parameters["unreadable"].default,
+                      inspect.Parameter.empty,
+                      "`unreadable` has a default again, so a caller can once "
+                      "more receive a complete-looking population it was never "
+                      "told was short")
+
+    def test_every_call_site_in_the_module_supplies_it(self):
+        """THE POPULATION OF CALLERS IS PART OF THE CLAIM — the same rule the
+        function itself enforces, applied to this fence.
+
+        A missing argument raises at CALL time, which only reaches a branch that
+        RUNS. This reads every call site in the source, so a caller on a path no
+        test takes is caught here instead of in production. Two production call
+        sites exist — `compute_event_loss` (I9) and `compute_duplicate_identity`
+        (I11) — and the `>= 2` floor is a vacuity guard: a rename would otherwise
+        find nothing to check and pass.
+        """
+        with open(os.path.join(HERE, "work-items.py"), encoding="utf-8") as fh:
+            src = fh.read()
+        calls = [n for n in ast.walk(ast.parse(src))
+                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                 and n.func.id == "_head_item_logs"]
+        self.assertGreaterEqual(len(calls), 2,
+                                "no call sites found — this test has gone vacuous")
+        for call in calls:
+            self.assertIn("unreadable", [kw.arg for kw in call.keywords],
+                          f"the call at work-items.py:{call.lineno} does not "
+                          f"supply `unreadable`")
+
+    def test_it_is_keyword_only_so_it_cannot_be_filled_by_accident(self):
+        """A REQUIRED POSITIONAL SLOT IS A SLOT SOMETHING ELSE CAN LAND IN.
+        `_head_item_logs(project, 30.0)` would have filled the list parameter with
+        a timeout and appended to a float — a failure at the first unparseable
+        blob and nowhere else. Keyword-only removes the slot; `timeout` keeps its
+        default because it is not the parameter under change."""
+        sig = inspect.signature(wi._head_item_logs)
+        param = sig.parameters["unreadable"]
+        self.assertIs(param.kind, inspect.Parameter.KEYWORD_ONLY)
+        self.assertIsNot(sig.parameters["timeout"].default,
+                         inspect.Parameter.empty,
+                         "`timeout` is not the parameter under change")
 
 
 if __name__ == "__main__":

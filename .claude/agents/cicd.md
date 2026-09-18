@@ -218,6 +218,15 @@ class (EXP-080) in the deploy ENVIRONMENT + its BINDING. The deploy target
       daemon-down is an actionable message at the top, not a crash mid-bundle.
 - [ ] **Asserts the credential is valid** (already present — the `sso-login`
       `sts get-caller-identity` check).
+- [ ] **Waits for a CI run with the ONE COMMITTED BOUNDED WAITER** (v185, DEF-ROC-220) —
+      `make deploy-lane PROJECT=<p> WAIT=1 SHA=<sha>`, which addresses the run BY
+      IDENTITY (`gh run list --commit <sha>`) and ends at a declared deadline with
+      `wait-timeout` = UNKNOWN, never a pass (exit 3). **Never hand-roll a polling
+      loop, and never poll a sha inside a fixed-size window**: a `--limit N` listing
+      filtered by an older sha returns EMPTY once newer runs displace it, and empty
+      never equals `completed`. Six waiters were found stalled on 2026-09-16, the
+      oldest for 8h17m, five of them that one bug. Raising the limit only moves the
+      cliff.
 - [ ] **Asserts the CI/deploy binding resolves to the verified target** — the
       `origin`/account recorded in project.md/decision-log, not whatever `gh`
       defaults to. `ci-watch` passes the resolved `origin` repo EXPLICITLY

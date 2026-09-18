@@ -78,6 +78,33 @@
  * one session), and `no run for head` is reported as the ordinary thing it is
  * rather than as a fault.
  *
+ * AND THE POPULATION IS DECLARED, NOT INCIDENTAL — SO THE WAIT CAN END (DEF-ROC-220).
+ * Selecting by trunk head fixed WHICH run we answer about; it left HOW we find it
+ * as `gh run list --limit N` plus a client-side filter, i.e. "of the last N runs,
+ * which are this commit's". On a trunk taking many pushes an hour that answer
+ * becomes EMPTY within minutes of the run finishing, and EMPTY IS NOT A TERMINAL
+ * STATE. Measured 2026-09-16, after the owner noticed shells that were not moving:
+ * six waiters stalled on conditions that had become unreachable, the oldest for
+ * 8h17m, and FIVE OF SIX were this one bug — loops comparing that empty result
+ * with "completed", against runs that had long since succeeded. Killing them was
+ * not even inert: one woke the orchestrator with an obsolete result minutes later.
+ * Quota survived at 5000/5000 by luck, not design.
+ *
+ * RAISING THE LIMIT IS NOT THE FIX — it moves the cliff, and a bound chosen by
+ * guesswork is the same defect with a bigger number. The run is now addressed BY
+ * IDENTITY (`gh run list --commit <sha>`), so the window is not part of the
+ * predicate: an empty answer means THE SERVER SAYS THIS COMMIT HAS NO RUNS, which
+ * is a fact about the commit and is reported as `no-run-for-sha`. The payload
+ * carries `runPopulation` so a caller can tell that established absence from a
+ * mere failure to see. The windowed list survives in exactly one place — the
+ * "what was the last successful deploy" history scan, which is genuinely a
+ * question about recency.
+ *
+ * `--wait` IS THE ONE BOUNDED WAITER. It exists so that nobody writes the loop
+ * again: two independent bounds (deadline + poll cap), only genuinely transient
+ * states waited for, jittered polling, and a timeout that reports UNKNOWN and
+ * NEVER a pass (§17i). See THE BOUNDED WAITER at the foot of this file.
+ *
  * FOUR VERDICTS, NEVER TWO.
  *   open            the deploy job for TRUNK HEAD's run COMPLETED SUCCESS.
  *   NOT-ESTABLISHED a CANCELLED job left the question open (DEF-ROC-224) — see the
@@ -91,12 +118,26 @@
  *                   does not define. An unanswerable question must never render
  *                   as a clean answer; that mistake is what this tool exists to
  *                   correct, so it may not commit it itself.
+ *   NOT-ESTABLISHED `wait-timeout`: `--wait` ran out of time. NOT a pass and NOT a
+ *                   failure — waiting stopped, the run did not. Carries the last
+ *                   thing actually observed as `lastVerdict`/`lastReason`, which
+ *                   is never promoted to the verdict.
  *
  * Usage
  *   node deploy-lane.js --project ROC --repo-root . --json
  *   node deploy-lane.js --project ROC --repo-root . --json \
  *        --capture-dir <dir> [--capture-run <id>] [--workflow <path>] [--no-git] \
  *        [--head-sha <sha>]
+ *
+ *   WATCHING CI AFTER A PUSH — the route, so nobody hand-rolls one (DEF-ROC-220):
+ *     make deploy-lane PROJECT=ROC WAIT=1 SHA=$(git -C work/ROC rev-parse HEAD)
+ *     make deploy-lane PROJECT=ROC WAIT=1 SHA=<sha> TIMEOUT=1800000 INTERVAL=20000 JSON=1
+ *   `--sha` names the commit to ask about (the one you just pushed); with no
+ *   `--sha` the question is about trunk head, resolved by git. `--wait` polls that
+ *   ONE run until it reaches a verdict, the deadline passes, or the poll cap is
+ *   hit. Exit codes without `--json`: 0 answered, 2 BLOCKED, 3 wait-timeout.
+ *   Defaults: --wait-timeout-ms 1800000, --poll-interval-ms 20000; both
+ *   overridable per project (`waitTimeoutMs`, `pollIntervalMs`).
  *
  *   `--head-sha` DECLARES what trunk head is instead of resolving it with
  *   `git rev-parse <trunkRef>`. It exists so the selection rule can be tested
@@ -145,9 +186,14 @@ const REPO_ROOT = path.resolve(arg("repo-root", process.cwd()));
 const CAPTURE_DIR = arg("capture-dir");
 const CAPTURE_RUN = arg("capture-run");
 const WORKFLOW_OVERRIDE = arg("workflow");
-const HEAD_SHA_ARG = arg("head-sha");
+// `--sha` is the LIVE way to name the commit (an agent asking about the commit it
+// just pushed); `--head-sha` is the same declaration under the name the selection
+// tests already use. One resolution path, so the waiter cannot drift from the gate.
+const HEAD_SHA_ARG = arg("head-sha") || arg("sha");
+const HEAD_SHA_FLAG = arg("head-sha") ? "--head-sha" : "--sha";
 const NO_GIT = flag("no-git");
 const AS_JSON = flag("json");
+const WAIT = flag("wait");
 
 const FAILED = new Set(["failure", "timed_out", "startup_failure",
   "action_required", "stale"]);
@@ -187,6 +233,11 @@ function out(obj) {
     process.exit(0);
   }
   process.stdout.write(render(full) + "\n");
+  // THREE OUTCOMES, THREE CODES (DEF-ROC-220, §17i). 0 answered, 2 shut, 3 the
+  // wait ran out. A timeout must not share an exit code with either an answer or
+  // a red: a caller that cannot tell a broken measurement from a real regression
+  // fixes the wrong one.
+  if (full.reason === "wait-timeout") process.exit(3);
   process.exit(full.verdict === "blocked" ? 2 : 0);
 }
 /** NOT-ESTABLISHED as a VALUE. `notEstablished()` below is the same thing wired
@@ -219,6 +270,12 @@ function render(r) {
     return `deploy-lane[${r.project}] IN-FLIGHT — "${r.deployJobName}" ${state} at `
       + `${String(r.headSha).slice(0, 12)}; nothing has landed. ${r.runUrl}`;
   }
+  if (r.reason === "wait-timeout") {
+    return `deploy-lane[${r.project}] UNKNOWN — could not establish a verdict in `
+      + `${r.waited.timeoutMs}ms (${r.waited.polls} poll(s), ended by ${r.waited.terminatedBy}); `
+      + `last reading ${r.lastVerdict || "none"}`
+      + `${r.lastReason ? ` (${r.lastReason})` : ""}. NOT a pass and NOT a red. ${r.runUrl || ""}`;
+  }
   return `deploy-lane[${r.project}] NOT ESTABLISHED (${r.reason}) — ${r.detail || "no detail"}`;
 }
 
@@ -244,6 +301,25 @@ const runLimit = cfg.runLimit || 12;
 const maxJobFetches = cfg.maxJobFetches || 8;
 const timeoutMs = cfg.timeoutMs || 60000;
 const repoDir = path.resolve(REPO_ROOT, cfg.repoPath);
+// How many runs OF ONE COMMIT to fetch. This is not a window over trunk: the
+// population is already declared by the sha, and this only bounds re-runs and
+// manual dispatches of that same commit, newest of which is the one we want.
+const runsPerShaLimit = cfg.runsPerShaLimit || 20;
+// The wait's two bounds. Both are declared, neither is discovered by running out
+// of patience (DEF-ROC-220).
+const waitTimeoutMs = Number(arg("wait-timeout-ms", cfg.waitTimeoutMs || 1800000));
+const pollIntervalMs = Number(arg("poll-interval-ms", cfg.pollIntervalMs || 20000));
+
+/** Same-prefix commit comparison. Module scope because the run lookup needs it
+ *  BEFORE the verdict is computed (DEF-ROC-220 moved the sha to the front). */
+function shaEq(a, b) {
+  const x = String(a || "").toLowerCase();
+  const y = String(b || "").toLowerCase();
+  if (!x || !y) return false;
+  const n = Math.min(x.length, y.length);
+  if (n < 7) return false;              // too short to identify a commit
+  return x.slice(0, n) === y.slice(0, n);
+}
 
 // ---- the workflow's job graph ---------------------------------------------
 // `needs` is read from the workflow SOURCE because the GitHub jobs API does not
@@ -360,6 +436,46 @@ function readRun(id) {
 }
 
 /**
+ * THE POPULATION IS DECLARED BY THE SHA, NEVER BY A WINDOW (DEF-ROC-220).
+ *
+ * `gh run list --limit N` answers a question nobody asked: "of the N most recent
+ * runs, which are this commit's?" On a trunk that takes many pushes an hour, the
+ * answer becomes EMPTY within minutes of the run finishing — and empty is not a
+ * verdict, it is a failure to see. Five of the six waiters found stalled on
+ * 2026-09-16 were loops comparing that empty result with "completed"; the oldest
+ * had been doing it for 8h17m against a run that had long since succeeded.
+ *
+ * RAISING THE LIMIT IS NOT THE FIX. It moves the cliff, and a bound chosen by
+ * guesswork is the same defect with a bigger number. `--commit <sha>` makes the
+ * server select by IDENTITY, so the window stops being part of the predicate: the
+ * residual `--limit` here bounds only how many RE-RUNS OF THE SAME COMMIT come
+ * back, and the newest of those is exactly what we want.
+ *
+ * Returns { runs, population } — `population` is reported in the payload so a
+ * caller can tell an ESTABLISHED absence ("the server says this commit has no
+ * runs") from a window artefact, which is the distinction the defect turned on.
+ */
+function readRunsForSha(sha) {
+  if (CAPTURE_DIR) {
+    // A capture may declare the identity answer directly; otherwise we are reading
+    // a WINDOW that was captured, and must say so rather than claim the server
+    // answered about this commit.
+    const byCommit = path.join(CAPTURE_DIR, `run-list-commit-${String(sha).toLowerCase()}.json`);
+    if (fs.existsSync(byCommit)) {
+      return { runs: JSON.parse(fs.readFileSync(byCommit, "utf8")), population: "by-commit" };
+    }
+    return { runs: readRunList().filter((r) => shaEq(r.headSha, sha)), population: "window-capture" };
+  }
+  return {
+    runs: JSON.parse(gh(["run", "list", "--repo", cfg.repo, "--branch", branch,
+      "--workflow", path.basename(cfg.workflowFile), "--commit", String(sha),
+      "--limit", String(runsPerShaLimit),
+      "--json", "databaseId,headSha,conclusion,status,createdAt,displayTitle,event,url"])),
+    population: "by-commit",
+  };
+}
+
+/**
  * THE READING, AS A VALUE RATHER THAN AN EXIT (DEF-ROC-220).
  *
  * Everything from here down used to run at top level and END THE PROCESS through
@@ -373,45 +489,26 @@ function readRun(id) {
  * an unparseable workflow is a PERMANENT condition, and re-reading it on a timer
  * would be waiting for something that cannot arrive.
  */
-function evaluate() {
-  let runList;
-  try {
-    runList = readRunList();
-  } catch (e) {
-    return ne("gh-run-list-failed",
-      `could not list runs of ${path.basename(cfg.workflowFile)} on ${branch} in ${cfg.repo} `
-      + `(${String(e.message).slice(0, 240)}). Check \`gh auth status\`. Nothing was read, `
-      + `which is not the same as the lane being open.`);
-  }
-  if (!Array.isArray(runList) || !runList.length) {
-    return ne("no-runs",
-      `no runs of ${path.basename(cfg.workflowFile)} on ${branch} in ${cfg.repo}. A workflow `
-      + `that has never run has never deployed.`);
-  }
-  runList.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
-
+function evaluate(opts) {
+  const skipHistory = !!(opts && opts.skipHistory);
   // ---- WHICH COMMIT ARE WE ANSWERING ABOUT? (DEF-ROC-142) -------------------
-  // The run is chosen by TRUNK HEAD'S SHA, never by recency. `runList[0]` is the
-  // newest run of this workflow on the branch, which is a DIFFERENT question: on a
-  // path-filtered workflow the newest run routinely belongs to an older commit,
-  // because every items-only / process / docs commit produces no run at all. The
-  // old code published that run's verdict as head's — a false SHUT on 2026-08-29,
-  // and a false OPEN just as readily.
-  function shaEq(a, b) {
-    const x = String(a || "").toLowerCase();
-    const y = String(b || "").toLowerCase();
-    if (!x || !y) return false;
-    const n = Math.min(x.length, y.length);
-    if (n < 7) return false;              // too short to identify a commit
-    return x.slice(0, n) === y.slice(0, n);
-  }
-
+  // The run is chosen by TRUNK HEAD'S SHA, never by recency. The newest run of
+  // this workflow on the branch is a DIFFERENT question: on a path-filtered
+  // workflow it routinely belongs to an older commit, because every items-only /
+  // process / docs commit produces no run at all. The old code published that
+  // run's verdict as head's — a false SHUT on 2026-08-29, and a false OPEN just
+  // as readily.
+  //
+  // THIS NOW HAPPENS FIRST (DEF-ROC-220). The commit has to be known BEFORE the
+  // runs are fetched, because the commit is what DECLARES which runs to fetch.
+  // While the list came first, the fetch could only be "the last N", and the
+  // filter was applied to whatever that happened to contain.
   let trunkHeadSha = null;
   let trunkHeadSource = null;
   let runSelection = null;
   if (HEAD_SHA_ARG) {
     trunkHeadSha = HEAD_SHA_ARG;
-    trunkHeadSource = "--head-sha";
+    trunkHeadSource = HEAD_SHA_FLAG;
   } else if (CAPTURE_RUN) {
     // REPLAY: the caller asserts the named run IS trunk head's run. Test-only —
     // the live path passes neither flag. Recorded in the payload so a reading can
@@ -436,24 +533,51 @@ function evaluate() {
   }
 
   let targetId;
+  let runPopulation = null;
   if (CAPTURE_RUN) {
     targetId = CAPTURE_RUN;
     runSelection = trunkHeadSha ? "capture-run-at-declared-head" : "capture-run-replay";
+    runPopulation = "capture-run";
   } else {
-    const candidates = runList.filter((r) => shaEq(r.headSha, trunkHeadSha));
+    let found;
+    try {
+      found = readRunsForSha(trunkHeadSha);
+    } catch (e) {
+      return ne("gh-run-list-failed",
+        `could not list runs of ${path.basename(cfg.workflowFile)} for commit `
+        + `${String(trunkHeadSha).slice(0, 12)} in ${cfg.repo} `
+        + `(${String(e.message).slice(0, 240)}). Check \`gh auth status\`. Nothing was read, `
+        + `which is not the same as the lane being open.`);
+    }
+    runPopulation = found.population;
+    const candidates = (found.runs || []).filter((r) => shaEq(r.headSha, trunkHeadSha));
     if (!candidates.length) {
-      const newest = runList[0];
-      return ne("no-run-for-trunk-head",
+      // DEF-ROC-220 — TWO DIFFERENT ABSENCES, and conflating them is the defect.
+      // `by-commit`: the SERVER was asked about this commit and said it has no
+      // runs. That is an ESTABLISHED absence about the commit, and it is ordinary.
+      // `window-capture`: we read a captured WINDOW, so all we know is that the
+      // sha was not in it — which is exactly the reading that kept six waiters
+      // spinning. Naming them differently is what lets a caller tell them apart.
+      const windowed = runPopulation !== "by-commit";
+      // The population is part of the ANSWER here, not a footnote: it is what
+      // separates "the server says there is no such run" from "we did not see one".
+      return { runPopulation, trunkHeadSha, trunkHeadSource,
+        ...ne(windowed ? "no-run-for-trunk-head" : "no-run-for-sha",
         `no run of ${path.basename(cfg.workflowFile)} on ${branch} has head `
-        + `${String(trunkHeadSha).slice(0, 12)} (trunk head, per ${trunkHeadSource}), within the `
-        + `newest ${runList.length} run(s). THIS IS ORDINARY, NOT A FAULT: the workflow is `
+        + `${String(trunkHeadSha).slice(0, 12)} (per ${trunkHeadSource})`
+        + (windowed
+          ? `, within the newest ${(found.runs || []).length} run(s) of the captured window. `
+            + `A window cannot establish an absence (DEF-ROC-220). `
+          : `. The population was DECLARED BY THE COMMIT (\`gh run list --commit\`), not by a `
+            + `window of the last N runs, so this is an ESTABLISHED absence rather than a `
+            + `failure to see (DEF-ROC-220). `)
+        + `THIS IS ORDINARY, NOT A FAULT: the workflow is `
         + `PATH-FILTERED, so a commit touching none of its trigger paths — every items-only, `
         + `process, or docs commit — produces no run at all. Nothing is therefore established `
         + `about this commit: it is NEITHER open NOR shut, and the verdict of a different `
         + `commit's run is not evidence about it (DEF-ROC-142: reading one BLOCKED a real cycle `
-        + `on 2026-08-29, and the same fallback returns a false OPEN just as readily). For `
-        + `reference only, NOT used: the newest run is ${newest.databaseId} at `
-        + `${String(newest.headSha).slice(0, 12)} (${newest.createdAt}), a DIFFERENT commit.`);
+        + `on 2026-08-29, and the same fallback returns a false OPEN just as readily). If the `
+        + `run has not been CREATED yet, \`--wait\` waits for it, bounded.`) };
     }
     // Deterministic even if several runs share the head sha (a re-run, a manual
     // dispatch): newest first, databaseId as the tie-break so ordering can never
@@ -536,11 +660,21 @@ function evaluate() {
   // ---- how much is stuck behind a shut lane --------------------------------
   // Bounded scan backwards for the newest run whose deploy job actually succeeded:
   // that sha is the last thing the environment can have received.
+  //
+  // THIS is the one question a recency window genuinely answers — "what is the
+  // most recent successful deploy" is ABOUT recency — so the windowed list stays
+  // here and only here. It is history, not the verdict: if it cannot be read the
+  // scan reports nothing established and the verdict is unaffected, and `--wait`
+  // skips it entirely between polls rather than re-fetching it on every tick.
   let lastOpenRun = null;
   let lastOpenEstablished = false;
-  {
+  if (!skipHistory) {
     let fetched = 0;
-    for (const r of runList) {
+    let recent = [];
+    try { recent = readRunList(); } catch { recent = []; }
+    if (!Array.isArray(recent)) recent = [];
+    recent.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    for (const r of recent) {
       if (String(r.databaseId) === String(targetId)) continue;
       if (fetched >= maxJobFetches) break;
       let full;
@@ -602,6 +736,7 @@ function evaluate() {
     trunkHeadSha,
     trunkHeadSource,
     runSelection,
+    runPopulation,
     // Stated in the payload, not merely in a comment: the caller can assert that
     // the run's overall conclusion was NOT the input to the decision, and (since
     // DEF-ROC-142) that the run it decided about really is trunk head's.
@@ -723,4 +858,92 @@ function evaluate() {
 
 }
 
-out(evaluate());
+
+// ---------------------------------------------------------------------------
+// THE BOUNDED WAITER (DEF-ROC-220)
+//
+// ONE implementation, because six hand-rolled ones were found stalled in a single
+// session and five of them were the same bug. The rules it exists to hold:
+//
+//   1. IT TERMINATES. Two independent bounds — a DEADLINE and a POLL CAP — so a
+//      zero/absurd interval cannot turn the deadline check into a hot spin, and
+//      neither bound depends on the thing being waited for.
+//   2. A TIMEOUT IS `UNKNOWN`, NEVER A PASS (§17i). The verdict on running out of
+//      time is NOT-ESTABLISHED/wait-timeout, carrying the LAST thing actually
+//      observed under `lastVerdict`/`lastReason` — never promoted to an answer.
+//   3. ONLY GENUINELY TRANSIENT STATES ARE WAITED FOR. `in-flight` (not finished),
+//      an absent run (not created yet), and a failed `gh` call (retryable, so it
+//      gets backoff rather than a conclusion). A cancelled run, a renamed deploy
+//      job, a missing config are all settled facts: waiting cannot change them, so
+//      waiting on them is exactly the unreachable condition this defect is about.
+//   4. THE POLL IS JITTERED. Several agents watching CI at once must not
+//      synchronise into a burst; quota survived 2026-09-16 by luck, not design.
+// ---------------------------------------------------------------------------
+const WAITABLE = new Set([
+  "no-run-for-sha",           // the run has not been CREATED yet
+  "no-run-for-trunk-head",    // same, as seen through a captured window
+  "gh-run-list-failed",       // retryable: rate limit, network, transient 5xx
+  "gh-run-view-failed",
+]);
+/** Is this reading one that a later reading could legitimately change? */
+function waitable(r) {
+  if (r.verdict === "in-flight") return true;
+  if (r.verdict !== "NOT-ESTABLISHED") return false;
+  return WAITABLE.has(r.reason);
+}
+/** Synchronous sleep with ±20% jitter, never longer than the time left. */
+function sleepSync(ms) {
+  if (ms <= 0) return;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+function jittered(ms) {
+  return Math.max(1, Math.round(ms * (0.8 + Math.random() * 0.4)));
+}
+
+function waitForVerdict() {
+  const startedAt = Date.now();
+  const deadline = startedAt + waitTimeoutMs;
+  // The second, independent bound. Derived from the two declared numbers, so it
+  // cannot be the thing that silently decides the wait — it only stops a
+  // degenerate interval from spinning.
+  const maxPolls = Math.max(2, Math.ceil(waitTimeoutMs / Math.max(1, pollIntervalMs)) + 2);
+  let polls = 0;
+  let last = null;
+  while (polls < maxPolls) {
+    polls += 1;
+    const r = evaluate({ skipHistory: true });
+    if (!waitable(r)) {
+      // Settled. Re-read in full so the report carries the history the single-shot
+      // reading would have had (last successful deploy, undelivered commits).
+      const full = evaluate();
+      return { ...full,
+        waited: { polls, elapsedMs: Date.now() - startedAt, timeoutMs: waitTimeoutMs,
+          pollIntervalMs, terminatedBy: "verdict" } };
+    }
+    last = r;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    sleepSync(Math.min(jittered(pollIntervalMs), remaining));
+  }
+  const elapsedMs = Date.now() - startedAt;
+  const terminatedBy = polls >= maxPolls && Date.now() < deadline ? "poll-cap" : "deadline";
+  return { ...(last || {}),
+    verdict: "NOT-ESTABLISHED",
+    reason: "wait-timeout",
+    lastVerdict: (last && last.verdict) || null,
+    lastReason: (last && last.reason) || null,
+    waited: { polls, elapsedMs, timeoutMs: waitTimeoutMs, pollIntervalMs, terminatedBy },
+    detail:
+      `UNKNOWN — could not establish a verdict for `
+      + `${String((last && last.trunkHeadSha) || HEAD_SHA_ARG || "trunk head").slice(0, 12)} `
+      + `within ${waitTimeoutMs}ms (${polls} poll(s), ended by ${terminatedBy}). The last `
+      + `reading was ${(last && last.verdict) || "none"}`
+      + `${last && last.reason ? ` (${last.reason})` : ""}. THIS IS NOT A PASS AND NOT A `
+      + `FAILURE: waiting stopped, the run did not. Read the run yourself, or wait again with `
+      + `a longer --wait-timeout-ms. A waiter that invented an answer here would be the same `
+      + `fault as one that never stopped (DEF-ROC-220, §17i).`
+      + `${last && last.detail ? ` Last detail: ${last.detail}` : ""}`,
+  };
+}
+
+out(WAIT ? waitForVerdict() : evaluate());

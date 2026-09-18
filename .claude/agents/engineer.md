@@ -169,8 +169,20 @@ hardcode the profile name.
    can reject a statement that passed offline shape-tests (e.g. an unresolvable principal).
    Pushing infra green-locally-but-unsynthed = a deploy-failure that turns CI red (the
    ec56025 incident). Never push infra without the synth/deploy gate green.
-   **After pushing, set off the non-blocking CI watch and keep working:**
-   `make -C work/<project> ci-watch`. If that run fails while your local suite + lint
+   **After pushing, watch CI with the ONE COMMITTED BOUNDED WAITER — never a hand-rolled
+   loop (v185, DEF-ROC-220):**
+   `make deploy-lane PROJECT=<project> WAIT=1 SHA=$(git -C work/<project> rev-parse HEAD)`.
+   It resolves the run **by identity** (`gh run list --commit <sha>`) and it **terminates**:
+   at a deadline it reports `wait-timeout`, which is **UNKNOWN — never a pass** (exit 3).
+   **NEVER write your own polling loop, and never poll a sha inside a fixed-size window.**
+   `gh run list --limit N` filtered by an older sha returns **EMPTY** once newer runs
+   displace it — and empty never equals `completed`, so the loop cannot end. On 2026-09-16
+   six waiters were found stalled on unreachable conditions, the oldest for **8h17m**, and
+   five were exactly that; a dead waiter is not even inert, one woke the orchestrator with
+   an obsolete result minutes after being killed. Raising `--limit` is not a fix: it moves
+   the cliff. If the waiter is missing something you need, fix the waiter — one
+   implementation, or this recurs.
+   If that run fails while your local suite + lint
    were green, that is a **defect** — raise it via `/defect`; its fix is exactly one
    of {add the local check that would have caught it | capture the manual config in
    the runbook AND automate it as a committed script/Make target}. Never re-run-and-hope,

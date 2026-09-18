@@ -182,8 +182,20 @@ make-refs-tracked:
 # no writes, no secrets. Self-tests: `make test-tools`.
 #   make deploy-lane PROJECT=ROC          # human line; exit 2 iff BLOCKED
 #   make deploy-lane PROJECT=ROC JSON=1   # the full report
+#
+# WATCHING CI AFTER A PUSH -- THE ROUTE, so nobody hand-rolls a waiter again
+# (DEF-ROC-220). Six were found stalled on 2026-09-16, the oldest for 8h17m, and
+# five were one bug: polling for a sha inside `gh run list --limit N`, which
+# returns EMPTY once newer runs displace it -- and empty never equals "completed".
+# This resolves the run BY IDENTITY (`--commit <sha>`) and is BOUNDED: it ends at
+# a deadline with `wait-timeout`, which is UNKNOWN and never a pass (exit 3).
+#   make deploy-lane PROJECT=ROC WAIT=1 SHA=$$(git -C work/ROC rev-parse HEAD)
+#   make deploy-lane PROJECT=ROC WAIT=1 SHA=<sha> TIMEOUT=1800000 INTERVAL=20000 JSON=1
+# SHA defaults to trunk head (resolved by git); TIMEOUT/INTERVAL are milliseconds.
 deploy-lane:
-	@node .claude/tools/deploy-lane.js --project $(PROJECT) --repo-root . $(if $(JSON),--json,)
+	@node .claude/tools/deploy-lane.js --project $(PROJECT) --repo-root . $(if $(JSON),--json,) \
+	   $(if $(WAIT),--wait,) $(if $(SHA),--sha $(SHA),) \
+	   $(if $(TIMEOUT),--wait-timeout-ms $(TIMEOUT),) $(if $(INTERVAL),--poll-interval-ms $(INTERVAL),)
 
 # --- DID THE ENGINEERING EXIT GATE SPEAK? (OI-ROC-025, process SSF11.4) ---------
 # The standalone probe behind `loop-gate` check 20, and the PARENT-repo caller of the
@@ -205,9 +217,19 @@ deploy-lane:
 # ONLY NON-EXECUTION BLOCKS (exit 2). A gate that SPOKE and said no is advisory here:
 # that subject belongs to `make exit-gate` on the commit in hand, and blocking on it
 # would wedge every agent in this shared tree on somebody else's regression.
+#
+# A COMMIT THAT RODE IN INSIDE A LARGER PUSH IS NOT AN UNGATED COMMIT (DEF-ROC-221).
+# The gate runs per PUSH, not per COMMIT, so of a push of eight only the push head
+# ever gets a run -- and the other seven are as gated as it is. Asked about one of
+# those seven, this now walks its trunk descendants nearest-first and reads the
+# verdict of the PUSH HEAD that carried it, saying whose run it read. It does NOT
+# pass the case: exhausting the descendants still BLOCKS, and every way of failing
+# to look (no readable repo, no trunk ref, a probe that stops answering, the walk's
+# bound) blocks too, as NO-VERDICT-UNRESOLVED. Trunk head is unaffected -- it is a
+# push head by definition, so no walk happens and no extra call is made.
 #   make exit-gate-ran PROJECT=ROC              # trunk head
 #   make exit-gate-ran PROJECT=ROC SHA=<commit> # ANY commit -- this is how it is proven to fire
-#   make exit-gate-ran PROJECT=ROC JSON=1
+#   make exit-gate-ran PROJECT=ROC JSON=1       # {"findings": [...], "resolution": {...}|null}
 exit-gate-ran:
 	@$(WORKITEMS) exit-gate-ran --project $(PROJECT) $(if $(SHA),--sha $(SHA),) $(if $(JSON),--json,)
 

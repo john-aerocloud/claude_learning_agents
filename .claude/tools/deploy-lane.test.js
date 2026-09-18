@@ -722,3 +722,284 @@ test("AC-224-5: the three REAL fixtures this tool was built on are completely un
   assert.deepStrictEqual(open.nonBlockingFailures, [AUDIT_JOB],
     "a genuinely FAILED out-of-closure job is still reported as a failure");
 });
+
+// ===========================================================================
+// DEF-ROC-220 — THE POPULATION MUST BE DECLARED, AND THE WAIT MUST END.
+//
+// THE DEFECT, measured 2026-09-16 after the owner noticed shells that were not
+// moving. Six waiters were stalled on conditions that had become UNREACHABLE,
+// the oldest for 8h17m, and FIVE OF SIX WERE ONE BUG: a loop polling for a sha
+// inside a FIXED-SIZE WINDOW (`gh run list --limit N`). Once newer runs displace
+// that sha the filter returns EMPTY, and EMPTY IS NOT A TERMINAL STATE, so the
+// comparison with "completed" can never match. The loop cannot tell NOT FINISHED
+// YET from I CAN NO LONGER SEE IT — the absence-read-as-evidence shape this
+// project has already hit in the commit guard (DEFECT-OAG-142), the coverage gate
+// and the observation probe (DEF-ROC-199). On this trunk it is the NORMAL case,
+// not an edge one: ROC pushes many commits an hour, so a sha leaves a 12-run
+// window in minutes.
+//
+// RAISING `--limit` IS NOT THE FIX. It moves the cliff, and a bound chosen by
+// guesswork is the same defect with a bigger number. The population has to stop
+// being "whatever happened to fit in the last N runs" and start being DECLARED:
+// address the run BY IDENTITY (`gh run list --commit <sha>`), so the window is
+// not part of the predicate at all.
+//
+// WHY THESE CASES DRIVE A FAKE `gh` ON PATH RATHER THAN `--capture-dir`.
+// `--capture-dir` replaces the FETCH, and the window IS the fetch — a capture
+// directory hands the tool a list that was never truncated, so the whole defect
+// is invisible from inside it. That is precisely why 41 green tests never saw
+// this. The fake is a REAL EXECUTABLE resolved through PATH, honouring `--limit`
+// and `--commit` the way `gh` 2.95 does, so the argv the tool actually builds is
+// what decides the outcome. Nothing here stubs `child_process`; the exec
+// boundary is driven, not replaced.
+//
+// PROVENANCE OF THE RUN PAYLOADS. The two runs whose VERDICT is asserted are the
+// committed REAL captures, used UNMODIFIED:
+//   run-33076365108.json          REAL, head f950220f, Deploy job SUCCEEDED.
+//   run-INFLIGHT-synthetic.json   the repo's existing DECLARED synthetic (see its
+//                                 own `_provenance`), head f950220f, Deploy job
+//                                 `in_progress` and never finishing.
+// The only authored data is the BUSY TRUNK around them — list rows with other
+// shas and no jobs, which exist solely to push the target out of the window.
+// They are declared synthetic here and no verdict is read from them.
+// ===========================================================================
+
+const REAL_OPEN_RUN = JSON.parse(fs.readFileSync(path.join(CAP, `run-${OPEN_RUN}.json`), "utf8"));
+const REAL_INFLIGHT_RUN = JSON.parse(
+  fs.readFileSync(path.join(CAP, "run-INFLIGHT-synthetic.json"), "utf8"));
+const TARGET_SHA = REAL_OPEN_RUN.headSha;
+
+/** A `gh` that honours `--limit` and `--commit` as gh 2.95 does. Written to a temp
+ *  dir and put FIRST on PATH, so the tool's own `execFileSync("gh", …)` reaches it. */
+const FAKE_GH = `#!/usr/bin/env node
+"use strict";
+const fs = require("node:fs");
+const argv = process.argv.slice(2);
+const corpus = JSON.parse(fs.readFileSync(process.env.FAKE_GH_CORPUS, "utf8"));
+fs.appendFileSync(process.env.FAKE_GH_LOG, JSON.stringify(argv) + "\\n");
+const val = (n) => { const i = argv.indexOf(n); return i > -1 ? argv[i + 1] : null; };
+const fields = () => (val("--json") || "").split(",").filter(Boolean);
+const pick = (o, fs2) => { const r = {}; for (const f of fs2) if (f in o) r[f] = o[f]; return r; };
+function bump(key) {
+  const p = process.env.FAKE_GH_STATE + "." + key;
+  let n = 0; try { n = Number(fs.readFileSync(p, "utf8")) || 0; } catch (e) { n = 0; }
+  fs.writeFileSync(p, String(n + 1));
+  return n;
+}
+if (argv[0] === "run" && argv[1] === "list") {
+  const commit = val("--commit");
+  let runs = corpus.runs.slice()
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  // gh filters by commit SERVER-SIDE: the population is the runs of that commit.
+  if (commit) runs = runs.filter((r) =>
+    String(r.headSha).toLowerCase() === String(commit).toLowerCase());
+  // ...and only then applies --limit. This is the window that ate the sha.
+  runs = runs.slice(0, Number(val("--limit") || 30));
+  // "the run does not exist YET": the first N listings find nothing at all.
+  if (corpus.appearAfter && bump("list") < corpus.appearAfter) runs = [];
+  process.stdout.write(JSON.stringify(runs.map((r) => pick(r, fields().filter((f) => f !== "jobs")))) + "\\n");
+  process.exit(0);
+}
+if (argv[0] === "run" && argv[1] === "view") {
+  const run = corpus.runs.find((r) => String(r.databaseId) === String(argv[2]));
+  if (!run) { process.stderr.write("no such run\\n"); process.exit(1); }
+  process.stdout.write(JSON.stringify(pick(run, fields())) + "\\n");
+  process.exit(0);
+}
+process.stderr.write("fake gh: unsupported " + argv.join(" ") + "\\n");
+process.exit(1);
+`;
+
+/** Synthetic busy trunk: `n` rows NEWER than the target, each a different sha.
+ *  Declared synthetic; no verdict is ever read from one. */
+function busyTrunk(n) {
+  const out = [];
+  for (let i = 0; i < n; i += 1) {
+    const sha = String(i).padStart(2, "0").repeat(20).slice(0, 40);
+    out.push({
+      _provenance: "SYNTHETIC — a busy-trunk list row. Asserts nothing; it exists only to "
+        + "displace the real capture out of a fixed-size window.",
+      databaseId: 40000000000 + i,
+      headSha: sha,
+      conclusion: "success",
+      status: "completed",
+      createdAt: `2026-08-28T0${Math.floor(i / 10)}:${String(i % 60).padStart(2, "0")}:00Z`,
+      displayTitle: `chore: busy trunk ${i}`,
+      event: "push",
+      url: `https://github.com/AeroCloudSystems/PpsEventAggregation/actions/runs/${40000000000 + i}`,
+      jobs: [],
+    });
+  }
+  return out;
+}
+
+function liveRun(opts) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "deploy-lane-gh-"));
+  const ghPath = path.join(dir, "gh");
+  fs.writeFileSync(ghPath, FAKE_GH);
+  fs.chmodSync(ghPath, 0o755);
+  const corpusPath = path.join(dir, "corpus.json");
+  fs.writeFileSync(corpusPath, JSON.stringify({ runs: opts.runs, appearAfter: opts.appearAfter || 0 }));
+  const logPath = path.join(dir, "gh.log");
+  fs.writeFileSync(logPath, "");
+  const root = repoRootWith({ ...BASE_CFG, ...(opts.cfg || {}) });
+  const argv = ["--project", "ROC", "--repo-root", root, "--json", "--workflow", WORKFLOW,
+    "--no-git", "--head-sha", opts.sha, ...(opts.argv || [])];
+  const started = Date.now();
+  const stdout = execFileSync("node", [TOOL, ...argv], {
+    encoding: "utf8",
+    timeout: opts.killAfterMs || 60000,
+    env: { ...process.env,
+      PATH: dir + path.delimiter + process.env.PATH,
+      FAKE_GH_CORPUS: corpusPath,
+      FAKE_GH_LOG: logPath,
+      FAKE_GH_STATE: path.join(dir, "state") },
+  });
+  const calls = fs.readFileSync(logPath, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  return { r: JSON.parse(stdout), calls, elapsedMs: Date.now() - started };
+}
+
+const listCalls = (calls) => calls.filter((a) => a[0] === "run" && a[1] === "list");
+
+test("AC-220-1: a sha DISPLACED out of the listing window still yields its TRUE verdict", () => {
+  // The exact 2026-09-16 condition: the run exists and finished long ago, but 20
+  // newer runs sit in front of it and the config's window is 12. Reading the
+  // window, the tool sees nothing and can conclude nothing. Reading by IDENTITY,
+  // it reads the real capture whose Deploy job SUCCEEDED, which is the truth.
+  const { r } = liveRun({
+    sha: TARGET_SHA,
+    runs: [REAL_OPEN_RUN, ...busyTrunk(20)],
+    cfg: { runLimit: 12 },
+  });
+  assert.strictEqual(r.verdict, "open", JSON.stringify(r));
+  assert.strictEqual(r.runId, Number(OPEN_RUN));
+  assert.strictEqual(r.headSha, TARGET_SHA);
+});
+
+test("AC-220-1: the resolution DECLARES its population — gh is asked --commit <sha>, not --limit N", () => {
+  // The property, not the symptom. A bigger --limit passes the case above and is
+  // still the same defect; what makes it gone is that the sha, not a position in
+  // a list, decides which runs are candidates.
+  const { calls } = liveRun({
+    sha: TARGET_SHA,
+    runs: [REAL_OPEN_RUN, ...busyTrunk(20)],
+    cfg: { runLimit: 12 },
+  });
+  const resolving = listCalls(calls).filter((a) => a.includes("--commit"));
+  assert.ok(resolving.length >= 1,
+    `the run must be addressed by identity: ${JSON.stringify(listCalls(calls))}`);
+  assert.ok(resolving.every((a) => a[a.indexOf("--commit") + 1] === TARGET_SHA),
+    `--commit must name the sha under test: ${JSON.stringify(resolving)}`);
+});
+
+test("AC-220-3: a sha with NO run at all TERMINATES with an established absence, not a window story", () => {
+  // The other direction, and the one that must never be a pass: nothing ran for
+  // this commit. Said plainly, and said as a fact about the COMMIT rather than
+  // about how far back we happened to look.
+  const { r } = liveRun({ sha: TARGET_SHA, runs: busyTrunk(20), cfg: { runLimit: 12 } });
+  assert.strictEqual(r.verdict, "NOT-ESTABLISHED", JSON.stringify(r));
+  assert.strictEqual(r.reason, "no-run-for-sha");
+  assert.strictEqual(r.runPopulation, "by-commit");
+  assert.ok(!/newest \d+ run/.test(r.detail),
+    `the absence must not be attributed to the size of a window: ${r.detail}`);
+  assert.ok(/neither/i.test(r.detail), `neither open nor shut must be stated: ${r.detail}`);
+});
+
+test("AC-220-2: --wait on a run that never finishes ENDS at its deadline and says UNKNOWN", () => {
+  // The bound demonstrated by EXCEEDING it. The in-flight capture never completes,
+  // so the only thing that can end this is the deadline. If the process does not
+  // exit, execFileSync's kill makes the case fail — which is the honest result for
+  // a waiter that does not terminate.
+  const { r, elapsedMs } = liveRun({
+    sha: REAL_INFLIGHT_RUN.headSha,
+    runs: [REAL_INFLIGHT_RUN],
+    argv: ["--wait", "--wait-timeout-ms", "600", "--poll-interval-ms", "50"],
+    killAfterMs: 30000,
+  });
+  assert.strictEqual(r.verdict, "NOT-ESTABLISHED", JSON.stringify(r));
+  assert.strictEqual(r.reason, "wait-timeout");
+  assert.strictEqual(r.lastVerdict, "in-flight");
+  assert.ok(r.waited && r.waited.polls > 1, `it must have polled: ${JSON.stringify(r.waited)}`);
+  assert.strictEqual(r.waited.terminatedBy, "deadline");
+  assert.ok(elapsedMs < 20000, `it must end near its deadline, not at the kill: ${elapsedMs}ms`);
+});
+
+test("AC-220-2: a wait that timed out is UNKNOWN — never open, never blocked, never a pass", () => {
+  // §17i. A bounded wait that could not establish the verdict reports that it could
+  // not. The whole point of ending the loop is lost if ending it invents an answer.
+  const { r } = liveRun({
+    sha: REAL_INFLIGHT_RUN.headSha,
+    runs: [REAL_INFLIGHT_RUN],
+    argv: ["--wait", "--wait-timeout-ms", "300", "--poll-interval-ms", "50"],
+    killAfterMs: 30000,
+  });
+  assert.notStrictEqual(r.verdict, "open");
+  assert.notStrictEqual(r.verdict, "blocked");
+  assert.strictEqual(r.reason, "wait-timeout");
+  assert.ok(/UNKNOWN|not established|could not/i.test(r.detail), r.detail);
+});
+
+test("AC-220-3: --wait on a sha with no run is BOUNDED too — absence is waited for, then reported", () => {
+  // A run genuinely does not exist for a few seconds after a push, so absence must
+  // be waitable. It must not therefore be waitable FOR EVER: the same deadline ends
+  // it, and the answer is still that nothing was established.
+  const { r } = liveRun({
+    sha: TARGET_SHA,
+    runs: busyTrunk(20),
+    cfg: { runLimit: 12 },
+    argv: ["--wait", "--wait-timeout-ms", "400", "--poll-interval-ms", "50"],
+    killAfterMs: 30000,
+  });
+  assert.strictEqual(r.verdict, "NOT-ESTABLISHED", JSON.stringify(r));
+  assert.strictEqual(r.reason, "wait-timeout");
+  assert.strictEqual(r.lastReason, "no-run-for-sha");
+  assert.ok(r.waited.polls > 1, JSON.stringify(r.waited));
+});
+
+test("AC-220-4: a run that appears WHILE waiting is picked up and its true verdict returned", () => {
+  // The push-then-watch case an agent actually runs at step 8 of the loop: the run
+  // does not exist for the first two polls, then it is there and it is green.
+  const { r, calls } = liveRun({
+    sha: TARGET_SHA,
+    runs: [REAL_OPEN_RUN],
+    appearAfter: 2,
+    argv: ["--wait", "--wait-timeout-ms", "20000", "--poll-interval-ms", "50"],
+    killAfterMs: 30000,
+  });
+  assert.strictEqual(r.verdict, "open", JSON.stringify(r));
+  assert.strictEqual(r.runId, Number(OPEN_RUN));
+  assert.ok(r.waited.polls >= 3, `it must have waited through the absence: ${JSON.stringify(r.waited)}`);
+  assert.strictEqual(r.waited.terminatedBy, "verdict");
+  assert.ok(listCalls(calls).length >= 3, JSON.stringify(listCalls(calls)));
+});
+
+test("AC-220-4: the agent files name the bounded waiter, and carry no unbounded polling recipe", () => {
+  // Candidate direction 3 on the item: whatever lands must be THE DOCUMENTED ROUTE,
+  // or agents keep hand-rolling the unbounded form — which is how five identical
+  // stalled loops came to exist in one session.
+  const agentsDir = path.join(__dirname, "..", "agents");
+  const files = fs.readdirSync(agentsDir).filter((f) => f.endsWith(".md"));
+  // The route as committed: `make deploy-lane … WAIT=1`, or the tool's own --wait.
+  const named = files.filter((f) => {
+    const text = fs.readFileSync(path.join(agentsDir, f), "utf8");
+    return /deploy-lane/.test(text) && /WAIT=1|--wait\b/.test(text);
+  });
+  for (const required of ["engineer.md", "cicd.md"]) {
+    assert.ok(named.includes(required),
+      `${required} must name the committed bounded waiter as the route for watching CI`);
+  }
+  // ...and the standing half: no agent file may carry a COPYABLE polling loop over
+  // `gh`. This one is vacuously true today and is here so it stays that way — the
+  // recipe is what gets pasted into a shell, and five identical pastes is how one
+  // bug became six stalled processes. It keys on the LOOP, not on the word
+  // `--limit`, so the paragraphs above may go on explaining why the window is fatal.
+  for (const f of files) {
+    const lines = fs.readFileSync(path.join(agentsDir, f), "utf8").split("\n");
+    lines.forEach((line, i) => {
+      if (!/\bgh (run|api)\b/.test(line)) return;
+      const near = lines.slice(Math.max(0, i - 2), i + 4).join("\n");
+      assert.ok(!/\b(sleep|while|until)\b/.test(near),
+        `${f}:${i + 1} carries a hand-rolled gh polling loop; agents copy these verbatim`);
+    });
+  }
+});

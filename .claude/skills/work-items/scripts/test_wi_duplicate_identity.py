@@ -400,6 +400,34 @@ class TestADuplicateInTheWorkingTree(Store):
         self.assertNotIn(CONFIRMED["ts"], v)
         self.assertNotIn(FIXED["ts"], v)
 
+    def test_a_MIXED_divergence_qualifies_ONLY_the_shared_name(self):
+        """The two committed cases are all-shared and all-distinct; this is the
+        MIXED one, where the `both` intersection actually has to discriminate
+        [DEF-ROC-290, tester].
+
+        A divergence usually carries some names the two sides share and some
+        they do not, and the rule is per-NAME, not per-report: qualifying the
+        whole side would clutter what the names already distinguish, and
+        qualifying none of it reprints the founding fault. Pinned because a
+        mixed case passes both existing tests while getting this wrong.
+        """
+        iid = self._two_copies(
+            active=[REPORTED, TRIAGED, PULLED, CONFIRMED, FIXED],
+            done=[REPORTED, TRIAGED, PULLED, FIXED_LATER, VALIDATED])
+        v = " ".join(x for x in self.validate() if "I11" in x)
+        self.assertIn("DIVERGED", v)
+        sides = re.findall(r"\[([^\]]*)\]", v)
+        self.assertEqual(len(sides), 2, f"expected one list per side: {v}")
+        # `fixed` is on BOTH sides at different times -> qualified on both
+        self.assertIn(f"fixed at {FIXED['ts']}", v)
+        self.assertIn(f"fixed at {FIXED_LATER['ts']}", v)
+        # `confirmed` and `validated` are each on ONE side -> left alone
+        for side in sides:
+            self.assertNotIn("confirmed at", side,
+                             f"a name only ONE side holds was qualified: {side}")
+            self.assertNotIn("validated at", side,
+                             f"a name only ONE side holds was qualified: {side}")
+
     def test_copies_that_AGREE_are_still_a_violation(self):
         """Agreement is not permission: an id must resolve to exactly ONE file,
         because the writer and the readers resolve to different ones."""
@@ -635,6 +663,38 @@ class TestAnUnreadableCommittedBlobWithholdsI11(Store):
         self.assertTrue(in_head, f"the established duplication was lost: {findings}")
         self.assertTrue([f for f in findings if f["severity"] == "unknown"])
         self.assertNotIn(iid, " ".join(f["message"] for f in in_head))
+
+    def test_I11_WITHHOLDS_ON_ITS_OWN_WITH_I9_SILENCED(self):
+        """I11's verdict must come from I11's OWN list, never from I9's.
+
+        THE REASON THIS IS PINNED SEPARATELY [DEF-ROC-290, tester]: the defect
+        was reported as "not currently exploitable", because I9 carries the same
+        unreadable list and the run still read NOT CLEAN. That is a property of
+        a SIBLING invariant, not of this one, and it is exactly the kind of
+        accidental cover that makes a fail-open look harmless until the sibling
+        changes. So the only honest check is to take the cover away: silence I9
+        entirely and ask whether I11 still refuses to claim it holds.
+
+        Measured both ways by the tester before this landed — against the
+        pre-fix build the same store reads
+        `clean - I1-I4 + I6 + I7 + I8 + I10 + I11 all hold`, which is the
+        founding symptom with I9's honesty removed.
+        """
+        self._the_store_that_printed_I11_ALL_HOLD()
+        orig = wi.compute_event_loss
+        wi.compute_event_loss = lambda *a, **k: []       # I9 reads CLEAN
+        try:
+            code, out, _err = self.validate_output()
+        finally:
+            wi.compute_event_loss = orig
+        self.assertIn("I9 holds", out, "the fixture did not silence I9")
+        self.assertIn("NOT CLEAN", out,
+                      f"I11 failed to withhold with I9 silenced — its verdict "
+                      f"was riding on a sibling invariant:\n{out}")
+        self.assertIn("NOT ESTABLISHED", out)
+        self.assertNotIn("I11", self.holders(out),
+                         f"I11 named among the HOLDERS with I9 silenced: {out}")
+        self.assertEqual(code, 0, "an unknown is never a plain FAIL (§17i)")
 
 
 class TestTheLoopGateAsksThisBeforeEveryPull(Store):

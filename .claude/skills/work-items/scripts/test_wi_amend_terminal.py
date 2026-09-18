@@ -227,6 +227,17 @@ class Store(unittest.TestCase):
             self.append(iid, event, **kw)
         return err.getvalue() + str(cm.exception)
 
+    def _graph_events_of(self, itype):
+        """Every event the GRAPH carries for this type, derived rather than
+        listed, so an event added later is probed without anyone remembering."""
+        return {t["event"] for t in self.graphs.transitions(itype)}
+
+    def _graph_events_from(self, itype, state):
+        """The events the GRAPH carries OUT of one state — the `legal_here` set
+        the refusal listing is built from."""
+        return {t["event"] for t in self.graphs.transitions(itype)
+                if t["from"] == state}
+
     def terminal_pairs(self):
         """Every (type, terminal state) the GRAPH declares for a flow type.
 
@@ -310,14 +321,32 @@ class TestAmendedIsAcceptedFromATerminalState(Store):
 # --------------------------------------------------------------------------- #
 class TestNothingElseGetsThroughATerminalState(Store):
 
-    FLOW_EVENTS = ("pulled", "triaged", "confirmed", "fixed", "built_green",
-                   "deployed", "validated", "rejected", "made_ready", "closed",
-                   "blocked", "cancelled", "reopened", "retried", "declined",
-                   "not_reproduced", "build_failed", "deploy_failed")
+    def flow_events(self, _itype=None):
+        """Every event ANY flow type declares, MINUS the audit self-edge —
+        derived from the graph, never listed [DEF-ROC-291, tester].
 
-    def _graph_events_from(self, itype, state):
-        return {t["event"] for t in self.graphs.transitions(itype)
-                if t["from"] == state}
+        This was a hand-written tuple of 18 names sitting beside a
+        `terminal_pairs()` that was already graph-derived, and the two had
+        drifted: the graph declares 25 and SIX were never probed here
+        (`dev_validated`, `not_yet_observed`, `promoted`,
+        `pulled_for_validation`, `scheduled`, `unblocked`). The writer refuses
+        all six correctly — measured before this changed — so nothing was
+        broken; but a safety test whose event set is maintained separately from
+        the graph it protects is the same two-copies shape as the defect it was
+        written for, and the next event added to the graph is the one it would
+        have missed.
+
+        The UNION across flow types rather than the events of THIS type, so the
+        breadth of the old literal is kept: an event a type does not declare at
+        all must still be refused, and dropping those would have traded six new
+        probes for fifty lost ones.
+        """
+        out = set()
+        for itype in self.graphs.types:
+            if self.graphs.kind(itype) != "flow":
+                continue
+            out |= self._graph_events_of(itype)
+        return sorted(out - {wi.AMENDED})
 
     def test_every_flow_event_is_still_refused_from_every_terminal_state(self):
         """A FRESH item per attempt, deliberately. The first version of this test
@@ -327,7 +356,7 @@ class TestNothingElseGetsThroughATerminalState(Store):
         of the state it is testing proves nothing at all."""
         for itype, term in self.terminal_pairs():
             legal = self._graph_events_from(itype, term)
-            for event in self.FLOW_EVENTS:
+            for event in self.flow_events(itype):
                 if event in legal:
                     continue          # a pre-existing edge, untouched by this fix
                 with self.subTest(type=itype, state=term, event=event):
@@ -521,15 +550,6 @@ class TestValidateAcceptsWhatAppendWrote(Store):
 class TestTheRefusalListingIsTrueOfItsOwnTool(Store):
     """The listing is read ALONE, as the tool's own account of what it accepts
     next — which is why a false one costs a whole defect cycle each way."""
-
-    def _graph_events_of(self, itype):
-        """Every event the GRAPH carries for this type, derived rather than
-        listed, so an event added later is probed without anyone remembering."""
-        return {t["event"] for t in self.graphs.transitions(itype)}
-
-    def _graph_events_from(self, itype, state):
-        return {t["event"] for t in self.graphs.transitions(itype)
-                if t["from"] == state}
 
     def _refuse_from(self, itype, term, prefix, event="pulled"):
         iid = f"{prefix}-{itype}-{term}".upper()

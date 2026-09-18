@@ -1,5 +1,5 @@
 ---
-process_version: 183
+process_version: 184
 effective_from: 2026-09-15
 supersedes: v181, v180, v179, v178, v177, v176, v175, v174, v173, v172, v171, v170, v169, v168, v167, v166, v165, v164, v163, v162, v161, v160, v159, v158, v157, v156, v155, v154, v152, v151, v150, v149, v148, v147, v146, v145, v144, v143, v142, v141, v140, v139, v138, v137, v136, v135, v134, v133, v132, v131, v130, v129, v128, v127, v126, v125, v124, v123, v122, v121, v120, v119, v118, v117, v116, v115, v114, v113, v112, v111, v110, v109, v108, v107, v106, v105, v104, v103, v102, v101, v100, v99, v98, v97, v96, v95, v94, v93, v92, v91, v90, v89, v88, v87, v86, v85, v84, v83, v82, v81, v80, v76
 status: active
@@ -2827,6 +2827,47 @@ through intake**, are JTBD-framed/costed, and **pre-empt** (a defect on delivere
 is a failure in something of higher value than anything merely queued); the displacement
 is logged as a time thief so the cost of interrupting is visible (§5a ownership semantics
 unchanged). Target: gross lead time (gate wait) guarded by CFR; MTTR. [EXP-025]
+
+**F5.1 — PRE-EMPTION IS BOUNDED BY A STANDING NON-DEFECT ALLOCATION (v184, ROC).**
+`pre-empt` above is unconditional, and unconditional pre-emption gives the intake
+queue a structurally guaranteed share of ZERO whenever any defect is open. Defects
+are always open. So the rule does not prioritise intake last — it removes intake
+from the schedule entirely, and the measured result is that nobody was ever lazy
+and nothing ever moved.
+
+MEASURED, ROC 2026-09-18, and the numbers are the argument: the `orchestrator`
+owner carries **34.64% of gross lead time**, all of it `reported` dwell. Its
+population is the intake queue — **20 items, median in-queue age 21.6d, oldest
+32.0d**. Across those 20 items: **79 `amended` events and 0 triage decisions.**
+Every one of the 20 carried an in-date `defer_until:`, and the 20 dates clustered
+on **three** values (14×2026-10-02, 4×2026-09-28, 2×2026-09-30) — a batch
+re-dating signature, which is the third recorded instance of this shape (the
+OagEventSource 36-item batch re-staggered twice in 9 days, v155; the six
+same-day defers of the v156 cycle, v157; and this).
+
+THE DEFER WAS NOT THE DISEASE. Re-dating was the only *available* compliant
+answer: `schedule` requires a WIP slot that §F5 promises to a defect the moment
+one exists, `decline` is forbidden on a real finding by §F8a, and `escalate` has
+no edge in the state graph at all (DEF-ROC-318). Given three answers of which two
+are unreachable, an agent following the rules exactly will re-date every time.
+**Where a rule leaves exactly one compliant move, the observed behaviour is the
+rule's output, not the agent's choice** — so this is fixed at the rule.
+
+THE RULE: **one concurrent work slot is RESERVED for non-defect work and a defect
+may not pre-empt it.** Defects pre-empt freely across every other slot; the
+reserved slot is filled from intake and the use-case queue by ordinary §10
+selection. It is a FLOOR, not a quota: if intake and the use-case queue are both
+empty the slot is returned to the defect stream immediately, so the allocation
+can never idle capacity, and it is deliberately ONE rather than a percentage so a
+growing defect stream cannot shrink it.
+
+WHAT THIS DOES NOT LICENSE: it is not permission to leave a defect unfixed (every
+other slot still pre-empts), and it is not permission to clear the aged-backlog
+gate by declining real findings — §F8a is untouched. It removes the excuse, not
+the obligation.
+
+Target metric: `orchestrator`/`reported` share of gross lead time, and intake
+median in-queue age. [EXP-ROC-025]
 
 ## F5a. Prod promotion is continuous — no review gate; the tester validates in prod
 Once an established CD promotion pipeline exists, **code flows to prod automatically on

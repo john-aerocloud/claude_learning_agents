@@ -8087,7 +8087,7 @@ def _egr_ask(argv, secs, common, cfg_path):
     return report, None
 
 
-def compute_exit_gate_ran(project, sha=None, timeout=None):
+def compute_exit_gate_ran(project, sha=None, timeout=None, trace=None):
     """Did the project's engineering exit gate produce a verdict for trunk head
     (or for `sha`)? 0 or 1 finding. DELEGATED to the project's own declared
     implementation — never re-implemented here (EXP-047)."""
@@ -8153,7 +8153,124 @@ def compute_exit_gate_ran(project, sha=None, timeout=None):
     if failure is not None:
         return [failure]
 
-    return _egr_map(common, report, sha, argv)
+    findings = _egr_map(common, report, sha, argv)
+    if sha and findings and findings[0].get("verdict") == "NO-VERDICT":
+        return _egr_through_carrier(project, sha, cmd, sha_arg, secs, common,
+                                    cfg_path, argv, findings, trace)
+    return findings
+
+
+# --- DEF-ROC-221: a commit that rode in inside a LARGER PUSH ------------------
+# The gate runs per PUSH, not per COMMIT. So of a push of eight commits, exactly
+# one — the push head — ever gets a run, and the other seven are as gated as it is
+# while having no run of their own. Asked about one of those seven, the probe
+# honestly answers NO-VERDICT, and this caller was reading that word as §F11.4's
+# subject: THE GATE DID NOT SPEAK. Those are different facts and only the first
+# may block. Measured on the four shas of DEF-ROC-221 (1656e581, e8bf8f11,
+# 12602b88, dd8953fb), all four gated by run 35039447274 at push head 3eb8a59f.
+#
+# THE FIX IS NOT TO PASS THE CASE. A blanket pass would turn a false block into a
+# false green, which is strictly worse and is the class this project logs most
+# (§17i, DEF-ROC-083's mirror). A carried commit HAS been through a gate run — the
+# run for the push head that carried it — so the honest move is to FIND that run
+# and read ITS verdict, and to keep blocking when even that cannot be found.
+#
+# WHICH DESCENDANT IS THE PUSH HEAD. Runs exist only for push heads, so walking
+# trunk descendants NEAREST FIRST and asking about each, the FIRST descendant that
+# has a run IS the push head that carried this commit. No push-boundary metadata is
+# needed and none is guessed.
+#
+# EVERY WAY OF NOT KNOWING STILL BLOCKS (fail closed). An unreadable repo, a sha
+# trunk does not contain, a probe that will not answer, more descendants than the
+# bound — each leaves the original block standing, with the sentence saying which
+# question went unasked. `NO-VERDICT-UNRESOLVED` is that verdict: still a block,
+# but a reader can tell it from the genuine one, which is the whole complaint.
+# 25 because the walk costs one network round trip per step and stops at the first
+# descendant with a run, so its real cost is the SIZE OF THE CARRYING PUSH — 8 for
+# the push this defect was found in (measured: the four shas resolved after 7, 5, 2
+# and 1 steps out of 639 descendants). 25 is ~3x that. A push larger than the bound
+# is REPORTED as having stopped at the bound, never silently treated as exhaustion.
+EGR_ANCESTRY_MAX = 25
+EGR_TRUNK_REFS = ("origin/main", "origin/master", "main", "master")
+
+
+def _egr_carriers(project, sha, limit=EGR_ANCESTRY_MAX):
+    """(candidates, trunk_ref, total) — the commits that could have CARRIED `sha`
+    into origin, NEAREST FIRST, capped at `limit`.
+
+    `candidates is None` means the question COULD NOT BE PUT (no readable repo, no
+    trunk ref, or a sha that repo does not contain). That is not the same as "there
+    are none", and the caller must not read it as either."""
+    for _lane, repo in _lane_repos(project):
+        if not _repo_readable(repo):
+            continue
+        for trunk in EGR_TRUNK_REFS:
+            rc, out = _git(repo, "rev-list", "--reverse", "--ancestry-path",
+                           "%s..%s" % (sha, trunk))
+            if rc == 0:
+                all_of_them = [c for c in out.split() if c]
+                return all_of_them[:limit], trunk, len(all_of_them)
+    return None, None, 0
+
+
+def _egr_through_carrier(project, sha, cmd, sha_arg, secs, common, cfg_path, argv,
+                         no_verdict, trace):
+    """`sha` has no run of its own. Resolve it to the push head that carried it and
+    read THAT run's verdict; block, saying why, when it cannot be found."""
+    def unresolved(reason):
+        f = dict(no_verdict[0], verdict="NO-VERDICT-UNRESOLVED")
+        f["message"] = (
+            f"[exit-gate-ran] NOT ESTABLISHED, AND STILL BLOCKING — no gate run "
+            f"exists for {sha}, and this run could not establish whether that means "
+            f"the gate DID NOT SPEAK (§F11.4 clause 1, the DEF-ROC-153 condition) or "
+            f"only that {sha} rode into origin inside a LARGER PUSH, whose head "
+            f"carries the run: {reason}. It blocks because §17i's unaskable question "
+            f"is never a pass and the fail-safe direction here is closed — but it is "
+            f"deliberately NOT the word used when the gate genuinely did not speak, "
+            f"because a reader must be able to tell those apart (DEF-ROC-221). "
+            f"Remedy: make the ancestry readable (fetch trunk), or ask about the "
+            f"push head directly.")
+        return [f]
+
+    carriers, trunk, total = _egr_carriers(project, sha)
+    if carriers is None:
+        return unresolved("no repository this caller can read contains that commit "
+                          "on a trunk ref (tried %s)" % ", ".join(EGR_TRUNK_REFS))
+    if not carriers:
+        return no_verdict      # nothing carried it: the gate really did not speak
+    for head_sha in carriers:
+        report, failure = _egr_ask(list(cmd) + [sha_arg.replace("{sha}", head_sha)],
+                                   secs, common, cfg_path)
+        if failure is not None:
+            return unresolved("the probe stopped answering while walking the %d "
+                              "descendant(s) on %s that could have carried it — %s"
+                              % (total, trunk, failure["message"]))
+        if str(report.get("status") or "").strip().upper() == "NO-VERDICT":
+            continue           # not a push head either; keep walking outwards
+        if isinstance(trace, dict):
+            # The RUN is named as well as the push head: "3eb8a59f passed" is not
+            # auditable, "run 35039447274 concluded success for 3eb8a59f" is. The
+            # project's probe reports it as `runId` and repeats it in `detail`;
+            # `runUrl` is the declared optional form. Take whichever exists.
+            trace["resolution"] = {
+                "asked": sha, "pushHead": head_sha, "trunk": trunk,
+                "status": str(report.get("status") or "").strip().upper(),
+                "runUrl": str(report.get("runUrl") or "").strip(),
+                "runId": str(report.get("runId") or "").strip(),
+                "detail": str(report.get("detail") or "").strip(),
+                "examined": carriers.index(head_sha) + 1, "descendants": total}
+        return _egr_map(common, report, head_sha, argv, carried=sha)
+
+    if total > len(carriers):
+        return unresolved("the nearest %d of its %d trunk descendants on %s have no "
+                          "run either, and the walk stopped at that bound rather "
+                          "than reaching the tip" % (len(carriers), total, trunk))
+    f = dict(no_verdict[0])
+    f["message"] += (
+        f" I also looked further out, and this is NOT the ride-in-a-larger-push case "
+        f"(DEF-ROC-221): none of the {total} descendant(s) of {sha} on {trunk} has a "
+        f"run either, so no push head carried it through a gate.")
+    return [f]
 
 
 def _egr_map(common, report, sha, argv, carried=None):
@@ -8172,7 +8289,7 @@ def _egr_map(common, report, sha, argv, carried=None):
     common = dict(common, verdict=status, head=head)
     via = ""
     if carried:
-        common = dict(common, carriedInto=head, asked=carried)
+        common = dict(common, pushHead=head, asked=carried)
         via = (f" (asked about {carried}, which has no run of its own because the "
                f"gate runs per PUSH not per COMMIT; {head} is the push head that "
                f"carried it into origin, so {head}'s run IS its run)")
@@ -8216,7 +8333,7 @@ def _egr_map(common, report, sha, argv, carried=None):
             f"`{' '.join(argv)}` by hand."))]
     return [dict(common, severity="unknown", message=(
         f"[exit-gate-ran] NOT ESTABLISHED — the declared probe reported status "
-        f"{status!r}, which is not one of {'/'.join(EGR_STATUSES)}. A word this "
+        f"{status!r} for {head}{via}, which is not one of {'/'.join(EGR_STATUSES)}. A word this "
         f"caller cannot interpret must never be read as a verdict. "
         f"{detail}{(' ' + url) if url else ''}"))]
 
@@ -8225,13 +8342,29 @@ def cmd_exit_gate_ran(a):
     """Standalone: `make exit-gate-ran PROJECT=<p> [SHA=<commit>] [JSON=1]`. Exists
     so the limb can be PROVEN TO FIRE against a real commit (§F9f) — a check only
     ever observed printing nothing proves nothing."""
-    findings = compute_exit_gate_ran(a.project, sha=getattr(a, "sha", None))
+    trace = {}
+    findings = compute_exit_gate_ran(a.project, sha=getattr(a, "sha", None),
+                                     trace=trace)
+    res = trace.get("resolution")
     if getattr(a, "json", False):
-        print(json.dumps(findings, indent=2))
+        # An OBJECT, not a bare array: when the answer came from the push head that
+        # CARRIED the commit, the array alone cannot say so, and a caller reading a
+        # silent pass would have no way to audit whose run it read (DEF-ROC-221).
+        print(json.dumps({"findings": findings, "resolution": res}, indent=2))
     elif not findings:
-        print(f"exit-gate-ran[{a.project}] => the exit gate SPOKE and PASSED for "
-              f"the commit asked about (or the project has declared, with a reason, "
-              f"that it has no such gate)")
+        if res:
+            print(f"exit-gate-ran[{a.project}] => the exit gate SPOKE and PASSED — "
+                  f"for {res['pushHead'][:12]}, not for {res['asked'][:12]}, which "
+                  f"has no run of its own because the gate runs per PUSH not per "
+                  f"COMMIT. {res['pushHead'][:12]} is the push head that carried it "
+                  f"into {res['trunk']} ({res['examined']} of {res['descendants']} "
+                  f"descendant(s) examined), so that run IS its run. "
+                  f"{res.get('detail') or ''}"
+                  f"{(' ' + res['runUrl']) if res.get('runUrl') else ''}".strip())
+        else:
+            print(f"exit-gate-ran[{a.project}] => the exit gate SPOKE and PASSED for "
+                  f"the commit asked about (or the project has declared, with a "
+                  f"reason, that it has no such gate)")
     else:
         f = findings[0]
         print(f"exit-gate-ran[{a.project}] => {f['severity'].upper()}")

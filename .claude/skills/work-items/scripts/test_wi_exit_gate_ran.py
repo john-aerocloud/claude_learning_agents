@@ -302,3 +302,232 @@ class TheCommittedROCDeclaration(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CarriedInInsideALargerPush(Base):
+    """DEF-ROC-221 — `NO-VERDICT` was answering TWO questions with one word.
+
+    The gate runs per PUSH, not per COMMIT. Of a push of eight commits exactly one
+    — the push head — ever gets a run; the other seven are as gated as it is while
+    having no run of their own. Asked about one of those seven, the probe honestly
+    answers NO-VERDICT, and this caller was reading that word as §F11.4's subject,
+    THE GATE DID NOT SPEAK, which is the DEF-ROC-153 condition and BLOCKS. Two
+    different facts wearing one name, and only the first may block.
+
+    THE FIX IS NOT TO PASS THE CASE (the trap this item sits in). A blanket pass
+    would convert a false block into a false green, which is strictly worse and is
+    the class this project logs most (§17i / DEF-ROC-083's mirror). A carried commit
+    HAS been through a gate run — the run for the push head that carried it — so the
+    honest move is to find THAT run and read its verdict, and to keep blocking when
+    even that cannot be found.
+
+    The real evidence: 1656e581, e8bf8f11, 12602b88, dd8953fb all rode into origin
+    inside one push landing at 3eb8a59f, where the gate ran and PASSED (run
+    35039447274); all four were reported NO-VERDICT.
+    """
+
+    def repo(self, chain, trunk_ref="refs/remotes/origin/main"):
+        """A REAL git repo at <ROOT>/work/ROC with a linear history, returning the
+        shas oldest-first. Real git, because the thing under test is an ancestry
+        question and a fake ancestry would prove only that this test agrees with
+        itself."""
+        import subprocess
+        repo = os.path.join(self.tmp, "work", "ROC")
+        os.makedirs(repo)
+        env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
+                   GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+
+        def g(*args):
+            return subprocess.run(["git", "-C", repo, *args], check=True, env=env,
+                                  capture_output=True, text=True).stdout.strip()
+        g("init", "-q", "-b", "main")
+        shas = []
+        for msg in chain:
+            with open(os.path.join(repo, "f.txt"), "a", encoding="utf-8") as fh:
+                fh.write(msg + "\n")
+            g("add", "-A")
+            g("commit", "-q", "-m", msg)
+            shas.append(g("rev-parse", "HEAD"))
+        g("branch", "-m", "main", "not-trunk")
+        if trunk_ref:
+            g("update-ref", trunk_ref, "HEAD")
+        return shas
+
+    def probe_map(self, by_sha, default=None):
+        """A probe that answers PER SHA, exactly as the real one does: only push
+        heads have runs, everything else is NO-VERDICT. It APPENDS every argv it is
+        given, so the walk itself — order, count, and that it stopped — is provable
+        rather than inferred from the verdict."""
+        sh = os.path.join(self.tmp, "fake-probe.sh")
+        log = os.path.join(self.tmp, "argv.log")
+        dflt = default if default is not None else {
+            "status": "NO-VERDICT", "detail": "no run exists for that commit"}
+        lines = ["#!/bin/sh", 'printf "ARGV %s\\n" "$*" >> ' + json.dumps(log)]
+        lines.append('case "$*" in')
+        def body(payload):
+            """A str payload is emitted RAW — that is how a probe that stopped
+            answering (a make error, an empty run) is expressed, and it must be
+            expressible or §17i's arm cannot be tested at all."""
+            return payload if isinstance(payload, str) else json.dumps(payload)
+        for sha, payload in by_sha.items():
+            lines.append("  *%s*) cat <<'EOF_P'\n%s\nEOF_P\n  ;;"
+                         % (sha, body(payload)))
+        lines.append("  *) cat <<'EOF_D'\n%s\nEOF_D\n  ;;" % body(dflt))
+        lines.append("esac")
+        sh_path = sh
+        with open(sh_path, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+        os.chmod(sh_path, 0o755)
+        self.argv_log = log
+        return [sh_path]
+
+    def calls(self):
+        """Every argv the probe was handed, in order. Logged with a marker prefix so
+        the NO-SHA call — whose argv is the empty string — is COUNTED rather than
+        silently filtered away, which is the same absence-versus-evidence mistake
+        this whole item is about."""
+        if not os.path.exists(self.argv_log):
+            return []
+        with open(self.argv_log, encoding="utf-8") as fh:
+            return [ln[len("ARGV "):] for ln in fh.read().splitlines()
+                    if ln.startswith("ARGV")]
+
+    # --- the ride-in direction ------------------------------------------------
+
+    def test_AC_221_1_a_carried_commit_reads_its_push_heads_PASS_and_does_not_block(self):
+        """AC-221-1. The four real shas' case: the probe has no run for the commit
+        asked about, the push head that carried it PASSED, so the gate DID speak for
+        it and nothing blocks."""
+        shas = self.repo(["c1", "c2", "c3", "push-head"])
+        self.declare({"command": self.probe_map({
+            shas[3]: {"status": "PASS", "head": shas[3][:12], "runId": 35039447274,
+                      "detail": "run 35039447274 concluded success"}}),
+            "shaArg": "SHA={sha}"})
+        trace = {}
+        findings = wi.compute_exit_gate_ran("ROC", sha=shas[0], trace=trace)
+        self.assertEqual(findings, [],
+                         "a commit whose push head PASSED has been through a gate "
+                         "run; blocking it is the DEF-ROC-221 false block")
+        self.assertEqual(trace["resolution"]["pushHead"], shas[3])
+        self.assertEqual(trace["resolution"]["status"], "PASS")
+        self.assertEqual(trace["resolution"]["asked"], shas[0])
+        self.assertEqual(trace["resolution"]["runId"], "35039447274",
+                         "'3eb8a59f passed' is not auditable; 'run 35039447274 "
+                         "concluded success for 3eb8a59f' is — AC-221-1 asks for "
+                         "the run BY NAME, and the real probe reports it as runId")
+
+    def test_AC_221_1_it_names_the_push_head_and_its_run_when_that_run_said_no(self):
+        """AC-221-1 — the gated-ancestor case NAMES the push head and its run. The
+        FAIL arm is where that is visible in a finding, and it must stay ADVISORY:
+        resolving through a carrier may not smuggle a new blocking condition in."""
+        shas = self.repo(["c1", "c2", "push-head"])
+        self.declare({"command": self.probe_map({
+            shas[2]: {"status": "FAIL", "head": shas[2][:12],
+                      "runUrl": "https://example/run/999",
+                      "detail": "run 999 concluded failure"}}),
+            "shaArg": "SHA={sha}"})
+        f = self.one(wi.compute_exit_gate_ran("ROC", sha=shas[0]))
+        self.assertEqual(f["severity"], "advisory")
+        self.assertEqual(f["verdict"], "FAIL")
+        self.assertIn(shas[2][:12], f["message"])
+        self.assertIn("999", f["message"])
+        self.assertIn(shas[0], f["message"],
+                      "it must say which commit was ASKED about as well as whose "
+                      "run it read, or the reader cannot audit the substitution")
+        self.assertIn("push", f["message"].lower())
+
+    def test_AC_221_1_the_first_descendant_with_a_run_is_the_push_head(self):
+        """AC-221-1. Runs exist only for push heads, so the walk goes NEAREST FIRST
+        and stops at the first descendant that has one — no push-boundary metadata
+        is needed and none is guessed. Asserted on the WALK, not just the verdict."""
+        shas = self.repo(["c1", "c2", "c3", "c4", "head-a", "later"])
+        self.declare({"command": self.probe_map({
+            shas[4]: {"status": "PASS", "head": shas[4][:12]},
+            shas[5]: {"status": "PASS", "head": shas[5][:12]}}),
+            "shaArg": "SHA={sha}"})
+        self.assertEqual(wi.compute_exit_gate_ran("ROC", sha=shas[1]), [])
+        walked = [c.split("SHA=")[-1] for c in self.calls()]
+        self.assertEqual(walked, [shas[1], shas[2], shas[3], shas[4]],
+                         "nearest-first, and it must STOP at the first run it finds "
+                         "— the nearer push head is the one that carried it, and "
+                         "each extra call is a network round trip")
+
+    # --- the genuinely-ungated direction, which must still block --------------
+
+    def test_AC_221_2_no_run_on_any_descendant_still_BLOCKS(self):
+        """AC-221-2. The blocking arm is untouched for its real subject: if no
+        descendant on trunk has a run either, no push head carried this commit
+        through a gate and §F11.4 clause 1's condition holds exactly."""
+        shas = self.repo(["c1", "c2", "c3"])
+        self.declare({"command": self.probe_map({}), "shaArg": "SHA={sha}"})
+        f = self.one(wi.compute_exit_gate_ran("ROC", sha=shas[0]))
+        self.assertEqual(f["severity"], "block")
+        self.assertEqual(f["verdict"], "NO-VERDICT")
+        self.assertIn("did not speak", f["message"].lower())
+        self.assertIn("DEF-ROC-221", f["message"],
+                      "having looked and found nothing is EVIDENCE — say it, or the "
+                      "next reader re-opens this same defect")
+
+    def test_AC_221_2_trunk_head_itself_is_unchanged_and_asks_nothing_extra(self):
+        """AC-221-2. Check 20 asks about TRUNK HEAD, with no sha at all, and that
+        path must not acquire a single extra probe call or a changed verdict — the
+        loop gate is the only continuously-running workflow here."""
+        self.declare({"command": self.probe_map(
+            {}, default={"status": "NO-VERDICT", "head": "b53ba12c"}),
+            "shaArg": "SHA={sha}"})
+        f = self.one(wi.compute_exit_gate_ran("ROC"))
+        self.assertEqual(f["severity"], "block")
+        self.assertEqual(f["verdict"], "NO-VERDICT")
+        self.assertEqual(len(self.calls()), 1,
+                         "trunk head IS a push head by definition; walking its "
+                         "descendants would be both meaningless and a cost paid "
+                         "every loop cycle")
+
+    def test_AC_221_3_a_sha_no_readable_repo_carries_blocks_with_a_different_word(self):
+        """AC-221-3, §17i. Could-not-look is never a pass, so it still blocks — but
+        it is NOT the word used when the gate genuinely did not speak, because the
+        whole complaint is that a reader could not tell those apart."""
+        self.declare({"command": self.probe_map({}), "shaArg": "SHA={sha}"})
+        f = self.one(wi.compute_exit_gate_ran("ROC", sha="deadbeefdeadbeef"))
+        self.assertEqual(f["severity"], "block")
+        self.assertEqual(f["verdict"], "NO-VERDICT-UNRESOLVED")
+        self.assertIn("could not establish", f["message"].lower())
+
+    def test_AC_221_3_a_probe_that_stops_answering_mid_walk_blocks_unresolved(self):
+        """AC-221-3, §17i. The walk is N network calls; one of them failing is not a
+        verdict about anything, and must not read as either 'gated' or 'never
+        gated'. The asked-about commit answers NO-VERDICT (so the walk is reached);
+        every descendant answers with a make error, which is not an answer."""
+        shas = self.repo(["c1", "c2", "c3"])
+        self.declare({"command": self.probe_map(
+            {shas[0]: {"status": "NO-VERDICT", "detail": "no run"}},
+            default="make: *** No rule to make target"), "shaArg": "SHA={sha}"})
+        f = self.one(wi.compute_exit_gate_ran("ROC", sha=shas[0]))
+        self.assertEqual(f["severity"], "block")
+        self.assertEqual(f["verdict"], "NO-VERDICT-UNRESOLVED")
+        self.assertIn("stopped answering", f["message"])
+
+    def test_AC_221_3_the_walk_is_bounded_and_says_so_when_it_stops_at_the_bound(self):
+        """AC-221-3. Each step is a network round trip, so the walk is bounded — and
+        a walk that stopped at its bound has NOT established that nothing carried
+        the commit. It blocks, and says which of the two it is."""
+        shas = self.repo(["c%d" % i for i in range(wi.EGR_ANCESTRY_MAX + 5)])
+        self.declare({"command": self.probe_map({}), "shaArg": "SHA={sha}"})
+        f = self.one(wi.compute_exit_gate_ran("ROC", sha=shas[0]))
+        self.assertEqual(f["verdict"], "NO-VERDICT-UNRESOLVED")
+        self.assertEqual(len(self.calls()), wi.EGR_ANCESTRY_MAX + 1,
+                         "one ask about the commit itself, then at most "
+                         "EGR_ANCESTRY_MAX descendants")
+        self.assertIn("bound", f["message"])
+
+    def test_AC_221_3_no_trunk_ref_to_walk_is_unresolved_not_an_answer(self):
+        """AC-221-3. With no trunk ref in any repo this caller can read, the
+        ancestry question cannot be PUT at all — which is not the same as putting it
+        and getting nothing back, and must not be reported as though it were."""
+        shas = self.repo(["c1", "c2"], trunk_ref=None)
+        self.declare({"command": self.probe_map({}), "shaArg": "SHA={sha}"})
+        f = self.one(wi.compute_exit_gate_ran("ROC", sha=shas[0]))
+        self.assertEqual(f["severity"], "block")
+        self.assertEqual(f["verdict"], "NO-VERDICT-UNRESOLVED",
+                         "no trunk ref is a question this caller could not put, not "
+                         "an answer about the gate")
